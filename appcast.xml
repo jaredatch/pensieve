@@ -1,8 +1,16 @@
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
     <channel>
         <title>Pensieve</title>
         <description>Pensieve updates</description>
         <language>en</language>
+        <item>
+            <title>0.9.0</title>
+            <pubDate>Fri, 24 Jul 2026 15:16:38 +0000</pubDate>
+            <sparkle:version>344</sparkle:version>
+            <sparkle:shortVersionString>0.9.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/jaredatch/pensieve/releases/download/v0.9.0/Pensieve-0.9.0.dmg" length="9489101" type="application/octet-stream" sparkle:edSignature="/KK3KMeZeTArcy7MMYu+mkxevn3nXh3+IaYHhGC3eVM1N+1BIMMYG1JRtd1foWjwFhk46htdS2UKOvvlfK/PCQ=="/>
+        </item>
     </channel>
 </rss>
