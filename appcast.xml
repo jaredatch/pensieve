@@ -5,6 +5,15 @@
         <description>Pensieve updates</description>
         <language>en</language>
         <item>
+            <title>0.9.1-beta.1</title>
+            <pubDate>Fri, 24 Jul 2026 16:18:23 +0000</pubDate>
+            <sparkle:channel>beta</sparkle:channel>
+            <sparkle:version>346</sparkle:version>
+            <sparkle:shortVersionString>0.9.1-beta.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/jaredatch/pensieve/releases/download/v0.9.1-beta.1/Pensieve-0.9.1-beta.1.dmg" length="9501918" type="application/octet-stream" sparkle:edSignature="o/P2N/Xk4lWzn0cu++m+BFSJ2vS2TtZgxiUOrNi41jJbTtVEF4Cu6qfMUdnBeoh7NpSj7uSHE26ecr/heGChBg=="/>
+        </item>
+        <item>
             <title>0.9.0</title>
             <pubDate>Fri, 24 Jul 2026 15:16:38 +0000</pubDate>
             <sparkle:version>344</sparkle:version>
