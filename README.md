@@ -11,7 +11,7 @@ The app's source is private for now. This repo is the public home for releases: 
 - A real library view of every skill (name, description, tags, token cost, where it's deployed) with a markdown editor and live preview. Much nicer than squinting at `/skills` output in a terminal.
 - Install skills straight from GitHub: paste a repository URL, a skill folder, or a direct `SKILL.md` link, and Pensieve finds the skills inside and remembers where each one came from. When the upstream repo changes, you get a quiet notice and a diff to read before anything updates. Private repos work with a personal access token.
 - One-click deploy to Claude Code, Grok, Codex, Cursor, OpenClaw, Hermes, or anything that reads standard `SKILL.md`. Agents that read standard markdown get a symlink, so there is no copy to go stale; agents with their own format get a compiled file.
-- Cross-machine sync through a git remote you control. A background daemon keeps every Mac current, and when two machines edit the same skill you get a side-by-side view to pick from, not `<<<<<<<` markers.
+- Cross-machine sync through a git remote you control. The app lives in your menu bar and syncs on its own: at launch, every 15 minutes, and after your Mac wakes. A MACHINES section shows what each of your Macs is running and has deployed, and deploys can target specific machines. When two Macs edit the same skill you get a side-by-side view to pick from, not `<<<<<<<` markers.
 - Scenarios: named groups of skills you can switch on and off as a unit. Think "client work", "writing", or "everything off".
 - Updates arrive automatically through Sparkle, and every build is signed and notarized.
 
