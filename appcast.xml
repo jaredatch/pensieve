@@ -5,6 +5,14 @@
         <description>Pensieve updates</description>
         <language>en</language>
         <item>
+            <title>0.14.0</title>
+            <pubDate>Wed, 30 Sep 2026 19:08:24 +0000</pubDate>
+            <sparkle:version>1334</sparkle:version>
+            <sparkle:shortVersionString>0.14.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/jaredatch/pensieve/releases/download/v0.14.0/Pensieve-0.14.0.dmg" length="15318886" type="application/octet-stream" sparkle:edSignature="pH8jojDsSWltxl6Sa41tWQLAU5pwVHNIiZwsyoHWOwfbuEdXFYvT7h1Bcz7fY6cCHt6CFbFue7KLf9AxawVpCQ=="/>
+        </item>
+        <item>
             <title>0.13.0</title>
             <pubDate>Wed, 26 Aug 2026 17:29:34 +0000</pubDate>
             <sparkle:version>535</sparkle:version>
@@ -19,14 +27,6 @@
             <sparkle:shortVersionString>0.12.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/jaredatch/pensieve/releases/download/v0.12.0/Pensieve-0.12.0.dmg" length="11772856" type="application/octet-stream" sparkle:edSignature="k3jXbpH7QDMdmDos+FNJ0iMMRa6P5eKIQuw3VGJxpNJ5V3LDgnNy54ttO27mTg6ZWW0q+wFhJNkfYJ4SZM3FDA=="/>
-        </item>
-        <item>
-            <title>0.11.0</title>
-            <pubDate>Fri, 14 Aug 2026 15:38:21 +0000</pubDate>
-            <sparkle:version>456</sparkle:version>
-            <sparkle:shortVersionString>0.11.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/jaredatch/pensieve/releases/download/v0.11.0/Pensieve-0.11.0.dmg" length="10901814" type="application/octet-stream" sparkle:edSignature="E8hQ1a7rf6JmoJjXjaWRmH00hZM/KFMPFMdguamC2QW4KQhaBS9ElQRkZpguAKdljbmYJAQtLMMAEIxyOnkLCg=="/>
         </item>
         <item>
             <title>0.9.1-beta.1</title>
