@@ -1,0 +1,29 @@
+name: Public hygiene
+on:
+  push:
+permissions:
+  contents: read
+jobs:
+  hygiene:
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deleted ref
+        if: github.event.deleted
+        run: echo 'Deleted ref; no added commits or pushed tree.'
+      - name: Checkout pushed head
+        if: '!github.event.deleted'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.after }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check pushed commits and tree
+        if: '!github.event.deleted'
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python3 -B script/public_hygiene_push.py --before "$BEFORE" --after "$AFTER" --default-branch "$DEFAULT_BRANCH"

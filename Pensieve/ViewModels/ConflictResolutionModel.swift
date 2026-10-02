@@ -1,0 +1,244 @@
+import Foundation
+import SwiftData
+
+/// Conflict-resolution state for the PLAN-09 sheet.
+///
+/// `@MainActor`: `load` and `apply` schedule synchronous git work through `Task`, mirroring
+/// `SyncModel`. That Task inherits the main actor, so the git work can still block the UI on slow
+/// storage/network; moving it off-main is a tracked refinement. Tests drive the awaitable seams.
+@MainActor
+@Observable
+final class ConflictResolutionModel {
+    enum Phase: Equatable {
+        case loading
+        case ready([ConflictGroup])
+        case resolving
+        case done
+        case empty
+        case error(String)
+    }
+
+    struct ConflictGroup: Identifiable, Equatable {
+        let id: String
+        let title: String
+        let subtitle: String
+        let items: [ConflictItem]
+        var chosen: ConflictSide?
+    }
+
+    private(set) var phase: Phase = .loading
+
+    private let engine: SyncEngineProtocol
+    private let git: GitServiceProtocol
+    private let credentials: CredentialStoreProtocol
+    private let root: String
+    private let headStamp: () -> String?
+    private let now: () -> Date
+    private let onResolutionStarted: () throws -> (SyncCycleResult) -> Void
+
+    init(engine: SyncEngineProtocol = SyncEngine(),
+         git: GitServiceProtocol = GitService(),
+         credentials: CredentialStoreProtocol = KeychainCredentialStore(),
+         root: String = Constants.pensieveBaseDir,
+         headStamp: (() -> String?)? = nil,
+         now: @escaping () -> Date = Date.init,
+         onResolutionStarted: @escaping () throws -> (SyncCycleResult) -> Void = { { _ in } }) {
+        self.engine = engine
+        self.git = git
+        self.credentials = credentials
+        self.root = root
+        self.headStamp = headStamp ?? { GitHeadStamp().read(root: root) }
+        self.now = now
+        self.onResolutionStarted = onResolutionStarted
+    }
+
+    var canApply: Bool {
+        guard case let .ready(groups) = phase, !groups.isEmpty else { return false }
+        return groups.allSatisfy { $0.chosen != nil }
+    }
+
+    /// Fire-and-forget entry for the sheet. Tests call `loadAndReport` directly.
+    func load(context: ModelContext) {
+        phase = .loading
+        Task { await loadAndReport(context: context) }
+    }
+
+    /// Awaitable seam (tests await this; the sheet goes through `load`).
+    func loadAndReport(context: ModelContext) async {
+        phase = .loading
+        let previousHeadStamp = headStamp()
+        do {
+            let onResolved = try onResolutionStarted()
+            let credential = try resolveCredential()
+            let inspection = try engine.inspectConflicts(root: root, credential: credential,
+                                                         context: context)
+            switch inspection {
+            case let .cleared(outcome):
+                onResolved(cycleResult(from: outcome, previousHeadStamp: previousHeadStamp))
+                phase = .empty
+            case let .conflicts(set):
+                let groups = try groups(from: set, context: context)
+                phase = groups.isEmpty ? .empty : .ready(groups)
+            }
+        } catch let error as LocalizedError {
+            phase = .error(error.errorDescription ?? "Couldn't load conflicts.")
+        } catch {
+            phase = .error("Couldn't load conflicts.")
+        }
+    }
+
+    func choose(_ groupID: String, _ side: ConflictSide) {
+        guard case var .ready(groups) = phase,
+              let index = groups.firstIndex(where: { $0.id == groupID }) else { return }
+        groups[index].chosen = side
+        phase = .ready(groups)
+    }
+
+    /// Fire-and-forget entry for the sheet. Tests call `applyAndReport` directly.
+    func apply(context: ModelContext) {
+        guard case let .ready(groups) = phase,
+              groups.allSatisfy({ $0.chosen != nil }) else { return }
+        phase = .resolving
+        Task { await apply(groups: groups, context: context) }
+    }
+
+    /// Awaitable seam (tests await this; the sheet goes through `apply`).
+    func applyAndReport(context: ModelContext) async {
+        guard case let .ready(groups) = phase,
+              groups.allSatisfy({ $0.chosen != nil }) else { return }
+        await apply(groups: groups, context: context)
+    }
+
+    private func apply(groups: [ConflictGroup], context: ModelContext) async {
+        phase = .resolving
+        let picks = groups.reduce(into: [String: ResolutionPick]()) { partial, group in
+            guard let side = group.chosen else { return }
+            for item in group.items {
+                partial[item.path] = ResolutionPick(side: side, expectedThis: item.thisMachine,
+                                                    expectedOther: item.otherMachine)
+            }
+        }
+        let previousHeadStamp = headStamp()
+        do {
+            let onResolved = try onResolutionStarted()
+            let credential = try resolveCredential()
+            let outcome = try engine.resolveConflicts(root: root, picks: picks,
+                                                      credential: credential, context: context)
+            switch outcome {
+            case .synced:
+                onResolved(cycleResult(from: outcome, previousHeadStamp: previousHeadStamp))
+                phase = .done
+            case .conflicted:
+                await loadAndReport(context: context)
+            case .noRemote:
+                phase = .empty
+            }
+        } catch SyncError.conflictsChanged {
+            await loadAndReport(context: context)
+        } catch let error as LocalizedError {
+            phase = .error(error.errorDescription ?? "Couldn't resolve conflicts.")
+        } catch {
+            phase = .error("Couldn't resolve conflicts.")
+        }
+    }
+
+    private func cycleResult(from outcome: SyncOutcome, previousHeadStamp: String?) -> SyncCycleResult {
+        guard case let .synced(pushed, warnings, ingestedHeadStamp) = outcome else {
+            preconditionFailure("resolved conflict callback requires a synced outcome")
+        }
+        return .synced(
+            pushed: pushed,
+            warnings: warnings,
+            completedAt: now(),
+            headAdvanced: pushed || (ingestedHeadStamp != nil && ingestedHeadStamp != previousHeadStamp)
+        )
+    }
+
+    private func groups(from set: ConflictSet, context: ModelContext) throws -> [ConflictGroup] {
+        let skills = try context.fetch(FetchDescriptor<Skill>())
+        let namesBySlug = Dictionary(uniqueKeysWithValues: skills.map { ($0.directoryName, $0.name) })
+        var order: [String] = []
+        var itemsByID: [String: [ConflictItem]] = [:]
+        for item in set.items {
+            let id = entityID(for: item)
+            if itemsByID[id] == nil { order.append(id) }
+            itemsByID[id, default: []].append(item)
+        }
+        return order.compactMap { id in
+            guard let items = itemsByID[id] else { return nil }
+            return ConflictGroup(id: id,
+                                 title: title(for: id, items: items, namesBySlug: namesBySlug),
+                                 subtitle: subtitle(for: items),
+                                 items: items,
+                                 chosen: nil)
+        }
+    }
+
+    private func entityID(for item: ConflictItem) -> String {
+        switch item.kind {
+        case .body:
+            if let slug = skillBodySlug(from: item.path) { return slug }
+        case .overlay:
+            if let slug = skillOverlaySlug(from: item.path) { return slug }
+        case .category:
+            return "category:" + categoryName(from: item.path)
+        case .project:
+            return "projects"
+        }
+        return item.path
+    }
+
+    private func title(for id: String, items: [ConflictItem], namesBySlug: [String: String]) -> String {
+        if id == "projects" { return "Project registry" }
+        if id.hasPrefix("category:") {
+            return "Category: " + String(id.dropFirst("category:".count))
+        }
+        let slug = items.compactMap { item -> String? in
+            skillBodySlug(from: item.path) ?? skillOverlaySlug(from: item.path)
+        }.first ?? id
+        return namesBySlug[slug] ?? slug
+    }
+
+    private func subtitle(for items: [ConflictItem]) -> String {
+        let kinds = Set(items.map(\.kind))
+        if kinds.contains(.body) && kinds.contains(.overlay) { return "Body and settings differ" }
+        if kinds.contains(.body) { return "Body differs" }
+        return "Settings differ"
+    }
+
+    private func skillBodySlug(from path: String) -> String? {
+        guard path.hasPrefix("skills/"), path.hasSuffix("/SKILL.md") else { return nil }
+        let start = path.index(path.startIndex, offsetBy: "skills/".count)
+        let end = path.index(path.endIndex, offsetBy: -"/SKILL.md".count)
+        guard start < end else { return nil }
+        return String(path[start..<end])
+    }
+
+    private func skillOverlaySlug(from path: String) -> String? {
+        guard path.hasPrefix("manifest/skills/"), path.hasSuffix(".yaml") else { return nil }
+        let start = path.index(path.startIndex, offsetBy: "manifest/skills/".count)
+        let end = path.index(path.endIndex, offsetBy: -".yaml".count)
+        guard start < end else { return nil }
+        return String(path[start..<end])
+    }
+
+    private func categoryName(from path: String) -> String {
+        guard path.hasPrefix("manifest/categories/"), path.hasSuffix(".yaml") else { return path }
+        let start = path.index(path.startIndex, offsetBy: "manifest/categories/".count)
+        let end = path.index(path.endIndex, offsetBy: -".yaml".count)
+        guard start < end else { return path }
+        return String(path[start..<end])
+    }
+
+    private func resolveCredential() throws -> GitCredential? {
+        try git.probeUsability().requireUsable()
+        guard let remote = try git.remoteURL(at: root),
+              let spec = SyncSetupModel.parseRemote(remote) else { return nil }
+        switch spec.transport {
+        case .ssh:
+            return .sshAgent
+        case .https:
+            return credentials.credential(forHost: spec.host)
+        }
+    }
+}

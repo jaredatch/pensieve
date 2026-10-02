@@ -1,0 +1,37 @@
+# SF Symbol name -> private-use code point (render-and-match against NSImage(systemSymbolName:), 2026-09-11; folder calibrated against the 26 kit's default sidebar glyph U+100215). margin = L1 distance to best / next best; low margin = verify by eye.
+tray	U+100223	51.0/85.5
+folder	U+100215	79.4/119.5 (kit default, exact)
+square.stack	U+10040B	41.7/91.1
+square.grid.2x2	U+1001F7	67.8/142.7
+tag	U+1002E1	38.3/104.4
+display	U+1008B9	133.3/142.8 (close call)
+checkmark.circle	U+100062	47.9/80.6
+person	U+100269	45.6/138.1
+doc.text	U+10023F	47.5/73.6
+sidebar.leading	U+1003DA	50.3/50.3 (tie with U+100C31)
+line.3.horizontal.decrease	U+100713	31.8/85.7
+ellipsis	U+100360	8.2/66.1
+plus	U+10017C	31.7/70.0
+chevron.down	U+100188	18.9/116.9
+chevron.left.forwardslash.chevron.right	U+10065A	19.4/104.2
+clock.arrow.circlepath	U+1008D4	37.7/55.3
+trash	U+100211	37.3/82.5
+magnifyingglass	U+1002AB	43.0/62.6
+sparkles	U+1001BF	18.8/128.8
+arrow.triangle.2.circlepath	U+1002AF	28.5/51.5
+arrow.triangle.branch	U+100660	19.2/153.4
+xmark.circle.fill	U+100051	27.6/27.6 (tie with U+100061, the outline variant; the filled one confirmed by eye in the frame)
+terminal	U+100A7C	43.5/63.7
+terminal.fill	U+100A8F	16.1/39.0
+doc.plaintext	U+100246	45.7/80.1
+pawprint	U+100F9E	51.4/221.8
+scroll	U+10090F	73.3/202.7
+checkmark.circle.fill	U+100063	22.5/56.2
+circle.dashed	U+1004DE	37.6/73.1
+questionmark.circle	U+10005C	49.4/64.2
+arrow.up.forward.square	U+100114	66.6/66.6 (tie with U+100C41; the kit's outbound-link glyph, confirmed by eye in the Source table)
+doc.on.doc	U+100241	70.2/187.6
+exclamationmark.triangle	U+1001FE	48.0/70.3
+arrow.down.circle	U+100078	52.2/67.9 (the list banner's glyph, matched)
+cube	U+100418	51.5/97.4
+pencil	U+10020A	17.5/29.8

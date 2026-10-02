@@ -1,0 +1,147 @@
+import Foundation
+import SwiftData
+
+struct PinnedSkillUpdate: Equatable {
+    let skillID: UUID
+    let existingSlug: String
+    let installedContentHash: String
+    let candidate: SkillCandidate
+    let source: SkillFetchResult
+
+    init(skill: Skill) throws {
+        guard skill.hasLinkedOrigin, let origin = skill.installedOrigin,
+              let upstreamCommit = skill.upstreamCommit, !upstreamCommit.isEmpty,
+              let upstreamTree = skill.upstreamTree, !upstreamTree.isEmpty else {
+            throw SkillUpdateFlowError.missingPinnedUpdate
+        }
+        let candidateSlug: String
+        if origin.path.isEmpty {
+            let repository = origin.repo.hasSuffix("/")
+                ? String(origin.repo.dropLast())
+                : origin.repo
+            let component = (repository as NSString).lastPathComponent
+            candidateSlug = SkillStore.slugify(
+                component.hasSuffix(".git") ? String(component.dropLast(4)) : component
+            )
+        } else {
+            candidateSlug = SkillStore.slugify((origin.path as NSString).lastPathComponent)
+        }
+        let candidate = SkillCandidate(
+            path: origin.path,
+            slug: candidateSlug,
+            name: skill.name,
+            skillDescription: skill.skillDescription,
+            treeHash: upstreamTree,
+            containsSymlink: false,
+            unavailableReason: nil
+        )
+        self.skillID = skill.id
+        self.existingSlug = skill.directoryName
+        self.installedContentHash = origin.contentHash
+        self.candidate = candidate
+        self.source = SkillFetchResult(
+            repo: origin.repo,
+            ref: origin.ref,
+            headCommit: upstreamCommit,
+            candidates: [candidate]
+        )
+    }
+}
+
+struct PinnedSkillDiff: Equatable {
+    let currentSkillMarkdown: String
+    let upstreamSkillMarkdown: String
+}
+
+enum SkillUpdateFlowError: LocalizedError, Equatable {
+    static let repositoryChangedMessage =
+        "Repository changed since last check — re-check to review the latest version"
+
+    case missingPinnedUpdate
+    case repositoryChanged
+    case localEditsRequireConfirmation
+    case skillNotFound
+    case unsafeSkillDirectory(String)
+    case unsafeSkillFile(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingPinnedUpdate:
+            "This update is no longer pinned — re-check to review the latest version"
+        case .repositoryChanged:
+            Self.repositoryChangedMessage
+        case .localEditsRequireConfirmation:
+            "This skill has local edits — updating will overwrite them"
+        case .skillNotFound:
+            "The skill is no longer available"
+        case let .unsafeSkillDirectory(slug):
+            "The local skill directory is unsafe: \(slug)"
+        case let .unsafeSkillFile(slug):
+            "The skill file is unsafe: \(slug)/SKILL.md"
+        }
+    }
+}
+
+extension SkillInstallService {
+    /// Reads both diff sides only after the fresh checkout matches the pinned commit and tree.
+    /// The operation writes scratch clone data only; it never touches the store, manifest, or flags.
+    func previewUpdate(_ update: PinnedSkillUpdate) throws -> PinnedSkillDiff {
+        do {
+            return try withVerifiedCheckout(
+                candidate: update.candidate,
+                source: update.source,
+                credential: nil
+            ) { checkout, verified in
+                try requireInstallable(verified)
+                guard let localDirectory = SkillStore.safeSkillDirectory(
+                    slug: update.existingSlug,
+                    base: storeRoot + "/skills",
+                    fileService: fileService
+                ), fileService.directoryExists(at: localDirectory) else {
+                    throw SkillUpdateFlowError.unsafeSkillDirectory(update.existingSlug)
+                }
+                let upstreamDirectory = verified.path.isEmpty
+                    ? checkout
+                    : checkout + "/" + verified.path
+                guard fileService.isRegularFile(at: localDirectory + "/SKILL.md"),
+                      fileService.isRegularFile(at: upstreamDirectory + "/SKILL.md") else {
+                    throw SkillUpdateFlowError.unsafeSkillFile(update.existingSlug)
+                }
+                return PinnedSkillDiff(
+                    currentSkillMarkdown: try fileService.readFile(
+                        at: localDirectory + "/SKILL.md"
+                    ),
+                    upstreamSkillMarkdown: try fileService.readFile(
+                        at: upstreamDirectory + "/SKILL.md"
+                    )
+                )
+            }
+        } catch SkillInstallError.repositoryChanged {
+            throw SkillUpdateFlowError.repositoryChanged
+        }
+    }
+
+    func applyUpdate(_ update: PinnedSkillUpdate, allowLocalOverwrite: Bool,
+                     bodyWriteRegistration: SyncBodyWriteRegistration = .suppressed,
+                     context: ModelContext) throws {
+        do {
+            try updateVerified(
+                existingSlug: update.existingSlug,
+                candidate: update.candidate,
+                from: update.source,
+                credential: nil,
+                beforeVendorSwap: { destination in
+                    guard !allowLocalOverwrite else { return }
+                    let currentHash = try stableContentHash(at: destination)
+                    guard currentHash == update.installedContentHash else {
+                        throw SkillUpdateFlowError.localEditsRequireConfirmation
+                    }
+                },
+                bodyWriteRegistration: bodyWriteRegistration,
+                context: context
+            )
+        } catch SkillInstallError.repositoryChanged {
+            throw SkillUpdateFlowError.repositoryChanged
+        }
+    }
+}

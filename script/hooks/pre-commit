@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# pre-commit: runs ratchet.sh's index checks (skip markers, secrets, tmp/ cites, acceptance hashes, the project check, the
+# count floor).
+# The kit wires no pre-merge-commit hook. A merge git concludes on its own runs pre-merge-commit, where MERGE_HEAD doesn't
+# exist yet, so the cite check couldn't see the other parent. Integrate with `git merge --no-ff --no-commit` so this hook
+# runs at `git commit`; CI replay checks every merge either way. Rule: protocol/verification.md § The test ratchet.
+repo="$(cd "$(dirname "$0")/../.." && pwd)"
+# The ratchet checks the repo that is committing: in split-repo mode the records repo runs these same hooks (install-hooks.sh
+# points its core.hooksPath here), and RATCHET_ROOT tells the ratchet which side it is on.
+top="$(git rev-parse --show-toplevel)" || { echo "pre-commit: git rev-parse --show-toplevel failed — the ratchet cannot tell which repo is committing" >&2; exit 2; }
+export RATCHET_ROOT="$top"
+exec "$repo/script/ratchet.sh"

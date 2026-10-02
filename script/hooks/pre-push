@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# pre-push: refuses a push to the default branch unless RATCHET_ALLOW_PUSH=1 is set on the push command itself
+# (`RATCHET_ALLOW_PUSH=1 git push`, never exported). The human sets it; the launcher unsets it before starting an Executor.
+# It also refuses any non-fast-forward (force) push. Rule: protocol/stop-conditions.md § The Never list.
+#
+# `git push --no-verify` or `git -c core.hooksPath=…` skips this hook. The harness deny rules catch those leading forms;
+# the rest relies on the Never list. Branch protection (no force push, no deletion) doesn't check who pushed; only a
+# require-PR rule on the remote would.
+#
+# The default branch, first found wins: RATCHET_DEFAULT_BRANCH in the environment; RATCHET_DEFAULT_BRANCH in
+# script/ratchet.conf (sourced in a subshell, the way the ratchet reads it); origin/HEAD's target; then the local
+# master and main: whichever exists is gated, both when both exist, and master when neither does. A git call or a conf
+# that fails, or a name that isn't a valid branch, refuses the push with the reason. It never guesses a branch.
+set -u   # NOT pipefail (the kit's rule): every producer below is captured, then checked
+remote="${1:-}"; url="${2:-}"
+
+valid_branch() {   # $1 name, $2 where it came from → 0 when git takes it as a branch name AS WRITTEN; 1 otherwise (the reason printed).
+  # check-ref-format --branch expands shorthand (@{-1} → the previous branch), so its answer must equal the literal the hook gates
+  local out
+  out="$(git check-ref-format --branch "$1" 2>/dev/null)" && [ "$out" = "$1" ] && return 0
+  echo "pre-push: '$1' ($2) is not a valid branch name — push refused" >&2; return 1
+}
+
+default_branches() {   # prints the gated branch names, one per line; 1 when a git call or the conf fails (the reason printed)
+  local top conf b rc=0 have="" br
+  if [ -n "${RATCHET_DEFAULT_BRANCH:-}" ]; then
+    valid_branch "$RATCHET_DEFAULT_BRANCH" "RATCHET_DEFAULT_BRANCH in the environment" || return 1
+    printf '%s\n' "$RATCHET_DEFAULT_BRANCH"; return 0
+  fi
+  top="$(git rev-parse --show-toplevel)" || { echo "pre-push: git rev-parse --show-toplevel failed — push refused" >&2; return 1; }
+  conf="$top/script/ratchet.conf"
+  if [ -f "$conf" ]; then
+    rc=0; b="$( . "$conf" >/dev/null || exit $?; printf '%s' "${RATCHET_DEFAULT_BRANCH:-}" )" || rc=$?
+    [ "$rc" -eq 0 ] || { echo "pre-push: sourcing $conf failed (exit $rc) — push refused" >&2; return 1; }
+    if [ -n "$b" ]; then valid_branch "$b" "RATCHET_DEFAULT_BRANCH in script/ratchet.conf" || return 1; printf '%s\n' "$b"; return 0; fi
+  fi
+  rc=0; b="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD)" || rc=$?
+  case "$rc" in
+    0) [ -z "$b" ] || { printf '%s\n' "${b#origin/}"; return 0; } ;;
+    1) ;;   # no origin/HEAD
+    *) echo "pre-push: git symbolic-ref refs/remotes/origin/HEAD failed (exit $rc) — push refused" >&2; return 1 ;;
+  esac
+  for br in master main; do
+    rc=0; git show-ref --verify --quiet "refs/heads/$br" || rc=$?
+    case "$rc" in 0) have="$have$br"$'\n' ;; 1) ;; *) echo "pre-push: git show-ref refs/heads/$br failed (exit $rc) — push refused" >&2; return 1 ;; esac
+  done
+  [ -n "$have" ] || have=master$'\n'
+  printf '%s' "$have"
+}
+
+defaults="$(default_branches)" || exit 1
+[ -n "$defaults" ] || { echo "pre-push: no default branch resolved — push refused" >&2; exit 1; }
+updates=""
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -n "$remote_ref" ] || continue
+  updates="$updates$local_ref $local_sha $remote_ref $remote_sha"$'\n'
+  case "$remote_ref" in
+    refs/heads/*)   # no here-string: bash 3.2 backs one with a temp file, and a redirect that fails would skip the gate. A branch
+      # name holds no whitespace (validated, or git's own), so word splitting with globbing off lists them
+      set -f
+      for br in $defaults; do
+        [ "$remote_ref" = "refs/heads/$br" ] || continue
+        [ "${RATCHET_ALLOW_PUSH:-}" = 1 ] || { echo "pre-push: a push to $br needs RATCHET_ALLOW_PUSH=1 (the merge gate is the human's — never an Executor's)" >&2; exit 1; }
+      done
+      set +f ;;
+  esac
+  # a non-fast-forward push (the remote's sha not an ancestor of the local) is a force push
+  if [ "$remote_sha" != "0000000000000000000000000000000000000000" ] && ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+    echo "pre-push: refusing a non-fast-forward push of $remote_ref (never --force a published branch)" >&2; exit 1
+  fi
+done
+# Local Pensieve patch pending upstream: scan all public refs once per push,
+# including sequencer commits. Keep the kit gates above intact for deletions.
+# install-hooks.sh uses this tracked hook and never replaces its bytes.
+top="$(git rev-parse --show-toplevel)" || exit 1
+if [ -n "$updates" ] && { [ -f "$top/script/public_hygiene.py" ] || [ -f "$top/script/public-hygiene.json" ]; }; then
+  printf '%s' "$updates" | python3 -B "$top/script/public_hygiene.py" --pre-push-batch "$url" || exit 1
+fi
+exit 0

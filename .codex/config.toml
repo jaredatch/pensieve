@@ -1,0 +1,2 @@
+# Repo-local Codex config for Pensieve.
+# Intentionally no model or sandbox overrides; stage invocations set those explicitly.

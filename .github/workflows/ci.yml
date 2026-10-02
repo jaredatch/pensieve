@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build and Test
+    permissions:
+      contents: read
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select Xcode 26
+        run: |
+          xcode_path="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' -print | sort | tail -n 1)"
+          if [ -z "$xcode_path" ]; then
+            echo "::error::No Xcode 26 installation found on this runner"
+            exit 1
+          fi
+          sudo xcode-select -s "$xcode_path/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install tools
+        run: |
+          brew install xcodegen
+
+      - name: Generate Xcode project
+        run: |
+          xcodegen generate
+
+      - name: Compute replay range
+        id: replay-range
+        run: |
+          set -euo pipefail
+          echo "skip_default_merge_head=false" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual dispatch; skipping per-commit replay."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          before="${{ github.event.before }}"
+          zeros="0000000000000000000000000000000000000000"
+          if [ -z "$before" ] || [ "$before" = "$zeros" ]; then
+            git fetch origin master:refs/remotes/origin/master
+            range="origin/master..${{ github.sha }}"
+          else
+            range="$before..${{ github.sha }}"
+          fi
+
+          if ! count="$(git rev-list --count "$range" 2>/tmp/ci-replay-range.err)"; then
+            echo "::error::Invalid replay range: $range"
+            cat /tmp/ci-replay-range.err
+            exit 1
+          fi
+          if [ "$count" = "0" ]; then
+            echo "No commits in $range; skipping per-commit replay."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Replaying $count commit(s) in $range."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "range=$range" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Test public hygiene guard
+        run: ./script/public-hygiene.sh --self-test
+
+      - name: Test workflow contracts
+        run: ruby script/workflow_self_test.rb
+
+      - name: Test development build host selection
+        run: python3 -B script/pull_dev_build_self_test.py
+
+      - name: Check public hygiene in pushed commits
+        if: steps.replay-range.outputs.skip != 'true'
+        env:
+          HYGIENE_RANGE: ${{ steps.replay-range.outputs.range }}
+        run: ./script/public-hygiene.sh --range "$HYGIENE_RANGE"
+
+      - name: Replay commit guards
+        if: steps.replay-range.outputs.skip != 'true'
+        run: |
+          RATCHET_CI_SKIP_DEFAULT_MERGE_HEAD="${{ steps.replay-range.outputs.skip_default_merge_head }}" \
+            ./script/ci-replay.sh "${{ steps.replay-range.outputs.range }}"
+
+      - name: Test
+        id: tests
+        timeout-minutes: 25
+        run: |
+          set -o pipefail
+          ./script/test.sh | tee /tmp/ci-test.out
+          count="$(grep -oE 'PENSIEVE_TEST_COUNT=[0-9]+' /tmp/ci-test.out | tail -1 | cut -d= -f2)"
+          floor="$(cat .test-count)"
+          if [ -z "$count" ] || [ "$count" -lt "$floor" ]; then
+            echo "::error::test count ${count:-none} below committed floor $floor"
+            exit 1
+          fi
+
+      - name: Upload failed test evidence
+        timeout-minutes: 5
+        if: failure() && steps.tests.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: failed-test-evidence
+          path: |
+            DerivedData/FailedRuns/
+            DerivedData/TestRuns/
+            DerivedData/TestDiagnostics/
+          if-no-files-found: warn
+
+      - name: Headless smoke
+        run: |
+          ./script/build_and_run.sh --headless

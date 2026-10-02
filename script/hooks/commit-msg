@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# commit-msg: runs ratchet.sh --commit-msg (the stage claim, the docs forms, the close, the refreeze trace, the draft's
+# criteria). Rule: protocol/verification.md § The docs-commit guard.
+repo="$(cd "$(dirname "$0")/../.." && pwd)"
+# The ratchet checks the repo that is committing: in split-repo mode the records repo runs these same hooks (install-hooks.sh
+# points its core.hooksPath here), and RATCHET_ROOT tells the ratchet which side it is on.
+top="$(git rev-parse --show-toplevel)" || { echo "commit-msg: git rev-parse --show-toplevel failed — the ratchet cannot tell which repo is committing" >&2; exit 2; }
+export RATCHET_ROOT="$top"
+exec "$repo/script/ratchet.sh" --commit-msg "$1"

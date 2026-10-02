@@ -1,0 +1,33 @@
+disabled_rules:
+  # `let _ = observableProperty` inside a SwiftUI @ViewBuilder `body` is a deliberate
+  # dependency-tracking idiom — dropping the `let` makes it a bare `()` expression that
+  # fails View conformance ("type '()' cannot conform to 'View'"). The rule is a false
+  # positive in ViewBuilders, so it is disabled project-wide.
+  - redundant_discardable_let
+
+included:
+  - Pensieve
+  - PensieveTests
+
+excluded:
+  - DerivedData
+  - build
+  - .build
+  - Pensieve.xcodeproj
+
+identifier_name:
+  min_length:
+    warning: 1
+    error: 1
+  max_length:
+    warning: 40
+    error: 40
+
+line_length:
+  warning: 130
+  error: 130
+
+function_parameter_count:
+  # Skill creation carries the six user-entered fields through one UI boundary.
+  warning: 6
+  error: 6

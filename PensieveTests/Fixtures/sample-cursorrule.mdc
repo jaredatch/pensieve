@@ -1,0 +1,9 @@
+---
+description: TypeScript conventions
+globs: **/*.ts, **/*.tsx
+alwaysApply: false
+---
+
+# TypeScript Best Practices
+
+Always use strict mode. Prefer `const` over `let`. Never use `any` unless absolutely necessary.

@@ -1,0 +1,141 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release
+    # Canonical source repository; PLAN-45 updates this at the cutover.
+    if: >-
+      github.repository == 'jaredatch/pensieve' &&
+      github.event_name == 'push' &&
+      github.ref_type == 'tag' &&
+      startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    environment: release
+    runs-on: macos-26
+    # Bound the 10x-billed macOS runner: a wedged run (Apple's first-ever-team
+    # notarization scan took ~50 min; the default job limit is 6 h) must not
+    # burn thousands of billed minutes.
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        timeout-minutes: 3
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select Xcode 26
+        timeout-minutes: 2
+        run: |
+          xcode_path="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' -print | sort | tail -n 1)"
+          if [ -z "$xcode_path" ]; then
+            echo "::error::No Xcode 26 installation found on this runner"
+            exit 1
+          fi
+          sudo xcode-select -s "$xcode_path/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install tools
+        timeout-minutes: 8
+        run: |
+          brew install xcodegen
+
+      - name: Generate Xcode project
+        timeout-minutes: 2
+        run: |
+          xcodegen generate
+
+      - name: Sign, notarize, and publish
+        # Setup, signing and cask timeouts retain 10 minutes for upload.
+        timeout-minutes: 60
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_API_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          expected_tag="v$(tr -d '[:space:]' < VERSION)"
+          if [ "$GITHUB_REF_NAME" != "$expected_tag" ]; then
+            echo "::error::Release tag $GITHUB_REF_NAME does not match VERSION $expected_tag"
+            exit 1
+          fi
+
+          printf '::add-mask::%s\n' "$DEVELOPER_ID_P12_PASSWORD"
+          printf '::add-mask::%s\n' "$NOTARY_ISSUER_ID"
+          printf '::add-mask::%s\n' "$NOTARY_KEY_ID"
+
+          keychain_path="$RUNNER_TEMP/pensieve-release.keychain-db"
+          keychain_password="$(uuidgen)"
+          p12_path="$RUNNER_TEMP/developer-id.p12"
+          notary_key_path="$RUNNER_TEMP/AuthKey_${NOTARY_KEY_ID}.p8"
+          sparkle_key_path="$RUNNER_TEMP/sparkle-private-ed25519.key"
+
+          cleanup() {
+            security delete-keychain "$keychain_path" >/dev/null 2>&1 || true
+            rm -f "$p12_path" "$notary_key_path" "$sparkle_key_path"
+          }
+          trap cleanup EXIT INT TERM
+
+          printf '%s' "$DEVELOPER_ID_P12" | base64 --decode > "$p12_path"
+          printf '%s\n' "$NOTARY_API_KEY_P8" > "$notary_key_path"
+          printf '%s\n' "$SPARKLE_PRIVATE_KEY" > "$sparkle_key_path"
+          chmod 600 "$p12_path" "$notary_key_path" "$sparkle_key_path"
+
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          existing_keychains="$(security list-keychains -d user | tr -d '"')"
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s "$keychain_path" $existing_keychains
+          security import "$p12_path" -k "$keychain_path" -P "$DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain_path"
+
+          sign_identity="$(security find-identity -v -p codesigning "$keychain_path" | sed -n 's/.*"\(Developer ID Application:.*\)".*/\1/p' | head -n 1)"
+          if [ -z "$sign_identity" ]; then
+            echo "::error::No Developer ID Application identity found in temporary keychain"
+            exit 1
+          fi
+
+          SPARKLE_PRIVATE_KEY_FILE="$sparkle_key_path" \
+            ./script/release.sh \
+              --sign "$sign_identity" \
+              --notary-key "$notary_key_path" \
+              --notary-key-id "$NOTARY_KEY_ID" \
+              --notary-issuer "$NOTARY_ISSUER_ID" \
+              --publish
+
+      - name: Publish Homebrew cask
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        run: ./script/release.sh --publish-cask-only
+
+      # The signed DMG exists on disk before release.sh reaches notarytool, so
+      # preserving it on failure/cancellation means a stuck Apple queue never
+      # strands the run's only DMG copy. No secret material lands in build/dist.
+      - name: Preserve DMG artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dmg
+          path: build/dist/*.dmg
+          if-no-files-found: ignore
+          retention-days: 14

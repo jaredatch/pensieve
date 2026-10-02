@@ -1,0 +1,149 @@
+name: Pensieve
+options:
+  bundleIdPrefix: com.jaredatch
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  minimumXcodeGenVersion: "2.40"
+  groupSortPosition: top
+
+packages:
+  Yams:
+    url: https://github.com/jpsim/Yams.git
+    exactVersion: 6.2.2
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui.git
+    exactVersion: 2.4.1
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.9.4
+
+targets:
+  Pensieve:
+    type: application
+    platform: macOS
+    info:
+      path: Pensieve/Info.plist
+      properties:
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        SUFeedURL: https://raw.githubusercontent.com/jaredatch/pensieve/master/appcast.xml
+        SUPublicEDKey: HibOcVcc/1MTA9UQHp4cIb7qMewKaA0elSCSQ0DY8Ns=
+    sources:
+      - path: Pensieve
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jaredatch.Pensieve$(PENSIEVE_BUNDLE_ID_SUFFIX)
+        PENSIEVE_BUNDLE_ID_SUFFIX: ""
+        PRODUCT_NAME: Pensieve
+        MARKETING_VERSION: "0.14.0"
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: "5.10"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.developer-tools"
+        INFOPLIST_KEY_CFBundleDisplayName: Pensieve
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_DEBUG_DYLIB: NO
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_REQUIRED: NO
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: NO
+      configs:
+        Debug:
+          PENSIEVE_BUNDLE_ID_SUFFIX: .debug
+    dependencies:
+      - package: Yams
+      - package: MarkdownUI
+      - package: Sparkle
+      - target: PensieveDaemon
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
+
+  PensieveTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: PensieveTests
+        excludes:
+          - Fixtures/GitProcessProbe
+    settings:
+      base:
+        SWIFT_VERSION: "5.10"
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: PensieveGitProcessProbe
+        embed: true
+        codeSign: false
+        copy:
+          destination: executables
+      - target: Pensieve
+      - package: Sparkle
+
+  PensieveGitProcessProbe:
+    type: tool
+    platform: macOS
+    sources:
+      - path: PensieveTests/Fixtures/GitProcessProbe
+      - path: Pensieve/Services/GitService.swift
+      - path: Pensieve/Services/GitService+ProcessOutput.swift
+      - path: Pensieve/Services/GitService+Usability.swift
+      - path: Pensieve/Services/GitServiceConflict.swift
+      - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/RemoteURLPolicy.swift
+      - path: Pensieve/Utilities/PathConstants.swift
+      - path: Pensieve/Utilities/DisplayTextSanitizer.swift
+    settings:
+      base:
+        PRODUCT_NAME: GitProcessProbe
+        SWIFT_VERSION: "5.10"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_REQUIRED: NO
+
+  PensieveDaemon:
+    type: tool
+    platform: macOS
+    sources:
+      - path: PensieveDaemon
+      - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/GitService.swift
+      - path: Pensieve/Services/GitService+ProcessOutput.swift
+      - path: Pensieve/Services/GitService+Usability.swift
+      - path: Pensieve/Services/GitService+FastForward.swift
+      - path: Pensieve/Services/GitServiceConflict.swift
+      - path: Pensieve/Services/CredentialStore.swift
+      - path: Pensieve/Services/RemoteURLPolicy.swift
+      - path: Pensieve/Services/CheckedYAMLLoader.swift
+      - path: Pensieve/Services/SkillParser.swift
+      - path: Pensieve/Services/SkillSerializer.swift
+      - path: Pensieve/Services/SkillStore.swift
+      - path: Pensieve/Services/ManifestTypes.swift
+      - path: Pensieve/Services/ManifestService.swift
+      - path: Pensieve/Services/ManifestService+DeployIntents.swift
+      - path: Pensieve/Services/CursorMDC.swift
+      - path: Pensieve/Services/DeployPaths.swift
+      - path: Pensieve/Services/DeployStateStore.swift
+      - path: Pensieve/Services/SyncLock.swift
+      - path: Pensieve/Services/FastForwardGitService.swift
+      - path: Pensieve/Services/DaemonCLI.swift
+      - path: Pensieve/Services/DaemonCLI+Deployed.swift
+      - path: Pensieve/Services/SyncDaemon.swift
+      - path: Pensieve/Services/SyncAudit.swift
+      - path: Pensieve/Services/DeployReconciler.swift
+      - path: Pensieve/Models/PlatformTarget.swift
+      - path: Pensieve/Models/SkillScope.swift
+      - path: Pensieve/Models/AdapterConfig.swift
+      - path: Pensieve/Utilities/PathConstants.swift
+      - path: Pensieve/Utilities/DisplayTextSanitizer.swift
+    settings:
+      base:
+        PRODUCT_NAME: pensieve-daemon
+        MARKETING_VERSION: "0.14.0"
+        SWIFT_VERSION: "5.10"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_REQUIRED: NO
+        ENABLE_HARDENED_RUNTIME: YES
+    dependencies:
+      - package: Yams

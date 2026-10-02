@@ -1,19 +1,16 @@
 # Pensieve
 
-Pensieve is a native Mac app for managing AI skills: the `SKILL.md` files that teach coding agents like Claude Code, Grok, Codex, and Cursor how you work.
+Pensieve is a native Mac app for managing AI skills: the `SKILL.md` files that teach coding agents like Claude Code, Codex, Cursor and Grok how you work.
 
-If you run more than one agent, you know the problem. Each one reads skills from its own directory (`~/.claude/skills/`, `~/.grok/skills/`, `~/.codex/skills/`, `~/.cursor/rules/`, and so on), so every skill you install lands in exactly one of them. Two agents means installing everything twice. A second Mac doubles it again. Pensieve keeps one canonical library and handles the rest: it deploys each skill to every agent in the form that agent expects, and syncs the library across your machines so an edit on one Mac shows up on all of them.
+Every agent reads skills from its own folder (`~/.claude/skills/`, `~/.codex/skills/`, `~/.cursor/rules/`, and so on). Install a skill and it lands in one of them. Run two agents and you install it twice. Add a second Mac and you do it all again. Pensieve keeps one library of skills and deploys each one to every agent, in the form that agent expects. It also syncs the library across your Macs through a git repository you own.
 
-The app's source is private for now. This repo is the public home for releases: the DMGs, the Sparkle update feed, and release notes all live here.
+## What it does
 
-## What you get
-
-- A real library view of every skill (name, description, tags, token cost, where it's deployed) with a markdown editor. Edits save when you say so, and every saved version sits in the skill's History, ready to diff or restore. Much nicer than squinting at `/skills` output in a terminal.
-- Install skills straight from GitHub: paste a repository URL, a skill folder, or a direct `SKILL.md` link, and Pensieve finds the skills inside and remembers where each one came from. When the upstream repo changes, you get a quiet notice and a diff to read before anything updates, and the skill's History shows the commits you'd be getting. Private repos work with a personal access token.
-- Deploy to Claude Code, Grok, Codex, Cursor, OpenClaw or Hermes with one switch per agent, for the whole Mac or a single project. Agents that read standard markdown get a symlink, so there is no copy to go stale. Cursor gets a compiled file in its own format.
-- Cross-machine sync through a git remote you control. The app lives in your menu bar and syncs on its own: at launch, every 15 minutes, and after your Mac wakes. A Machines section shows what each of your Macs is running and has deployed, and you can turn a skill on for another Mac right from this one. When two Macs edit the same skill you get a side-by-side view to pick from, not `<<<<<<<` markers.
-- Scenarios: named groups of skills you can switch on and off as a unit. Think "client work", "writing", or "everything off".
-- Updates arrive automatically through Sparkle, and every build is signed and notarized.
+- Shows every skill in one library, with its description, tags, token cost and where it's deployed. Edit it in a markdown editor, save when you're ready, and roll back to any saved version from its History.
+- Deploys a skill to Claude Code, Codex, Cursor, Grok, OpenClaw or Hermes with a switch in its Deployments tab, for the whole Mac or for one project. OpenClaw and Hermes deploy for the whole Mac only. Agents that read standard markdown get a symlink, so there's no copy to go stale. Cursor gets a compiled `.mdc` file.
+- Installs skills from GitHub. Paste a repository, a folder or a `SKILL.md` link, and Pensieve remembers where each skill came from. When the original changes, Pensieve can tell you, and you can read the diff before you update.
+- Syncs your library across Macs through a private git remote. It runs from the menu bar, you can turn a skill on for another Mac from this one, and when two Macs edit the same skill you pick between the versions side by side.
+- Keeps your skills as plain files in `~/.pensieve/skills/`. Delete the app and they're still there, readable as markdown.
 
 ## Install
 
@@ -23,23 +20,39 @@ With Homebrew:
 brew install --cask jaredatch/tap/pensieve
 ```
 
-The first install may ask you to confirm that you trust the `jaredatch/homebrew-tap` tap. That's normal for third-party taps.
+Homebrew may ask you to trust the `jaredatch/homebrew-tap` tap the first time. That's normal for a third-party tap.
 
-Or grab the DMG straight from [Releases](https://github.com/jaredatch/pensieve/releases): download, open, drag to Applications.
+Or download the dmg from [Releases](https://github.com/jaredatch/pensieve/releases), open it and drag Pensieve to Applications.
 
-## Requirements
+Pensieve needs macOS 14 or later and runs on Apple silicon and Intel. Every release is signed with a Developer ID and notarized by Apple, and updates arrive through Sparkle.
 
-- macOS 14 or later
-- Apple silicon or Intel
+Pensieve isn't sandboxed, and that's on purpose. It writes symlinks and files into folders like `~/.claude` and `~/.cursor`, which the App Store sandbox doesn't allow. It's also beta software that writes to real agent folders, so keep a backup of any skills you care about. If you sync more than one Mac, update them all together: a new version can move the library to a format older versions won't open.
 
-## It's a beta
+## Build from source
 
-Pensieve is a public beta. Every build here is Developer ID signed and notarized by Apple. Still, this is early software that writes to real agent directories on your machine. If your skill library matters to you (it should, that's the point), keep a backup until you trust it.
+You'll need a Mac with Apple silicon, Xcode 26 and [XcodeGen](https://github.com/yonaskolb/XcodeGen). The Xcode project is generated from `project.yml`, so edit that file, not the project.
 
-If you sync more than one Mac, update them all together. A new version can move the library to a format older versions won't open.
+```sh
+brew install xcodegen
+git clone https://github.com/jaredatch/pensieve.git
+cd pensieve
+script/build_and_run.sh
+```
 
-Pensieve is also not sandboxed, on purpose. It creates symlinks and compiled files under directories like `~/.claude` and `~/.cursor`, which the Mac App Store sandbox doesn't allow. That's why it ships here instead of the App Store.
+That generates the project, builds the app and opens it. `script/test.sh` runs the test suite. If you'd rather work in Xcode, run `xcodegen generate` and open `Pensieve.xcodeproj`.
 
-## Feedback
+The scripts build for Apple silicon only. Release builds are universal.
 
-Found a bug or have an idea? [Open an issue](https://github.com/jaredatch/pensieve/issues). This is the stage where feedback actually changes what gets built, so don't be shy.
+## Docs
+
+- [Getting started](docs/GETTING-STARTED.md): a tour of the app.
+- [Architecture](docs/ARCHITECTURE.md): how the pieces fit together.
+- [Specification](docs/SPEC.md): what the app is meant to do.
+- [Changelog](CHANGELOG.md): what changed in each release.
+- [Contributing](CONTRIBUTING.md): building, testing and reporting issues.
+- [Security](SECURITY.md): what Pensieve touches on your Mac, and how to report a vulnerability.
+- [How Pensieve is built](docs/HOW-PENSIEVE-IS-BUILT.md): frozen criteria, checks proven both ways, and review by a second AI model.
+
+## License
+
+Pensieve is released under the [MIT License](LICENSE). The open-source packages it uses are listed with their licenses in [third-party notices](THIRD-PARTY-NOTICES.md).
