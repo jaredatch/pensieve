@@ -403,8 +403,9 @@ def line_rules(path, line, paths, terms, public=False):
     config_declaration = public and path in KIT_CONFIG and bool(re.fullmatch(
         r'(?:RATCHET_(?:LOG=docs/' r'LOG\.md|PLANS_DIR=docs/' r'plans|ALLOWLIST=docs/test-allowlist\.md)'
         r'|(?:RATCHET|XP)_RESUME_NOTE="?tmp' r'/clear-continue\.md"?)', line))
-    command_setup = ('XP_WORKTREE_SETUP="xcodegen generate && python3 -B '
-                     'private' '/' 'release/' 'public-repo/cutover/trees.py --link-commands ."')
+    command_setup = ('XP_WORKTREE_SETUP="xcodegen generate && mkdir -p .claude && { '
+                     '[ -L .claude/' 'commands ] || { [ ! -e .claude/' 'commands ] && '
+                     'ln -s ..' '/pri' 'vate/.claude/' 'commands .claude/' 'commands; }; }"')
     config_declaration |= public and path == 'script/herdr.conf' and line == command_setup
     exempt = KIT if public else KIT | KIT_CONFIG
     old_repo = public and re.search(r'(?i)(?<![\w.-])jaredatch/' r'pensieve-app(?![\w-])', line)

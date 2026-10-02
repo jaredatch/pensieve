@@ -964,6 +964,35 @@ class HygieneTests(unittest.TestCase):
         self.assert_scan([(path, 2, 'decision-cite')])
         self.assert_scan([], '--tree')
 
+    def test_worktree_command_setup_exemption_is_exact(self):
+        self.repo.terms()
+        self.repo.stage(guard.SETTINGS, '{"public_repo": true}')
+        setup = ('XP_WORKTREE_SETUP="xcodegen generate && mkdir -p .claude && { '
+                 '[ -L .claude/' 'commands ] || { [ ! -e .claude/' 'commands ] && '
+                 'ln -s ..' '/pri' 'vate/.claude/' 'commands .claude/' 'commands; }; }"')
+        old_setup = ('XP_WORKTREE_SETUP="xcodegen generate && python3 -B '
+                     'private' '/' 'release/' 'public-repo/cutover/trees.py --link-commands ."')
+        env = dict(self.repo.env, GIT_INDEX_FILE=str(self.repo.root / '.git/index'))
+        cases = [('script/herdr.conf', setup, False),
+                 ('ordinary.txt', setup, True),
+                 ('script/ratchet.conf', setup, True),
+                 ('nested/script/herdr.conf', setup, True),
+                 ('script/herdr.conf', setup + ' ', True),
+                 ('script/herdr.conf', old_setup, True)]
+        for path, line, refused in cases:
+            with self.subTest(path=path, line=line):
+                self.repo.stage(path, line + '\n')
+                expected = [(path, 1, 'private-path-cite')] if refused else []
+                result = self.repo.run('--project-check', env=env)
+                self.assertEqual(result.returncode, int(refused), result.stderr)
+                if refused:
+                    self.assertIn((path + ':1: private-path-cite').encode(), result.stderr)
+                else:
+                    self.assertEqual(result.stderr, b'')
+                self.assert_scan(expected)
+                self.assert_scan(expected, '--tree')
+            self.repo.git('rm', '-qf', '--', path)
+
     def test_public_briefings_allow_only_one_correct_pointer_each(self):
         self.repo.terms()
         self.repo.stage(guard.SETTINGS, '{"public_repo": true}')
