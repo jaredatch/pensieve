@@ -31,6 +31,18 @@ targets:
         SUPublicEDKey: HibOcVcc/1MTA9UQHp4cIb7qMewKaA0elSCSQ0DY8Ns=
     sources:
       - path: Pensieve
+    postBuildScripts:
+      - name: Generate About credits
+        script: |
+          set -euo pipefail
+          /usr/bin/env python3 "$SRCROOT/script/credits.py" \
+            "$SRCROOT/THIRD-PARTY-NOTICES.md" \
+            "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Credits.rtf"
+        inputFiles:
+          - $(SRCROOT)/script/credits.py
+          - $(SRCROOT)/THIRD-PARTY-NOTICES.md
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Credits.rtf
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jaredatch.Pensieve$(PENSIEVE_BUNDLE_ID_SUFFIX)
