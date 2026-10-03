@@ -55,6 +55,13 @@ final class ImportReadSpy: FileServiceProtocol {
     }
     func deleteFile(at path: String) throws { try files.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { files.fileExists(at: path) }
+    func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {
+        try files.entryExistsWithoutFollowingLinks(at: path)
+    }
+    func realPath(at path: String) -> String { files.realPath(at: path) }
+    func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? {
+        files.fileIdentity(at: path, followingLinks: followingLinks)
+    }
     func isExecutableFile(at path: String) -> Bool { files.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { files.directoryExists(at: path) }
     func createDirectory(at path: String) throws { try files.createDirectory(at: path) }

@@ -1,0 +1,79 @@
+import Darwin
+import XCTest
+@testable import Pensieve
+
+/// Forwards filesystem operations to a temporary tree and records both text reads and actual
+/// descriptor read counts. Growth happens on the first read callback, after production fstat.
+/// A device entry is modeled with /dev/null's real no-follow metadata because unprivileged tests
+/// cannot create device nodes. Its text-read sentinel exposes an unsafe scanner without reading
+/// the host device. Other fixtures are real files, links, directories and FIFOs.
+final class ImportBoundedReadSpy: FileServiceProtocol {
+    let files = FileService()
+    var devicePath: String?
+    var unreadablePath: String?
+    var growPath: String?
+    var growthSize = 0
+    var textReads: [String] = []
+    var limits: [String: Int] = [:]
+    var consumed: [String: Int] = [:]
+    var requests: [String: [Int]] = [:]
+
+    func readFile(at path: String) throws -> String {
+        textReads.append(path)
+        if path == devicePath { return "device sentinel" }
+        return try files.readFile(at: path)
+    }
+
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        limits[path] = maximumBytes
+        if path == unreadablePath { throw CocoaError(.fileReadNoPermission) }
+        return try files.readRegularFileData(at: path, maximumBytes: maximumBytes) { descriptor, buffer, count in
+            if path == self.growPath {
+                self.growPath = nil
+                // Fixture-only POSIX mutation preserves the inode held by the reader.
+                let writer = open(path, O_WRONLY)
+                XCTAssertGreaterThanOrEqual(writer, 0)
+                if writer >= 0 {
+                    XCTAssertEqual(ftruncate(writer, off_t(self.growthSize)), 0)
+                    close(writer)
+                }
+            }
+            self.requests[path, default: []].append(count)
+            let result = Darwin.read(descriptor, buffer, count)
+            if result > 0 { self.consumed[path, default: 0] += result }
+            return result
+        }
+    }
+
+    func isRegularFile(at path: String) -> Bool {
+        files.isRegularFile(at: path == devicePath ? "/dev/null" : path)
+    }
+    func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {
+        if path == devicePath { return true }
+        return try files.entryExistsWithoutFollowingLinks(at: path)
+    }
+    func listDirectory(at path: String) throws -> [String] {
+        var entries = try files.listDirectory(at: path)
+        if let devicePath, (devicePath as NSString).deletingLastPathComponent == path {
+            entries.append((devicePath as NSString).lastPathComponent)
+        }
+        return entries
+    }
+    func writeFile(at path: String, content: String) throws { try files.writeFile(at: path, content: content) }
+    func deleteFile(at path: String) throws { try files.deleteFile(at: path) }
+    func fileExists(at path: String) -> Bool { files.fileExists(at: path) }
+    func realPath(at path: String) -> String { files.realPath(at: path) }
+    func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? {
+        files.fileIdentity(at: path, followingLinks: followingLinks)
+    }
+    func isExecutableFile(at path: String) -> Bool { files.isExecutableFile(at: path) }
+    func directoryExists(at path: String) -> Bool { files.directoryExists(at: path) }
+    func createDirectory(at path: String) throws { try files.createDirectory(at: path) }
+    func deleteDirectory(at path: String) throws { try files.deleteDirectory(at: path) }
+    func createSymlink(at path: String, pointingTo target: String) throws {
+        try files.createSymlink(at: path, pointingTo: target)
+    }
+    func symlinkTarget(at path: String) throws -> String { try files.symlinkTarget(at: path) }
+    func isSymlink(at path: String) -> Bool { files.isSymlink(at: path) }
+    func contentsHash(at path: String) throws -> String { try files.contentsHash(at: path) }
+}

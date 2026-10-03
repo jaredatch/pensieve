@@ -20,8 +20,27 @@ final class ImportViewModel {
     var importProgress: Double = 0
     var error: String?
     var importNotices: [String] = []
+    var scanSkips: [ImportScanSkip] = []
 
     var hasResults: Bool { !discoveredSkills.isEmpty }
+
+    var scanSummary: String? {
+        guard !scanSkips.isEmpty else { return nil }
+        let reasons = ImportScanSkip.Reason.allCases.compactMap { reason -> String? in
+            let count = scanSkips.filter { $0.reason == reason }.count
+            guard count > 0 else { return nil }
+            let label: String
+            switch reason {
+            case .notRegular: label = count == 1 ? "symlink or special file" : "symlinks or special files"
+            case .tooLarge: label = count == 1 ? "file larger than 4 MiB" : "files larger than 4 MiB"
+            case .unreadable: label = count == 1 ? "unreadable file or folder" : "unreadable files or folders"
+            case .invalidUTF8: label = count == 1 ? "file that isn't UTF-8 text" : "files that aren't UTF-8 text"
+            }
+            return "\(count) \(label)"
+        }
+        let entries = scanSkips.count == 1 ? "entry" : "entries"
+        return "Skipped \(scanSkips.count) \(entries): " + reasons.joined(separator: "; ") + "."
+    }
 
     init(
         fileService: FileServiceProtocol? = nil,
@@ -47,7 +66,9 @@ final class ImportViewModel {
         importNotices = []
         error = nil
         isScanning = true
-        discoveredSkills = scanner.scan()
+        let report = scanner.scanWithReport()
+        discoveredSkills = report.skills
+        scanSkips = report.skipped
         duplicateGroups = ImportScanner.findDuplicates(discoveredSkills)
         // Select all by default
         selectedSkills = Set(discoveredSkills.map(\.sourcePath))
@@ -61,10 +82,13 @@ final class ImportViewModel {
     func scanFolder(_ path: String) -> FolderScanOutcome {
         importNotices = []
         error = nil
+        scanSkips = []
         guard !scanner.isInsideStore(path) else { return .insideLibrary }
         isScanning = true
         defer { isScanning = false }
-        let found = scanner.scanFolder(path)
+        let report = scanner.scanFolderWithReport(path)
+        scanSkips = report.skipped
+        let found = report.skills
         guard !found.isEmpty else { return .nothingFound }
         discoveredSkills = found
         duplicateGroups = ImportScanner.findDuplicates(discoveredSkills)

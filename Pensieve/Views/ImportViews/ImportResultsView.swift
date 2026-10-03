@@ -27,6 +27,12 @@ struct ImportResultsView: View {
             }
             .padding()
 
+            if !importVM.scanSkips.isEmpty {
+                ImportScanSummary(summary: importVM.scanSummary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding([.horizontal, .bottom])
+            }
+
             Divider()
 
             // Skill list
