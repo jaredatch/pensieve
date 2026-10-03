@@ -34,7 +34,6 @@ struct AddEntitySheet: View {
                     .create(name: name, context: context)
                 if let created { onCreated(.category(created.id)) }
             }
-
         }
     }
 }

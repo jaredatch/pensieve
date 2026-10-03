@@ -273,9 +273,9 @@ Each installation has a canonical UUID in app support. Its single-writer `machin
 │ Skills   │ basecamp              ⓖ 9/5/26 │ basecamp                          │
 │ Projects │ Claude Code, Codex · This Mac  │ ⑂ 37signals/basecamp · main       │
 │ Categori…│ Interact with Basecamp via the…│ Interact with Basecamp via the…   │
-│          │ skill-b                        │ typescript  code-quality          │
-│ Tags     │                                │ Overview Deployments Content Hi…  │
-│ Machines │                                │ ───────────────────────────────── │
+│ Tags     │ skill-b                        │ typescript  code-quality          │
+│ Machines │                                │ Overview Deployments Content Hi…  │
+│          │                                │ ───────────────────────────────── │
 │          │                                │ [Context cost] [Bundle] [Deployed]│
 │          │                                │ Source                            │
 │          │                                │   Repository   37signals/basecamp │

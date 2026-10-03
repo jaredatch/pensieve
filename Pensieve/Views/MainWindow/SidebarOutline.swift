@@ -179,7 +179,7 @@ final class SidebarOutlineCell: NSTableCellView {
     }
 }
 
-/// The six row descriptions in the shipped order, Machines only when `showsMachines`.
+/// The row descriptions in the shipped order, Machines only when `showsMachines`.
 /// Pure, so the section/title/symbol mapping is testable apart from `SidebarView`.
 enum SidebarRows {
     static func items(showsMachines: Bool) -> [SidebarOutlineItem] {

@@ -266,6 +266,7 @@ final class CategoryReconcileWiringTests: XCTestCase {
 
     @MainActor
     func testDeleteSkillUnlinksWhileLiveThenDeletesFilesAndRecord() throws {
+        // Category reconciliation seeds the deploys; SkillDeletionFlow unlinks and retires them.
         let context = try makeContext()
         let seed = try makeSeededRule(context: context)
         let linkService = RecordingLinkService()
@@ -292,6 +293,7 @@ final class CategoryReconcileWiringTests: XCTestCase {
 
     @MainActor
     func testDeleteSkillRetainsRecordAndDoesNotDeleteFilesOnFailedUnlink() throws {
+        // Live deletion keeps both ledger rows and the skill when any owned unlink fails.
         let context = try makeContext()
         _ = try makeSeededRule(context: context)
         let linkService = RecordingLinkService()
@@ -317,15 +319,14 @@ final class CategoryReconcileWiringTests: XCTestCase {
 
     @MainActor
     func testDeleteSkillWithFailedReconcileKeepsPendingEditSoItIsNotLost() throws {
-        // Regression (06.3 layer-2 review): if the deletion reconcile FAILS, the skill is retained for
-        // retry — so its pending debounced edit must NOT be cancelled, or the user's unsaved edit is
-        // silently lost on a skill that survives. (The clean-delete cancel is covered by SkillLibrarySaveTests.)
+        // SkillDeletionFlow retains the skill and its draft when an owned unlink fails.
+        // The retained draft must still save; clean deletion cancellation is covered by SkillLibrarySaveTests.
         let context = try makeContext()
         _ = try makeSeededRule(context: context)
         let linkService = RecordingLinkService()
         let reconciler = makeReconciler(linkService: linkService)
         _ = reconciler.reconcile(context: context)
-        linkService.throwOnUnlink = [.codex]                       // force a failed reconcile → skill retained
+        linkService.throwOnUnlink = [.codex]                       // force a failed unlink; retain the skill
         let skill = try context.fetch(FetchDescriptor<Skill>()).first!
 
         let skillStore = RecordingSkillStore()
@@ -337,7 +338,7 @@ final class CategoryReconcileWiringTests: XCTestCase {
             skill: skill, library: library, platformVM: reconciler.platformVM,
             projects: try context.fetch(FetchDescriptor<Project>()), context: context
         )
-        XCTAssertNotNil(library.deletionNotice)                             // failure surfaced by deleteSkill
+        XCTAssertNotNil(library.deletionNotice)                             // failure surfaced by SkillDeletionFlow
         XCTAssertEqual(try skillCount(context: context), 1)        // skill retained for retry
 
         XCTAssertTrue(library.hasUnsavedChanges(for: skill))       // the draft must still be live

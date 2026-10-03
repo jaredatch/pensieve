@@ -32,10 +32,6 @@ protocol CategoryStoreProtocol {
     func reconcileAfterRemovingProject(_ project: Project,
                                        reconciler: CategoryReconcilerProtocol, context: ModelContext,
                                        notifier: SyncStateNotifying) -> BatchResult
-    @discardableResult
-    func reconcileAfterRemovingSkill(_ skill: Skill,
-                                     reconciler: CategoryReconcilerProtocol, context: ModelContext,
-                                     notifier: SyncStateNotifying) -> BatchResult
 }
 
 extension CategoryStoreProtocol {
@@ -72,10 +68,6 @@ extension CategoryStoreProtocol {
     func reconcileAfterRemovingProject(_ project: Project, reconciler: CategoryReconcilerProtocol,
                                        context: ModelContext) -> BatchResult {
         reconcileAfterRemovingProject(project, reconciler: reconciler, context: context, notifier: notifier)
-    }
-    func reconcileAfterRemovingSkill(_ skill: Skill, reconciler: CategoryReconcilerProtocol,
-                                     context: ModelContext) -> BatchResult {
-        reconcileAfterRemovingSkill(skill, reconciler: reconciler, context: context, notifier: notifier)
     }
 }
 
@@ -208,21 +200,6 @@ struct CategoryStore: CategoryStoreProtocol {
                 setProject(project, inCategory: category, member: false, context: context,
                            notifier: SyncStateNotifier.suppressed)
             }
-        }
-        let result = reconciler.reconcile(context: context)
-        notifier()
-        return result
-    }
-
-    /// Prune a skill from EVERY category, then reconcile ONCE while the skill is still live. Does NOT delete
-    /// the skill — the caller (SkillLibraryViewModel) deletes files+record only on a clean reconcile (§C). (PLAN-06 / 06.3)
-    @discardableResult
-    func reconcileAfterRemovingSkill(_ skill: Skill,
-                                     reconciler: CategoryReconcilerProtocol, context: ModelContext,
-                                     notifier: SyncStateNotifying) -> BatchResult {
-        for category in categories(containingSkillSlug: skill.directoryName, context: context) {
-            setSkill(skill, inCategory: category, assigned: false, context: context,
-                     notifier: SyncStateNotifier.suppressed)
         }
         let result = reconciler.reconcile(context: context)
         notifier()

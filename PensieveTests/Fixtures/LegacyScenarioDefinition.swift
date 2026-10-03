@@ -19,10 +19,8 @@ struct LegacyScenarioDefinition {
     static func serialize(_ record: Self) -> String {
         var lines = ["id: " + SkillSerializer.quotedScalar(record.id),
                      "name: " + SkillSerializer.quotedScalar(record.name)]
-        for (key, values) in [("skill_slugs", record.skillSlugs), ("agents", record.agents)] {
-            lines.append(key + ":")
-            lines += Set(values).sorted().map { "  - " + SkillSerializer.quotedScalar($0) }
-        }
+        ManifestService.appendBlockList(&lines, key: "skill_slugs", values: record.skillSlugs)
+        ManifestService.appendBlockList(&lines, key: "agents", values: record.agents)
         return lines.joined(separator: "\n") + "\n"
     }
 }

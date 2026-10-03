@@ -64,6 +64,33 @@ final class ScenarioHandoverLaunchTests: XCTestCase {
         try await assertPersistentFailureAllowsLaunch(migrationWarning: true)
     }
 
+    func testMigrationManifestWithPerSkillWarningStillCompletesHandover() throws {
+        let harness = try HandoverHarness(defaults: isolatedDefaults())
+        defer { try? harness.cleanUp() }
+        try harness.seed()
+        try harness.seed("broken", platforms: [])
+        try harness.files.writeFile(at: harness.root + "/skills/broken/SKILL.md",
+                                    content: "---\nname: [broken\n---\nBody")
+        let before = try harness.deployedFiles()
+        let migration = StoreMigrationService(
+            fileService: harness.files, manifestService: harness.manifest,
+            skillStore: SkillStore(fileService: harness.files, baseDir: harness.root + "/skills")
+        )
+        let migrated = migration.migrateIfNeeded(fromRoot: harness.root, context: harness.freshContext())
+        XCTAssertTrue(migrated.manifestWritten)
+        XCTAssertFalse(migrated.warnings.isEmpty)
+        let outcome = LaunchReconciler(
+            rebuildService: StoreRebuildService(fileService: harness.files, manifestService: harness.manifest),
+            migrationService: migration, fileService: harness.files, manifestService: harness.manifest,
+            root: harness.root, lockPath: harness.root + "/sync.lock", scenarioHandover: harness.handover()
+        ).reconcileOnLaunch(context: harness.freshContext(), alreadyMigrated: false)
+        XCTAssertFalse(outcome.migrationRan, "per-skill migration must retry on the next launch")
+        XCTAssertFalse(outcome.ingestionNeedsRetry)
+        XCTAssertFalse(outcome.rebuild.warnings.isEmpty)
+        try harness.assertComplete()
+        XCTAssertEqual(try harness.deployedFiles(), before)
+    }
+
     private func assertPersistentFailureAllowsLaunch(migrationWarning: Bool) async throws {
         let harness = try HandoverHarness(defaults: isolatedDefaults())
         defer { try? harness.cleanUp() }
@@ -126,8 +153,10 @@ final class ScenarioHandoverLaunchTests: XCTestCase {
             try harness.files.writeFile(at: harness.root + "/skills/skill/SKILL.md",
                                         content: "---\nname: [broken\n---\nBody")
         }
+        let migrationManifest = HandoverManifest()
+        migrationManifest.failAllWrites = migrationWarning
         return StoreMigrationService(
-            fileService: harness.files, manifestService: harness.manifest.live,
+            fileService: harness.files, manifestService: migrationManifest,
             skillStore: SkillStore(fileService: harness.files, baseDir: harness.root + "/skills")
         )
     }

@@ -95,7 +95,6 @@ struct ManifestService: ManifestReadWriting {
         return ManifestSnapshot(
             schemaVersion: schema,
             categories: try readCategories(from: manifestDir).sorted { $0.name < $1.name },
-
             projects: try readProjects(from: manifestDir).sorted { $0.identityKey < $1.identityKey },
             skills: try readSkills(from: manifestDir).sorted { $0.slug < $1.slug },
             deployIntents: schema >= 4

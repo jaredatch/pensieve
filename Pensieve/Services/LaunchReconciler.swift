@@ -200,7 +200,7 @@ struct LaunchReconciler {
             result.migrationRan = migration.manifestWritten && migration.warnings.isEmpty
             if !result.migrationRan, scenarioHandover != nil {
                 result.rebuild.warnings.append(contentsOf: migration.warnings)
-                return result
+                if !migration.manifestWritten { return result }
             }
         }
         if result.rebuild.saveFailed, scenarioHandover != nil {

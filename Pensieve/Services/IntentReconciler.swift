@@ -39,7 +39,7 @@ struct IntentReconciler: IntentReconcilerProtocol {
         platformVM: PlatformViewModel,
         machineIdentity: MachineIdentityProviding = MachineIdentity(),
         stateFetcher: ReconcilerStateFetching = ReconcilerStateFetcher(),
-        handoverIsComplete: @escaping () -> Bool = { UserDefaults.standard.bool(forKey: ScenarioHandover.doneKey) }
+        handoverIsComplete: @escaping () -> Bool
     ) {
         self.platformVM = platformVM
         self.machineIdentity = machineIdentity

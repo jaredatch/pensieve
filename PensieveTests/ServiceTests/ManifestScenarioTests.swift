@@ -40,6 +40,17 @@ final class ManifestScenarioTests: XCTestCase {
         XCTAssertEqual(try recursiveFiles(under: tempDir), before)
     }
 
+    func testLegacyFixtureKeepsSortedDuplicateMembershipBytes() {
+        let record = LegacyScenarioDefinition(
+            id: "legacy", name: "Legacy", skillSlugs: ["beta", "alpha", "alpha"],
+            agents: ["cursor", "codex", "codex"]
+        )
+        let expected = "id: " + SkillSerializer.quotedScalar("legacy")
+            + "\nname: " + SkillSerializer.quotedScalar("Legacy")
+            + "\nskill_slugs:\n  - alpha\n  - alpha\n  - beta\nagents:\n  - codex\n  - codex\n  - cursor\n"
+        XCTAssertEqual(LegacyScenarioDefinition.serialize(record), expected)
+    }
+
     func testHostileScenarioNamesConfined() throws {
         let records = [
             LegacyScenarioDefinition(id: "1E3AB3B9-53EF-4051-9215-201177354373", name: "../evil",
