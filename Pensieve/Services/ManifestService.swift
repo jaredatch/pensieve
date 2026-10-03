@@ -46,12 +46,7 @@ struct ManifestService: ManifestReadWriting {
                     content: Self.serializeCategory(category)
                 )
             }
-            for scenario in snapshot.scenarios {
-                try fileService.writeFile(
-                    at: scenariosDir + "/" + Self.scenarioFileName(name: scenario.name, id: scenario.id),
-                    content: Self.serializeScenario(scenario)
-                )
-            }
+            try carryScenarioFiles(from: manifestDir + "/scenarios", to: scenariosDir)
             for skill in snapshot.skills {
                 try fileService.writeFile(
                     at: skillsDir + "/" + skill.slug + ".yaml",
@@ -100,7 +95,7 @@ struct ManifestService: ManifestReadWriting {
         return ManifestSnapshot(
             schemaVersion: schema,
             categories: try readCategories(from: manifestDir).sorted { $0.name < $1.name },
-            scenarios: try readScenarios(from: manifestDir).sorted { ($0.name, $0.id) < ($1.name, $1.id) },
+            scenarios: [],
             projects: try readProjects(from: manifestDir).sorted { $0.identityKey < $1.identityKey },
             skills: try readSkills(from: manifestDir).sorted { $0.slug < $1.slug },
             deployIntents: schema >= 4
@@ -139,32 +134,15 @@ struct ManifestService: ManifestReadWriting {
         return categories
     }
 
-    private func readScenarios(from manifestDir: String) throws -> [ScenarioRecord] {
-        var scenariosByID: [String: ScenarioRecord] = [:]
-        let scenariosDir = manifestDir + "/scenarios"
-        guard fileService.directoryExists(at: scenariosDir) else { return [] }
-        let entries = try fileService.listDirectory(at: scenariosDir).filter { $0.hasSuffix(".yaml") }.sorted()
-        for entry in entries {
-            guard let content = try? fileService.readFile(at: scenariosDir + "/" + entry),
-                  let obj = (try? CheckedYAMLLoader.load(yaml: content)) as? [String: Any],
-                  let rawID = obj["id"] as? String,
-                  let uuid = UUID(uuidString: rawID),
-                  let name = obj["name"] as? String else {
-                throw ManifestError.corruptManifestFile("scenarios/" + entry)
-            }
-            let canonicalID = uuid.uuidString
-            let skillSlugs = try Self.requireStringList(obj, "skill_slugs", file: "scenarios/" + entry)
-            let agents = try Self.requireStringList(obj, "agents", file: "scenarios/" + entry)
-            if scenariosByID[canonicalID] == nil {
-                scenariosByID[canonicalID] = ScenarioRecord(
-                    id: canonicalID,
-                    name: name,
-                    skillSlugs: skillSlugs,
-                    agents: agents
-                )
-            }
+    /// Legacy definitions belong to older builds. Keep opaque regular-file bytes in the atomic
+    /// replacement tree, and never traverse a symlinked scenarios directory or entry.
+    private func carryScenarioFiles(from source: String, to destination: String) throws {
+        guard !fileService.isSymlink(at: source), fileService.directoryExists(at: source) else { return }
+        for entry in try fileService.listDirectory(at: source).sorted() {
+            let path = source + "/" + entry
+            guard !fileService.isSymlink(at: path), fileService.isRegularFile(at: path) else { continue }
+            try fileService.copyFile(at: path, to: destination + "/" + entry)
         }
-        return Array(scenariosByID.values)
     }
 
     private func readSkills(from manifestDir: String) throws -> [SkillOverlay] {

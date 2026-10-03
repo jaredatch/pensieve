@@ -20,6 +20,8 @@ extension ManifestServiceTests {
             projectKey: "github.com/owner/project"
         )]
         try service.write(snapshot, toRoot: tempDir)
+        let legacy = "id: " + scenarioID + "\nname: Release\nskill_slugs:\n  - plain\nagents:\n  - codex\n"
+        try fileService.writeFile(at: tempDir + "/manifest/scenarios/release.yaml", content: legacy)
         let before = try unrelatedManifestBytes(excludingSkill: "plain")
 
         let replacement = SkillOverlay(

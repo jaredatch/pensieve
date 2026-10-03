@@ -57,6 +57,7 @@ struct LaunchReconciler {
     private let gitHeadStamp: GitHeadStamp
     private let headStampOverride: (() -> String?)?
     private let git: GitServiceProtocol
+    private let scenarioHandover: ScenarioHandingOver?
 
     init(rebuildService: StoreRebuildServiceProtocol = StoreRebuildService(),
          migrationService: StoreMigrationServiceProtocol = StoreMigrationService(),
@@ -65,6 +66,7 @@ struct LaunchReconciler {
          root: String = Constants.pensieveBaseDir,
          lockPath: String = PathConstants.pensieveAppSupportDir + "/sync.lock",
          git: GitServiceProtocol = GitService(),
+         scenarioHandover: ScenarioHandingOver? = nil,
          headStampOverride: (() -> String?)? = nil) {
         self.rebuildService = rebuildService
         self.migrationService = migrationService
@@ -75,6 +77,7 @@ struct LaunchReconciler {
         self.gitHeadStamp = GitHeadStamp(fileService: fileService)
         self.headStampOverride = headStampOverride
         self.git = git
+        self.scenarioHandover = scenarioHandover
     }
 
     @discardableResult
@@ -147,7 +150,7 @@ struct LaunchReconciler {
             ingestionNeedsRetry: ingestionNeedsRetry
         ), alreadyMigrated: alreadyMigrated, externallyHeldLock: externallyHeldLock, context: context)
         return LaunchReconcileOutcome(
-            rebuild: rebuild,
+            rebuild: validation.rebuild,
             migrationRan: validation.migrationRan,
             ingestedHeadStamp: validation.ingestedHeadStamp,
             ingestionNeedsRetry: validation.ingestionNeedsRetry
@@ -176,6 +179,7 @@ struct LaunchReconciler {
             result.ingestionNeedsRetry = false
             return result
         }
+        guard !result.ingestionNeedsRetry else { return result }
         var ownedLock: SyncLock?
         if !externallyHeldLock {
             guard let lock = SyncLock.tryAcquire(at: lockPath) else {
@@ -191,9 +195,23 @@ struct LaunchReconciler {
             result.ingestionNeedsRetry = true
             return result
         }
-        guard !alreadyMigrated else { return result }
-        let migration = migrationService.migrateIfNeeded(fromRoot: root, context: context)
-        result.migrationRan = migration.manifestWritten && migration.warnings.isEmpty
+        if !alreadyMigrated {
+            let migration = migrationService.migrateIfNeeded(fromRoot: root, context: context)
+            result.migrationRan = migration.manifestWritten && migration.warnings.isEmpty
+            if !result.migrationRan, scenarioHandover != nil {
+                result.ingestionNeedsRetry = true
+                result.rebuild.warnings.append(contentsOf: migration.warnings)
+                return result
+            }
+        }
+        do {
+            try scenarioHandover?.handOver(context: context)
+        } catch {
+            result.ingestedHeadStamp = nil
+            result.ingestionNeedsRetry = true
+            result.rebuild.warnings.append("Scenario handover will retry: \(error.localizedDescription)")
+            NSLog("Pensieve scenario handover will retry: \(error.localizedDescription)")
+        }
         return result
     }
 

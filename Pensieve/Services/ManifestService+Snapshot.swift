@@ -16,7 +16,6 @@ extension ManifestService: ManifestSnapshotting {
         // (a remote-wide deletion). (08.4 review)
         let skills = try context.fetch(FetchDescriptor<Skill>())
         let categories = try context.fetch(FetchDescriptor<Category>())
-        let scenarios = try context.fetch(FetchDescriptor<Scenario>())
         let deployIntents = try context.fetch(FetchDescriptor<MachineDeployIntent>())
 
         let skillOverlays = skills.map { skill in
@@ -41,23 +40,13 @@ extension ManifestService: ManifestSnapshotting {
         let categoryRecords = categories.map {
             CategoryRecord(name: $0.name, projectKeys: $0.projectKeys, skillSlugs: $0.skillSlugs)
         }
-        let scenarioRecords = scenarios
-            .sorted { ($0.name, $0.id.uuidString) < ($1.name, $1.id.uuidString) }
-            .map {
-                ScenarioRecord(
-                    id: $0.id.uuidString,
-                    name: $0.name,
-                    skillSlugs: $0.skillSlugs,
-                    agents: $0.agentRawValues
-                )
-            }
         // Project identities are per-machine and are published in `machines/<id>.yaml`
         // (`MachineStateService.projectRecords`); the manifest carries none, so `projects.yaml` is the
         // constant `projects:` on every machine and never ping-pongs between them.
         return ManifestSnapshot(
             schemaVersion: Self.currentSchemaVersion,
             categories: categoryRecords,
-            scenarios: scenarioRecords,
+            scenarios: [],
             projects: [],
             skills: skillOverlays,
             deployIntents: Self.deployIntentRecords(from: deployIntents)

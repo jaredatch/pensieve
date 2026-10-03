@@ -140,7 +140,7 @@ extension ManifestServiceTests {
         switch kind {
         case .schema:
             "schema_version"
-        case .category, .scenario:
+        case .category:
             "name"
         case .skill, .deployIntent:
             "slug"
@@ -152,7 +152,6 @@ extension ManifestServiceTests {
     private enum ManifestFileKind: String, CaseIterable {
         case schema
         case category
-        case scenario
         case skill
         case projects
         case deployIntent
@@ -165,9 +164,6 @@ extension ManifestServiceTests {
         case .category:
             let name = try XCTUnwrap(try fileService.listDirectory(at: tempDir + "/manifest/categories").first)
             return "categories/" + name
-        case .scenario:
-            let name = try XCTUnwrap(try fileService.listDirectory(at: tempDir + "/manifest/scenarios").first)
-            return "scenarios/" + name
         case .skill:
             return "skills/skill.yaml"
         case .projects:

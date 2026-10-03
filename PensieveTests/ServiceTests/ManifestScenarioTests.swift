@@ -19,7 +19,7 @@ final class ManifestScenarioTests: XCTestCase {
         }
     }
 
-    func testRoundTripPreservesScenarioRecordsAndSortsByName() throws {
+    func testExistingScenarioBytesSurviveSnapshotChanges() throws {
         let backend = ScenarioRecord(
             id: "D23BF2CE-86FD-4F89-951D-F16E446F91F2",
             name: "Backend",
@@ -32,15 +32,14 @@ final class ManifestScenarioTests: XCTestCase {
             skillSlugs: ["react", "vite"],
             agents: ["codex", "cursor"]
         )
+        try seedLegacy([frontend, backend])
+        let before = try recursiveFiles(under: tempDir)
         try service.write(snapshot(scenarios: [frontend, backend]), toRoot: tempDir)
 
         let read = try service.read(fromRoot: tempDir).scenarios
 
-        XCTAssertEqual(read.map(\.name), ["Backend", "Frontend"])
-        XCTAssertEqual(read[0], ScenarioRecord(id: backend.id, name: backend.name,
-                                               skillSlugs: ["api", "sql"], agents: ["claudeCode", "cursor"]))
-        XCTAssertEqual(read[1], ScenarioRecord(id: frontend.id, name: frontend.name,
-                                               skillSlugs: ["react", "vite"], agents: ["codex", "cursor"]))
+        XCTAssertTrue(read.isEmpty)
+        XCTAssertEqual(try recursiveFiles(under: tempDir), before)
     }
 
     func testHostileScenarioNamesConfined() throws {
@@ -55,6 +54,7 @@ final class ManifestScenarioTests: XCTestCase {
                            skillSlugs: ["unicode"], agents: ["openClaw"])
         ]
 
+        try seedLegacy(records)
         try service.write(snapshot(scenarios: records), toRoot: tempDir)
 
         let scenariosDir = tempDir + "/manifest/scenarios"
@@ -67,35 +67,37 @@ final class ManifestScenarioTests: XCTestCase {
             XCTAssertTrue(fileService.fileExists(at: scenariosDir + "/" + file), file)
         }
         XCTAssertTrue(files.contains { $0.hasPrefix("scn-") }, "empty/unicode names use the scn fallback")
-        XCTAssertEqual(try service.read(fromRoot: tempDir).scenarios.map(\.name).sorted(), records.map(\.name).sorted())
+        XCTAssertTrue(try service.read(fromRoot: tempDir).scenarios.isEmpty)
     }
 
-    func testNonSequenceListFieldThrows() throws {
+    func testNonSequenceLegacyFieldsAreIgnoredAndCarried() throws {
         let record = ScenarioRecord(id: "8787F07B-40FA-46FD-A9C2-D892D07D4661", name: "Bad Lists",
                                     skillSlugs: ["swift"], agents: ["cursor"])
+        try seedLegacy([record])
         try service.write(snapshot(scenarios: [record]), toRoot: tempDir)
         let path = try scenarioPath(named: "Bad Lists")
 
         var raw = try fileService.readFile(at: path)
         raw = raw.replacingOccurrences(of: "skill_slugs:\n  - swift", with: "skill_slugs: swift")
         try fileService.writeFile(at: path, content: raw)
-        assertCorruptScenarioRead()
+        try assertIgnoredScenarioReadAndCarry()
 
+        try seedLegacy([record])
         try service.write(snapshot(scenarios: [record]), toRoot: tempDir)
         raw = try fileService.readFile(at: path)
         raw = raw.replacingOccurrences(of: "agents:\n  - cursor", with: "agents: cursor")
         try fileService.writeFile(at: path, content: raw)
-        assertCorruptScenarioRead()
+        try assertIgnoredScenarioReadAndCarry()
     }
 
-    func testMissingOrInvalidIDThrows() throws {
+    func testMissingOrInvalidLegacyIDsAreIgnoredAndCarried() throws {
         try writeScenarioFile(name: "missing.yaml", content: """
         name: "Missing"
         skill_slugs:
         agents:
 
         """)
-        assertCorruptScenarioRead()
+        try assertIgnoredScenarioReadAndCarry()
 
         try service.write(snapshot(scenarios: []), toRoot: tempDir)
         try writeScenarioFile(name: "invalid.yaml", content: """
@@ -105,14 +107,14 @@ final class ManifestScenarioTests: XCTestCase {
         agents:
 
         """)
-        assertCorruptScenarioRead()
+        try assertIgnoredScenarioReadAndCarry()
     }
 
-    func testUnparseableScenarioFileThrows() throws {
+    func testUnparseableScenarioFileIsIgnoredAndCarried() throws {
         try service.write(snapshot(scenarios: []), toRoot: tempDir)
         try fileService.writeFile(at: tempDir + "/manifest/scenarios/broken.yaml", content: ":\n  - [\n")
 
-        assertCorruptScenarioRead()
+        try assertIgnoredScenarioReadAndCarry()
     }
 
     func testNewerSchemaManifestRefused() throws {
@@ -143,10 +145,11 @@ final class ManifestScenarioTests: XCTestCase {
             ScenarioRecord(id: "F59F385D-E42D-425F-843C-D9019B7BA8BA", name: "Healed",
                            skillSlugs: ["x"], agents: ["codex"])
         ]), toRoot: tempDir)
-        XCTAssertEqual(try service.read(fromRoot: tempDir).scenarios.map(\.name), ["Healed"])
+        XCTAssertTrue(try service.read(fromRoot: tempDir).scenarios.isEmpty)
+        XCTAssertEqual(try fileService.readFile(at: tempDir + "/manifest/scenarios/keep.yaml"), "keep: bytes\n")
     }
 
-    func testDuplicateScenarioIDsDedupeByLexicographicallyFirstFilename() throws {
+    func testDuplicateLegacyIDsKeepBothFiles() throws {
         try service.write(snapshot(scenarios: []), toRoot: tempDir)
         let upperID = "D52AB43B-57E4-496C-AE4D-B14A2D574F4E"
         let lowerID = upperID.lowercased()
@@ -171,27 +174,24 @@ final class ManifestScenarioTests: XCTestCase {
 
         let read = try service.read(fromRoot: tempDir).scenarios
 
-        XCTAssertEqual(read.count, 1)
-        XCTAssertEqual(read.first?.id, upperID)
-        XCTAssertEqual(read.first?.name, "First")
-        XCTAssertEqual(read.first?.skillSlugs, ["first"])
-        XCTAssertEqual(read.first?.agents, ["codex"])
+        XCTAssertTrue(read.isEmpty)
+        try service.write(snapshot(scenarios: []), toRoot: tempDir)
+        XCTAssertEqual(Set(try fileService.listDirectory(at: tempDir + "/manifest/scenarios")),
+                       ["a-first.yaml", "z-last.yaml"])
     }
 
-    func testSameNamedScenariosReadInDeterministicIdOrder() throws {
-        // Same-named scenarios from different machines are a supported case (distinct id-hashed files);
-        // read must tie-break on id so snapshots are deterministic across runs/processes.
+    func testSameNamedLegacyScenariosKeepDistinctFiles() throws {
+        // Distinct legacy files stay distinct even when their names match.
         let idA = "0AAAAAAA-1111-4222-8333-444444444444"
         let idB = "0BBBBBBB-1111-4222-8333-444444444444"
-        try service.write(snapshot(scenarios: [
+        try seedLegacy([
             ScenarioRecord(id: idB, name: "Same", skillSlugs: ["b"], agents: ["cursor"]),
             ScenarioRecord(id: idA, name: "Same", skillSlugs: ["a"], agents: ["codex"])
-        ]), toRoot: tempDir)
-
-        let read = try service.read(fromRoot: tempDir).scenarios
-
-        XCTAssertEqual(read.map(\.id), [idA, idB])
-        XCTAssertEqual(read.map(\.skillSlugs), [["a"], ["b"]])
+        ])
+        let before = try recursiveFiles(under: tempDir)
+        try service.write(snapshot(scenarios: []), toRoot: tempDir)
+        XCTAssertTrue(try service.read(fromRoot: tempDir).scenarios.isEmpty)
+        XCTAssertEqual(try recursiveFiles(under: tempDir), before)
     }
 
     func testV1TreeWithoutScenariosReadsAsEmptyScenarios() throws {
@@ -232,11 +232,21 @@ final class ManifestScenarioTests: XCTestCase {
         try fileService.writeFile(at: tempDir + "/manifest/scenarios/" + name, content: content)
     }
 
-    private func assertCorruptScenarioRead(file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertThrowsError(try service.read(fromRoot: tempDir), file: file, line: line) { error in
-            guard case ManifestError.corruptManifestFile = error else {
-                return XCTFail("expected corruptManifestFile, got \(error)", file: file, line: line)
-            }
+    private func assertIgnoredScenarioReadAndCarry(file: StaticString = #filePath, line: UInt = #line) throws {
+        let before = try recursiveFiles(under: tempDir)
+        XCTAssertTrue(try service.read(fromRoot: tempDir).scenarios.isEmpty, file: file, line: line)
+        try service.write(snapshot(scenarios: []), toRoot: tempDir)
+        let after = try recursiveFiles(under: tempDir)
+        for (path, bytes) in before where path.hasPrefix("manifest/scenarios/") {
+            XCTAssertEqual(after[path], bytes, file: file, line: line)
+        }
+    }
+
+    private func seedLegacy(_ records: [ScenarioRecord]) throws {
+        try service.write(snapshot(scenarios: []), toRoot: tempDir)
+        for record in records {
+            try writeScenarioFile(name: ManifestService.scenarioFileName(name: record.name, id: record.id),
+                                  content: ManifestService.serializeScenario(record))
         }
     }
 

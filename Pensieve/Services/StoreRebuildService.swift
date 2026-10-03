@@ -83,7 +83,6 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
         warnOverlaysWithoutFiles(snapshot: snapshot, filePresentSlugs: filePresentSlugs, result: &result)
         if manifestIsAuthoritative {
             rebuildCategories(snapshot: snapshot, context: context, result: &result)
-            rebuildScenarios(snapshot: snapshot, context: context, result: &result)
         }
         rebuildDeployIntents(snapshot: snapshot, context: context, result: &result)
 
@@ -96,44 +95,6 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
                 "Rebuild computed changes but saving the local store failed: \(error.localizedDescription)")
         }
         return result
-    }
-}
-
-// MARK: - Scenarios reconcile
-
-extension StoreRebuildService {
-    private func rebuildScenarios(snapshot: ManifestSnapshot,
-                                  context: ModelContext,
-                                  result: inout RebuildResult) {
-        let existingScenarios = (try? context.fetch(FetchDescriptor<Scenario>())) ?? []
-        var existingByID = Dictionary(existingScenarios.map { ($0.id.uuidString, $0) },
-                                      uniquingKeysWith: { first, _ in first })
-
-        for record in snapshot.scenarios {
-            guard let id = UUID(uuidString: record.id) else { continue }
-            let canonicalID = id.uuidString
-            let skillSlugs = Array(Set(record.skillSlugs)).sorted()
-            let agents = Array(Set(record.agents)).sorted()
-
-            if let existing = existingByID.removeValue(forKey: canonicalID) {
-                var changed = false
-                if existing.name != record.name { existing.name = record.name; changed = true }
-                if existing.skillSlugs != skillSlugs { existing.skillSlugs = skillSlugs; changed = true }
-                if existing.agentRawValues != agents { existing.agentRawValues = agents; changed = true }
-                if changed { result.scenariosUpdated += 1 }
-            } else {
-                let scenario = Scenario(id: id, name: record.name)
-                scenario.skillSlugs = skillSlugs
-                scenario.agentRawValues = agents
-                context.insert(scenario)
-                result.scenariosInserted += 1
-            }
-        }
-
-        for scenario in existingByID.values {
-            context.delete(scenario)
-            result.scenariosRemoved += 1
-        }
     }
 }
 

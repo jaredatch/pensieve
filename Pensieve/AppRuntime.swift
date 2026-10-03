@@ -158,7 +158,7 @@ final class AppRuntime {
         MachineDisplayName.seedIfNeeded(defaults: resolvedDefaults, hostName: hostName)
         self.defaults = resolvedDefaults
         self.paths = paths
-        self.launchReconcile = launchReconcile ?? paths.makeLaunchReconcile()
+        self.launchReconcile = launchReconcile ?? paths.makeLaunchReconcile(defaults: resolvedDefaults)
         self.launchBackfill = Self.backfillRefreshingIndex(
             launchBackfill ?? paths.makeLaunchBackfill(), platformVM: resolvedPlatformVM
         )

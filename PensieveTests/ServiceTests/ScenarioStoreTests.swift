@@ -183,7 +183,7 @@ final class ScenarioStoreTests: XCTestCase {
     }
 
     @MainActor
-    func testUnknownAgentSurvivesManifestRoundTrip() throws {
+    func testLegacyAgentsSurviveCarryWithoutRebuildingScenarios() throws {
         let tempDir = NSTemporaryDirectory() + "PensieveScenarioRoundTrip-\(UUID().uuidString)"
         let fileService = FileService()
         try fileService.createDirectory(at: tempDir)
@@ -199,18 +199,21 @@ final class ScenarioStoreTests: XCTestCase {
         let scenario = Scenario(name: "Synced")
         scenario.agentRawValues = [PlatformTarget.cursor.rawValue, "nonexistent-agent-fixture"]
         sourceContext.insert(scenario)
+        let legacy = "id: \(scenario.id.uuidString)\nname: Synced\nagents:\n  - nonexistent-agent-fixture\n"
+        try fileService.writeFile(at: tempDir + "/manifest/scenarios/legacy.yaml", content: legacy)
 
         roundTripStore.setAgent(.codex, inScenario: scenario, enabled: true, context: sourceContext)
+        XCTAssertEqual(try fileService.readFile(at: tempDir + "/manifest/scenarios/legacy.yaml"), legacy)
 
         let rebuiltContext = try makeContext()
         let rebuild = StoreRebuildService(fileService: fileService, manifestService: manifestService)
         let result = rebuild.rebuild(fromRoot: tempDir, context: rebuiltContext)
-        let rebuilt = try XCTUnwrap(try rebuiltContext.fetch(FetchDescriptor<Scenario>()).first)
         XCTAssertFalse(result.storeUnreadable)
-        XCTAssertEqual(result.scenariosInserted, 1)
+        XCTAssertEqual(result.scenariosInserted, 0)
+        XCTAssertTrue(try rebuiltContext.fetch(FetchDescriptor<Scenario>()).isEmpty)
         XCTAssertEqual(
-            rebuilt.agentRawValues,
-            [PlatformTarget.codex.rawValue, PlatformTarget.cursor.rawValue, "nonexistent-agent-fixture"]
+            scenario.agentRawValues,
+            [PlatformTarget.cursor.rawValue, PlatformTarget.codex.rawValue, "nonexistent-agent-fixture"]
         )
     }
 

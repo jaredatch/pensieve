@@ -45,10 +45,16 @@ final class StoreRebuildScenarioTests: XCTestCase {
             ),
             toRoot: tempDir
         )
+        for record in scenarios {
+            try fileService.writeFile(
+                at: tempDir + "/manifest/scenarios/" + ManifestService.scenarioFileName(name: record.name, id: record.id),
+                content: ManifestService.serializeScenario(record)
+            )
+        }
     }
 
     @MainActor
-    func testManifestScenarioAbsentLocallyIsInsertedWithManifestID() throws {
+    func testManifestScenarioAbsentLocallyIsNotInserted() throws {
         let context = try makeContext()
         let id = UUID()
         try writeManifest(scenarios: [
@@ -57,16 +63,12 @@ final class StoreRebuildScenarioTests: XCTestCase {
 
         let result = service.rebuild(fromRoot: tempDir, context: context)
 
-        XCTAssertEqual(result.scenariosInserted, 1)
-        let scenario = try XCTUnwrap(try context.fetch(FetchDescriptor<Scenario>()).first)
-        XCTAssertEqual(scenario.id, id)
-        XCTAssertEqual(scenario.name, "Frontend")
-        XCTAssertEqual(scenario.skillSlugs, ["react"])
-        XCTAssertEqual(scenario.agentRawValues, ["cursor"])
+        XCTAssertEqual(result.scenariosInserted, 0)
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Scenario>()).isEmpty)
     }
 
     @MainActor
-    func testPresentButDifferentScenarioIsUpdatedInPlace() throws {
+    func testPresentButDifferentScenarioIsPreserved() throws {
         let context = try makeContext()
         let id = UUID()
         let scenario = Scenario(id: id, name: "Old")
@@ -81,17 +83,17 @@ final class StoreRebuildScenarioTests: XCTestCase {
 
         let result = service.rebuild(fromRoot: tempDir, context: context)
 
-        XCTAssertEqual(result.scenariosUpdated, 1)
+        XCTAssertEqual(result.scenariosUpdated, 0)
         XCTAssertEqual(result.scenariosInserted, 0)
         XCTAssertEqual(try context.fetch(FetchDescriptor<Scenario>()).count, 1)
         XCTAssertEqual(scenario.id, id)
-        XCTAssertEqual(scenario.name, "New")
-        XCTAssertEqual(scenario.skillSlugs, ["new"])
-        XCTAssertEqual(scenario.agentRawValues, ["codex", "cursor"])
+        XCTAssertEqual(scenario.name, "Old")
+        XCTAssertEqual(scenario.skillSlugs, ["old"])
+        XCTAssertEqual(scenario.agentRawValues, ["claudeCode"])
     }
 
     @MainActor
-    func testRebuildMatchesByIdAndRenamesInPlace() throws {
+    func testRebuildLeavesLocalNameAndActiveReferenceAlone() throws {
         let context = try makeContext()
         let id = UUID()
         let scenario = Scenario(id: id, name: "Local Name")
@@ -106,15 +108,15 @@ final class StoreRebuildScenarioTests: XCTestCase {
 
         let result = service.rebuild(fromRoot: tempDir, context: context)
 
-        XCTAssertEqual(result.scenariosUpdated, 1)
+        XCTAssertEqual(result.scenariosUpdated, 0)
         XCTAssertEqual(try context.fetch(FetchDescriptor<Scenario>()).count, 1)
         XCTAssertEqual(scenario.id, id)
-        XCTAssertEqual(scenario.name, "Remote Rename")
+        XCTAssertEqual(scenario.name, "Local Name")
         XCTAssertEqual(store.activeScenarioID(), id)
     }
 
     @MainActor
-    func testLocallyPresentButAbsentFromManifestIsDeleted() throws {
+    func testLocallyPresentButAbsentFromManifestIsPreserved() throws {
         let context = try makeContext()
         context.insert(Scenario(name: "Local Only"))
         try context.save()
@@ -122,12 +124,12 @@ final class StoreRebuildScenarioTests: XCTestCase {
 
         let result = service.rebuild(fromRoot: tempDir, context: context)
 
-        XCTAssertEqual(result.scenariosRemoved, 1)
-        XCTAssertTrue(try context.fetch(FetchDescriptor<Scenario>()).isEmpty)
+        XCTAssertEqual(result.scenariosRemoved, 0)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Scenario>()).first?.name, "Local Only")
     }
 
     @MainActor
-    func testCorruptScenarioFileBailsRebuildMutatingNothing() throws {
+    func testCorruptScenarioFileDoesNotBlockRebuild() throws {
         let context = try makeContext()
         let scenario = Scenario(name: "Preserve Me")
         scenario.skillSlugs = ["keep"]
@@ -143,7 +145,7 @@ final class StoreRebuildScenarioTests: XCTestCase {
 
         let result = service.rebuild(fromRoot: tempDir, context: context)
 
-        XCTAssertTrue(result.storeUnreadable)
+        XCTAssertFalse(result.storeUnreadable)
         XCTAssertEqual(result.scenariosInserted, 0)
         XCTAssertEqual(result.scenariosUpdated, 0)
         XCTAssertEqual(result.scenariosRemoved, 0)
