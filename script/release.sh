@@ -499,19 +499,19 @@ verify_public_branch_unchanged() {
 }
 
 verify_appcast_unchanged() {
-  local response current status decoded="$DIST_DIR/recheck-appcast.xml"
+  local response current status
   response="$(mktemp "${TMPDIR:-/tmp}/pensieve-appcast-response.XXXXXX")" || return 1
   if run_command_seam "$GH_CMD" api -X GET "repos/$PUBLIC_REPO/contents/appcast.xml" \
       -f "ref=$PUBLIC_BRANCH" --include > "$response"; then
-    if ! current="$(state_tool contents "$response" "$decoded")"; then
-      rm -f "$response" "$decoded"
+    if ! current="$(state_tool contents-sha "$response")"; then
+      rm -f "$response"
       echo "release: invalid appcast recheck response" >&2
       return 1
     fi
   else
     status="$(http_status "$response")"
     cat "$response" >&2
-    rm -f "$response" "$decoded"
+    rm -f "$response"
     if [ "$FIRST_RELEASE" -eq 1 ] && [ -z "$APPCAST_SHA" ] && [ "$status" = 404 ]; then
       return 0
     fi
@@ -520,14 +520,10 @@ verify_appcast_unchanged() {
   fi
   rm -f "$response"
   if [ "$current" != "$APPCAST_SHA" ]; then
-    rm -f "$decoded"
     echo "release: appcast changed since preflight; stopping before GitHub Release creation" >&2
     return 1
   fi
-  status=0
-  state_tool appcast "$decoded" "$VERSION" "$DOWNLOAD_PREFIX" >/dev/null || status=$?
-  rm -f "$decoded"
-  return "$status"
+  return 0
 }
 
 publish_appcast() {
@@ -555,12 +551,15 @@ dry_run_local() {
   echo "DRY RUN LOCAL: wrote bumped cask $cask_output; stopping before notarization/publishing."
 }
 
-bump_cask() {
-  [ "$(cask_action_for "$VERSION")" = "bump" ] || { echo "release: phase v.f skipped: prerelease $VERSION does not bump the Homebrew cask"; return 0; }
-  [ "$CASK_PREFLIGHT" -eq 1 ] || cask_preflight
-  local digest comparison=0 cask_output="$DIST_DIR/homebrew/pensieve.rb"
+cask_publication_status() {
+  CASK_STATUS=skip
+  [ "$(cask_action_for "$VERSION")" = "bump" ] || { echo "release: cask skipped for prerelease $VERSION"; return 0; }
+  [ "$CASK_PREFLIGHT" -eq 1 ] || cask_preflight || return 1
+  local digest comparison=0
+  CASK_OUTPUT="$DIST_DIR/homebrew/pensieve.rb"
   [ -z "$CASK_VERSION" ] || comparison="$(state_tool compare-versions "$CASK_VERSION" "$VERSION")" || return 1
   if [ "$comparison" -gt 0 ]; then
+    CASK_STATUS=newer
     echo "release: cask already names newer version $CASK_VERSION; refusing downgrade to $VERSION"
     return 0
   fi
@@ -568,13 +567,21 @@ bump_cask() {
   if [ "$CASK_VERSION" = "$VERSION" ]; then
     [ "$CASK_DIGEST" = "$digest" ] || { echo "release: cask sha256 does not match DMG" >&2; return 1; }
   fi
-  write_bumped_cask "$cask_output"
-  if [ -n "$CASK_SHA" ] && cmp -s "$cask_output" "$CASK_REMOTE"; then
+  write_bumped_cask "$CASK_OUTPUT" || return 1
+  if [ -n "$CASK_SHA" ] && cmp -s "$CASK_OUTPUT" "$CASK_REMOTE"; then
+    CASK_STATUS=done
     echo "release: cask done"
     return 0
   fi
+  CASK_STATUS=pending
+  echo "release: cask pending; run --publish-cask-only with the verified artifact"
+}
+
+bump_cask() {
+  cask_publication_status || return 1
+  [ "$CASK_STATUS" = pending ] || return 0
   echo "release: phase v.f: bump Homebrew cask in $TAP_REPO"
-  publish_contents_file "$TAP_REPO" "Casks/pensieve.rb" "$cask_output" "cask: v$VERSION" "" "$CASK_SHA"
+  publish_contents_file "$TAP_REPO" "Casks/pensieve.rb" "$CASK_OUTPUT" "cask: v$VERSION" "" "$CASK_SHA"
 }
 
 notarize_and_publish() {

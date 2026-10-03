@@ -26,6 +26,12 @@ def response_json(path):
     return value
 
 
+def contents_sha(path):
+    value = response_json(path)
+    require(re.fullmatch(r"[a-f0-9]{40}", value.get("sha", "")), "contents response has no valid SHA")
+    return value["sha"]
+
+
 def contents(path, output):
     value = response_json(path)
     require(re.fullmatch(r"[a-f0-9]{40}", value.get("sha", "")), "contents response has no valid SHA")
@@ -49,8 +55,12 @@ def version_parts(version):
 
 
 def compare_versions(left, right):
-    left_core, left_pre = version_parts(left)
-    right_core, right_pre = version_parts(right)
+    return compare_version_parts(version_parts(left), version_parts(right))
+
+
+def compare_version_parts(left, right):
+    left_core, left_pre = left
+    right_core, right_pre = right
     if left_core != right_core:
         return 1 if left_core > right_core else -1
     if not left_pre or not right_pre:
@@ -74,9 +84,12 @@ def cask_fields(text):
         match = re.fullmatch(rf"[ \t]*{name}[ \t]+({pattern})[ \t]*", candidates[0].group())
         require(match, f"cask has malformed {name} line")
         fields.append((candidates[0], match.group(1)))
-    syntax = subprocess.run(
-        ["/usr/bin/ruby", "-rripper", "-e", "exit(Ripper.sexp(STDIN.read) ? 0 : 1)"],
-        input=text, text=True, capture_output=True, timeout=10)
+    try:
+        syntax = subprocess.run(
+            ["/usr/bin/ruby", "-rripper", "-e", "exit(Ripper.sexp(STDIN.read) ? 0 : 1)"],
+            input=text, text=True, capture_output=True, timeout=10)
+    except FileNotFoundError as error:
+        raise ValueError("required interpreter /usr/bin/ruby is missing") from error
     require(syntax.returncode == 0, "cask has malformed Ruby syntax")
     return fields
 
@@ -104,21 +117,27 @@ def appcast_root(text):
     return root
 
 
-def appcast_state(text, version, download_prefix):
+def appcast_publication_state(text, version, download_prefix):
     root = appcast_root(text)
     seen, result = set(), "absent"
-    version_parts(version)
+    newest, newest_parts = version, version_parts(version)
+    channel = "beta" if "-" in version else ""
     expected_url = f"{download_prefix}/v{version}/Pensieve-{version}.dmg"
     for item in root.find("channel").findall("item"):
         versions = item.findall(SPARKLE + "shortVersionString")
-        require(len(versions) == 1 and re.fullmatch(VERSION, versions[0].text or ""), "malformed appcast version")
-        current = versions[0].text
-        version_parts(current)
+        require(len(versions) == 1, "malformed appcast version")
+        current = versions[0].text or ""
+        current_parts = version_parts(current)
         require(current not in seen, f"duplicated appcast item for {current}")
         seen.add(current)
         enclosures = item.findall("enclosure")
         require(len(enclosures) == 1, f"missing or duplicated appcast enclosure for {current}")
         enclosure = enclosures[0]
+        channels = item.findall(SPARKLE + "channel")
+        require(len(channels) <= 1, "duplicated appcast channel")
+        current_channel = (channels[0].text or "") if channels else ""
+        if current_channel == channel and compare_version_parts(current_parts, newest_parts) > 0:
+            newest, newest_parts = current, current_parts
         if current != version:
             require(enclosure.get("url") != expected_url, "appcast item names this DMG under another version")
             continue
@@ -128,17 +147,11 @@ def appcast_state(text, version, download_prefix):
         signature = enclosure.get(SPARKLE + "edSignature", "")
         require(len(base64.b64decode(signature, validate=True)) == 64, "appcast has invalid EdDSA signature")
         result = length + " " + signature
-    return result
+    return result, newest if newest != version else "absent"
 
 
-def newer_appcast_version(text, version, download_prefix):
-    appcast_state(text, version, download_prefix)  # Validate the whole feed before comparing it.
-    newest = version
-    for item in appcast_root(text).find("channel").findall("item"):
-        current = item.find(SPARKLE + "shortVersionString").text
-        if compare_versions(current, newest) > 0:
-            newest = current
-    return newest if compare_versions(newest, version) > 0 else "absent"
+def appcast_state(text, version, download_prefix):
+    return appcast_publication_state(text, version, download_prefix)[0]
 
 
 def release_state(value, version, require_uploaded=False):
@@ -148,24 +161,27 @@ def release_state(value, version, require_uploaded=False):
     require(type(value.get("id")) is int and value["id"] > 0, "release has invalid ID")
     assets = value.get("assets")
     require(isinstance(assets, list) and len(assets) <= 1, "release has extra or invalid DMG assets")
-    require(not assets or isinstance(assets[0], dict), "release DMG is not an object")
     asset = assets[0] if assets else None
-    if asset is not None:
+    if assets:
         require(isinstance(asset, dict), "release DMG is not an object")
         require(asset.get("name") == f"Pensieve-{version}.dmg", "release is missing its expected DMG")
-        require(asset.get("state") in ("starter", "uploaded"), "release DMG has invalid upload state")
-        require(type(asset.get("size")) is int and asset["size"] >= (1 if asset["state"] == "uploaded" else 0), "release DMG has invalid size")
+        require(type(asset.get("size")) is int and asset["size"] >= (1 if asset.get("state") == "uploaded" else 0), "release DMG has invalid size")
         require(type(asset.get("id")) is int and asset["id"] > 0, "release DMG has invalid ID")
     if require_uploaded:
-        require(asset is not None and asset["state"] == "uploaded", "live appcast release DMG is missing or not uploaded")
-    # Download counts and timestamps can change without changing publication state.
-    return json.dumps({"id": value["id"], "asset": {key: asset[key] for key in ("id", "name", "size", "state")} if asset else None}, sort_keys=True)
+        require(asset is not None and asset.get("state") == "uploaded", "live appcast release DMG is missing or not uploaded")
+    # The actual tag target is peeled and verified separately. Asset IDs, sizes,
+    # timestamps and partial state names do not decide creation or replacement.
+    action = {key: value[key] for key in ("id", "tag_name", "draft", "prerelease")}
+    action["asset"] = "absent" if asset is None else "uploaded" if asset.get("state") == "uploaded" else "partial"
+    return json.dumps(action, sort_keys=True)
 
 
 def main(args):
     mode = args[0]
     if mode == "contents":
         print(contents(*args[1:]))
+    elif mode == "contents-sha":
+        print(contents_sha(args[1]))
     elif mode == "release":
         print(release_state(response_json(args[1]), args[2], args[3] == "live"))
     elif mode == "tag":
@@ -173,9 +189,7 @@ def main(args):
         require(obj["type"] in ("commit", "tag") and re.fullmatch(r"[a-f0-9]{40}", obj["sha"]), "invalid tag target")
         print(obj["type"], obj["sha"])
     elif mode == "appcast":
-        print(appcast_state(Path(args[1]).read_text(), args[2], args[3]))
-    elif mode == "appcast-newer":
-        print(newer_appcast_version(Path(args[1]).read_text(), args[2], args[3]))
+        print(*appcast_publication_state(Path(args[1]).read_text(), args[2], args[3]), sep="\n")
     elif mode == "compare-versions":
         print(compare_versions(args[1], args[2]))
     elif mode == "cask":

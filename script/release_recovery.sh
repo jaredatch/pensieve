@@ -72,9 +72,10 @@ cask_preflight() {
 }
 
 publication_preflight() {
+  local appcast_state
   if [ -f "$APPCAST_INPUT_DIR/appcast.xml" ]; then
-    APPCAST_ITEM="$(state_tool appcast "$APPCAST_INPUT_DIR/appcast.xml" "$VERSION" "$DOWNLOAD_PREFIX")" || return 1
-    APPCAST_NEWER="$(state_tool appcast-newer "$APPCAST_INPUT_DIR/appcast.xml" "$VERSION" "$DOWNLOAD_PREFIX")" || return 1
+    appcast_state="$(state_tool appcast "$APPCAST_INPUT_DIR/appcast.xml" "$VERSION" "$DOWNLOAD_PREFIX")" || return 1
+    { read -r APPCAST_ITEM; read -r APPCAST_NEWER; } <<< "$appcast_state"
   fi
   if [ "$APPCAST_NEWER" != absent ]; then
     echo "release: appcast already names newer version $APPCAST_NEWER; keeping it"
@@ -110,27 +111,7 @@ recover_live_release() {
   rm -rf "$download_dir"
   # The cask step uses this verified artifact with its separate tap credential.
   echo "release: GitHub release and appcast done; verified published DMG"
-  local digest comparison cask_output="$DIST_DIR/homebrew/pensieve.rb"
-  digest="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
-  if [ "$CASK_VERSION" = "$VERSION" ] && [ "$CASK_DIGEST" != "$digest" ]; then
-    echo "release: cask sha256 does not match verified published DMG" >&2; return 1
-  fi
-  if [ "$(cask_action_for "$VERSION")" = skip ]; then
-    echo "release: cask skipped for prerelease $VERSION"
-  else
-    comparison=0
-    [ -z "$CASK_VERSION" ] || comparison="$(state_tool compare-versions "$CASK_VERSION" "$VERSION")" || return 1
-    if [ "$comparison" -gt 0 ]; then
-      echo "release: cask already names newer version $CASK_VERSION; refusing downgrade to $VERSION"
-    else
-      write_bumped_cask "$cask_output" || return 1
-      if [ -n "$CASK_SHA" ] && cmp -s "$cask_output" "$CASK_REMOTE"; then
-        echo "release: cask done; everything published"
-      else
-        echo "release: cask pending; run --publish-cask-only with the verified artifact"
-      fi
-    fi
-  fi
+  cask_publication_status
 }
 
 publish_release_asset() {
