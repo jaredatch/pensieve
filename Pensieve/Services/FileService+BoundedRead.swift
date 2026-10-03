@@ -2,6 +2,10 @@ import Darwin
 import Foundation
 
 extension FileService {
+    /// Reads one bounded regular file through one no-follow descriptor. `O_NONBLOCK` ensures a FIFO
+    /// substituted before `open` cannot hang the caller, while `fstat` rejects every non-regular node.
+    /// The size is checked both before and during the read because another process can grow a file
+    /// after it is opened. (PLAN-39 / 39.1.)
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
         try readRegularFileData(at: path, maximumBytes: maximumBytes, read: Darwin.read)
     }
@@ -12,21 +16,8 @@ extension FileService {
                              read: (Int32, UnsafeMutableRawPointer?, Int) -> Int
     ) throws -> Data {
         guard maximumBytes >= 0 else { throw CocoaError(.fileReadTooLarge) }
-        let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-        guard descriptor >= 0 else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno),
-                          userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))])
-        }
+        let (descriptor, status) = try Self.openRegularFile(at: path)
         defer { close(descriptor) }
-
-        var status = stat()
-        guard fstat(descriptor, &status) == 0 else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
-        }
-        let kind = status.st_mode & S_IFMT
-        guard kind == S_IFREG else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(kind == S_IFDIR ? EISDIR : EFTYPE))
-        }
         guard status.st_size >= 0, status.st_size <= maximumBytes else {
             throw CocoaError(.fileReadTooLarge)
         }
@@ -54,4 +45,28 @@ extension FileService {
         }
     }
 
+    /// Admit one regular leaf for reading, copying or timestamp updates. Failure closes the
+    /// descriptor; success transfers it to the caller, who must close it after using this inode.
+    static func openRegularFile(at path: String) throws -> (descriptor: Int32, status: stat) {
+        let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        guard descriptor >= 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno),
+                          userInfo: [NSLocalizedDescriptionKey: "open(\(path)): " + String(cString: strerror(errno))])
+        }
+        do {
+            var status = stat()
+            guard fstat(descriptor, &status) == 0 else {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+            }
+            let kind = status.st_mode & S_IFMT
+            guard kind == S_IFREG else {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(kind == S_IFDIR ? EISDIR : EFTYPE),
+                              userInfo: [NSLocalizedDescriptionKey: "not a regular file: \(path)"])
+            }
+            return (descriptor, status)
+        } catch {
+            close(descriptor)
+            throw error
+        }
+    }
 }

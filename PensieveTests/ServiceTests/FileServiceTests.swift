@@ -120,6 +120,20 @@ final class FileServiceTests: XCTestCase {
         XCTAssertEqual(timestamp.tv_sec, 42)
         XCTAssertEqual(timestamp.tv_nsec, 0)
     }
+
+    func testUnmodeledBoundedReadDefaultNeverLoadsHostBytes() throws {
+        let path = tempDir + "/unmodeled"
+        try fileService.writeFile(at: path, content: "Host bytes must not escape through a double")
+        let double: FileServiceProtocol = InertMetadataFileService()
+        for candidate in [path, tempDir + "/missing"] {
+            XCTAssertThrowsError(try double.readRegularFileData(at: candidate, maximumBytes: 1_024)) { error in
+                let failure = error as NSError
+                XCTAssertEqual(failure.domain, NSCocoaErrorDomain)
+                XCTAssertEqual(failure.code, CocoaError.featureUnsupported.rawValue,
+                               "An unmodeled read must refuse without inspecting \(candidate)")
+            }
+        }
+    }
 }
 
 private struct InertMetadataFileService: FileServiceProtocol {

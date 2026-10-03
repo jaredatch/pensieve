@@ -168,6 +168,55 @@ final class ImportScanRevisionTests: XCTestCase {
         XCTAssertEqual(model.doneMessage, "0 skills imported into Pensieve.")
     }
 
+    func testFailedLibrarySaveDoesNotPublishSuccessfulImports() throws {
+        let scanner = RevisionReportScanner()
+        scanner.report = ImportScanReport(skills: (0..<5).map { skill("skill-\($0)") })
+        let store = RevisionSkillStore()
+        var notifications = 0
+        var echoes: [[String]] = []
+        let model = ImportViewModel(scanner: scanner, skillStore: store,
+                                    notifier: { notifications += 1 }, echoRegistrar: { echoes.append($0) })
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        model.scan()
+        var saves = 0
+        model.importSelected(context: context, saveContext: { pending in
+            saves += 1
+            XCTAssertEqual(pending.insertedModelsArray.count, 5)
+            throw CocoaError(.fileWriteUnknown)
+        })
+
+        XCTAssertEqual(saves, 1)
+        XCTAssertEqual(store.createdNames.count, 5, "All five file creates succeed before the failed save")
+        XCTAssertEqual(try ModelContext(container).fetch(FetchDescriptor<Skill>()).count, 0)
+        XCTAssertNotNil(model.error)
+        XCTAssertEqual(model.importedSkillCount, 0, "The done count must reflect saved library rows")
+        XCTAssertEqual(model.doneMessage, "0 skills imported into Pensieve.")
+        XCTAssertEqual(model.doneTitle, "Import Finished")
+        XCTAssertEqual(notifications, 0)
+        XCTAssertTrue(echoes.isEmpty)
+    }
+
+    func testImportCountIsPublishedOnlyAfterTheLibrarySaveSucceeds() throws {
+        let scanner = RevisionReportScanner()
+        scanner.report = ImportScanReport(skills: (0..<5).map { skill("skill-\($0)") })
+        let model = ImportViewModel(scanner: scanner, skillStore: RevisionSkillStore())
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        model.scan()
+        model.importSelected(context: context, saveContext: { pending in
+            XCTAssertEqual(model.importedSkillCount, 0, "Unsaved insertions are not completed imports")
+            try pending.save()
+        })
+
+        XCTAssertNil(model.error)
+        XCTAssertEqual(model.importedSkillCount, 5)
+        XCTAssertEqual(try ModelContext(container).fetch(FetchDescriptor<Skill>()).count, 5)
+        XCTAssertEqual(model.doneMessage, "5 skills imported into Pensieve.")
+    }
+
     private func skill(_ name: String) -> DiscoveredSkill {
         DiscoveredSkill(name: name, body: name, sourcePlatform: "folder", sourcePath: name, skillDescription: nil)
     }
@@ -195,8 +244,10 @@ private final class RevisionReportScanner: ImportScannerProtocol {
 
 private final class RevisionSkillStore: SkillStoreProtocol {
     var failures: Set<String> = []
+    private(set) var createdNames: [String] = []
     func createSkill(name: String, description: String, body: String) throws -> String {
         if failures.contains(name) { throw CocoaError(.fileWriteNoPermission) }
+        createdNames.append(name)
         return name
     }
     func readBody(directoryName: String) throws -> String { throw CocoaError(.featureUnsupported) }

@@ -84,12 +84,9 @@ extension FileServiceProtocol {
         return try Data(contentsOf: URL(fileURLWithPath: path))
     }
 
-    /// Reads one bounded regular file through one no-follow descriptor. `O_NONBLOCK` ensures a FIFO
-    /// substituted before `open` cannot hang the caller, while `fstat` rejects every non-regular node.
-    /// The size is checked both before and during the read because another process can grow a file
-    /// after it is opened. (PLAN-39 / 39.1.)
+    /// Inert default: doubles must explicitly model bounded reads; never fall through to host I/O.
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
-        try FileService().readRegularFileData(at: path, maximumBytes: maximumBytes)
+        throw CocoaError(.featureUnsupported)
     }
 
     /// Copy one untrusted repository entry through one no-follow descriptor, so the regular-file check
@@ -99,28 +96,8 @@ extension FileServiceProtocol {
     /// substituted FIFO from blocking the open before `fstat` can reject it — for a regular file the
     /// flag has no effect on the subsequent reads.
     func copyFile(at sourcePath: String, to destinationPath: String) throws {
-        let fd = open(sourcePath, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-        guard fd >= 0 else {
-            throw NSError(
-                domain: NSPOSIXErrorDomain,
-                code: Int(errno),
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        "open(\(sourcePath)): " + String(cString: strerror(errno))
-                ]
-            )
-        }
+        let (fd, status) = try FileService.openRegularFile(at: sourcePath)
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        var status = stat()
-        guard fstat(fd, &status) == 0, (status.st_mode & S_IFMT) == S_IFREG else {
-            throw NSError(
-                domain: NSPOSIXErrorDomain,
-                code: Int(EFTYPE),
-                userInfo: [
-                    NSLocalizedDescriptionKey: "not a regular file: \(sourcePath)"
-                ]
-            )
-        }
         let data = handle.readDataToEndOfFile()
         let created = FileManager.default.createFile(
             atPath: destinationPath,
@@ -308,16 +285,8 @@ final class FileService: FileServiceProtocol {
 
     /// Updates recency through a no-follow descriptor whose type is checked before `futimens`.
     func touchRegularFile(at path: String, date: Date) throws {
-        let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-        guard descriptor >= 0 else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
-        }
+        let (descriptor, status) = try Self.openRegularFile(at: path)
         defer { close(descriptor) }
-        var status = stat()
-        guard fstat(descriptor, &status) == 0,
-              (status.st_mode & S_IFMT) == S_IFREG else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(EFTYPE))
-        }
         let interval = date.timeIntervalSince1970
         let seconds = floor(interval)
         let nanoseconds = Int64((interval - seconds) * 1_000_000_000)

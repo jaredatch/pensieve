@@ -141,7 +141,8 @@ final class ImportViewModel {
 
     func importSelected(
         context: ModelContext,
-        takenSlugs: (ModelContext) throws -> Set<String> = { Set(try $0.fetch(FetchDescriptor<Skill>()).map(\.directoryName)) }
+        takenSlugs: (ModelContext) throws -> Set<String> = { Set(try $0.fetch(FetchDescriptor<Skill>()).map(\.directoryName)) },
+        saveContext: (ModelContext) throws -> Void = { try $0.save() }
     ) {
         importNotices = []
         importedSkillCount = 0
@@ -180,7 +181,6 @@ final class ImportViewModel {
                 )
                 context.insert(skill)
                 writtenSlugs.append(dirName)
-                importedSkillCount = writtenSlugs.count
                 importProgress = Double(writtenSlugs.count) / Double(toImport.count)
             } catch {
                 self.error = "Failed to import \(discovered.name): \(error.localizedDescription)"
@@ -188,7 +188,8 @@ final class ImportViewModel {
         }
 
         do {
-            try context.save()
+            try saveContext(context)
+            importedSkillCount = writtenSlugs.count
             regenerateManifest(context: context)
             echoRegistrar(writtenSlugs)
             notifier()
