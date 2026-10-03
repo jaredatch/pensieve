@@ -161,7 +161,8 @@ notes_for() {
 build_release_args() {
   local version="$1"
   local changelog="${2:-$REPO/CHANGELOG.md}"
-  local notes_file
+  local notes_file channel
+  channel="$(state_tool channel "$version")" || return 1
   notes_file="$(mktemp "${TMPDIR:-/tmp}/pensieve-release-notes.XXXXXX")" || return 1
   if ! notes_for "$version" "$changelog" > "$notes_file"; then
     rm -f "$notes_file"
@@ -176,16 +177,15 @@ build_release_args() {
     --title "Pensieve $version"
     --notes-file "$notes_file"
   )
-  if [[ "$version" == *-* ]]; then
+  if [ -n "$channel" ]; then
     RELEASE_ARGS+=(--prerelease)
   fi
 }
 
 cask_action_for() {
-  case "$1" in
-    *-*) printf 'skip\n' ;;
-    *) printf 'bump\n' ;;
-  esac
+  local channel
+  channel="$(state_tool channel "$1")" || return 1
+  if [ -n "$channel" ]; then printf 'skip\n'; else printf 'bump\n'; fi
 }
 
 run_command_seam() {
@@ -384,8 +384,10 @@ generate_appcast() {
     --ed-key-file "$SPARKLE_PRIVATE_KEY_FILE"
     --download-url-prefix "$DOWNLOAD_PREFIX/$tag/"
   )
-  if [[ "$VERSION" == *-* ]]; then
-    appcast_args+=(--channel beta)
+  local channel
+  channel="$(state_tool channel "$VERSION")" || return 1
+  if [ -n "$channel" ]; then
+    appcast_args+=(--channel "$channel")
   fi
   appcast_args+=("$APPCAST_INPUT_DIR")
 
@@ -553,7 +555,9 @@ dry_run_local() {
 
 cask_publication_status() {
   CASK_STATUS=skip
-  [ "$(cask_action_for "$VERSION")" = "bump" ] || { echo "release: cask skipped for prerelease $VERSION"; return 0; }
+  local action
+  action="$(cask_action_for "$VERSION")" || return 1
+  [ "$action" = "bump" ] || { echo "release: cask skipped for prerelease $VERSION"; return 0; }
   [ "$CASK_PREFLIGHT" -eq 1 ] || cask_preflight || return 1
   local digest comparison=0
   CASK_OUTPUT="$DIST_DIR/homebrew/pensieve.rb"
@@ -574,14 +578,14 @@ cask_publication_status() {
     return 0
   fi
   CASK_STATUS=pending
-  echo "release: cask pending; run --publish-cask-only with the verified artifact"
 }
 
 bump_cask() {
   cask_publication_status || return 1
   [ "$CASK_STATUS" = pending ] || return 0
   echo "release: phase v.f: bump Homebrew cask in $TAP_REPO"
-  publish_contents_file "$TAP_REPO" "Casks/pensieve.rb" "$CASK_OUTPUT" "cask: v$VERSION" "" "$CASK_SHA"
+  publish_contents_file "$TAP_REPO" "Casks/pensieve.rb" "$CASK_OUTPUT" "cask: v$VERSION" "" "$CASK_SHA" || return 1
+  echo "release: cask done"
 }
 
 notarize_and_publish() {

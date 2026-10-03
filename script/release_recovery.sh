@@ -51,7 +51,9 @@ verify_tag_target() {
 }
 
 cask_preflight() {
-  [ "$(cask_action_for "$VERSION")" = bump ] || { CASK_PREFLIGHT=1; return 0; }
+  local action
+  action="$(cask_action_for "$VERSION")" || return 1
+  [ "$action" = bump ] || { CASK_PREFLIGHT=1; return 0; }
   local response="$DIST_DIR/cask-response.txt" fields status
   mkdir -p "$DIST_DIR/homebrew"
   CASK_REMOTE="$DIST_DIR/homebrew/base.rb"
@@ -111,7 +113,10 @@ recover_live_release() {
   rm -rf "$download_dir"
   # The cask step uses this verified artifact with its separate tap credential.
   echo "release: GitHub release and appcast done; verified published DMG"
-  cask_publication_status
+  cask_publication_status || return 1
+  if [ "$CASK_STATUS" = pending ]; then
+    echo "release: cask pending; run --publish-cask-only with the verified artifact"
+  fi
 }
 
 publish_release_asset() {

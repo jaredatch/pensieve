@@ -26,21 +26,25 @@ def response_json(path):
     return value
 
 
+def contents_blob_sha(value):
+    sha = value.get("sha")
+    require(isinstance(sha, str) and re.fullmatch(r"[a-f0-9]{40}", sha), "contents response has no valid SHA")
+    return sha
+
+
 def contents_sha(path):
-    value = response_json(path)
-    require(re.fullmatch(r"[a-f0-9]{40}", value.get("sha", "")), "contents response has no valid SHA")
-    return value["sha"]
+    return contents_blob_sha(response_json(path))
 
 
 def contents(path, output):
     value = response_json(path)
-    require(re.fullmatch(r"[a-f0-9]{40}", value.get("sha", "")), "contents response has no valid SHA")
+    sha = contents_blob_sha(value)
     require(value.get("encoding") == "base64", "contents response is not base64")
     require(isinstance(value.get("content"), str), "contents response has no text content")
     data = base64.b64decode(value["content"].replace("\n", "").replace("\r", ""), validate=True)
     require(data, "empty contents response")
     Path(output).write_bytes(data)
-    return value["sha"]
+    return sha
 
 
 def version_parts(version):
@@ -56,6 +60,11 @@ def version_parts(version):
 
 def compare_versions(left, right):
     return compare_version_parts(version_parts(left), version_parts(right))
+
+
+def publication_channel(version):
+    """Channel for a validated publication version; all prereleases use beta."""
+    return "beta" if "-" in version else ""
 
 
 def compare_version_parts(left, right):
@@ -121,7 +130,7 @@ def appcast_publication_state(text, version, download_prefix):
     root = appcast_root(text)
     seen, result = set(), "absent"
     newest, newest_parts = version, version_parts(version)
-    channel = "beta" if "-" in version else ""
+    channel = publication_channel(version)
     expected_url = f"{download_prefix}/v{version}/Pensieve-{version}.dmg"
     for item in root.find("channel").findall("item"):
         versions = item.findall(SPARKLE + "shortVersionString")
@@ -136,11 +145,12 @@ def appcast_publication_state(text, version, download_prefix):
         channels = item.findall(SPARKLE + "channel")
         require(len(channels) <= 1, "duplicated appcast channel")
         current_channel = (channels[0].text or "") if channels else ""
-        if current_channel == channel and compare_version_parts(current_parts, newest_parts) > 0:
+        if current_channel in ("", channel) and compare_version_parts(current_parts, newest_parts) > 0:
             newest, newest_parts = current, current_parts
         if current != version:
             require(enclosure.get("url") != expected_url, "appcast item names this DMG under another version")
             continue
+        require(current_channel == channel, "appcast item is in the wrong channel")
         require(enclosure.get("url") == expected_url, "appcast item names other bytes (wrong DMG URL)")
         length = enclosure.get("length", "")
         require(re.fullmatch(r"[1-9][0-9]*", length), "appcast has invalid DMG length")
@@ -150,14 +160,10 @@ def appcast_publication_state(text, version, download_prefix):
     return result, newest if newest != version else "absent"
 
 
-def appcast_state(text, version, download_prefix):
-    return appcast_publication_state(text, version, download_prefix)[0]
-
-
 def release_state(value, version, require_uploaded=False):
     require(value.get("tag_name") == "v" + version, "release has wrong tag")
     require(value.get("draft") is False, "release is a draft or has no draft flag")
-    require(value.get("prerelease") is ("-" in version), "release has wrong prerelease flag")
+    require(value.get("prerelease") is bool(publication_channel(version)), "release has wrong prerelease flag")
     require(type(value.get("id")) is int and value["id"] > 0, "release has invalid ID")
     assets = value.get("assets")
     require(isinstance(assets, list) and len(assets) <= 1, "release has extra or invalid DMG assets")
@@ -165,6 +171,7 @@ def release_state(value, version, require_uploaded=False):
     if assets:
         require(isinstance(asset, dict), "release DMG is not an object")
         require(asset.get("name") == f"Pensieve-{version}.dmg", "release is missing its expected DMG")
+        require(asset.get("state") in ("uploaded", "open", "starter"), "release DMG has unknown upload state")
         require(type(asset.get("size")) is int and asset["size"] >= (1 if asset.get("state") == "uploaded" else 0), "release DMG has invalid size")
         require(type(asset.get("id")) is int and asset["id"] > 0, "release DMG has invalid ID")
     if require_uploaded:
@@ -192,6 +199,9 @@ def main(args):
         print(*appcast_publication_state(Path(args[1]).read_text(), args[2], args[3]), sep="\n")
     elif mode == "compare-versions":
         print(compare_versions(args[1], args[2]))
+    elif mode == "channel":
+        version_parts(args[1])
+        print(publication_channel(args[1]))
     elif mode == "cask":
         print(cask_state(Path(args[1]).read_text()))
     elif mode == "rewrite-cask":
