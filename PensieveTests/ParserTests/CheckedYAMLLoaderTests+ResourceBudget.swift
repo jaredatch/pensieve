@@ -188,11 +188,14 @@ extension CheckedYAMLLoaderTests {
         for fixture in fixtures {
             XCTAssertGreaterThan(fixture.yaml.utf8.count, 900_000, fixture.name)
             XCTAssertLessThan(fixture.yaml.utf8.count, 1_000_000, fixture.name)
-            let start = Date()
+            let start = ProcessInfo.processInfo.systemUptime
             XCTAssertThrowsError(try CheckedYAMLLoader.load(yaml: fixture.yaml), fixture.name) { error in
                 XCTAssertEqual(error as? CheckedYAMLLoader.LoaderError, fixture.error)
             }
-            XCTAssertLessThan(Date().timeIntervalSince(start), 1, fixture.name)
+            let elapsed = ProcessInfo.processInfo.systemUptime - start
+            // The slowest checked fixture takes ~0.5 s on the mini; delayed merge refusal takes >8 s.
+            // Five seconds leaves CI headroom while detecting construction before refusal.
+            XCTAssertLessThan(elapsed, 5, fixture.name)
         }
     }
 

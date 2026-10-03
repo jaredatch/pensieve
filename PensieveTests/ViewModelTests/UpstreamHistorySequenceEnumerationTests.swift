@@ -33,9 +33,31 @@ final class UpstreamHistorySequenceEnumerationTests: UpstreamHistoryCacheTestCas
         } }
     }
 
-    func testEveryReachableTwoRequestOrder() async throws {
-        guard let results = try await sweep() else { return }
-        try HistorySequenceCoverage.validateAll(results) { print($0) }
+    private func scenarios(for intervening: Intervening) -> [Scenario] {
+        scenarios.filter { $0.intervening == intervening }
+    }
+
+    func testEveryReachableTwoRequestOrderWithoutInterveningEvent() async throws {
+        try await sweep(.none)
+    }
+
+    func testEveryReachableTwoRequestOrderWithManualCheck() async throws {
+        try await sweep(.manual)
+    }
+
+    func testEveryReachableTwoRequestOrderWithSkillSwitch() async throws {
+        try await sweep(.skillSwitch)
+    }
+
+    func testEveryReachableTwoRequestOrderWithRemoval() async throws {
+        try await sweep(.remove)
+    }
+
+    func testTwoRequestOrderSubsetsPartitionExpectedScenarios() {
+        let names = Intervening.allCases.flatMap { scenarios(for: $0).map(\.name) }
+        XCTAssertEqual(names.count, 44, "The subsets must run all 44 scenarios")
+        XCTAssertEqual(Set(names).count, names.count, "The subsets must not repeat a scenario")
+        XCTAssertEqual(Set(names), Set(HistorySequenceCoverage.expected.keys), "The subsets must cover the exact domain")
     }
 
     func testExactCountsRejectExtraReadProbeAndPersist() async throws {
@@ -105,15 +127,26 @@ final class UpstreamHistorySequenceEnumerationTests: UpstreamHistoryCacheTestCas
         try assertInvariants(fixture, scenario: scenario, lateCheck: true)
     }
 
-    private func sweep() async throws -> [String: (complete: Int, excluded: Int)]? {
+    private func sweep(_ intervening: Intervening) async throws {
         var results: [String: (complete: Int, excluded: Int)] = [:]
-        for scenario in scenarios {
-            guard let count = try await enumerate(scenario) else { return nil }
+        for scenario in scenarios(for: intervening) {
+            guard let count = try await enumerate(scenario) else { return }
             XCTAssertGreaterThan(count, 0, scenario.name)
             results[scenario.name] = (count, 0)
             print("HISTORY_REDUCER_COUNT \(scenario.name) \(count)")
         }
-        return results
+        let expectedNames = HistorySequenceCoverage.expected.keys.filter { name in
+            intervening == .none ? !name.contains(".") : name.hasSuffix("." + intervening.rawValue)
+        }
+        XCTAssertEqual(Set(results.keys), Set(expectedNames), "Missing or unexpected scenarios: \(intervening.rawValue)")
+        for name in expectedNames.sorted() {
+            guard let count = results[name] else {
+                XCTFail("Missing scenario: \(name)")
+                continue
+            }
+            print("HISTORY_SEQUENCE_ORDERS \(name) passed=\(count.complete) excludedPrefixes=\(count.excluded)")
+            try HistorySequenceCoverage.validate(name, complete: count.complete, excluded: count.excluded)
+        }
     }
 
     private func enumerate(_ scenario: Scenario, file: StaticString = #filePath, line: UInt = #line) async throws -> Int? {
