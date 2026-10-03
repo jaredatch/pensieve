@@ -17,18 +17,24 @@ VERSION = "1.0.0"
 SHA = "a" * 40
 DMG = b"fresh built DMG"
 SIGNATURE = base64.b64encode(b"s" * 64).decode()
+DOWNLOAD_PREFIX = "https://github.com/jaredatch/pensieve/releases/download"
 
 
-def feed(version=VERSION, signature=SIGNATURE, length=len(DMG)):
+def feed(version=VERSION, signature=SIGNATURE, length=len(DMG), prefix=DOWNLOAD_PREFIX):
     return (f'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
             f'<channel><item><sparkle:shortVersionString>{version}</sparkle:shortVersionString>'
-            f'<enclosure url="https://github.com/jaredatch/pensieve/releases/download/v{version}/'
+            f'<enclosure url="{prefix}/v{version}/'
             f'Pensieve-{version}.dmg" length="{length}" sparkle:edSignature="{signature}"/>'
             '</item></channel></rss>')
 
 
 def cask(version="0.9.0", sha="0" * 64):
     return f'cask "pensieve" do\n  version "{version}"\n  sha256 "{sha}"\nend\n'
+
+
+def feeds(*versions):
+    items = ''.join(feed(v).split('<channel>')[1].split('</channel>')[0] for v in versions)
+    return feed().split('<channel>')[0] + '<channel>' + items + '</channel></rss>'
 
 
 # The stub only handles the command shapes used by production. An unexpected
@@ -62,11 +68,17 @@ if cmd == "gh":
             print('HTTP/2.0 503 Failed\n\n{}'); fail("failed " + kind + " read")
         if s.get("malformed") == kind:
             print('HTTP/2.0 200 OK\n\n{"bad":'); sys.exit(0)
+        if kind == "appcast":
+            s["appcast_reads"] = s.get("appcast_reads", 0) + 1
+            if s["appcast_reads"] > 1 and "recheck_content" in s:
+                s[kind] = s["recheck_content"]; s[kind + "_sha"] = s.get("recheck_sha", "b" * 40)
+            save()
         if kind == "repo": print("master"); sys.exit(0)
         if kind == "tag": value = {"object": {"type": "commit", "sha": s.get("target", "a" * 40)}}
         elif kind == "release": value = s["release"]
         else:
             value = None if s[kind] is None else {"sha": s[kind + "_sha"], "encoding": "base64", "content": base64.b64encode(s[kind].encode()).decode()}
+            if s.get("null_content") == kind: value["content"] = None
         if value is None:
             print('HTTP/2.0 404 Not Found\n\n{"message":"Not Found"}'); sys.exit(1)
         print('HTTP/2.0 200 OK\n\n' + json.dumps(value)); sys.exit(0)
@@ -76,6 +88,11 @@ if cmd == "gh":
         s["writes"].append("create"); save(); sys.exit(0)
     if args[:2] == ["release", "upload"]:
         if "--clobber" not in args: fail("no replacement requested")
+        interruption = s.pop("interrupt_upload", None)
+        if interruption:
+            s["release"]["assets"] = [] if interruption == "missing" else [dict(s["expected_release"]["assets"][0], state="starter", size=0)]
+            fail("upload interrupted after deleting the old DMG")
+        s["release"] = s["expected_release"]
         s["asset"] = pathlib.Path(next(a for a in args if a.endswith(".dmg"))).read_text()
         s["writes"].append("replace"); save(); sys.exit(0)
     if args[:2] == ["release", "download"]:
@@ -170,6 +187,24 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         return result.stdout + result.stderr
 
+    def run_function(self, body):
+        self.state_path.write_text(json.dumps(self.state))
+        result = subprocess.run(["/bin/bash", "-c", 'source "$1" --inspect-functions\n' + body,
+                                 "release-test", str(self.root / "script/release.sh")],
+                                env=self.env, text=True, capture_output=True, timeout=30)
+        self.state = json.loads(self.state_path.read_text())
+        return result
+
+    def set_version(self, version):
+        self.state["version"] = version
+        self.state["expected_release"] = dict(self.state["expected_release"], tag_name="v" + version,
+                                             prerelease="-" in version,
+                                             assets=[dict(self.state["expected_release"]["assets"][0], name="Pensieve-" + version + ".dmg")])
+        self.state["new_feed"] = feed(version)
+        (self.root / "VERSION").write_text(version)
+        (self.root / "project.yml").write_text('MARKETING_VERSION: "' + version + '"\n')
+        (self.root / "CHANGELOG.md").write_text("## [" + version + "]\nRelease fixture.\n")
+
     def test_fresh_release_and_second_run(self):
         self.run_release(); self.run_release(cask_only=True)
         self.assertEqual(self.state["writes"], ["create", "appcast", "cask"])
@@ -180,13 +215,22 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.assertEqual(self.state["builds"], 1)
 
     def test_release_exists_rebuilds_and_replaces_before_signing_feed(self):
-        self.state["release"] = self.state["expected_release"]
-        self.state["asset"] = "old unpublished bytes"
-        self.run_release(); self.run_release(cask_only=True)
-        self.assertEqual(self.state["writes"], ["replace", "appcast", "cask"])
-        self.assertEqual(self.state["asset"], DMG.decode())
-        self.assertEqual(self.state["signing_inputs"], [["Pensieve-1.0.0.dmg"]])
-        self.assertFalse(any(c[:2] == ["gh", "release"] and c[2] == "download" for c in self.state["calls"]))
+        original = json.loads(json.dumps(self.state))
+        for interruption in (None, "missing", "starter"):
+            with self.subTest(interruption=interruption):
+                self.state = json.loads(json.dumps(original))
+                self.state["release"] = self.state["expected_release"]
+                self.state["asset"] = "old unpublished bytes"
+                if interruption:
+                    self.state["interrupt_upload"] = interruption
+                    self.assertIn("upload interrupted", self.run_release(expected=1))
+                    self.assertEqual(self.state["writes"], [])
+                self.run_release(); self.run_release(cask_only=True)
+                self.assertEqual(self.state["writes"], ["replace", "appcast", "cask"])
+                self.assertEqual(self.state["asset"], DMG.decode())
+                self.assertEqual(self.state["builds"], 2 if interruption else 1)
+                self.assertEqual(self.state["signing_inputs"], [["Pensieve-1.0.0.dmg"]] * (2 if interruption else 1))
+                self.assertFalse(any(c[:3] == ["gh", "release", "download"] for c in self.state["calls"]))
 
     def test_live_appcast_verifies_without_rebuild_or_asset_write(self):
         self.state.update(release=self.state["expected_release"], appcast=feed())
@@ -197,11 +241,16 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.assertTrue(any(c[0] == "verify" for c in self.state["calls"]))
 
     def test_bad_release_shapes_stop_before_any_changes(self):
-        for change in ({"draft": True}, {"assets": []}, {"assets": self.state["expected_release"]["assets"] * 2}, {"tag_name": "v9.0.0"}, {"prerelease": True}, {"assets": [{"name": "extra"}]}):
+        for change in ({"draft": True}, {"assets": None}, {"assets": [None]}, {"assets": self.state["expected_release"]["assets"] * 2}, {"tag_name": "v9.0.0"}, {"prerelease": True}, {"assets": [{"name": "extra"}]}, {"assets": [dict(self.state["expected_release"]["assets"][0], state="unknown")]}, {"assets": [dict(self.state["expected_release"]["assets"][0], size=0)]}):
             with self.subTest(change=change):
                 self.state["release"] = dict(self.state["expected_release"], **change)
                 output = self.run_release(expected=1)
                 self.assertIn("release", output)
+                self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
+        for assets in ([], [dict(self.state["expected_release"]["assets"][0], state="starter", size=0)]):
+            with self.subTest(live_assets=assets):
+                self.state.update(appcast=feed(), release=dict(self.state["expected_release"], assets=assets))
+                self.assertIn("DMG", self.run_release(expected=1))
                 self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
         self.state["release"] = self.state["expected_release"]; self.state["target"] = "b" * 40
         self.assertIn("target", self.run_release(expected=1))
@@ -240,11 +289,16 @@ class ReleaseSequenceTests(unittest.TestCase):
 
     def test_failed_and_malformed_reads_are_unknown(self):
         original = json.loads(json.dumps(self.state))
-        for mode, kind in itertools.product(("fail_read", "malformed"), ("release", "appcast", "cask", "tag")):
+        cases = list(itertools.product(("fail_read", "malformed"), ("release", "appcast", "cask", "tag")))
+        cases += [("null_content", "appcast"), ("null_content", "cask")]
+        for mode, kind in cases:
             with self.subTest(mode=mode, kind=kind):
                 self.state = json.loads(json.dumps(original))
                 self.state[mode] = kind
-                self.assertIn(kind, self.run_release(expected=1))
+                output = self.run_release(expected=1)
+                self.assertIn(kind, output)
+                self.assertNotIn("Traceback", output)
+                if mode == "null_content": self.assertIn("invalid contents state", output)
                 self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
 
     def test_appcast_race_stops_and_recovery_reads_new_state(self):
@@ -257,9 +311,10 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.assertEqual(self.state["builds"], 1)
 
     def test_cask_race_stops_and_second_run_is_done(self):
-        import hashlib
         self.run_release()
-        self.state.update(race="cask", race_content=cask(VERSION, hashlib.sha256(DMG).hexdigest()))
+        result = self.run_function('VERSION=1.0.0; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; write_bumped_cask "$DIST_DIR/homebrew/pensieve.rb"')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.state.update(race="cask", race_content=(self.root / "build/dist/homebrew/pensieve.rb").read_text())
         self.assertIn("409", self.run_release(cask_only=True, expected=1))
         self.state.pop("race")
         self.run_release(cask_only=True)
@@ -267,10 +322,84 @@ class ReleaseSequenceTests(unittest.TestCase):
 
     def test_prerelease_recovery_skips_cask(self):
         version = "1.0.0-beta.1"
-        self.state.update(version=version, appcast=feed(version), release=dict(self.state["expected_release"], tag_name="v" + version, prerelease=True, assets=[{"id": 2, "name": "Pensieve-" + version + ".dmg", "size": len(DMG), "state": "uploaded"}]))
-        (self.root / "VERSION").write_text(version)
+        self.set_version(version)
+        original = json.loads(json.dumps(self.state))
+        for problem in ({"fail_read": "cask"}, {"malformed": "cask"}, {"cask": "def broken("}, {"cask": None, "cask_sha": ""}):
+            with self.subTest(problem=problem):
+                self.state = dict(json.loads(json.dumps(original)), **problem)
+                self.state.update(appcast=feed(version), release=self.state["expected_release"])
+                self.run_release(); self.run_release(cask_only=True)
+                self.assertEqual(self.state["writes"], [])
+                self.assertFalse(any("pensieve.rb" in arg for call in self.state["calls"] for arg in call))
+
+    def test_older_version_cannot_move_publications_back(self):
         self.run_release(); self.run_release(cask_only=True)
-        self.assertEqual(self.state["writes"], [])
+        self.set_version("1.1.0")
+        self.state.update(release=None, new_feed=feeds("1.1.0", VERSION))
+        self.run_release(); self.run_release(cask_only=True)
+        published_feed, published_cask = self.state["appcast"], self.state["cask"]
+        self.set_version(VERSION)
+        self.state.update(release=self.state["expected_release"], writes=[], calls=[], builds=0, signing_inputs=[])
+        output = self.run_release() + self.run_release(cask_only=True)
+        self.assertEqual(self.state["cask"], published_cask, "old workflow must not downgrade the cask")
+        self.assertEqual(self.state["appcast"], published_feed, "old workflow must not downgrade the appcast")
+        self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
+        self.assertIn("newer version 1.1.0", output)
+
+    def test_older_appcast_publication_stops_before_build(self):
+        original = json.loads(json.dumps(self.state))
+        for older, newer in (("1.0.0", "1.1.0"), ("1.9.0", "1.10.0"), ("1.0.0-beta.1", "1.0.0"), ("1.0.0-beta.2", "1.0.0-beta.11")):
+            with self.subTest(older=older, newer=newer):
+                self.state = json.loads(json.dumps(original)); self.set_version(older)
+                self.state["appcast"] = feed(newer)
+                self.assertIn("newer version " + newer, self.run_release(expected=1))
+                self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
+
+    def test_cask_template_changes_reach_tap_and_repeat_is_noop(self):
+        import hashlib
+        self.run_release()
+        self.state["cask"] = cask(VERSION, hashlib.sha256(DMG).hexdigest())
+        template = self.root / "release/homebrew/pensieve.rb"
+        stanza = '  depends_on macos: ">= 26"\n'
+        template.write_text(template.read_text().replace('  app "Pensieve.app"\n', stanza + '  app "Pensieve.app"\n'))
+        self.run_release(cask_only=True)
+        self.assertIn(stanza, self.state["cask"], "repo template stanza must reach the tap")
+        self.assertIn('  version "1.0.0"', self.state["cask"])
+        self.assertIn(hashlib.sha256(DMG).hexdigest(), self.state["cask"])
+        self.assertEqual(self.state["writes"], ["create", "appcast", "cask"])
+        self.run_release(cask_only=True)
+        self.assertEqual(self.state["writes"], ["create", "appcast", "cask"])
+
+    def test_changed_malformed_appcast_reports_race_and_cleans_up(self):
+        temporary = self.root / "temporary"; temporary.mkdir()
+        self.env["TMPDIR"] = str(temporary)
+        original = json.loads(json.dumps(self.state))
+        for sha, message in (("b" * 40, "appcast changed since preflight"), (SHA, "invalid appcast state")):
+            with self.subTest(sha=sha):
+                self.state = dict(json.loads(json.dumps(original)), recheck_content="<invalid/>", recheck_sha=sha)
+                self.assertIn(message, self.run_release(expected=1))
+                self.assertEqual(list(temporary.glob("pensieve-appcast-response.*")), [], "appcast response must be cleaned up")
+                self.assertFalse((self.root / "build/dist/recheck-appcast.xml").exists())
+                self.assertEqual(self.state["writes"], [])
+
+    def test_contents_write_requires_explicit_preflight_sha(self):
+        source = self.root / "source.xml"; source.write_text(feed())
+        result = self.run_function('publish_contents_file fixture/public appcast.xml "$REPO/source.xml" fixture master')
+        self.assertEqual(self.state["calls"], [], "a write must never discover a new SHA after preflight")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_appcast_uses_release_download_prefix(self):
+        prefix = "https://github.com/fixture/public/releases/download"
+        script = self.root / "script/release.sh"
+        self.assertEqual(script.read_text().count('PUBLIC_REPO="jaredatch/pensieve"'), 1)
+        script.write_text(script.read_text().replace('PUBLIC_REPO="jaredatch/pensieve"', 'PUBLIC_REPO="fixture/public"'))
+        self.state.update(release=self.state["expected_release"], appcast=feed(prefix=prefix))
+        self.run_release()
+        self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
+        self.state.update(release=None, appcast=feed("0.9.0", prefix=prefix), new_feed=feed(prefix=prefix))
+        self.run_release()
+        command = next(call for call in self.state["calls"] if call[0] == "generate")
+        self.assertEqual(command[command.index("--download-url-prefix") + 1], prefix + "/v1.0.0/")
 
     def test_package_removes_stale_product_before_build(self):
         stale = self.root / "build/package-dd/Build/Products/Release/Pensieve.app/Contents/stale-proof"
@@ -298,6 +427,16 @@ class PublishedTextSweepTests(unittest.TestCase):
     def setUpClass(cls):
         spec = importlib.util.spec_from_file_location("release_state", ROOT / "script/release_state.py")
         cls.tool = importlib.util.module_from_spec(spec); spec.loader.exec_module(cls.tool)
+
+    def test_version_order_cross_product(self):
+        ordered = ("0.9.0", "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta",
+                   "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0", "1.1.0", "1.9.0", "1.10.0", "2.0.0", "10.0.0")
+        for (i, left), (j, right) in itertools.product(enumerate(ordered), repeat=2):
+            with self.subTest(left=left, right=right):
+                self.assertEqual(self.tool.compare_versions(left, right), (i > j) - (i < j))
+        for invalid in ("1.0", "01.0.0", "1.0.0-alpha..1", "1.0.0-beta.01"):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError): self.tool.compare_versions(invalid, VERSION)
 
     def test_cask_shape_cross_product_and_fixed_point(self):
         count = 0
@@ -327,15 +466,15 @@ class PublishedTextSweepTests(unittest.TestCase):
             text = feed().split("<channel>")[0] + "<channel>" + ending + (item + ending) * items + old + "</channel></rss>" + (ending if trailing else "")
             with self.subTest(ending=ending, trailing=trailing, items=items, other=other):
                 if items == 2:
-                    with self.assertRaises(ValueError): self.tool.appcast_state(text, VERSION)
+                    with self.assertRaises(ValueError): self.tool.appcast_state(text, VERSION, DOWNLOAD_PREFIX)
                 else:
                     expected = "absent" if items == 0 else str(len(DMG)) + " " + SIGNATURE
-                    self.assertEqual(self.tool.appcast_state(text, VERSION), expected)
-                    self.assertEqual(self.tool.appcast_state(text, VERSION), expected)
+                    self.assertEqual(self.tool.appcast_state(text, VERSION, DOWNLOAD_PREFIX), expected)
+                    self.assertEqual(self.tool.appcast_state(text, VERSION, DOWNLOAD_PREFIX), expected)
             count += 1
         self.assertEqual(count, 24)
         for invalid in ("", feed().replace("<enclosure", "<other"), feed().replace('length="15"', 'length="bad"'), feed().replace(SIGNATURE, "bad"), feed().replace("v1.0.0/", "v9.0.0/")):
-            with self.assertRaises((ValueError, ET.ParseError)): self.tool.appcast_state(invalid, VERSION)
+            with self.assertRaises((ValueError, ET.ParseError)): self.tool.appcast_state(invalid, VERSION, DOWNLOAD_PREFIX)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 # Sourced by release.sh. Remote reads are checked before build or publication.
 RELEASE_STATE="absent"
 APPCAST_ITEM="absent"
+APPCAST_NEWER="absent"
 CASK_SHA=""
 CASK_VERSION=""
 CASK_DIGEST=""
@@ -17,9 +18,10 @@ verify_update_archive() {
 }
 
 read_release_state() {
-  local response="$DIST_DIR/release-response.txt" status
+  local response="$DIST_DIR/release-response.txt" status mode=unpublished
+  [ "$APPCAST_ITEM" = absent ] || mode=live
   if run_command_seam "$GH_CMD" api --include "repos/$PUBLIC_REPO/releases/tags/v$VERSION" > "$response"; then
-    RELEASE_STATE="$(state_tool release "$response" "$VERSION")" || return 1
+    RELEASE_STATE="$(state_tool release "$response" "$VERSION" "$mode")" || return 1
   else
     status="$(http_status "$response")"
     [ "$status" = 404 ] || { echo "release: release read failed (HTTP ${status:-unknown})" >&2; return 1; }
@@ -49,30 +51,37 @@ verify_tag_target() {
 }
 
 cask_preflight() {
+  [ "$(cask_action_for "$VERSION")" = bump ] || { CASK_PREFLIGHT=1; return 0; }
   local response="$DIST_DIR/cask-response.txt" fields status
   mkdir -p "$DIST_DIR/homebrew"
-  CASK_TEMPLATE="$DIST_DIR/homebrew/base.rb"
+  CASK_REMOTE="$DIST_DIR/homebrew/base.rb"
+  CASK_VERSION=""; CASK_DIGEST=""
   if run_command_seam "$GH_CMD" api --include -X GET "repos/$TAP_REPO/contents/Casks/pensieve.rb" > "$response"; then
-    CASK_SHA="$(state_tool contents "$response" "$CASK_TEMPLATE")" || {
+    CASK_SHA="$(state_tool contents "$response" "$CASK_REMOTE")" || {
       echo "release: invalid cask contents response" >&2; return 1;
     }
+    fields="$(state_tool cask "$CASK_REMOTE")" || return 1
+    read -r CASK_VERSION CASK_DIGEST <<< "$fields"
   else
     status="$(http_status "$response")"
     [ "$status" = 404 ] || { echo "release: cask read failed (HTTP ${status:-unknown})" >&2; return 1; }
     CASK_SHA=""
-    ditto "$REPO/release/homebrew/pensieve.rb" "$CASK_TEMPLATE"
+    rm -f "$CASK_REMOTE"
   fi
-  fields="$(state_tool cask "$CASK_TEMPLATE")" || return 1
-  read -r CASK_VERSION CASK_DIGEST <<< "$fields"
   CASK_PREFLIGHT=1
 }
 
 publication_preflight() {
+  if [ -f "$APPCAST_INPUT_DIR/appcast.xml" ]; then
+    APPCAST_ITEM="$(state_tool appcast "$APPCAST_INPUT_DIR/appcast.xml" "$VERSION" "$DOWNLOAD_PREFIX")" || return 1
+    APPCAST_NEWER="$(state_tool appcast-newer "$APPCAST_INPUT_DIR/appcast.xml" "$VERSION" "$DOWNLOAD_PREFIX")" || return 1
+  fi
+  if [ "$APPCAST_NEWER" != absent ]; then
+    echo "release: appcast already names newer version $APPCAST_NEWER; keeping it"
+    [ "$APPCAST_ITEM" != absent ] || { echo "release: refusing older appcast publication for $VERSION" >&2; return 1; }
+  fi
   read_release_state
   verify_tag_target
-  if [ -f "$APPCAST_INPUT_DIR/appcast.xml" ]; then
-    APPCAST_ITEM="$(state_tool appcast "$APPCAST_INPUT_DIR/appcast.xml" "$VERSION")" || return 1
-  fi
   cask_preflight
   if [ "$APPCAST_ITEM" != absent ] && [ "$RELEASE_STATE" = absent ]; then
     echo "release: appcast item exists but GitHub release/DMG is missing" >&2; return 1
@@ -101,17 +110,26 @@ recover_live_release() {
   rm -rf "$download_dir"
   # The cask step uses this verified artifact with its separate tap credential.
   echo "release: GitHub release and appcast done; verified published DMG"
-  local digest
+  local digest comparison cask_output="$DIST_DIR/homebrew/pensieve.rb"
   digest="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
   if [ "$CASK_VERSION" = "$VERSION" ] && [ "$CASK_DIGEST" != "$digest" ]; then
     echo "release: cask sha256 does not match verified published DMG" >&2; return 1
   fi
   if [ "$(cask_action_for "$VERSION")" = skip ]; then
     echo "release: cask skipped for prerelease $VERSION"
-  elif [ "$CASK_VERSION" = "$VERSION" ]; then
-    echo "release: cask done; everything published"
   else
-    echo "release: cask pending; run --publish-cask-only with the verified artifact"
+    comparison=0
+    [ -z "$CASK_VERSION" ] || comparison="$(state_tool compare-versions "$CASK_VERSION" "$VERSION")" || return 1
+    if [ "$comparison" -gt 0 ]; then
+      echo "release: cask already names newer version $CASK_VERSION; refusing downgrade to $VERSION"
+    else
+      write_bumped_cask "$cask_output" || return 1
+      if [ -n "$CASK_SHA" ] && cmp -s "$cask_output" "$CASK_REMOTE"; then
+        echo "release: cask done; everything published"
+      else
+        echo "release: cask pending; run --publish-cask-only with the verified artifact"
+      fi
+    fi
   fi
 }
 

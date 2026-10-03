@@ -30,10 +30,40 @@ def contents(path, output):
     value = response_json(path)
     require(re.fullmatch(r"[a-f0-9]{40}", value.get("sha", "")), "contents response has no valid SHA")
     require(value.get("encoding") == "base64", "contents response is not base64")
+    require(isinstance(value.get("content"), str), "contents response has no text content")
     data = base64.b64decode(value["content"].replace("\n", "").replace("\r", ""), validate=True)
     require(data, "empty contents response")
     Path(output).write_bytes(data)
     return value["sha"]
+
+
+def version_parts(version):
+    require(re.fullmatch(VERSION, version), "invalid publication version")
+    core, separator, suffix = version.partition("-")
+    numbers = core.split(".")
+    identifiers = suffix.split(".") if separator else []
+    require(all(n == "0" or not n.startswith("0") for n in numbers), "version has leading zeros")
+    require(all(re.fullmatch(r"[A-Za-z0-9-]+", part) for part in identifiers), "invalid prerelease version")
+    require(all(not part.isdigit() or part == "0" or not part.startswith("0") for part in identifiers), "prerelease has leading zeros")
+    return tuple(map(int, numbers)), identifiers
+
+
+def compare_versions(left, right):
+    left_core, left_pre = version_parts(left)
+    right_core, right_pre = version_parts(right)
+    if left_core != right_core:
+        return 1 if left_core > right_core else -1
+    if not left_pre or not right_pre:
+        return (not left_pre) - (not right_pre)
+    for a, b in zip(left_pre, right_pre):
+        if a == b:
+            continue
+        if a.isdigit() and b.isdigit():
+            return 1 if int(a) > int(b) else -1
+        if a.isdigit() != b.isdigit():
+            return -1 if a.isdigit() else 1
+        return 1 if a > b else -1
+    return (len(left_pre) > len(right_pre)) - (len(left_pre) < len(right_pre))
 
 
 def cask_fields(text):
@@ -66,17 +96,24 @@ def rewrite_cask(text, version, sha):
     return text
 
 
-def appcast_state(text, version):
+def appcast_root(text):
     require(text.strip(), "empty appcast")
     require("<!DOCTYPE" not in text.upper() and "<!ENTITY" not in text.upper(), "appcast contains a DTD")
     root = ET.fromstring(text)
     require(root.tag == "rss" and len(root.findall("channel")) == 1, "invalid appcast channel")
+    return root
+
+
+def appcast_state(text, version, download_prefix):
+    root = appcast_root(text)
     seen, result = set(), "absent"
-    expected_url = f"https://github.com/jaredatch/pensieve/releases/download/v{version}/Pensieve-{version}.dmg"
+    version_parts(version)
+    expected_url = f"{download_prefix}/v{version}/Pensieve-{version}.dmg"
     for item in root.find("channel").findall("item"):
         versions = item.findall(SPARKLE + "shortVersionString")
         require(len(versions) == 1 and re.fullmatch(VERSION, versions[0].text or ""), "malformed appcast version")
         current = versions[0].text
+        version_parts(current)
         require(current not in seen, f"duplicated appcast item for {current}")
         seen.add(current)
         enclosures = item.findall("enclosure")
@@ -94,21 +131,35 @@ def appcast_state(text, version):
     return result
 
 
-def release_state(value, version):
+def newer_appcast_version(text, version, download_prefix):
+    appcast_state(text, version, download_prefix)  # Validate the whole feed before comparing it.
+    newest = version
+    for item in appcast_root(text).find("channel").findall("item"):
+        current = item.find(SPARKLE + "shortVersionString").text
+        if compare_versions(current, newest) > 0:
+            newest = current
+    return newest if compare_versions(newest, version) > 0 else "absent"
+
+
+def release_state(value, version, require_uploaded=False):
     require(value.get("tag_name") == "v" + version, "release has wrong tag")
     require(value.get("draft") is False, "release is a draft or has no draft flag")
     require(value.get("prerelease") is ("-" in version), "release has wrong prerelease flag")
     require(type(value.get("id")) is int and value["id"] > 0, "release has invalid ID")
     assets = value.get("assets")
-    require(isinstance(assets, list) and len(assets) == 1, "release has extra or missing DMG assets")
-    asset = assets[0]
-    require(isinstance(asset, dict), "release DMG is not an object")
-    require(asset.get("name") == f"Pensieve-{version}.dmg", "release is missing its expected DMG")
-    require(asset.get("state") == "uploaded", "release DMG is not uploaded")
-    require(type(asset.get("size")) is int and asset["size"] > 0, "release DMG has invalid size")
-    require(type(asset.get("id")) is int and asset["id"] > 0, "release DMG has invalid ID")
+    require(isinstance(assets, list) and len(assets) <= 1, "release has extra or invalid DMG assets")
+    require(not assets or isinstance(assets[0], dict), "release DMG is not an object")
+    asset = assets[0] if assets else None
+    if asset is not None:
+        require(isinstance(asset, dict), "release DMG is not an object")
+        require(asset.get("name") == f"Pensieve-{version}.dmg", "release is missing its expected DMG")
+        require(asset.get("state") in ("starter", "uploaded"), "release DMG has invalid upload state")
+        require(type(asset.get("size")) is int and asset["size"] >= (1 if asset["state"] == "uploaded" else 0), "release DMG has invalid size")
+        require(type(asset.get("id")) is int and asset["id"] > 0, "release DMG has invalid ID")
+    if require_uploaded:
+        require(asset is not None and asset["state"] == "uploaded", "live appcast release DMG is missing or not uploaded")
     # Download counts and timestamps can change without changing publication state.
-    return json.dumps({"id": value["id"], "asset": {key: asset[key] for key in ("id", "name", "size", "state")}}, sort_keys=True)
+    return json.dumps({"id": value["id"], "asset": {key: asset[key] for key in ("id", "name", "size", "state")} if asset else None}, sort_keys=True)
 
 
 def main(args):
@@ -116,13 +167,17 @@ def main(args):
     if mode == "contents":
         print(contents(*args[1:]))
     elif mode == "release":
-        print(release_state(response_json(args[1]), args[2]))
+        print(release_state(response_json(args[1]), args[2], args[3] == "live"))
     elif mode == "tag":
         obj = response_json(args[1])["object"]
         require(obj["type"] in ("commit", "tag") and re.fullmatch(r"[a-f0-9]{40}", obj["sha"]), "invalid tag target")
         print(obj["type"], obj["sha"])
     elif mode == "appcast":
-        print(appcast_state(Path(args[1]).read_text(), args[2]))
+        print(appcast_state(Path(args[1]).read_text(), args[2], args[3]))
+    elif mode == "appcast-newer":
+        print(newer_appcast_version(Path(args[1]).read_text(), args[2], args[3]))
+    elif mode == "compare-versions":
+        print(compare_versions(args[1], args[2]))
     elif mode == "cask":
         print(cask_state(Path(args[1]).read_text()))
     elif mode == "rewrite-cask":

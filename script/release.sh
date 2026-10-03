@@ -31,6 +31,7 @@ STAPLER_CMD="${STAPLER_CMD:-xcrun stapler}"
 GH_CMD="${GH_CMD:-gh}"
 PUBLIC_REPO="jaredatch/pensieve"
 TAP_REPO="jaredatch/homebrew-tap"
+DOWNLOAD_PREFIX="https://github.com/$PUBLIC_REPO/releases/download"
 
 usage() {
   cat >&2 <<'USAGE'
@@ -381,7 +382,7 @@ generate_appcast() {
 
   local -a appcast_args=(
     --ed-key-file "$SPARKLE_PRIVATE_KEY_FILE"
-    --download-url-prefix "https://github.com/jaredatch/pensieve/releases/download/$tag/"
+    --download-url-prefix "$DOWNLOAD_PREFIX/$tag/"
   )
   if [[ "$VERSION" == *-* ]]; then
     appcast_args+=(--channel beta)
@@ -407,6 +408,7 @@ http_status() {
 }
 
 publish_contents_file() {
+  [ "$#" -eq 6 ] || { echo "release: contents writes require an explicit preflight SHA" >&2; return 64; }
   local repo="$1"
   local contents_path="$2"
   local local_file="$3"
@@ -414,19 +416,7 @@ publish_contents_file() {
   local branch="${5:-}"
   test -f "$local_file" || { echo "release: contents source missing at $local_file" >&2; exit 1; }
 
-  local sha response
-  # An explicitly supplied empty SHA means create-only. Only the tap caller
-  # omits this argument and reads its current SHA here.
-  if [ "$#" -ge 6 ]; then
-    sha="$6"
-  else
-    sha="$(run_command_seam "$GH_CMD" api -X GET "repos/$repo/contents/$contents_path" --jq .sha)" || {
-      echo "release: contents read failed: $repo/$contents_path" >&2; return 1;
-    }
-    [ -n "$sha" ] && [ "$sha" != null ] || {
-      echo "release: contents read returned no SHA: $repo/$contents_path" >&2; return 1;
-    }
-  fi
+  local sha="$6" response
 
   local -a put_args=(
     -X PUT
@@ -509,20 +499,19 @@ verify_public_branch_unchanged() {
 }
 
 verify_appcast_unchanged() {
-  local response current status
+  local response current status decoded="$DIST_DIR/recheck-appcast.xml"
   response="$(mktemp "${TMPDIR:-/tmp}/pensieve-appcast-response.XXXXXX")" || return 1
   if run_command_seam "$GH_CMD" api -X GET "repos/$PUBLIC_REPO/contents/appcast.xml" \
       -f "ref=$PUBLIC_BRANCH" --include > "$response"; then
-    if ! current="$(state_tool contents "$response" "$DIST_DIR/recheck-appcast.xml")"; then
-      rm -f "$response"
+    if ! current="$(state_tool contents "$response" "$decoded")"; then
+      rm -f "$response" "$decoded"
       echo "release: invalid appcast recheck response" >&2
       return 1
     fi
-    state_tool appcast "$DIST_DIR/recheck-appcast.xml" "$VERSION" >/dev/null || return 1
   else
     status="$(http_status "$response")"
     cat "$response" >&2
-    rm -f "$response"
+    rm -f "$response" "$decoded"
     if [ "$FIRST_RELEASE" -eq 1 ] && [ -z "$APPCAST_SHA" ] && [ "$status" = 404 ]; then
       return 0
     fi
@@ -531,9 +520,14 @@ verify_appcast_unchanged() {
   fi
   rm -f "$response"
   if [ "$current" != "$APPCAST_SHA" ]; then
+    rm -f "$decoded"
     echo "release: appcast changed since preflight; stopping before GitHub Release creation" >&2
     return 1
   fi
+  status=0
+  state_tool appcast "$decoded" "$VERSION" "$DOWNLOAD_PREFIX" >/dev/null || status=$?
+  rm -f "$decoded"
+  return "$status"
 }
 
 publish_appcast() {
@@ -545,7 +539,7 @@ publish_appcast() {
 
 write_bumped_cask() {
   local cask_output="$1"
-  local cask_template="${CASK_TEMPLATE:-$REPO/release/homebrew/pensieve.rb}"
+  local cask_template="$REPO/release/homebrew/pensieve.rb"
   local dmg_sha
   dmg_sha="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
   test "${#dmg_sha}" -eq 64 || { echo "release: invalid dmg sha256 for $DMG_PATH" >&2; exit 1; }
@@ -564,17 +558,22 @@ dry_run_local() {
 bump_cask() {
   [ "$(cask_action_for "$VERSION")" = "bump" ] || { echo "release: phase v.f skipped: prerelease $VERSION does not bump the Homebrew cask"; return 0; }
   [ "$CASK_PREFLIGHT" -eq 1 ] || cask_preflight
-  local digest
+  local digest comparison=0 cask_output="$DIST_DIR/homebrew/pensieve.rb"
+  [ -z "$CASK_VERSION" ] || comparison="$(state_tool compare-versions "$CASK_VERSION" "$VERSION")" || return 1
+  if [ "$comparison" -gt 0 ]; then
+    echo "release: cask already names newer version $CASK_VERSION; refusing downgrade to $VERSION"
+    return 0
+  fi
   digest="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
   if [ "$CASK_VERSION" = "$VERSION" ]; then
     [ "$CASK_DIGEST" = "$digest" ] || { echo "release: cask sha256 does not match DMG" >&2; return 1; }
+  fi
+  write_bumped_cask "$cask_output"
+  if [ -n "$CASK_SHA" ] && cmp -s "$cask_output" "$CASK_REMOTE"; then
     echo "release: cask done"
     return 0
   fi
   echo "release: phase v.f: bump Homebrew cask in $TAP_REPO"
-
-  local cask_output="$DIST_DIR/homebrew/pensieve.rb"
-  write_bumped_cask "$cask_output"
   publish_contents_file "$TAP_REPO" "Casks/pensieve.rb" "$cask_output" "cask: v$VERSION" "" "$CASK_SHA"
 }
 
