@@ -132,8 +132,9 @@ struct AppRuntimePaths {
 
     /// AppRuntime invokes the closure only while it holds sync.lock (initial launch and the retry loop
     /// both acquire before calling) — the reconciler must not re-acquire.
-    func makeLaunchReconcile(defaults: UserDefaults) -> AppRuntime.LaunchReconcile {
-        { context, alreadyMigrated in
+    func makeLaunchReconcile(defaults: UserDefaults, platformVM: PlatformViewModel,
+                             notifier: @escaping SyncStateNotifying) -> AppRuntime.LaunchReconcile {
+        return { context, alreadyMigrated in
             let fileService = FileService()
             let migrationService = StoreMigrationService(
                 fileService: fileService,
@@ -149,7 +150,9 @@ struct AppRuntimePaths {
                     machineIdentity: MachineIdentity(fileService: fileService, appSupportDir: appSupportDir),
                     manifest: ManifestService(fileService: fileService),
                     root: storeRoot,
-                    defaults: defaults
+                    defaults: defaults,
+                    artifactExists: { platformVM.artifactExists(skill: $0, platform: $1) },
+                    notifier: notifier
                 )
             ).reconcileOnLaunch(
                 context: context,

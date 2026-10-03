@@ -12,7 +12,7 @@ protocol FileServiceProtocol {
     func writeExecutableFile(at path: String, content: String) throws
     func copyFile(at sourcePath: String, to destinationPath: String) throws
     /// Copies regular entries from one no-follow directory descriptor; never traverses child links.
-    func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws
+    func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws -> RegularFileCopyReceipt
     func deleteFile(at path: String) throws
     func fileExists(at path: String) -> Bool
     /// The final entry itself, including dangling links. Only ENOENT is absence; other failures throw.
@@ -152,32 +152,8 @@ extension FileServiceProtocol {
                 ]
             )
         }
-        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        var status = stat()
-        guard fstat(fd, &status) == 0, (status.st_mode & S_IFMT) == S_IFREG else {
-            throw NSError(
-                domain: NSPOSIXErrorDomain,
-                code: Int(EFTYPE),
-                userInfo: [
-                    NSLocalizedDescriptionKey: "not a regular file: \(sourcePath)"
-                ]
-            )
-        }
-        let data = handle.readDataToEndOfFile()
-        let created = FileManager.default.createFile(
-            atPath: destinationPath,
-            contents: data,
-            attributes: [.posixPermissions: status.st_mode & 0o777]
-        )
-        guard created, FileManager.default.fileExists(atPath: destinationPath) else {
-            throw NSError(
-                domain: NSCocoaErrorDomain,
-                code: NSFileWriteUnknownError,
-                userInfo: [
-                    NSLocalizedDescriptionKey: "failed to create \(destinationPath)"
-                ]
-            )
-        }
+        defer { close(fd) }
+        try DescriptorFileCopy.copy(from: fd, sourcePath: sourcePath, to: destinationPath)
     }
 
     /// True iff the owner/user executable bit is set on a regular file. Group/world execute bits do

@@ -58,6 +58,7 @@ struct LaunchReconciler {
     private let headStampOverride: (() -> String?)?
     private let git: GitServiceProtocol
     private let scenarioHandover: ScenarioHandingOver?
+    private let log: (String) -> Void
 
     init(rebuildService: StoreRebuildServiceProtocol = StoreRebuildService(),
          migrationService: StoreMigrationServiceProtocol = StoreMigrationService(),
@@ -67,6 +68,7 @@ struct LaunchReconciler {
          lockPath: String = PathConstants.pensieveAppSupportDir + "/sync.lock",
          git: GitServiceProtocol = GitService(),
          scenarioHandover: ScenarioHandingOver? = nil,
+         log: @escaping (String) -> Void = { NSLog("Pensieve: \($0)") },
          headStampOverride: (() -> String?)? = nil) {
         self.rebuildService = rebuildService
         self.migrationService = migrationService
@@ -78,6 +80,7 @@ struct LaunchReconciler {
         self.headStampOverride = headStampOverride
         self.git = git
         self.scenarioHandover = scenarioHandover
+        self.log = log
     }
 
     @discardableResult
@@ -179,7 +182,6 @@ struct LaunchReconciler {
             result.ingestionNeedsRetry = false
             return result
         }
-        guard !result.ingestionNeedsRetry else { return result }
         var ownedLock: SyncLock?
         if !externallyHeldLock {
             guard let lock = SyncLock.tryAcquire(at: lockPath) else {
@@ -195,26 +197,20 @@ struct LaunchReconciler {
             result.ingestionNeedsRetry = true
             return result
         }
+        var manifestWritten = alreadyMigrated
         if !alreadyMigrated {
             let migration = migrationService.migrateIfNeeded(fromRoot: root, context: context)
             result.migrationRan = migration.manifestWritten && migration.warnings.isEmpty
-            if !result.migrationRan, scenarioHandover != nil {
-                result.rebuild.warnings.append(contentsOf: migration.warnings)
-                if !migration.manifestWritten { return result }
-            }
-        }
-        if result.rebuild.saveFailed, scenarioHandover != nil {
-            let warning = "Scenario handover deferred until next launch: launch rebuild save failed."
-            result.rebuild.warnings.append(warning)
-            NSLog("Pensieve: \(warning)")
-            return result
+            manifestWritten = migration.manifestWritten
         }
         do {
-            try scenarioHandover?.handOver(context: context)
+            try scenarioHandover?.handOver(context: context, readiness: ScenarioHandoverReadiness(
+                manifestWritten: manifestWritten, rebuildSaveFailed: result.rebuild.saveFailed,
+                ingestionNeedsRetry: result.ingestionNeedsRetry
+            ))
         } catch {
             let warning = "Scenario handover deferred until next launch: \(error.localizedDescription)"
-            result.rebuild.warnings.append(warning)
-            NSLog("Pensieve: \(warning)")
+            log(warning)
         }
         return result
     }

@@ -55,7 +55,7 @@ final class ScenarioHandoverTests: XCTestCase {
     }
 
     func testManifestFailureRetainsUnhandedRowsAndRetriesAtLaunch() throws {
-        for failedWrite in [1, 2] {
+        for failedWrite in [1] {
             let harness = try HandoverHarness(defaults: isolatedDefaults("write-\(failedWrite)"))
             defer { try? harness.cleanUp() }
             try harness.seed()
@@ -63,8 +63,9 @@ final class ScenarioHandoverTests: XCTestCase {
             harness.manifest.failWrite = failedWrite
             XCTAssertFalse(harness.launch().ingestionNeedsRetry)
             let fresh = harness.freshContext()
+            XCTAssertEqual(harness.nudges, 0)
             XCTAssertEqual(try fresh.fetch(FetchDescriptor<ScenarioAssignment>()).map { $0.platform.rawValue }.sorted(),
-                           failedWrite == 1 ? ["codex", "cursor"] : ["cursor"])
+                           ["codex", "cursor"])
             XCTAssertFalse(harness.defaults.bool(forKey: ScenarioHandover.doneKey))
             XCTAssertNotNil(harness.defaults.object(forKey: ScenarioHandover.activeKey))
             XCTAssertEqual(try harness.deployedFiles(), before)
@@ -80,7 +81,7 @@ final class ScenarioHandoverTests: XCTestCase {
     }
 
     func testEachSaveBoundaryRecoversWithoutLosingOrDuplicatingPairs() throws {
-        for failedSave in 1...4 {
+        for failedSave in 1...2 {
             let harness = try HandoverHarness(defaults: isolatedDefaults("save-\(failedSave)"))
             defer { try? harness.cleanUp() }
             try harness.seed()
@@ -90,7 +91,7 @@ final class ScenarioHandoverTests: XCTestCase {
                 saves += 1
                 let durable = try harness.manifest.read(fromRoot: harness.root).deployIntents
                 XCTAssertEqual(durable.filter { $0.skillSlug == "skill" && $0.projectKey == nil }.count,
-                               saves <= 2 ? 1 : 2, "manifest must precede each saved ownership")
+                               2, "all manifest intents must precede ownership and retirement saves")
                 if saves == failedSave { throw DeployStubFailure() }
                 try context.save()
             }
@@ -98,7 +99,7 @@ final class ScenarioHandoverTests: XCTestCase {
             XCTAssertFalse(harness.defaults.bool(forKey: ScenarioHandover.doneKey))
             XCTAssertNotNil(harness.defaults.object(forKey: ScenarioHandover.activeKey))
             let remaining = try harness.freshContext().fetch(FetchDescriptor<ScenarioAssignment>())
-            XCTAssertEqual(remaining.map { $0.platform.rawValue }.sorted(), failedSave <= 2 ? ["codex", "cursor"] : ["cursor"])
+            XCTAssertEqual(remaining.map { $0.platform.rawValue }.sorted(), ["codex", "cursor"])
             XCTAssertEqual(try harness.deployedFiles(), before)
             try harness.assertUnrelatedIntentsUnchanged()
             XCTAssertFalse(harness.launch().ingestionNeedsRetry)
@@ -212,6 +213,8 @@ final class ScenarioHandoverTests: XCTestCase {
         try harness.manifest.live.write(harness.manifest.live.snapshot(from: harness.context), toRoot: harness.root)
         XCTAssertFalse(harness.launch().ingestionNeedsRetry)
         try harness.assertComplete(["codex"])
+        XCTAssertEqual(harness.manifest.writes, 0)
+        XCTAssertEqual(harness.nudges, 0)
     }
 
     func testCompletedHandoverDoesNotRunAgainAfterLocalSwitchIsTurnedOff() throws {

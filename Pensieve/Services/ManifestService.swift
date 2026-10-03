@@ -5,6 +5,8 @@ import Foundation
 
 struct ManifestService: ManifestReadWriting {
     static let currentSchemaVersion = 5
+    /// Shared across all service instances and callers in this process. SyncLock ownership stays with callers.
+    private static let writeLock = NSLock()
 
     let fileService: FileServiceProtocol
     private let supportedSchemaVersion: Int
@@ -18,6 +20,8 @@ struct ManifestService: ManifestReadWriting {
     // MARK: Write (idempotent, prunes stale)
 
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
+        Self.writeLock.lock()
+        defer { Self.writeLock.unlock() }
         let manifestDir = root + "/manifest"
         try refuseNewerExistingManifest(at: manifestDir)
         try validateSnapshotForWrite(snapshot)
@@ -46,7 +50,7 @@ struct ManifestService: ManifestReadWriting {
                     content: Self.serializeCategory(category)
                 )
             }
-            try carryScenarioFiles(from: manifestDir + "/scenarios", to: scenariosDir)
+            let carried = try carryScenarioFiles(from: manifestDir + "/scenarios", to: scenariosDir)
             for skill in snapshot.skills {
                 try fileService.writeFile(
                     at: skillsDir + "/" + skill.slug + ".yaml",
@@ -61,6 +65,7 @@ struct ManifestService: ManifestReadWriting {
             if !fileService.directoryExists(at: root) {
                 try fileService.createDirectory(at: root)
             }
+            try carried.validateSource()
             try fileService.replaceItem(at: manifestDir, with: tmpDir)
         } catch {
             try? fileService.deleteDirectory(at: tmpDir)
@@ -135,7 +140,7 @@ struct ManifestService: ManifestReadWriting {
 
     /// Legacy definitions belong to older builds. Keep opaque regular-file bytes in the atomic
     /// replacement tree, and never traverse a symlinked scenarios directory or entry.
-    private func carryScenarioFiles(from source: String, to destination: String) throws {
+    private func carryScenarioFiles(from source: String, to destination: String) throws -> RegularFileCopyReceipt {
         try fileService.copyRegularFiles(fromDirectory: source, toDirectory: destination)
     }
 

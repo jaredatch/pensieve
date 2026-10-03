@@ -34,7 +34,8 @@ final class ScenarioHandoverLaunchTests: XCTestCase {
             do { try harness.assertComplete() } catch { XCTFail("handover did not complete: \(error)") }
         }
         let runtime = try AppRuntime(
-            container: harness.container, library: library(harness), defaults: harness.defaults,
+            container: harness.container, platformVM: HandoverDeployments(root: harness.root).platformVM,
+            library: library(harness), defaults: harness.defaults,
             launchBackfill: { _ in }, hasRemoteConfigured: { false }, postSyncConvergence: convergence,
             launchIngestRetryNanoseconds: 10_000_000, paths: paths, gitUsabilityProbe: { .usable }
         )
@@ -116,9 +117,9 @@ final class ScenarioHandoverLaunchTests: XCTestCase {
                     XCTAssertNil(SyncLock.tryAcquire(at: paths.syncLockPath))
                     let outcome = LaunchReconciler(
                         rebuildService: StoreRebuildService(fileService: harness.files, manifestService: harness.manifest),
-                        migrationService: migration,
-                        fileService: harness.files, manifestService: harness.manifest, root: harness.root,
-                        lockPath: paths.syncLockPath, scenarioHandover: harness.handover()
+                        migrationService: migration, fileService: harness.files,
+                        manifestService: harness.manifest, root: harness.root,
+                        lockPath: paths.syncLockPath, scenarioHandover: harness.handover(), log: { harness.logs.append($0) }
                     ).reconcileOnLaunch(context: context, alreadyMigrated: migrated, externallyHeldLock: true)
                     outcomes.append(outcome)
                     return outcome
@@ -132,7 +133,7 @@ final class ScenarioHandoverLaunchTests: XCTestCase {
         XCTAssertEqual(convergence.calls, 1)
         XCTAssertEqual(backfills, 1)
         XCTAssertFalse(try XCTUnwrap(outcomes.first).ingestionNeedsRetry)
-        XCTAssertFalse(try XCTUnwrap(outcomes.first).rebuild.warnings.isEmpty)
+        XCTAssertTrue(harness.logs.contains { $0.localizedCaseInsensitiveContains("deferred until next launch") })
         try await Task.sleep(nanoseconds: 40_000_000)
         XCTAssertEqual(attempts, 1, "persistent handover conditions must not create an ingest retry loop")
         let next = try runtime()

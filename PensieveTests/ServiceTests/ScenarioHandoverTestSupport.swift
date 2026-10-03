@@ -44,6 +44,7 @@ final class HandoverHarness {
     let manifest = HandoverManifest()
     let files = FileService()
     var logs: [String] = []
+    var nudges = 0
     var artifacts: [String] = []
     let unrelated = [
         DeployIntentRecord(machineID: "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB",
@@ -107,6 +108,10 @@ final class HandoverHarness {
     func handover(save: @escaping (ModelContext) throws -> Void = { try $0.save() },
                   fetcher: ReconcilerStateFetching = ReconcilerStateFetcher()) -> ScenarioHandover {
         ScenarioHandover(machineIdentity: identity, manifest: manifest, root: root, defaults: defaults,
+                         artifactExists: { [root, files] skill, platform in
+                             let path = root + "/agents/" + platform.rawValue + "/" + skill.directoryName
+                             return files.isSymlink(at: path) || files.fileExists(at: path)
+                         }, notifier: { [weak self] in self?.nudges += 1 },
                          fetcher: fetcher, save: save, log: { [weak self] in self?.logs.append($0) })
     }
 
@@ -198,6 +203,7 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
     let files = FileService()
     var createCalls = 0
     var removeCalls = 0
+    var allowCreation = false
     init(root: String) { self.root = root }
     var platformVM: PlatformViewModel {
         PlatformViewModel(fileService: files, linkService: self, cursorCompiler: self,
@@ -206,7 +212,9 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
     }
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
         createCalls += 1
-        throw DeployStubFailure()
+        guard allowCreation else { throw DeployStubFailure() }
+        try files.createSymlink(at: linkPath(skill: skill, platform: platform, projectPath: projectPath),
+                                pointingTo: targetPath(skill: skill, platform: platform, projectPath: projectPath))
     }
     func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
         removeCalls += 1
@@ -222,7 +230,11 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
         root + "/skills/" + skill.directoryName
     }
     func validateAll(skills: [Skill]) -> [BrokenLink] { [] }
-    func compile(skill: Skill, projectPath: String?) throws { createCalls += 1; throw DeployStubFailure() }
+    func compile(skill: Skill, projectPath: String?) throws {
+        createCalls += 1
+        guard allowCreation else { throw DeployStubFailure() }
+        try files.writeFile(at: outputPath(skill: skill, projectPath: projectPath), content: "repaired")
+    }
     func remove(skill: Skill, projectPath: String?) throws {
         removeCalls += 1
         try files.deleteFile(at: outputPath(skill: skill, projectPath: projectPath))

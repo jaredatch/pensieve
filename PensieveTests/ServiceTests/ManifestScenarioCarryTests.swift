@@ -115,9 +115,16 @@ final class ManifestScenarioCarryTests: XCTestCase {
                 try self.files.createSymlink(at: source, pointingTo: outside)
             } catch { swapError = error }
         }
-        try ManifestService(fileService: guarded).write(empty, toRoot: root)
+        XCTAssertThrowsError(try ManifestService(fileService: guarded).write(empty, toRoot: root))
         XCTAssertNil(swapError)
         XCTAssertEqual(swaps, 1)
+        XCTAssertTrue(files.isSymlink(at: source))
+        XCTAssertEqual(try files.readFile(at: root + "/parked/legacy.yaml"), "original")
+        XCTAssertEqual(try files.readFile(at: outside + "/secret.yaml"), "outside")
+        try files.deleteFile(at: source)
+        try files.replaceItem(at: source, with: root + "/parked")
+        guarded.afterDirectoryCheck = nil
+        try ManifestService(fileService: guarded).write(empty, toRoot: root)
         XCTAssertEqual(try files.listDirectory(at: source), ["legacy.yaml"])
         XCTAssertEqual(try files.readFile(at: source + "/legacy.yaml"), "original")
         XCTAssertEqual(try files.readFile(at: outside + "/secret.yaml"), "outside")
@@ -160,7 +167,7 @@ final class ManifestScenarioCarryTests: XCTestCase {
         XCTAssertEqual(try files.readFile(at: root + "/manifest/scenarios/b.yaml"), "second")
     }
 
-    private func treeBytes(at directory: String) throws -> [String: Data] {
+    func treeBytes(at directory: String) throws -> [String: Data] {
         var result: [String: Data] = [:]
         for name in try files.listDirectory(at: directory) {
             let path = directory + "/" + name
@@ -182,6 +189,8 @@ final class ScenarioCarryFileService: FileServiceProtocol {
     var failCopyNumber: Int?
     var copyCount = 0
     var afterDirectoryCheck: (() -> Void)?
+    var checkpointAction: ((FileService.DirectoryCopyCheckpoint) throws -> Void)?
+    var beforeSwap: (() throws -> Void)?
     private func record(_ path: String) {
         if forbiddenPrefixes.contains(where: path.hasPrefix) { touchedForbiddenPath = true }
     }
@@ -193,8 +202,9 @@ final class ScenarioCarryFileService: FileServiceProtocol {
         if copyCount == failCopyNumber { throw CocoaError(.fileReadUnknown) }
         try wrapped.copyFile(at: sourcePath, to: destinationPath)
     }
-    func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws {
+    func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws -> RegularFileCopyReceipt {
         try wrapped.copyRegularFiles(fromDirectory: source, toDirectory: destination) { checkpoint in
+            try checkpointAction?(checkpoint)
             switch checkpoint {
             case .opened:
                 record(source)
@@ -204,10 +214,15 @@ final class ScenarioCarryFileService: FileServiceProtocol {
                 record(source + "/" + name)
                 copyCount += 1
                 if copyCount == failCopyNumber { throw CocoaError(.fileReadUnknown) }
+            case .copiedChunk, .unavailable:
+                break
             }
         }
     }
-    func writeFile(at path: String, content: String) throws { try wrapped.writeFile(at: path, content: content) }
+    func writeFile(at path: String, content: String) throws {
+        try wrapped.writeFile(at: path, content: content)
+        if path.hasSuffix("/projects.yaml") { try beforeSwap?() }
+    }
     func deleteFile(at path: String) throws { try wrapped.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
