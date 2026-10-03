@@ -42,7 +42,8 @@ extension ThirdPartyNoticesTests {
             try withEditorFixture(versions: ["one": "1.0.1"], listedVersions: ["one": listed]) { root, notices, credits in
                 let found = listed.isEmpty ? "<missing>" : listed
                 assertMissing("Version mismatch for editor package one: lockfile 1.0.1, notice \(found)") {
-                    try inventory.checkEditorPackages(lockfile: root + "/lock.json", notices: notices, credits: credits)
+                    try inventory.checkEditorPackages(lockfile: root + "/lock.json",
+                                                   notices: NoticeDocument(notices), credits: credits)
                 }
             }
         }
@@ -50,20 +51,8 @@ extension ThirdPartyNoticesTests {
 
     func testMatchingEditorVersionsAreAccepted() throws {
         try withEditorFixture(versions: ["one": "1.0.1", "two": "2.0.0"]) { root, notices, credits in
-            try inventory.checkEditorPackages(lockfile: root + "/lock.json", notices: notices, credits: credits)
-        }
-    }
-
-    func testEditorCreditsAreNormalizedOnce() throws {
-        try withEditorFixture(versions: ["one": "1.0.1", "two": "2.0.0"]) { root, notices, credits in
-            var calls = 0
-            let counted = NoticeInventory(fileService: fileService, normalizeCredits: { text in
-                XCTAssertEqual(text, credits)
-                calls += 1
-                return NoticeInventory.normalized(text)
-            })
-            try counted.checkEditorPackages(lockfile: root + "/lock.json", notices: notices, credits: credits)
-            XCTAssertEqual(calls, 1, "Normalize the credits once for the complete editor inventory")
+            try inventory.checkEditorPackages(lockfile: root + "/lock.json",
+                                                   notices: NoticeDocument(notices), credits: credits)
         }
     }
 
@@ -91,9 +80,7 @@ extension ThirdPartyNoticesTests {
         let lf = try renderFixture(source)
         let crlf = try renderFixture(source.replacingOccurrences(of: "\n", with: "\r\n"))
         XCTAssertEqual(crlf, lf)
-        let decoded = try NSAttributedString(data: Data(crlf.utf8),
-                                             options: [.documentType: NSAttributedString.DocumentType.rtf],
-                                             documentAttributes: nil)
+        let decoded = try decodeCredits(Data(crlf.utf8))
         XCTAssertEqual(decoded.string.trimmingCharacters(in: .whitespacesAndNewlines), "Notices\nCopyright {Fixture}.")
     }
 
@@ -101,7 +88,7 @@ extension ThirdPartyNoticesTests {
         ["\u{000B}", "\u{000C}", "\u{001C}", "\u{001D}", "\u{001E}", "\u{0085}", "\u{2028}", "\u{2029}"]
     }
 
-    private func assertVendorNoticeRequired(named name: String) throws {
+    func assertVendorNoticeRequired(named name: String) throws {
         try withSwiftFixture { root in
             let vendor = root + "/example/Vendor/NewLibrary"
             let license = "Copyright Vendor. Unique required attribution."
@@ -126,12 +113,14 @@ extension ThirdPartyNoticesTests {
     }
 
     private func checkYamsFixture(root: String) throws {
+        try LibYAMLNoticeAudit.checkVendorVersion(resolved: root + "/resolved.json", fileService: fileService)
         try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
-                                         notices: "[Yams](https://github.com/jpsim/Yams)", credits: "Yams license.")
+                                         notices: NoticeDocument("[Yams](https://github.com/jpsim/Yams)"),
+                                         credits: "Yams license.")
     }
 
-    private func withEditorFixture(versions: [String: String], listedVersions: [String: String]? = nil,
-                                   operation: (String, String, String) throws -> Void) throws {
+    func withEditorFixture(versions: [String: String], listedVersions: [String: String]? = nil,
+                           operation: (String, String, String) throws -> Void) throws {
         try withFixture { root in
             let packages = Dictionary(uniqueKeysWithValues: versions.map { name, version in
                 ("node_modules/" + name, ["version": version, "license": "MIT"])
@@ -144,20 +133,5 @@ extension ThirdPartyNoticesTests {
             let notices = entries.joined(separator: "\n") + "\n```text\n" + license + "\n```\n"
             try operation(root, notices, versions.keys.sorted().joined(separator: " ") + "\n" + license)
         }
-    }
-
-    private func renderFixture(_ source: String) throws -> String {
-        var rtf = ""
-        try withFixture { root in
-            try fileService.writeFile(at: root + "/source.md", content: source)
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-            process.arguments = [sourceRoot + "/script/credits.py", root + "/source.md", root + "/Credits.rtf"]
-            try process.run()
-            process.waitUntilExit()
-            XCTAssertEqual(process.terminationStatus, 0)
-            rtf = try fileService.readFile(at: root + "/Credits.rtf")
-        }
-        return rtf
     }
 }

@@ -30,7 +30,8 @@ def render(notices):
     if not lines[-1]:
         lines.pop()
     for line in lines:
-        line = line.removesuffix("\r")
+        if line.endswith("\r"):
+            line = line[:-1]
         if line == "```text":
             in_license = True
             continue
@@ -40,9 +41,9 @@ def render(notices):
         if in_license:
             output.append(escape_rtf(line) + r"\line")
             continue
-        heading = re.match(r"^(#{1,3}) (.*)$", line)
         line = re.sub(r"\[([^]]+)\]\(([^)]+)\)", r"\1 (\2)", line)
         line = line.replace("`", "")
+        heading = re.match(r"^(#+) (.*)$", line)
         if heading:
             output.append(r"\b\fs24 " + escape_rtf(heading[2]) + r"\b0\fs20\par")
         else:
