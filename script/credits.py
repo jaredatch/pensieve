@@ -26,7 +26,11 @@ def render(notices):
     # No foreground/background color: AppKit supplies the appearance's text colors.
     output = [r"{\rtf1\ansi\deff0{\fonttbl{\f0 Helvetica;}}\uc1\f0\fs20"]
     in_license = False
-    for line in notices.splitlines():
+    lines = notices.split("\n")
+    if not lines[-1]:
+        lines.pop()
+    for line in lines:
+        line = line.removesuffix("\r")
         if line == "```text":
             in_license = True
             continue
@@ -54,7 +58,8 @@ def main():
         sys.exit("usage: credits.py NOTICES.md Credits.rtf")
     output = Path(sys.argv[2])
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(render(Path(sys.argv[1]).read_text(encoding="utf-8")), encoding="ascii")
+    with Path(sys.argv[1]).open(encoding="utf-8", newline="") as source:
+        output.write_text(render(source.read()), encoding="ascii")
 
 
 if __name__ == "__main__":

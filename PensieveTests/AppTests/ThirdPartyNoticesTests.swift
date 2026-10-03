@@ -131,20 +131,20 @@ final class ThirdPartyNoticesTests: XCTestCase {
                                       documentAttributes: nil).string
     }
 
-    private func assertMissing(_ expected: String, operation: () throws -> Void) {
+    func assertMissing(_ expected: String, operation: () throws -> Void) {
         XCTAssertThrowsError(try operation()) { error in
             XCTAssertEqual((error as? NoticeInventory.MissingNotice)?.description, expected)
         }
     }
 
-    private func withFixture(_ operation: (String) throws -> Void) throws {
+    func withFixture(_ operation: (String) throws -> Void) throws {
         let root = NSTemporaryDirectory() + "notices-" + UUID().uuidString
         try fileService.createDirectory(at: root)
         defer { try? fileService.deleteDirectory(at: root) }
         try operation(root)
     }
 
-    private func withSwiftFixture(_ operation: (String) throws -> Void) throws {
+    func withSwiftFixture(_ operation: (String) throws -> Void) throws {
         try withFixture { root in
             try fileService.createDirectory(at: root + "/example")
             try fileService.writeFile(at: root + "/example/LICENSE", content: "Example license.")
@@ -153,7 +153,7 @@ final class ThirdPartyNoticesTests: XCTestCase {
         }
     }
 
-    private func checkSwiftFixture(root: String, credits: String) throws {
+    func checkSwiftFixture(root: String, credits: String) throws {
         try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
                                          notices: "[Example](https://github.com/vendor/example)", credits: credits)
     }
