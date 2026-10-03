@@ -8,6 +8,14 @@ CASK_PREFLIGHT=0
 
 state_tool() { python3 "$REPO/script/release_state.py" "$@"; }
 
+verify_update_archive() {
+  if [ -n "${VERIFY_UPDATE_CMD:-}" ]; then
+    run_command_seam "$VERIFY_UPDATE_CMD" "$@"
+  else
+    /usr/bin/swift "$REPO/script/verify_update.swift" "$@"
+  fi
+}
+
 read_release_state() {
   local response="$DIST_DIR/release-response.txt" status
   if run_command_seam "$GH_CMD" api --include "repos/$PUBLIC_REPO/releases/tags/v$VERSION" > "$response"; then
@@ -85,8 +93,7 @@ recover_live_release() {
   fi
   read -r length signature <<< "$APPCAST_ITEM"
   public_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$REPO/Pensieve/Info.plist")" || return 1
-  if ! run_command_seam "${VERIFY_UPDATE_CMD:-/usr/bin/swift $REPO/script/verify_update.swift}" \
-      "$download_dir/Pensieve-$VERSION.dmg" "$length" "$signature" "$public_key"; then
+  if ! verify_update_archive "$download_dir/Pensieve-$VERSION.dmg" "$length" "$signature" "$public_key"; then
     rm -rf "$download_dir"
     echo "release: published DMG length or EdDSA signature does not match appcast" >&2; return 1
   fi

@@ -127,7 +127,7 @@ fail("unexpected stub call " + cmd + " " + repr(args))
 
 class ReleaseSequenceTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="pensieve-release-test-")
+        self.temp = tempfile.TemporaryDirectory(prefix="pensieve-release test-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / "script").mkdir()
@@ -150,9 +150,9 @@ class ReleaseSequenceTests(unittest.TestCase):
                           appcast=feed("0.9.0"), cask=cask(), appcast_sha=SHA, cask_sha=SHA,
                           calls=[], writes=[], builds=0, signing_inputs=[], new_feed=feed(), signature=SIGNATURE)
         self.env = dict(os.environ, PATH=str(bin_dir) + ":/usr/bin:/bin:/usr/sbin:/sbin",
-                        RELEASE_TEST_STATE=str(self.state_path), GH_CMD=str(bin_dir / "gh"),
-                        NOTARY_CMD=str(bin_dir / "notary"), STAPLER_CMD=str(bin_dir / "stapler"),
-                        GENERATE_APPCAST_CMD=str(bin_dir / "generate"), VERIFY_UPDATE_CMD=str(bin_dir / "verify"),
+                        RELEASE_TEST_STATE=str(self.state_path), GH_CMD="gh",
+                        NOTARY_CMD="notary", STAPLER_CMD="stapler",
+                        GENERATE_APPCAST_CMD=str(bin_dir / "generate"), VERIFY_UPDATE_CMD="verify",
                         SPARKLE_PRIVATE_KEY_FILE=str(self.root / "fixture-key"))
 
     def run_release(self, cask_only=False, expected=0, first=False):
@@ -229,7 +229,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         public, signature = keys.stdout.splitlines()
         plist = self.root / "Pensieve/Info.plist"
         plist.write_text(plist.read_text().replace("HibOcVcc/1MTA9UQHp4cIb7qMewKaA0elSCSQ0DY8Ns=", public))
-        self.env["VERIFY_UPDATE_CMD"] = "/usr/bin/swift " + str(self.root / "script/verify_update.swift")
+        self.env.pop("VERIFY_UPDATE_CMD")  # Exercise the default verifier in a checkout with spaces.
         self.state.update(release=self.state["expected_release"], appcast=feed(signature=signature))
         self.run_release()
         self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
