@@ -4,6 +4,43 @@ import XCTest
 
 @MainActor
 final class ScenarioHandoverMetadataTests: XCTestCase {
+    private func assertSavedRebuildHandsOverDespiteUnrelatedUnsavedMainContextChange() throws {
+        let harness = try HandoverHarness(defaults: isolatedDefaults("saved-main-context"))
+        defer { try? harness.cleanUp() }
+        try harness.seed()
+        let before = try harness.deployedFiles()
+        let context = harness.container.mainContext
+        context.autosaveEnabled = true
+        XCTAssertTrue(context.autosaveEnabled)
+        let project = Project(name: "Saved name", path: harness.root + "/project")
+        context.insert(project)
+        try context.save()
+        var rebuilds = 0
+        let rebuild = SavedRebuildWithPendingEdit(
+            live: StoreRebuildService(fileService: harness.files, manifestService: harness.manifest),
+            afterSave: { savedContext in
+                rebuilds += 1
+                XCTAssertTrue(savedContext === context)
+                XCTAssertFalse(savedContext.hasChanges, "the real rebuild saved successfully")
+                project.name = "Pending local rename"
+                XCTAssertTrue(savedContext.hasChanges)
+            }
+        )
+        let outcome = LaunchReconciler(
+            rebuildService: rebuild, fileService: harness.files, manifestService: harness.manifest,
+            root: harness.root, lockPath: harness.root + "/sync.lock", scenarioHandover: harness.handover()
+        ).reconcileOnLaunch(context: context, alreadyMigrated: true)
+        XCTAssertEqual(rebuilds, 1)
+        XCTAssertFalse(outcome.ingestionNeedsRetry)
+        XCTAssertFalse(outcome.rebuild.saveFailed)
+        XCTAssertTrue(outcome.rebuild.warnings.isEmpty)
+        try harness.assertComplete()
+        XCTAssertEqual(try harness.deployedFiles(), before)
+        XCTAssertTrue(context.hasChanges, "handover must not save the unrelated edit")
+        XCTAssertEqual(project.name, "Pending local rename")
+        XCTAssertEqual(try harness.freshContext().fetch(FetchDescriptor<Project>()).first?.name, "Saved name")
+    }
+
     func testAbsentAndPartialManifestPreserveCachedMetadataThroughNextRebuild() throws {
         for partial in [false, true] {
             let harness = try HandoverHarness(defaults: isolatedDefaults("partial-\(partial)"))
@@ -60,6 +97,7 @@ final class ScenarioHandoverMetadataTests: XCTestCase {
     }
 
     func testFailedRebuildSaveKeepsUnsavedSkillsScenarioOwnershipUntilNextLaunch() throws {
+        try assertSavedRebuildHandsOverDespiteUnrelatedUnsavedMainContextChange()
         let harness = try HandoverHarness(defaults: isolatedDefaults())
         defer { try? harness.cleanUp() }
         let skill = try harness.seed()
@@ -72,13 +110,18 @@ final class ScenarioHandoverMetadataTests: XCTestCase {
         launchContext.autosaveEnabled = false
         let restored = Skill(name: "skill", skillDescription: "Description", directoryName: "skill")
         restored.id = skillID
-        let rebuild = UnsavedSkillRebuild(skill: restored)
+        let rebuild = UnsavedSkillRebuild(
+            skill: restored,
+            live: StoreRebuildService(fileService: harness.files, manifestService: harness.manifest,
+                                      save: { _ in throw ScenarioStubFailure() })
+        )
         let outcome = LaunchReconciler(
             rebuildService: rebuild, fileService: harness.files, manifestService: harness.manifest,
             root: harness.root, lockPath: harness.root + "/sync.lock", scenarioHandover: harness.handover()
         ).reconcileOnLaunch(context: launchContext, alreadyMigrated: true)
         XCTAssertFalse(outcome.ingestionNeedsRetry)
         XCTAssertTrue(launchContext.hasChanges)
+        XCTAssertTrue(outcome.rebuild.saveFailed)
         XCTAssertFalse(outcome.rebuild.warnings.isEmpty)
         XCTAssertEqual(try harness.freshContext().fetchCount(FetchDescriptor<ScenarioAssignment>()), 2)
         XCTAssertFalse(harness.defaults.bool(forKey: ScenarioHandover.doneKey))
@@ -110,15 +153,22 @@ final class ScenarioHandoverMetadataTests: XCTestCase {
     }
 }
 
+/// Runs the real rebuild, then adds an unrelated edit before launch validates and hands ownership over.
+private struct SavedRebuildWithPendingEdit: StoreRebuildServiceProtocol {
+    let live: StoreRebuildService
+    let afterSave: (ModelContext) -> Void
+    func rebuild(fromRoot root: String, context: ModelContext) -> RebuildResult {
+        let result = live.rebuild(fromRoot: root, context: context)
+        afterSave(context)
+        return result
+    }
+}
+
 private struct UnsavedSkillRebuild: StoreRebuildServiceProtocol {
     let skill: Skill
+    let live: StoreRebuildService
     func rebuild(fromRoot root: String, context: ModelContext) -> RebuildResult {
         context.insert(skill)
-        // Inject the same boundary failure the real rebuild reports without rolling back its context.
-        do { try failedSave(context) } catch {
-            return RebuildResult(skillsInserted: 1, warnings: ["Rebuild saving local store failed: \(error)"])
-        }
-        return RebuildResult()
+        return live.rebuild(fromRoot: root, context: context)
     }
-    private func failedSave(_ context: ModelContext) throws { throw ScenarioStubFailure() }
 }

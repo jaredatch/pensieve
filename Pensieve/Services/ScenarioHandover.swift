@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 protocol ScenarioHandingOver {
-    /// Called only under the launch ingest lock, before any deploy convergence.
+    /// Called under the launch ingest lock, after any rebuild has saved, before deploy convergence.
     func handOver(context: ModelContext) throws
 }
 
@@ -15,10 +15,6 @@ struct ScenarioHandover: ScenarioHandingOver {
 
     struct InvalidMachineIdentity: LocalizedError {
         var errorDescription: String? { "Scenario handover requires a canonical machine identity." }
-    }
-
-    struct UnsavedLaunchContext: LocalizedError {
-        var errorDescription: String? { "Scenario handover requires saved launch rebuild changes." }
     }
 
     private let machineIdentity: MachineIdentityProviding
@@ -45,9 +41,6 @@ struct ScenarioHandover: ScenarioHandingOver {
 
     func handOver(context caller: ModelContext) throws {
         guard !defaults.bool(forKey: Self.doneKey) else { return }
-        // A failed rebuild save leaves live skills visible only in the launch context. Never
-        // classify those pairs as orphans using a fresh context, or persist the caller's edits here.
-        guard !caller.hasChanges else { throw UnsavedLaunchContext() }
         let context = ModelContext(caller.container)
         context.autosaveEnabled = false
         let machineID = try machineIdentity.identifier()

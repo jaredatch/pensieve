@@ -203,6 +203,12 @@ struct LaunchReconciler {
                 return result
             }
         }
+        if result.rebuild.saveFailed, scenarioHandover != nil {
+            let warning = "Scenario handover deferred until next launch: launch rebuild save failed."
+            result.rebuild.warnings.append(warning)
+            NSLog("Pensieve: \(warning)")
+            return result
+        }
         do {
             try scenarioHandover?.handOver(context: context)
         } catch {

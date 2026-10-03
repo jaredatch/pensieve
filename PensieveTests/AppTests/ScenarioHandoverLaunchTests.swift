@@ -64,12 +64,6 @@ final class ScenarioHandoverLaunchTests: XCTestCase {
         try await assertPersistentFailureAllowsLaunch(migrationWarning: true)
     }
 
-    // Keep the existing Verify block executable until the Planner replaces its selector.
-    // Its assertions now require ingest and convergence to complete despite the failure.
-    func testRuntimeSkipsConvergenceOnHandoverFailureAndRetriesItFirst() async throws {
-        try await testRuntimeCompletesIngestAndConvergesDespitePersistentHandoverFailure()
-    }
-
     private func assertPersistentFailureAllowsLaunch(migrationWarning: Bool) async throws {
         let harness = try HandoverHarness(defaults: isolatedDefaults())
         defer { try? harness.cleanUp() }

@@ -25,6 +25,8 @@ struct RebuildResult: Equatable {
     /// nothing was ingested. Distinct from per-item `warnings`. `SyncEngine` refuses to push over a store
     /// it couldn't read (a downgrade) and surfaces "update Pensieve" instead. (PLAN-08 / 08.4 review)
     var storeUnreadable: Bool = false
+    /// The rebuild computed changes but its save failed. Unrelated caller edits do not set this flag.
+    var saveFailed: Bool = false
 }
 
 // MARK: - Protocol
@@ -45,11 +47,14 @@ protocol StoreRebuildServiceProtocol {
 struct StoreRebuildService: StoreRebuildServiceProtocol {
     private let fileService: FileServiceProtocol
     private let manifestService: ManifestReadWriting
+    private let save: (ModelContext) throws -> Void
 
     init(fileService: FileServiceProtocol = FileService(),
-         manifestService: ManifestReadWriting = ManifestService()) {
+         manifestService: ManifestReadWriting = ManifestService(),
+         save: @escaping (ModelContext) throws -> Void = { try $0.save() }) {
         self.fileService = fileService
         self.manifestService = manifestService
+        self.save = save
     }
 
     @discardableResult
@@ -89,8 +94,9 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
         // Surface a persistence failure instead of returning success counts over an unsaved store
         // (PLAN-07 / 07.4 review — the codebase's surface-don't-swallow rule).
         do {
-            try context.save()
+            try save(context)
         } catch {
+            result.saveFailed = true
             result.warnings.append(
                 "Rebuild computed changes but saving the local store failed: \(error.localizedDescription)")
         }
