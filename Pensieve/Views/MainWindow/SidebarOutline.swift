@@ -141,7 +141,7 @@ final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, NSOutli
         onSelect?(section)
     }
 
-    /// Type-select (typing "Sc" jumps to Scenarios) is on by default, but a view-based outline has
+    /// Type-select (typing "Pr" jumps to Projects) is on by default, but a view-based outline has
     /// no cell to read the string from, so AppKit asks the delegate; without this it matches nothing.
     func outlineView(_ outlineView: NSOutlineView, typeSelectStringFor tableColumn: NSTableColumn?,
                      item: Any) -> String? {
@@ -187,7 +187,6 @@ enum SidebarRows {
             SidebarOutlineItem(section: .skills, title: "Skills", symbol: "tray"),
             SidebarOutlineItem(section: .projects, title: "Projects", symbol: "folder"),
             SidebarOutlineItem(section: .categories, title: "Categories", symbol: "square.stack"),
-            SidebarOutlineItem(section: .scenarios, title: "Scenarios", symbol: "square.grid.2x2"),
             SidebarOutlineItem(section: .tags, title: "Tags", symbol: "tag")
         ]
         if showsMachines {

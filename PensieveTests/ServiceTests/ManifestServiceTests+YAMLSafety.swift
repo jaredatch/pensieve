@@ -28,7 +28,7 @@ extension ManifestServiceTests {
     private func write(_ overlay: SkillOverlay) throws {
         try service.write(
             ManifestSnapshot(schemaVersion: ManifestService.currentSchemaVersion,
-                             categories: [], scenarios: [], projects: [], skills: [overlay]),
+                             categories: [], projects: [], skills: [overlay]),
             toRoot: tempDir
         )
     }
@@ -73,7 +73,7 @@ extension ManifestServiceTests {
     func testCaseCollidingSlugsRejected() throws {
         let snapshot = ManifestSnapshot(
             schemaVersion: ManifestService.currentSchemaVersion,
-            categories: [], scenarios: [], projects: [],
+            categories: [], projects: [],
             skills: [try installedOverlay(slug: "PDF_Tools", path: "skills/a"),
                      try installedOverlay(slug: "pdf_tools", path: "skills/b")]
         )

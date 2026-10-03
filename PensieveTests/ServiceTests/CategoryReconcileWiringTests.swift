@@ -21,6 +21,7 @@ private struct SeededRule {
 }
 
 private final class RecordingLinkService: LinkServiceProtocol {
+    var linked: Set<RecordedLink> = []
     var linkCalls: [RecordedLink] = []
     var unlinkCalls: [RecordedLink] = []
     var throwOnLink: Set<PlatformTarget> = []
@@ -29,14 +30,18 @@ private final class RecordingLinkService: LinkServiceProtocol {
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
         linkCalls.append(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
         if throwOnLink.contains(platform) { throw StubFailure() }
+        linked.insert(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
     }
 
     func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
         unlinkCalls.append(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
         if throwOnUnlink.contains(platform) { throw StubFailure() }
+        linked.remove(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
     }
 
-    func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
+    func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
+        linked.contains(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
+    }
 
     func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
         (projectPath ?? "/tmp/user-wide") + "/links/" + platform.rawValue + "/" + skill.directoryName
@@ -94,18 +99,12 @@ private final class RecordingSkillStore: SkillStoreProtocol {
     func listSkills() throws -> [String] { [] }
 }
 
-private struct NoopScenarioReconciler: ScenarioReconcilerProtocol {
-    func reconcile(context: ModelContext) -> BatchResult { BatchResult() }
-}
-
 final class CategoryReconcileWiringTests: XCTestCase {
 
     @MainActor
     private func makeContext() throws -> ModelContext {
-        let container = try ModelContainer(
-            for: Skill.self, Project.self, SkillProjectAssignment.self,
-            IntentAssignment.self, DeployRecord.self, PensieveCategory.self, Scenario.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try AppRuntime.makeContainer(
+            configuration: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         return ModelContext(container)
     }
@@ -117,7 +116,8 @@ final class CategoryReconcileWiringTests: XCTestCase {
         CategoryReconciler(platformVM: PlatformViewModel(
             fileService: StubFileService(),
             linkService: linkService,
-            agentDetection: StubDetection(installed: installed)
+            agentDetection: StubDetection(installed: installed),
+            deployStateStore: .memoryBacked
         ))
     }
 
@@ -275,11 +275,9 @@ final class CategoryReconcileWiringTests: XCTestCase {
         let skillStore = RecordingSkillStore()
         let library = SkillLibraryViewModel(skillStore: skillStore)
 
-        library.deleteSkill(
-            seed.skill,
-            context: context,
-            categoryReconciler: reconciler,
-            scenarioReconciler: NoopScenarioReconciler()
+        SkillDeletionFlow.delete(
+            skill: seed.skill, library: library, platformVM: reconciler.platformVM,
+            projects: try context.fetch(FetchDescriptor<Project>()), context: context
         )
 
         XCTAssertNil(library.error)
@@ -304,19 +302,17 @@ final class CategoryReconcileWiringTests: XCTestCase {
         let skillStore = RecordingSkillStore()
         let library = SkillLibraryViewModel(skillStore: skillStore)
 
-        library.deleteSkill(
-            skill,
-            context: context,
-            categoryReconciler: reconciler,
-            scenarioReconciler: NoopScenarioReconciler()
+        SkillDeletionFlow.delete(
+            skill: skill, library: library, platformVM: reconciler.platformVM,
+            projects: try context.fetch(FetchDescriptor<Project>()), context: context
         )
 
-        XCTAssertNotNil(library.error)
+        XCTAssertNotNil(library.deletionNotice)
         XCTAssertEqual(try skillCount(context: context), 1)
         XCTAssertTrue(skillStore.deletedDirectoryNames.isEmpty)
         let retainedRows = try ledgerRows(context: context)
-        XCTAssertEqual(retainedRows.count, 1)
-        XCTAssertEqual(retainedRows.first?.platform, .codex)
+        XCTAssertEqual(retainedRows.count, 2)
+        XCTAssertEqual(Set(retainedRows.map(\.platform)), [.claudeCode, .codex])
     }
 
     @MainActor
@@ -337,13 +333,11 @@ final class CategoryReconcileWiringTests: XCTestCase {
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "edited")           // an unsaved draft for this skill
 
-        library.deleteSkill(
-            skill,
-            context: context,
-            categoryReconciler: reconciler,
-            scenarioReconciler: NoopScenarioReconciler()
+        SkillDeletionFlow.delete(
+            skill: skill, library: library, platformVM: reconciler.platformVM,
+            projects: try context.fetch(FetchDescriptor<Project>()), context: context
         )
-        XCTAssertNotNil(library.error)                             // failure surfaced by deleteSkill
+        XCTAssertNotNil(library.deletionNotice)                             // failure surfaced by deleteSkill
         XCTAssertEqual(try skillCount(context: context), 1)        // skill retained for retry
 
         XCTAssertTrue(library.hasUnsavedChanges(for: skill))       // the draft must still be live

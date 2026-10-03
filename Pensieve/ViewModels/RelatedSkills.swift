@@ -10,11 +10,6 @@ enum RelatedSkills {
         return skills.filter { slugs.contains($0.directoryName) }
     }
 
-    static func forScenario(_ scenario: Scenario, in skills: [Skill]) -> [Skill] {
-        let slugs = Set(scenario.skillSlugs)
-        return skills.filter { slugs.contains($0.directoryName) }
-    }
-
     static func forTag(_ tag: String, in skills: [Skill]) -> [Skill] {
         skills.filter { $0.tags.contains(tag) }
     }

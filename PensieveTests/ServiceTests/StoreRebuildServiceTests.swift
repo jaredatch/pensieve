@@ -79,7 +79,7 @@ final class StoreRebuildServiceTests: XCTestCase {
         let snapshot = ManifestSnapshot(
             schemaVersion: 1,
             categories: categories,
-            scenarios: [],
+
             projects: projects,
             skills: skills
         )

@@ -34,21 +34,20 @@ final class StoreRebuildScenarioTests: XCTestCase {
         return ModelContext(container)
     }
 
-    private func writeManifest(scenarios: [ScenarioRecord]) throws {
+    private func writeManifest(scenarios: [LegacyScenarioDefinition]) throws {
         try manifest.write(
             ManifestSnapshot(
                 schemaVersion: ManifestService.currentSchemaVersion,
                 categories: [],
-                scenarios: scenarios,
-                projects: [],
+                    projects: [],
                 skills: []
             ),
             toRoot: tempDir
         )
         for record in scenarios {
             try fileService.writeFile(
-                at: tempDir + "/manifest/scenarios/" + ManifestService.scenarioFileName(name: record.name, id: record.id),
-                content: ManifestService.serializeScenario(record)
+                at: tempDir + "/manifest/scenarios/" + LegacyScenarioDefinition.fileName(name: record.name, id: record.id),
+                content: LegacyScenarioDefinition.serialize(record)
             )
         }
     }
@@ -58,12 +57,11 @@ final class StoreRebuildScenarioTests: XCTestCase {
         let context = try makeContext()
         let id = UUID()
         try writeManifest(scenarios: [
-            ScenarioRecord(id: id.uuidString, name: "Frontend", skillSlugs: ["react"], agents: ["cursor"])
+            LegacyScenarioDefinition(id: id.uuidString, name: "Frontend", skillSlugs: ["react"], agents: ["cursor"])
         ])
 
         let result = service.rebuild(fromRoot: tempDir, context: context)
 
-        XCTAssertEqual(result.scenariosInserted, 0)
         XCTAssertTrue(try context.fetch(FetchDescriptor<Scenario>()).isEmpty)
     }
 
@@ -78,13 +76,11 @@ final class StoreRebuildScenarioTests: XCTestCase {
         try context.save()
 
         try writeManifest(scenarios: [
-            ScenarioRecord(id: id.uuidString, name: "New", skillSlugs: ["new"], agents: ["codex", "cursor"])
+            LegacyScenarioDefinition(id: id.uuidString, name: "New", skillSlugs: ["new"], agents: ["codex", "cursor"])
         ])
 
         let result = service.rebuild(fromRoot: tempDir, context: context)
 
-        XCTAssertEqual(result.scenariosUpdated, 0)
-        XCTAssertEqual(result.scenariosInserted, 0)
         XCTAssertEqual(try context.fetch(FetchDescriptor<Scenario>()).count, 1)
         XCTAssertEqual(scenario.id, id)
         XCTAssertEqual(scenario.name, "Old")
@@ -99,20 +95,19 @@ final class StoreRebuildScenarioTests: XCTestCase {
         let scenario = Scenario(id: id, name: "Local Name")
         context.insert(scenario)
         try context.save()
-        let store = ScenarioStore(defaults: try isolatedDefaults())
-        store.setActiveScenarioID(id)
+        let defaults = try isolatedDefaults()
+        defaults.set(id.uuidString, forKey: ScenarioHandover.activeKey)
 
         try writeManifest(scenarios: [
-            ScenarioRecord(id: id.uuidString, name: "Remote Rename", skillSlugs: [], agents: ["cursor"])
+            LegacyScenarioDefinition(id: id.uuidString, name: "Remote Rename", skillSlugs: [], agents: ["cursor"])
         ])
 
         let result = service.rebuild(fromRoot: tempDir, context: context)
 
-        XCTAssertEqual(result.scenariosUpdated, 0)
         XCTAssertEqual(try context.fetch(FetchDescriptor<Scenario>()).count, 1)
         XCTAssertEqual(scenario.id, id)
         XCTAssertEqual(scenario.name, "Local Name")
-        XCTAssertEqual(store.activeScenarioID(), id)
+        XCTAssertEqual(defaults.string(forKey: ScenarioHandover.activeKey), id.uuidString)
     }
 
     @MainActor
@@ -124,7 +119,6 @@ final class StoreRebuildScenarioTests: XCTestCase {
 
         let result = service.rebuild(fromRoot: tempDir, context: context)
 
-        XCTAssertEqual(result.scenariosRemoved, 0)
         XCTAssertEqual(try context.fetch(FetchDescriptor<Scenario>()).first?.name, "Local Only")
     }
 
@@ -137,7 +131,7 @@ final class StoreRebuildScenarioTests: XCTestCase {
         try context.save()
 
         try writeManifest(scenarios: [
-            ScenarioRecord(id: UUID().uuidString, name: "Remote", skillSlugs: ["remote"], agents: ["cursor"])
+            LegacyScenarioDefinition(id: UUID().uuidString, name: "Remote", skillSlugs: ["remote"], agents: ["cursor"])
         ])
         let scenarioDir = tempDir + "/manifest/scenarios"
         let scenarioFile = try XCTUnwrap(try fileService.listDirectory(at: scenarioDir).first { $0.hasSuffix(".yaml") })
@@ -146,9 +140,6 @@ final class StoreRebuildScenarioTests: XCTestCase {
         let result = service.rebuild(fromRoot: tempDir, context: context)
 
         XCTAssertFalse(result.storeUnreadable)
-        XCTAssertEqual(result.scenariosInserted, 0)
-        XCTAssertEqual(result.scenariosUpdated, 0)
-        XCTAssertEqual(result.scenariosRemoved, 0)
         let scenarios = try context.fetch(FetchDescriptor<Scenario>())
         XCTAssertEqual(scenarios.count, 1)
         XCTAssertEqual(scenarios.first?.id, scenario.id)

@@ -55,7 +55,7 @@ final class IngestRecordingManifest: ManifestSnapshotting {
         if let readError { throw readError }
         return ManifestSnapshot(
             schemaVersion: ManifestService.currentSchemaVersion,
-            categories: [], scenarios: [], projects: [], skills: []
+            categories: [], projects: [], skills: []
         )
     }
 
@@ -63,7 +63,7 @@ final class IngestRecordingManifest: ManifestSnapshotting {
         events.append("snapshot")
         return ManifestSnapshot(
             schemaVersion: ManifestService.currentSchemaVersion,
-            categories: [], scenarios: [], projects: [], skills: []
+            categories: [], projects: [], skills: []
         )
     }
 }

@@ -65,7 +65,7 @@ final class SyncEngineTests: XCTestCase {
     private struct ThrowingSnapshotManifest: ManifestSnapshotting {
         func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {}
         func read(fromRoot root: String) throws -> ManifestSnapshot {
-            ManifestSnapshot(schemaVersion: 1, categories: [], scenarios: [], projects: [], skills: [])
+            ManifestSnapshot(schemaVersion: 1, categories: [], projects: [], skills: [])
         }
         func snapshot(from context: ModelContext) throws -> ManifestSnapshot { throw SnapshotFetchBoom() }
     }
@@ -248,7 +248,7 @@ extension SyncEngineTests {
         let remote = try seedRemote(git: git) { seed in
             let snapshot = ManifestSnapshot(schemaVersion: 1,
                                             categories: [CategoryRecord(name: "Swift", projectKeys: [], skillSlugs: [])],
-                                            scenarios: [], projects: [], skills: [])
+                                            projects: [], skills: [])
             try manifest.write(snapshot, toRoot: seed)
         }
         let cloneA = tempDir + "/cloneA"
@@ -276,7 +276,7 @@ extension SyncEngineTests {
         let git = GitService()
         let manifest = ManifestService()
         let remote = try seedRemote(git: git) { seed in
-            try manifest.write(ManifestSnapshot(schemaVersion: 1, categories: [], scenarios: [], projects: [], skills: []),
+            try manifest.write(ManifestSnapshot(schemaVersion: 1, categories: [], projects: [], skills: []),
                                toRoot: seed)
         }
         let cloneA = tempDir + "/pcloneA"
@@ -307,7 +307,7 @@ extension SyncEngineTests {
 
     private func writeProjects(_ manifest: ManifestService, root: String,
                                _ projects: [ProjectIdentityRecord]) throws {
-        try manifest.write(ManifestSnapshot(schemaVersion: 1, categories: [], scenarios: [], projects: projects, skills: []),
+        try manifest.write(ManifestSnapshot(schemaVersion: 1, categories: [], projects: projects, skills: []),
                            toRoot: root)
     }
 
@@ -320,7 +320,7 @@ extension SyncEngineTests {
         let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: git), manifestService: manifest,
                                 storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)
         let remote = try seedRemote(git: git) { seed in
-            try manifest.write(ManifestSnapshot(schemaVersion: 1, categories: [], scenarios: [], projects: [], skills: []),
+            try manifest.write(ManifestSnapshot(schemaVersion: 1, categories: [], projects: [], skills: []),
                                toRoot: seed)
         }
 

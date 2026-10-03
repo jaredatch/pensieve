@@ -46,7 +46,7 @@ extension ManifestService: ManifestSnapshotting {
         return ManifestSnapshot(
             schemaVersion: Self.currentSchemaVersion,
             categories: categoryRecords,
-            scenarios: [],
+
             projects: [],
             skills: skillOverlays,
             deployIntents: Self.deployIntentRecords(from: deployIntents)

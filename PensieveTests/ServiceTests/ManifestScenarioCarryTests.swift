@@ -7,7 +7,7 @@ final class ManifestScenarioCarryTests: XCTestCase {
     let files = FileService()
     var manifest: ManifestService { ManifestService(fileService: files) }
     var empty: ManifestSnapshot {
-        ManifestSnapshot(schemaVersion: 5, categories: [], scenarios: [], projects: [], skills: [])
+        ManifestSnapshot(schemaVersion: 5, categories: [], projects: [], skills: [])
     }
 
     override func setUpWithError() throws {
@@ -54,7 +54,7 @@ final class ManifestScenarioCarryTests: XCTestCase {
         guarded.forbiddenPrefixes = [outside, root + "/manifest/scenarios/link.yaml"]
         let service = ManifestService(fileService: guarded)
 
-        XCTAssertTrue(try service.read(fromRoot: root).scenarios.isEmpty)
+        XCTAssertNoThrow(try service.read(fromRoot: root))
         try service.write(empty, toRoot: root)
         XCTAssertEqual(Set(try files.listDirectory(at: root + "/manifest/scenarios")), ["broken.yaml", "opaque.bin"])
         XCTAssertEqual(try files.readFile(at: root + "/manifest/scenarios/broken.yaml"), ":\n  - [\n")
@@ -133,13 +133,10 @@ final class ManifestScenarioCarryTests: XCTestCase {
         let local = Scenario(name: "Local")
         context.insert(local)
         try context.save()
-        let record = ScenarioRecord(id: UUID().uuidString, name: "Remote", skillSlugs: [], agents: [])
-        try files.writeFile(at: root + "/manifest/scenarios/remote.yaml", content: ManifestService.serializeScenario(record))
+        let record = LegacyScenarioDefinition(id: UUID().uuidString, name: "Remote", skillSlugs: [], agents: [])
+        try files.writeFile(at: root + "/manifest/scenarios/remote.yaml", content: LegacyScenarioDefinition.serialize(record))
         let result = StoreRebuildService(fileService: files, manifestService: manifest).rebuild(fromRoot: root, context: context)
         XCTAssertFalse(result.storeUnreadable)
-        XCTAssertEqual(result.scenariosInserted, 0)
-        XCTAssertEqual(result.scenariosUpdated, 0)
-        XCTAssertEqual(result.scenariosRemoved, 0)
         XCTAssertEqual(try context.fetch(FetchDescriptor<Scenario>()).map(\.id), [local.id])
     }
 

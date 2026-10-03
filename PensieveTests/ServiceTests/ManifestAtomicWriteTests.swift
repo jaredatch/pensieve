@@ -62,7 +62,7 @@ final class ManifestAtomicWriteTests: XCTestCase {
             schemaVersion: 1,
             categories: [CategoryRecord(name: "Keep-A", projectKeys: [], skillSlugs: ["s1"]),
                          CategoryRecord(name: "Keep-B", projectKeys: [], skillSlugs: [])],
-            scenarios: [],
+
             projects: [], skills: [])
         try service.write(v1, toRoot: tempDir)
         XCTAssertEqual(Set(try service.read(fromRoot: tempDir).categories.map { $0.name }), ["Keep-A", "Keep-B"])
@@ -73,7 +73,7 @@ final class ManifestAtomicWriteTests: XCTestCase {
         let v2 = ManifestSnapshot(
             schemaVersion: 1,
             categories: [CategoryRecord(name: "Gone", projectKeys: [], skillSlugs: [])],
-            scenarios: [],
+
             projects: [], skills: [])
         XCTAssertThrowsError(try ManifestService(fileService: faulty).write(v2, toRoot: tempDir))
 
@@ -123,7 +123,7 @@ final class ManifestAtomicWriteTests: XCTestCase {
         ManifestSnapshot(
             schemaVersion: 1,
             categories: [CategoryRecord(name: "Swift", projectKeys: [], skillSlugs: ["swift-style"])],
-            scenarios: [],
+
             projects: [ProjectIdentityRecord(identityKey: "git:x", identityKind: "remote", name: "X")],
             skills: [SkillOverlay(slug: "swift-style", createdAt: Date(timeIntervalSince1970: 1),
                                   scope: .user, tags: ["t"], cursor: nil, agents: [], origin: .authored)])

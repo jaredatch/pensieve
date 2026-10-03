@@ -138,7 +138,8 @@ final class AppRuntime {
         let resolvedProvenanceVM = provenanceVM ?? paths.makeSkillProvenanceViewModel()
         let resolvedIntentReconciler = IntentReconciler(
             platformVM: resolvedPlatformVM,
-            machineIdentity: MachineIdentity(appSupportDir: paths.appSupportDir)
+            machineIdentity: MachineIdentity(appSupportDir: paths.appSupportDir),
+            handoverIsComplete: { resolvedDefaults.bool(forKey: ScenarioHandover.doneKey) }
         )
         let resolvedConvergence = postSyncConvergence ?? paths.makeConvergence(
             container: resolvedContainer,

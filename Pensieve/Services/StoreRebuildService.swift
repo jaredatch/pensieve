@@ -14,9 +14,6 @@ struct RebuildResult: Equatable {
     var categoriesInserted: Int = 0
     var categoriesUpdated: Int = 0
     var categoriesRemoved: Int = 0
-    var scenariosInserted: Int = 0
-    var scenariosUpdated: Int = 0
-    var scenariosRemoved: Int = 0
     var deployIntentsInserted: Int = 0
     var deployIntentsUpdated: Int = 0
     var deployIntentsRemoved: Int = 0

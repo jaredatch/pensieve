@@ -193,18 +193,6 @@ final class ListRowsTests: XCTestCase {
         XCTAssertFalse(row.title.contains("\u{200F}"))
     }
 
-    func testScenarioRowActiveAndAgents() {
-        let skill = Skill(name: "Alpha", directoryName: "alpha")
-        let scenario = Scenario(name: "Writing")
-        scenario.skillSlugs = ["alpha"]
-        scenario.agentRawValues = [PlatformTarget.codex.rawValue, "zed"]
-        let row = ListRows.scenario(scenario, skills: [skill], isActive: true)
-
-        XCTAssertEqual(row.trailingText, "Active")
-        XCTAssertEqual(row.line2, "Alpha")
-        XCTAssertEqual(row.line3, "Codex, zed")
-    }
-
     func testSubtitleForms() {
         XCTAssertEqual(ListSubtitle.text(total: 0, shown: 0, singular: "skill", plural: "skills"), "No skills")
         XCTAssertEqual(ListSubtitle.text(total: 1, shown: 1, singular: "category", plural: "categories"),
@@ -227,7 +215,6 @@ final class ListRowsTests: XCTestCase {
         XCTAssertEqual(ListLineTitles.titles(for: .skills).line3, "Show Description")
         XCTAssertEqual(ListLineTitles.titles(for: .projects).line3, "Show Identity")
         XCTAssertEqual(ListLineTitles.titles(for: .categories).line3, "Show Skills")
-        XCTAssertEqual(ListLineTitles.titles(for: .scenarios).line3, "Show Agents")
         XCTAssertEqual(ListLineTitles.titles(for: .machines).line3, "Show Deployments")
         XCTAssertEqual(ListLineTitles.titles(for: .tags).line2, "Show Skills")
         XCTAssertNil(ListLineTitles.titles(for: .tags).line3)

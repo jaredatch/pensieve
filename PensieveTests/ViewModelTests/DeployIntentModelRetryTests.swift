@@ -6,7 +6,7 @@ import XCTest
 extension DeployIntentModelTests {
     func testIdempotentLocalApplySurfacesReadFailureAndRepairsExactTarget() throws {
         let harness = try makeHarness(reconcile: { _ in
-            BatchResult.readFailure("deployment state", error: ScenarioStubFailure())
+            BatchResult.readFailure("deployment state", error: DeployStubFailure())
         })
         let skill = try insertSkill(context: harness.context)
         harness.context.insert(MachineDeployIntent(

@@ -21,7 +21,8 @@ final class ScenarioHandoverTests: XCTestCase {
         XCTAssertFalse(rebuilt.storeUnreadable)
         try harness.assertComplete()
         let deploys = HandoverDeployments(root: harness.root)
-        let reconciler = IntentReconciler(platformVM: deploys.platformVM, machineIdentity: harness.identity)
+        let reconciler = IntentReconciler(platformVM: deploys.platformVM, machineIdentity: harness.identity,
+            handoverIsComplete: { false })
         XCTAssertFalse(reconciler.reconcile(context: context).hasFailures)
         XCTAssertEqual(deploys.createCalls, 0)
         XCTAssertEqual(deploys.removeCalls, 0)
@@ -41,7 +42,7 @@ final class ScenarioHandoverTests: XCTestCase {
         let identity = HandoverIdentity()
         identity.id = "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC"
         let deploys = HandoverDeployments(root: harness.root)
-        XCTAssertFalse(IntentReconciler(platformVM: deploys.platformVM, machineIdentity: identity)
+        XCTAssertFalse(IntentReconciler(platformVM: deploys.platformVM, machineIdentity: identity, handoverIsComplete: { false })
             .reconcile(context: context).hasFailures)
         XCTAssertEqual(deploys.createCalls, 0)
         XCTAssertEqual(deploys.removeCalls, 0)
@@ -90,7 +91,7 @@ final class ScenarioHandoverTests: XCTestCase {
                 let durable = try harness.manifest.read(fromRoot: harness.root).deployIntents
                 XCTAssertEqual(durable.filter { $0.skillSlug == "skill" && $0.projectKey == nil }.count,
                                saves <= 2 ? 1 : 2, "manifest must precede each saved ownership")
-                if saves == failedSave { throw ScenarioStubFailure() }
+                if saves == failedSave { throw DeployStubFailure() }
                 try context.save()
             }
             XCTAssertFalse(harness.launch(handover).ingestionNeedsRetry)
@@ -136,7 +137,7 @@ final class ScenarioHandoverTests: XCTestCase {
         var saves = 0
         let handover = harness.handover { context in
             saves += 1
-            if saves == 2 { throw ScenarioStubFailure() }
+            if saves == 2 { throw DeployStubFailure() }
             try context.save()
         }
         XCTAssertFalse(harness.launch(handover).ingestionNeedsRetry)
@@ -146,7 +147,8 @@ final class ScenarioHandoverTests: XCTestCase {
         }
         try fresh.save()
         let deploys = HandoverDeployments(root: harness.root)
-        XCTAssertFalse(IntentReconciler(platformVM: deploys.platformVM, machineIdentity: harness.identity)
+        XCTAssertFalse(IntentReconciler(platformVM: deploys.platformVM, machineIdentity: harness.identity,
+            handoverIsComplete: { false })
             .reconcile(context: fresh).hasFailures)
         XCTAssertEqual(deploys.removeCalls, 0)
         XCTAssertEqual(try harness.deployedFiles(), before)
@@ -223,7 +225,8 @@ final class ScenarioHandoverTests: XCTestCase {
         let dependencies = DeployIntentDependencies.live(
             identity: harness.identity, stateService: MachineStateService(), root: harness.root,
             lockPath: harness.root + "/sync.lock", notifier: {}, reconcile: {
-                IntentReconciler(platformVM: deploys.platformVM, machineIdentity: harness.identity).reconcile(context: $0)
+                IntentReconciler(platformVM: deploys.platformVM, machineIdentity: harness.identity,
+                    handoverIsComplete: { false }).reconcile(context: $0)
             }
         )
         let model = DeployIntentModel(platformVM: deploys.platformVM, dependencies: dependencies)

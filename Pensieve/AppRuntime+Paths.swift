@@ -321,7 +321,6 @@ extension AppRuntimePaths {
             deployReconciler: makeDeployReconciler(),
             contextFactory: { ModelContext(container) },
             categoryReconciler: CategoryReconciler(platformVM: platformVM),
-            scenarioReconciler: ScenarioReconciler(platformVM: platformVM),
             intentReconciler: intentReconciler,
             auditLog: { SyncAudit(appSupport: appSupportDir).append(category: $0, detail: $1) },
             didConverge: { platformVM.noteDeployStateChanged() }

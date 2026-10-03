@@ -95,7 +95,7 @@ struct ManifestService: ManifestReadWriting {
         return ManifestSnapshot(
             schemaVersion: schema,
             categories: try readCategories(from: manifestDir).sorted { $0.name < $1.name },
-            scenarios: [],
+
             projects: try readProjects(from: manifestDir).sorted { $0.identityKey < $1.identityKey },
             skills: try readSkills(from: manifestDir).sorted { $0.slug < $1.slug },
             deployIntents: schema >= 4
@@ -219,11 +219,6 @@ extension ManifestService {
         return prefix + "-" + sha256Hex16(name) + ".yaml"
     }
 
-    static func scenarioFileName(name: String, id: String) -> String {
-        let prefix = slugify(name, fallback: "scn")
-        return prefix + "-" + sha256Hex16(id) + ".yaml"
-    }
-
     private static func slugify(_ value: String, fallback: String) -> String {
         let slug = value.lowercased()
             .replacing(/[^a-z0-9\s-]/, with: "")
@@ -244,15 +239,6 @@ extension ManifestService {
         lines.append("name: \(SkillSerializer.quotedScalar(category.name))")
         appendBlockList(&lines, key: "project_keys", values: category.projectKeys)
         appendBlockList(&lines, key: "skill_slugs", values: category.skillSlugs)
-        return lines.joined(separator: "\n") + "\n"
-    }
-
-    static func serializeScenario(_ scenario: ScenarioRecord) -> String {
-        var lines: [String] = []
-        lines.append("id: \(SkillSerializer.quotedScalar(scenario.id))")
-        lines.append("name: \(SkillSerializer.quotedScalar(scenario.name))")
-        appendBlockList(&lines, key: "skill_slugs", values: scenario.skillSlugs)
-        appendBlockList(&lines, key: "agents", values: scenario.agents)
         return lines.joined(separator: "\n") + "\n"
     }
 

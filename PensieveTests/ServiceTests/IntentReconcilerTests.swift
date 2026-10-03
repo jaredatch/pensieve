@@ -24,7 +24,7 @@ final class IntentReconcilerTests: XCTestCase {
 
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(harness.linkService.linkCalls, [
-            ScenarioRecordedLink(directoryName: "addressed", platform: .codex, projectPath: nil)
+            DeployRecordedLink(directoryName: "addressed", platform: .codex, projectPath: nil)
         ])
         XCTAssertEqual(try assignmentKeys(context: harness.context), [addressed.id.uuidString + "|codex"])
     }
@@ -44,7 +44,7 @@ final class IntentReconcilerTests: XCTestCase {
 
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(harness.linkService.unlinkCalls, [
-            ScenarioRecordedLink(directoryName: "alpha", platform: .codex, projectPath: nil)
+            DeployRecordedLink(directoryName: "alpha", platform: .codex, projectPath: nil)
         ])
         XCTAssertTrue(try assignmentKeys(context: harness.context).isEmpty)
     }
@@ -151,7 +151,7 @@ final class IntentReconcilerTests: XCTestCase {
             ManifestSnapshot(
                 schemaVersion: 5,
                 categories: [],
-                scenarios: [],
+
                 projects: [],
                 skills: [SkillOverlay(
                     slug: slug,
@@ -229,28 +229,28 @@ private extension IntentReconcilerTests {
         let context: ModelContext
         let reconciler: IntentReconciler
         let platformVM: PlatformViewModel
-        let fileService: ScenarioRecordingFileService
-        let linkService: ScenarioRecordingLinkService
+        let fileService: DeployRecordingFileService
+        let linkService: DeployRecordingLinkService
     }
 
     func makeHarness(installed: [PlatformTarget]) throws -> Harness {
         let context = ModelContext(try AppRuntime.makeContainer(
             configuration: ModelConfiguration(isStoredInMemoryOnly: true)
         ))
-        let fileService = ScenarioRecordingFileService()
-        let linkService = ScenarioRecordingLinkService(fileService: fileService)
+        let fileService = DeployRecordingFileService()
+        let linkService = DeployRecordingLinkService(fileService: fileService)
         let platformVM = PlatformViewModel(
             fileService: fileService,
             linkService: linkService,
-            cursorCompiler: ScenarioRecordingCursorCompiler(fileService: fileService),
-            agentDetection: ScenarioStubDetection(installed: installed),
+            cursorCompiler: DeployRecordingCursorCompiler(fileService: fileService),
+            agentDetection: DeployStubDetection(installed: installed),
             deployStateStore: DeployStateStore(fileService: fileService)
         )
         return Harness(
             context: context,
             reconciler: IntentReconciler(
                 platformVM: platformVM,
-                machineIdentity: IntentIdentityStub(id: localID)
+                machineIdentity: IntentIdentityStub(id: localID), handoverIsComplete: { false }
             ),
             platformVM: platformVM,
             fileService: fileService,

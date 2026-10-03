@@ -74,7 +74,8 @@ final class ScenarioHandoverLaunchTests: XCTestCase {
         let deploys = HandoverDeployments(root: harness.root)
         let convergence = HandoverConvergence()
         convergence.onLaunch = {
-            XCTAssertFalse(IntentReconciler(platformVM: deploys.platformVM, machineIdentity: harness.identity)
+            XCTAssertFalse(IntentReconciler(platformVM: deploys.platformVM, machineIdentity: harness.identity,
+                handoverIsComplete: { false })
                 .reconcile(context: harness.freshContext()).hasFailures)
         }
         var attempts = 0

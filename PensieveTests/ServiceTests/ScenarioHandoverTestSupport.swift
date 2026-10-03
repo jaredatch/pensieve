@@ -8,7 +8,7 @@ final class HandoverIdentity: MachineIdentityProviding {
     var calls = 0
     func identifier() throws -> String {
         calls += 1
-        if fails { throw ScenarioStubFailure() }
+        if fails { throw DeployStubFailure() }
         return id
     }
 }
@@ -22,7 +22,7 @@ final class HandoverManifest: ManifestSnapshotting {
     func read(fromRoot root: String) throws -> ManifestSnapshot { try live.read(fromRoot: root) }
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
         writes += 1
-        if failAllWrites || writes == failWrite { throw ScenarioStubFailure() }
+        if failAllWrites || writes == failWrite { throw DeployStubFailure() }
         try live.write(snapshot, toRoot: root)
     }
 }
@@ -170,19 +170,19 @@ struct HandoverFailingFetcher: ReconcilerStateFetching {
     let failure: HandoverRead
     let live = ReconcilerStateFetcher()
     func scenarioAssignments(context: ModelContext) throws -> [ScenarioAssignment] {
-        if failure == .scenario { throw ScenarioStubFailure() }
+        if failure == .scenario { throw DeployStubFailure() }
         return try live.scenarioAssignments(context: context)
     }
     func skills(context: ModelContext) throws -> [Skill] {
-        if failure == .skill { throw ScenarioStubFailure() }
+        if failure == .skill { throw DeployStubFailure() }
         return try live.skills(context: context)
     }
     func deployIntents(context: ModelContext) throws -> [MachineDeployIntent] {
-        if failure == .intent { throw ScenarioStubFailure() }
+        if failure == .intent { throw DeployStubFailure() }
         return try live.deployIntents(context: context)
     }
     func intentAssignments(context: ModelContext) throws -> [IntentAssignment] {
-        if failure == .assignment { throw ScenarioStubFailure() }
+        if failure == .assignment { throw DeployStubFailure() }
         return try live.intentAssignments(context: context)
     }
     func categoryAssignments(context: ModelContext) throws -> [SkillProjectAssignment] {
@@ -201,12 +201,12 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
     init(root: String) { self.root = root }
     var platformVM: PlatformViewModel {
         PlatformViewModel(fileService: files, linkService: self, cursorCompiler: self,
-                          agentDetection: ScenarioStubDetection(installed: [.codex, .cursor]),
+                          agentDetection: DeployStubDetection(installed: [.codex, .cursor]),
                           deployStateStore: .memoryBacked)
     }
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
         createCalls += 1
-        throw ScenarioStubFailure()
+        throw DeployStubFailure()
     }
     func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
         removeCalls += 1
@@ -222,7 +222,7 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
         root + "/skills/" + skill.directoryName
     }
     func validateAll(skills: [Skill]) -> [BrokenLink] { [] }
-    func compile(skill: Skill, projectPath: String?) throws { createCalls += 1; throw ScenarioStubFailure() }
+    func compile(skill: Skill, projectPath: String?) throws { createCalls += 1; throw DeployStubFailure() }
     func remove(skill: Skill, projectPath: String?) throws {
         removeCalls += 1
         try files.deleteFile(at: outputPath(skill: skill, projectPath: projectPath))

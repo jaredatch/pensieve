@@ -3,7 +3,7 @@ import XCTest
 @testable import Pensieve
 
 private struct UnreadableRemoteIdentity: MachineIdentityProviding {
-    func identifier() throws -> String { throw ScenarioStubFailure() }
+    func identifier() throws -> String { throw DeployStubFailure() }
 }
 
 @MainActor
@@ -143,7 +143,7 @@ extension DeployIntentModelTests {
         let harness = try makeHarness(
             writeManifest: { _ in
                 writes += 1
-                if writes == 2 { throw ScenarioStubFailure() }
+                if writes == 2 { throw DeployStubFailure() }
             },
             remoteRetractions: holds
         )
@@ -280,7 +280,7 @@ extension DeployIntentModelTests {
     func testFailedSheetRetractionRecordsNoHold() throws {
         let holds = RemoteRetractionStore()
         let harness = try makeHarness(
-            writeManifest: { _ in throw ScenarioStubFailure() },
+            writeManifest: { _ in throw DeployStubFailure() },
             remoteRetractions: holds
         )
         let skill = try insertSkill(context: harness.context)
@@ -302,7 +302,7 @@ extension DeployIntentModelTests {
         let holds = RemoteRetractionStore()
         let harness = try makeHarness(
             saveContext: { context in
-                if shouldFailSave { throw ScenarioStubFailure() }
+                if shouldFailSave { throw DeployStubFailure() }
                 try context.save()
             },
             remoteRetractions: holds

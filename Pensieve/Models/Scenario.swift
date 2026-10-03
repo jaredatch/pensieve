@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 
+/// Retained for SwiftData compatibility while legacy deploy ownership is handed over.
 @Model
 final class Scenario {
     @Attribute(.unique) var id: UUID
@@ -8,7 +9,7 @@ final class Scenario {
     var createdAt: Date
     /// Member skills, stored by Skill.directoryName (the cross-machine join key).
     var skillSlugs: [String]
-    /// Enabled agents, stored as PlatformTarget raw values so the set can sync through the manifest.
+    /// Legacy enabled agents, retained as PlatformTarget raw values for SwiftData compatibility.
     var agentRawValues: [String]
 
     init(name: String) {

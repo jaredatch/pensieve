@@ -124,16 +124,6 @@ enum ListRows {
             .localizedCaseInsensitiveContains(query)
     }
 
-    static func scenario(_ scenario: Scenario, skills: [Skill], isActive: Bool) -> ListRowModel {
-        let agents = scenario.agentRawValues.map { PlatformTarget(rawValue: $0)?.displayName ?? $0 }
-        return ListRowModel(
-            title: scenario.name,
-            trailingText: isActive ? "Active" : nil,
-            line2: skillNamesLine(scenario.skillSlugs, skills: skills),
-            line3: agents.isEmpty ? "No agents" : agents.joined(separator: ", ")
-        )
-    }
-
     /// "1 skill" / "3 skills" / "0 skills": the trailing counts read as counts, never as "No skills"
     /// (that placeholder belongs to the lines, where it replaces a list of names).
     static func counted(_ count: Int, _ singular: String) -> String {
@@ -180,7 +170,6 @@ enum ListSubtitle {
         case .skills: ("skill", "skills")
         case .projects: ("project", "projects")
         case .categories: ("category", "categories")
-        case .scenarios: ("scenario", "scenarios")
         case .tags: ("tag", "tags")
         case .machines: ("machine", "machines")
         }
@@ -234,7 +223,6 @@ enum ListLineTitles {
         case .skills: ("Show Deployments", "Show Description")
         case .projects: ("Show Path", "Show Identity")
         case .categories: ("Show Projects", "Show Skills")
-        case .scenarios: ("Show Skills", "Show Agents")
         case .tags: ("Show Skills", nil)
         case .machines: ("Show Agents", "Show Deployments")
         }

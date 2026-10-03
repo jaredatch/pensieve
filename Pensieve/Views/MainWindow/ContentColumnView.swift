@@ -49,15 +49,6 @@ struct ContentColumnView: View {
                 onAdd: { onAdd(.categories) },
                 addsFenced: library.addsFenced
             )
-        case .scenarioList:
-            ScenarioListView(
-                entitySelection: $entitySelection,
-                searchText: $searchText,
-                platformVM: platformVM,
-                notifier: notifier,
-                onAdd: { onAdd(.scenarios) },
-                addsFenced: library.addsFenced
-            )
         case .tagList:
             TagListView(entitySelection: $entitySelection, searchText: $searchText)
         case .machineList:

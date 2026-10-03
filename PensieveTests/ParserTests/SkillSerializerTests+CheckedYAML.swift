@@ -15,7 +15,7 @@ extension SkillSerializerTests {
 
         for (index, value) in values.enumerated() {
             let label = "case \(index): \(value.debugDescription)"
-            try assertSkillCategoryAndScenarioFields(value, label: label)
+            try assertSkillAndCategoryFields(value, label: label)
             try assertOverlayAndDeployFields(value, label: label)
         }
     }
@@ -166,7 +166,7 @@ extension SkillSerializerTests {
         return [checked, legacy]
     }
 
-    private func assertSkillCategoryAndScenarioFields(_ value: String, label: String) throws {
+    private func assertSkillAndCategoryFields(_ value: String, label: String) throws {
         let skill = SkillSerializer.serialize(name: value, description: value, body: "Body")
         let frontmatter = try XCTUnwrap(SkillParser.parse(skill).preservedFrontmatter?.source, label)
         for skillMap in try loadMappings(
@@ -193,20 +193,6 @@ extension SkillSerializerTests {
             XCTAssertEqual((categoryMap["skill_slugs"] as? [Any])?.first as? String, value, label)
         }
 
-        let scenario = ManifestService.serializeScenario(
-            ScenarioRecord(id: value, name: value, skillSlugs: [value], agents: [value])
-        )
-        for scenarioMap in try loadMappings(
-            scenario,
-            originalValue: value,
-            expectedLegacyQuoteCount: 4,
-            label: label
-        ) {
-            XCTAssertEqual(scenarioMap["id"] as? String, value, label)
-            XCTAssertEqual(scenarioMap["name"] as? String, value, label)
-            XCTAssertEqual((scenarioMap["skill_slugs"] as? [Any])?.first as? String, value, label)
-            XCTAssertEqual((scenarioMap["agents"] as? [Any])?.first as? String, value, label)
-        }
     }
 
     private func assertOverlayAndDeployFields(_ value: String, label: String) throws {

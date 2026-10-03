@@ -20,7 +20,7 @@ private extension DeployIntentModelTests {
         let selectionBefore: Set<String>
         let selectionAfter: Set<String>
         let intentKeys: [String]
-        let linkCalls: [ScenarioRecordedLink]
+        let linkCalls: [DeployRecordedLink]
         let files: Set<String>
         let symlinks: Set<String>
     }

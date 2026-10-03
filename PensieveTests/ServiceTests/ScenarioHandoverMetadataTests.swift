@@ -113,7 +113,7 @@ final class ScenarioHandoverMetadataTests: XCTestCase {
         let rebuild = UnsavedSkillRebuild(
             skill: restored,
             live: StoreRebuildService(fileService: harness.files, manifestService: harness.manifest,
-                                      save: { _ in throw ScenarioStubFailure() })
+                                      save: { _ in throw DeployStubFailure() })
         )
         let outcome = LaunchReconciler(
             rebuildService: rebuild, fileService: harness.files, manifestService: harness.manifest,
@@ -128,7 +128,8 @@ final class ScenarioHandoverMetadataTests: XCTestCase {
         XCTAssertEqual(harness.manifest.writes, 0)
         XCTAssertEqual(try harness.deployedFiles(), before)
         let deploys = HandoverDeployments(root: harness.root)
-        XCTAssertFalse(IntentReconciler(platformVM: deploys.platformVM, machineIdentity: harness.identity)
+        XCTAssertFalse(IntentReconciler(platformVM: deploys.platformVM, machineIdentity: harness.identity,
+            handoverIsComplete: { false })
             .reconcile(context: launchContext).hasFailures)
         XCTAssertEqual(deploys.removeCalls, 0)
         try launchContext.save()

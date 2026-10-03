@@ -58,7 +58,7 @@ extension ManifestServiceTests {
         let snapshot = ManifestSnapshot(
             schemaVersion: ManifestService.currentSchemaVersion,
             categories: categories,
-            scenarios: [],
+
             projects: projects,
             skills: skills
         )
@@ -126,8 +126,6 @@ extension ManifestServiceTests {
         ManifestSnapshot(
             schemaVersion: ManifestService.currentSchemaVersion,
             categories: [CategoryRecord(name: "Category", projectKeys: [], skillSlugs: [])],
-            scenarios: [ScenarioRecord(id: "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB", name: "Scenario",
-                                       skillSlugs: [], agents: [])],
             projects: [],
             skills: [SkillOverlay(slug: "skill", createdAt: Date(timeIntervalSince1970: 0),
                                   scope: .user, tags: [], cursor: nil, agents: [], origin: .authored)],

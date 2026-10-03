@@ -136,7 +136,7 @@ final class SafeSkillFileGUISinkTests: XCTestCase {
 
     private func writeEmptyManifest() throws {
         try ManifestService(fileService: fileService).write(
-            ManifestSnapshot(schemaVersion: 1, categories: [], scenarios: [], projects: [], skills: []),
+            ManifestSnapshot(schemaVersion: 1, categories: [], projects: [], skills: []),
             toRoot: tempDir
         )
     }

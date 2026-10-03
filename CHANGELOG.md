@@ -8,6 +8,10 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 - Pensieve is open source. The code lives at [github.com/jaredatch/pensieve](https://github.com/jaredatch/pensieve), and that's the place to report a bug or ask for something.
 
+### Removed
+
+- Scenarios are gone. Skills they deployed stay in place, and existing scenario files stay in your synced store for older builds.
+
 ### Fixed
 
 - Pensieve could freeze while running git on Macs with only a few cores. Several git commands at once could wait on each other forever. They don't anymore.

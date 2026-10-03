@@ -11,6 +11,7 @@ struct IntentReconciler: IntentReconcilerProtocol {
     let platformVM: PlatformViewModel
     let stateFetcher: ReconcilerStateFetching
     private let machineIdentity: MachineIdentityProviding
+    private let handoverIsComplete: () -> Bool
 
     struct UserPair: Hashable {
         let skillID: UUID
@@ -37,11 +38,13 @@ struct IntentReconciler: IntentReconcilerProtocol {
     init(
         platformVM: PlatformViewModel,
         machineIdentity: MachineIdentityProviding = MachineIdentity(),
-        stateFetcher: ReconcilerStateFetching = ReconcilerStateFetcher()
+        stateFetcher: ReconcilerStateFetching = ReconcilerStateFetcher(),
+        handoverIsComplete: @escaping () -> Bool = { UserDefaults.standard.bool(forKey: ScenarioHandover.doneKey) }
     ) {
         self.platformVM = platformVM
         self.machineIdentity = machineIdentity
         self.stateFetcher = stateFetcher
+        self.handoverIsComplete = handoverIsComplete
     }
 
     @discardableResult
@@ -71,7 +74,7 @@ struct IntentReconciler: IntentReconcilerProtocol {
         let intents = try stateFetcher.deployIntents(context: context)
         let skills = try stateFetcher.skills(context: context)
         let ledger = try stateFetcher.intentAssignments(context: context)
-        let scenarioLedger = try stateFetcher.scenarioAssignments(context: context)
+        let scenarioLedger = handoverIsComplete() ? [] : try stateFetcher.scenarioAssignments(context: context)
         let categoryLedger = try stateFetcher.categoryAssignments(context: context)
         let projects = try stateFetcher.projects(context: context)
         var projectsByKey: [String: [Project]] = [:]

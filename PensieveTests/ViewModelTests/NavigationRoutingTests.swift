@@ -5,7 +5,7 @@ final class NavigationRoutingTests: XCTestCase {
     func testContentRouteIsOnePerSection() {
         XCTAssertEqual(
             SidebarSection.allCases.map(contentColumn(for:)),
-            [.skillList, .projectList, .categoryList, .scenarioList, .tagList, .machineList]
+            [.skillList, .projectList, .categoryList, .tagList, .machineList]
         )
     }
 
@@ -19,8 +19,8 @@ final class NavigationRoutingTests: XCTestCase {
         }
     }
 
-    func testSidebarSectionAllCasesHasSixMembers() {
-        XCTAssertEqual(SidebarSection.allCases.count, 6)
+    func testSidebarSectionAllCasesHasFiveMembers() {
+        XCTAssertEqual(SidebarSection.allCases.count, 5)
     }
 
     func testDetailRouteForMultipleSkillsShowsBulk() {
@@ -54,7 +54,7 @@ final class NavigationRoutingTests: XCTestCase {
     func testPrunedEntitySelectionDropsVanishedTag() {
         XCTAssertNil(
             prunedEntitySelection(
-                .tag("swift"), projectIDs: [], categoryIDs: [], scenarioIDs: [],
+                .tag("swift"), projectIDs: [], categoryIDs: [],
                 machineIDs: [], tags: []
             )
         )
@@ -107,7 +107,6 @@ final class NavigationRoutingTests: XCTestCase {
     func testDetailRouteForEachEntitySectionRoutesToItsEntity() {
         let projectID = UUID()
         let categoryID = UUID()
-        let scenarioID = UUID()
 
         XCTAssertEqual(
             detailColumn(
@@ -122,13 +121,6 @@ final class NavigationRoutingTests: XCTestCase {
                 selectedSkillCount: 0, skillsEmpty: false
             ),
             .category(categoryID)
-        )
-        XCTAssertEqual(
-            detailColumn(
-                for: .scenarios, entity: .scenario(scenarioID),
-                selectedSkillCount: 0, skillsEmpty: false
-            ),
-            .scenario(scenarioID)
         )
         XCTAssertEqual(
             detailColumn(
@@ -170,7 +162,7 @@ final class NavigationRoutingTests: XCTestCase {
 
     func testEntitySelectionSectionMappingIsTotal() {
         let selections: [EntitySelection] = [
-            .project(UUID()), .category(UUID()), .scenario(UUID()),
+            .project(UUID()), .category(UUID()),
             .machine("mac-mini"), .tag("swift")
         ]
         let mappedSections = Set(selections.map(\.section))
@@ -182,14 +174,14 @@ final class NavigationRoutingTests: XCTestCase {
 
     func testPrunedEntitySelectionDropsDeletedEntity() {
         let selections: [EntitySelection] = [
-            .project(UUID()), .category(UUID()), .scenario(UUID()),
+            .project(UUID()), .category(UUID()),
             .machine("mac-mini"), .tag("swift")
         ]
 
         for selection in selections {
             XCTAssertNil(
                 prunedEntitySelection(
-                    selection, projectIDs: [], categoryIDs: [], scenarioIDs: [],
+                    selection, projectIDs: [], categoryIDs: [],
                     machineIDs: [], tags: []
                 )
             )
@@ -199,9 +191,8 @@ final class NavigationRoutingTests: XCTestCase {
     func testPrunedEntitySelectionKeepsLiveEntity() {
         let projectID = UUID()
         let categoryID = UUID()
-        let scenarioID = UUID()
         let selections: [EntitySelection] = [
-            .project(projectID), .category(categoryID), .scenario(scenarioID),
+            .project(projectID), .category(categoryID),
             .machine("mac-mini"), .tag("swift")
         ]
 
@@ -209,7 +200,7 @@ final class NavigationRoutingTests: XCTestCase {
             XCTAssertEqual(
                 prunedEntitySelection(
                     selection, projectIDs: [projectID], categoryIDs: [categoryID],
-                    scenarioIDs: [scenarioID], machineIDs: ["mac-mini"], tags: ["swift"]
+                    machineIDs: ["mac-mini"], tags: ["swift"]
                 ),
                 selection
             )
@@ -219,8 +210,7 @@ final class NavigationRoutingTests: XCTestCase {
     func testSelectionAfterCreatingSelectsMatchingEntityAndClearsSearch() {
         let created: [(SidebarSection, EntitySelection)] = [
             (.projects, .project(UUID())),
-            (.categories, .category(UUID())),
-            (.scenarios, .scenario(UUID()))
+            (.categories, .category(UUID()))
         ]
 
         for (section, selection) in created {
@@ -250,12 +240,12 @@ final class NavigationRoutingTests: XCTestCase {
     }
 
     func testSelectionAfterCreatingKeepsSelectionAndSearchWithoutCreatedEntity() {
-        let original = EntitySelection.scenario(UUID())
+        let original = EntitySelection.category(UUID())
         var current: EntitySelection? = original
         var searchText = "Old"
 
         selectionAfterCreating(
-            nil, in: .scenarios, entity: &current, searchText: &searchText
+            nil, in: .categories, entity: &current, searchText: &searchText
         )
 
         XCTAssertEqual(current, original)
@@ -323,9 +313,9 @@ extension NavigationRoutingTests {
 
     func testRevealSkillSurvivesTheSectionChangeClearingRule() {
         let skill = Skill(name: "Reveal", directoryName: "reveal")
-        let oldSection = SidebarSection.scenarios
+        let oldSection = SidebarSection.categories
         var section = oldSection
-        var entity: EntitySelection? = .scenario(UUID())
+        var entity: EntitySelection? = .category(UUID())
         var selectedSkills: Set<Skill> = []
         var filter = SkillListFilter()
         var searchText = ""

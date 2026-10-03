@@ -98,7 +98,7 @@ final class SkillContentTabLayoutTests: XCTestCase {
 
     private func sourceFixture(selectedFile: String) -> (host: NSHostingView<AnyView>, window: NSWindow) {
         let skill = Skill(name: "Example", directoryName: "example")
-        let fileService = ScenarioRecordingFileService()
+        let fileService = DeployRecordingFileService()
         fileService.contents[Constants.pensieveSkillsDir + "/example/scripts/x.sh"] = "echo hi"
         let base = NSTemporaryDirectory() + "SkillContentTabLayoutTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(

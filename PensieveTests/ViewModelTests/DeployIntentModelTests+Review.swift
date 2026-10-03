@@ -10,7 +10,7 @@ struct DeployIntentIdentityStub: MachineIdentityProviding {
 struct DeployIntentStateStub: MachineStateServicing {
     let states: [MachineState]
     func compose(machineID: String, context: ModelContext, publishedAt: Date) throws -> MachineState {
-        throw ScenarioStubFailure()
+        throw DeployStubFailure()
     }
     func write(_ state: MachineState, toRoot root: String) throws {}
     func readAll(fromRoot root: String) -> [MachineState] { states }
@@ -19,7 +19,7 @@ struct DeployIntentStateStub: MachineStateServicing {
 @MainActor
 extension DeployIntentModelTests {
     func testSheetReadFailureDoesNotDeleteAnyMachineIntent() throws {
-        let harness = try makeHarness(fetchIntents: { _ in throw ScenarioStubFailure() })
+        let harness = try makeHarness(fetchIntents: { _ in throw DeployStubFailure() })
         let skill = try insertSkill(context: harness.context)
         for machineID in [localID, remoteID] {
             harness.context.insert(MachineDeployIntent(
@@ -250,7 +250,7 @@ extension DeployIntentModelTests {
         var onSaveAttempts = 0
         let failedOn = try makeHarness(saveContext: { context in
             onSaveAttempts += 1
-            if onSaveAttempts == 1 { throw ScenarioStubFailure() }
+            if onSaveAttempts == 1 { throw DeployStubFailure() }
             try context.save()
         })
         let onSkill = try insertSkill(context: failedOn.context)
@@ -267,7 +267,7 @@ extension DeployIntentModelTests {
         var offSaveAttempts = 0
         let failedOff = try makeHarness(saveContext: { context in
             offSaveAttempts += 1
-            if offSaveAttempts == 2 { throw ScenarioStubFailure() }
+            if offSaveAttempts == 2 { throw DeployStubFailure() }
             try context.save()
         })
         let offSkill = try insertSkill(context: failedOff.context)
@@ -291,7 +291,7 @@ extension DeployIntentModelTests {
         let harness = try makeHarness(
             writeManifest: { _ in
                 writes += 1
-                if writes == 2 { throw ScenarioStubFailure() }
+                if writes == 2 { throw DeployStubFailure() }
             },
             saveContext: { _ in throw CocoaError(.fileWriteUnknown) }
         )
