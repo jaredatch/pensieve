@@ -41,19 +41,15 @@ enum SkillSerializer {
         fallbackName: String,
         fallbackDescription: String
     ) -> String {
-        let body = normalizeLineEndings(
-            bodyWithoutTerminalLineBreaks(body),
-            to: parsed.preferredLineEnding
-        )
         if let file = parsed.preservedFile {
-            if SkillParser.canonicalBody(body) == file.body {
+            if body == file.body || body == file.body + file.bodySuffix {
                 return file.source
             }
             let separator: String
-            switch file.bodyPrefix.utf8.last {
-            case 0x0A: separator = ""
-            case 0x0D: separator = "\n"
-            default: separator = parsed.preferredLineEnding
+            if let last = file.bodyPrefix.unicodeScalars.last, SkillParser.isYAMLLineBreak(last) {
+                separator = last == "\r" && file.body.isEmpty ? "\n" : ""
+            } else {
+                separator = parsed.preferredLineEnding
             }
             return file.bodyPrefix + separator + body + file.bodySuffix
         }
@@ -68,14 +64,15 @@ enum SkillSerializer {
     /// Normalize the two identity entries while retaining every other trustworthy source slice.
     /// Returns nil rather than fabricating output when the parser could not safely identify entries.
     static func normalizeIdentity(name: String, description: String, parsed: ParsedSkill) -> String? {
-        let body = bodyWithoutTerminalLineBreaks(parsed.body)
         guard let frontmatter = parsed.preservedFrontmatter else {
-            return compose(
+            guard parsed.preservedFile == nil else { return nil }
+            let output = compose(
                 name: name,
                 description: description,
-                body: body,
+                body: parsed.body,
                 lineEnding: parsed.preferredLineEnding
-            ) + parsed.trailingLineBreaks
+            )
+            return identityOutputIsValid(output, original: parsed, name: name, description: description) ? output : nil
         }
         guard frontmatter.entriesAreTrustworthy, let file = parsed.preservedFile else { return nil }
         let source = replacingIdentityEntries(
@@ -84,7 +81,29 @@ enum SkillSerializer {
             description: description,
             lineEnding: parsed.preferredLineEnding
         )
-        return file.frontmatterPrefix + source + file.frontmatterSuffix
+        let output = file.frontmatterPrefix + source + file.frontmatterSuffix
+        return identityOutputIsValid(output, original: parsed, name: name, description: description) ? output : nil
+    }
+
+    /// Compare checked nodes, including their resolved tags and complete nested structure. This
+    /// covers Yams' tuple-valued !!omap/!!pairs as well as scalars, sequences, mappings and sets,
+    /// without depending on Foundation's equality for arbitrary constructed Swift values.
+    private static func identityOutputIsValid(
+        _ output: String, original: ParsedSkill, name: String, description: String
+    ) -> Bool {
+        let written = SkillParser.parse(output)
+        guard written.name == name, written.description == description,
+              let writtenYAML = written.preservedFrontmatter?.source else { return false }
+        guard let originalYAML = original.preservedFrontmatter?.source else { return true }
+        guard let before = try? CheckedYAMLLoader.composeAndLoad(yaml: originalYAML).root,
+              let after = try? CheckedYAMLLoader.composeAndLoad(yaml: writtenYAML).root,
+              before.tag == after.tag,
+              let beforeMapping = before.mapping, let afterMapping = after.mapping else { return false }
+        let beforeEntries = beforeMapping.filter { !["name", "description"].contains($0.key.string ?? "") }
+        let afterEntries = afterMapping.filter { !["name", "description"].contains($0.key.string ?? "") }
+        return beforeEntries.count == afterEntries.count && zip(beforeEntries, afterEntries).allSatisfy {
+            $0.key == $1.key && $0.value == $1.value
+        }
     }
 
     private static func replacingIdentityEntries(
@@ -171,23 +190,6 @@ enum SkillSerializer {
             }
         }
         return result
-    }
-
-    private static func bodyWithoutTerminalLineBreaks(_ body: String) -> String {
-        let scalars = body.unicodeScalars
-        var end = scalars.endIndex
-        while end > scalars.startIndex {
-            let previous = scalars.index(before: end)
-            guard scalars[previous] == "\n" || scalars[previous] == "\r" else { break }
-            end = previous
-        }
-        return String(scalars[..<end])
-    }
-
-    private static func normalizeLineEndings(_ value: String, to lineEnding: String) -> String {
-        value.replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-            .replacingOccurrences(of: "\n", with: lineEnding)
     }
 
     /// Shared canonical YAML scalar quoter for both SKILL.md frontmatter and the manifest overlay

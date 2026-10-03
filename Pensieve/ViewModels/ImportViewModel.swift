@@ -181,35 +181,16 @@ final class ImportViewModel {
         guard let source = discovered.sourceContent else { return (nil, false) }
         let parsed = SkillParser.parse(source)
         if parsed.preservedFrontmatter != nil,
-           let normalized = SkillSerializer.normalizeIdentity(name: discovered.name, description: description, parsed: parsed),
-           normalizationPreservesSource(normalized, parsed: parsed, name: discovered.name, description: description) {
+           let normalized = SkillSerializer.normalizeIdentity(name: discovered.name, description: description, parsed: parsed) {
             return (normalized, false)
         }
-        let firstLine = source.components(separatedBy: "\n")
+        let firstLine = SkillParser.sourceLines(in: source).map { source[$0.contentRange] }
             .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         let startsWithFence = firstLine?.trimmingCharacters(in: .whitespacesAndNewlines) == "---"
         return (
             SkillSerializer.serialize(name: discovered.name, description: description, body: source),
             startsWithFence
         )
-    }
-
-    /// Import verifies the splice independently of the parser's line-based entry ranges.
-    /// Compare loaded mappings so keys hidden by quoted scalars or YAML line breaks cannot disappear.
-    private func normalizationPreservesSource(
-        _ normalized: String, parsed: ParsedSkill, name: String, description: String
-    ) -> Bool {
-        let written = SkillParser.parse(normalized)
-        guard written.hasRequiredFrontmatter, written.name == name, written.description == description,
-              let sourceYAML = parsed.preservedFrontmatter?.source,
-              let writtenYAML = written.preservedFrontmatter?.source,
-              var sourceEntries = try? CheckedYAMLLoader.load(yaml: sourceYAML) as? [String: Any],
-              var writtenEntries = try? CheckedYAMLLoader.load(yaml: writtenYAML) as? [String: Any] else { return false }
-        for key in ["name", "description"] {
-            sourceEntries.removeValue(forKey: key)
-            writtenEntries.removeValue(forKey: key)
-        }
-        return (sourceEntries as NSDictionary).isEqual(to: writtenEntries)
     }
 
 }

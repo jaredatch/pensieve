@@ -1,0 +1,116 @@
+import SwiftData
+import XCTest
+@testable import Pensieve
+
+final class UntrustedSkillRewriteTests: XCTestCase {
+    private var root: String!
+    private var files: ImportReadSpy!
+
+    override func setUpWithError() throws {
+        root = NSTemporaryDirectory() + "UntrustedSkillRewrite-" + UUID().uuidString
+        files = ImportReadSpy(files: FileService())
+        try files.createDirectory(at: root)
+    }
+
+    override func tearDownWithError() throws {
+        try files.deleteDirectory(at: root)
+    }
+
+    @MainActor
+    private func context() throws -> ModelContext {
+        ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
+    }
+
+    private var store: SkillStore { SkillStore(fileService: files, baseDir: root + "/store/skills") }
+
+    @MainActor
+    func testGeneratedMigrationSweepPreservesRefusedFilesAndWarns() throws {
+        let context = try context()
+        let fixtures = FrontmatterRewriteFixture.sweep
+        for (index, fixture) in fixtures.enumerated() {
+            let slug = "case-\(index)"
+            let skill = Skill(name: "New", skillDescription: "New description", directoryName: slug)
+            context.insert(skill)
+            try files.writeFile(at: root + "/store/skills/\(slug)/SKILL.md", content: fixture.source)
+        }
+        files.writtenPaths = []
+        let result = StoreMigrationService(
+            fileService: files, manifestService: ManifestService(fileService: files), skillStore: store
+        ).migrateIfNeeded(fromRoot: root + "/store", context: context)
+        for (index, fixture) in fixtures.enumerated() {
+            let slug = "case-\(index)"
+            let path = root + "/store/skills/\(slug)/SKILL.md"
+            let expected: String
+            if fixture.trustsEntries {
+                expected = fixture.source.replacingOccurrences(of: "name: A", with: "name: New")
+                    .replacingOccurrences(of: "description: D", with: "description: New description")
+            } else if fixture.header != nil {
+                expected = fixture.source
+                XCTAssertFalse(files.writtenPaths.contains(path), fixture.label)
+                XCTAssertTrue(result.warnings.contains { $0.contains("'\(slug)'") && $0.contains("not normalized") },
+                              fixture.label)
+            } else {
+                let ending = fixture.lineEnding == "\r\n" ? "\r\n" : "\n"
+                expected = "---\(ending)name: New\(ending)description: New description\(ending)---"
+                    + ending + ending + fixture.source
+            }
+            XCTAssertEqual(try files.files.readData(at: path), Data(expected.utf8), fixture.label)
+        }
+    }
+
+    @MainActor
+    func testGeneratedImportSweepNormalizesSafeValuesAndKeepsFallbackSource() throws {
+        for (index, fixture) in FrontmatterRewriteFixture.sweep.enumerated() {
+            let scanner = ImportScanner(
+                fileService: files, claudeSkillsDir: root + "/claude", grokSkillsDir: root + "/grok",
+                cursorRulesDir: root + "/cursor", codexSkillsDir: root + "/codex", storeRoot: root + "/store"
+            )
+            let model = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: root + "/store")
+            let context = try context()
+            let folder = root + "/source-\(index)"
+            try files.writeFile(at: folder + "/SKILL.md", content: fixture.source)
+            XCTAssertEqual(model.scanFolder(folder), .found(1), fixture.label)
+            // Exercise a real identity change after discovery; both callers use the shared validation.
+            let discovered = try XCTUnwrap(model.discoveredSkills.first)
+            model.discoveredSkills = [DiscoveredSkill(
+                name: "New", body: discovered.body, sourcePlatform: discovered.sourcePlatform,
+                sourcePath: discovered.sourcePath, skillDescription: "New description", sourceContent: discovered.sourceContent
+            )]
+            model.importSelected(context: context)
+            XCTAssertNil(model.error, fixture.label)
+            let row = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
+            let path = root + "/store/skills/\(row.directoryName)/SKILL.md"
+            let expected = fixture.trustsEntries
+                ? fixture.source.replacingOccurrences(of: "name: A", with: "name: New")
+                    .replacingOccurrences(of: "description: D", with: "description: New description")
+                : "---\nname: New\ndescription: New description\n---\n\n" + fixture.source
+            XCTAssertEqual(try files.files.readData(at: path), Data(expected.utf8), fixture.label)
+            XCTAssertEqual(model.importNotices, fixture.trustsEntries ? [] : ["New: frontmatter was kept as text."],
+                           fixture.label)
+        }
+    }
+
+    @MainActor
+    func testGeneratedBodySavesKeepFrontmatterAndExactEditedBytes() throws {
+        let model = SkillLibraryViewModel(skillStore: store, fileService: files, manifestRoot: root + "/store")
+        let edited = "First\nSecond\r\nThird\rFourth\u{85}Fifth\u{2028}Sixth\u{2029}Last"
+        for (index, fixture) in FrontmatterRewriteFixture.sweep.enumerated() {
+            let slug = "case-\(index)"
+            let path = root + "/store/skills/\(slug)/SKILL.md"
+            let skill = Skill(name: "A", skillDescription: "D", directoryName: slug)
+            try files.writeFile(at: path, content: fixture.source)
+            XCTAssertTrue(model.updateBody(skill, body: edited), fixture.label)
+            if let header = fixture.header {
+                XCTAssertEqual(try files.files.readData(at: path), Data((header + edited + fixture.terminal).utf8), fixture.label)
+            } else {
+                let ending = fixture.lineEnding == "\r\n" ? "\r\n" : "\n"
+                let expected = "---\(ending)name: A\(ending)description: D\(ending)---"
+                    + ending + ending + edited + fixture.terminal
+                XCTAssertEqual(try files.files.readData(at: path), Data(expected.utf8), fixture.label)
+            }
+            let first = try files.files.readData(at: path)
+            XCTAssertTrue(model.updateBody(skill, body: edited), fixture.label)
+            XCTAssertEqual(try files.files.readData(at: path), first, fixture.label)
+        }
+    }
+}
