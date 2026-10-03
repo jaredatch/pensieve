@@ -17,15 +17,19 @@ struct ScenarioHandover: ScenarioHandingOver {
         var errorDescription: String? { "Scenario handover requires a canonical machine identity." }
     }
 
+    struct UnsavedLaunchContext: LocalizedError {
+        var errorDescription: String? { "Scenario handover requires saved launch rebuild changes." }
+    }
+
     private let machineIdentity: MachineIdentityProviding
-    private let manifest: ManifestReadWriting
+    private let manifest: ManifestSnapshotting
     private let root: String
     private let defaults: UserDefaults
     private let fetcher: ReconcilerStateFetching
     private let save: (ModelContext) throws -> Void
     private let log: (String) -> Void
 
-    init(machineIdentity: MachineIdentityProviding, manifest: ManifestReadWriting,
+    init(machineIdentity: MachineIdentityProviding, manifest: ManifestSnapshotting,
          root: String, defaults: UserDefaults,
          fetcher: ReconcilerStateFetching = ReconcilerStateFetcher(),
          save: @escaping (ModelContext) throws -> Void = { try $0.save() },
@@ -41,6 +45,9 @@ struct ScenarioHandover: ScenarioHandingOver {
 
     func handOver(context caller: ModelContext) throws {
         guard !defaults.bool(forKey: Self.doneKey) else { return }
+        // A failed rebuild save leaves live skills visible only in the launch context. Never
+        // classify those pairs as orphans using a fresh context, or persist the caller's edits here.
+        guard !caller.hasChanges else { throw UnsavedLaunchContext() }
         let context = ModelContext(caller.container)
         context.autosaveEnabled = false
         let machineID = try machineIdentity.identifier()
@@ -51,7 +58,7 @@ struct ScenarioHandover: ScenarioHandingOver {
         let skillByID = Dictionary(skills.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var intentKeys = Set(try fetcher.deployIntents(context: context).map(\.key))
         var assignmentKeys = Set(try fetcher.intentAssignments(context: context).map(\.key))
-        var snapshot = try manifest.read(fromRoot: root)
+        var snapshot = try preservedSnapshot(context: context)
         var unmanagedCount = 0
 
         do {
@@ -65,7 +72,6 @@ struct ScenarioHandover: ScenarioHandingOver {
                 guard ManifestService.isAdmittedIntentComponent(skill.directoryName),
                       SkillStore.isPathSafeSlug(skill.directoryName),
                       ManifestService.isAdmittedIntentComponent(platform) else {
-                    try manifest.write(snapshot, toRoot: root)
                     context.delete(row)
                     try save(context)
                     unmanagedCount += 1
@@ -93,5 +99,33 @@ struct ScenarioHandover: ScenarioHandingOver {
         defaults.removeObject(forKey: Self.activeKey)
         defaults.set(true, forKey: Self.doneKey)
         log("Completed for \(machineID): \(rows.count) legacy rows retired; \(unmanagedCount) left unmanaged in this run.")
+    }
+
+    /// An absent/partial tree is silent about cached metadata, and disk-only facts can outlive
+    /// their local cache. Preserve both sets; local overlay fields win when both name one skill.
+    private func preservedSnapshot(context: ModelContext) throws -> ManifestSnapshot {
+        var snapshot = try manifest.read(fromRoot: root)
+        let cached = try manifest.snapshot(from: context)
+        for category in cached.categories {
+            if let index = snapshot.categories.firstIndex(where: { $0.name == category.name }) {
+                snapshot.categories[index].projectKeys = Array(Set(
+                    snapshot.categories[index].projectKeys + category.projectKeys)).sorted()
+                snapshot.categories[index].skillSlugs = Array(Set(
+                    snapshot.categories[index].skillSlugs + category.skillSlugs)).sorted()
+            } else {
+                snapshot.categories.append(category)
+            }
+        }
+        for overlay in cached.skills {
+            if let index = snapshot.skills.firstIndex(where: { $0.slug == overlay.slug }) {
+                snapshot.skills[index] = overlay
+            } else {
+                snapshot.skills.append(overlay)
+            }
+        }
+        for intent in cached.deployIntents where !snapshot.deployIntents.contains(intent) {
+            snapshot.deployIntents.append(intent)
+        }
+        return snapshot
     }
 }

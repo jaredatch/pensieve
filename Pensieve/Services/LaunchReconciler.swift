@@ -199,7 +199,6 @@ struct LaunchReconciler {
             let migration = migrationService.migrateIfNeeded(fromRoot: root, context: context)
             result.migrationRan = migration.manifestWritten && migration.warnings.isEmpty
             if !result.migrationRan, scenarioHandover != nil {
-                result.ingestionNeedsRetry = true
                 result.rebuild.warnings.append(contentsOf: migration.warnings)
                 return result
             }
@@ -207,10 +206,9 @@ struct LaunchReconciler {
         do {
             try scenarioHandover?.handOver(context: context)
         } catch {
-            result.ingestedHeadStamp = nil
-            result.ingestionNeedsRetry = true
-            result.rebuild.warnings.append("Scenario handover will retry: \(error.localizedDescription)")
-            NSLog("Pensieve scenario handover will retry: \(error.localizedDescription)")
+            let warning = "Scenario handover deferred until next launch: \(error.localizedDescription)"
+            result.rebuild.warnings.append(warning)
+            NSLog("Pensieve: \(warning)")
         }
         return result
     }

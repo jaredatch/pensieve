@@ -60,7 +60,7 @@ final class ScenarioHandoverTests: XCTestCase {
             try harness.seed()
             let before = try harness.deployedFiles()
             harness.manifest.failWrite = failedWrite
-            XCTAssertTrue(harness.launch().ingestionNeedsRetry)
+            XCTAssertFalse(harness.launch().ingestionNeedsRetry)
             let fresh = harness.freshContext()
             XCTAssertEqual(try fresh.fetch(FetchDescriptor<ScenarioAssignment>()).map { $0.platform.rawValue }.sorted(),
                            failedWrite == 1 ? ["codex", "cursor"] : ["cursor"])
@@ -93,7 +93,7 @@ final class ScenarioHandoverTests: XCTestCase {
                 if saves == failedSave { throw ScenarioStubFailure() }
                 try context.save()
             }
-            XCTAssertTrue(harness.launch(handover).ingestionNeedsRetry)
+            XCTAssertFalse(harness.launch(handover).ingestionNeedsRetry)
             XCTAssertFalse(harness.defaults.bool(forKey: ScenarioHandover.doneKey))
             XCTAssertNotNil(harness.defaults.object(forKey: ScenarioHandover.activeKey))
             let remaining = try harness.freshContext().fetch(FetchDescriptor<ScenarioAssignment>())
@@ -115,7 +115,7 @@ final class ScenarioHandoverTests: XCTestCase {
             let durable = try harness.manifest.read(fromRoot: harness.root)
             harness.identity.fails = !invalid
             if invalid { harness.identity.id = "not-canonical" }
-            XCTAssertTrue(harness.launch().ingestionNeedsRetry)
+            XCTAssertFalse(harness.launch().ingestionNeedsRetry)
             XCTAssertEqual(try harness.freshContext().fetchCount(FetchDescriptor<ScenarioAssignment>()), 2)
             XCTAssertEqual(harness.manifest.writes, 0)
             XCTAssertEqual(try harness.manifest.read(fromRoot: harness.root), durable)
@@ -139,7 +139,7 @@ final class ScenarioHandoverTests: XCTestCase {
             if saves == 2 { throw ScenarioStubFailure() }
             try context.save()
         }
-        XCTAssertTrue(harness.launch(handover).ingestionNeedsRetry)
+        XCTAssertFalse(harness.launch(handover).ingestionNeedsRetry)
         let fresh = harness.freshContext()
         for row in try fresh.fetch(FetchDescriptor<MachineDeployIntent>()) where row.projectKey == nil {
             fresh.delete(row)
@@ -161,7 +161,8 @@ final class ScenarioHandoverTests: XCTestCase {
             defer { try? harness.cleanUp() }
             try harness.seed()
             let before = try harness.deployedFiles()
-            XCTAssertTrue(harness.launch(harness.handover(fetcher: HandoverFailingFetcher(failure: failure))).ingestionNeedsRetry)
+            let handover = harness.handover(fetcher: HandoverFailingFetcher(failure: failure))
+            XCTAssertFalse(harness.launch(handover).ingestionNeedsRetry)
             XCTAssertEqual(try harness.freshContext().fetchCount(FetchDescriptor<ScenarioAssignment>()), 2)
             XCTAssertEqual(harness.manifest.writes, 0)
             XCTAssertFalse(harness.defaults.bool(forKey: ScenarioHandover.doneKey))
@@ -179,7 +180,7 @@ final class ScenarioHandoverTests: XCTestCase {
         let before = try harness.deployedFiles()
         XCTAssertFalse(harness.launch().ingestionNeedsRetry)
         try harness.assertComplete([])
-        XCTAssertEqual(harness.manifest.writes, 3)
+        XCTAssertEqual(harness.manifest.writes, 0)
         XCTAssertEqual(try harness.deployedFiles(), before)
         for slug in slugs {
             XCTAssertEqual(harness.logs.filter { $0 == "Left unmanaged: skill '\(slug)', agent 'codex'." }.count, 1)

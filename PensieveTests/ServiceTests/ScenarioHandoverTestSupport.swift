@@ -13,14 +13,16 @@ final class HandoverIdentity: MachineIdentityProviding {
     }
 }
 
-final class HandoverManifest: ManifestReadWriting {
+final class HandoverManifest: ManifestSnapshotting {
     let live = ManifestService()
     var writes = 0
     var failWrite: Int?
+    var failAllWrites = false
+    func snapshot(from context: ModelContext) throws -> ManifestSnapshot { try live.snapshot(from: context) }
     func read(fromRoot root: String) throws -> ManifestSnapshot { try live.read(fromRoot: root) }
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
         writes += 1
-        if writes == failWrite { throw ScenarioStubFailure() }
+        if failAllWrites || writes == failWrite { throw ScenarioStubFailure() }
         try live.write(snapshot, toRoot: root)
     }
 }

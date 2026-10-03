@@ -91,6 +91,7 @@ targets:
       - path: Pensieve/Services/GitService+Usability.swift
       - path: Pensieve/Services/GitServiceConflict.swift
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+DirectoryCopy.swift
       - path: Pensieve/Services/RemoteURLPolicy.swift
       - path: Pensieve/Utilities/PathConstants.swift
       - path: Pensieve/Utilities/DisplayTextSanitizer.swift
@@ -107,6 +108,7 @@ targets:
     sources:
       - path: PensieveDaemon
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+DirectoryCopy.swift
       - path: Pensieve/Services/GitService.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
       - path: Pensieve/Services/GitService+Usability.swift

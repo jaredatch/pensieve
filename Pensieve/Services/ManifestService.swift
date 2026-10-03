@@ -137,12 +137,7 @@ struct ManifestService: ManifestReadWriting {
     /// Legacy definitions belong to older builds. Keep opaque regular-file bytes in the atomic
     /// replacement tree, and never traverse a symlinked scenarios directory or entry.
     private func carryScenarioFiles(from source: String, to destination: String) throws {
-        guard !fileService.isSymlink(at: source), fileService.directoryExists(at: source) else { return }
-        for entry in try fileService.listDirectory(at: source).sorted() {
-            let path = source + "/" + entry
-            guard !fileService.isSymlink(at: path), fileService.isRegularFile(at: path) else { continue }
-            try fileService.copyFile(at: path, to: destination + "/" + entry)
-        }
+        try fileService.copyRegularFiles(fromDirectory: source, toDirectory: destination)
     }
 
     private func readSkills(from manifestDir: String) throws -> [SkillOverlay] {

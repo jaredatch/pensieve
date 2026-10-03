@@ -99,6 +99,31 @@ final class ManifestScenarioCarryTests: XCTestCase {
         try assertFailureRetries(listing: false)
     }
 
+    func testDirectoryReplacementCannotRedirectScenarioCarryOutsideStore() throws {
+        let source = root + "/manifest/scenarios"
+        let outside = root + "/outside"
+        try files.writeFile(at: source + "/legacy.yaml", content: "original")
+        try files.writeFile(at: outside + "/secret.yaml", content: "outside")
+        let guarded = ScenarioCarryFileService()
+        var swaps = 0
+        var swapError: Error?
+        guarded.afterDirectoryCheck = {
+            guard swaps == 0 else { return }
+            swaps += 1
+            do {
+                try self.files.replaceItem(at: self.root + "/parked", with: source)
+                try self.files.createSymlink(at: source, pointingTo: outside)
+            } catch { swapError = error }
+        }
+        try ManifestService(fileService: guarded).write(empty, toRoot: root)
+        XCTAssertNil(swapError)
+        XCTAssertEqual(swaps, 1)
+        XCTAssertEqual(try files.listDirectory(at: source), ["legacy.yaml"])
+        XCTAssertEqual(try files.readFile(at: source + "/legacy.yaml"), "original")
+        XCTAssertEqual(try files.readFile(at: outside + "/secret.yaml"), "outside")
+        XCTAssertFalse(files.fileExists(at: source + "/secret.yaml"))
+    }
+
     @MainActor
     func testRebuildIgnoresLegacyDefinitionsWithoutChangingLocalScenarios() throws {
         let container = try AppRuntime.makeContainer(
@@ -159,6 +184,7 @@ final class ScenarioCarryFileService: FileServiceProtocol {
     var failListing = false
     var failCopyNumber: Int?
     var copyCount = 0
+    var afterDirectoryCheck: (() -> Void)?
     private func record(_ path: String) {
         if forbiddenPrefixes.contains(where: path.hasPrefix) { touchedForbiddenPath = true }
     }
@@ -170,11 +196,29 @@ final class ScenarioCarryFileService: FileServiceProtocol {
         if copyCount == failCopyNumber { throw CocoaError(.fileReadUnknown) }
         try wrapped.copyFile(at: sourcePath, to: destinationPath)
     }
+    func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws {
+        try wrapped.copyRegularFiles(fromDirectory: source, toDirectory: destination) { checkpoint in
+            switch checkpoint {
+            case .opened:
+                record(source)
+                afterDirectoryCheck?()
+                if failListing { throw CocoaError(.fileReadUnknown) }
+            case .copying(let name):
+                record(source + "/" + name)
+                copyCount += 1
+                if copyCount == failCopyNumber { throw CocoaError(.fileReadUnknown) }
+            }
+        }
+    }
     func writeFile(at path: String, content: String) throws { try wrapped.writeFile(at: path, content: content) }
     func deleteFile(at path: String) throws { try wrapped.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
-    func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
+    func directoryExists(at path: String) -> Bool {
+        let exists = wrapped.directoryExists(at: path)
+        if exists && path.hasSuffix("/manifest/scenarios") { afterDirectoryCheck?() }
+        return exists
+    }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {

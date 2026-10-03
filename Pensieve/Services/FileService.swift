@@ -11,6 +11,8 @@ protocol FileServiceProtocol {
     func writeData(at path: String, data: Data) throws
     func writeExecutableFile(at path: String, content: String) throws
     func copyFile(at sourcePath: String, to destinationPath: String) throws
+    /// Copies regular entries from one no-follow directory descriptor; never traverses child links.
+    func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws
     func deleteFile(at path: String) throws
     func fileExists(at path: String) -> Bool
     /// The final entry itself, including dangling links. Only ENOENT is absence; other failures throw.
