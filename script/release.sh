@@ -479,17 +479,7 @@ release_preflight() {
     # Decode directly to generate_appcast's input, preserving every byte. The
     # content and SHA come from this same response. The later recheck never
     # replaces the SHA used by PUT.
-    if ! APPCAST_SHA="$(ruby -rjson -e '
-      response = File.binread(ARGV[0])
-      body = response.split(/\r?\n\r?\n/, 2).fetch(1)
-      value = JSON.parse(body)
-      abort "release: appcast response has no SHA" unless value["sha"].is_a?(String) && !value["sha"].empty?
-      abort "release: appcast response is not base64" unless value["encoding"] == "base64"
-      content = value.fetch("content").delete("\r\n").unpack1("m0")
-      abort "release: empty appcast base" if content.empty?
-      File.binwrite(ARGV[1], content)
-      puts value["sha"]
-    ' "$response" "$APPCAST_INPUT_DIR/appcast.xml")"; then
+    if ! APPCAST_SHA="$(state_tool contents "$response" "$APPCAST_INPUT_DIR/appcast.xml")"; then
       rm -f "$response"
       echo "release: invalid appcast base response" >&2
       return 1
@@ -523,15 +513,12 @@ verify_appcast_unchanged() {
   response="$(mktemp "${TMPDIR:-/tmp}/pensieve-appcast-response.XXXXXX")" || return 1
   if run_command_seam "$GH_CMD" api -X GET "repos/$PUBLIC_REPO/contents/appcast.xml" \
       -f "ref=$PUBLIC_BRANCH" --include > "$response"; then
-    if ! current="$(ruby -rjson -e '
-      body = File.binread(ARGV[0]).split(/\r?\n\r?\n/, 2).fetch(1)
-      sha = JSON.parse(body)["sha"]
-      abort "release: appcast response has no SHA" unless sha.is_a?(String) && !sha.empty?
-      puts sha
-    ' "$response")"; then
+    if ! current="$(state_tool contents "$response" "$DIST_DIR/recheck-appcast.xml")"; then
       rm -f "$response"
+      echo "release: invalid appcast recheck response" >&2
       return 1
     fi
+    state_tool appcast "$DIST_DIR/recheck-appcast.xml" "$VERSION" >/dev/null || return 1
   else
     status="$(http_status "$response")"
     cat "$response" >&2
@@ -558,26 +545,13 @@ publish_appcast() {
 
 write_bumped_cask() {
   local cask_output="$1"
-  local cask_template="$REPO/release/homebrew/pensieve.rb"
+  local cask_template="${CASK_TEMPLATE:-$REPO/release/homebrew/pensieve.rb}"
   local dmg_sha
   dmg_sha="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
   test "${#dmg_sha}" -eq 64 || { echo "release: invalid dmg sha256 for $DMG_PATH" >&2; exit 1; }
 
   mkdir -p "$(dirname "$cask_output")"
-  awk -v version="$VERSION" -v sha="$dmg_sha" '
-    /^  version "/ {
-      print "  version \"" version "\""
-      next
-    }
-    /^  sha256 / {
-      print "  sha256 \"" sha "\""
-      next
-    }
-    { print }
-  ' "$cask_template" > "$cask_output"
-
-  grep -q "  version \"$VERSION\"" "$cask_output" || exit 1
-  grep -q "  sha256 \"$dmg_sha\"" "$cask_output" || exit 1
+  state_tool rewrite-cask "$cask_template" "$cask_output" "$VERSION" "$dmg_sha"
 }
 
 dry_run_local() {
@@ -589,11 +563,19 @@ dry_run_local() {
 
 bump_cask() {
   [ "$(cask_action_for "$VERSION")" = "bump" ] || { echo "release: phase v.f skipped: prerelease $VERSION does not bump the Homebrew cask"; return 0; }
+  [ "$CASK_PREFLIGHT" -eq 1 ] || cask_preflight
+  local digest
+  digest="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
+  if [ "$CASK_VERSION" = "$VERSION" ]; then
+    [ "$CASK_DIGEST" = "$digest" ] || { echo "release: cask sha256 does not match DMG" >&2; return 1; }
+    echo "release: cask done"
+    return 0
+  fi
   echo "release: phase v.f: bump Homebrew cask in $TAP_REPO"
 
   local cask_output="$DIST_DIR/homebrew/pensieve.rb"
   write_bumped_cask "$cask_output"
-  publish_contents_file "$TAP_REPO" "Casks/pensieve.rb" "$cask_output" "cask: v$VERSION"
+  publish_contents_file "$TAP_REPO" "Casks/pensieve.rb" "$cask_output" "cask: v$VERSION" "" "$CASK_SHA"
 }
 
 notarize_and_publish() {
@@ -610,12 +592,12 @@ notarize_and_publish() {
   echo "release: phase v.d: create GitHub release $tag"
   verify_public_branch_unchanged
   verify_appcast_unchanged
-  build_release_args "$VERSION" "$CHANGELOG_PATH"
-  run_command_seam "$GH_CMD" "${RELEASE_ARGS[@]+"${RELEASE_ARGS[@]}"}"
-  rm -f "$RELEASE_NOTES_FILE"
+  publish_release_asset
 
   publish_appcast
 }
+
+source "$REPO/script/release_recovery.sh"
 
 case "$INSPECT_MODE" in
   functions)
@@ -667,6 +649,11 @@ fi
 
 if [ "$PUBLISH" -eq 1 ]; then
   release_preflight
+  publication_preflight
+  if [ "$APPCAST_ITEM" != absent ]; then
+    recover_live_release
+    exit 0
+  fi
 fi
 
 package_app_only

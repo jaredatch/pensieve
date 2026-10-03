@@ -88,6 +88,10 @@ jobs:
       - name: Test workflow contracts
         run: ruby script/workflow_self_test.rb
 
+      - name: Test release recovery
+        timeout-minutes: 3
+        run: python3 -B script/release_self_test.py
+
       - name: Test development build host selection
         run: python3 -B script/pull_dev_build_self_test.py
 
