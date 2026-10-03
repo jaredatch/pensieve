@@ -10,6 +10,11 @@ final class FrontmatterTrustTests: XCTestCase {
             let parsed = SkillParser.parse(fixture.source)
             if fixture.header == nil || fixture.label.hasPrefix("empty,") {
                 XCTAssertNil(parsed.preservedFrontmatter, fixture.label)
+                if fixture.header == nil {
+                    XCTAssertNil(parsed.preservedFile, fixture.label)
+                    XCTAssertFalse(parsed.hasRequiredFrontmatter, fixture.label)
+                    XCTAssertEqual(parsed.body, fixture.source, fixture.label)
+                }
                 continue
             }
             let frontmatter = try XCTUnwrap(parsed.preservedFrontmatter, fixture.label)
@@ -64,8 +69,11 @@ final class FrontmatterTrustTests: XCTestCase {
                 XCTAssertEqual(try XCTUnwrap(normalized, fixture.label), expected, fixture.label)
             } else if parsed.preservedFile != nil {
                 XCTAssertNil(normalized, fixture.label)
-            } else if let normalized {
-                XCTAssertTrue(normalized.hasSuffix(fixture.source), fixture.label)
+            } else {
+                let ending = fixture.lineEnding == "\r\n" ? "\r\n" : "\n"
+                let expected = "---\(ending)name: New\(ending)description: New description\(ending)---"
+                    + ending + ending + fixture.source
+                XCTAssertEqual(try XCTUnwrap(normalized, fixture.label), expected, fixture.label)
             }
         }
     }

@@ -95,7 +95,7 @@ final class SkillSerializerTests: XCTestCase {
 
         XCTAssertEqual(
             rewritten,
-            "---\r\nname: Upstream\r\ndescription: Original\r\nlicense: MIT\r\n---\r\n\r\nEdited\nSecond\r\n"
+            "---\r\nname: Upstream\r\ndescription: Original\r\nlicense: MIT\r\n---\r\n\r\nEdited\r\nSecond\r\n"
         )
         XCTAssertEqual(SkillParser.parse(rewritten).trailingLineBreaks, "\r\n")
     }
@@ -280,7 +280,7 @@ final class SkillSerializerTests: XCTestCase {
 
         XCTAssertEqual(
             rewritten,
-            "---\r\nname: Legacy\r\ndescription: Legacy description\r\n---\r\n\r\nEdited\nBody\r\n"
+            "---\r\nname: Legacy\r\ndescription: Legacy description\r\n---\r\n\r\nEdited\r\nBody\r\n"
         )
     }
 }

@@ -41,15 +41,19 @@ enum SkillSerializer {
         fallbackName: String,
         fallbackDescription: String
     ) -> String {
+        let body = normalizeLineEndings(
+            bodyWithoutTerminalLineBreaks(body),
+            to: parsed.preferredLineEnding
+        )
         if let file = parsed.preservedFile {
-            if body == file.body || body == file.body + file.bodySuffix {
+            if SkillParser.canonicalBody(body) == file.body {
                 return file.source
             }
             let separator: String
-            if let last = file.bodyPrefix.unicodeScalars.last, SkillParser.isYAMLLineBreak(last) {
-                separator = last == "\r" && file.body.isEmpty ? "\n" : ""
-            } else {
-                separator = parsed.preferredLineEnding
+            switch file.bodyPrefix.utf8.last {
+            case 0x0A: separator = ""
+            case 0x0D: separator = "\n"
+            default: separator = parsed.preferredLineEnding
             }
             return file.bodyPrefix + separator + body + file.bodySuffix
         }
@@ -190,6 +194,23 @@ enum SkillSerializer {
             }
         }
         return result
+    }
+
+    private static func bodyWithoutTerminalLineBreaks(_ body: String) -> String {
+        let scalars = body.unicodeScalars
+        var end = scalars.endIndex
+        while end > scalars.startIndex {
+            let previous = scalars.index(before: end)
+            guard scalars[previous] == "\n" || scalars[previous] == "\r" else { break }
+            end = previous
+        }
+        return String(scalars[..<end])
+    }
+
+    private static func normalizeLineEndings(_ value: String, to lineEnding: String) -> String {
+        value.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\n", with: lineEnding)
     }
 
     /// Shared canonical YAML scalar quoter for both SKILL.md frontmatter and the manifest overlay

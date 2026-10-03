@@ -85,8 +85,8 @@ final class UntrustedSkillRewriteTests: XCTestCase {
                     .replacingOccurrences(of: "description: D", with: "description: New description")
                 : "---\nname: New\ndescription: New description\n---\n\n" + fixture.source
             XCTAssertEqual(try files.files.readData(at: path), Data(expected.utf8), fixture.label)
-            XCTAssertEqual(model.importNotices, fixture.trustsEntries ? [] : ["New: frontmatter was kept as text."],
-                           fixture.label)
+            let keptFrontmatter = !fixture.trustsEntries && ["\n", "\r\n"].contains(fixture.lineEnding)
+            XCTAssertEqual(model.importNotices, keptFrontmatter ? ["New: frontmatter was kept as text."] : [], fixture.label)
         }
     }
 
@@ -99,18 +99,15 @@ final class UntrustedSkillRewriteTests: XCTestCase {
             let path = root + "/store/skills/\(slug)/SKILL.md"
             let skill = Skill(name: "A", skillDescription: "D", directoryName: slug)
             try files.writeFile(at: path, content: fixture.source)
-            XCTAssertTrue(model.updateBody(skill, body: edited), fixture.label)
-            if let header = fixture.header {
-                XCTAssertEqual(try files.files.readData(at: path), Data((header + edited + fixture.terminal).utf8), fixture.label)
-            } else {
-                let ending = fixture.lineEnding == "\r\n" ? "\r\n" : "\n"
-                let expected = "---\(ending)name: A\(ending)description: D\(ending)---"
-                    + ending + ending + edited + fixture.terminal
+            let ending = fixture.lineEnding == "\r\n" ? "\r\n" : "\n"
+            let expectedBody = ["First", "Second", "Third", "Fourth\u{85}Fifth\u{2028}Sixth\u{2029}Last"]
+                .joined(separator: ending)
+            let header = fixture.header ?? "---\(ending)name: A\(ending)description: D\(ending)---" + ending + ending
+            let expected = header + expectedBody + fixture.terminal
+            for draft in [edited, edited + "\n", edited + "\r\n\r\n"] {
+                XCTAssertTrue(model.updateBody(skill, body: draft), fixture.label)
                 XCTAssertEqual(try files.files.readData(at: path), Data(expected.utf8), fixture.label)
             }
-            let first = try files.files.readData(at: path)
-            XCTAssertTrue(model.updateBody(skill, body: edited), fixture.label)
-            XCTAssertEqual(try files.files.readData(at: path), first, fixture.label)
         }
     }
 }

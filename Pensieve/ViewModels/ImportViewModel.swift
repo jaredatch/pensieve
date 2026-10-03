@@ -184,7 +184,7 @@ final class ImportViewModel {
            let normalized = SkillSerializer.normalizeIdentity(name: discovered.name, description: description, parsed: parsed) {
             return (normalized, false)
         }
-        let firstLine = SkillParser.sourceLines(in: source).map { source[$0.contentRange] }
+        let firstLine = source.components(separatedBy: "\n")
             .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         let startsWithFence = firstLine?.trimmingCharacters(in: .whitespacesAndNewlines) == "---"
         return (

@@ -50,7 +50,7 @@ struct FrontmatterRewriteFixture {
                     return Self(
                         label: "\(label), \(ending.debugDescription), terminal \(terminal.debugDescription)",
                         source: header + "Original body" + terminal,
-                        header: label == "missing fence" ? nil : header,
+                        header: label != "missing fence" && ["\n", "\r\n"].contains(ending) ? header : nil,
                         trustsEntries: block.safe && ["\n", "\r\n"].contains(ending),
                         lineEnding: ending,
                         terminal: terminal
