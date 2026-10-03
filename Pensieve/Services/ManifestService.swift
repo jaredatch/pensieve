@@ -10,17 +10,24 @@ struct ManifestService: ManifestReadWriting {
 
     let fileService: FileServiceProtocol
     private let supportedSchemaVersion: Int
+    /// Diagnostic checkpoint after an actual lock try; callbacks must not reenter write.
+    private let writeLockAttempted: (Bool) -> Void
 
     init(fileService: FileServiceProtocol = FileService(),
-         supportedSchemaVersion: Int = Self.currentSchemaVersion) {
+         supportedSchemaVersion: Int = Self.currentSchemaVersion,
+         writeLockAttempted: @escaping (Bool) -> Void = { _ in }) {
         self.fileService = fileService
         self.supportedSchemaVersion = supportedSchemaVersion
+        self.writeLockAttempted = writeLockAttempted
     }
 
     // MARK: Write (idempotent, prunes stale)
 
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
-        Self.writeLock.lock()
+        let acquired = Self.writeLock.try()
+        // Reports an actual lock attempt from inside write; tests need no dispatch-timing inference.
+        writeLockAttempted(acquired)
+        if !acquired { Self.writeLock.lock() }
         defer { Self.writeLock.unlock() }
         let manifestDir = root + "/manifest"
         try refuseNewerExistingManifest(at: manifestDir)

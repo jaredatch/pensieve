@@ -24,13 +24,14 @@ final class AppRuntime {
 
     private(set) var coordinator: SyncCoordinator?
     private(set) var launchWorkInvocationCount = 0
+    /// True after completed ingest has seeded the coordinator and notified the scheduler.
+    private(set) var launchIngestSignaled = false
     private(set) var storeQuarantined = false
     private(set) var updateCheckInFlight = false
     private(set) var updateCheckError: String?
     private(set) var updateCheckAlertError: String?
     private var automaticUpdateRetryDeferred = false
     private let gitState: RuntimeGitState
-
     private let defaults: UserDefaults
     private let launchReconcile: LaunchReconcile
     private let launchBackfill: LaunchBackfill
@@ -53,7 +54,6 @@ final class AppRuntime {
     @ObservationIgnored private var launchIngestRetryTask: Task<Void, Never>?
     @ObservationIgnored private var openMainWindowAction: (() -> Void)?
     @ObservationIgnored private(set) lazy var upstreamHistory = paths.makeUpstreamHistoryViewModel()
-
     @ObservationIgnored
     private(set) lazy var bootstrapTask: Task<Void, Never> = {
         let container = container
@@ -221,7 +221,6 @@ final class AppRuntime {
     }
 
     func clearUpdateCheckAlert() { updateCheckAlertError = nil }
-
     /// Runs process-lifetime launch work at most once. The callback keeps the existing auto-update check
     /// between deploy-state backfill and watcher startup while the view retains its presentation state.
     @discardableResult
@@ -323,6 +322,7 @@ private extension AppRuntime {
                 self.scheduler.enqueueManualTrigger()
             }
             self.scheduler.launchIngestCompleted()
+            self.launchIngestSignaled = true
         }
     }
 }

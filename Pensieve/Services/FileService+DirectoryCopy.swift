@@ -31,7 +31,7 @@ extension FileService {
             }
             try checkpoint(.unavailable)
             let initial = try DirectoryCopySource.pathStamp(source)
-            guard (initial?.mode ?? 0) & S_IFMT != S_IFDIR else {
+            guard initial?.fileType != S_IFDIR else {
                 throw DescriptorFileCopy.error("source changed", path: source, code: ESTALE)
             }
             return RegularFileCopyReceipt {
@@ -74,29 +74,23 @@ private struct CopyEntryStamp: Equatable {
     let device: dev_t
     let inode: ino_t
     let size: off_t
-    let mode: mode_t
-    let links: nlink_t
+    let fileType: mode_t
     let modifiedSeconds: Int
     let modifiedNanoseconds: Int
-    let changedSeconds: Int
-    let changedNanoseconds: Int
-    var isRegular: Bool { mode & S_IFMT == S_IFREG }
+    var isRegular: Bool { fileType == S_IFREG }
 
     init(_ status: stat) {
         device = status.st_dev
         inode = status.st_ino
         size = status.st_size
-        mode = status.st_mode
-        links = status.st_nlink
+        fileType = status.st_mode & S_IFMT
         modifiedSeconds = status.st_mtimespec.tv_sec
         modifiedNanoseconds = status.st_mtimespec.tv_nsec
-        changedSeconds = status.st_ctimespec.tv_sec
-        changedNanoseconds = status.st_ctimespec.tv_nsec
     }
 }
 
 /// Owns one no-follow directory stream. Each validation re-lists it and checks the live path,
-/// directory identity/mtime and every entry's identity, size, mode, link count and timestamps.
+/// directory identity/mtime and every entry's identity, type, size and modification time.
 private final class DirectoryCopySource {
     let path: String
     let directory: UnsafeMutablePointer<DIR>
@@ -147,8 +141,7 @@ private final class DirectoryCopySource {
     }
 
     private func validateDirectory() throws {
-        guard initial.links > 0,
-              try Self.descriptorStamp(descriptor, path: path) == initial,
+        guard try Self.descriptorStamp(descriptor, path: path) == initial,
               try Self.pathStamp(path) == initial else {
             throw DescriptorFileCopy.error("source changed", path: path, code: ESTALE)
         }
@@ -177,7 +170,8 @@ private final class DirectoryCopySource {
     }
 }
 
-/// Shared by single-file copying and directory-relative carrying. Memory use is independent of file size.
+/// Shared by single-file copying and directory-relative carrying. A sibling temporary file preserves
+/// the destination until rename; descriptor chunks keep memory use independent of file size.
 enum DescriptorFileCopy {
     static func error(_ operation: String, path: String, code: Int32) -> NSError {
         NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [
@@ -191,14 +185,19 @@ enum DescriptorFileCopy {
         var status = stat()
         guard fstat(descriptor, &status) == 0 else { throw error("fstat", path: sourcePath, code: errno) }
         guard status.st_mode & S_IFMT == S_IFREG else { throw error("not regular", path: sourcePath, code: EFTYPE) }
-        let output = open(destination, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_NONBLOCK, status.st_mode & 0o777)
+        let parent = URL(fileURLWithPath: destination).deletingLastPathComponent().path
+        let temporary = parent + "/.pensieve-copy-" + UUID().uuidString + ".tmp"
+        let output = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, status.st_mode & 0o777)
         guard output >= 0 else { throw error("open", path: destination, code: errno) }
-        defer { close(output) }
+        defer {
+            close(output)
+            unlink(temporary)
+        }
         guard fchmod(output, status.st_mode & 0o777) == 0 else { throw error("fchmod", path: destination, code: errno) }
         var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
         while true {
             let count = buffer.withUnsafeMutableBytes { read(descriptor, $0.baseAddress, $0.count) }
-            if count == 0 { return }
+            if count == 0 { break }
             if count < 0 {
                 if errno == EINTR { continue }
                 throw error("read", path: sourcePath, code: errno)
@@ -206,6 +205,7 @@ enum DescriptorFileCopy {
             try writeChunk(buffer, count: count, output: output, destination: destination)
             try copiedChunk(count)
         }
+        guard rename(temporary, destination) == 0 else { throw error("rename", path: destination, code: errno) }
     }
     private static func writeChunk(_ buffer: [UInt8], count: Int, output: Int32, destination: String) throws {
         try buffer.withUnsafeBytes { bytes in

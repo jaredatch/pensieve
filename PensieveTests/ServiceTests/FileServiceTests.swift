@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import Pensieve
 
@@ -15,6 +16,59 @@ final class FileServiceTests: XCTestCase {
         if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
             try FileManager.default.removeItem(atPath: tempDir)
         }
+    }
+
+    func testCopyFileFailurePreservesDestinationAndCleansTemporaryFile() throws {
+        let source = tempDir + "/source"
+        let destination = tempDir + "/destination"
+        try fileService.writeData(at: source, data: Data(repeating: 42, count: 128 * 1_024))
+        try fileService.writeFile(at: destination, content: "original")
+        let identity = fileService.fileIdentity(at: destination, followingLinks: false)
+        let entries = try fileService.listDirectory(at: tempDir).sorted()
+        let descriptor = open(source, O_RDONLY | O_NOFOLLOW)
+        XCTAssertGreaterThanOrEqual(descriptor, 0)
+        defer { close(descriptor) }
+        var chunks = 0
+        // Inject failure in the descriptor helper that the public copyFile entry uses.
+        XCTAssertThrowsError(try DescriptorFileCopy.copy(from: descriptor, sourcePath: source, to: destination) { _ in
+            chunks += 1
+            throw CocoaError(.fileWriteUnknown)
+        })
+        XCTAssertEqual(chunks, 1)
+        XCTAssertTrue(try fileService.readData(at: destination) == Data("original".utf8))
+        XCTAssertEqual(fileService.fileIdentity(at: destination, followingLinks: false), identity)
+        XCTAssertEqual(try fileService.listDirectory(at: tempDir).sorted(), entries)
+    }
+
+    func testCopyFileReplacesSymlinkWithoutChangingItsTarget() throws {
+        let source = tempDir + "/source"
+        let target = tempDir + "/target"
+        let destination = tempDir + "/destination"
+        try fileService.writeExecutableFile(at: source, content: "new bytes")
+        try fileService.writeFile(at: target, content: "target bytes")
+        for dangling in [false, true] {
+            try fileService.createSymlink(at: destination, pointingTo: dangling ? tempDir + "/absent" : target)
+            XCTAssertNoThrow(try fileService.copyFile(at: source, to: destination))
+            XCTAssertTrue(fileService.isRegularFile(at: destination))
+            XCTAssertEqual(try fileService.readFile(at: destination), "new bytes")
+            XCTAssertTrue(fileService.isUserExecutableFile(at: destination))
+            XCTAssertEqual(try fileService.readFile(at: target), "target bytes")
+        }
+    }
+
+    func testCopyFileReplacesHardLinkedDestinationWithoutOverwritingOtherLinks() throws {
+        let source = tempDir + "/source"
+        let destination = tempDir + "/destination"
+        let other = tempDir + "/other"
+        try fileService.writeFile(at: source, content: "new bytes")
+        try fileService.writeFile(at: destination, content: "original")
+        try FileManager.default.linkItem(atPath: destination, toPath: other)
+        let identity = fileService.fileIdentity(at: other, followingLinks: false)
+        try fileService.copyFile(at: source, to: destination)
+        XCTAssertEqual(try fileService.readFile(at: destination), "new bytes")
+        XCTAssertEqual(try fileService.readFile(at: other), "original")
+        XCTAssertEqual(fileService.fileIdentity(at: other, followingLinks: false), identity)
+        XCTAssertNotEqual(fileService.fileIdentity(at: destination, followingLinks: false), identity)
     }
 
     func testIsExecutableFileReturnsTrueForExecutableRegularFile() throws {

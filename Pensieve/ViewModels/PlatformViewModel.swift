@@ -375,3 +375,18 @@ extension PlatformViewModel {
     }
 
 }
+
+extension PlatformViewModel {
+    /// Handover's realization probe; kept separate from removal's broad occupied-entry probe.
+    func workingArtifactExists(skill: Skill, platform: PlatformTarget) -> Bool {
+        if platform.usesSymlinks {
+            let path = linkService.linkPath(skill: skill, platform: platform, projectPath: nil)
+            let expected = linkService.targetPath(skill: skill, platform: platform, projectPath: nil)
+            guard fileService.isSymlink(at: path), fileService.directoryExists(at: expected),
+                  let identity = fileService.fileIdentity(at: expected, followingLinks: true) else { return false }
+            return fileService.fileIdentity(at: path, followingLinks: true) == identity
+        }
+        let path = cursorCompiler.outputPath(skill: skill, projectPath: nil)
+        return fileService.isRegularFile(at: path) && cursorCompiler.isUpToDate(skill: skill, projectPath: nil)
+    }
+}

@@ -32,11 +32,13 @@ struct ScenarioHandover: ScenarioHandingOver {
     private let log: (String) -> Void
     private let artifactExists: (Skill, PlatformTarget) -> Bool
     private let notifier: SyncStateNotifying
+    private let fileService: FileServiceProtocol
 
     init(machineIdentity: MachineIdentityProviding, manifest: ManifestSnapshotting,
          root: String, defaults: UserDefaults,
          artifactExists: @escaping (Skill, PlatformTarget) -> Bool,
          notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
+         fileService: FileServiceProtocol = FileService(),
          fetcher: ReconcilerStateFetching = ReconcilerStateFetcher(),
          save: @escaping (ModelContext) throws -> Void = { try $0.save() },
          log: @escaping (String) -> Void = { NSLog("Pensieve scenario handover: \($0)") }) {
@@ -49,6 +51,7 @@ struct ScenarioHandover: ScenarioHandingOver {
         self.log = log
         self.artifactExists = artifactExists
         self.notifier = notifier
+        self.fileService = fileService
     }
 
     private struct TransferPair {
@@ -57,7 +60,7 @@ struct ScenarioHandover: ScenarioHandingOver {
         let record: DeployIntentRecord
     }
 
-    func handOver(context caller: ModelContext, readiness: ScenarioHandoverReadiness = .init()) throws {
+    func handOver(context caller: ModelContext, readiness: ScenarioHandoverReadiness) throws {
         guard !defaults.bool(forKey: Self.doneKey) else { return }
         guard readiness.manifestWritten, !readiness.rebuildSaveFailed, !readiness.ingestionNeedsRetry else {
             log("Deferred until next launch ingest: manifest written=\(readiness.manifestWritten), "
@@ -108,6 +111,12 @@ struct ScenarioHandover: ScenarioHandingOver {
                   ManifestService.isAdmittedIntentComponent(platform) else {
                 unmanagedCount += 1
                 log("Left unmanaged: skill '\(skill.directoryName)', agent '\(platform)'.")
+                continue
+            }
+            guard let directory = SkillStore.safeSkillDirectory(slug: skill.directoryName, base: root + "/skills",
+                                                                fileService: fileService),
+                  fileService.directoryExists(at: directory) else {
+                log("Dropped orphan: skill '\(skill.directoryName)' has no safe store folder, agent '\(platform)'.")
                 continue
             }
             let record = DeployIntentRecord(machineID: machineID, skillSlug: skill.directoryName,

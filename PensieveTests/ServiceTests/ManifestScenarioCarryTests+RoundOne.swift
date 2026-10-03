@@ -8,7 +8,7 @@ extension ManifestScenarioCarryTests {
         let firstOpened = DispatchSemaphore(value: 0)
         let releaseFirst = DispatchSemaphore(value: 0)
         let secondAttempted = DispatchSemaphore(value: 0)
-        let secondOpened = DispatchSemaphore(value: 0)
+        let order = CarryOrder()
         let finished = DispatchGroup()
         let errors = CarryErrors()
         let first = ScenarioCarryFileService()
@@ -17,7 +17,7 @@ extension ManifestScenarioCarryTests {
             if releaseFirst.wait(timeout: .now() + 5) != .success { errors.record(DeployStubFailure()) }
         }
         let second = ScenarioCarryFileService()
-        second.afterDirectoryCheck = { secondOpened.signal() }
+        second.afterDirectoryCheck = { order.record("second opened") }
         let root = try XCTUnwrap(root)
         let snapshot = empty
         finished.enter()
@@ -29,14 +29,20 @@ extension ManifestScenarioCarryTests {
         finished.enter()
         DispatchQueue.global().async {
             defer { finished.leave() }
-            secondAttempted.signal()
-            do { try ManifestService(fileService: second).write(snapshot, toRoot: root) } catch { errors.record(error) }
+            do {
+                try ManifestService(fileService: second, writeLockAttempted: { acquired in
+                    order.record(acquired ? "second acquired" : "second blocked")
+                    secondAttempted.signal()
+                }).write(snapshot, toRoot: root)
+            } catch { errors.record(error) }
         }
         XCTAssertEqual(secondAttempted.wait(timeout: .now() + 5), .success)
-        XCTAssertEqual(secondOpened.wait(timeout: .now() + 0.2), .timedOut, "second writer entered the held build")
+        XCTAssertEqual(order.values, ["second blocked"], "second writer must encounter the held process lock")
+        order.record("first released")
         releaseFirst.signal()
         XCTAssertEqual(finished.wait(timeout: .now() + 5), .success)
         XCTAssertTrue(errors.values.isEmpty, "\(errors.values)")
+        XCTAssertEqual(order.values, ["second blocked", "first released", "second opened"])
         XCTAssertEqual(try files.readFile(at: root + "/manifest/scenarios/legacy.yaml"), "keep")
     }
 
@@ -174,4 +180,12 @@ private final class CarryErrors {
     private var errors: [String] = []
     var values: [String] { lock.lock(); defer { lock.unlock() }; return errors }
     func record(_ error: Error) { lock.lock(); defer { lock.unlock() }; errors.append(error.localizedDescription) }
+}
+
+/// Ordered cross-thread checkpoint events; the semaphore publishes the lock-attempt event before inspection.
+private final class CarryOrder {
+    private let lock = NSLock()
+    private var events: [String] = []
+    var values: [String] { lock.lock(); defer { lock.unlock() }; return events }
+    func record(_ event: String) { lock.lock(); defer { lock.unlock() }; events.append(event) }
 }

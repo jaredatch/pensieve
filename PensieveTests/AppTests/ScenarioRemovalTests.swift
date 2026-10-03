@@ -49,21 +49,16 @@ final class ScenarioRemovalTests: XCTestCase {
         defaults.set(false, forKey: AppRuntime.backgroundSyncEnabledKey)
         defaults.set(true, forKey: AppRuntime.migrationDefaultsKey)
         defaults.set(true, forKey: ScenarioHandover.doneKey)
+        let launchLock = try XCTUnwrap(SyncLock.tryAcquire(at: paths.syncLockPath))
+        defer { launchLock.release() }
         let runtime = try AppRuntime(defaults: defaults, paths: paths, gitUsabilityProbe: { .usable })
         let skill = Skill(name: "Launch skill", skillDescription: "Description", directoryName: "launch")
         runtime.container.mainContext.insert(skill)
         try runtime.container.mainContext.save()
         try FileService().writeFile(at: paths.skillsDir + "/launch/SKILL.md",
                                     content: "---\nname: Launch skill\ndescription: Description\n---\nBody")
-        let content = ContentView(
-            installService: runtime.updatesViewModelOperations.skillInstallService,
-            updatesOperations: runtime.updatesViewModelOperations, notifier: runtime.syncStateNotifier,
-            echoRegistrar: runtime.syncWriteEchoRegistrar, bodyWriteRegistration: runtime.syncBodyWriteRegistration,
-            machineDependencies: MachineObservabilityDependencies(
-                stateService: MachineStateService(), identity: MachineIdentity(appSupportDir: paths.appSupportDir),
-                root: paths.storeRoot, now: Date.init))
-        let host = NSHostingView(rootView: content
-            .environment(runtime).modelContainer(runtime.container))
+        var launchRendered = false
+        let host = makeHost(runtime: runtime, paths: paths) { launchRendered = true }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1_000, height: 700),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -76,8 +71,13 @@ final class ScenarioRemovalTests: XCTestCase {
             return runtime.launchWorkInvocationCount == 1 && self.sidebar(in: host) != nil
         }
         await runtime.mainWindowAppeared()
-        // Drain the view update after launch and configuration callbacks before inspecting its real selection.
-        try await Task.sleep(for: .milliseconds(100))
+        launchLock.release()
+        await TestWait.until(failureMessage: "launch ingest and coordinator signaling did not finish and render",
+                             diagnostics: { "signaled=\(runtime.launchIngestSignaled), rendered=\(launchRendered)" }, {
+
+            host.layoutSubtreeIfNeeded()
+            return runtime.launchIngestSignaled && launchRendered
+        })
         host.layoutSubtreeIfNeeded()
         let outline = try XCTUnwrap(sidebar(in: host))
         let selected = try XCTUnwrap(outline.item(atRow: outline.selectedRow) as? SidebarOutlineItem)
@@ -85,8 +85,38 @@ final class ScenarioRemovalTests: XCTestCase {
     }
 
     @MainActor
+    private func makeHost(runtime: AppRuntime, paths: AppRuntimePaths,
+                          onLaunchRendered: @escaping () -> Void) -> NSHostingView<AnyView> {
+        let content = ContentView(
+            installService: runtime.updatesViewModelOperations.skillInstallService,
+            updatesOperations: runtime.updatesViewModelOperations, notifier: runtime.syncStateNotifier,
+            echoRegistrar: runtime.syncWriteEchoRegistrar, bodyWriteRegistration: runtime.syncBodyWriteRegistration,
+            machineDependencies: MachineObservabilityDependencies(
+                stateService: MachineStateService(), identity: MachineIdentity(appSupportDir: paths.appSupportDir),
+                root: paths.storeRoot, now: Date.init))
+        let rendered = LaunchRenderFence(content: content, onRendered: onLaunchRendered)
+            .environment(runtime).modelContainer(runtime.container)
+        return NSHostingView(rootView: AnyView(rendered))
+    }
+
+    @MainActor
     private func sidebar(in view: NSView) -> NSOutlineView? {
         if let outline = view as? NSOutlineView, outline.accessibilityLabel() == "Sidebar" { return outline }
         return view.subviews.lazy.compactMap { self.sidebar(in: $0) }.first
+    }
+}
+
+/// Observes completion inside a SwiftUI body, so the fence represents a real post-ingest render.
+private struct LaunchRenderFence: View {
+    let content: ContentView
+    let onRendered: () -> Void
+    @Environment(AppRuntime.self) private var runtime
+
+    var body: some View {
+        content.overlay {
+            if runtime.launchIngestSignaled {
+                Color.clear.onAppear(perform: onRendered)
+            }
+        }
     }
 }

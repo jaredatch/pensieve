@@ -151,8 +151,9 @@ struct AppRuntimePaths {
                     manifest: ManifestService(fileService: fileService),
                     root: storeRoot,
                     defaults: defaults,
-                    artifactExists: { platformVM.artifactExists(skill: $0, platform: $1) },
-                    notifier: notifier
+                    artifactExists: { platformVM.workingArtifactExists(skill: $0, platform: $1) },
+                    notifier: notifier,
+                    fileService: fileService
                 )
             ).reconcileOnLaunch(
                 context: context,

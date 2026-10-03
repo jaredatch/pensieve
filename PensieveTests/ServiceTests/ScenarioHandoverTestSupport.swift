@@ -108,9 +108,8 @@ final class HandoverHarness {
     func handover(save: @escaping (ModelContext) throws -> Void = { try $0.save() },
                   fetcher: ReconcilerStateFetching = ReconcilerStateFetcher()) -> ScenarioHandover {
         ScenarioHandover(machineIdentity: identity, manifest: manifest, root: root, defaults: defaults,
-                         artifactExists: { [root, files] skill, platform in
-                             let path = root + "/agents/" + platform.rawValue + "/" + skill.directoryName
-                             return files.isSymlink(at: path) || files.fileExists(at: path)
+                         artifactExists: { [root] skill, platform in
+                             HandoverDeployments(root: root).platformVM.workingArtifactExists(skill: skill, platform: platform)
                          }, notifier: { [weak self] in self?.nudges += 1 },
                          fetcher: fetcher, save: save, log: { [weak self] in self?.logs.append($0) })
     }
@@ -240,7 +239,7 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
         try files.deleteFile(at: outputPath(skill: skill, projectPath: projectPath))
     }
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool {
-        files.fileExists(at: outputPath(skill: skill, projectPath: projectPath))
+        (try? files.readFile(at: outputPath(skill: skill, projectPath: projectPath))) == "compiled bytes"
     }
     func outputPath(skill: Skill, projectPath: String?) -> String { root + "/agents/cursor/" + skill.directoryName }
 }
