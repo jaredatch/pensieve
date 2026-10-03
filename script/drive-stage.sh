@@ -133,14 +133,14 @@ set -eu   # NOT pipefail (the kit's rule): every producer below is captured, the
 # spawns its own sandbox, e.g. xcodebuild → SwiftPM's sandbox-exec, cannot run inside Codex's Seatbelt and needs
 # danger-full-access on an isolated machine; a docs-only stage can run workspace-write). Env overrides exist for the
 # self-test and for a one-off; the file is the record.
-CODEX_MODEL="${DRIVE_STAGE_MODEL:-gpt-6-astra}"                     # the BUILDER's pin: stages, --bounded, --fix
-CODEX_REASONING="${DRIVE_STAGE_REASONING:-high}"             # e.g. high
+CODEX_MODEL="${DRIVE_STAGE_MODEL:-gpt-6.1-sol}"                     # the BUILDER's pin: stages, --bounded, --fix
+CODEX_REASONING="${DRIVE_STAGE_REASONING:-xhigh}"             # e.g. high
 CODEX_REVIEW_MODEL="${DRIVE_STAGE_REVIEW_MODEL:-gpt-6-astra}"       # the REVIEWER's pin: --review, --read (may be the builder's model; decided once, in DECISIONS.md)
 CODEX_REVIEW_REASONING="${DRIVE_STAGE_REVIEW_REASONING:-xhigh}"   # e.g. xhigh
 CODEX_SANDBOX="${DRIVE_STAGE_SANDBOX:-danger-full-access}"                 # the builder's sandbox (a review and a read are always read-only)
 TIMEOUT_NORMAL="${DRIVE_STAGE_TIMEOUT:-3600}"
 TIMEOUT_HEAVY="${DRIVE_STAGE_TIMEOUT_HEAVY:-7200}"
-CODEX_VERSION="${DRIVE_STAGE_CODEX_VERSION-0.154.0}"   # the pin, e.g. 0.144.3 — what the invocation below was last probed against; empty = unpinned (a launch is refused until it is set). `-` not `:-`: an explicitly EMPTY env value means unpinned even on a filled copy (the self-test relies on it)
+CODEX_VERSION="${DRIVE_STAGE_CODEX_VERSION-0.160.0}"   # the pin, e.g. 0.144.3 — what the invocation below was last probed against; empty = unpinned (a launch is refused until it is set). `-` not `:-`: an explicitly EMPTY env value means unpinned even on a filled copy (the self-test relies on it)
 REVIEW_MANDATE="${DRIVE_STAGE_REVIEW_MANDATE:-private/.codex/agents/pensieve-reviewer.toml}"   # the stage reviewer's mandate file, repo-relative: templates/codex-reviewer.toml copied to .codex/agents/<project>-reviewer.toml; --review is refused while it reads EDIT-ME
 HERDR_TESTED="${DRIVE_STAGE_HERDR_VERSION-0.9.1}"   # the pane's gate: the Herdr version (client AND server) the pane calls were probed on; any other refuses before a tab is made
 # --------------------------------------------------------------------------------------------------
