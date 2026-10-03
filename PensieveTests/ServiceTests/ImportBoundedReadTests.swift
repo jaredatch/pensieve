@@ -69,7 +69,8 @@ final class ImportBoundedReadTests: XCTestCase {
         XCTAssertEqual(skills.count, 5)
         XCTAssertTrue(skills.allSatisfy { $0.name == "good" })
         XCTAssertTrue(spy.textReads.isEmpty)
-        XCTAssertEqual(spy.limits.count, 15)
+        // The chosen collection's missing SKILL.md is also decided by one descriptor attempt.
+        XCTAssertEqual(spy.limits.count, 16)
         XCTAssertTrue(spy.limits.values.allSatisfy { $0 == cap })
         for (path, count) in spy.consumed {
             XCTAssertLessThanOrEqual(count, cap + 1, path)
@@ -151,13 +152,15 @@ final class ImportBoundedReadTests: XCTestCase {
         XCTAssertEqual(model.scanSkips.count, 4)
         XCTAssertEqual(Set(model.scanSkips.map(\.reason)), Set(ImportScanSkip.Reason.allCases))
         let retained = model.discoveredSkills
+        let retainedSkips = model.scanSkips
         XCTAssertEqual(model.scanFolder(root + "/missing"), .nothingFound)
         XCTAssertEqual(model.discoveredSkills, retained)
-        XCTAssertTrue(model.scanSkips.isEmpty)
+        XCTAssertEqual(model.scanSkips, retainedSkips, "Rejected scans must retain the matching report")
         model.scan()
         XCTAssertEqual(model.scanSkips.count, 4)
         XCTAssertEqual(model.scanFolder(root + "/store"), .insideLibrary)
-        XCTAssertTrue(model.scanSkips.isEmpty)
+        XCTAssertEqual(model.discoveredSkills, retained)
+        XCTAssertEqual(model.scanSkips, retainedSkips, "Library refusal must retain the matching report")
     }
 
     func testAllSkippedFolderKeepsNothingFoundAndDoesNotWidenDanglingLeaf() throws {

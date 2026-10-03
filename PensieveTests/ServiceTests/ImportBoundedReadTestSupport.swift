@@ -4,9 +4,9 @@ import XCTest
 
 /// Forwards filesystem operations to a temporary tree and records both text reads and actual
 /// descriptor read counts. Growth happens on the first read callback, after production fstat.
-/// A device entry is modeled with /dev/null's real no-follow metadata because unprivileged tests
-/// cannot create device nodes. Its text-read sentinel exposes an unsafe scanner without reading
-/// the host device. Other fixtures are real files, links, directories and FIFOs.
+/// A device entry forwards descriptor admission to /dev/null because unprivileged tests cannot
+/// create device nodes. Its text-read sentinel exposes an unsafe scanner. Other fixtures are real
+/// files, links, directories and FIFOs.
 final class ImportBoundedReadSpy: FileServiceProtocol {
     let files = FileService()
     var devicePath: String?
@@ -17,6 +17,11 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
     var limits: [String: Int] = [:]
     var consumed: [String: Int] = [:]
     var requests: [String: [Int]] = [:]
+    var readAttempts: [String] = []
+    var regularProbes: [String] = []
+    var presenceProbes: [String] = []
+    var directoryProbes: [String] = []
+    var readFailures: [String: Int32] = [:]
 
     func readFile(at path: String) throws -> String {
         textReads.append(path)
@@ -25,9 +30,12 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
     }
 
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        readAttempts.append(path)
         limits[path] = maximumBytes
+        if let code = readFailures[path] { throw NSError(domain: NSPOSIXErrorDomain, code: Int(code)) }
         if path == unreadablePath { throw CocoaError(.fileReadNoPermission) }
-        return try files.readRegularFileData(at: path, maximumBytes: maximumBytes) { descriptor, buffer, count in
+        return try files.readRegularFileData(at: path == devicePath ? "/dev/null" : path,
+                                             maximumBytes: maximumBytes) { descriptor, buffer, count in
             if path == self.growPath {
                 self.growPath = nil
                 // Fixture-only POSIX mutation preserves the inode held by the reader.
@@ -46,9 +54,11 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
     }
 
     func isRegularFile(at path: String) -> Bool {
-        files.isRegularFile(at: path == devicePath ? "/dev/null" : path)
+        regularProbes.append(path)
+        return files.isRegularFile(at: path == devicePath ? "/dev/null" : path)
     }
     func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {
+        presenceProbes.append(path)
         if path == devicePath { return true }
         return try files.entryExistsWithoutFollowingLinks(at: path)
     }
@@ -67,7 +77,10 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
         files.fileIdentity(at: path, followingLinks: followingLinks)
     }
     func isExecutableFile(at path: String) -> Bool { files.isExecutableFile(at: path) }
-    func directoryExists(at path: String) -> Bool { files.directoryExists(at: path) }
+    func directoryExists(at path: String) -> Bool {
+        directoryProbes.append(path)
+        return files.directoryExists(at: path)
+    }
     func createDirectory(at path: String) throws { try files.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try files.deleteDirectory(at: path) }
     func createSymlink(at path: String, pointingTo target: String) throws {

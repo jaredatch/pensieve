@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 // MARK: - Discovered Skill
@@ -87,7 +88,7 @@ final class ImportScanner: ImportScannerProtocol {
             return []
         }
         return entries
-            .filter { !$0.hasPrefix(".") && fileService.directoryExists(at: skillsDir + "/" + $0) }
+            .filter { !$0.hasPrefix(".") }
             .compactMap { discoveredSkill(inDirectory: skillsDir, entry: $0, platform: platform, skipped: &skipped) }
     }
 
@@ -101,6 +102,10 @@ final class ImportScanner: ImportScannerProtocol {
         let skillPath = skillsDir + "/" + entry + "/SKILL.md"
         guard !isInsideStore(skillPath),
               let content = scannedText(at: skillPath, skipped: &skipped) else { return nil }
+        return discoveredSkill(content: content, path: skillPath, entry: entry, platform: platform)
+    }
+
+    private func discoveredSkill(content: String, path skillPath: String, entry: String, platform: String) -> DiscoveredSkill {
         // The byte boundary removes the encoding signature before decoding or frontmatter detection.
         let parsed = SkillParser.parse(content)
         if parsed.hasFrontmatter {
@@ -190,19 +195,19 @@ final class ImportScanner: ImportScannerProtocol {
     func scanFolderWithReport(_ path: String) -> ImportScanReport {
         guard !isInsideStore(path) else { return ImportScanReport() }
         var skipped: [ImportScanSkip] = []
-        let hasSkill: Bool
-        do { hasSkill = try fileService.entryExistsWithoutFollowingLinks(at: path + "/SKILL.md") } catch {
-            return ImportScanReport(skipped: [ImportScanSkip(path: path + "/SKILL.md", reason: .unreadable)])
-        }
+        let skillPath = path + "/SKILL.md"
+        guard !isInsideStore(skillPath) else { return ImportScanReport() }
+        let content = scannedText(at: skillPath, directoryIsContainer: true, skipped: &skipped)
         let skills: [DiscoveredSkill]
-        if hasSkill {
-            // A present leaf decides, even a dangling link. Never widen a refused skill to children.
-            let parent = (path as NSString).deletingLastPathComponent
+        if let content {
             let entry = (path as NSString).lastPathComponent
-            skills = discoveredSkill(inDirectory: parent, entry: entry, platform: "folder", skipped: &skipped)
-                .map { [$0] } ?? []
-        } else {
+            skills = [discoveredSkill(content: content, path: skillPath, entry: entry, platform: "folder")]
+        } else if skipped.isEmpty {
+            // Missing files and directories named SKILL.md leave this a collection. A refused leaf,
+            // including a dangling link, decides the folder's result without widening to children.
             skills = scanSkillDirectory(path, platform: "folder", skipped: &skipped)
+        } else {
+            skills = []
         }
         return ImportScanReport(skills: skills, skipped: skipped)
     }
@@ -227,19 +232,11 @@ final class ImportScanner: ImportScannerProtocol {
         }
     }
 
-    /// Missing SKILL.md entries are ordinary non-skills. Present unsafe leaves are reported, and
-    /// the descriptor reader repeats admission so a replacement between the probes stays safe.
-    private func scannedText(at path: String, skipped: inout [ImportScanSkip]) -> String? {
-        guard fileService.isRegularFile(at: path) else {
-            do {
-                if try fileService.entryExistsWithoutFollowingLinks(at: path) {
-                    skipped.append(ImportScanSkip(path: path, reason: .notRegular))
-                }
-            } catch {
-                skipped.append(ImportScanSkip(path: path, reason: .unreadable))
-            }
-            return nil
-        }
+    /// The descriptor decides the leaf once, so replacement or deletion cannot leave a stale
+    /// admission result. A chosen folder's own SKILL.md directory remains a collection.
+    private func scannedText(
+        at path: String, directoryIsContainer: Bool = false, skipped: inout [ImportScanSkip]
+    ) -> String? {
         do {
             let data = try fileService.readRegularFileData(at: path, maximumBytes: Self.maximumFileBytes)
             guard let content = String(bytes: Self.sourceTextBytes(data), encoding: .utf8) else {
@@ -250,7 +247,15 @@ final class ImportScanner: ImportScannerProtocol {
         } catch {
             let failure = error as NSError
             let reason: ImportScanSkip.Reason
-            if failure.domain == NSCocoaErrorDomain && failure.code == CocoaError.fileReadTooLarge.rawValue {
+            if failure.domain == NSPOSIXErrorDomain {
+                switch Int32(failure.code) {
+                case ENOENT, ENOTDIR: return nil
+                case EISDIR where directoryIsContainer: return nil
+                // Darwin rejects a socket at open with EOPNOTSUPP, before fstat is possible.
+                case ELOOP, EFTYPE, EISDIR, EOPNOTSUPP: reason = .notRegular
+                default: reason = .unreadable
+                }
+            } else if failure.domain == NSCocoaErrorDomain && failure.code == CocoaError.fileReadTooLarge.rawValue {
                 reason = .tooLarge
             } else {
                 reason = .unreadable

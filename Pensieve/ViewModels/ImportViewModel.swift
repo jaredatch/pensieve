@@ -21,22 +21,30 @@ final class ImportViewModel {
     var error: String?
     var importNotices: [String] = []
     var scanSkips: [ImportScanSkip] = []
+    private(set) var importedSkillCount = 0
 
     var hasResults: Bool { !discoveredSkills.isEmpty }
+
+    var doneTitle: String {
+        if !hasResults { return scanSkips.isEmpty ? "No Skills Found" : "No Skills Imported" }
+        return error == nil && importedSkillCount == selectedSkills.count ? "Import Complete" : "Import Finished"
+    }
+
+    var doneMessage: String {
+        if hasResults {
+            let noun = importedSkillCount == 1 ? "skill" : "skills"
+            return "\(importedSkillCount) \(noun) imported into Pensieve."
+        }
+        return scanSkips.isEmpty ? "No existing skills were found. Create your first skill to get started."
+            : "No skills could be imported from the scanned entries."
+    }
 
     var scanSummary: String? {
         guard !scanSkips.isEmpty else { return nil }
         let reasons = ImportScanSkip.Reason.allCases.compactMap { reason -> String? in
             let count = scanSkips.filter { $0.reason == reason }.count
             guard count > 0 else { return nil }
-            let label: String
-            switch reason {
-            case .notRegular: label = count == 1 ? "symlink or special file" : "symlinks or special files"
-            case .tooLarge: label = count == 1 ? "file larger than 4 MiB" : "files larger than 4 MiB"
-            case .unreadable: label = count == 1 ? "unreadable file or folder" : "unreadable files or folders"
-            case .invalidUTF8: label = count == 1 ? "file that isn't UTF-8 text" : "files that aren't UTF-8 text"
-            }
-            return "\(count) \(label)"
+            return "\(count) \(reason.label(count: count))"
         }
         let entries = scanSkips.count == 1 ? "entry" : "entries"
         return "Skipped \(scanSkips.count) \(entries): " + reasons.joined(separator: "; ") + "."
@@ -64,6 +72,7 @@ final class ImportViewModel {
 
     func scan() {
         importNotices = []
+        importedSkillCount = 0
         error = nil
         isScanning = true
         let report = scanner.scanWithReport()
@@ -81,16 +90,20 @@ final class ImportViewModel {
     @discardableResult
     func scanFolder(_ path: String) -> FolderScanOutcome {
         importNotices = []
+        importedSkillCount = 0
         error = nil
-        scanSkips = []
         guard !scanner.isInsideStore(path) else { return .insideLibrary }
         isScanning = true
         defer { isScanning = false }
         let report = scanner.scanFolderWithReport(path)
-        scanSkips = report.skipped
         let found = report.skills
-        guard !found.isEmpty else { return .nothingFound }
+        guard !found.isEmpty else {
+            // A report belongs to its results. Keep both when retaining an earlier non-empty scan.
+            if discoveredSkills.isEmpty { scanSkips = report.skipped }
+            return .nothingFound
+        }
         discoveredSkills = found
+        scanSkips = report.skipped
         duplicateGroups = ImportScanner.findDuplicates(discoveredSkills)
         selectedSkills = Set(discoveredSkills.map(\.sourcePath))
         return .found(found.count)
@@ -131,6 +144,7 @@ final class ImportViewModel {
         takenSlugs: (ModelContext) throws -> Set<String> = { Set(try $0.fetch(FetchDescriptor<Skill>()).map(\.directoryName)) }
     ) {
         importNotices = []
+        importedSkillCount = 0
         error = nil
         let toImport = discoveredSkills.filter { selectedSkills.contains($0.sourcePath) }
         guard !toImport.isEmpty else { return }
@@ -166,6 +180,7 @@ final class ImportViewModel {
                 )
                 context.insert(skill)
                 writtenSlugs.append(dirName)
+                importedSkillCount = writtenSlugs.count
                 importProgress = Double(writtenSlugs.count) / Double(toImport.count)
             } catch {
                 self.error = "Failed to import \(discovered.name): \(error.localizedDescription)"
