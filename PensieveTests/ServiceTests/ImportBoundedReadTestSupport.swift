@@ -7,6 +7,7 @@ import XCTest
 /// A device entry forwards descriptor admission to /dev/null because unprivileged tests cannot
 /// create device nodes. Its text-read sentinel exposes an unsafe scanner. Other fixtures are real
 /// files, links, directories and FIFOs.
+/// Tree comparisons forward to the same filesystem and record the caller's main-thread status.
 final class ImportBoundedReadSpy: FileServiceProtocol {
     let files = FileService()
     var devicePath: String?
@@ -22,6 +23,18 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
     var presenceProbes: [String] = []
     var directoryProbes: [String] = []
     var readFailures: [String: Int32] = [:]
+    var comparisonThreads: [Bool] = []
+
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try files.entryTypeWithoutFollowingLinks(at: path)
+    }
+
+    func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
+                          limits: FileTreeComparisonLimits) throws -> FileTreeComparison {
+        comparisonThreads.append(Thread.isMainThread)
+        return try files.compareFileTrees(local: local, upstream: upstream, excludingUpstreamGit: excludingUpstreamGit,
+                                          limits: limits)
+    }
 
     func readFile(at path: String) throws -> String {
         textReads.append(path)

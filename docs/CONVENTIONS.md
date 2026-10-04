@@ -106,6 +106,7 @@ The **C7 invariant** — never read, write, deploy, or ingest through a symlinke
 - **Pass `base` explicitly** — `root + "/skills"` where the store root is a parameter (`StoreRebuildService`/`StoreMigrationService`), `Constants.pensieveSkillsDir` where it is fixed (deploy/token). The resolver never hardcodes the base.
 - **Adding a new sink means calling `safeSkillDirectory`.** A sink that doesn't is visibly guardless in review. **Exception:** `SyncEngine.validatedWorktreePath` is a *different* validator (arbitrary multi-component git-relative paths, leaf-vs-non-leaf symlink semantics) and is deliberately **not** folded in — do not route it through this primitive.
 - **Regular files have their own single primitive (PLAN-48, PLAN-43).** Every no-follow open of a file goes through `FileService.openRegularFile`, which admits one regular leaf with `O_NOFOLLOW | O_NONBLOCK` and cleans up after a failed admission. `FileServiceAdmissionTests` counts every `O_NOFOLLOW`-family `open`/`openat` in `Pensieve/` and `PensieveDaemon/` and fails on a second one. Only an `O_DIRECTORY` open is exempt. To read, copy or create a file without following links, call the helper; don't add another `open`.
+- **Directories have one admission too.** `FileService.openDirectory` in `FileService+DirectoryCopy.swift` is the only no-follow `O_DIRECTORY` open; directory copying and tree comparison both call it.
 
 ## 16. Shell scripts — bash 3.2 and BSD tools
 

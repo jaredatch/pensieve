@@ -7,6 +7,17 @@ struct RegularFileCopyReceipt {
 }
 
 extension FileService {
+    /// Admits one directory without following its leaf, optionally relative to a held parent.
+    /// The caller owns the returned descriptor and preserves its operation and path in errors.
+    static func openDirectory(at path: String, relativeTo directoryDescriptor: Int32 = AT_FDCWD,
+                              reportingPath: String? = nil, operation: String = "open") throws -> Int32 {
+        let descriptor = openat(directoryDescriptor, path, O_RDONLY | O_NOFOLLOW | O_DIRECTORY | O_NONBLOCK)
+        guard descriptor >= 0 else {
+            throw DescriptorFileCopy.error(operation, path: reportingPath ?? path, code: errno)
+        }
+        return descriptor
+    }
+
     enum DirectoryCopyCheckpoint {
         case opened
         case unavailable
@@ -23,11 +34,14 @@ extension FileService {
     @discardableResult
     func copyRegularFiles(fromDirectory source: String, toDirectory destination: String,
                           checkpoint: (DirectoryCopyCheckpoint) throws -> Void) throws -> RegularFileCopyReceipt {
-        let descriptor = open(source, O_RDONLY | O_NOFOLLOW | O_DIRECTORY | O_NONBLOCK)
-        guard descriptor >= 0 else {
-            let code = errno
-            guard code == ENOENT || code == ENOTDIR || code == ELOOP else {
-                throw DescriptorFileCopy.error("open", path: source, code: code)
+        let descriptor: Int32
+        do {
+            descriptor = try Self.openDirectory(at: source)
+        } catch {
+            let failure = error as NSError
+            guard failure.domain == NSPOSIXErrorDomain,
+                  failure.code == Int(ENOENT) || failure.code == Int(ENOTDIR) || failure.code == Int(ELOOP) else {
+                throw error
             }
             try checkpoint(.unavailable)
             let initial = try DirectoryCopySource.pathStamp(source)

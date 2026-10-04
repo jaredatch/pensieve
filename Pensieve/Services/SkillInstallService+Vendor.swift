@@ -2,40 +2,6 @@ import Foundation
 import SwiftData
 
 extension SkillInstallService {
-    func withVerifiedCheckout<Result>(
-        candidate: SkillCandidate,
-        source: SkillFetchResult,
-        credential: GitCredential?,
-        body: (String, SkillCandidate) throws -> Result
-    ) throws -> Result {
-        try prepareScratchRoot()
-        let sessionRoot = scratchRoot + "/" + UUID().uuidString
-        try fileService.createDirectory(at: sessionRoot)
-        defer { try? fileService.deleteDirectory(at: sessionRoot) }
-
-        guard let validatedRemote = validateRemote(source.repo) else {
-            throw SkillInstallError.unsupportedRepositoryRemote
-        }
-        let checkoutName = SkillStore.slugify(repositoryName(for: validatedRemote.repo))
-        let checkoutPath = sessionRoot + "/" + checkoutName
-        try cloneForInstall(
-            remote: validatedRemote.cloneRemote,
-            branch: source.ref,
-            into: checkoutPath,
-            credential: credential
-        )
-        guard try gitService.commitSHA(at: checkoutPath) == source.headCommit else {
-            throw SkillInstallError.repositoryChanged
-        }
-        let refreshed = try discover(at: checkoutPath, path: candidate.path)
-        guard let verified = refreshed.first,
-              verified.treeHash == candidate.treeHash,
-              verified.slug == candidate.slug else {
-            throw SkillInstallError.repositoryChanged
-        }
-        return try body(checkoutPath, verified)
-    }
-
     func install(candidate: SkillCandidate, from source: SkillFetchResult,
                  credential: GitCredential? = nil,
                  bodyWriteRegistration: SyncBodyWriteRegistration = .suppressed,

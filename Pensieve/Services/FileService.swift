@@ -9,6 +9,9 @@ protocol FileServiceProtocol {
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data
     /// Checks the opened inode's resolved path is inside this directory before reading any bytes.
     func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data
+    /// Inventories both no-follow trees before reading, then compares their regular files under shared limits.
+    func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
+                          limits: FileTreeComparisonLimits) throws -> FileTreeComparison
     func writeFile(at path: String, content: String) throws
     func writeData(at path: String, data: Data) throws
     func writeExecutableFile(at path: String, content: String) throws
@@ -64,6 +67,11 @@ struct RegularFileMetadata: Equatable {
 // MARK: - Default implementations
 
 extension FileServiceProtocol {
+    /// Inert default: tree comparisons must be modeled explicitly by filesystem doubles.
+    func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
+                          limits: FileTreeComparisonLimits) throws -> FileTreeComparison {
+        throw CocoaError(.featureUnsupported)
+    }
     /// Inert default: an unmodeled directory probe is unknown and never accesses the host.
     func checkDirectoryReadable(at path: String) throws { throw CocoaError(.fileReadUnknown) }
 

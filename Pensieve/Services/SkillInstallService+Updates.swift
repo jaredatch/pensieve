@@ -48,11 +48,6 @@ struct PinnedSkillUpdate: Equatable {
     }
 }
 
-struct PinnedSkillDiff: Equatable {
-    let currentSkillMarkdown: String
-    let upstreamSkillMarkdown: String
-}
-
 enum SkillUpdateFlowError: LocalizedError, Equatable {
     static let repositoryChangedMessage =
         "Repository changed since last check — re-check to review the latest version"
@@ -87,12 +82,11 @@ extension SkillInstallService {
     /// The operation writes scratch clone data only; it never touches the store, manifest, or flags.
     func previewUpdate(_ update: PinnedSkillUpdate) throws -> PinnedSkillDiff {
         do {
-            return try withVerifiedCheckout(
+            return try withPinnedCheckout(
                 candidate: update.candidate,
                 source: update.source,
                 credential: nil
-            ) { checkout, verified in
-                try requireInstallable(verified)
+            ) { checkout in
                 guard let localDirectory = SkillStore.safeSkillDirectory(
                     slug: update.existingSlug,
                     base: storeRoot + "/skills",
@@ -100,21 +94,28 @@ extension SkillInstallService {
                 ), fileService.directoryExists(at: localDirectory) else {
                     throw SkillUpdateFlowError.unsafeSkillDirectory(update.existingSlug)
                 }
-                let upstreamDirectory = verified.path.isEmpty
+                let upstreamDirectory = update.candidate.path.isEmpty
                     ? checkout
-                    : checkout + "/" + verified.path
-                guard fileService.isRegularFile(at: localDirectory + "/SKILL.md"),
-                      fileService.isRegularFile(at: upstreamDirectory + "/SKILL.md") else {
+                    : checkout + "/" + update.candidate.path
+                guard fileService.isRegularFile(at: localDirectory + "/SKILL.md") else {
                     throw SkillUpdateFlowError.unsafeSkillFile(update.existingSlug)
                 }
-                return PinnedSkillDiff(
-                    currentSkillMarkdown: try fileService.readFile(
-                        at: localDirectory + "/SKILL.md"
-                    ),
-                    upstreamSkillMarkdown: try fileService.readFile(
-                        at: upstreamDirectory + "/SKILL.md"
+                guard fileService.isRegularFile(at: upstreamDirectory + "/SKILL.md") else {
+                    throw SkillInstallError.unavailableCandidate("Unsafe upstream file: \(upstreamDirectory)/SKILL.md")
+                }
+                do {
+                    let comparison = try fileService.compareFileTrees(
+                        local: localDirectory, upstream: upstreamDirectory,
+                        excludingUpstreamGit: update.candidate.path.isEmpty, limits: .updatePreview
                     )
-                )
+                    return PinnedSkillDiff(comparison: comparison)
+                } catch {
+                    let path = (error as NSError).userInfo[NSFilePathErrorKey] as? String ?? ""
+                    if path.hasPrefix(upstreamDirectory + "/") {
+                        throw SkillInstallError.unavailableCandidate(error.localizedDescription)
+                    }
+                    throw error
+                }
             }
         } catch SkillInstallError.repositoryChanged {
             throw SkillUpdateFlowError.repositoryChanged
