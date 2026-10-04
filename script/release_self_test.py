@@ -187,6 +187,7 @@ elif cmd == "hdiutil":
         shutil.copytree(source / "Pensieve.app", payload)
         pathlib.Path(args[-1]).write_text("fresh built DMG"); save()
     elif args[0] == "attach":
+        if s.get("attach_failure"): fail("fixture DMG attach failed")
         import plistlib, shutil
         mounted = pathlib.Path(args[args.index("-mountpoint") + 1]) / "Pensieve.app"
         source = p.parent / "dmg-payload"
@@ -200,6 +201,7 @@ elif cmd == "hdiutil":
             else: info["LSMinimumSystemVersion"] = s["dmg_minimum"]
         info_path.write_bytes(plistlib.dumps(info))
     elif args[0] == "detach":
+        if s.get("detach_failure"): fail("fixture DMG detach failed")
         import shutil; shutil.rmtree(pathlib.Path(args[1]) / "Pensieve.app")
     else: fail("unexpected hdiutil")
     sys.exit(0)
@@ -564,7 +566,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         for original, replacement in (
                 ('NOTARY_CMD="/usr/bin/xcrun notarytool"', 'NOTARY_CMD="notary"'),
                 ('STAPLER_CMD="/usr/bin/xcrun stapler"', 'STAPLER_CMD="stapler"'),
-                ('GH_CMD="/opt/homebrew/bin/gh"\n[ -x "$GH_CMD" ] || GH_CMD="/usr/local/bin/gh"', 'GH_CMD="gh"'),
+                ('GH_CMD="/opt/homebrew/bin/gh"\nif [ ! -x "$GH_CMD" ]; then\n  GH_CMD="/usr/local/bin/gh"\n  [ -x "$GH_CMD" ] || {\n    echo "release: executable gh required at /opt/homebrew/bin/gh or /usr/local/bin/gh" >&2\n    exit 1\n  }\nfi', 'GH_CMD="gh"'),
                 ('GENERATE_APPCAST_CMD=""', "GENERATE_APPCAST_CMD=" + json.dumps(str(bin_dir / "generate"))),
                 ('VERIFY_UPDATE_CMD=""', 'VERIFY_UPDATE_CMD="verify"')):
             self.substitute_fixture_source(self.root / "script/release.sh", original, replacement)
@@ -588,6 +590,77 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.substitute_fixture_source(self.root / "script/release.sh",
             "VERIFY_UPDATE_CMD=" + json.dumps(self.fixture_verifier), "VERIFY_UPDATE_CMD=" + json.dumps(command))
         self.fixture_verifier = command
+
+    def test_failed_dmg_attach_never_attempts_detach(self):
+        original = json.loads(json.dumps(self.state))
+        for published in (False, True):
+            with self.subTest(published=published):
+                self.state = dict(json.loads(json.dumps(original)), attach_failure=True)
+                if published:
+                    self.state.update(release=self.state["expected_release"], appcast=feed())
+                output = self.run_release(expected=1)
+                self.assertIn("local DMG attach failed", output)
+                self.assertNotIn("detach failed", output)
+                self.assertEqual(sum(c[:2] == ["hdiutil", "attach"] for c in self.state["calls"]), 1)
+                self.assertEqual(sum(c[:2] == ["hdiutil", "detach"] for c in self.state["calls"]), 0)
+                self.assertEqual(self.state["writes"], [])
+
+    def test_fixed_gh_paths_require_an_executable_before_work(self):
+        source = (ROOT / "script/release.sh").read_text()
+        block = source[source.index('GH_CMD="/opt/homebrew/bin/gh"'):source.index('GENERATE_APPCAST_CMD=""')].rstrip()
+        primary, fallback = self.root / "primary-gh", self.root / "fallback-gh"
+        block = block.replace("/opt/homebrew/bin/gh", str(primary)).replace("/usr/local/bin/gh", str(fallback))
+        self.substitute_fixture_source(self.root / "script/release.sh", 'GH_CMD="gh"', block)
+        for first, second in ((True, False), (False, True), (False, False), (None, None)):
+            with self.subTest(primary=first, fallback=second):
+                for path, executable in ((primary, first), (fallback, second)):
+                    if executable is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        path.write_text("#!/bin/sh\nexit 0\n"); path.chmod(0o755 if executable else 0o644)
+                result = self.run_function('printf "%s\\n" "$GH_CMD"', before_source="")
+                if first or second:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.strip(), str(primary if first else fallback))
+                else:
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn(str(primary), result.stderr)
+                    self.assertIn(str(fallback), result.stderr)
+                self.assertEqual(self.state["calls"], [], "tool admission must precede child commands")
+
+    def test_dmg_detach_failure_refuses_fresh_and_published_checks(self):
+        original = json.loads(json.dumps(self.state))
+        for published in (False, True):
+            with self.subTest(published=published):
+                self.state = dict(json.loads(json.dumps(original)), detach_failure=True)
+                if published:
+                    self.state.update(release=self.state["expected_release"], appcast=feed())
+                output = self.run_release(expected=1)
+                self.assertIn("local DMG detach failed", output)
+                self.assertEqual(sum(c[:2] == ["hdiutil", "attach"] for c in self.state["calls"]), 1)
+                self.assertEqual(sum(c[:2] == ["hdiutil", "detach"] for c in self.state["calls"]), 1)
+                self.assertEqual(self.state["writes"], [])
+
+    def test_shared_dmg_check_validates_version_and_publish_only_tickets(self):
+        original = json.loads(json.dumps(self.state))
+        for mode in ("dry", "publish", "recovery"):
+            with self.subTest(mode=mode):
+                self.state = json.loads(json.dumps(original))
+                self.cask_artifact()
+                body = 'VERSION="' + VERSION + '"; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; '
+                body += ('verify_published_dmg "$DMG_PATH" ' + str(len(DMG)) + ' "' + SIGNATURE + '" "fixture" "feed"'
+                         if mode == "recovery" else 'PUBLISH=' + str(int(mode == "publish")) + '; verify_dmg_app')
+                result = self.run_function(body)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                for command in ("stapler", "spctl"):
+                    checks = [c for c in self.state["calls"] if c[0] == command]
+                    self.assertEqual(len(checks), int(mode == "publish"))
+                self.assertEqual(sum(c[:2] == ["hdiutil", "detach"] for c in self.state["calls"]), 1)
+                self.state["dmg_version"] = "0.14.0"
+                result = self.run_function(body)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("version differs", result.stderr)
+                self.assertEqual(self.state["writes"], [])
 
     def test_live_recovery_refuses_replayed_older_dmg(self):
         signature = self.install_fixture_public_key()
@@ -1650,7 +1723,7 @@ verify_appcast_unchanged''')
         for name in ("Pensieve", "pensieve-daemon"):
             binary = info.parent / "MacOS" / name
             binary.parent.mkdir(parents=True, exist_ok=True); binary.write_text("fixture Mach-O")
-        verify = "verify_dmg_app_ticket; " if verify_minimum else ""
+        verify = "verify_dmg_app; " if verify_minimum else ""
         return self.run_function('VERSION="' + version + '"; VERSION_CHANNEL="' + PUBLICATION_CASES[version][0] + '"; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; ' + verify + 'release_preflight; generate_appcast')
 
     def test_release_ignores_macho_tool_environment_overrides(self):
@@ -1781,7 +1854,8 @@ verify_appcast_unchanged''')
                     ET.SubElement(root.find("channel/item"), self.tool.SPARKLE + "minimumSystemVersion").text = "26.0"
                 self.state = dict(json.loads(json.dumps(original)), new_feed=ET.tostring(root, encoding="unicode"))
                 output = self.run_release(expected=1)
-                self.assertIn("generated appcast has missing, empty or duplicated minimum system version", output)
+                message = "generated appcast minimum system version is empty" if minimum == "" else "generated appcast item has wrong element count: " + self.tool.SPARKLE + "minimumSystemVersion"
+                self.assertIn(message, output)
                 self.assertEqual(self.state["writes"], [])
 
     def test_generated_appcast_requires_built_app_minimum(self):
@@ -1891,14 +1965,8 @@ verify_appcast_unchanged''')
                     altered = ET.fromstring(ET.tostring(item)); child = altered.find(tag)
                     if mutation == "duplicate": altered.append(ET.fromstring(ET.tostring(child)))
                     else: altered.remove(child)
-                    root = ET.fromstring(ET.tostring(captured)); channel = root.find("channel")
-                    channel.remove(channel.find("item")); channel.append(altered)
                     with self.assertRaisesRegex(ValueError, "wrong element count"):
-                        if tag == self.tool.SPARKLE + "minimumSystemVersion":
-                            self.tool.appcast_provenance(ET.tostring(root, encoding="unicode"), None,
-                                "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION, "26.0")
-                        else:
-                            self.tool.check_generated_item(altered, f"{DOWNLOAD_PREFIX}/v{VERSION}/Pensieve-{VERSION}.dmg")
+                        self.tool.check_generated_item(altered, f"{DOWNLOAD_PREFIX}/v{VERSION}/Pensieve-{VERSION}.dmg")
         for _ in range(2): ET.SubElement(item, self.tool.SPARKLE + "channel").text = "beta"
         with self.assertRaisesRegex(ValueError, "wrong element count"):
             self.tool.check_generated_item(item, f"{DOWNLOAD_PREFIX}/v{VERSION}/Pensieve-{VERSION}.dmg")

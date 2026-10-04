@@ -206,7 +206,7 @@ def check_generated_item(item, expected_url):
         allowed_attributes = {"url", "length", "type", SPARKLE + "edSignature"} if child.tag == "enclosure" else set()
         require(set(child.attrib) <= allowed_attributes, "unexpected generated appcast item attribute")
         values.extend(child.attrib.values())
-    for name in names - {SPARKLE + "minimumSystemVersion"}:
+    for name in names:
         count = len(item.findall(name))
         expected = count <= 1 if name == SPARKLE + "channel" else count == 1
         require(expected, f"generated appcast item has wrong element count: {name}")
@@ -232,12 +232,8 @@ def appcast_provenance(text, base_text, built_dmg, download_prefix, version, bui
     items = root.find("channel").findall("item")
     current = next(item for item in items if item.findtext(SPARKLE + "shortVersionString") == version)
     minimums = current.findall(SPARKLE + "minimumSystemVersion")
-    require(len(minimums) == 1,
-            "generated appcast item has wrong element count: minimumSystemVersion; "
-            "generated appcast has missing, empty or duplicated minimum system version")
-    require(bool(minimums[0].text),
-            "generated appcast has missing, empty or duplicated minimum system version")
     check_generated_item(current, f"{download_prefix}/v{version}/{built_dmg}")
+    require(bool(minimums[0].text), "generated appcast minimum system version is empty")
     require(minimums[0].text == built_minimum,
             f"generated appcast minimum {minimums[0].text} differs from built app minimum {built_minimum}")
     require(canonical_xml(root, items) == canonical_xml(base, base_items),

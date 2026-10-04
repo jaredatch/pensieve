@@ -18,15 +18,12 @@ verify_update_archive() {
   fi
 }
 
-verify_published_dmg() (
-  local dmg="$1" length="$2" signature="$3" context="$4" source="$5" public_key mount_point
-  public_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$REPO/Pensieve/Info.plist")" || return 1
-  if ! verify_update_archive "$dmg" "$length" "$signature" "$public_key"; then
-    echo "release: $context length or EdDSA signature does not match $source" >&2
-    return 1
-  fi
-  mount_point="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-published-dmg.XXXXXX")" || return 1
-  trap 'cleanup_rc=$?; if ! hdiutil detach "$mount_point" -force >/dev/null 2>&1; then
+# One read-only mount owns metadata validation and cleanup for built and published DMGs.
+mounted_dmg_minimum() (
+  local dmg="$1" context="$2" version="${3:-}" check_tickets="${4:-0}" mount_point attached=0
+  local minimum_args
+  mount_point="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-dmg-verify.XXXXXX")" || return 1
+  trap 'cleanup_rc=$?; if [ "$attached" -eq 1 ] && ! hdiutil detach "$mount_point" -force >/dev/null 2>&1; then
           echo "release: $context: local DMG detach failed" >&2; cleanup_rc=1;
         fi;
         if ! rmdir "$mount_point"; then
@@ -34,8 +31,31 @@ verify_published_dmg() (
         fi; exit "$cleanup_rc"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  hdiutil attach "$dmg" -mountpoint "$mount_point" -nobrowse -readonly -quiet >&2 || return 1
-  python3 -B "$REPO/script/minimum_system.py" --app "$mount_point/Pensieve.app" --version "$VERSION" >/dev/null || return 1
+  hdiutil attach "$dmg" -mountpoint "$mount_point" -nobrowse -readonly -quiet >&2 || {
+    echo "release: $context: local DMG attach failed" >&2; return 1;
+  }
+  attached=1
+  test -d "$mount_point/Pensieve.app" || {
+    echo "release: $context: no Pensieve.app inside $dmg" >&2; return 1;
+  }
+  # Only the fresh publish path checks the app's ticket and Gatekeeper assessment.
+  if [ "$check_tickets" -eq 1 ]; then
+    run_command_seam "$STAPLER_CMD" validate "$mount_point/Pensieve.app" >&2 || return 1
+    spctl --assess --type exec -vv "$mount_point/Pensieve.app" >&2 || return 1
+  fi
+  minimum_args=(--app "$mount_point/Pensieve.app")
+  [ -z "$version" ] || minimum_args+=(--version "$version")
+  python3 -B "$REPO/script/minimum_system.py" "${minimum_args[@]}" || return 1
+)
+
+verify_published_dmg() (
+  local dmg="$1" length="$2" signature="$3" context="$4" source="$5" public_key
+  public_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$REPO/Pensieve/Info.plist")" || return 1
+  if ! verify_update_archive "$dmg" "$length" "$signature" "$public_key"; then
+    echo "release: $context length or EdDSA signature does not match $source" >&2
+    return 1
+  fi
+  mounted_dmg_minimum "$dmg" "$context" "$VERSION" >/dev/null || return 1
 )
 
 verify_cask_artifact() (

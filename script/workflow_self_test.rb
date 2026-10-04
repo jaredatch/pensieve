@@ -4,6 +4,8 @@ require 'yaml'
 require 'json'
 require 'minitest/autorun'
 require 'strscan'
+require 'open3'
+require 'tmpdir'
 
 # Evaluate only the boolean/string subset used by the release job condition.
 # Unknown syntax fails closed. This is a local policy probe, not a runner:
@@ -692,7 +694,7 @@ class WorkflowTests < Minitest::Test
       original.call(job)
     end
     test_ci_budget_rejects_missing_short_and_unsummed_bounds
-    CI_WORST_SECONDS.each do |name, worst|
+    ci_worst_seconds(baseline).each do |name, worst|
       next if worst.zero?
       assert_equal((worst * 3 / 60.0).ceil - 1, observed.fetch(name), name + ': tight short-bound mutation')
     end
@@ -742,8 +744,12 @@ class WorkflowTests < Minitest::Test
   # Apply 2x for a slower runner before adding it to each historical runner baseline.
   # Recovery uses the complete 46.3-c3 local rehearsal, also scaled by 2x.
   CI_RUNNER_FACTOR = 2
-  # 32 existing branch commits, this fix, and the integration merge.
-  CI_LARGEST_PUSH = 34
+  # Largest per-commit averages among multi-commit runs 37143791867 (2),
+  # 37192623397 (17), and 37218019371 (17): the last took 20 s and 28 s.
+  CI_PER_COMMIT_SECONDS = {
+    'Check public hygiene in pushed commits' => 20.0 / 17,
+    'Replay commit guards' => 28.0 / 17
+  }.freeze
   CI_LOCAL_WORST_SECONDS = {
     'Wrapper self-test' => 9.826, 'Hygiene added checks' => 0.731, 'Workflow suite' => 7.273,
     'Release recovery' => 204.182
@@ -753,16 +759,21 @@ class WorkflowTests < Minitest::Test
     'Generate Xcode project' => 1, 'Compute replay range' => 0,
     'Test public hygiene guard' => 156 + (CI_LOCAL_WORST_SECONDS.fetch('Hygiene added checks') * CI_RUNNER_FACTOR).ceil, 'Test workflow contracts' => [3, (CI_LOCAL_WORST_SECONDS.fetch('Workflow suite') * CI_RUNNER_FACTOR).ceil].max,
     'Test release recovery' => (CI_LOCAL_WORST_SECONDS.fetch('Release recovery') * CI_RUNNER_FACTOR).ceil, 'Test development build host selection' => 0,
-    'Check public hygiene in pushed commits' => 22 * CI_LARGEST_PUSH, 'Replay commit guards' => 35 * CI_LARGEST_PUSH,
     'Test' => 867 + (CI_LOCAL_WORST_SECONDS.fetch('Wrapper self-test') * CI_RUNNER_FACTOR).ceil, 'Upload failed test evidence' => 7, 'Headless smoke' => 14
   }.freeze
+
+  def ci_worst_seconds(job)
+    limit = Integer(job.fetch('env').fetch('CI_LARGEST_PUSH'))
+    assert_operator limit, :>, 0, 'CI: positive replay count limit'
+    CI_WORST_SECONDS.merge(CI_PER_COMMIT_SECONDS.transform_values { |seconds| seconds * limit })
+  end
 
   def assert_ci_timeout_budget(job)
     steps = job.fetch('steps')
     budgets = steps.map do |step|
       assert step.key?('timeout-minutes'), step.fetch('name') + ': missing timeout'
       minutes = step.fetch('timeout-minutes')
-      assert_operator minutes * 60, :>=, CI_WORST_SECONDS.fetch(step.fetch('name')) * 3,
+      assert_operator minutes * 60, :>=, ci_worst_seconds(job).fetch(step.fetch('name')) * 3,
                       step.fetch('name') + ': measured timeout floor'
       assert_operator minutes, :>, 0, step.fetch('name') + ': missing timeout'
       minutes
@@ -779,7 +790,7 @@ class WorkflowTests < Minitest::Test
       fixture['steps'][index].delete('timeout-minutes')
       error = assert_raises(Minitest::Assertion, step.fetch('name')) { assert_ci_timeout_budget(fixture) }
       assert_includes error.message, 'missing timeout'
-      worst = CI_WORST_SECONDS.fetch(step.fetch('name'))
+      worst = ci_worst_seconds(job).fetch(step.fetch('name'))
       next if worst.zero?
       fixture = Marshal.load(Marshal.dump(job))
       short_minutes = (worst * 3 / 60.0).ceil - 1
@@ -801,6 +812,7 @@ class WorkflowTests < Minitest::Test
     test = steps.find { |step| step['id'] == 'tests' }
     upload = steps.find { |step| step.fetch('uses', '').start_with?('actions/upload-artifact@') }
     assert_ci_timeout_budget(job)
+    assert_ci_replay_count_limit(job)
     # Runner StepsRunner.RunStepAsync maps a step timeout (not job cancellation) to Failed.
     # Thus failure() is true and steps.tests.outcome is 'failure'; no success() implicit guard.
     assert_equal "failure() && steps.tests.outcome == 'failure'", upload.fetch('if')
@@ -808,6 +820,35 @@ class WorkflowTests < Minitest::Test
     assert_operator steps.index(upload), :>, steps.index(test)
     %w[DerivedData/FailedRuns/ DerivedData/TestRuns/ DerivedData/TestDiagnostics/].each do |path|
       assert_includes upload.fetch('with').fetch('path').lines.map(&:strip), path
+    end
+  end
+
+  def assert_ci_replay_count_limit(job)
+    step = job.fetch('steps').find { |entry| entry['id'] == 'replay-range' }
+    limit = Integer(job.fetch('env').fetch('CI_LARGEST_PUSH'))
+    script = step.fetch('run').gsub('${{ github.event_name }}', 'push')
+                 .gsub('${{ github.event.before }}', 'before').gsub('${{ github.sha }}', 'after')
+    Dir.mktmpdir('pensieve-ci-range-') do |directory|
+      git = File.join(directory, 'git')
+      File.write(git, "#!/bin/sh\nprintf '%s\\n' \"$FIXTURE_COMMIT_COUNT\"\n")
+      File.chmod(0755, git)
+      [limit, limit + 1].each do |count|
+        output = File.join(directory, 'output')
+        File.write(output, '')
+        stdout, stderr, status = Open3.capture3({ 'PATH' => directory + ':/usr/bin:/bin',
+          'GITHUB_OUTPUT' => output, 'CI_LARGEST_PUSH' => limit.to_s,
+          'FIXTURE_COMMIT_COUNT' => count.to_s }, '/bin/bash', '-c', script)
+        if count > limit
+          refute status.success?, 'oversized push must fail before replay'
+          assert_includes stdout + stderr, "#{count} commits exceeds limit #{limit}"
+          refute_includes File.read(output), 'range='
+          refute_includes File.read(output), 'skip=false'
+        else
+          assert status.success?, stderr
+          assert_includes stdout, "Replaying #{count} commit(s)"
+          assert_includes File.read(output), "range=before..after\n"
+        end
+      end
     end
   end
 

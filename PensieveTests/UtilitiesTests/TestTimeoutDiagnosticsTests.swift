@@ -88,7 +88,7 @@ final class TestTimeoutDiagnosticsTests: XCTestCase {
     func testDefaultFailedWriteReportsReachUnbufferedStderr() throws {
         let blocked = directory + "/blocked"
         try files.writeFile(at: blocked, content: "blocked")
-        let output = try captureStandardError {
+        let output = try captureStandardError { _ in
             let observer = TestTimeoutDiagnostics(environment: ["PENSIEVE_TEST_DIAGNOSTICS_DIR": blocked])
             observer.recordSnapshot("stderr state sentinel", threadSample: "stderr threads sentinel")
             observer.testCase(self, didRecord: XCTIssue(type: .assertionFailure, compactDescription: "timeout probe"))
@@ -101,7 +101,7 @@ final class TestTimeoutDiagnosticsTests: XCTestCase {
     }
 
     func testDefaultPartialWriteFlushesOnlyMissingReportToStderr() throws {
-        let output = try captureStandardError {
+        let output = try captureStandardError { _ in
             let observer = TestTimeoutDiagnostics(environment: ["PENSIEVE_TEST_DIAGNOSTICS_DIR": directory],
                 writeReport: { path, content in
                     if path.hasSuffix("-threads.txt") { throw CocoaError(.fileWriteUnknown) }
@@ -117,7 +117,20 @@ final class TestTimeoutDiagnosticsTests: XCTestCase {
         XCTAssertEqual(try files.listDirectory(at: directory).filter { $0.hasSuffix("-state.txt") }.count, 1)
     }
 
-    private func captureStandardError(_ body: () throws -> Void) throws -> String {
+    func testStandardErrorSinkFlushesEveryWriteBeforeTeardown() throws {
+        try captureStandardError { readDescriptor in
+            var expected = ""
+            for message in ["first report", "second report"] {
+                TestTimeoutDiagnostics.writeToStandardError(message)
+                expected += message + "\n"
+                XCTAssertEqual(try readDescriptor(), expected,
+                               "Each write must reach stderr before another write or teardown flushes it")
+            }
+        }
+    }
+
+    @discardableResult
+    private func captureStandardError(_ body: (() throws -> String) throws -> Void) throws -> String {
         let path = directory + "/stderr-" + UUID().uuidString + ".txt"
         let descriptor = try FileService.openRegularFile(at: path, creatingWithPermissions: 0o600).descriptor
         defer { close(descriptor) }
@@ -133,7 +146,7 @@ final class TestTimeoutDiagnosticsTests: XCTestCase {
             _ = dup2(saved, STDERR_FILENO)
             _ = setvbuf(stderr, nil, _IONBF, 0)
         }
-        try body()
+        try body { try files.readFile(at: path) }
         return try files.readFile(at: path)
     }
 }

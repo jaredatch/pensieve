@@ -45,7 +45,13 @@ NOTARY_ISSUER=""
 NOTARY_CMD="/usr/bin/xcrun notarytool"
 STAPLER_CMD="/usr/bin/xcrun stapler"
 GH_CMD="/opt/homebrew/bin/gh"
-[ -x "$GH_CMD" ] || GH_CMD="/usr/local/bin/gh"
+if [ ! -x "$GH_CMD" ]; then
+  GH_CMD="/usr/local/bin/gh"
+  [ -x "$GH_CMD" ] || {
+    echo "release: executable gh required at /opt/homebrew/bin/gh or /usr/local/bin/gh" >&2
+    exit 1
+  }
+fi
 GENERATE_APPCAST_CMD=""
 VERIFY_UPDATE_CMD=""
 PUBLIC_REPO="jaredatch/pensieve"
@@ -355,28 +361,12 @@ sign_dmg() {
   codesign --verify --strict "$DMG_PATH"
 }
 
-# The regression tooth for phase iii.b. Everything above operates on dmg-root;
-# this opens the artifact users actually receive and validates the app as they
-# receive it — extracted from the container, with no dmg ticket in play. A future
-# reorder that drops or moves phase iii.b fails the release here instead of
-# shipping a bundle whose first launch depends on a live Apple lookup. spctl runs
-# too because stapler only proves a ticket is present, not that Gatekeeper
-# accepts the bundle; with the ticket stapled this assessment is offline-capable.
-verify_dmg_app_ticket() {
+# Inspect the finished DMG's app and binaries before generating its feed, including dry runs.
+# Publishing additionally validates the app's stapled ticket and Gatekeeper assessment;
+# the container's ticket alone does not travel with the extracted app.
+verify_dmg_app() {
   echo "release: phase iv.c: validate the app inside the dmg"
-  local mount_point
-  mount_point="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-dmg-verify.XXXXXX")"
-  DMG_MINIMUM="$(
-    trap 'trap_rc=$?; hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true; exit "$trap_rc"' EXIT INT TERM
-    hdiutil attach "$DMG_PATH" -mountpoint "$mount_point" -nobrowse -readonly -quiet >&2 || exit 1
-    test -d "$mount_point/Pensieve.app" || { echo "release: no Pensieve.app inside $DMG_PATH" >&2; exit 1; }
-    if [ "$PUBLISH" -eq 1 ]; then
-      run_command_seam "$STAPLER_CMD" validate "$mount_point/Pensieve.app" >&2 || exit 1
-      spctl --assess --type exec -vv "$mount_point/Pensieve.app" >&2 || exit 1
-    fi
-    python3 -B "$REPO/script/minimum_system.py" --app "$mount_point/Pensieve.app" || exit 1
-  )" || { rmdir "$mount_point" 2>/dev/null || true; return 1; }
-  rmdir "$mount_point" 2>/dev/null || true
+  DMG_MINIMUM="$(mounted_dmg_minimum "$DMG_PATH" "built DMG" "$VERSION" "$PUBLISH")" || return 1
 }
 
 find_generate_appcast() {
@@ -795,7 +785,7 @@ fi
 package_dmg_only
 sign_dmg
 
-verify_dmg_app_ticket
+verify_dmg_app
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "DRY RUN: built, signed, verified, and packaged $DMG_PATH; stopping before notarization/publishing."
