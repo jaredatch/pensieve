@@ -412,6 +412,10 @@ verify_appcast_provenance() {
 }
 
 generate_appcast() {
+  if [ -z "$DMG_MINIMUM" ]; then
+    echo "release: DMG app minimum has not been verified" >&2
+    exit 1
+  fi
   echo "release: phase v.c: generate appcast"
 
   local tag="v$VERSION"
@@ -436,10 +440,6 @@ generate_appcast() {
   # Retained items and feed metadata must match the immutable preflight base.
   local built_dmg
   built_dmg="$(basename "$DMG_PATH")"
-  if [ -z "$DMG_MINIMUM" ]; then
-    echo "release: DMG app minimum has not been verified" >&2
-    exit 1
-  fi
   verify_appcast_provenance "$APPCAST_INPUT_DIR/appcast.xml" "$APPCAST_BASE" "$built_dmg" "$DOWNLOAD_PREFIX" "$VERSION" "$DMG_MINIMUM" || exit 1
 
   ditto "$APPCAST_INPUT_DIR/appcast.xml" "$DIST_DIR/appcast.xml"

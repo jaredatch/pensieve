@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise release.sh in an isolated checkout; all external commands are stubs."""
+"""Exercise release.sh with stubbed publication commands and check its minimum policy."""
 import base64
 import importlib.util
 import itertools
@@ -7,7 +7,9 @@ import json
 import os
 import plistlib
 import re
+import runpy
 import select
+import sys
 import time
 from pathlib import Path
 import shutil
@@ -16,12 +18,13 @@ import tempfile
 import unittest
 from unittest import mock
 import xml.etree.ElementTree as ET
+from xml.parsers.expat import ExpatError
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE_SPEC = importlib.util.spec_from_file_location("release_state", ROOT / "script/release_state.py")
 STATE_TOOL = importlib.util.module_from_spec(STATE_SPEC)
 STATE_SPEC.loader.exec_module(STATE_TOOL)
-MINIMUM_SPEC = importlib.util.spec_from_file_location("minimum_self_test", ROOT / "script/minimum_system_self_test.py")
+MINIMUM_SPEC = importlib.util.spec_from_file_location("minimum_system", ROOT / "script/minimum_system.py")
 MINIMUM_TOOL = importlib.util.module_from_spec(MINIMUM_SPEC)
 MINIMUM_SPEC.loader.exec_module(MINIMUM_TOOL)
 VERSION = "1.0.0"
@@ -228,7 +231,7 @@ class MinimumParserTests(unittest.TestCase):
         def command(args, **kwargs):
             return subprocess.CompletedProcess(args, 0, "arm64 x86_64\n" if "lipo" in args[0] else output, "")
         with mock.patch.object(MINIMUM_TOOL.subprocess, "run", side_effect=command):
-            MINIMUM_TOOL.MinimumSystemTests().assert_binary_minimum(Path("/fixture/pensieve-daemon"))
+            MINIMUM_TOOL.check_binary_minimum(Path("/fixture/pensieve-daemon"), "26.0")
 
     @staticmethod
     def slice(arch, command="LC_BUILD_VERSION", platform="1", minimum="26.0"):
@@ -237,17 +240,85 @@ class MinimumParserTests(unittest.TestCase):
 
     def test_each_architecture_requires_a_minimum(self):
         output = self.slice("arm64") + "/fixture/pensieve-daemon (architecture x86_64):\nLoad command 0\n cmd LC_UUID\n"
-        with self.assertRaisesRegex(AssertionError, "missing or duplicated minimum load command"):
+        with self.assertRaisesRegex(ValueError, "missing or duplicated minimum load command"):
             self.check_output(output)
 
     def test_build_version_requires_the_macos_platform(self):
         for platform in ("6", "2", "MACCATALYST", ""):
-            with self.subTest(platform=platform), self.assertRaisesRegex(AssertionError, "platform must be macOS"):
+            with self.subTest(platform=platform), self.assertRaisesRegex(ValueError, "platform must be macOS"):
                 self.check_output(self.slice("arm64") + self.slice("x86_64", platform=platform))
 
     def test_malformed_minimum_is_a_named_failure(self):
-        with self.assertRaisesRegex(AssertionError, "missing or malformed minos"):
+        with self.assertRaisesRegex(ValueError, "missing or malformed minos"):
             self.check_output(self.slice("arm64") + self.slice("x86_64", minimum=None))
+
+    def test_macho_tools_use_system_paths_with_explicit_test_overrides(self):
+        for overrides, expected in (({}, ("/usr/bin/lipo", "/usr/bin/otool")),
+                                    ({"LIPO_CMD": "/fixture tools/lipo", "OTOOL_CMD": "/fixture tools/otool"},
+                                     ("/fixture tools/lipo", "/fixture tools/otool"))):
+            with self.subTest(overrides=overrides), mock.patch.dict(os.environ, overrides, clear=True):
+                calls = []
+                def command(args, **kwargs):
+                    calls.append(args[0])
+                    return subprocess.CompletedProcess(args, 0, "arm64 x86_64\n" if len(calls) == 1 else self.slice("arm64") + self.slice("x86_64"), "")
+                with mock.patch.object(MINIMUM_TOOL.subprocess, "run", side_effect=command):
+                    MINIMUM_TOOL.check_binary_minimum(Path("/fixture/pensieve-daemon"), "26.0")
+                self.assertEqual(tuple(calls), expected, "only an explicit test override may replace Apple's Mach-O tools")
+
+    def test_malformed_xml_cli_diagnostic_is_escaped(self):
+        with tempfile.TemporaryDirectory(prefix="pensieve-plist-") as directory:
+            app = Path(directory) / "Pensieve.app"
+            info = app / "Contents/Info.plist"; info.parent.mkdir(parents=True)
+            info.write_bytes(b'<?xml version="1.0"?><plist><dict>')
+            result = subprocess.run([sys.executable, "-B", str(ROOT / "script/minimum_system.py"), "--app", str(app)],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("release: invalid built minimum:", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+            with mock.patch.object(sys, "argv", ["minimum_system.py", "--app", str(app)]), \
+                    mock.patch.object(plistlib, "loads", side_effect=ExpatError("fixture\x1b\nraw diagnostic")), \
+                    self.assertRaises(SystemExit) as refusal:
+                runpy.run_path(str(ROOT / "script/minimum_system.py"), run_name="__main__")
+            self.assertEqual(str(refusal.exception), "release: invalid built minimum: fixture\\x1b\\nraw diagnostic")
+
+    def test_unittest_module_loads_from_repo_root(self):
+        environment = dict(os.environ); environment.pop("PYTHONPATH", None)
+        result = subprocess.run([sys.executable, "-B", "-m", "unittest",
+                                 "script.release_self_test.MinimumParserTests.test_each_architecture_requires_a_minimum"],
+                                cwd=ROOT, env=environment, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Ran 1 test", result.stderr)
+
+
+class MinimumPolicyTests(unittest.TestCase):
+    def test_project_deployment_settings_match_pinned_minimum(self):
+        expected = (ROOT / "release/minimum-macos.txt").read_text().strip()
+        result = subprocess.run(["/usr/bin/ruby", "-ryaml", "-rjson", "-e",
+                                 "puts JSON.generate(YAML.safe_load(File.read(ARGV.fetch(0))))", str(ROOT / "project.yml")],
+                                capture_output=True, text=True, check=True, timeout=30)
+        project = json.loads(result.stdout)
+        self.assertEqual(project["options"]["deploymentTarget"]["macOS"], expected, "project's default minimum differs from policy")
+        def check_settings(value, path):
+            if not isinstance(value, dict): return
+            for key, child in value.items():
+                if key == "MACOSX_DEPLOYMENT_TARGET":
+                    self.assertEqual(child, expected, path + "." + key + " differs from policy")
+                elif key == "deploymentTarget" and isinstance(child, dict) and "macOS" in child:
+                    self.assertEqual(child["macOS"], expected, path + ".deploymentTarget.macOS differs from policy")
+                elif key == "deploymentTarget" and value.get("platform") == "macOS":
+                    self.assertEqual(child, expected, path + ".deploymentTarget differs from policy")
+                check_settings(child, path + "." + key)
+        check_settings(project, "project")
+
+    def test_cask_requirement_matches_pinned_minimum(self):
+        expected = (ROOT / "release/minimum-macos.txt").read_text().strip()
+        text = (ROOT / "release/homebrew/pensieve.rb").read_text()
+        requirements = re.findall(r"(?m)^\s*depends_on\s+macos:\s*:(\w+)\s*$", text)
+        self.assertEqual(len(requirements), 1, "cask must have one named macOS requirement")
+        result = subprocess.run(["brew", "ruby", "-e", 'require "macos_version"; puts MacOSVersion.from_symbol(ARGV.fetch(0).to_sym)',
+                                 requirements[0]], capture_output=True, text=True, check=True, timeout=30)
+        self.assertEqual(tuple(map(int, result.stdout.strip().split('.'))) + (0,), tuple(map(int, expected.split('.'))),
+                         "Homebrew's named minimum differs from policy")
 
 
 class ReleaseSequenceTests(unittest.TestCase):
@@ -285,6 +356,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         for name in ("release.sh", "release_recovery.sh", "package.sh", "build-number.sh", "release_state.py", "verify_update.swift", "minimum_system.py", "minimum_system_self_test.py"):
             if (ROOT / "script" / name).exists(): shutil.copy2(ROOT / "script" / name, self.root / "script" / name)
         shutil.copytree(ROOT / "release/homebrew", self.root / "release/homebrew")
+        shutil.copy2(ROOT / "release/minimum-macos.txt", self.root / "release/minimum-macos.txt")
         shutil.copytree(ROOT / "Pensieve", self.root / "Pensieve", ignore=shutil.ignore_patterns("*.swift", "Resources"))
         (self.root / "VERSION").write_text(VERSION)
         (self.root / "BUILD_NUMBER_OFFSET").write_text("00")
@@ -306,6 +378,7 @@ class ReleaseSequenceTests(unittest.TestCase):
                         GENERATE_APPCAST_CMD=str(bin_dir / "generate"), VERIFY_UPDATE_CMD="verify",
                         GH_TOKEN="fixture-public-token", TAP_GH_TOKEN="fixture-tap-token",
                         SPARKLE_PRIVATE_KEY_FILE=str(self.root / "fixture-key"))
+        self.env.update(LIPO_CMD=str(bin_dir / "lipo"), OTOOL_CMD=str(bin_dir / "otool"))
 
     def run_release(self, cask_only=False, expected=0, first=False):
         self.state_path.write_text(json.dumps(self.state))
@@ -1263,7 +1336,7 @@ verify_appcast_unchanged''')
                 self.run_release(expected=1)
                 self.assertEqual(self.state["writes"], [], "unproven generated enclosures must stop before release or appcast publication")
 
-    def run_appcast_generation(self):
+    def run_appcast_generation(self, verify_minimum=True):
         version = self.state["version"]
         input_dir = self.root / "build/dist/appcast-input"
         shutil.rmtree(input_dir, ignore_errors=True); input_dir.mkdir(parents=True)
@@ -1274,7 +1347,25 @@ verify_appcast_unchanged''')
         for name in ("Pensieve", "pensieve-daemon"):
             binary = info.parent / "MacOS" / name
             binary.parent.mkdir(parents=True, exist_ok=True); binary.write_text("fixture Mach-O")
-        return self.run_function('VERSION="' + version + '"; VERSION_CHANNEL="' + PUBLICATION_CASES[version][0] + '"; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; verify_dmg_app_ticket; release_preflight; generate_appcast')
+        verify = "verify_dmg_app_ticket; " if verify_minimum else ""
+        return self.run_function('VERSION="' + version + '"; VERSION_CHANNEL="' + PUBLICATION_CASES[version][0] + '"; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; ' + verify + 'release_preflight; generate_appcast')
+
+    def test_release_refuses_an_agreeing_but_unpinned_minimum(self):
+        original = json.loads(json.dumps(self.state))
+        for minimum in ("14.0", "27.2"):
+            with self.subTest(minimum=minimum):
+                self.state = dict(json.loads(json.dumps(original)), built_minimum=minimum, new_feed=feed(minimum=minimum))
+                output = self.run_release(expected=1)
+                self.assertIn("release policy requires macOS 26.0", output)
+                self.assertIn("found " + minimum, output)
+                self.assertEqual(self.state["writes"], [])
+                self.assertEqual(self.state["signing_inputs"], [], "unpinned app must stop before appcast signing")
+
+    def test_unverified_dmg_minimum_stops_before_appcast_signing(self):
+        result = self.run_appcast_generation(verify_minimum=False)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("DMG app minimum has not been verified", result.stderr)
+        self.assertEqual(self.state["signing_inputs"], [], "precondition must stop before Sparkle signs any input")
 
     def test_release_checks_app_and_daemon_slices_before_publication(self):
         original = json.loads(json.dumps(self.state))
@@ -1289,16 +1380,17 @@ verify_appcast_unchanged''')
 
     def test_release_reads_minimum_from_the_dmg_app(self):
         original = json.loads(json.dumps(self.state))
-        for staged, mounted in (("26.0", "27.2"), ("14.0", "26.0")):
+        for staged, mounted in (("27.2", "26.0"), ("14.0", "26.0")):
             with self.subTest(staged=staged, mounted=mounted):
                 self.state = dict(json.loads(json.dumps(original)), built_minimum=staged,
                                   dmg_minimum=mounted, new_feed=feed(minimum=mounted))
                 self.run_release()
                 self.assertEqual(self.state["writes"], ["create", "appcast"])
-        self.state = dict(json.loads(json.dumps(original)), dmg_minimum="14.0")
-        output = self.run_release(expected=1)
-        self.assertIn("generated appcast minimum 26.0 differs from built app minimum 14.0", output)
-        self.assertEqual(self.state["writes"], [])
+        for mounted in ("14.0", "27.2"):
+            self.state = dict(json.loads(json.dumps(original)), dmg_minimum=mounted, new_feed=feed(minimum=mounted))
+            output = self.run_release(expected=1)
+            self.assertIn("release policy requires macOS 26.0; found " + mounted, output)
+            self.assertEqual(self.state["writes"], [])
         self.state = dict(json.loads(json.dumps(original)), dmg_minimum=None)
         self.assertIn("built app has no minimum system version", self.run_release(expected=1))
         self.assertEqual(self.state["writes"], [])
@@ -1327,7 +1419,7 @@ verify_appcast_unchanged''')
 
     def test_generated_appcast_minimum_matches_built_app_and_preserves_history(self):
         original = json.loads(json.dumps(self.state))
-        for version, minimum in ((VERSION, "26.0"), ("1.0.0-beta.2", "27.2")):
+        for version, minimum in ((VERSION, "26.0"), ("1.0.0-beta.2", "26.0")):
             with self.subTest(version=version, minimum=minimum):
                 self.state = json.loads(json.dumps(original)); self.set_version(version)
                 old = ET.fromstring(feed("0.9.0"))
@@ -1345,7 +1437,7 @@ verify_appcast_unchanged''')
 
     def test_generated_appcast_minimum_mismatch_stops_before_publication(self):
         original = json.loads(json.dumps(self.state))
-        for built, generated in (("26.0", "14.0"), ("27.2", "26.0")):
+        for built, generated in (("26.0", "14.0"), ("26.0", "27.2")):
             with self.subTest(built=built, generated=generated):
                 self.state = dict(json.loads(json.dumps(original)), built_minimum=built, new_feed=feed(minimum=generated))
                 output = self.run_release(expected=1)

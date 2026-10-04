@@ -2,28 +2,26 @@
 """Check the minimum macOS of a built app and every embedded daemon slice."""
 import argparse
 from pathlib import Path
-import plistlib
 import subprocess
 import unittest
-from minimum_system import check_binary_minimum
+from xml.parsers.expat import ExpatError
+from minimum_system import check_app_minimum, required_minimum
 
 APP = None
 
 
 class MinimumSystemTests(unittest.TestCase):
-    def assert_binary_minimum(self, binary):
+    def assert_app_minimum(self):
         try:
-            check_binary_minimum(binary, "26.0")
-        except (ValueError, OSError, subprocess.SubprocessError) as error:
+            self.assertEqual(check_app_minimum(APP), required_minimum())
+        except (ValueError, OSError, ExpatError, subprocess.SubprocessError) as error:
             self.fail(str(error))
 
     def test_app_requires_macos_26(self):
-        info = plistlib.loads((APP / "Contents/Info.plist").read_bytes())
-        self.assertEqual(info.get("LSMinimumSystemVersion"), "26.0", "the built app must require macOS 26.0")
-        self.assert_binary_minimum(APP / "Contents/MacOS" / info["CFBundleExecutable"])
+        self.assert_app_minimum()
 
     def test_embedded_daemon_requires_macos_26(self):
-        self.assert_binary_minimum(APP / "Contents/MacOS/pensieve-daemon")
+        self.assert_app_minimum()
 
 
 if __name__ == "__main__":
