@@ -88,19 +88,26 @@ final class TestTimeoutDiagnosticsTests: XCTestCase {
     func testDefaultFailedWriteReportsReachUnbufferedStderr() throws {
         let blocked = directory + "/blocked"
         try files.writeFile(at: blocked, content: "blocked")
-        let observer = TestTimeoutDiagnostics(environment: ["PENSIEVE_TEST_DIAGNOSTICS_DIR": blocked])
-        let pipe = Pipe()
-        let original = dup(STDERR_FILENO)
-        XCTAssertGreaterThanOrEqual(original, 0)
-        dup2(pipe.fileHandleForWriting.fileDescriptor, STDERR_FILENO)
-        observer.recordSnapshot("stderr state sentinel", threadSample: "stderr threads sentinel")
+        var output = ""
+        var writes = 0
+        var flushes = 0
+        let observer = TestTimeoutDiagnostics(environment: ["PENSIEVE_TEST_DIAGNOSTICS_DIR": blocked],
+            standardErrorWrite: { text, stream in
+                XCTAssertEqual(stream, stderr, "Default diagnostics must select stderr")
+                output += text
+                writes += 1
+                return 0
+            }, standardErrorFlush: { stream in
+                XCTAssertEqual(stream, stderr)
+                flushes += 1
+                return 0
+            })
+        let state = "stderr state sentinel" + String(repeating: "S", count: 262144)
+        observer.recordSnapshot(state, threadSample: "stderr threads sentinel")
         observer.testCase(self, didRecord: XCTIssue(type: .assertionFailure, compactDescription: "timeout probe"))
-        fflush(stderr)
-        dup2(original, STDERR_FILENO)
-        close(original)
-        try pipe.fileHandleForWriting.close()
-        let data = try XCTUnwrap(pipe.fileHandleForReading.readToEnd())
-        let output = try XCTUnwrap(String(bytes: data, encoding: .utf8))
+        XCTAssertEqual(writes, 4, "Both write warnings and both complete reports must use the sink")
+        XCTAssertEqual(flushes, writes, "Each write must be flushed immediately")
+        XCTAssertTrue(output.contains(state), "Output past pipe capacity must remain complete")
         XCTAssertEqual(output.components(separatedBy: "BEGIN TIMEOUT DIAGNOSTIC ").count - 1, 2)
         XCTAssertEqual(output.components(separatedBy: "END TIMEOUT DIAGNOSTIC ").count - 1, 2)
         XCTAssertTrue(output.contains("stderr state sentinel"))

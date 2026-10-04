@@ -74,6 +74,18 @@ extension ThirdPartyNoticesTests {
         XCTAssertFalse(result.error.isEmpty)
     }
 
+    func testFixtureNoticeCacheReusesAlternatingSources() throws {
+        let prefix = UUID().uuidString
+        let sources = ["# " + prefix + " A\n", "# " + prefix + " B\n"]
+        let runs = creditsRendererRuns
+        let canonical = canonicalNoticeCacheCount
+        for source in sources + sources {
+            _ = try parseNotices(source)
+        }
+        XCTAssertEqual(creditsRendererRuns - runs, 2, "Each distinct fixture source must be parsed once")
+        XCTAssertEqual(canonicalNoticeCacheCount, canonical, "Fixtures must not populate the canonical cache")
+    }
+
     func testFixtureNoticeCacheNeverFillsCanonicalCache() throws {
         try withFixture { root in
             let count = canonicalNoticeCacheCount

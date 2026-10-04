@@ -62,7 +62,8 @@ def feed(version=VERSION, signature=SIGNATURE, length=len(DMG), prefix=DOWNLOAD_
         minimum = "26.0" if version == VERSION else "14.0"
     channel = PUBLICATION_CASES[version][0] if channel is None else channel
     return (f'<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
-            f'<channel><title>Pensieve</title><item><sparkle:shortVersionString>{version}</sparkle:shortVersionString>'
+            f'<channel><title>Pensieve</title><item><title>{version}</title><pubDate>Sun, 04 Oct 2026 00:00:00 +0000</pubDate>'
+            f'<sparkle:version>999</sparkle:version><sparkle:shortVersionString>{version}</sparkle:shortVersionString>'
             + (f'<sparkle:channel>{channel}</sparkle:channel>' if channel else '') +
             (f'<sparkle:minimumSystemVersion>{minimum}</sparkle:minimumSystemVersion>' if minimum is not None else '') +
             f'<enclosure url="{prefix}/v{version}/'
@@ -321,9 +322,9 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         return result.stdout + result.stderr
 
-    def run_function(self, body):
+    def run_function(self, body, before_source="trap cleanup_appcast_base EXIT"):
         self.state_path.write_text(json.dumps(self.state))
-        result = subprocess.run(["/bin/bash", "-c", 'source "$1" --inspect-functions\n' + body,
+        result = subprocess.run(["/bin/bash", "-c", before_source + '\nsource "$1" --inspect-functions\n' + body,
                                  "release-test", str(self.root / "script/release.sh")],
                                 env=self.env, text=True, capture_output=True, timeout=30)
         self.state = json.loads(self.state_path.read_text())
@@ -638,12 +639,14 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.state_path.write_text(json.dumps(self.state))
         modes = (("--inspect-functions",), ("--verify-appcast", "missing", "", "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION, "26.0"),
                  ("--publish",), ("--publish-cask-only",), ("--dry-run",), ("--first-release",))
-        for mode in modes:
-            with self.subTest(mode=mode):
-                result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), *mode,
-                                         "--check-tag", "v9.9.9"], env=self.env,
+        for mode, tag, check_first in itertools.product(modes, ("v" + VERSION, "v9.9.9"), (False, True)):
+            with self.subTest(mode=mode, tag=tag, check_first=check_first):
+                check = ("--check-tag", tag)
+                args = (*check, *mode) if check_first else (*mode, *check)
+                result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), *args], env=self.env,
                                         capture_output=True, text=True, timeout=30)
-                self.assertNotEqual(result.returncode, 0, "combined check-only mode must refuse")
+                self.assertEqual(result.returncode, 64, "combined check-only mode must refuse before tag validation")
+                self.assertIn("usage:", result.stderr)
                 self.assertEqual(json.loads(self.state_path.read_text())["calls"], [])
                 self.assertFalse((self.root / "build").exists())
 
@@ -710,9 +713,56 @@ class ReleaseSequenceTests(unittest.TestCase):
         (self.root / "contents.rb").write_text(cask())
         result = self.run_function('log_response() { echo "fixture log refusal" >&2; return 7; }; '
                                    'publish_contents_file "$TAP_REPO" Casks/pensieve.rb "$REPO/contents.rb" fixture "" "' + SHA + '"')
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 0, "a landed PUT must remain successful when logging fails")
         self.assertIn("fixture log refusal", result.stderr)
         self.assertEqual(list(directory.glob("pensieve-contents-response.*")), [], "response must not leak on a logging refusal")
+
+    def test_contents_put_result_survives_logging_failure(self):
+        (self.root / "contents.rb").write_text(cask())
+        for status in (200, 409, 503):
+            with self.subTest(status=status):
+                result = self.run_function('contents_api() { printf "HTTP/1.1 ' + str(status) + ' Fixture\r\n\r\n{}"; return ' + ('0' if status == 200 else '1') + '; }; '
+                    'log_response() { echo "fixture log refusal" >&2; return 7; }; '
+                    'publish_contents_file "$TAP_REPO" Casks/pensieve.rb "$REPO/contents.rb" fixture "" "' + SHA + '"')
+                self.assertEqual(result.returncode, 0 if status == 200 else 1, "only the PUT decides publication success")
+                if status == 409:
+                    self.assertIn("contents changed since preflight (HTTP 409)", result.stderr)
+                elif status == 503:
+                    self.assertIn("contents write failed", result.stderr)
+
+    def test_failed_feed_reads_always_print_the_callers_context(self):
+        self.state["fail_read"] = "appcast"
+        for context in ("appcast base read failed", "appcast recheck failed", "cask appcast read failed"):
+            for helper in ("http_status", "log_response"):
+                with self.subTest(context=context, helper=helper):
+                    result = self.run_function(helper + '() { echo "fixture helper refusal" >&2; return 7; }; '
+                        'if read_live_appcast master "" "' + context + '" "invalid fixture"; then exit 9; fi')
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn('release: ' + context + ' (HTTP ', result.stderr)
+                    self.assertIn("unknown" if helper == "http_status" else "503", result.stderr)
+
+    def test_source_preserves_an_already_installed_exit_trap(self):
+        (self.root / "build/dist").mkdir(parents=True)
+        result = self.run_function('release_preflight; [ -f "$APPCAST_BASE" ]',
+            before_source='trap \'echo "fixture prior caller trap"; cleanup_appcast_base\' EXIT')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("fixture prior caller trap", result.stdout)
+        self.assertEqual(list((self.root / "build/dist").glob("appcast-base.*")), [])
+
+    def test_inspection_and_publication_modes_are_exclusive(self):
+        self.state_path.write_text(json.dumps(self.state))
+        inspections = (("--inspect-functions",), ("--print-cask-action", VERSION),
+            ("--notes-for", VERSION), ("--print-release-args", VERSION),
+            ("--verify-appcast", "missing", "", "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION, "26.0"))
+        for mode in ("--publish", "--first-release", "--publish-cask-only", "--dry-run", "--dry-run-local"):
+            for inspect in inspections:
+                with self.subTest(mode=mode, inspect=inspect):
+                    result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), mode, *inspect],
+                        env=self.env, capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.returncode, 64, "mixed inspection/publication must refuse before any work")
+                    self.assertIn("usage:", result.stderr)
+                    self.assertEqual(json.loads(self.state_path.read_text())["calls"], [])
+                    self.assertFalse((self.root / "build").exists())
 
     def test_non_crypto_focused_run_does_not_compile_swift(self):
         code = '''import sys, unittest
@@ -1404,6 +1454,29 @@ verify_appcast_unchanged''')
         result = self.run_appcast_generation()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_generated_item_requires_the_observed_element_counts(self):
+        captured = ET.fromstring((ROOT / "PensieveTests/Fixtures/release-appcast-single-archive.xml").read_text())
+        item = captured.find("channel/item")
+        item.find(self.tool.SPARKLE + "shortVersionString").text = VERSION
+        item.remove(item.find(self.tool.SPARKLE + "channel"))
+        item.find("enclosure").attrib.update(url=f"{DOWNLOAD_PREFIX}/v{VERSION}/Pensieve-{VERSION}.dmg",
+                                            length=str(len(DMG)))
+        item.find("enclosure").set(self.tool.SPARKLE + "edSignature", SIGNATURE)
+        self.tool.appcast_provenance(ET.tostring(captured, encoding="unicode"), None,
+                                    "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION, "26.0")
+        for tag in ("title", "pubDate", self.tool.SPARKLE + "version", self.tool.SPARKLE + "shortVersionString",
+                    self.tool.SPARKLE + "minimumSystemVersion", "enclosure"):
+            for mutation in ("duplicate", "missing"):
+                with self.subTest(tag=tag, mutation=mutation):
+                    altered = ET.fromstring(ET.tostring(item)); child = altered.find(tag)
+                    if mutation == "duplicate": altered.append(ET.fromstring(ET.tostring(child)))
+                    else: altered.remove(child)
+                    root = ET.fromstring(ET.tostring(captured)); channel = root.find("channel")
+                    channel.remove(channel.find("item")); channel.append(altered)
+                    with self.assertRaises(ValueError, msg="generated fields require the captured one-archive counts"):
+                        self.tool.appcast_provenance(ET.tostring(root, encoding="unicode"), None,
+                            "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION, "26.0")
+
     def test_generated_item_refuses_delta_notes_and_link_urls(self):
         original = json.loads(json.dumps(self.state))
         expected_url = f"{DOWNLOAD_PREFIX}/v{VERSION}/Pensieve-{VERSION}.dmg"
@@ -1425,7 +1498,7 @@ verify_appcast_unchanged''')
         for placement in ("title", "item-text", "tail"):
             with self.subTest(placement=placement):
                 root = ET.fromstring(feed()); item = root.find("channel/item")
-                if placement == "title": ET.SubElement(item, "title").text = "https://fixture/other"
+                if placement == "title": item.find("title").text = "https://fixture/other"
                 elif placement == "item-text": item.text = "https://fixture/other"
                 else: item.find("enclosure").tail = "https://fixture/other"
                 self.state = dict(json.loads(json.dumps(original)), new_feed=ET.tostring(root, encoding="unicode"))

@@ -90,7 +90,6 @@ def relay(directory, parent_pid, ready=None):
             if path in seen:
                 continue
             if match is None:
-                seen.add(path)
                 continue
             try:
                 report = path.read_text()

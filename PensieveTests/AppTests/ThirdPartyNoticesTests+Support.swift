@@ -19,7 +19,7 @@ final class NoticeFileCache {
 
 extension ThirdPartyNoticesTests {
     private static let realNotices = NoticeFileCache()
-    private static var fixtureNotices: [String: NoticeDocument] = [:]
+    private static let fixtureNotices = NoticeFileCache()
     var canonicalNoticeCacheCount: Int { Self.realNotices.count }
 
     func readNotices() throws -> NoticeDocument {
@@ -70,16 +70,15 @@ extension ThirdPartyNoticesTests {
     }
 
     func parseNotices(_ source: String) throws -> NoticeDocument {
-        if let cached = Self.fixtureNotices[source] { return cached }
-        var document: NoticeDocument?
-        try withFixture { root in
-            let path = root + "/source.md"
-            try fileService.writeFile(at: path, content: source)
-            document = try parseNoticeFile(source, at: path, fixtureRoot: root)
+        try Self.fixtureNotices.document(source: source) {
+            var document: NoticeDocument?
+            try withFixture { root in
+                let path = root + "/source.md"
+                try fileService.writeFile(at: path, content: source)
+                document = try parseNoticeFile(source, at: path, fixtureRoot: root)
+            }
+            return try XCTUnwrap(document)
         }
-        let parsed = try XCTUnwrap(document)
-        Self.fixtureNotices[source] = parsed
-        return parsed
     }
 
     func renderFixture(_ source: String) throws -> String {

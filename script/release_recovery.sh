@@ -3,7 +3,6 @@ RELEASE_STATE="absent"
 APPCAST_ITEM="absent"
 APPCAST_NEWER="absent"
 APPCAST_BASE=""
-trap cleanup_appcast_base EXIT
 CASK_SHA=""
 CASK_VERSION=""
 CASK_DIGEST=""

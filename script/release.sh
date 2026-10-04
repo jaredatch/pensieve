@@ -63,7 +63,7 @@ usage: script/release.sh [--dry-run | --dry-run-local] [--sign IDENTITY]
 
 --inspect-functions is for bash -c only: sourcing sets shell options
 (errexit, nounset, pipefail), configuration defaults and function definitions
-in that disposable shell.
+in that disposable shell. The caller owns cleanup_appcast_base and EXIT traps.
 
 --verify-appcast takes an empty BASE_APPCAST only when no base exists.
 
@@ -82,53 +82,61 @@ without notarizing, publishing, or calling gh.
 USAGE
 }
 
-RELEASE_ARG_COUNT=$#
+RELEASE_OPTIONS=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --check-tag)
-      [ "$#" -eq 2 ] && [ "$RELEASE_ARG_COUNT" -eq 2 ] || { usage; exit 64; }
+      [ "$#" -ge 2 ] || { usage; exit 64; }
       EXPECTED_TAG="$2"
       CHECK_TAG=1
       CHECK_TAG_ONLY=1
       shift 2
       ;;
     --expect-tag)
+      RELEASE_OPTIONS=1
       [ "$#" -ge 2 ] || { usage; exit 64; }
       EXPECTED_TAG="$2"
       CHECK_TAG=1
       shift 2
       ;;
     --dry-run)
+      RELEASE_OPTIONS=1
       DRY_RUN=1
       DRY_RUN_LOCAL=0
       shift
       ;;
     --dry-run-local)
+      RELEASE_OPTIONS=1
       DRY_RUN=0
       DRY_RUN_LOCAL=1
       shift
       ;;
     --sign)
+      RELEASE_OPTIONS=1
       [ "$#" -ge 2 ] || { usage; exit 64; }
       SIGN_IDENTITY="$2"
       shift 2
       ;;
     --notary-key)
+      RELEASE_OPTIONS=1
       [ "$#" -ge 2 ] || { usage; exit 64; }
       NOTARY_KEY="$2"
       shift 2
       ;;
     --notary-key-id)
+      RELEASE_OPTIONS=1
       [ "$#" -ge 2 ] || { usage; exit 64; }
       NOTARY_KEY_ID="$2"
       shift 2
       ;;
     --notary-issuer)
+      RELEASE_OPTIONS=1
       [ "$#" -ge 2 ] || { usage; exit 64; }
       NOTARY_ISSUER="$2"
       shift 2
       ;;
     --first-release)
+      RELEASE_OPTIONS=1
       FIRST_RELEASE=1
       shift
       ;;
@@ -137,10 +145,12 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --publish-cask-only)
+      RELEASE_OPTIONS=1
       CASK_ONLY=1
       shift
       ;;
     --publish)
+      RELEASE_OPTIONS=1
       PUBLISH=1
       DRY_RUN=0
       DRY_RUN_LOCAL=0
@@ -186,6 +196,12 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+if { [ -n "$INSPECT_MODE" ] || [ "$CHECK_TAG_ONLY" -eq 1 ]; } &&
+    { [ "$RELEASE_OPTIONS" -eq 1 ] || { [ -n "$INSPECT_MODE" ] && [ "$CHECK_TAG_ONLY" -eq 1 ]; }; }; then
+  usage
+  exit 64
+fi
 
 notes_for() {
   local v="$1" f="$2" out
@@ -478,9 +494,10 @@ publish_contents_file() (
   response="$(mktemp "${TMPDIR:-/tmp}/pensieve-contents-response.XXXXXX")" || return 1
   trap 'rm -f "$response"' EXIT
   if contents_api "$repo" --include "${put_args[@]}" > "$response"; then
-    log_response "$response" || return 1
+    log_response "$response" || true
+    return 0
   else
-    log_response "$response" >&2 || return 1
+    log_response "$response" >&2 || true
     if [ "$(http_status "$response")" = 409 ]; then
       echo "release: contents changed since preflight (HTTP 409); refusing to overwrite $repo/$contents_path. Read the current feed before retrying." >&2
     else
@@ -529,9 +546,12 @@ read_live_appcast() {
       return 1
     fi
   else
-    status="$(http_status "$response")" || { rm -f "$response"; return 1; }
-    log_response "$response" >&2 || { rm -f "$response"; return 1; }
-    rm -f "$response" || return 1
+    status="$(http_status "$response")" || status=""
+    log_response "$response" >&2 || true
+    rm -f "$response" || {
+      echo "release: $failure (HTTP $(log_text "${status:-unknown}"))$suffix" >&2
+      return 1
+    }
     if [ "$allow_missing" -eq 1 ] && [ "$status" = 404 ]; then
       LIVE_APPCAST_ABSENT=1
       return 0
@@ -670,6 +690,9 @@ notarize_and_publish() {
 }
 
 source "$REPO/script/release_recovery.sh"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  trap cleanup_appcast_base EXIT
+fi
 
 if [ "$INSPECT_MODE" != functions ] && [ "$INSPECT_MODE" != verify-appcast ]; then
   if [ -z "$INSPECT_MODE" ]; then

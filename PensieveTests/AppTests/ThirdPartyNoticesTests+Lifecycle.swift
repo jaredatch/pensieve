@@ -29,14 +29,40 @@ extension ThirdPartyNoticesTests {
     }
 
     func testCreditsProcessCapturesLargeStderrCompletely() throws {
-        let code = "import sys; sys.stderr.write('E'*262144); sys.stderr.flush(); sys.stdout.write('DONE'); sys.stdout.flush()"
+        let code = largeStderrProgram
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = ["-c", code]
         let result = try runCreditsProcess(process)
-        XCTAssertEqual(result.status, 0)
+        XCTAssertEqual(result.status, 0, "Credits stderr pipe deadlock (three-second SIGALRM watchdog)")
         XCTAssertEqual(result.output, "DONE")
         XCTAssertEqual(result.error.count, 262144)
+    }
+
+    var largeStderrProgram: String {
+        """
+        import os, signal, sys
+        def deadlock(_signal, _frame):
+            os._exit(97)
+        signal.signal(signal.SIGALRM, deadlock)
+        signal.alarm(3)
+        sys.stderr.write('E'*262144); sys.stderr.flush(); sys.stdout.write('DONE'); sys.stdout.flush()
+        """
+    }
+
+    func testCreditsLargeStderrWatchdogNamesADeadlock() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        // A separate six-second bound keeps this regression safe when SIGALRM is removed.
+        let safety = "import os, threading, signal\nthreading.Timer(6, lambda: os._exit(98)).start()\n"
+        let stalled = largeStderrProgram.replacingOccurrences(of: "sys.stderr.write('E'*262144)",
+                                                               with: "signal.pause()")
+        process.arguments = ["-c", safety + stalled]
+        let start = Date()
+        let result = try runCreditsProcess(process)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5, "The deadlock watchdog must fire before the safety bound")
+        XCTAssertEqual(result.status, 97, "The three-second SIGALRM must name a pipe deadlock before the safety bound")
+        XCTAssertEqual(result.error, "", "The signal handler must exit without writing to a potentially full pipe")
     }
 
     func testPackageAuditEnforcesYamsVersionWithoutCallerChaining() throws {

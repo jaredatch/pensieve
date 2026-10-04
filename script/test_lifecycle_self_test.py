@@ -353,6 +353,35 @@ sys.exit(65)
                                  'inspect failures must warn only once per path')
                 self.assertEqual(output.getvalue(), '', 'an old report must not be relayed after inspection recovers')
 
+    def test_relay_retries_new_uninspectable_reports_and_warns_once(self):
+        directory = self.root / 'reports'; directory.mkdir()
+        for method in ('is_file', 'is_symlink'):
+            for failed_inspections in (1, 3):
+                with self.subTest(method=method, failures=failed_inspections):
+                    for path in directory.iterdir(): path.unlink()
+                    output, errors = io.StringIO(), io.StringIO()
+                    polls, inspections = 0, 0
+                    original = getattr(Path, method)
+                    def inspect(path):
+                        nonlocal inspections
+                        if path.name.endswith('-state.txt'):
+                            inspections += 1
+                            if inspections <= failed_inspections: raise PermissionError('new inspection denied')
+                        return original(path)
+                    def poll(_delay):
+                        nonlocal polls
+                        polls += 1
+                        if polls == 1: self.report_pair(directory, 1)
+                    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors), \
+                         patch.object(Path, method, inspect), patch.object(diagnostics.signal, 'signal'), \
+                         patch.object(diagnostics.os, 'getppid', side_effect=lambda: 123 if polls < 6 else 0), \
+                         patch.object(diagnostics.time, 'sleep', side_effect=poll):
+                        diagnostics.relay(directory, 123)
+                    self.assertEqual(errors.getvalue().count('new inspection denied'), 1)
+                    self.assertEqual(output.getvalue().count('BEGIN TIMEOUT DIAGNOSTIC '), 2,
+                                     'a newly arrived report must survive transient inspection failures')
+                    self.assertEqual(output.getvalue().count('END TIMEOUT DIAGNOSTIC '), 2)
+
     def test_sigkilled_wrapper_does_not_leave_relay_holding_stdout(self):
         process, ready = self.launch(mode="hang")
         child = self.wait_ready(ready)

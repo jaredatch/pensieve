@@ -36,11 +36,16 @@ final class TestTimeoutDiagnostics: NSObject, XCTestObservation {
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment,
          fallbackDirectory: String = NSTemporaryDirectory() + "PensieveTestDiagnostics",
-         output: @escaping (String) -> Void = { fputs($0 + "\n", stderr); fflush(stderr) },
+         output: ((String) -> Void)? = nil,
+         standardErrorWrite: @escaping (String, UnsafeMutablePointer<FILE>) -> Int32 = { fputs($0, $1) },
+         standardErrorFlush: @escaping (UnsafeMutablePointer<FILE>) -> Int32 = { fflush($0) },
          writeReport: @escaping (String, String) throws -> Void = { try FileService().writeFile(at: $0, content: $1) }) {
         self.environment = environment
         self.fallbackDirectory = fallbackDirectory
-        self.output = output
+        self.output = output ?? {
+            _ = standardErrorWrite($0 + "\n", stderr)
+            _ = standardErrorFlush(stderr)
+        }
         self.writeReport = writeReport
         super.init()
     }
