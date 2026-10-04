@@ -107,8 +107,9 @@ final class ImportViewModel {
     }
 
     func nothingFoundMessage(folder shown: String) -> String {
-        if let summary = latestFolderReport.summary { return "\(shown): \(summary)" }
-        return "\(shown) holds no readable SKILL.md. Pensieve looks in it and in its folders, never deeper."
+        let explanation = "\(shown) holds no readable SKILL.md. Pensieve looks in it and in its folders, never deeper."
+        guard let summary = latestFolderReport.summary else { return explanation }
+        return explanation + "\n\n\(shown): \(summary)"
     }
 
     func toggleSelection(_ skill: DiscoveredSkill) {

@@ -261,7 +261,7 @@ final class ThrowingSkillStore: SkillStoreProtocol {
     func createSkill(name: String, description: String, body: String) throws -> String { "created-skill" }
     func readBody(directoryName: String) throws -> String { "A" }
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws { throw SaveFailure() }
+                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult { throw SaveFailure() }
     func writeBody(directoryName: String, body: String) throws { throw SaveFailure() }
     func deleteSkill(directoryName: String) throws {}
     func listSkills() throws -> [String] { [] }
@@ -272,6 +272,7 @@ final class CountingSkillStore: SkillStoreProtocol {
     private(set) var lastWrittenBody: String?
     /// The skill's files removed from under the app: every read fails, as `FileService` would.
     var filesGone = false
+    var rewriteOverride: String?
 
     init(body: String? = nil) {
         lastWrittenBody = body
@@ -287,9 +288,10 @@ final class CountingSkillStore: SkillStoreProtocol {
     }
 
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws {
+                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
         writeCount += 1
-        lastWrittenBody = body
+        lastWrittenBody = rewriteOverride ?? body
+        return SkillRewriteResult(content: lastWrittenBody ?? body, didWrite: true)
     }
 
     func writeBody(directoryName: String, body: String) throws {

@@ -25,14 +25,9 @@ struct PreviewImageProvider: ImageProvider, InlineImageProvider {
     /// Shared by the mounted block task and inline provider. Leaf reads and ImageIO decoding are
     /// synchronous, so detach them explicitly even when the caller inherits the main actor.
     func loadImage(url: URL?) async -> CGImage? {
-        guard var url else { return nil }
-        if url.scheme == nil, let skillDirectory {
-            let document = URL(fileURLWithPath: skillDirectory + "/" + documentRelativePath)
-            guard let resolved = URL(string: url.relativeString, relativeTo: document.deletingLastPathComponent()) else {
-                return nil
-            }
-            url = resolved.absoluteURL
-        }
+        guard let url, let url = PreviewImageLoader.resolvedURL(
+            url, skillDirectory: skillDirectory, documentRelativePath: documentRelativePath
+        ) else { return nil }
         return await Task.detached(priority: .userInitiated) { [loader, skillDirectory, url] in
             try? loader.loadImage(at: url, skillDirectory: skillDirectory)
         }.value

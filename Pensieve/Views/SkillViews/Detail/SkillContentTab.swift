@@ -21,8 +21,9 @@ struct SkillContentTab: View {
     private var file: String { choice.relativePath }
     private var shownMode: SkillContentPresentation.Mode { presentation.shownMode }
     private var isDirty: Bool { library.hasUnsavedChanges(for: skill) }
+    private var folderRevision: UInt64 { library.folderChangeRevisions[skill.directoryName, default: 0] }
     private var otherFileKey: String {
-        "\(skill.id)|\(file)|\(library.reloadToken)|\(library.appWriteRevision)|\(library.watcherEventSequence)"
+        "\(skill.id)|\(file)|\(library.reloadToken)|\(library.appWriteRevision)|\(folderRevision)"
     }
     private var otherFileText: String? {
         loadedOtherFile?.text(for: skill.id, relativePath: file)
@@ -92,9 +93,9 @@ struct SkillContentTab: View {
 
     func preview(markdownBody: String, skillsBase: String) -> SkillPreviewView {
         SkillPreviewView(markdownBody: markdownBody, scrolls: false,
-                         skillDirectory: PreviewImageLoader.skillDirectory(slug: skill.directoryName, base: skillsBase),
+                         skillDirectory: SkillStore.skillDirectoryPath(slug: skill.directoryName, base: skillsBase),
                          documentRelativePath: file,
-                         imageRevision: library.watcherEventSequence,
+                         imageRevision: folderRevision,
                          imageLoader: PreviewImageLoader(fileService: library.fileService))
     }
 

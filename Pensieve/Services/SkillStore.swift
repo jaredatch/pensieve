@@ -7,6 +7,12 @@ enum SkillStoreError: Error, Equatable {
     case unsafeLeaf(String)
 }
 
+/// The single serialization's complete content, and whether it changed any on-disk byte.
+struct SkillRewriteResult {
+    let content: String
+    let didWrite: Bool
+}
+
 // MARK: - Protocol
 
 protocol SkillStoreProtocol {
@@ -25,7 +31,7 @@ protocol SkillStoreProtocol {
     func readData(directoryName: String) throws -> Data
     /// Rewrite an existing SKILL.md from caller-supplied parsed preservation data.
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws
+                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult
     /// Write raw SKILL.md content verbatim - no frontmatter synthesis. Low-level primitive.
     func writeBody(directoryName: String, body: String) throws
     /// Delete a skill directory and its contents.
@@ -103,8 +109,9 @@ final class SkillStore: SkillStoreProtocol {
         return try fileService.readRegularFileData(at: path, maximumBytes: Int.max)
     }
 
+    @discardableResult
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws {
+                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
         let path = try validatedSkillDirectory(directoryName) + "/SKILL.md"
         let content = SkillSerializer.rewrite(
             body: body,
@@ -112,7 +119,12 @@ final class SkillStore: SkillStoreProtocol {
             fallbackName: fallbackName,
             fallbackDescription: fallbackDescription
         )
+        let original = parsed.preservedFile?.source ?? parsed.body
+        guard !content.utf8.elementsEqual(original.utf8) else {
+            return SkillRewriteResult(content: content, didWrite: false)
+        }
         try fileService.writeFile(at: path, content: content)
+        return SkillRewriteResult(content: content, didWrite: true)
     }
 
     func writeBody(directoryName: String, body: String) throws {
@@ -177,13 +189,13 @@ final class SkillStore: SkillStoreProtocol {
             && !slug.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7F }
     }
 
-    // MARK: - Private
-
     /// Pure path construction for render-time context. Filesystem admission still uses C7.
     static func skillDirectoryPath(slug: String, base: String) -> String? {
         guard !slug.isEmpty, !slug.contains("/"), slug != ".", slug != ".." else { return nil }
         return base + "/" + slug
     }
+
+    // MARK: - Private
 
     /// The single C7 guard. Returns `<base>/<slug>` iff `slug` is a safe single directory
     /// component (non-empty; no `/`; not `.`/`..`) AND `<base>/<slug>` is neither a symlink nor

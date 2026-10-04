@@ -116,7 +116,9 @@ final class InstallEchoSkillStore: SkillStoreProtocol {
     func createSkill(name: String, description: String, body: String) throws -> String { "unused" }
     func readBody(directoryName: String) throws -> String { bodies[directoryName] ?? "" }
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws {}
+                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
+        return SkillRewriteResult(content: body, didWrite: true)
+    }
     func writeBody(directoryName: String, body: String) throws {}
     func deleteSkill(directoryName: String) throws {}
     func listSkills() throws -> [String] { Array(bodies.keys) }

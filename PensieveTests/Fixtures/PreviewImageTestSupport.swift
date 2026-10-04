@@ -37,6 +37,7 @@ final class PreviewImageFileSpy: FileServiceProtocol {
 
     let files = FileService()
     var unreadablePath: String?
+    private(set) var writes: [String] = []
     private let lock = NSLock()
     private var recordedReads: [Read] = []
     private var recordedBytes = 0
@@ -61,7 +62,10 @@ final class PreviewImageFileSpy: FileServiceProtocol {
         throw CocoaError(.featureUnsupported)
     }
     func readFile(at path: String) throws -> String { try files.readFile(at: path) }
-    func writeFile(at path: String, content: String) throws { try files.writeFile(at: path, content: content) }
+    func writeFile(at path: String, content: String) throws {
+        writes.append(path)
+        try files.writeFile(at: path, content: content)
+    }
     func deleteFile(at path: String) throws { try files.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { files.fileExists(at: path) }
     func isExecutableFile(at path: String) -> Bool { files.isExecutableFile(at: path) }

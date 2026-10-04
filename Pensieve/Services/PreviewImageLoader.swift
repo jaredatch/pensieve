@@ -26,9 +26,15 @@ struct PreviewImageLoader: PreviewImageLoading {
         self.decode = decode ?? Self.thumbnail
     }
 
-    /// Path derivation only. The C7 filesystem guard runs in loadImage, off the view's render path.
-    static func skillDirectory(slug: String, base: String) -> String? {
-        SkillStore.skillDirectoryPath(slug: slug, base: base)
+    /// The one relative-URL rule, shared by document previews and direct loader callers.
+    /// Filesystem admission remains in localPath and the contained descriptor read.
+    static func resolvedURL(_ url: URL, skillDirectory: String?, documentRelativePath: String = "SKILL.md") -> URL? {
+        guard url.scheme == nil else { return url }
+        guard let skillDirectory else { return nil }
+        // Standardize the existing root, not the possibly missing leaf, before resolving it.
+        let root = URL(fileURLWithPath: skillDirectory, isDirectory: true).standardizedFileURL
+        let document = URL(fileURLWithPath: root.path + "/" + documentRelativePath)
+        return URL(string: url.relativeString, relativeTo: document.deletingLastPathComponent())?.absoluteURL
     }
 
     func loadImage(at url: URL, skillDirectory: String?) throws -> CGImage {
@@ -75,16 +81,8 @@ struct PreviewImageLoader: PreviewImageLoading {
             fileService: fileService
         ) else { throw PreviewImageError.blocked }
         let root = URL(fileURLWithPath: safeDirectory, isDirectory: true).standardizedFileURL
-        let resolved: URL
-        if url.scheme == nil {
-            guard let relative = URL(string: url.relativeString, relativeTo: root) else {
-                throw PreviewImageError.blocked
-            }
-            resolved = relative.absoluteURL.standardizedFileURL
-        } else {
-            resolved = url.standardizedFileURL
-        }
-        let path = resolved.path
+        guard let resolved = Self.resolvedURL(url, skillDirectory: root.path) else { throw PreviewImageError.blocked }
+        let path = resolved.standardizedFileURL.path
         guard !path.contains("\0"), path.hasPrefix(root.path + "/") else { throw PreviewImageError.blocked }
         return path
     }

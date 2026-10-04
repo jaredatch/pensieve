@@ -66,6 +66,8 @@ final class SkillLibraryViewModel {
     var coordinatorBaselineBodies: [String: String] = [:]
     var coordinatorObservedSlugs: Set<String> = []
     var watcherEventSequence: UInt64 = 0
+    /// Asset invalidation belongs to the folder reported by the watcher, even for a body echo.
+    var folderChangeRevisions: [String: UInt64] = [:]
     var error: String?
     var showCreateSheet = false
     /// Skill `directoryName`s whose on-disk body changed outside the app and have not yet been re-edited.

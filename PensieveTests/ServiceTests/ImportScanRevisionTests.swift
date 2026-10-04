@@ -5,6 +5,16 @@ import XCTest
 
 @MainActor
 final class ImportScanRevisionTests: XCTestCase {
+    func testAllSkippedNoticeExplainsScanDepthBeforeLatestFolderSummary() {
+        let scanner = RevisionReportScanner()
+        scanner.report = ImportScanReport(skipped: [.init(path: "skip", reason: .tooLarge)])
+        let model = ImportViewModel(scanner: scanner)
+        XCTAssertEqual(model.scanFolder("/chosen"), .nothingFound)
+        XCTAssertEqual(model.nothingFoundMessage(folder: "Chosen"),
+                       "Chosen holds no readable SKILL.md. Pensieve looks in it and in its folders, never deeper.\n\n"
+                       + "Chosen: Skipped 1 entry: 1 file larger than 4 MiB.")
+    }
+
     func testNothingFoundNoticeUsesLatestFolderSkipsWhileRetainingEarlierResultsAndReport() {
         let scanner = RevisionReportScanner()
         let model = ImportViewModel(scanner: scanner)
@@ -15,13 +25,16 @@ final class ImportScanRevisionTests: XCTestCase {
                                                   .init(path: "denied", reason: .unreadable)])
         XCTAssertEqual(model.scanFolder("/chosen"), .nothingFound)
         XCTAssertEqual(model.nothingFoundMessage(folder: "Chosen"),
-                       "Chosen: Skipped 2 entries: 1 file larger than 4 MiB; 1 unreadable file or folder.")
+                       "Chosen holds no readable SKILL.md. Pensieve looks in it and in its folders, never deeper.\n\n"
+                       + "Chosen: Skipped 2 entries: 1 file larger than 4 MiB; 1 unreadable file or folder.")
         XCTAssertEqual(model.discoveredSkills.map(\.name), ["old"])
         XCTAssertEqual(model.scanSummary, oldSummary)
         scanner.report = ImportScanReport(skipped: [.init(path: "one", reason: .invalidUTF8)])
         let fresh = ImportViewModel(scanner: scanner)
         XCTAssertEqual(fresh.scanFolder("/new"), .nothingFound)
-        XCTAssertEqual(fresh.nothingFoundMessage(folder: "New"), "New: Skipped 1 entry: 1 file that isn't UTF-8 text.")
+        XCTAssertEqual(fresh.nothingFoundMessage(folder: "New"),
+                       "New holds no readable SKILL.md. Pensieve looks in it and in its folders, never deeper.\n\n"
+                       + "New: Skipped 1 entry: 1 file that isn't UTF-8 text.")
         scanner.report = ImportScanReport()
         XCTAssertEqual(fresh.scanFolder("/empty"), .nothingFound)
         XCTAssertEqual(fresh.nothingFoundMessage(folder: "Empty"),
@@ -275,7 +288,9 @@ private final class RevisionSkillStore: SkillStoreProtocol {
     }
     func readBody(directoryName: String) throws -> String { throw CocoaError(.featureUnsupported) }
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws { throw CocoaError(.featureUnsupported) }
+                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
+        throw CocoaError(.featureUnsupported)
+    }
     func writeBody(directoryName: String, body: String) throws { throw CocoaError(.featureUnsupported) }
     func deleteSkill(directoryName: String) throws { throw CocoaError(.featureUnsupported) }
     func listSkills() throws -> [String] { [] }
