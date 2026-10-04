@@ -34,9 +34,9 @@ struct PlatformTokenBudgetSetting: Identifiable, Equatable {
         var values: [PlatformTarget: Int] = [:]
         for setting in rows {
             guard case let .editable(storageKey, defaultValue) = setting.budget else { continue }
-            let storedValue = defaults.object(forKey: storageKey)
-            let budget = storedValue == nil ? defaultValue : storedValue as? Int
-            guard let budget, budget > 0 else { continue }
+            let budget = defaults.object(forKey: storageKey) == nil
+                ? defaultValue : defaults.integer(forKey: storageKey)
+            guard budget > 0 else { continue }
             values[setting.platform] = budget
         }
         return values

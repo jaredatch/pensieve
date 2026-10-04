@@ -69,8 +69,23 @@ final class PlatformSettingsPresentationTests: XCTestCase {
     }
 
     func testStringBudgetIsOmitted() throws {
-        try assertBudgetIsOmitted("not a number")
-        try assertBudgetIsOmitted("2500")
+        try assertBudgetIsOmitted("junk")
+    }
+
+    func testNumericStringAndFractionalBudgetsMatchSettings() throws {
+        let suite = "PlatformSettingsPresentationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let storedValues: [Any] = ["2500", 2_500.5]
+        for setting in PlatformTokenBudgetSetting.rows {
+            guard case let .editable(storageKey, _) = setting.budget else { continue }
+            for value in storedValues {
+                defaults.set(value, forKey: storageKey)
+                XCTAssertEqual(PlatformTokenBudgetSetting.values(defaults: defaults)[setting.platform], 2_500,
+                               "Stored budget \(value) should match Settings for \(setting.platform.displayName)")
+            }
+        }
     }
 
     private func assertBudgetIsOmitted(_ value: Any, file: StaticString = #filePath, line: UInt = #line) throws {
