@@ -45,8 +45,9 @@ final class ThirdPartyNoticesTests: XCTestCase {
     func testLibYAMLNoticeIsComplete() throws {
         let notices = try readNotices()
         let pins = try inventory.swiftPackagePins(resolved: resolvedPackagesPath)
-        if try LibYAMLNoticeAudit.checkVendorVersion(pins: pins, notices: notices) != nil {
-            XCTAssertTrue(try bundledCredits().contains("libYAML"), "Bundled credits omitted the libYAML label")
+        if let license = try LibYAMLNoticeAudit.checkVendorVersion(pins: pins, notices: notices) {
+            XCTAssertTrue(try hasRenderedLibYAMLSection(bundledCreditsDocument(), license: license),
+                          "Bundled credits omitted the libYAML heading or its following pinned license")
         }
     }
 
@@ -109,9 +110,13 @@ final class ThirdPartyNoticesTests: XCTestCase {
     }
 
     private func bundledCredits() throws -> String {
+        try bundledCreditsDocument().string
+    }
+
+    private func bundledCreditsDocument() throws -> NSAttributedString {
         let path = try XCTUnwrap(Bundle.main.path(forResource: "Credits", ofType: "rtf"), "App is missing Credits.rtf")
         let data = try fileService.readData(at: path)
-        return try decodeCredits(data).string
+        return try decodeCredits(data)
     }
 
     func assertMissing(_ expected: String, operation: () throws -> Void) {

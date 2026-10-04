@@ -105,18 +105,16 @@ extension ThirdPartyNoticesTests {
         }
     }
 
-    func testUnreadableFilesDelegateProbesAndMutations() throws {
-        try withFixture { root in
-            let executable = root + "/tool"
-            try fileService.writeExecutableFile(at: executable, content: "#!/bin/sh\nexit 0\n")
-            let files = NoticeUnreadableFiles(base: fileService, unreadable: root + "/fault")
-            XCTAssertTrue(files.fileExists(at: executable))
-            XCTAssertTrue(files.isExecutableFile(at: executable))
-            try files.writeFile(at: root + "/text", content: "Delegate this write.")
-            XCTAssertEqual(try files.readFile(at: root + "/text"), "Delegate this write.")
-            XCTAssertEqual(try files.contentsHash(at: root + "/text"), try fileService.contentsHash(at: root + "/text"))
-            try files.deleteFile(at: root + "/text")
-            XCTAssertFalse(files.fileExists(at: root + "/text"))
+    func testSwiftAuditUsesOnlyReadOperations() throws {
+        try withSwiftFixture { root in
+            let path = "license-guard.bin", bytes = "Read only license fixture."
+            try fileService.writeFile(at: root + "/example/" + path, content: bytes)
+            let exemption = NoticeInventory.LicenseExemption(package: "example", path: path, reason: "Audit fixture.",
+                                                              sha256: fixtureDigest(bytes))
+            let files = NoticeUnreadableFiles(base: fileService, unreadable: root + "/unused-fault")
+            XCTAssertNoThrow(try NoticeInventory(fileService: files, exemptions: [exemption]).checkSwiftPackages(
+                resolved: root + "/resolved.json", checkouts: root,
+                notices: parseNotices("[Example](https://github.com/vendor/example)"), credits: "Example license."))
         }
     }
 
@@ -160,8 +158,8 @@ extension ThirdPartyNoticesTests {
 
 }
 
-/// Injects a binary read failure for one candidate. Every other operation delegates
-/// to FileService. The double is scoped to temporary notice-audit fixtures.
+/// Audits temporary checkouts through real read probes, with a binary read failure
+/// at one candidate. Mutations throw, so an audit can never write through this double.
 private final class NoticeUnreadableFiles: FileServiceProtocol {
     private let base: FileService
     private let unreadable: String
@@ -181,22 +179,22 @@ private final class NoticeUnreadableFiles: FileServiceProtocol {
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
         try base.readRegularFileData(at: path, maximumBytes: maximumBytes)
     }
-    func writeFile(at path: String, content: String) throws { try base.writeFile(at: path, content: content) }
-    func writeData(at path: String, data: Data) throws { try base.writeData(at: path, data: data) }
-    func writeExecutableFile(at path: String, content: String) throws { try base.writeExecutableFile(at: path, content: content) }
+    func writeFile(at path: String, content: String) throws { throw CocoaError(.featureUnsupported) }
+    func writeData(at path: String, data: Data) throws { throw CocoaError(.featureUnsupported) }
+    func writeExecutableFile(at path: String, content: String) throws { throw CocoaError(.featureUnsupported) }
     func copyFile(at sourcePath: String, to destinationPath: String) throws {
-        try base.copyFile(at: sourcePath, to: destinationPath)
+        throw CocoaError(.featureUnsupported)
     }
-    func deleteFile(at path: String) throws { try base.deleteFile(at: path) }
+    func deleteFile(at path: String) throws { throw CocoaError(.featureUnsupported) }
     func fileExists(at path: String) -> Bool { base.fileExists(at: path) }
     func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool { try base.entryExistsWithoutFollowingLinks(at: path) }
     func isExecutableFile(at path: String) -> Bool { base.isExecutableFile(at: path) }
     func isUserExecutableFile(at path: String) -> Bool { base.isUserExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { base.directoryExists(at: path) }
-    func createDirectory(at path: String) throws { try base.createDirectory(at: path) }
-    func deleteDirectory(at path: String) throws { try base.deleteDirectory(at: path) }
+    func createDirectory(at path: String) throws { throw CocoaError(.featureUnsupported) }
+    func deleteDirectory(at path: String) throws { throw CocoaError(.featureUnsupported) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
-        try base.createSymlink(at: linkPath, pointingTo: targetPath)
+        throw CocoaError(.featureUnsupported)
     }
     func symlinkTarget(at path: String) throws -> String { try base.symlinkTarget(at: path) }
     func isSymlink(at path: String) -> Bool { base.isSymlink(at: path) }
@@ -208,5 +206,5 @@ private final class NoticeUnreadableFiles: FileServiceProtocol {
     }
     func realPath(at path: String) -> String { base.realPath(at: path) }
     func regularFileMetadata(at path: String) -> RegularFileMetadata? { base.regularFileMetadata(at: path) }
-    func touchRegularFile(at path: String, date: Date) throws { try base.touchRegularFile(at: path, date: date) }
+    func touchRegularFile(at path: String, date: Date) throws { throw CocoaError(.featureUnsupported) }
 }

@@ -1,5 +1,4 @@
 import CryptoKit
-import Darwin
 import XCTest
 @testable import Pensieve
 
@@ -130,14 +129,28 @@ extension ThirdPartyNoticesTests {
         }
     }
 
+    func testRenderedLibYAMLLinkCannotReplaceSectionHeading() throws {
+        let license = try pinnedLibYAMLFixture()
+        let source = "[libYAML](https://github.com/yaml/libyaml), vendored by Yams.\n```text\n" + license + "\n```\n"
+        let credits = try decodeCredits(Data(renderFixture(source).utf8))
+        XCTAssertFalse(hasRenderedLibYAMLSection(credits, license: license), "The link alone is not a section heading")
+    }
+
+    func testRenderedLibYAMLHeadingCannotBorrowLaterLicense() throws {
+        let license = try pinnedLibYAMLFixture()
+        let source = "### libYAML\n```text\nChanged terms.\n```\n### Other vendor\n```text\n" + license + "\n```\n"
+        let credits = try decodeCredits(Data(renderFixture(source).utf8))
+        XCTAssertFalse(hasRenderedLibYAMLSection(credits, license: license), "The pinned license belongs to another section")
+    }
+
     func testNoticeCacheTracksSourceContent() throws {
         try withFixture { root in
             let path = root + "/THIRD-PARTY-NOTICES.md"
             try fileService.writeFile(at: path, content: "```text\nCopyright First.\n```\n")
-            XCTAssertEqual(try loadNotices(at: path).licenseBlocks.map(\.text), ["Copyright First."])
-            XCTAssertEqual(try loadNotices(at: path).licenseBlocks.map(\.text), ["Copyright First."])
+            XCTAssertEqual(try loadNotices(at: path, canonicalPath: path).licenseBlocks.map(\.text), ["Copyright First."])
+            XCTAssertEqual(try loadNotices(at: path, canonicalPath: path).licenseBlocks.map(\.text), ["Copyright First."])
             try fileService.writeFile(at: path, content: "```text\nCopyright Changed.\n```\n")
-            XCTAssertEqual(try loadNotices(at: path).licenseBlocks.map(\.text), ["Copyright Changed."])
+            XCTAssertEqual(try loadNotices(at: path, canonicalPath: path).licenseBlocks.map(\.text), ["Copyright Changed."])
         }
     }
 
@@ -145,33 +158,9 @@ extension ThirdPartyNoticesTests {
         try withFixture { root in
             let path = root + "/THIRD-PARTY-NOTICES.md"
             try fileService.writeFile(at: path, content: "```text\nCopyright Cached.\n```\n")
-            _ = try loadNotices(at: path)
+            _ = try loadNotices(at: path, canonicalPath: path)
             try fileService.deleteFile(at: path)
-            XCTAssertThrowsError(try loadNotices(at: path))
-        }
-    }
-
-    func testCreditsProcessThrowsAndReapsOnPipeReadFailure() throws {
-        for side in ["stdout", "stderr"] {
-            let stdout = Pipe(), stderr = Pipe()
-            let failing = side == "stdout" ? stdout.fileHandleForReading : stderr.fileHandleForReading
-            let read: (FileHandle) throws -> Data? = { handle in
-                if handle === failing { throw CocoaError(.fileReadUnknown) }
-                return try handle.readToEnd()
-            }
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-            process.arguments = ["-c", "import os,signal,sys; signal.signal(signal.SIGALRM,lambda *a:os._exit(72)); "
-                                 + "signal.alarm(3); sys.stderr.write('E'*262144); sys.stderr.flush(); print('DONE'); "
-                                 + "sys.stdout.flush(); __import__('time').sleep(60)"]
-            XCTAssertThrowsError(try runCreditsProcess(process, stdout: stdout, stderr: stderr, read: read), side)
-            XCTAssertFalse(process.isRunning, side)
-            XCTAssertEqual(process.terminationReason, .uncaughtSignal, side)
-            XCTAssertEqual(process.terminationStatus, SIGKILL, side)
-            var status: Int32 = 0
-            let reaped = (waitpid(process.processIdentifier, &status, WNOHANG), errno)
-            XCTAssertEqual(reaped.0, -1, side)
-            XCTAssertEqual(reaped.1, ECHILD, side)
+            XCTAssertThrowsError(try loadNotices(at: path, canonicalPath: path))
         }
     }
 

@@ -280,7 +280,6 @@
 		782B9DEDA9CA37B50AF0ADC1 /* StoreRebuildServiceTests+CheckedYAML.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E6508FA3B393A962FF22465 /* StoreRebuildServiceTests+CheckedYAML.swift */; };
 		785006B21A2CC9CEF3B6B2D1 /* ManifestService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7EF0F5FBE6434FEDE72758 /* ManifestService.swift */; };
 		7859F9ECC739C640FCB33F4B /* UpdatesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFED54571C0A47E86F78572 /* UpdatesViewModel.swift */; };
-		78AB098B0583CF6C8D2BFB7A /* ProcessOutputReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4DC6262DB573755D02B001D /* ProcessOutputReader.swift */; };
 		78FEEA4329FFF7F2F4F142B4 /* PlatformViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26ED8D9EDA8729984655172B /* PlatformViewModel.swift */; };
 		791188DD1F6BE1DB0BCEC5EE /* AppRuntimeUpdateRulesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA6CC007048F440FE74BD142 /* AppRuntimeUpdateRulesTests.swift */; };
 		7A104F41B2C2F9F7E3D84BDF /* MarkdownEditorWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21F28E70C4DFCF4254FCAEC0 /* MarkdownEditorWebView.swift */; };
@@ -370,7 +369,6 @@
 		9625FFD3D2C5C2765BD6A345 /* SkillHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B577FC8ECFD56344C61961EB /* SkillHistoryView.swift */; };
 		964F29B7A7B8284A944DAF87 /* SkillInstallCrashWindowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E5D618B7956A6FE43E6A93E /* SkillInstallCrashWindowTests.swift */; };
 		970FFEF32BE0FC020EA17561 /* ManifestTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70BD019BE6EBE7B9E3E23880 /* ManifestTypes.swift */; };
-		974316AC37A36857B135AFC8 /* ProcessOutputReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4DC6262DB573755D02B001D /* ProcessOutputReader.swift */; };
 		9773B6D28D6511C9CEB791B8 /* ManifestService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7EF0F5FBE6434FEDE72758 /* ManifestService.swift */; };
 		97F7BE2E3758767632751CED /* ImportWholeFileTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0C69E973F53315290D9B6A /* ImportWholeFileTestSupport.swift */; };
 		983DBDF744686E2AE32A2AAA /* CheckedYAMLLoaderTests+ResourceBudget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19642102010F256B2EA9540B /* CheckedYAMLLoaderTests+ResourceBudget.swift */; };
@@ -495,7 +493,6 @@
 		C7FD152FC46799581A4A9E75 /* PathConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58F132A4F44D02B771C85673 /* PathConstants.swift */; };
 		C88DC8262F714CBD08CE8E71 /* TestTimeoutDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45049776DDD8EC63204D5133 /* TestTimeoutDiagnostics.swift */; };
 		C9EE063A6CF9960B22F01DE3 /* Scenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 134726C6E0580176DE762D8D /* Scenario.swift */; };
-		CA3BE0AB708539A2F8B28791 /* ProcessOutputReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4DC6262DB573755D02B001D /* ProcessOutputReader.swift */; };
 		CABC875EB608965AFC828F4D /* PensieveApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EFC4C388B8CBC54EEFECB58 /* PensieveApp.swift */; };
 		CB7EABA69FB57C6C17FE5083 /* ConflictResolutionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8541267C853062E4A44AA6AB /* ConflictResolutionView.swift */; };
 		CB809FFA848563B84283AC40 /* PensieveAppInstallPathsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19037D584ACDBF02516D31B1 /* PensieveAppInstallPathsTests.swift */; };
@@ -1098,7 +1095,6 @@
 		B2DA21D28AC1DDBFF031C3D5 /* SyncDaemon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDaemon.swift; sourceTree = "<group>"; };
 		B3543F918F31E49A99D7AB5E /* LinkServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkServiceTests.swift; sourceTree = "<group>"; };
 		B4D2030D1871811732C084EF /* UpstreamHistoryReviewGitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpstreamHistoryReviewGitTests.swift; sourceTree = "<group>"; };
-		B4DC6262DB573755D02B001D /* ProcessOutputReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessOutputReader.swift; sourceTree = "<group>"; };
 		B5550E0C81048159E82A1EEC /* PlatformSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformSettingsView.swift; sourceTree = "<group>"; };
 		B577FC8ECFD56344C61961EB /* SkillHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillHistoryView.swift; sourceTree = "<group>"; };
 		B5EEC4CEFD0B3B579DED4B8A /* SkillDetailHeaderLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDetailHeaderLayoutTests.swift; sourceTree = "<group>"; };
@@ -1495,7 +1491,6 @@
 				1DAE126FF838442F2098DF8D /* ListRows.swift */,
 				54CC2ACA742330CA1489C7DE /* MachineDisplayName.swift */,
 				58F132A4F44D02B771C85673 /* PathConstants.swift */,
-				B4DC6262DB573755D02B001D /* ProcessOutputReader.swift */,
 				E5E8C9FD08BE697082DF02B5 /* PublishedStringSanitizer.swift */,
 				2294C207980E3AF191BBBA52 /* RelativeTime.swift */,
 				C8A76CF083F2DEFD100063E8 /* SkillBundleInventory.swift */,
@@ -2353,7 +2348,6 @@
 				914E23B428DCA6962D10443F /* ManifestTypes.swift in Sources */,
 				2243800FAAD5680AEF0680C5 /* PathConstants.swift in Sources */,
 				B6565ED98206F246F56273F4 /* PlatformTarget.swift in Sources */,
-				974316AC37A36857B135AFC8 /* ProcessOutputReader.swift in Sources */,
 				D98B5053088824D69F3FB589 /* RemoteURLPolicy.swift in Sources */,
 				252A4AA6F90CF0482BFF03A1 /* SkillParser.swift in Sources */,
 				647F159BCA0C809A20715092 /* SkillScope.swift in Sources */,
@@ -2823,7 +2817,6 @@
 				FDD45F641F766635A4C7A6FC /* PlatformTarget.swift in Sources */,
 				78FEEA4329FFF7F2F4F142B4 /* PlatformViewModel.swift in Sources */,
 				DB7CFE56307BA13E7EA693C6 /* PostSyncConvergence.swift in Sources */,
-				CA3BE0AB708539A2F8B28791 /* ProcessOutputReader.swift in Sources */,
 				821B84FDBE89FB4F6A685F8B /* Project.swift in Sources */,
 				CE8B83EDFDBA8689D18C44B1 /* ProjectDetailView.swift in Sources */,
 				B765DAC11B9F9CB81F525C01 /* ProjectIdentityPresentation.swift in Sources */,
@@ -2961,7 +2954,6 @@
 				C5B74D20DA1D002BC0690889 /* GitService.swift in Sources */,
 				07EAF615D323FAE05635444F /* GitServiceConflict.swift in Sources */,
 				C7FD152FC46799581A4A9E75 /* PathConstants.swift in Sources */,
-				78AB098B0583CF6C8D2BFB7A /* ProcessOutputReader.swift in Sources */,
 				E9421848CC79B605ACB09989 /* RemoteURLPolicy.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

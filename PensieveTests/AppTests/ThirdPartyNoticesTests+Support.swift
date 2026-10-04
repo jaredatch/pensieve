@@ -12,9 +12,11 @@ extension ThirdPartyNoticesTests {
 
     /// Only the canonical notices fill the real content cache. Fixtures share the pure-source cache.
     /// Read files before reuse so changed or missing sources remain observable.
-    func loadNotices(at path: String) throws -> NoticeDocument {
+    func loadNotices(at path: String, canonicalPath: String? = nil) throws -> NoticeDocument {
         let source = try fileService.readFile(at: path)
-        guard path == sourceRoot + "/THIRD-PARTY-NOTICES.md" else { return try parseNotices(source) }
+        guard path == (canonicalPath ?? sourceRoot + "/THIRD-PARTY-NOTICES.md") else {
+            return try parseNotices(source)
+        }
         if let cached = Self.realNotices[source] { return cached }
         let document = try parseNoticeFile(source, at: path)
         Self.realNotices[source] = document
@@ -26,6 +28,24 @@ extension ThirdPartyNoticesTests {
         XCTAssertEqual(result.status, 0, result.error)
         let blocks = try JSONDecoder().decode([NoticeDocument.LicenseBlock].self, from: Data(result.output.utf8))
         return NoticeDocument(source, licenseBlocks: blocks)
+    }
+
+    func hasRenderedLibYAMLSection(_ credits: NSAttributedString, license: String) -> Bool {
+        var headings: [(text: String, range: NSRange)] = []
+        let text = credits.string
+        text.enumerateSubstrings(in: text.startIndex..<text.endIndex, options: .byLines) { line, range, _, _ in
+            let bounds = NSRange(range, in: text)
+            if let line, !line.isEmpty,
+               let font = credits.attribute(.font, at: bounds.location, effectiveRange: nil) as? NSFont,
+               NSFontManager.shared.traits(of: font).contains(.boldFontMask) {
+                headings.append((line, bounds))
+            }
+        }
+        guard let index = headings.firstIndex(where: { $0.text == "libYAML" }) else { return false }
+        let start = NSMaxRange(headings[index].range)
+        let end = headings.dropFirst(index + 1).first?.range.location ?? credits.length
+        let body = (credits.string as NSString).substring(with: NSRange(location: start, length: end - start))
+        return NoticeInventory.normalized(body).contains(NoticeInventory.normalized(license))
     }
 
     func decodeCredits(_ data: Data) throws -> NSAttributedString {
@@ -70,15 +90,26 @@ extension ThirdPartyNoticesTests {
         return try runCreditsProcess(process)
     }
 
-    func runCreditsProcess(_ process: Process, stdout: Pipe = Pipe(), stderr: Pipe = Pipe(),
-                           read: @escaping (FileHandle) throws -> Data? = ProcessOutputReader.defaultRead)
-        throws -> CreditsResult {
-        process.standardOutput = stdout
-        process.standardError = stderr
-        try process.run()
-        let (output, error) = ProcessOutputReader.read(process: process, stdout: stdout, stderr: stderr, read: read)
-        return try CreditsResult(status: process.terminationStatus,
-                                 output: String(data: output.get(), encoding: .utf8) ?? "",
-                                 error: String(data: error.get(), encoding: .utf8) ?? "")
+    /// The child redirects stderr to a scratch file; Swift only drains the stdout pipe.
+    /// FileService owns the fixture directory and reads the completed diagnostic file.
+    func runCreditsProcess(_ process: Process) throws -> CreditsResult {
+        var result: CreditsResult?
+        try withFixture { root in
+            let errorPath = root + "/stderr.txt"
+            let executable = try XCTUnwrap(process.executableURL)
+            let arguments = process.arguments ?? []
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", #"error=$1; shift; exec "$@" 2>"$error""#,
+                                 "credits-output", errorPath, executable.path] + arguments
+            let stdout = Pipe()
+            process.standardOutput = stdout
+            try process.run()
+            let output = try stdout.fileHandleForReading.readToEnd() ?? Data()
+            process.waitUntilExit()
+            result = CreditsResult(status: process.terminationStatus,
+                                   output: String(data: output, encoding: .utf8) ?? "",
+                                   error: try fileService.readFile(at: errorPath))
+        }
+        return try XCTUnwrap(result)
     }
 }
