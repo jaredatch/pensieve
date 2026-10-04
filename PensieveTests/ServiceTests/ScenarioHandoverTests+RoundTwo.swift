@@ -48,7 +48,7 @@ extension ScenarioHandoverTests {
         let before = try harness.deployedFiles()
         try harness.handover().handOver(context: harness.freshContext(), readiness: ScenarioHandoverReadiness(
                 manifestWritten: true, rebuildSaveFailed: false,
-                ingestionNeedsRetry: false, storeUnreadable: false, quarantined: false))
+                ingestionNeedsRetry: false))
         let context = harness.freshContext()
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<ScenarioAssignment>()), 0)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
@@ -73,13 +73,13 @@ extension ScenarioHandoverTests {
         let defaulted = try NSRegularExpression(pattern: #"readiness:\s*ScenarioHandoverReadiness\s*="#)
         XCTAssertNil(defaulted.firstMatch(in: source, range: NSRange(source.startIndex..., in: source)))
         let defaults = try NSRegularExpression(pattern:
-            #"(?:var|let)\s+(?:manifestWritten|rebuildSaveFailed|ingestionNeedsRetry|storeUnreadable|quarantined)"#
+            #"(?:var|let)\s+(?:manifestWritten|rebuildSaveFailed|ingestionNeedsRetry)"#
                 + #"(?:\s*:\s*Bool)?\s*="#
         )
         XCTAssertNil(defaults.firstMatch(in: source, range: NSRange(source.startIndex..., in: source)))
-        for gate in 0..<5 {
+        for gate in 0..<3 {
             let readiness = ScenarioHandoverReadiness(manifestWritten: gate != 0, rebuildSaveFailed: gate == 1,
-                ingestionNeedsRetry: gate == 2, storeUnreadable: gate == 3, quarantined: gate == 4)
+                ingestionNeedsRetry: gate == 2)
             let harness = try HandoverHarness(defaults: isolatedDefaults())
             defer { try? harness.cleanUp() }
             try harness.seed()

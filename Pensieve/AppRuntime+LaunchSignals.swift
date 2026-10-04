@@ -1,25 +1,30 @@
 import Foundation
 
 extension AppRuntime {
-    func completeLaunchWorkIfPossible() {
-        guard didCompleteLaunchIngest, didFinishInitialLaunchCallbacks else { return }
-        launchWorkCompleted = true
+    /// Constructs launch collaborators from explicit inputs without owning runtime launch state.
+    static func makeLaunchIntentReconciler(platformVM: PlatformViewModel, paths: AppRuntimePaths,
+                                           defaults: UserDefaults) -> IntentReconciler {
+        IntentReconciler(platformVM: platformVM,
+            machineIdentity: MachineIdentity(appSupportDir: paths.appSupportDir),
+            handoverIsComplete: { defaults.bool(forKey: ScenarioHandover.doneKey) })
     }
 
-    func signalLaunchIngestIfPossible() {
-        guard didCompleteLaunchIngest,
-              !didSignalLaunchIngest,
-              let coordinator else { return }
-        didSignalLaunchIngest = true
-        let stamp = launchIngestHeadStamp
-        Task { [weak self] in
-            await coordinator.seedLastIngestedHeadStamp(stamp)
-            guard let self else { return }
-            if self.forceLaunchPreflight {
-                self.forceLaunchPreflight = false
-                self.scheduler.enqueueManualTrigger()
-            }
-            self.scheduler.launchIngestCompleted()
-        }
+    static func deferredLaunchOutcome() -> LaunchReconcileOutcome {
+        LaunchReconcileOutcome(rebuild: RebuildResult(), migrationRan: false,
+                               ingestionNeedsRetry: true, quarantined: true)
+    }
+
+    /// Samples and applies one cycle's watcher state; the caller owns git evidence and launch signaling.
+    static func runCoordinatorCycle(_ coordinator: SyncCoordinator, library: SkillLibraryViewModel,
+                                    paths: AppRuntimePaths) async -> SyncCycleResult {
+        let result = await Task.detached { await coordinator.runCycle() }.value
+        let sampledWatcherEventSequence = library.coordinatorWatcherEventSequence
+        let hasUnsyncedChanges = await Task.detached { !paths.isWorktreeClean() }.value
+        library.finishCoordinatorChanges(
+            hasUnsyncedChanges: hasUnsyncedChanges,
+            sampledWatcherEventSequence: sampledWatcherEventSequence,
+            recheckHasUnsyncedChanges: { !paths.isWorktreeClean() }
+        )
+        return result
     }
 }

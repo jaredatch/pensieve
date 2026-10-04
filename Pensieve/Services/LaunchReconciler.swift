@@ -203,11 +203,11 @@ struct LaunchReconciler {
             result.migrationRan = migration.manifestWritten && migration.warnings.isEmpty
             manifestWritten = migration.manifestWritten
         }
+        // Quarantine returns from reconcileOnLaunch; unreadable stores return above. Neither reaches handover.
         do {
             try scenarioHandover?.handOver(context: context, readiness: ScenarioHandoverReadiness(
                 manifestWritten: manifestWritten, rebuildSaveFailed: result.rebuild.saveFailed,
-                ingestionNeedsRetry: result.ingestionNeedsRetry,
-                storeUnreadable: result.rebuild.storeUnreadable, quarantined: false
+                ingestionNeedsRetry: result.ingestionNeedsRetry
             ))
         } catch {
             let warning = "Scenario handover deferred until next launch: \(error.localizedDescription)"

@@ -91,7 +91,7 @@ final class ScenarioHandoverMetadataTests: XCTestCase {
         try harness.manifest.live.write(disk, toRoot: harness.root)
         try harness.handover().handOver(context: harness.freshContext(), readiness: ScenarioHandoverReadiness(
                 manifestWritten: true, rebuildSaveFailed: false,
-                ingestionNeedsRetry: false, storeUnreadable: false, quarantined: false))
+                ingestionNeedsRetry: false))
         let written = try harness.manifest.read(fromRoot: harness.root)
         XCTAssertTrue((cached.categories + disk.categories).allSatisfy(written.categories.contains))
         XCTAssertTrue((cached.skills + disk.skills).allSatisfy(written.skills.contains))

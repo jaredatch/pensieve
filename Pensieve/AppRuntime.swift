@@ -28,7 +28,7 @@ final class AppRuntime {
     /// True after the launch attempt reaches a terminal outcome, including unreadable/quarantined stores,
     /// and initial callbacks and watcher startup finish. A deferred ingest waits for its retry.
     /// Coordinator signaling and any backfill deferred to a later sync cycle are separate.
-    var launchWorkCompleted = false
+    private(set) var launchWorkCompleted = false
 
     private(set) var storeQuarantined = false
     private(set) var updateCheckInFlight = false
@@ -50,13 +50,13 @@ final class AppRuntime {
     /// Where the store and App Support live; every collaborator built here is pointed at them (`AppRuntime+Paths.swift`).
     private let paths: AppRuntimePaths
     private var didPerformLaunchWork = false
-    var didCompleteLaunchIngest = false
-    var didFinishInitialLaunchCallbacks = false
+    private var didCompleteLaunchIngest = false
+    private var didFinishInitialLaunchCallbacks = false
 
-    var didSignalLaunchIngest = false
-    var launchIngestHeadStamp: String?
+    private var didSignalLaunchIngest = false
+    private var launchIngestHeadStamp: String?
     private var needsLaunchBackfillAfterCoordinator = false
-    var forceLaunchPreflight = false
+    private var forceLaunchPreflight = false
     @ObservationIgnored private var launchIngestRetryTask: Task<Void, Never>?
     @ObservationIgnored private var openMainWindowAction: (() -> Void)?
     @ObservationIgnored private(set) lazy var upstreamHistory = paths.makeUpstreamHistoryViewModel()
@@ -77,18 +77,7 @@ final class AppRuntime {
                     guard let self else { return }
                     self.library.beginCoordinatorChanges()
                     let evidence = self.gitState.beginEvidence()
-                    let result = await Task.detached { await coordinator.runCycle() }.value
-                    let sampledWatcherEventSequence = self.library.coordinatorWatcherEventSequence
-                    let hasUnsyncedChanges = await Task.detached {
-                        !paths.isWorktreeClean()
-                    }.value
-                    self.library.finishCoordinatorChanges(
-                        hasUnsyncedChanges: hasUnsyncedChanges,
-                        sampledWatcherEventSequence: sampledWatcherEventSequence,
-                        recheckHasUnsyncedChanges: {
-                            !paths.isWorktreeClean()
-                        }
-                    )
+                    let result = await Self.runCoordinatorCycle(coordinator, library: self.library, paths: paths)
                     if result.provesGitUsable {
                         self.handleGitChange(self.gitState.accept(.usable, order: evidence, model: self.syncModel))
                     }
@@ -142,11 +131,8 @@ final class AppRuntime {
         let resolvedContainer = try container ?? paths.makeContainer()
         let resolvedPlatformVM = platformVM ?? paths.makePlatformViewModel()
         let resolvedProvenanceVM = provenanceVM ?? paths.makeSkillProvenanceViewModel()
-        let resolvedIntentReconciler = IntentReconciler(
-            platformVM: resolvedPlatformVM,
-            machineIdentity: MachineIdentity(appSupportDir: paths.appSupportDir),
-            handoverIsComplete: { resolvedDefaults.bool(forKey: ScenarioHandover.doneKey) }
-        )
+        let resolvedIntentReconciler = Self.makeLaunchIntentReconciler(
+            platformVM: resolvedPlatformVM, paths: paths, defaults: resolvedDefaults)
         let resolvedConvergence = postSyncConvergence ?? paths.makeConvergence(
             container: resolvedContainer,
             platformVM: resolvedPlatformVM,
@@ -241,13 +227,7 @@ final class AppRuntime {
 
         let alreadyMigrated = defaults.bool(forKey: Self.migrationDefaultsKey)
         guard let lock = SyncLock.tryAcquire(at: launchIngestLockPath) else {
-            let pendingOutcome = LaunchReconcileOutcome(
-                rebuild: RebuildResult(),
-                migrationRan: false,
-                ingestionNeedsRetry: true,
-                quarantined: true
-            )
-            acceptLaunchIngest(pendingOutcome, context: context)
+            acceptLaunchIngest(Self.deferredLaunchOutcome(), context: context)
             beforeStartingWatcher()
             library.startWatching()
             scheduleLaunchIngestRetry(context: context)
@@ -273,6 +253,28 @@ final class AppRuntime {
 }
 
 private extension AppRuntime {
+    private func completeLaunchWorkIfPossible() {
+        guard didCompleteLaunchIngest, didFinishInitialLaunchCallbacks else { return }
+        launchWorkCompleted = true
+    }
+
+    private func signalLaunchIngestIfPossible() {
+        guard didCompleteLaunchIngest,
+              !didSignalLaunchIngest,
+              let coordinator else { return }
+        didSignalLaunchIngest = true
+        let stamp = launchIngestHeadStamp
+        Task { [weak self] in
+            await coordinator.seedLastIngestedHeadStamp(stamp)
+            guard let self else { return }
+            if self.forceLaunchPreflight {
+                self.forceLaunchPreflight = false
+                self.scheduler.enqueueManualTrigger()
+            }
+            self.scheduler.launchIngestCompleted()
+        }
+    }
+
     private func acceptLaunchIngest(_ outcome: LaunchReconcileOutcome, context: ModelContext) {
         storeQuarantined = outcome.quarantined
         library.setStoreUnreadable(outcome.rebuild.storeUnreadable)

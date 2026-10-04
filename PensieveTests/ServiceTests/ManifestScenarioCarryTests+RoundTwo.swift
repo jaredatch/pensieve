@@ -3,6 +3,18 @@ import XCTest
 @testable import Pensieve
 
 extension ManifestScenarioCarryTests {
+    func testArchitectureDescribesCarryMetadataInvalidation() throws {
+        let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let architecture = try String(contentsOf: sourceRoot.appendingPathComponent("docs/ARCHITECTURE.md"), encoding: .utf8)
+        XCTAssertFalse(architecture.contains("Link counts are excluded."))
+        for comparison in ["inode", "size", "modification time", "ctime"] {
+            XCTAssertTrue(architecture.contains(comparison), comparison)
+        }
+        XCTAssertTrue(architecture.contains("A hard link changes ctime"))
+        XCTAssertTrue(architecture.contains("the next manifest write carries the unchanged bytes successfully"))
+    }
+
     func testHarmlessFileAndFolderMetadataChangesDoNotRejectManifestWrite() throws {
         for kind in ["file-xattr", "file-mode", "hard-link", "folder-xattr", "folder-mode"] {
             let source = root + "/manifest/scenarios"

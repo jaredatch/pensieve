@@ -4,6 +4,24 @@ import XCTest
 
 @MainActor
 final class AppRuntimeLaunchCompletionTests: XCTestCase {
+    func testLaunchStateRemainsPrivateAndCompletionIsReadOnly() throws {
+        // Visibility and the source cap are explicit requirements; behavior cannot prove a missing setter.
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("Pensieve/AppRuntime.swift"), encoding: .utf8)
+        for name in ["didCompleteLaunchIngest", "didFinishInitialLaunchCallbacks", "didSignalLaunchIngest",
+                     "launchIngestHeadStamp", "forceLaunchPreflight"] {
+            let declaration = try NSRegularExpression(pattern: "private var " + name + #"\b"#)
+            XCTAssertNotNil(declaration.firstMatch(in: source, range: NSRange(source.startIndex..., in: source)), name)
+        }
+        XCTAssertTrue(source.contains("private(set) var launchWorkCompleted"))
+        XCTAssertLessThanOrEqual(source.split(separator: "\n", omittingEmptySubsequences: false).count - 1, 400)
+        let helpers = try String(contentsOf: root.appendingPathComponent("Pensieve/AppRuntime+LaunchSignals.swift"),
+                                 encoding: .utf8)
+        XCTAssertFalse(helpers.contains("didSignalLaunchIngest"))
+        XCTAssertFalse(helpers.contains("forceLaunchPreflight"))
+    }
+
     func testLaunchWorkCompletionFollowsCallbacksBeforeCoordinatorSignaling() async throws {
         let paths = try AppRuntimePaths.temporary(named: "LaunchCompletion")
         defer { try? FileService().deleteDirectory(at: (paths.storeRoot as NSString).deletingLastPathComponent) }

@@ -383,7 +383,11 @@ extension PlatformViewModel {
         let path = platform.usesSymlinks
             ? linkService.linkPath(skill: skill, platform: platform, projectPath: nil)
             : cursorCompiler.outputPath(skill: skill, projectPath: nil)
-        guard try fileService.entryExistsWithoutFollowingLinks(at: path) else { return .absent }
+        do {
+            guard try fileService.entryExistsWithoutFollowingLinks(at: path) else { return .absent }
+        } catch {
+            return .unmanaged
+        }
         if platform.usesSymlinks {
             return linkService.isLinked(skill: skill, platform: platform, projectPath: nil) ? .realized : .unmanaged
         }
