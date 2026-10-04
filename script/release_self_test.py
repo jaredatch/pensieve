@@ -5,6 +5,7 @@ import importlib.util
 import itertools
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -23,9 +24,28 @@ DMG = b"fresh built DMG"
 SIGNATURE = base64.b64encode(b"s" * 64).decode()
 DOWNLOAD_PREFIX = "https://github.com/jaredatch/pensieve/releases/download"
 
+# This oracle is deliberately independent of the production channel helper.
+PUBLICATION_CASES = {
+    "0.9.0": ("", False), "1.0.0": ("", False), "1.0.1": ("", False),
+    "1.1.0": ("", False), "1.9.0": ("", False), "1.10.0": ("", False),
+    "2.0.0": ("", False), "10.0.0": ("", False),
+    "1.0.0-alpha": ("beta", True), "1.0.0-alpha.1": ("beta", True),
+    "1.0.0-alpha.beta": ("beta", True), "1.0.0-beta": ("beta", True),
+    "1.0.0-beta.1": ("beta", True), "1.0.0-beta.2": ("beta", True),
+    "1.0.0-beta.11": ("beta", True), "1.0.0-rc.1": ("beta", True),
+    "1.1.0-alpha.1": ("beta", True), "1.1.0-beta.1": ("beta", True),
+}
+POISON_TEXTS = ("x\n::error::fixture", "x\r\t\x1b\x7f", "x\u0085::warning::fixture", "##[error]fixture")
+
+
+def assert_safe_diagnostic(test, text):
+    test.assertFalse(any(line.startswith("::") for line in text.splitlines()), "untrusted text must not become an Actions workflow command")
+    test.assertIsNone(re.search(r"[\x00-\x09\x0b-\x1f\x7f-\x9f]", text), "diagnostics must escape raw control characters")
+    test.assertNotIn("##[", text, "legacy Actions command markers must be escaped wherever they appear")
+
 
 def feed(version=VERSION, signature=SIGNATURE, length=len(DMG), prefix=DOWNLOAD_PREFIX, channel=None):
-    channel = STATE_TOOL.publication_channel(version) if channel is None else channel
+    channel = PUBLICATION_CASES[version][0] if channel is None else channel
     return (f'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
             f'<channel><item><sparkle:shortVersionString>{version}</sparkle:shortVersionString>'
             + (f'<sparkle:channel>{channel}</sparkle:channel>' if channel else '') +
@@ -52,7 +72,7 @@ s = json.loads(p.read_text())
 cmd, args = pathlib.Path(sys.argv[0]).name, sys.argv[1:]
 def save(): p.write_text(json.dumps(s))
 def fail(message):
-    print(message, file=sys.stderr); save(); sys.exit(1)
+    print(message + s.get("error_tail", ""), file=sys.stderr); save(); sys.exit(1)
 s["calls"].append([cmd] + args)
 save()
 if cmd == "gh":
@@ -64,14 +84,17 @@ if cmd == "gh":
             fields = dict(a.split("=", 1) for i, a in enumerate(args) if i and args[i-1] == "-f")
             if s.get("race") == kind:
                 s[kind] = s.get("race_content", s[kind]); s[kind + "_sha"] = "b" * 40
-                print('HTTP/2.0 409 Conflict\n\n{}'); fail("lost write race")
+                print('HTTP/2.0 409 Conflict\n\n{}' + s.get('response_tail', '')); fail("lost write race")
             if fields.get("sha", "") != s[kind + "_sha"]: fail("unguarded PUT")
             s[kind] = base64.b64decode(fields["content"]).decode()
             s[kind + "_sha"] = "b" * 40
-            s["writes"].append(kind); save()
+            s["writes"].append(kind)
+            if kind == "appcast" and s.get("break_template_after_appcast"):
+                pathlib.Path(s["break_template_after_appcast"]).write_text("def broken(")
+            save()
             print('HTTP/2.0 200 OK\n\n{}'); sys.exit(0)
         if s.get("fail_read") == kind:
-            print('HTTP/2.0 503 Failed\n\n{}'); fail("failed " + kind + " read")
+            print('HTTP/2.0 ' + s.get('fail_status', '503') + ' Failed\n\n{}' + s.get('response_tail', '')); fail("failed " + kind + " read")
         if s.get("malformed") == kind:
             print('HTTP/2.0 200 OK\n\n{"bad":'); sys.exit(0)
         if kind == "appcast":
@@ -84,7 +107,7 @@ if cmd == "gh":
             if s["release_reads"] > 1 and "recheck_release" in s:
                 s["release"] = s["recheck_release"]
             save()
-        if kind == "repo": print("master"); sys.exit(0)
+        if kind == "repo": print(s.get("branch", "master")); sys.exit(0)
         if kind == "tag": value = {"object": {"type": "commit", "sha": s.get("target", "a" * 40)}}
         elif kind == "release": value = s["release"]
         else:
@@ -174,7 +197,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         for name in ("gh", "git", "xcodegen", "xcodebuild", "codesign", "ditto", "hdiutil", "spctl", "notary", "stapler", "generate", "verify"):
             f = bin_dir / name; f.write_text(STUB); f.chmod(0o755)
         self.state_path = self.root / "state.json"
-        release = {"id": 1, "tag_name": "v" + VERSION, "draft": False, "prerelease": bool(self.tool.publication_channel(VERSION)),
+        release = {"id": 1, "tag_name": "v" + VERSION, "draft": False, "prerelease": PUBLICATION_CASES[VERSION][1],
                    "assets": [{"id": 2, "name": "Pensieve-1.0.0.dmg", "size": len(DMG), "state": "uploaded"}]}
         self.state = dict(version=VERSION, release=None, expected_release=release, asset=DMG.decode(),
                           appcast=feed("0.9.0"), cask=cask(), appcast_sha=SHA, cask_sha=SHA,
@@ -211,7 +234,7 @@ class ReleaseSequenceTests(unittest.TestCase):
     def set_version(self, version):
         self.state["version"] = version
         self.state["expected_release"] = dict(self.state["expected_release"], tag_name="v" + version,
-                                             prerelease=bool(self.tool.publication_channel(version)),
+                                             prerelease=PUBLICATION_CASES[version][1],
                                              assets=[dict(self.state["expected_release"]["assets"][0], name="Pensieve-" + version + ".dmg")])
         self.state["new_feed"] = feed(version)
         (self.root / "VERSION").write_text(version)
@@ -229,10 +252,10 @@ class ReleaseSequenceTests(unittest.TestCase):
 
     def test_invalid_version_stops_in_every_mode_before_work(self):
         invalid = "1.0.0+build-1"
-        self.set_version(invalid)
+        (self.root / "VERSION").write_text(invalid)
         self.state_path.write_text(json.dumps(self.state))
         modes = ([], ["--dry-run"], ["--dry-run-local"], ["--publish"], ["--publish", "--first-release"],
-                 ["--publish-cask-only"], ["--inspect-functions"], ["--verify-appcast", "missing.xml", "missing.dmg", "missing-base"],
+                 ["--publish-cask-only"],
                  ["--notes-for", invalid], ["--print-release-args", invalid], ["--print-cask-action", invalid])
         for arguments in modes:
             with self.subTest(arguments=arguments):
@@ -253,12 +276,12 @@ class ReleaseSequenceTests(unittest.TestCase):
                 result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), option, ""],
                                         env=self.env, text=True, capture_output=True, timeout=30)
                 self.assertNotEqual(result.returncode, 0, "an empty inspect version must not fall back to VERSION")
-                self.assertIn("VERSION must not be empty", result.stderr.splitlines()[0] if result.stderr else "")
+                self.assertIn(option + " version argument must not be empty", result.stderr.splitlines()[0] if result.stderr else "")
                 self.assertEqual(json.loads(self.state_path.read_text())["calls"], [])
 
     def test_first_release_names_invalid_version_before_release_flags(self):
         invalid = "1.0.0+build-1"
-        self.set_version(invalid)
+        (self.root / "VERSION").write_text(invalid)
         self.state.update(appcast=None, appcast_sha="", release=dict(self.state["expected_release"], prerelease=False))
         output = self.run_release(expected=1, first=True)
         errors = [line for line in output.splitlines() if "release:" in line]
@@ -351,7 +374,7 @@ class ReleaseSequenceTests(unittest.TestCase):
                 output = self.run_release(expected=1)
                 self.assertIn(kind, output)
                 self.assertNotIn("Traceback", output)
-                if mode == "null_content": self.assertIn("invalid contents state", output)
+                if mode == "null_content": self.assertIn("invalid 'contents' state", output)
                 self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
 
         for state in ("missing", None, "processing", "", 1):
@@ -408,7 +431,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.assertEqual(self.state["cask"], published_cask, "old workflow must not downgrade the cask")
         self.assertEqual(self.state["appcast"], published_feed, "old workflow must not downgrade the appcast")
         self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
-        self.assertIn("newer version 1.1.0", output)
+        self.assertIn("newer version '1.1.0'", output)
 
     def test_older_appcast_publication_stops_before_build(self):
         original = json.loads(json.dumps(self.state))
@@ -416,7 +439,7 @@ class ReleaseSequenceTests(unittest.TestCase):
             with self.subTest(older=older, newer=newer):
                 self.state = json.loads(json.dumps(original)); self.set_version(older)
                 self.state["appcast"] = feed(newer)
-                self.assertIn("newer version " + newer, self.run_release(expected=1))
+                self.assertIn("newer version " + repr(newer), self.run_release(expected=1))
                 self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
         # Stable clients ignore beta; beta clients also receive the default channel.
         for version, other, channel in (("1.0.1", "1.1.0-beta.1", "beta"), ("1.0.0-beta.1", "1.1.0-alpha.1", "alpha")):
@@ -427,7 +450,7 @@ class ReleaseSequenceTests(unittest.TestCase):
                 output = self.run_release() + self.run_release(cask_only=True)
                 self.assertNotIn("refusing older appcast", output)
                 self.assertIn(other, self.state["appcast"])
-                self.assertEqual(self.state["writes"], ["create", "appcast"] + (["cask"] if not self.tool.publication_channel(version) else []))
+                self.assertEqual(self.state["writes"], ["create", "appcast"] + (["cask"] if not PUBLICATION_CASES[version][1] else []))
                 self.assertEqual(self.state["builds"], 1)
 
     def test_cask_template_changes_reach_tap_and_repeat_is_noop(self):
@@ -467,7 +490,7 @@ verify_appcast_unchanged''')
         self.assertFalse((self.root / "build/dist/recheck-appcast.xml").exists())
 
     def test_cask_status_reports_publication_progress(self):
-        self.assertIn("cask pending; run --publish-cask-only", self.run_release(), "fresh stable publication must explain the remaining cask step")
+        self.assertIn("cask step runs next", self.run_release(), "fresh publication must explain the next step without deciding cask status")
         recovery = self.run_release()
         self.assertIn("cask pending; run --publish-cask-only", recovery)
         publication = self.run_release(cask_only=True)
@@ -483,6 +506,9 @@ verify_appcast_unchanged''')
         for version, channel in ((VERSION, ""), ("1.0.0-alpha.1", "beta"), ("1.0.0-beta.2", "beta"), ("1.0.0-rc.1", "beta")):
             with self.subTest(version=version):
                 self.state = json.loads(json.dumps(original)); self.set_version(version)
+                action = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--print-cask-action", version], env=self.env, text=True, capture_output=True, timeout=30)
+                self.assertEqual(action.returncode, 0, action.stderr)
+                self.assertEqual(action.stdout.strip(), "skip" if PUBLICATION_CASES[version][1] else "bump")
                 self.run_release(); self.run_release(cask_only=True)
                 generate = next(call for call in self.state["calls"] if call[0] == "generate")
                 create = next(call for call in self.state["calls"] if call[:3] == ["gh", "release", "create"])
@@ -556,6 +582,11 @@ verify_appcast_unchanged''')
                 self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
                 self.state[kind] = original
 
+        for element in ("<sparkle:channel/>", "<sparkle:channel></sparkle:channel>"):
+            self.state.update(appcast=feed().replace("<enclosure", element + "<enclosure"), release=self.state["expected_release"])
+            self.assertIn("empty appcast channel", self.run_release(expected=1))
+            self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
+
         for version, channel in ((VERSION, "beta"), ("1.0.0-beta.2", ""), ("1.0.0-beta.2", "alpha")):
             with self.subTest(version=version, wrong_live_channel=channel):
                 self.set_version(version)
@@ -573,8 +604,137 @@ verify_appcast_unchanged''')
                 self.assertFalse(any(call[:3] == ["gh", "release", "download"] for call in self.state["calls"]))
 
 
+    def test_fixture_policy_does_not_follow_production_regressions(self):
+        with mock.patch.object(self.tool, "publication_channel", return_value=""):
+            self.set_version("1.0.0-rc.1")
+            self.assertIs(self.state["expected_release"]["prerelease"], True, "the fixture must retain its independent prerelease flag")
+            root = ET.fromstring(feed("1.0.0-rc.1"))
+            channel = root.find("channel/item/" + self.tool.SPARKLE + "channel")
+            self.assertIsNotNone(channel, "the fixture must retain its independent channel")
+            self.assertEqual(channel.text, "beta", "the fixture must retain its independent channel")
+
+    def test_inspect_modes_validate_only_their_version_arguments(self):
+        for file_version in (None, "", "not-a-publication-version"):
+            with self.subTest(file_version=file_version):
+                version_file = self.root / "VERSION"
+                if file_version is None: version_file.unlink(missing_ok=True)
+                else: version_file.write_text(file_version)
+                inspected = self.run_function('printf "inspected\\n"')
+                self.assertEqual(inspected.returncode, 0, "function inspection must not depend on VERSION: " + inspected.stderr)
+                base = self.root / "base-list"; base.write_text("")
+                appcast = self.root / "inspect.xml"; appcast.write_text(feed())
+                result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(appcast), "Pensieve-1.0.0.dmg", str(base)], env=self.env, text=True, capture_output=True, timeout=30)
+                self.assertEqual(result.returncode, 0, "provenance inspection must not depend on VERSION: " + result.stderr)
+                for option in ("--notes-for", "--print-release-args", "--print-cask-action"):
+                    printed = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), option, VERSION], env=self.env, text=True, capture_output=True, timeout=30)
+                    self.assertEqual(printed.returncode, 0, printed.stderr)
+
+    def test_fresh_cask_cue_cannot_fail_after_publication(self):
+        self.state["break_template_after_appcast"] = str(self.root / "release/homebrew/pensieve.rb")
+        output = self.run_release()
+        self.assertIn("cask step runs next", output)
+        self.assertNotIn("cask done", output, "fresh publication must not report stale cask status")
+        self.assertEqual(self.state["writes"], ["create", "appcast"])
+        self.assertEqual(sum("pensieve.rb" in arg for call in self.state["calls"] for arg in call), 1, "fresh reporting must not re-read the tap")
+        self.assertFalse((self.root / "build/dist/homebrew/pensieve.rb").exists(), "fresh reporting must not render or compare a cask")
+        self.assertIn("invalid 'rewrite-cask' state", self.run_release(cask_only=True, expected=1))
+
+    def test_empty_appcast_channel_stops_before_build(self):
+        original = json.loads(json.dumps(self.state))
+        for element in ("<sparkle:channel/>", "<sparkle:channel></sparkle:channel>"):
+            with self.subTest(element=element):
+                self.state = json.loads(json.dumps(original))
+                self.state.update(appcast=feed().replace("<enclosure", element + "<enclosure"), release=self.state["expected_release"])
+                self.assertIn("empty appcast channel", self.run_release(expected=1))
+                self.assertEqual(self.state["builds"], 0); self.assertEqual(self.state["writes"], [])
+                self.assertFalse(any(call[:3] == ["gh", "release", "download"] for call in self.state["calls"]))
+
+    def test_refusal_logs_escape_outside_text(self):
+        original = json.loads(json.dumps(self.state))
+        bodies = (
+            'notes_for "$REFUSAL_TEXT" "$CHANGELOG_PATH"',
+            'sign_path "$REFUSAL_TEXT"',
+            'package_app_only; DMG_PATH="$REFUSAL_TEXT"; package_dmg_only',
+            'verify_appcast_provenance "$REPO/provenance.xml" Pensieve-1.0.0.dmg ""',
+            'publish_contents_file fixture/public appcast.xml "$REFUSAL_TEXT" fixture master aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            'resolve_public_branch',
+            'PUBLIC_BRANCH="$REFUSAL_TEXT"; verify_public_branch_unchanged',
+            'release_preflight',
+            'PUBLIC_BRANCH=master; verify_appcast_unchanged',
+            'read_release_state', 'cask_preflight',
+            'APPCAST_NEWER="$REFUSAL_TEXT"; publication_preflight',
+            'publish_contents_file "$REFUSAL_TEXT" appcast.xml "$REPO/source.xml" fixture master aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        )
+        (self.root / "source.xml").write_text(feed())
+        for poison, body in itertools.product(POISON_TEXTS, bodies):
+            with self.subTest(poison=poison, body=body):
+                self.state = dict(json.loads(json.dumps(original)), response_tail="\n" + poison, error_tail="\n" + poison, fail_status=poison.replace("\n", ""), fail_read="appcast")
+                if body == 'resolve_public_branch': self.state["branch"] = poison
+                if body == 'read_release_state': self.state["fail_read"] = "release"
+                if body == 'cask_preflight': self.state["fail_read"] = "cask"
+                if body.startswith('publish_contents_file "$REFUSAL_TEXT"'): self.state["race"] = "appcast"
+                self.env["REFUSAL_TEXT"] = poison
+                (self.root / "provenance.xml").write_text(feed().replace("Pensieve-1.0.0.dmg", poison.replace("\n", "").replace("\r", "") + ".dmg"))
+                result = self.run_function(body)
+                self.assertNotEqual(result.returncode, 0, "the guard must exercise a refusal")
+                self.assertTrue(result.stderr)
+                assert_safe_diagnostic(self, result.stderr)
+                assert_safe_diagnostic(self, result.stdout)
+        for poison in POISON_TEXTS:
+            with self.subTest(prerelease_message=poison):
+                self.state = json.loads(json.dumps(original)); self.env["REFUSAL_TEXT"] = poison
+                result = self.run_function('VERSION="$REFUSAL_TEXT"; VERSION_CHANNEL=beta; cask_publication_status')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                assert_safe_diagnostic(self, result.stdout)
+
+
 class PublishedTextSweepTests(unittest.TestCase):
     tool = STATE_TOOL
+
+
+    def test_publication_channel_matches_literal_policy(self):
+        for version, (channel, prerelease) in PUBLICATION_CASES.items():
+            with self.subTest(version=version):
+                self.assertEqual(self.tool.publication_channel(version), channel, "channel must match the independent release policy")
+                self.assertEqual(bool(channel), prerelease)
+
+    def test_refusal_diagnostics_escape_swept_inputs(self):
+        with tempfile.TemporaryDirectory(prefix="pensieve-refusals-") as directory:
+            root = Path(directory); source = root / "source"; output = root / "output"
+            for poison in POISON_TEXTS:
+                cases = [("channel", [poison], None), ("compare-versions", [poison, VERSION], None),
+                         ("compare-versions", [VERSION, poison], None), ("rewrite-cask", [str(source), str(output), poison, "a" * 64], cask()),
+                         ("rewrite-cask", [str(source), str(output), VERSION, poison], cask())]
+                # Exercise every refusing count in the cask and appcast sweeps.
+                for versions, hashes in itertools.product((0, 1, 2), repeat=2):
+                    if versions == hashes == 1: continue
+                    text = '\n'.join(['cask "pensieve" do'] + ['  version "0.9.0"'] * versions + ['  sha256 :no_check'] * hashes + ['end', '# ' + poison])
+                    cases += [("cask", [str(source)], text), ("rewrite-cask", [str(source), str(output), VERSION, "a" * 64], text)]
+                invalid = feed().replace('>1.0.0<', '>' + poison + '<')
+                cases.append(("appcast", [str(source), VERSION, DOWNLOAD_PREFIX], invalid))
+                for invalid in (feed() + feed(), feeds(VERSION, VERSION), feed().replace('<enclosure', '<other'), feed().replace('length="15"', 'length="bad"'), feed().replace(SIGNATURE, 'bad'), feed().replace('v1.0.0/', 'v9.0.0/'), cask() + 'def broken(\n', cask().replace('"0.9.0"', '"bad"'), cask().replace('"' + '0' * 64 + '"', '"bad"')):
+                    mode = "appcast" if invalid.startswith('<') else "cask"
+                    args = [str(source), VERSION, DOWNLOAD_PREFIX] if mode == "appcast" else [str(source)]
+                    cases.append((mode, args, invalid + ('<!--' + poison + '-->' if mode == "appcast" else '\n# ' + poison)))
+                for sha in ("", "g" * 40, "a" * 39, None, 1, poison):
+                    response = 'HTTP/2.0 200 OK\n\n' + json.dumps(dict(sha=sha, encoding="base64", content=base64.b64encode(poison.encode()).decode()))
+                    cases += [("contents-sha", [str(source)], response), ("contents", [str(source), str(output)], response)]
+                duplicated = ET.fromstring(feed())
+                item = duplicated.find("channel/item")
+                item.append(ET.fromstring(ET.tostring(item.find("enclosure"))))
+                cases.append(("appcast", [str(source), VERSION, DOWNLOAD_PREFIX], ET.tostring(duplicated, encoding="unicode") + "<!--" + poison + "-->"))
+                for invalid in ("1.0", "01.0.0", "1.0.0-alpha..1", "1.0.0-beta.01"):
+                    cases.append(("compare-versions", [invalid, poison], None))
+                cases += [("contents", [str(root / poison), str(output)], None),
+                          ("appcast", [str(source), VERSION, DOWNLOAD_PREFIX], '<rss><channel><!DOCTYPE ' + poison + '></channel></rss>'),
+                          (poison, [], None), ("tag", [str(source)], 'HTTP/2.0 200 OK\n\n' + json.dumps({"object": {poison: "bad"}}))]
+                for mode, args, text in cases:
+                    with self.subTest(poison=poison, mode=mode, text=text):
+                        if text is not None: source.write_text(text)
+                        result = subprocess.run(["python3", str(ROOT / "script/release_state.py"), mode, *args], text=True, capture_output=True, timeout=15)
+                        self.assertEqual(result.returncode, 1, "the diagnostic guard must reach a refusal: " + result.stdout)
+                        self.assertTrue(result.stderr)
+                        assert_safe_diagnostic(self, result.stderr)
 
     def test_version_order_cross_product(self):
         ordered = ("0.9.0", "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta",
@@ -642,6 +802,11 @@ class PublishedTextSweepTests(unittest.TestCase):
                     visible = channel == "" or (version != VERSION and channel == "beta")
                     expected = (str(len(DMG)) + " " + SIGNATURE, published if visible else "absent")
                     self.assertEqual(self.tool.appcast_publication_state(text, version, DOWNLOAD_PREFIX), expected)
+
+        for element in ("<sparkle:channel/>", "<sparkle:channel></sparkle:channel>"):
+            with self.subTest(empty_channel=element):
+                with self.assertRaisesRegex(ValueError, "empty appcast channel"):
+                    self.tool.appcast_publication_state(feed().replace("<enclosure", element + "<enclosure"), VERSION, DOWNLOAD_PREFIX)
 
     def test_contents_sha_validation_and_decode(self):
         with tempfile.TemporaryDirectory(prefix="pensieve-contents-") as directory:

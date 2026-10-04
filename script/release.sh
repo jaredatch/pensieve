@@ -18,7 +18,9 @@ PUBLIC_BRANCH=""
 APPCAST_SHA=""
 APPCAST_PREFLIGHT=0
 INSPECT_MODE=""
-INSPECT_VERSION=""
+VERSION=""
+VERSION_CHANNEL=""
+VERSION_SOURCE="VERSION file"
 CHANGELOG_PATH="$REPO/CHANGELOG.md"
 INSPECT_APPCAST=""
 INSPECT_BUILT_DMG=""
@@ -112,21 +114,24 @@ while [ "$#" -gt 0 ]; do
     --notes-for)
       [ "$#" -ge 2 ] && [ "$#" -le 3 ] || { usage; exit 64; }
       INSPECT_MODE="notes"
-      INSPECT_VERSION="$2"
+      VERSION="$2"
+      VERSION_SOURCE="$1 version argument"
       [ "$#" -eq 2 ] || CHANGELOG_PATH="$3"
       shift "$#"
       ;;
     --print-release-args)
       [ "$#" -ge 2 ] && [ "$#" -le 3 ] || { usage; exit 64; }
       INSPECT_MODE="release-args"
-      INSPECT_VERSION="$2"
+      VERSION="$2"
+      VERSION_SOURCE="$1 version argument"
       [ "$#" -eq 2 ] || CHANGELOG_PATH="$3"
       shift "$#"
       ;;
     --print-cask-action)
       [ "$#" -eq 2 ] || { usage; exit 64; }
       INSPECT_MODE="cask-action"
-      INSPECT_VERSION="$2"
+      VERSION="$2"
+      VERSION_SOURCE="$1 version argument"
       shift 2
       ;;
     --verify-appcast)
@@ -146,13 +151,13 @@ done
 
 notes_for() {
   local v="$1" f="$2" out
-  out=$(awk -v ver="$v" '
+  out=$(run_command_seam awk -v ver="$v" '
     index($0, "## [" ver "]") == 1 { grab=1; next }
     grab && index($0, "## [") == 1 { exit }
     grab { print }
   ' "$f" | sed -e '/^[[:space:]]*$/d')
   if [ -z "$out" ]; then
-    echo "release: no CHANGELOG.md section for $v" >&2
+    echo "release: no CHANGELOG.md section for $(log_text "$v")" >&2
     return 1
   fi
   printf '%s\n' "$out"
@@ -175,13 +180,15 @@ build_release_args() {
     --title "Pensieve $VERSION"
     --notes-file "$notes_file"
   )
-  if [ -n "$VERSION_CHANNEL" ]; then
+  if is_prerelease; then
     RELEASE_ARGS+=(--prerelease)
   fi
 }
 
+is_prerelease() { [ -n "$VERSION_CHANNEL" ]; }
+
 cask_action_for() {
-  if [ -n "$VERSION_CHANNEL" ]; then printf 'skip\n'; else printf 'bump\n'; fi
+  if is_prerelease; then printf 'skip\n'; else printf 'bump\n'; fi
 }
 
 run_command_seam() {
@@ -190,12 +197,21 @@ run_command_seam() {
   local -a command_parts
   read -r -a command_parts <<< "$command_spec"
   [ "${#command_parts[@]}" -gt 0 ] || { echo "release: empty command seam" >&2; exit 64; }
-  "${command_parts[@]}" "$@"
+  local errors status=0
+  errors="$(mktemp "${TMPDIR:-/tmp}/pensieve-command-errors.XXXXXX")" || return 1
+  "${command_parts[@]}" "$@" 2> "$errors" || status=$?
+  if [ -s "$errors" ]; then log_response "$errors" >&2; fi
+  rm -f "$errors"
+  return "$status"
 }
+
+# Diagnostics are single-line representations, never raw Actions commands.
+log_text() { state_tool log-text "$1"; }
+log_response() { state_tool log-file "$1"; }
 
 sign_path() {
   local path="$1"
-  test -e "$path" || { echo "release: missing signing input $path" >&2; exit 1; }
+  test -e "$path" || { echo "release: missing signing input $(log_text "$path")" >&2; exit 1; }
 
   local -a codesign_args=(--force --options runtime --sign "$SIGN_IDENTITY")
   if [ "$SIGN_IDENTITY" != "-" ]; then
@@ -263,7 +279,7 @@ notarize_and_staple_app() {
 package_dmg_only() {
   echo "release: phase iv: package --dmg-only"
   "$REPO/script/package.sh" --dmg-only
-  test -f "$DMG_PATH" || { echo "release: expected dmg missing at $DMG_PATH" >&2; exit 1; }
+  test -f "$DMG_PATH" || { echo "release: expected dmg missing at $(log_text "$DMG_PATH")" >&2; exit 1; }
 }
 
 # The dmg container needs its own signature (18.6b's `spctl --assess --type open`
@@ -293,7 +309,7 @@ verify_dmg_app_ticket() {
   (
     trap 'trap_rc=$?; hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true; exit "$trap_rc"' EXIT INT TERM
     hdiutil attach "$DMG_PATH" -mountpoint "$mount_point" -nobrowse -readonly -quiet || exit 1
-    test -d "$mount_point/Pensieve.app" || { echo "release: no Pensieve.app inside $DMG_PATH" >&2; exit 1; }
+    test -d "$mount_point/Pensieve.app" || { echo "release: no Pensieve.app inside $(log_text "$DMG_PATH")" >&2; exit 1; }
     run_command_seam "$STAPLER_CMD" validate "$mount_point/Pensieve.app" || exit 1
     spctl --assess --type exec -vv "$mount_point/Pensieve.app" || exit 1
   )
@@ -342,7 +358,7 @@ prepare_appcast_inputs() {
 appcast_dmg_basenames() {
   local file="$1"
   [ -f "$file" ] || return 0
-  grep -oE 'url="[^"]+\.dmg"' "$file" \
+  run_command_seam grep -oE 'url="[^"]+\.dmg"' "$file" \
     | sed -E 's#.*/([^/"]+\.dmg)"#\1#' \
     | sort -u || true
 }
@@ -356,7 +372,7 @@ verify_appcast_provenance() {
     [ -n "$fn" ] || continue
     [ "$fn" = "$built_dmg" ] && continue
     grep -qxF "$fn" <<< "$base_dmgs" && continue
-    echo "release: generated appcast references an unexpected archive: $fn (not built this run and not in the signed base) — aborting" >&2
+    echo "release: generated appcast references an unexpected archive: $(log_text "$fn") (not built this run and not in the signed base) — aborting" >&2
     return 1
   done <<< "$(appcast_dmg_basenames "$appcast_file")"
 }
@@ -380,7 +396,7 @@ generate_appcast() {
     --ed-key-file "$SPARKLE_PRIVATE_KEY_FILE"
     --download-url-prefix "$DOWNLOAD_PREFIX/$tag/"
   )
-  if [ -n "$VERSION_CHANNEL" ]; then
+  if is_prerelease; then
     appcast_args+=(--channel "$VERSION_CHANNEL")
   fi
   appcast_args+=("$APPCAST_INPUT_DIR")
@@ -410,7 +426,7 @@ publish_contents_file() {
   local local_file="$3"
   local message="$4"
   local branch="${5:-}"
-  test -f "$local_file" || { echo "release: contents source missing at $local_file" >&2; exit 1; }
+  test -f "$local_file" || { echo "release: contents source missing at $(log_text "$local_file")" >&2; exit 1; }
 
   local sha="$6" response
 
@@ -429,14 +445,14 @@ publish_contents_file() {
 
   response="$(mktemp "${TMPDIR:-/tmp}/pensieve-contents-response.XXXXXX")" || return 1
   if run_command_seam "$GH_CMD" api --include "${put_args[@]}" > "$response"; then
-    cat "$response"
+    log_response "$response"
     rm -f "$response"
   else
-    cat "$response" >&2
+    log_response "$response" >&2
     if [ "$(http_status "$response")" = 409 ]; then
-      echo "release: contents changed since preflight (HTTP 409); refusing to overwrite $repo/$contents_path. Read the current feed before retrying." >&2
+      echo "release: contents changed since preflight (HTTP 409); refusing to overwrite $(log_text "$repo/$contents_path"). Read the current feed before retrying." >&2
     else
-      echo "release: contents write failed: $repo/$contents_path" >&2
+      echo "release: contents write failed: $(log_text "$repo/$contents_path")" >&2
     fi
     rm -f "$response"
     return 1
@@ -448,7 +464,7 @@ resolve_public_branch() {
   branch="$(run_command_seam "$GH_CMD" api "repos/$PUBLIC_REPO" --jq .default_branch)" || return 1
   case "$branch" in
     main|master) printf '%s\n' "$branch" ;;
-    *) echo "release: invalid public default branch: $branch" >&2; return 1 ;;
+    *) echo "release: invalid public default branch: $(log_text "$branch")" >&2; return 1 ;;
   esac
 }
 
@@ -472,13 +488,13 @@ release_preflight() {
     fi
   else
     status="$(http_status "$response")"
-    cat "$response" >&2
+    log_response "$response" >&2
     rm -f "$response"
     if [ "$FIRST_RELEASE" -eq 1 ] && [ "$status" = 404 ]; then
       APPCAST_PREFLIGHT=1
       return 0
     fi
-    echo "release: appcast base read failed (HTTP ${status:-unknown})" >&2
+    echo "release: appcast base read failed (HTTP $(log_text "${status:-unknown}"))" >&2
     return 1
   fi
   rm -f "$response"
@@ -489,7 +505,7 @@ verify_public_branch_unchanged() {
   local current
   current="$(resolve_public_branch)" || return 1
   if [ "$current" != "$PUBLIC_BRANCH" ]; then
-    echo "release: public default branch changed from $PUBLIC_BRANCH to $current since preflight; stopping publication" >&2
+    echo "release: public default branch changed from $(log_text "$PUBLIC_BRANCH") to $(log_text "$current") since preflight; stopping publication" >&2
     return 1
   fi
 }
@@ -506,12 +522,12 @@ verify_appcast_unchanged() {
     fi
   else
     status="$(http_status "$response")"
-    cat "$response" >&2
+    log_response "$response" >&2
     rm -f "$response"
     if [ "$FIRST_RELEASE" -eq 1 ] && [ -z "$APPCAST_SHA" ] && [ "$status" = 404 ]; then
       return 0
     fi
-    echo "release: appcast recheck failed (HTTP ${status:-unknown}); stopping before GitHub Release creation" >&2
+    echo "release: appcast recheck failed (HTTP $(log_text "${status:-unknown}")); stopping before GitHub Release creation" >&2
     return 1
   fi
   rm -f "$response"
@@ -525,7 +541,7 @@ verify_appcast_unchanged() {
 publish_appcast() {
   [ "$APPCAST_PREFLIGHT" -eq 1 ] || { echo "release: appcast preflight required" >&2; return 1; }
   verify_public_branch_unchanged
-  echo "release: phase v.e: publish appcast.xml to $PUBLIC_REPO $PUBLIC_BRANCH"
+  echo "release: phase v.e: publish appcast.xml to $(log_text "$PUBLIC_REPO") $(log_text "$PUBLIC_BRANCH")"
   publish_contents_file "$PUBLIC_REPO" "appcast.xml" "$DIST_DIR/appcast.xml" "appcast: v$VERSION" "$PUBLIC_BRANCH" "$APPCAST_SHA"
 }
 
@@ -533,8 +549,8 @@ write_bumped_cask() {
   local cask_output="$1"
   local cask_template="$REPO/release/homebrew/pensieve.rb"
   local dmg_sha
-  dmg_sha="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
-  test "${#dmg_sha}" -eq 64 || { echo "release: invalid dmg sha256 for $DMG_PATH" >&2; exit 1; }
+  dmg_sha="$(run_command_seam shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
+  test "${#dmg_sha}" -eq 64 || { echo "release: invalid dmg sha256 for $(log_text "$DMG_PATH")" >&2; exit 1; }
 
   mkdir -p "$(dirname "$cask_output")"
   state_tool rewrite-cask "$cask_template" "$cask_output" "$VERSION" "$dmg_sha"
@@ -544,22 +560,22 @@ dry_run_local() {
   echo "release: local dry run: write bumped Homebrew cask only"
   local cask_output="$DIST_DIR/homebrew/pensieve.rb"
   write_bumped_cask "$cask_output"
-  echo "DRY RUN LOCAL: wrote bumped cask $cask_output; stopping before notarization/publishing."
+  echo "DRY RUN LOCAL: wrote bumped cask $(log_text "$cask_output"); stopping before notarization/publishing."
 }
 
 cask_publication_status() {
   CASK_STATUS=skip
-  [ -z "$VERSION_CHANNEL" ] || { echo "release: cask skipped for prerelease $VERSION"; return 0; }
+  ! is_prerelease || { echo "release: cask skipped for prerelease $(log_text "$VERSION")"; return 0; }
   [ "$CASK_PREFLIGHT" -eq 1 ] || cask_preflight || return 1
   local digest comparison=0
   CASK_OUTPUT="$DIST_DIR/homebrew/pensieve.rb"
   [ -z "$CASK_VERSION" ] || comparison="$(state_tool compare-versions "$CASK_VERSION" "$VERSION")" || return 1
   if [ "$comparison" -gt 0 ]; then
     CASK_STATUS=newer
-    echo "release: cask already names newer version $CASK_VERSION; refusing downgrade to $VERSION"
+    echo "release: cask already names newer version $(log_text "$CASK_VERSION"); refusing downgrade to $(log_text "$VERSION")"
     return 0
   fi
-  digest="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
+  digest="$(run_command_seam shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
   if [ "$CASK_VERSION" = "$VERSION" ]; then
     [ "$CASK_DIGEST" = "$digest" ] || { echo "release: cask sha256 does not match DMG" >&2; return 1; }
   fi
@@ -582,7 +598,7 @@ report_cask_publication() {
 bump_cask() {
   cask_publication_status || return 1
   [ "$CASK_STATUS" = pending ] || return 0
-  echo "release: phase v.f: bump Homebrew cask in $TAP_REPO"
+  echo "release: phase v.f: bump Homebrew cask in $(log_text "$TAP_REPO")"
   publish_contents_file "$TAP_REPO" "Casks/pensieve.rb" "$CASK_OUTPUT" "cask: v$VERSION" "" "$CASK_SHA" || return 1
   echo "release: cask done"
 }
@@ -598,36 +614,33 @@ notarize_and_publish() {
 
   generate_appcast
 
-  echo "release: phase v.d: create GitHub release $tag"
+  echo "release: phase v.d: create GitHub release $(log_text "$tag")"
   verify_public_branch_unchanged
   verify_appcast_unchanged
   publish_release_asset
 
   publish_appcast
-  report_cask_publication
+  echo "release: cask step runs next with the verified artifact (--publish-cask-only)"
 }
 
 source "$REPO/script/release_recovery.sh"
 
-case "$INSPECT_MODE" in
-  notes|release-args|cask-action)
-    VERSION="$INSPECT_VERSION"
-    ;;
-  *)
+if [ "$INSPECT_MODE" != functions ] && [ "$INSPECT_MODE" != verify-appcast ]; then
+  if [ -z "$INSPECT_MODE" ]; then
     [ -f "$VERSION_FILE" ] || { echo "release: VERSION file missing" >&2; exit 3; }
     VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
-    ;;
-esac
-[ -n "$VERSION" ] || { echo "release: VERSION must not be empty" >&2; exit 3; }
-VERSION_CHANNEL="$(state_tool channel "$VERSION")"
-DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"
+  fi
+  [ -n "$VERSION" ] || { echo "release: $VERSION_SOURCE must not be empty" >&2; exit 3; }
+  VERSION_CHANNEL="$(state_tool channel "$VERSION")"
+  DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"
+fi
 
 case "$INSPECT_MODE" in
   functions)
     return 0 2>/dev/null || exit 0
     ;;
   notes)
-    notes_for "$INSPECT_VERSION" "$CHANGELOG_PATH"
+    notes_for "$VERSION" "$CHANGELOG_PATH"
     exit
     ;;
   release-args)
@@ -640,7 +653,7 @@ case "$INSPECT_MODE" in
     exit
     ;;
   verify-appcast)
-    INSPECT_BASE_LIST="$(cat "$INSPECT_BASE_LIST_FILE")" || exit 1
+    INSPECT_BASE_LIST="$(run_command_seam cat "$INSPECT_BASE_LIST_FILE")" || exit 1
     verify_appcast_provenance "$INSPECT_APPCAST" "$INSPECT_BUILT_DMG" "$INSPECT_BASE_LIST"
     exit
     ;;
@@ -694,7 +707,7 @@ if [ "$PUBLISH" -eq 1 ]; then
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  echo "DRY RUN: built, signed, verified, and packaged $DMG_PATH; stopping before notarization/publishing."
+  echo "DRY RUN: built, signed, verified, and packaged $(log_text "$DMG_PATH"); stopping before notarization/publishing."
   exit 0
 fi
 

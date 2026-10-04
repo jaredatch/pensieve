@@ -24,7 +24,7 @@ read_release_state() {
     RELEASE_STATE="$(state_tool release "$response" "$VERSION" "$mode")" || return 1
   else
     status="$(http_status "$response")"
-    [ "$status" = 404 ] || { echo "release: release read failed (HTTP ${status:-unknown})" >&2; return 1; }
+    [ "$status" = 404 ] || { echo "release: release read failed (HTTP $(log_text "${status:-unknown}"))" >&2; return 1; }
     RELEASE_STATE="absent"
   fi
 }
@@ -51,7 +51,7 @@ verify_tag_target() {
 }
 
 cask_preflight() {
-  [ -z "$VERSION_CHANNEL" ] || { CASK_PREFLIGHT=1; return 0; }
+  ! is_prerelease || { CASK_PREFLIGHT=1; return 0; }
   local response="$DIST_DIR/cask-response.txt" fields status
   mkdir -p "$DIST_DIR/homebrew"
   CASK_REMOTE="$DIST_DIR/homebrew/base.rb"
@@ -64,7 +64,7 @@ cask_preflight() {
     read -r CASK_VERSION CASK_DIGEST <<< "$fields"
   else
     status="$(http_status "$response")"
-    [ "$status" = 404 ] || { echo "release: cask read failed (HTTP ${status:-unknown})" >&2; return 1; }
+    [ "$status" = 404 ] || { echo "release: cask read failed (HTTP $(log_text "${status:-unknown}"))" >&2; return 1; }
     CASK_SHA=""
     rm -f "$CASK_REMOTE"
   fi
@@ -78,8 +78,8 @@ publication_preflight() {
     { read -r APPCAST_ITEM; read -r APPCAST_NEWER; } <<< "$appcast_state"
   fi
   if [ "$APPCAST_NEWER" != absent ]; then
-    echo "release: appcast already names newer version $APPCAST_NEWER; keeping it"
-    [ "$APPCAST_ITEM" != absent ] || { echo "release: refusing older appcast publication for $VERSION" >&2; return 1; }
+    echo "release: appcast already names newer version $(log_text "$APPCAST_NEWER"); keeping it"
+    [ "$APPCAST_ITEM" != absent ] || { echo "release: refusing older appcast publication for $(log_text "$VERSION")" >&2; return 1; }
   fi
   read_release_state
   verify_tag_target

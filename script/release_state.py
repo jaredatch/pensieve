@@ -10,7 +10,12 @@ import xml.etree.ElementTree as ET
 
 SPARKLE = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
 VERSION = r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?"
-APPCAST_CHANNELS = ("", "alpha", "beta")
+PUBLICATION_CHANNELS = dict(stable="", alpha="alpha", prerelease="beta")
+
+
+def diagnostic_text(value):
+    # The runner also recognizes legacy commands anywhere in a log line.
+    return ascii(str(value)).replace("##[", r"\x23\x23[")
 
 
 def require(condition, message):
@@ -49,7 +54,7 @@ def contents(path, output):
 
 
 def version_parts(version):
-    require(re.fullmatch(VERSION, version), f"invalid publication version: {version}")
+    require(re.fullmatch(VERSION, version), f"invalid publication version: {version!a}")
     core, separator, suffix = version.partition("-")
     numbers = core.split(".")
     identifiers = suffix.split(".") if separator else []
@@ -65,7 +70,7 @@ def compare_versions(left, right):
 
 def publication_channel(version):
     """Channel for a validated publication version; all prereleases use beta."""
-    return "beta" if "-" in version else ""
+    return PUBLICATION_CHANNELS["prerelease"] if "-" in version else PUBLICATION_CHANNELS["stable"]
 
 
 def compare_version_parts(left, right):
@@ -138,16 +143,17 @@ def appcast_publication_state(text, version, download_prefix):
         require(len(versions) == 1, "malformed appcast version")
         current = versions[0].text or ""
         current_parts = version_parts(current)
-        require(current not in seen, f"duplicated appcast item for {current}")
+        require(current not in seen, f"duplicated appcast item for {current!a}")
         seen.add(current)
         enclosures = item.findall("enclosure")
-        require(len(enclosures) == 1, f"missing or duplicated appcast enclosure for {current}")
+        require(len(enclosures) == 1, f"missing or duplicated appcast enclosure for {current!a}")
         enclosure = enclosures[0]
         channels = item.findall(SPARKLE + "channel")
         require(len(channels) <= 1, "duplicated appcast channel")
-        current_channel = (channels[0].text or "") if channels else ""
-        require(current_channel in APPCAST_CHANNELS, "unknown or malformed appcast channel")
-        if current_channel in ("", channel) and compare_version_parts(current_parts, newest_parts) > 0:
+        current_channel = channels[0].text if channels else PUBLICATION_CHANNELS["stable"]
+        require(not channels or bool(current_channel), "empty appcast channel")
+        require(current_channel in PUBLICATION_CHANNELS.values(), "unknown or malformed appcast channel")
+        if current_channel in (PUBLICATION_CHANNELS["stable"], channel) and compare_version_parts(current_parts, newest_parts) > 0:
             newest, newest_parts = current, current_parts
         if current != version:
             require(enclosure.get("url") != expected_url, "appcast item names this DMG under another version")
@@ -187,7 +193,11 @@ def release_state(value, version, require_uploaded=False):
 
 def main(args):
     mode = args[0]
-    if mode == "contents":
+    if mode == "log-text":
+        print(diagnostic_text(args[1]))
+    elif mode == "log-file":
+        print(diagnostic_text(Path(args[1]).read_bytes().decode("utf-8", errors="backslashreplace")))
+    elif mode == "contents":
         print(contents(*args[1:]))
     elif mode == "contents-sha":
         print(contents_sha(args[1]))
@@ -210,11 +220,11 @@ def main(args):
         text = Path(args[1]).read_bytes().decode("utf-8")
         Path(args[2]).write_bytes(rewrite_cask(text, args[3], args[4]).encode("utf-8"))
     else:
-        raise ValueError("unknown state operation")
+        raise ValueError(f"unknown state operation: {mode!a}")
 
 
 if __name__ == "__main__":
     try:
         main(sys.argv[1:])
     except (ValueError, KeyError, IndexError, TypeError, OSError, ET.ParseError, subprocess.SubprocessError) as error:
-        sys.exit(f"release: invalid {sys.argv[1] if len(sys.argv) > 1 else 'publication'} state: {error}")
+        sys.exit(f"release: invalid {diagnostic_text(sys.argv[1] if len(sys.argv) > 1 else 'publication')} state: {diagnostic_text(error)}")
