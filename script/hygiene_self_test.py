@@ -831,7 +831,7 @@ print(json.dumps({'payload': payload, 'lines': list(enumerate(payload.splitlines
             self.assertEqual(getattr(guard, name), expected, 'snapshot ' + name)
 
     def test_shared_fixture_sets_cannot_hide_guard_drift(self):
-        for name, extra in [('JS_TS_SUFFIXES', '.jsx'), ('FIXTURE_DOMAINS', 'extra.example')]:
+        for name, extra in [('JS_TS_SUFFIXES', '.jsx'), ('FIXTURE_DOMAINS', 'extra.example'), ('FIXTURE_USERS', 'new-fixture')]:
             original = getattr(guard, name)
             for changed in (original - {sorted(original)[0]}, original | {extra}):
                 with patch.object(guard, name, changed):

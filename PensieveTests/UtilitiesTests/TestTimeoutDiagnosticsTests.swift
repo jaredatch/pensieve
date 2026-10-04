@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import Pensieve
 
@@ -59,11 +60,51 @@ final class TestTimeoutDiagnosticsTests: XCTestCase {
         observer.testCase(self, didRecord: XCTIssue(type: .assertionFailure, compactDescription: "timeout probe"))
 
         let reports = output.filter { $0.hasPrefix("BEGIN TIMEOUT DIAGNOSTIC ") }
-        XCTAssertEqual(reports.count, 2, "Unwritten reports must fall back to stdout")
+        XCTAssertEqual(reports.count, 2, "Unwritten reports must reach the wrapper")
         XCTAssertEqual(reports.filter { $0.contains("failed-write state") }.count, 1)
         XCTAssertEqual(reports.filter { $0.contains("failed-write threads") }.count, 1)
         XCTAssertTrue(reports.allSatisfy { $0.contains("END TIMEOUT DIAGNOSTIC ") })
         XCTAssertEqual(try files.readFile(at: blocked), "directory creation is blocked")
+    }
+
+    func testPartialWritePrintsOnlyMissingThreadsReport() throws {
+        var output: [String] = []
+        let observer = TestTimeoutDiagnostics(environment: ["PENSIEVE_TEST_DIAGNOSTICS_DIR": directory],
+                                              output: { output.append($0) }, writeReport: { path, content in
+            if path.hasSuffix("-threads.txt") { throw CocoaError(.fileWriteUnknown) }
+            try self.files.writeFile(at: path, content: content)
+        })
+        observer.recordSnapshot("partial state", threadSample: "partial threads")
+        observer.testCase(self, didRecord: XCTIssue(type: .assertionFailure, compactDescription: "timeout probe"))
+        let saved = try files.listDirectory(at: directory)
+        XCTAssertEqual(saved.count, 1)
+        XCTAssertTrue(try XCTUnwrap(saved.first).hasSuffix("-state.txt"))
+        let reports = output.filter { $0.hasPrefix("BEGIN TIMEOUT DIAGNOSTIC ") }
+        XCTAssertEqual(reports.count, 1)
+        XCTAssertTrue(try XCTUnwrap(reports.first).contains("partial threads"))
+        XCTAssertFalse(reports.contains { $0.contains("partial state") })
+    }
+
+    func testDefaultFailedWriteReportsReachUnbufferedStderr() throws {
+        let blocked = directory + "/blocked"
+        try files.writeFile(at: blocked, content: "blocked")
+        let observer = TestTimeoutDiagnostics(environment: ["PENSIEVE_TEST_DIAGNOSTICS_DIR": blocked])
+        let pipe = Pipe()
+        let original = dup(STDERR_FILENO)
+        XCTAssertGreaterThanOrEqual(original, 0)
+        dup2(pipe.fileHandleForWriting.fileDescriptor, STDERR_FILENO)
+        observer.recordSnapshot("stderr state sentinel", threadSample: "stderr threads sentinel")
+        observer.testCase(self, didRecord: XCTIssue(type: .assertionFailure, compactDescription: "timeout probe"))
+        fflush(stderr)
+        dup2(original, STDERR_FILENO)
+        close(original)
+        try pipe.fileHandleForWriting.close()
+        let data = try XCTUnwrap(pipe.fileHandleForReading.readToEnd())
+        let output = try XCTUnwrap(String(bytes: data, encoding: .utf8))
+        XCTAssertEqual(output.components(separatedBy: "BEGIN TIMEOUT DIAGNOSTIC ").count - 1, 2)
+        XCTAssertEqual(output.components(separatedBy: "END TIMEOUT DIAGNOSTIC ").count - 1, 2)
+        XCTAssertTrue(output.contains("stderr state sentinel"))
+        XCTAssertTrue(output.contains("stderr threads sentinel"))
     }
 
 }

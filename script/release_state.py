@@ -187,6 +187,23 @@ def canonical_xml(element, omit_items=()):
     return element.tag, tuple(sorted(element.attrib.items())), text, tuple(children)
 
 
+def check_generated_item(item, expected_url):
+    # Sparkle 2.9.4 generate_appcast's actual one-archive output (stable/beta),
+    # captured in the release-appcast-single-archive.xml test fixture.
+    names = {"title", "pubDate", "enclosure"} | {
+        SPARKLE + name for name in ("version", "shortVersionString", "minimumSystemVersion", "channel")}
+    require(not item.attrib, "unexpected generated appcast item attribute")
+    values = list(item.itertext())
+    for child in item:
+        require(child.tag in names and not len(child), "unexpected generated appcast item element")
+        allowed_attributes = {"url", "length", "type", SPARKLE + "edSignature"} if child.tag == "enclosure" else set()
+        require(set(child.attrib) <= allowed_attributes, "unexpected generated appcast item attribute")
+        values.extend(child.attrib.values())
+    for value in values:
+        urls = re.findall(r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s]+", value)
+        require(all(url == expected_url for url in urls), "generated appcast item contains another URL")
+
+
 def appcast_provenance(text, base_text, built_dmg, download_prefix, version, built_minimum=None):
     version_parts(version)
     require(built_dmg == f"Pensieve-{version}.dmg", "generated appcast names a different built DMG")
@@ -201,8 +218,9 @@ def appcast_provenance(text, base_text, built_dmg, download_prefix, version, bui
     require(state != "absent", "generated appcast has no item for the publication version")
     base_items = base.find("channel").findall("item")
     items = root.find("channel").findall("item")
+    current = next(item for item in items if item.findtext(SPARKLE + "shortVersionString") == version)
+    check_generated_item(current, f"{download_prefix}/v{version}/{built_dmg}")
     if built_minimum is not None:
-        current = next(item for item in items if item.findtext(SPARKLE + "shortVersionString") == version)
         minimums = current.findall(SPARKLE + "minimumSystemVersion")
         require(len(minimums) == 1 and bool(minimums[0].text),
                 "generated appcast has missing, empty or duplicated minimum system version")

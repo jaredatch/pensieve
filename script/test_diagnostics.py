@@ -19,13 +19,17 @@ REPORT_NAME = re.compile(
 KEEP_PAIRS = 5
 
 
-def reports(directory):
+def reports(directory, warned=None):
+    warned = set() if warned is None else warned
     for path in sorted(directory.glob("*.txt")):
         match = REPORT_NAME.fullmatch(path.name)
         try:
             regular = match and not path.is_symlink() and path.is_file()
         except OSError as error:
-            print(f"TestDiagnostics warning: preserved {path.name}: {error}", file=sys.stderr)
+            if path not in warned:
+                print(f"TestDiagnostics warning: preserved {path.name}: {error}", file=sys.stderr)
+                warned.add(path)
+            yield path, None
             continue
         if regular:
             yield path, match
@@ -44,6 +48,8 @@ def process_finished(pid):
 def prune(directory):
     pairs = {}
     for path, match in reports(directory):
+        if match is None:
+            continue
         pid, identifier, kind = match.groups()
         pairs.setdefault((int(pid), identifier), {})[kind] = path
     inactive = []
@@ -68,7 +74,8 @@ def prune(directory):
 
 def relay(directory, parent_pid, ready=None):
     running = True
-    seen = {path for path, _ in reports(directory)}
+    warned = set()
+    seen = {path for path, _ in reports(directory, warned)}
 
     def stop(_signum, _frame):
         nonlocal running
@@ -79,8 +86,11 @@ def relay(directory, parent_pid, ready=None):
     if ready:
         ready.write_text("ready\n")
     while os.getppid() == parent_pid:
-        for path, _ in reports(directory):
+        for path, match in reports(directory, warned):
             if path in seen:
+                continue
+            if match is None:
+                seen.add(path)
                 continue
             try:
                 report = path.read_text()

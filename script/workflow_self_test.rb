@@ -11,17 +11,19 @@ require 'strscan'
 # String comparisons support ASCII only. Both boolean operands are evaluated;
 # short-circuit semantics remain outside this policy probe.
 class WorkflowCondition
+  class Error < ArgumentError; end
   attr_reader :tree
 
   def initialize(expression)
+    raise Error, 'workflow probe requires a string condition' unless expression.is_a?(String)
     @input = StringScanner.new(expression.strip.sub(/\A\$\{\{\s*/, '').sub(/\s*\}\}\z/, ''))
     @tree = disjunction
-    raise 'unparsed condition' unless @input.rest.strip.empty?
+    raise Error, 'unparsed condition' unless @input.rest.strip.empty?
   end
 
   def evaluate(context)
     value = evaluate_node(tree, context)
-    raise 'condition is not boolean' unless [true, false].include?(value)
+    raise Error, 'condition is not boolean' unless [true, false].include?(value)
     value
   end
 
@@ -31,8 +33,8 @@ class WorkflowCondition
   end
 
   def self.fold(value)
-    raise ArgumentError, 'workflow probe requires string operands' unless value.is_a?(String)
-    raise ArgumentError, 'workflow probe supports ASCII strings only' unless value.ascii_only?
+    raise Error, 'workflow probe requires string operands' unless value.is_a?(String)
+    raise Error, 'workflow probe supports ASCII strings only' unless value.ascii_only?
     value.tr('A-Z', 'a-z')
   end
 
@@ -51,7 +53,7 @@ class WorkflowCondition
     when :==, :!=
       equal = left.is_a?(String) && right.is_a?(String) ? self.class.fold(left) == self.class.fold(right) : left == right
       kind == :== ? equal : !equal
-    else raise 'unsupported node: ' + kind.inspect
+    else raise Error, 'unsupported node: ' + kind.inspect
     end
   end
 
@@ -61,7 +63,7 @@ class WorkflowCondition
   end
 
   def expect(pattern)
-    take(pattern) || raise('expected ' + pattern.inspect + ': ' + @input.rest)
+    take(pattern) || raise(Error, 'expected ' + pattern.inspect + ': ' + @input.rest)
   end
 
   def disjunction
@@ -110,7 +112,7 @@ class WorkflowCondition
     elsif (boolean = take(/true\b|false\b/))
       [:literal, boolean == 'true']
     else
-      raise 'unsupported condition: ' + @input.rest
+      raise Error, 'unsupported condition: ' + @input.rest
     end
   end
 end
@@ -390,11 +392,18 @@ class WorkflowTests < Minitest::Test
     cases = JSON.parse(File.read(File.join(ROOT, 'PensieveTests/Fixtures/release-versions.json')))
     assert_operator cases.length, :>=, 18
     condition = WorkflowCondition.new(@cask.fetch('if'))
-    cases.each do |version, (channel, prerelease)|
+    cases.each do |version, (channel, _prerelease)|
       context = { 'repository' => 'jaredatch/pensieve', 'event_name' => 'push',
                   'ref_type' => 'tag', 'ref' => 'refs/tags/v' + version }
       assert_equal channel.empty?, condition.evaluate(context), "#{version}: literal publication channel #{channel.inspect}"
-      assert_equal !prerelease, condition.evaluate(context), "#{version}: literal prerelease status"
+    end
+  end
+
+  def test_literal_publication_channels_agree_with_prerelease_flags
+    cases = JSON.parse(File.read(File.join(ROOT, 'PensieveTests/Fixtures/release-versions.json')))
+    cases.each do |version, (channel, prerelease)|
+      assert_includes [true, false], prerelease, version
+      assert_equal channel.empty?, !prerelease, "#{version}: fixture channel and prerelease disagree"
     end
   end
 
@@ -403,6 +412,12 @@ class WorkflowTests < Minitest::Test
       error = assert_raises(Minitest::Assertion) { assert_release_admission(condition, 'jaredatch/pensieve', 'typed gate') }
       assert_includes error.message, condition.inspect
       assert_includes error.message, 'cannot evaluate condition'
+    end
+  end
+
+  def test_unexpected_probe_errors_are_not_contract_refusals
+    stub :release_event_mismatches, ->(*) { raise NoMethodError, 'unexpected probe defect' } do
+      assert_raises(NoMethodError) { assert_release_admission('true', 'owner/repo', 'broken probe') }
     end
   end
 
@@ -531,7 +546,7 @@ class WorkflowTests < Minitest::Test
   def assert_release_admission(condition, canonical, label, stable_only: false)
     begin
       mismatch = release_event_mismatches(condition, canonical, stable_only: stable_only).first
-    rescue StandardError => error
+    rescue WorkflowCondition::Error => error
       flunk "#{label}: cannot evaluate condition #{condition.inspect}: #{error.message}"
     end
     assert mismatch.nil?, -> { "#{label}: release matrix mismatch: #{mismatch.inspect}" }
@@ -729,7 +744,8 @@ class WorkflowTests < Minitest::Test
   def assert_ci_timeout_budget(job)
     steps = job.fetch('steps')
     budgets = steps.map do |step|
-      minutes = step.fetch('timeout-minutes', 0)
+      assert step.key?('timeout-minutes'), step.fetch('name') + ': missing timeout'
+      minutes = step.fetch('timeout-minutes')
       assert_operator minutes * 60, :>=, CI_WORST_SECONDS.fetch(step.fetch('name')) * 3,
                       step.fetch('name') + ': measured timeout floor'
       assert_operator minutes, :>, 0, step.fetch('name') + ': missing timeout'
@@ -745,7 +761,8 @@ class WorkflowTests < Minitest::Test
     job.fetch('steps').each_with_index do |step, index|
       fixture = Marshal.load(Marshal.dump(job))
       fixture['steps'][index].delete('timeout-minutes')
-      assert_raises(Minitest::Assertion, step.fetch('name')) { assert_ci_timeout_budget(fixture) }
+      error = assert_raises(Minitest::Assertion, step.fetch('name')) { assert_ci_timeout_budget(fixture) }
+      assert_includes error.message, 'missing timeout'
       worst = CI_WORST_SECONDS.fetch(step.fetch('name'))
       next if worst.zero?
       fixture = Marshal.load(Marshal.dump(job))

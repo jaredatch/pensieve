@@ -112,9 +112,16 @@ extension ThirdPartyNoticesTests {
             let exemption = NoticeInventory.LicenseExemption(package: "example", path: path, reason: "Audit fixture.",
                                                               sha256: fixtureDigest(bytes))
             let files = NoticeUnreadableFiles(base: fileService, unreadable: root + "/unused-fault")
+            try fileService.createDirectory(at: root + "/example/Vendor")
+            try fileService.writeFile(at: root + "/example/Vendor/LICENSE", content: "Vendored license.")
+            try fileService.writeFile(at: root + "/outside.txt", content: "Unbundled linked notice.")
+            try fileService.createSymlink(at: root + "/example/notice-linked.txt", pointingTo: root + "/outside.txt")
             XCTAssertNoThrow(try NoticeInventory(fileService: files, exemptions: [exemption]).checkSwiftPackages(
                 resolved: root + "/resolved.json", checkouts: root,
-                notices: parseNotices("[Example](https://github.com/vendor/example)"), credits: "Example license."))
+                notices: parseNotices("[Example](https://github.com/vendor/example)"),
+                credits: "Example license. Vendored license."))
+            XCTAssertEqual(files.readAttempts, [root + "/resolved.json", root + "/example/" + path])
+            XCTAssertEqual(files.textReadAttempts, [root + "/example/LICENSE", root + "/example/Vendor/LICENSE"])
         }
     }
 
@@ -138,7 +145,7 @@ extension ThirdPartyNoticesTests {
     func testRendererExportsItsLicenseBlocksAsJSON() throws {
         try withFixture { root in
             try fileService.writeFile(at: root + "/source.md", content: "```text\n```\n```text\nCopyright JSON.\n```\n")
-            let result = try runCredits(arguments: ["--license-blocks", root + "/source.md"])
+            let result = try runCredits(arguments: ["--license-blocks", root + "/source.md"], fixtureRoot: root)
             XCTAssertEqual(result.status, 0, result.error)
             let blocks = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(result.output.utf8)) as? [[String: Any]])
             XCTAssertEqual(blocks.compactMap { $0["text"] as? String }, ["", "Copyright JSON."])
@@ -164,6 +171,7 @@ private final class NoticeUnreadableFiles: FileServiceProtocol {
     private let base: FileService
     private let unreadable: String
     var readAttempts: [String] = []
+    var textReadAttempts: [String] = []
 
     init(base: FileService, unreadable: String) {
         self.base = base
@@ -175,7 +183,10 @@ private final class NoticeUnreadableFiles: FileServiceProtocol {
         if path == unreadable { throw CocoaError(.fileReadUnknown) }
         return try base.readData(at: path)
     }
-    func readFile(at path: String) throws -> String { try base.readFile(at: path) }
+    func readFile(at path: String) throws -> String {
+        textReadAttempts.append(path)
+        return try base.readFile(at: path)
+    }
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
         try base.readRegularFileData(at: path, maximumBytes: maximumBytes)
     }

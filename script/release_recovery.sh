@@ -3,6 +3,7 @@ RELEASE_STATE="absent"
 APPCAST_ITEM="absent"
 APPCAST_NEWER="absent"
 APPCAST_BASE=""
+trap cleanup_appcast_base EXIT
 CASK_SHA=""
 CASK_VERSION=""
 CASK_DIGEST=""
@@ -22,13 +23,13 @@ verify_cask_artifact() (
   ! is_prerelease || return 0
   # Own a read-only snapshot outside build/dist. This path never prepares or
   # changes the signing folder, and GH_TOKEN here is the public-read credential.
-  # The plain entry-point call keeps errexit active for local I/O failures.
+  # Explicit returns also stop callers that disable errexit with an if/OR list.
   local read_dir live_feed branch publication length signature public_key
-  read_dir="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-cask-appcast.XXXXXX")"
+  read_dir="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-cask-appcast.XXXXXX")" || return 1
   trap 'rm -rf "$read_dir"' EXIT
   live_feed="$read_dir/appcast.xml"
   branch="$(resolve_public_branch)" || return 1
-  read_live_appcast "$branch" "$live_feed" "cask appcast"
+  read_live_appcast "$branch" "$live_feed" "cask appcast read failed" "invalid cask appcast contents response" || return 1
   publication="$(state_tool appcast "$live_feed" "$VERSION" "$DOWNLOAD_PREFIX")" || return 1
   read -r length signature <<< "$publication"
   [ "$length" != absent ] || { echo "release: cask requires a live appcast item for $VERSION" >&2; return 1; }

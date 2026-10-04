@@ -1,10 +1,26 @@
 import AppKit
+import Darwin
 import XCTest
 @testable import Pensieve
 
+/// Content cache shared by the canonical loader and isolated fixture-cache instances.
+/// The loader reads the source before looking up a document, preserving read refusals.
+final class NoticeFileCache {
+    private var documents: [String: NoticeDocument] = [:]
+    var count: Int { documents.count }
+
+    func document(source: String, parse: () throws -> NoticeDocument) rethrows -> NoticeDocument {
+        if let document = documents[source] { return document }
+        let document = try parse()
+        documents[source] = document
+        return document
+    }
+}
+
 extension ThirdPartyNoticesTests {
-    private static var realNotices: [String: NoticeDocument] = [:]
+    private static let realNotices = NoticeFileCache()
     private static var fixtureNotices: [String: NoticeDocument] = [:]
+    var canonicalNoticeCacheCount: Int { Self.realNotices.count }
 
     func readNotices() throws -> NoticeDocument {
         try loadNotices(at: sourceRoot + "/THIRD-PARTY-NOTICES.md")
@@ -12,19 +28,19 @@ extension ThirdPartyNoticesTests {
 
     /// Only the canonical notices fill the real content cache. Fixtures share the pure-source cache.
     /// Read files before reuse so changed or missing sources remain observable.
-    func loadNotices(at path: String, canonicalPath: String? = nil) throws -> NoticeDocument {
+    func loadNotices(at path: String, cache: NoticeFileCache? = nil) throws -> NoticeDocument {
         let source = try fileService.readFile(at: path)
-        guard path == (canonicalPath ?? sourceRoot + "/THIRD-PARTY-NOTICES.md") else {
-            return try parseNotices(source)
+        if path == sourceRoot + "/THIRD-PARTY-NOTICES.md" {
+            return try Self.realNotices.document(source: source) { try parseNoticeFile(source, at: path) }
         }
-        if let cached = Self.realNotices[source] { return cached }
-        let document = try parseNoticeFile(source, at: path)
-        Self.realNotices[source] = document
-        return document
+        guard let cache else { return try parseNotices(source) }
+        return try cache.document(source: source) {
+            try parseNoticeFile(source, at: path, fixtureRoot: URL(fileURLWithPath: path).deletingLastPathComponent().path)
+        }
     }
 
-    private func parseNoticeFile(_ source: String, at path: String) throws -> NoticeDocument {
-        let result = try runCredits(arguments: ["--license-blocks", path])
+    private func parseNoticeFile(_ source: String, at path: String, fixtureRoot: String? = nil) throws -> NoticeDocument {
+        let result = try runCredits(arguments: ["--license-blocks", path], fixtureRoot: fixtureRoot)
         XCTAssertEqual(result.status, 0, result.error)
         let blocks = try JSONDecoder().decode([NoticeDocument.LicenseBlock].self, from: Data(result.output.utf8))
         return NoticeDocument(source, licenseBlocks: blocks)
@@ -59,7 +75,7 @@ extension ThirdPartyNoticesTests {
         try withFixture { root in
             let path = root + "/source.md"
             try fileService.writeFile(at: path, content: source)
-            document = try parseNoticeFile(source, at: path)
+            document = try parseNoticeFile(source, at: path, fixtureRoot: root)
         }
         let parsed = try XCTUnwrap(document)
         Self.fixtureNotices[source] = parsed
@@ -70,7 +86,7 @@ extension ThirdPartyNoticesTests {
         var rtf = ""
         try withFixture { root in
             try fileService.writeFile(at: root + "/source.md", content: source)
-            let result = try runCredits(arguments: [root + "/source.md", root + "/Credits.rtf"])
+            let result = try runCredits(arguments: [root + "/source.md", root + "/Credits.rtf"], fixtureRoot: root)
             XCTAssertEqual(result.status, 0, result.error)
             rtf = try fileService.readFile(at: root + "/Credits.rtf")
         }
@@ -83,33 +99,73 @@ extension ThirdPartyNoticesTests {
         let error: String
     }
 
-    func runCredits(arguments: [String]) throws -> CreditsResult {
+    func runCredits(arguments: [String], fixtureRoot: String? = nil) throws -> CreditsResult {
+        creditsRendererRuns += 1
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = [sourceRoot + "/script/credits.py"] + arguments
-        return try runCreditsProcess(process)
+        return try runCreditsProcess(process, fixtureRoot: fixtureRoot)
     }
 
     /// The child redirects stderr to a scratch file; Swift only drains the stdout pipe.
     /// FileService owns the fixture directory and reads the completed diagnostic file.
-    func runCreditsProcess(_ process: Process) throws -> CreditsResult {
+    func runCreditsProcess(_ process: Process, fixtureRoot: String? = nil,
+                           readStdout: (Process, FileHandle) throws -> Data? = { _, handle in
+                               try handle.readToEnd()
+                           }) throws -> CreditsResult {
+        if let fixtureRoot {
+            return try runCreditsProcessInFixture(process, root: fixtureRoot, readStdout: readStdout)
+        }
         var result: CreditsResult?
         try withFixture { root in
-            let errorPath = root + "/stderr.txt"
-            let executable = try XCTUnwrap(process.executableURL)
-            let arguments = process.arguments ?? []
-            process.executableURL = URL(fileURLWithPath: "/bin/sh")
-            process.arguments = ["-c", #"error=$1; shift; exec "$@" 2>"$error""#,
-                                 "credits-output", errorPath, executable.path] + arguments
-            let stdout = Pipe()
-            process.standardOutput = stdout
-            try process.run()
-            let output = try stdout.fileHandleForReading.readToEnd() ?? Data()
-            process.waitUntilExit()
-            result = CreditsResult(status: process.terminationStatus,
-                                   output: String(data: output, encoding: .utf8) ?? "",
-                                   error: try fileService.readFile(at: errorPath))
+            result = try runCreditsProcessInFixture(process, root: root, readStdout: readStdout)
         }
         return try XCTUnwrap(result)
+    }
+
+    private func runCreditsProcessInFixture(_ configuration: Process, root: String,
+                                            readStdout: (Process, FileHandle) throws -> Data?) throws -> CreditsResult {
+        let errorPath = root + "/stderr.txt"
+        let executable = try XCTUnwrap(configuration.executableURL)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", #"error=$1; shift; exec "$@" 2>"$error""#,
+                             "credits-output", errorPath, executable.path] + (configuration.arguments ?? [])
+        process.environment = configuration.environment
+        process.currentDirectoryURL = configuration.currentDirectoryURL
+        process.standardInput = configuration.standardInput
+        process.qualityOfService = configuration.qualityOfService
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        defer { try? stdout.fileHandleForReading.close() }
+        try process.run()
+        let output: Data
+        do {
+            output = try readStdout(process, stdout.fileHandleForReading) ?? Data()
+        } catch {
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            process.waitUntilExit()
+            throw error
+        }
+        process.waitUntilExit()
+        let diagnostic: String
+        do {
+            diagnostic = decodeCreditsOutput(try fileService.readData(at: errorPath))
+        } catch {
+            diagnostic = "Credits stderr unavailable: \(error.localizedDescription)"
+        }
+        return CreditsResult(status: process.terminationStatus,
+                             output: decodeCreditsOutput(output), error: diagnostic)
+    }
+
+    private func decodeCreditsOutput(_ data: Data) -> String {
+        var text = "", decoder = UTF8(), bytes = data.makeIterator()
+        while true {
+            switch decoder.decode(&bytes) {
+            case .scalarValue(let scalar): text.unicodeScalars.append(scalar)
+            case .error: text.unicodeScalars.append("\u{FFFD}")
+            case .emptyInput: return text
+            }
+        }
     }
 }

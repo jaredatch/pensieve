@@ -235,7 +235,6 @@ sys.exit(65)
         self.assertEqual(target.read_text(), 'do not delete')
         self.failed_run(label='prune-repeat')
         self.assertEqual(set(directory.iterdir()), expected)
-        self.assert_current_run_reports_are_retained()
 
     def assert_current_run_reports_are_retained(self):
         directory = self.root / 'DerivedData/TestDiagnostics'
@@ -255,7 +254,7 @@ sys.exit(65)
         script.write_text("import sys\nif '--prune' in sys.argv:\n    print('prune inspection denied', file=sys.stderr)\n    sys.exit(23)\n" + script.read_text())
         output = self.failed_run()
         self.assertIn('prune inspection denied', output)
-        self.assertIn('warning', output.lower())
+        self.assertIn('test.sh: warning: timeout diagnostics pruning failed; continuing the test run', output)
         self.assertEqual(list(self.runs.iterdir()), [], 'prune failure must not skip failed-run cleanup')
         self.assertEqual(len(list((self.root / 'DerivedData/FailedRuns').glob('*.xcresult'))), 1)
 
@@ -323,6 +322,36 @@ sys.exit(65)
         error = process.stderr.read()
         self.assertEqual(process.returncode, 0, error.decode())
         self.assertEqual(error, b'', 'relay printed a traceback or shutdown exception')
+
+    def test_relay_warns_once_and_never_relays_initially_uninspectable_reports(self):
+        directory = self.root / 'reports'
+        old = sorted(self.report_pair(directory, 1))[0]
+        is_file = Path.is_file
+        for failed_inspections in (1, 3):
+            with self.subTest(failed_inspections=failed_inspections):
+                output, errors = io.StringIO(), io.StringIO()
+                polls, inspections = 0, 0
+
+                def inspect(path):
+                    nonlocal inspections
+                    if path == old:
+                        inspections += 1
+                        if inspections <= failed_inspections:
+                            raise PermissionError('inspection denied')
+                    return is_file(path)
+
+                def poll(_delay):
+                    nonlocal polls
+                    polls += 1
+
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors), \
+                     patch.object(Path, 'is_file', inspect), patch.object(diagnostics.signal, 'signal'), \
+                     patch.object(diagnostics.os, 'getppid', side_effect=lambda: 123 if polls < 3 else 0), \
+                     patch.object(diagnostics.time, 'sleep', side_effect=poll):
+                    diagnostics.relay(directory, 123)
+                self.assertEqual(errors.getvalue().count('inspection denied'), 1,
+                                 'inspect failures must warn only once per path')
+                self.assertEqual(output.getvalue(), '', 'an old report must not be relayed after inspection recovers')
 
     def test_sigkilled_wrapper_does_not_leave_relay_holding_stdout(self):
         process, ready = self.launch(mode="hang")

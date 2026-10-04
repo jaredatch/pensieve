@@ -5,6 +5,7 @@ import XCTest
 @MainActor
 final class ThirdPartyNoticesTests: XCTestCase {
     let fileService = FileService()
+    var creditsRendererRuns = 0
     var sourceRoot: String {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().path

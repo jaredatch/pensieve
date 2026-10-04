@@ -80,10 +80,11 @@ without notarizing, publishing, or calling gh.
 USAGE
 }
 
+RELEASE_ARG_COUNT=$#
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --check-tag)
-      [ "$#" -eq 2 ] || { usage; exit 64; }
+      [ "$#" -eq 2 ] && [ "$RELEASE_ARG_COUNT" -eq 2 ] || { usage; exit 64; }
       EXPECTED_TAG="$2"
       CHECK_TAG=1
       CHECK_TAG_ONLY=1
@@ -447,7 +448,7 @@ contents_api() {
   fi
 }
 
-publish_contents_file() {
+publish_contents_file() (
   [ "$#" -eq 6 ] || { echo "release: contents writes require an explicit preflight SHA" >&2; return 64; }
   local repo="$1"
   local contents_path="$2"
@@ -472,20 +473,19 @@ publish_contents_file() {
   fi
 
   response="$(mktemp "${TMPDIR:-/tmp}/pensieve-contents-response.XXXXXX")" || return 1
+  trap 'rm -f "$response"' EXIT
   if contents_api "$repo" --include "${put_args[@]}" > "$response"; then
-    log_response "$response"
-    rm -f "$response"
+    log_response "$response" || return 1
   else
-    log_response "$response" >&2
+    log_response "$response" >&2 || return 1
     if [ "$(http_status "$response")" = 409 ]; then
       echo "release: contents changed since preflight (HTTP 409); refusing to overwrite $repo/$contents_path. Read the current feed before retrying." >&2
     else
       echo "release: contents write failed: $repo/$contents_path" >&2
     fi
-    rm -f "$response"
     return 1
   fi
-}
+)
 
 resolve_public_branch() {
   local branch
@@ -498,7 +498,7 @@ resolve_public_branch() {
 
 cleanup_appcast_base() {
   if [ -n "$APPCAST_BASE" ]; then
-    rm -f "$APPCAST_BASE" || true
+    rm -f "$APPCAST_BASE" || return 1
     APPCAST_BASE=""
   fi
 }
@@ -507,32 +507,28 @@ cleanup_appcast_base() {
 # Empty output selects SHA-only parsing. A known 404 is absent only when the
 # caller explicitly permits it; transport, local I/O and parse failures stop.
 read_live_appcast() {
-  local branch="$1" output="$2" context="$3" allow_missing="${4:-0}"
-  local response status failure="$context read failed" invalid="invalid $context response" suffix=""
+  local branch="$1" output="$2" failure="$3" invalid="$4" allow_missing="${5:-0}" suffix="${6:-}"
+  local response status
   LIVE_APPCAST_SHA=""
   LIVE_APPCAST_ABSENT=0
-  case "$context" in
-    "appcast recheck") failure="$context failed"; suffix="; stopping before GitHub Release creation" ;;
-    "cask appcast") invalid="invalid cask appcast contents response" ;;
-  esac
-  response="$(mktemp "${TMPDIR:-/tmp}/pensieve-appcast-response.XXXXXX")"
+  response="$(mktemp "${TMPDIR:-/tmp}/pensieve-appcast-response.XXXXXX")" || return 1
   if run_command_seam "$GH_CMD" api -X GET "repos/$PUBLIC_REPO/contents/appcast.xml" \
       -f "ref=$branch" --include > "$response"; then
     if [ -n "$output" ]; then
       if ! LIVE_APPCAST_SHA="$(state_tool contents "$response" "$output")"; then
-        rm -f "$response"
+        rm -f "$response" || return 1
         echo "release: $invalid" >&2
         return 1
       fi
     elif ! LIVE_APPCAST_SHA="$(state_tool contents-sha "$response")"; then
-      rm -f "$response"
+      rm -f "$response" || return 1
       echo "release: $invalid" >&2
       return 1
     fi
   else
-    status="$(http_status "$response")"
-    log_response "$response" >&2
-    rm -f "$response"
+    status="$(http_status "$response")" || { rm -f "$response"; return 1; }
+    log_response "$response" >&2 || { rm -f "$response"; return 1; }
+    rm -f "$response" || return 1
     if [ "$allow_missing" -eq 1 ] && [ "$status" = 404 ]; then
       LIVE_APPCAST_ABSENT=1
       return 0
@@ -540,26 +536,24 @@ read_live_appcast() {
     echo "release: $failure (HTTP $(log_text "${status:-unknown}"))$suffix" >&2
     return 1
   fi
-  rm -f "$response"
+  rm -f "$response" || return 1
 }
 
 release_preflight() {
-  cleanup_appcast_base
   APPCAST_PREFLIGHT=0
+  cleanup_appcast_base || return 1
   APPCAST_SHA=""
   PUBLIC_BRANCH="$(resolve_public_branch)" || return 1
-  rm -rf "$APPCAST_INPUT_DIR"
-  mkdir -p "$APPCAST_INPUT_DIR"
+  rm -rf "$APPCAST_INPUT_DIR" || return 1
+  mkdir -p "$APPCAST_INPUT_DIR" || return 1
   # The immutable base is owned outside the signing folder. Its bytes and SHA
   # come from the same response before any copy is supplied to generate_appcast.
-  APPCAST_BASE="$(mktemp "$DIST_DIR/appcast-base.XXXXXX")"
-  trap cleanup_appcast_base EXIT
-  read_live_appcast "$PUBLIC_BRANCH" "$APPCAST_BASE" "appcast base" "$FIRST_RELEASE"
+  APPCAST_BASE="$(mktemp "$DIST_DIR/appcast-base.XXXXXX")" || return 1
+  read_live_appcast "$PUBLIC_BRANCH" "$APPCAST_BASE" "appcast base read failed" "invalid appcast base response" "$FIRST_RELEASE" || return 1
   if [ "$LIVE_APPCAST_ABSENT" -eq 1 ]; then
-    cleanup_appcast_base
+    cleanup_appcast_base || return 1
   else
     APPCAST_SHA="$LIVE_APPCAST_SHA"
-    ditto "$APPCAST_BASE" "$APPCAST_INPUT_DIR/appcast.xml"
   fi
   APPCAST_PREFLIGHT=1
 }
@@ -576,7 +570,8 @@ verify_public_branch_unchanged() {
 verify_appcast_unchanged() {
   local allow_missing=0
   if [ "$FIRST_RELEASE" -eq 1 ] && [ -z "$APPCAST_SHA" ]; then allow_missing=1; fi
-  read_live_appcast "$PUBLIC_BRANCH" "" "appcast recheck" "$allow_missing"
+  read_live_appcast "$PUBLIC_BRANCH" "" "appcast recheck failed" "invalid appcast recheck response" "$allow_missing" \
+    "; stopping before GitHub Release creation" || return 1
   if [ "$LIVE_APPCAST_ABSENT" -eq 1 ]; then return 0; fi
   if [ "$LIVE_APPCAST_SHA" != "$APPCAST_SHA" ]; then
     echo "release: appcast changed since preflight; stopping before GitHub Release creation" >&2

@@ -9,7 +9,7 @@ func installTimeoutDiagnostics() {
 
 /// Bundle-load registration happens once on the main thread. Timeout paths save state and can
 /// supply a thread sample taken before releasing gates. An unexpected issue publishes reports
-/// to attachments and files, with stdout supplied by the wrapper relay or standalone host.
+/// to attachments and files, with output supplied by the wrapper relay or standalone host.
 /// Passing/expected-failure cases discard their snapshots.
 /// The deliberate History timeout tests inject a sampler double; real harnesses sample
 /// at timeout, before abort. Shared waits sample during failure reporting, before caller cleanup.
@@ -32,13 +32,16 @@ final class TestTimeoutDiagnostics: NSObject, XCTestObservation {
     private let environment: [String: String]
     private let fallbackDirectory: String
     private let output: (String) -> Void
+    private let writeReport: (String, String) throws -> Void
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment,
          fallbackDirectory: String = NSTemporaryDirectory() + "PensieveTestDiagnostics",
-         output: @escaping (String) -> Void = { print($0); fflush(stdout) }) {
+         output: @escaping (String) -> Void = { fputs($0 + "\n", stderr); fflush(stderr) },
+         writeReport: @escaping (String, String) throws -> Void = { try FileService().writeFile(at: $0, content: $1) }) {
         self.environment = environment
         self.fallbackDirectory = fallbackDirectory
         self.output = output
+        self.writeReport = writeReport
         super.init()
     }
 
@@ -92,7 +95,7 @@ final class TestTimeoutDiagnostics: NSObject, XCTestObservation {
         for (name, content) in reports {
             do {
                 try files.createDirectory(at: directory)
-                try files.writeFile(at: directory + "/" + name, content: content)
+                try writeReport(directory + "/" + name, content)
                 writtenReports.insert(name)
             } catch {
                 // Attachments remain available even when the upload directory cannot be written.
@@ -101,7 +104,7 @@ final class TestTimeoutDiagnostics: NSObject, XCTestObservation {
         }
         // Publish both files before interacting with XCTest's stdout/attachment transport.
         for (name, content) in reports {
-            // The relay owns successfully written reports; failed writes fall back to stdout.
+            // The relay owns successfully written reports; failed writes fall back to stderr.
             if environment["PENSIEVE_TEST_DIAGNOSTICS_DIR"] == nil || !writtenReports.contains(name) {
                 output("BEGIN TIMEOUT DIAGNOSTIC \(name)\n\(content)\nEND TIMEOUT DIAGNOSTIC \(name)")
             }

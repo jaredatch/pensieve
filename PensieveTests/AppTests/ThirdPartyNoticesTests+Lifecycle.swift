@@ -22,15 +22,14 @@ extension ThirdPartyNoticesTests {
             process.arguments = ["-c", command]
             process.environment = ["PATH": root + "/bin:/usr/bin:/bin", "SRCROOT": root,
                                    "TARGET_BUILD_DIR": root, "UNLOCALIZED_RESOURCES_FOLDER_PATH": "Resources"]
-            let result = try runCreditsProcess(process)
+            let result = try runCreditsProcess(process, fixtureRoot: root)
             XCTAssertEqual(result.status, 0, result.error)
             XCTAssertTrue(fileService.fileExists(at: root + "/Resources/Credits.rtf"))
         }
     }
 
-    func testCreditsProcessDrainsLargeStderrBeforeStdout() throws {
-        let code = "import os,signal,sys; signal.signal(signal.SIGALRM,lambda *args:os._exit(72)); signal.alarm(3); "
-            + "sys.stderr.write('E'*262144); sys.stderr.flush(); sys.stdout.write('DONE'); sys.stdout.flush()"
+    func testCreditsProcessCapturesLargeStderrCompletely() throws {
+        let code = "import sys; sys.stderr.write('E'*262144); sys.stderr.flush(); sys.stdout.write('DONE'); sys.stdout.flush()"
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = ["-c", code]
@@ -134,6 +133,10 @@ extension ThirdPartyNoticesTests {
         let source = "[libYAML](https://github.com/yaml/libyaml), vendored by Yams.\n```text\n" + license + "\n```\n"
         let credits = try decodeCredits(Data(renderFixture(source).utf8))
         XCTAssertFalse(hasRenderedLibYAMLSection(credits, license: license), "The link alone is not a section heading")
+        let plain = try decodeCredits(Data(renderFixture("libYAML\n```text\n" + license + "\n```\n").utf8))
+        XCTAssertFalse(hasRenderedLibYAMLSection(plain, license: license), "A plain libYAML line is not a bold heading")
+        let heading = try decodeCredits(Data(renderFixture("### libYAML\n```text\n" + license + "\n```\n").utf8))
+        XCTAssertTrue(hasRenderedLibYAMLSection(heading, license: license), "The bold heading and its own license form a section")
     }
 
     func testRenderedLibYAMLHeadingCannotBorrowLaterLicense() throws {
@@ -145,22 +148,30 @@ extension ThirdPartyNoticesTests {
 
     func testNoticeCacheTracksSourceContent() throws {
         try withFixture { root in
+            let cache = NoticeFileCache()
+            let nonce = UUID().uuidString
+            let first = "Copyright First. " + nonce
+            let changed = "Copyright Changed. " + nonce
+            let before = creditsRendererRuns
             let path = root + "/THIRD-PARTY-NOTICES.md"
-            try fileService.writeFile(at: path, content: "```text\nCopyright First.\n```\n")
-            XCTAssertEqual(try loadNotices(at: path, canonicalPath: path).licenseBlocks.map(\.text), ["Copyright First."])
-            XCTAssertEqual(try loadNotices(at: path, canonicalPath: path).licenseBlocks.map(\.text), ["Copyright First."])
-            try fileService.writeFile(at: path, content: "```text\nCopyright Changed.\n```\n")
-            XCTAssertEqual(try loadNotices(at: path, canonicalPath: path).licenseBlocks.map(\.text), ["Copyright Changed."])
+            try fileService.writeFile(at: path, content: "```text\n" + first + "\n```\n")
+            XCTAssertEqual(try loadNotices(at: path, cache: cache).licenseBlocks.map(\.text), [first])
+            XCTAssertEqual(try loadNotices(at: path, cache: cache).licenseBlocks.map(\.text), [first])
+            XCTAssertEqual(creditsRendererRuns - before, 1, "A cache hit must not run credits.py again")
+            try fileService.writeFile(at: path, content: "```text\n" + changed + "\n```\n")
+            XCTAssertEqual(try loadNotices(at: path, cache: cache).licenseBlocks.map(\.text), [changed])
+            XCTAssertEqual(creditsRendererRuns - before, 2)
         }
     }
 
     func testNoticeCacheDoesNotHideMissingSource() throws {
         try withFixture { root in
+            let cache = NoticeFileCache()
             let path = root + "/THIRD-PARTY-NOTICES.md"
             try fileService.writeFile(at: path, content: "```text\nCopyright Cached.\n```\n")
-            _ = try loadNotices(at: path, canonicalPath: path)
+            _ = try loadNotices(at: path, cache: cache)
             try fileService.deleteFile(at: path)
-            XCTAssertThrowsError(try loadNotices(at: path, canonicalPath: path))
+            XCTAssertThrowsError(try loadNotices(at: path, cache: cache))
         }
     }
 

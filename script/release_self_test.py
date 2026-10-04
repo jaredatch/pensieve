@@ -195,12 +195,6 @@ class ReleaseSequenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.crypto_tools = None
-        # Compile once under an adversarial allocator default, so every test
-        # reuses binaries even when the host TMPDIR contains whitespace.
-        cls.crypto_tmpdir = tempfile.TemporaryDirectory(prefix="pensieve crypto TMPDIR with spaces-", dir="/tmp")
-        cls.addClassCleanup(cls.crypto_tmpdir.cleanup)
-        with mock.patch.object(tempfile, "tempdir", cls.crypto_tmpdir.name):
-            cls.fixture_crypto_tools()
 
     @classmethod
     def fixture_crypto_tools(cls):
@@ -580,6 +574,35 @@ class ReleaseSequenceTests(unittest.TestCase):
                 self.assertEqual(json.loads(self.state_path.read_text())["calls"], [])
                 self.assertFalse((self.root / "build").exists(), "check-only must not prepare a release")
 
+    def test_check_tag_rejects_combined_modes_before_work(self):
+        self.state_path.write_text(json.dumps(self.state))
+        modes = (("--inspect-functions",), ("--verify-appcast", "missing", "", "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION),
+                 ("--publish",), ("--publish-cask-only",), ("--dry-run",), ("--first-release",))
+        for mode in modes:
+            with self.subTest(mode=mode):
+                result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), *mode,
+                                         "--check-tag", "v9.9.9"], env=self.env,
+                                        capture_output=True, text=True, timeout=30)
+                self.assertNotEqual(result.returncode, 0, "combined check-only mode must refuse")
+                self.assertEqual(json.loads(self.state_path.read_text())["calls"], [])
+                self.assertFalse((self.root / "build").exists())
+
+    def test_feed_consumers_fail_closed_when_called_from_if(self):
+        original = json.loads(json.dumps(self.state))
+        for consumer in ("release_preflight", "verify_appcast_unchanged", "verify_cask_artifact"):
+            for failure in ("read", "parse", "temporary-file"):
+                with self.subTest(consumer=consumer, failure=failure):
+                    self.state = json.loads(json.dumps(original))
+                    self.state["fail_read" if failure == "read" else "malformed"] = "appcast"
+                    prefix = 'mkdir -p "$DIST_DIR"; VERSION="1.0.0"; VERSION_CHANNEL=""; FIRST_RELEASE=1; PUBLIC_BRANCH=master; '
+                    if failure == "temporary-file":
+                        prefix += 'mktemp() { echo "fixture temporary-file refusal" >&2; return 1; }; '
+                    result = self.run_function(prefix + 'if ' + consumer + '; then echo "fixture admitted failed read"; exit 9; fi; '
+                                               '[ "$APPCAST_PREFLIGHT" -eq 0 ]')
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertNotIn("fixture admitted failed read", result.stdout)
+                    self.assertEqual(self.state["writes"], [])
+
     def test_missing_tap_token_fails_before_live_reads_or_verification(self):
         self.env.pop("TAP_GH_TOKEN")
         self.cask_artifact(); self.state["appcast"] = feed()
@@ -594,8 +617,10 @@ class ReleaseSequenceTests(unittest.TestCase):
         original = script.read_text()
         script.write_text(original.replace('if [ "${CASK_ONLY:-0}" -eq 1 ]; then',
             'verify_cask_artifact() { echo "fixture reached verifier" >&2; return 1; }\nbump_cask() { echo "fixture reached bump_cask" >&2; return 1; }\nif [ "${CASK_ONLY:-0}" -eq 1 ]; then'))
+        self.state_path.write_text(json.dumps(self.state))
         result = subprocess.run(["/bin/bash", str(script), "--publish-cask-only"], env=self.env,
                                 capture_output=True, text=True, timeout=30)
+        self.state = json.loads(self.state_path.read_text())
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("cask skipped for prerelease 1.0.0-beta.1", result.stdout)
         self.assertNotIn("fixture reached", result.stderr)
@@ -611,6 +636,41 @@ class ReleaseSequenceTests(unittest.TestCase):
                 self.assertIn("fixture shared feed refusal", result.stderr)
                 self.assertFalse(any("appcast.xml" in arg for call in self.state["calls"] for arg in call),
                                  "consumers must not bypass the common fetch policy")
+
+    def test_preflight_preserves_callers_exit_trap_and_defers_signing_copy(self):
+        (self.root / "build/dist").mkdir(parents=True)
+        result = self.run_function('trap \'echo "fixture caller exit trap"\' EXIT; release_preflight; '
+                                   '[ ! -e "$APPCAST_INPUT_DIR/appcast.xml" ] || exit 9')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("fixture caller exit trap", result.stdout)
+
+    def test_contents_response_is_cleaned_when_logging_fails(self):
+        directory = self.root / "response temporary files"; directory.mkdir()
+        self.env["TMPDIR"] = str(directory)
+        (self.root / "contents.rb").write_text(cask())
+        result = self.run_function('log_response() { echo "fixture log refusal" >&2; return 7; }; '
+                                   'publish_contents_file "$TAP_REPO" Casks/pensieve.rb "$REPO/contents.rb" fixture "" "' + SHA + '"')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("fixture log refusal", result.stderr)
+        self.assertEqual(list(directory.glob("pensieve-contents-response.*")), [], "response must not leak on a logging refusal")
+
+    def test_non_crypto_focused_run_does_not_compile_swift(self):
+        code = '''import sys, unittest
+from unittest import mock
+import release_self_test as suite
+run = suite.subprocess.run
+def no_compilation(args, *positional, **keywords):
+    if args[0] == "/usr/bin/swiftc":
+        raise AssertionError("non-crypto focused run compiled Swift")
+    return run(args, *positional, **keywords)
+with mock.patch.object(suite.subprocess, "run", side_effect=no_compilation):
+    result = unittest.TextTestRunner().run(unittest.TestLoader().loadTestsFromName(
+        "ReleaseSequenceTests.test_check_tag_mode_has_no_release_work_for_matching_or_mismatched_tags", suite))
+sys.exit(not result.wasSuccessful())
+'''
+        result = subprocess.run(["python3", "-B", "-c", code], cwd=ROOT / "script",
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_default_swift_verifier_in_spaced_checkout_and_cold_cache(self):
         signature = self.install_fixture_public_key()
@@ -638,7 +698,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.assertIn("Published DMG EdDSA signature does not match appcast", result.stderr)
         self.assertEqual(json.loads(self.state_path.read_text())["writes"], ["cask"])
 
-    def test_crypto_tools_support_tmpdir_with_spaces(self):
+    def test_cask_verification_supports_tmpdir_with_spaces(self):
         scratch = self.root / "TMPDIR with spaces"; scratch.mkdir()
         self.env["TMPDIR"] = str(scratch) + "/"
         signature = self.install_fixture_public_key()
@@ -646,7 +706,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.cask_artifact()
         self.run_release(cask_only=True)
         self.assertEqual(self.state["writes"], ["cask"])
-        self.assertNotIn(" ", self.env["VERIFY_UPDATE_CMD"], "command seam requires a space-free tool path")
+        self.assertEqual(list(scratch.iterdir()), [], "cask response files must be cleaned from the spaced TMPDIR")
 
     def test_expected_tag_is_checked_by_release_script_before_work(self):
         self.cask_artifact()
@@ -1097,7 +1157,6 @@ verify_appcast_unchanged''')
         version = self.state["version"]
         input_dir = self.root / "build/dist/appcast-input"
         shutil.rmtree(input_dir, ignore_errors=True); input_dir.mkdir(parents=True)
-        (input_dir / "appcast.xml").write_text(self.state["appcast"])
         (input_dir.parent / ("Pensieve-" + version + ".dmg")).write_bytes(DMG)
         info = input_dir.parent / "dmg-root/Pensieve.app/Contents/Info.plist"
         info.parent.mkdir(parents=True, exist_ok=True)
@@ -1186,7 +1245,7 @@ verify_appcast_unchanged''')
                 elif failure in ("wrong-channel", "empty-channel"): ET.SubElement(item, self.tool.SPARKLE + "channel").text = "beta" if failure == "wrong-channel" else ""
                 elif failure == "zero-length": item.find("enclosure").set("length", "0")
                 elif failure == "bad-signature": item.find("enclosure").set(self.tool.SPARKLE + "edSignature", base64.b64encode(b"short").decode())
-                elif failure == "duplicate-url": ET.SubElement(item, "enclosure", url=expected_url)
+                elif failure == "duplicate-url": ET.SubElement(ET.SubElement(item, self.tool.SPARKLE + "deltas"), "enclosure", url=expected_url)
                 elif failure == "duplicate-item": root.find("channel").append(ET.fromstring(ET.tostring(item)))
                 elif failure == "no-current-item":
                     item.find(self.tool.SPARKLE + "shortVersionString").text = "0.9.0"
@@ -1200,7 +1259,7 @@ verify_appcast_unchanged''')
                 messages = {
                     "wrong-version": "names this DMG under another version", "wrong-channel": "wrong channel",
                     "empty-channel": "empty appcast channel", "zero-length": "invalid DMG length",
-                    "bad-signature": "invalid EdDSA signature", "duplicate-url": "duplicated appcast enclosure",
+                    "bad-signature": "invalid EdDSA signature", "duplicate-url": "unexpected generated appcast item element",
                     "duplicate-item": "duplicated appcast item", "url-outside-current-item": "wrong DMG URL",
                     "no-current-item": "no item for the publication version",
                 }
@@ -1218,6 +1277,47 @@ verify_appcast_unchanged''')
         result = self.run_appcast_generation()
         self.assertEqual(result.returncode, 1, "a generated prerelease must be on beta")
         self.assertIn("wrong channel", result.stderr)
+
+    def test_generated_item_matches_bundled_generator_output(self):
+        root = ET.fromstring((ROOT / "PensieveTests/Fixtures/release-appcast-single-archive.xml").read_text())
+        item = root.find("channel/item")
+        self.set_version("1.0.0-beta.1")
+        item.find(self.tool.SPARKLE + "shortVersionString").text = self.state["version"]
+        item.find("enclosure").attrib.update(url=f'{DOWNLOAD_PREFIX}/v{self.state["version"]}/Pensieve-{self.state["version"]}.dmg',
+                                            length=str(len(DMG)))
+        item.find("enclosure").set(self.tool.SPARKLE + "edSignature", SIGNATURE)
+        self.state["new_feed"] = ET.tostring(root, encoding="unicode")
+        result = self.run_appcast_generation()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_generated_item_refuses_delta_notes_and_link_urls(self):
+        original = json.loads(json.dumps(self.state))
+        expected_url = f"{DOWNLOAD_PREFIX}/v{VERSION}/Pensieve-{VERSION}.dmg"
+        for placement in ("delta", "release-notes", "link", "duplicate-url"):
+            with self.subTest(placement=placement):
+                root = ET.fromstring(feed()); item = root.find("channel/item")
+                if placement in ("delta", "duplicate-url"):
+                    ET.SubElement(ET.SubElement(item, self.tool.SPARKLE + "deltas"), "enclosure",
+                                  url=expected_url if placement == "duplicate-url" else "https://fixture/other.delta")
+                else:
+                    ET.SubElement(item, self.tool.SPARKLE + "releaseNotesLink" if placement == "release-notes" else "link").text = "https://fixture/other"
+                self.state = dict(json.loads(json.dumps(original)), new_feed=ET.tostring(root, encoding="unicode"))
+                result = self.run_appcast_generation()
+                self.assertEqual(result.returncode, 1, "the new item must contain only the generator's one-archive elements")
+                self.assertIn("unexpected generated appcast item element", result.stderr)
+
+    def test_generated_item_checks_urls_in_all_text(self):
+        original = json.loads(json.dumps(self.state))
+        for placement in ("title", "item-text", "tail"):
+            with self.subTest(placement=placement):
+                root = ET.fromstring(feed()); item = root.find("channel/item")
+                if placement == "title": ET.SubElement(item, "title").text = "https://fixture/other"
+                elif placement == "item-text": item.text = "https://fixture/other"
+                else: item.find("enclosure").tail = "https://fixture/other"
+                self.state = dict(json.loads(json.dumps(original)), new_feed=ET.tostring(root, encoding="unicode"))
+                result = self.run_appcast_generation()
+                self.assertEqual(result.returncode, 1, "every URL in the new item must name this run's DMG")
+                self.assertIn("generated appcast item contains another URL", result.stderr)
 
     def test_whole_feed_provenance_preserves_base_urls(self):
         root = ET.fromstring(feed("0.9.0"))
