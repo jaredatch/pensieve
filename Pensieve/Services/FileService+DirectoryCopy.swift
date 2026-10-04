@@ -57,9 +57,10 @@ extension FileService {
             guard CopyEntryStamp(status) == opened.entries[name] else {
                 throw DescriptorFileCopy.error("source changed", path: path, code: ESTALE)
             }
-            try DescriptorFileCopy.copy(from: child, status: status, sourcePath: path, to: destination + "/" + name) { count in
+            try DescriptorFileCopy.copy(from: child, status: status, sourcePath: path, to: destination + "/" + name,
+                                        copiedChunk: { count in
                 try checkpoint(.copiedChunk(name, count))
-            }
+            })
             guard try DirectoryCopySource.descriptorStamp(child, path: path) == opened.entries[name] else {
                 throw DescriptorFileCopy.error("source changed", path: path, code: ESTALE)
             }
