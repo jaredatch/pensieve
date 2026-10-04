@@ -59,4 +59,31 @@ final class PlatformSettingsPresentationTests: XCTestCase {
             XCTAssertEqual(PlatformTokenBudgetSetting.values(defaults: defaults)[setting.platform], defaultValue + 200)
         }
     }
+
+    func testZeroBudgetIsOmitted() throws {
+        try assertBudgetIsOmitted(0)
+    }
+
+    func testNegativeBudgetIsOmitted() throws {
+        try assertBudgetIsOmitted(-2_500)
+    }
+
+    func testStringBudgetIsOmitted() throws {
+        try assertBudgetIsOmitted("not a number")
+        try assertBudgetIsOmitted("2500")
+    }
+
+    private func assertBudgetIsOmitted(_ value: Any, file: StaticString = #filePath, line: UInt = #line) throws {
+        let suite = "PlatformSettingsPresentationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        for setting in PlatformTokenBudgetSetting.rows {
+            guard case let .editable(storageKey, _) = setting.budget else { continue }
+            defaults.set(value, forKey: storageKey)
+            XCTAssertNil(PlatformTokenBudgetSetting.values(defaults: defaults)[setting.platform],
+                         "Invalid budget must omit \(setting.platform.displayName)", file: file, line: line)
+            defaults.removeObject(forKey: storageKey)
+        }
+    }
 }
