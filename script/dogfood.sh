@@ -260,15 +260,23 @@ if [ "$DRY_RUN" -eq 0 ]; then
     || die "could not unlock $FAKE_KEYCHAIN"
   in_fake_home security default-keychain -d user -s "$FAKE_KEYCHAIN" || die "could not make $FAKE_KEYCHAIN the default"
   in_fake_home security list-keychains -d user -s "$FAKE_KEYCHAIN" || die "could not set the sandbox keychain search list"
-  fake_default="$(in_fake_home security default-keychain -d user | sed 's/^ *"//; s/" *$//')"
+  # Each read is captured with its own exit status checked and then matched in the shell, so a
+  # failed `security` call refuses the launch instead of reading as "not listed".
+  fake_default="$(in_fake_home security default-keychain -d user)" \
+    || die "could not read the fake home's default keychain — refusing to launch"
+  fake_default="${fake_default#*\"}"; fake_default="${fake_default%\"*}"
   [ "$fake_default" = "$FAKE_KEYCHAIN" ] \
     || die "the fake home's default keychain is '$fake_default', not $FAKE_KEYCHAIN — refusing to launch"
-  if security list-keychains -d user | grep -qF "$FAKE_HOME/"; then
-    die "the real keychain search list names a keychain in $FAKE_HOME — remove it (security list-keychains -d user -s …) and re-run"
-  fi
-  real_default="$(security default-keychain -d user | sed 's/^ *"//; s/" *$//')"
+  real_list="$(security list-keychains -d user)" \
+    || die "could not read the real keychain search list — refusing to launch"
+  case "$real_list" in
+    *"$FAKE_HOME/"*) die "the real keychain search list names a keychain in $FAKE_HOME — remove it (security list-keychains -d user -s …) and re-run" ;;
+  esac
+  real_default="$(security default-keychain -d user)" \
+    || die "could not read the real default keychain — refusing to launch"
+  real_default="${real_default#*\"}"; real_default="${real_default%\"*}"
   case "$real_default" in
-    "$FAKE_HOME"/*) die "the real default keychain is $real_default, inside the fake home — reset it with security default-keychain -d user -s" ;;
+    *"$FAKE_HOME/"*) die "the real default keychain is $real_default, inside the fake home — reset it with security default-keychain -d user -s" ;;
   esac
   say "keychain: $FAKE_KEYCHAIN (sandbox only)"
 fi
