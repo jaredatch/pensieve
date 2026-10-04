@@ -12,12 +12,13 @@ final class ThirdPartyNoticesTests: XCTestCase {
     var inventory: NoticeInventory { NoticeInventory(fileService: fileService) }
 
     func testBundledCreditsCoverSwiftPackagesAndVendoredLicenseFiles() throws {
-        try inventory.checkSwiftPackages(
+        let pins = try inventory.checkSwiftPackages(
             resolved: sourceRoot + "/Pensieve.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
             checkouts: inventory.checkouts(for: Bundle.main.bundleURL),
             notices: readNotices(),
             credits: bundledCredits()
         )
+        try LibYAMLNoticeAudit.checkVendorVersion(pins: pins)
     }
 
     func testBundledCreditsCoverEditorPackages() throws {
@@ -39,10 +40,6 @@ final class ThirdPartyNoticesTests: XCTestCase {
     }
 
     func testLibYAMLNoticeIsComplete() throws {
-        try LibYAMLNoticeAudit.checkVendorVersion(
-            resolved: sourceRoot + "/Pensieve.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
-            fileService: fileService
-        )
         let license = try XCTUnwrap(readNotices().license(inSection: "### libYAML"))
         XCTAssertEqual(LibYAMLNoticeAudit.noticeDigest(license), LibYAMLNoticeAudit.digest)
         XCTAssertTrue(try bundledCredits().contains("libYAML"))
@@ -53,7 +50,7 @@ final class ThirdPartyNoticesTests: XCTestCase {
             try fileService.writeFile(at: root + "/resolved.json", content: "{\"pins\":[{\"identity\":\"new-library\"}]}")
             assertMissing("Missing notice for Swift package new-library") {
                 try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
-                                                 notices: NoticeDocument(""), credits: "")
+                                                 notices: parseNotices(""), credits: "")
             }
         }
     }
@@ -62,7 +59,7 @@ final class ThirdPartyNoticesTests: XCTestCase {
         try withFixture { root in
             try writeEditorLock(root: root, dev: false)
             assertMissing("Missing notice for editor package @vendor/new-library") {
-                try inventory.checkEditorPackages(lockfile: root + "/lock.json", notices: NoticeDocument(""), credits: "")
+                try inventory.checkEditorPackages(lockfile: root + "/lock.json", notices: parseNotices(""), credits: "")
             }
         }
     }
@@ -70,7 +67,7 @@ final class ThirdPartyNoticesTests: XCTestCase {
     func testDevOnlyEditorPackageNeedsNoNotice() throws {
         try withFixture { root in
             try writeEditorLock(root: root, dev: true)
-            try inventory.checkEditorPackages(lockfile: root + "/lock.json", notices: NoticeDocument(""), credits: "")
+            try inventory.checkEditorPackages(lockfile: root + "/lock.json", notices: parseNotices(""), credits: "")
         }
     }
 
@@ -136,7 +133,7 @@ final class ThirdPartyNoticesTests: XCTestCase {
 
     func checkSwiftFixture(root: String, credits: String) throws {
         try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
-                                         notices: NoticeDocument("[Example](https://github.com/vendor/example)"),
+                                         notices: parseNotices("[Example](https://github.com/vendor/example)"),
                                          credits: credits)
     }
 

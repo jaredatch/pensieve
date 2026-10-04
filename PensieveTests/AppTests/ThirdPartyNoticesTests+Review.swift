@@ -35,7 +35,7 @@ extension ThirdPartyNoticesTests {
     func testLicenseExtractionAcceptsCRLFAndKeepsOtherSeparators() throws {
         let license = "Copyright A\u{000C}B\u{001C}C\u{001D}D\u{001E}E\u{0085}F\u{2028}G\u{2029}H."
         let source = "### libYAML\r\n```text\r\n\(license)\r\n```\r\n"
-        let notices = try NoticeDocument(source)
+        let notices = try parseNotices(source)
         XCTAssertEqual(notices.licenseBlocks.map(\.text), [license])
         XCTAssertEqual(notices.license(inSection: "### libYAML"), license)
         let decoded = try decodeCredits(Data(renderFixture(source).utf8))
@@ -67,10 +67,10 @@ extension ThirdPartyNoticesTests {
             let first = "Copyright First. Permission is hereby granted. THE SOFTWARE IS PROVIDED AS IS."
             let second = "Copyright Second. Permission is hereby granted. THE SOFTWARE IS PROVIDED AS IS."
             let notices = "- `foo` 1.2.0\n```text\n\(first)\n```\n- `foo` 2.0.0\n```text\n\(second)\n```\n"
-            XCTAssertNoThrow(try inventory.checkEditorPackages(lockfile: root + "/lock.json", notices: NoticeDocument(notices),
+            XCTAssertNoThrow(try inventory.checkEditorPackages(lockfile: root + "/lock.json", notices: parseNotices(notices),
                                                                credits: "foo\n" + first + "\n" + second))
             assertMissing("Missing bundled license for editor package foo") {
-                try inventory.checkEditorPackages(lockfile: root + "/lock.json", notices: NoticeDocument(notices),
+                try inventory.checkEditorPackages(lockfile: root + "/lock.json", notices: parseNotices(notices),
                                                    credits: "foo\n" + first)
             }
         }
@@ -79,15 +79,17 @@ extension ThirdPartyNoticesTests {
     func testEditorAuditAcceptsCRLFNotices() throws {
         try withEditorFixture(versions: ["one": "1.0.1"]) { root, notices, credits in
             XCTAssertNoThrow(try inventory.checkEditorPackages(
-                lockfile: root + "/lock.json", notices: NoticeDocument(notices.replacingOccurrences(of: "\n", with: "\r\n")),
+                lockfile: root + "/lock.json", notices: parseNotices(notices.replacingOccurrences(of: "\n", with: "\r\n")),
                 credits: credits
             ))
         }
     }
 
-    func testRendererUsesPortableStringOperations() throws {
-        let source = "# Notices\r\n```text\r\nCopyright Portable.\r\n```\r\n"
-        XCTAssertEqual(try renderFixture(source, portable: true), try renderFixture(source))
+    func testRendererRunsUnderSystemPython() throws {
+        let source = "# Notices\r\n```text\r\nCopyright System Python.\r\n```\r\n"
+        let decoded = try decodeCredits(Data(renderFixture(source).utf8))
+        XCTAssertEqual(decoded.string.trimmingCharacters(in: .whitespacesAndNewlines),
+                       "Notices\nCopyright System Python.")
     }
 
     func testRendererStripsMarkdownFromEveryHeadingLevel() throws {

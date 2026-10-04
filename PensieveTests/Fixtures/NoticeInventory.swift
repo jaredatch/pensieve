@@ -1,23 +1,42 @@
+import CryptoKit
 import Foundation
 @testable import Pensieve
 
-/// Audits resolved dependencies and documentation/plain-text files whose names contain
-/// license, licence, copying, copyright, notice or unlicense (case-insensitively).
-/// Source/tooling extensions and symlinks are excluded. Embedded notices (swift-cmark
-/// and Sparkle) are compared as complete text. Notices hidden in source comments are
-/// outside this discovery; libYAML's omitted license is audited separately.
+/// Audits dependency notices with a wide filename net and reviewed exemptions.
+/// Candidates contain license/licence (including licensing), copying, copyright or
+/// notice. Source/script/data extensions and symlinks are excluded. Complete text is
+/// required unless the package-relative path has an explicit single-line exemption.
+/// Notices hidden in source comments are outside this discovery.
 struct NoticeInventory {
     struct MissingNotice: Error, CustomStringConvertible {
         let description: String
     }
 
     let fileService: FileServiceProtocol
+    struct LicenseExemption {
+        let package: String
+        let path: String
+        let reason: String
+    }
+    // Add reviewed non-attribution candidates here: package, checkout-relative path, reason.
+    static let licenseExemptions: [LicenseExemption] = [
+        LicenseExemption(package: "sparkle", path: "Tests/Resources/SparkleTestCodeSignApp.enc.nolicense.dmg",
+                         reason: "Encrypted unarchiver test fixture; excluded from Sparkle's shipped binary target.")
+    ]
+    let exemptions: [LicenseExemption]
+
+    init(fileService: FileServiceProtocol, exemptions: [LicenseExemption] = Self.licenseExemptions) {
+        self.fileService = fileService
+        self.exemptions = exemptions
+    }
 
     static func normalized(_ text: String) -> String {
         text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
-    func checkSwiftPackages(resolved: String, checkouts: String, notices: NoticeDocument, credits: String) throws {
+    @discardableResult
+    func checkSwiftPackages(resolved: String, checkouts: String,
+                            notices: NoticeDocument, credits: String) throws -> [[String: Any]] {
         let data = try fileService.readData(at: resolved)
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         guard let pins = json?["pins"] as? [[String: Any]] else {
@@ -47,12 +66,24 @@ struct NoticeInventory {
                 throw MissingNotice(description: "No license files for Swift package \(identity)")
             }
             for path in licenses {
-                let license = Self.normalized(try fileService.readFile(at: path))
+                let relative = String(path.dropFirst(root.count + 1))
+                if exemptions.contains(where: {
+                    $0.package.lowercased() == identity.lowercased() && $0.path == relative
+                        && !$0.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        && !$0.reason.contains(where: \.isNewline)
+                }) { continue }
+                let license: String
+                do {
+                    license = Self.normalized(try fileService.readFile(at: path))
+                } catch {
+                    throw MissingNotice(description: "Unreadable license candidate: \(identity)/\(relative): \(error)")
+                }
                 guard !license.isEmpty, bundled.contains(license) else {
-                    throw MissingNotice(description: "Missing bundled license: \(identity)/\(path.dropFirst(root.count + 1))")
+                    throw MissingNotice(description: "Missing bundled license: \(identity)/\(relative)")
                 }
             }
         }
+        return pins
     }
 
     func checkEditorPackages(lockfile: String, notices: NoticeDocument, credits: String) throws {
@@ -63,25 +94,15 @@ struct NoticeInventory {
         let bundled = Self.normalized(credits)
         for path in packages.keys.sorted() where !path.isEmpty && packages[path]?["dev"] as? Bool != true {
             let name = path.components(separatedBy: "node_modules/").last ?? path
-            let marker = "- `\(name)` "
-            let expression = try NSRegularExpression(pattern: "(?:\\A|(?<=\\n))"
-                                                     + NSRegularExpression.escapedPattern(for: marker) + "([^\\n]*)")
-            let entries = expression.matches(in: notices.text, range: NSRange(notices.text.startIndex..., in: notices.text))
-            guard !entries.isEmpty else {
+            guard let entries = notices.editorEntries[name] else {
                 throw MissingNotice(description: "Missing notice for editor package \(name)")
             }
             let version = packages[path]?["version"] as? String ?? "<missing>"
-            let versions = entries.map { entry in
-                Range(entry.range(at: 1), in: notices.text).flatMap { range in
-                    notices.text[range].split(whereSeparator: \.isWhitespace).first.map(String.init)
-                } ?? "<missing>"
-            }
-            guard version != "<missing>", let index = versions.firstIndex(of: version),
-                  let entry = Range(entries[index].range, in: notices.text) else {
+            guard version != "<missing>", let entry = entries.first(where: { $0.version == version }) else {
                 throw MissingNotice(description: "Version mismatch for editor package \(name): "
-                                    + "lockfile \(version), notice \(versions.joined(separator: ", "))")
+                                    + "lockfile \(version), notice \(entries.map(\.version).joined(separator: ", "))")
             }
-            guard let body = notices.license(after: entry.upperBound), packages[path]?["license"] as? String == "MIT" else {
+            guard let body = entry.license, packages[path]?["license"] as? String == "MIT" else {
                 throw MissingNotice(description: "Missing or unsupported license for editor package \(name)")
             }
             let license = Self.normalized(body)
@@ -106,6 +127,10 @@ struct NoticeInventory {
         return path
     }
 
+    private static let excludedExtensions: Set<String> = [
+        "swift", "c", "h", "m", "mm", "cpp", "py", "sh", "js", "ts", "go", "rb", "json", "yml", "yaml", "plist", "xml"
+    ]
+
     private func licenseFiles(in directory: String) throws -> [String] {
         var result: [String] = []
         for name in try fileService.listDirectory(at: directory).sorted() where name != ".git" {
@@ -114,12 +139,36 @@ struct NoticeInventory {
             if fileService.isSymlink(at: path) { continue }
             if fileService.directoryExists(at: path) {
                 result += try licenseFiles(in: path)
-            } else if ["", "txt", "md", "markdown", "rst", "html"].contains(suffix),
-                      name.range(of: "licen[sc]e|copying|copyright|notice|unlicense",
+            } else if !Self.excludedExtensions.contains(suffix),
+                      name.range(of: "licen[sc](?:e|ing)|copying|copyright|notice",
                                  options: [.regularExpression, .caseInsensitive]) != nil {
                 result.append(path)
             }
         }
         return result
+    }
+}
+
+/// Yams omits a separate libYAML license file. Keep the vendor version and upstream
+/// notice digest together so changing Yams requires rechecking that vendored notice.
+struct LibYAMLNoticeAudit {
+    static let yamsVersion = "6.2.2"
+    // yaml/libyaml 0.2.5's complete License, normalized only for whitespace.
+    static let digest = "6cc0c393c5cb002fce678ab4f5e7642c58fdb32f9e7ee27ada2ef111df5ac021"
+
+    static func checkVendorVersion(pins: [[String: Any]]) throws {
+        guard let pin = pins.first(where: { ($0["identity"] as? String)?.lowercased() == "yams" }) else {
+            throw NoticeInventory.MissingNotice(description: "Stale libYAML notice: Yams is no longer resolved; "
+                                                + "remove its notice or audit the new vendor")
+        }
+        let version = (pin["state"] as? [String: Any])?["version"] as? String ?? "<missing>"
+        guard version == yamsVersion else {
+            throw NoticeInventory.MissingNotice(description: "Recheck libYAML notice for Swift package yams \(version); "
+                                                + "audited Yams version is \(yamsVersion)")
+        }
+    }
+
+    static func noticeDigest(_ license: String) -> String {
+        SHA256.hash(data: Data(NoticeInventory.normalized(license).utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }

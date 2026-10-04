@@ -43,7 +43,7 @@ extension ThirdPartyNoticesTests {
                 let found = listed.isEmpty ? "<missing>" : listed
                 assertMissing("Version mismatch for editor package one: lockfile 1.0.1, notice \(found)") {
                     try inventory.checkEditorPackages(lockfile: root + "/lock.json",
-                                                   notices: NoticeDocument(notices), credits: credits)
+                                                   notices: parseNotices(notices), credits: credits)
                 }
             }
         }
@@ -52,7 +52,7 @@ extension ThirdPartyNoticesTests {
     func testMatchingEditorVersionsAreAccepted() throws {
         try withEditorFixture(versions: ["one": "1.0.1", "two": "2.0.0"]) { root, notices, credits in
             try inventory.checkEditorPackages(lockfile: root + "/lock.json",
-                                                   notices: NoticeDocument(notices), credits: credits)
+                                                   notices: parseNotices(notices), credits: credits)
         }
     }
 
@@ -113,10 +113,10 @@ extension ThirdPartyNoticesTests {
     }
 
     private func checkYamsFixture(root: String) throws {
-        try LibYAMLNoticeAudit.checkVendorVersion(resolved: root + "/resolved.json", fileService: fileService)
-        try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
-                                         notices: NoticeDocument("[Yams](https://github.com/jpsim/Yams)"),
+        let pins = try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
+                                         notices: parseNotices("[Yams](https://github.com/jpsim/Yams)"),
                                          credits: "Yams license.")
+        try LibYAMLNoticeAudit.checkVendorVersion(pins: pins)
     }
 
     func withEditorFixture(versions: [String: String], listedVersions: [String: String]? = nil,

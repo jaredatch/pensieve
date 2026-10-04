@@ -4,7 +4,7 @@ import XCTest
 
 extension ThirdPartyNoticesTests {
     func readNotices() throws -> NoticeDocument {
-        try NoticeDocument(fileService.readFile(at: sourceRoot + "/THIRD-PARTY-NOTICES.md"))
+        try parseNotices(fileService.readFile(at: sourceRoot + "/THIRD-PARTY-NOTICES.md"))
     }
 
     func decodeCredits(_ data: Data) throws -> NSAttributedString {
@@ -12,34 +12,51 @@ extension ThirdPartyNoticesTests {
                                documentAttributes: nil)
     }
 
-    func renderFixture(_ source: String, portable: Bool = false) throws -> String {
+    func parseNotices(_ source: String) throws -> NoticeDocument {
+        var blocks: [NoticeDocument.LicenseBlock] = []
+        try withFixture { root in
+            try fileService.writeFile(at: root + "/source.md", content: source)
+            let result = try runCredits(arguments: ["--license-blocks", root + "/source.md"])
+            XCTAssertEqual(result.status, 0, result.error)
+            blocks = try JSONDecoder().decode([NoticeDocument.LicenseBlock].self, from: Data(result.output.utf8))
+        }
+        return NoticeDocument(source, licenseBlocks: blocks)
+    }
+
+    func renderFixture(_ source: String) throws -> String {
         var rtf = ""
         try withFixture { root in
             try fileService.writeFile(at: root + "/source.md", content: source)
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-            process.arguments = [sourceRoot + "/script/credits.py", root + "/source.md", root + "/Credits.rtf"]
-            if portable {
-                let harness = """
-                import runpy, sys
-                from pathlib import Path
-                class OldLine(str):
-                    def removesuffix(self, suffix):
-                        raise AttributeError("str.removesuffix is unavailable before Python 3.9")
-                class OldText(str):
-                    def split(self, separator):
-                        return [OldLine(line) for line in super().split(separator)]
-                renderer = runpy.run_path(sys.argv[1])
-                source = Path(sys.argv[2]).read_bytes().decode("utf-8")
-                Path(sys.argv[3]).write_text(renderer["render"](OldText(source)), encoding="ascii")
-                """
-                process.arguments = ["-c", harness] + (process.arguments ?? [])
-            }
-            try process.run()
-            process.waitUntilExit()
-            XCTAssertEqual(process.terminationStatus, 0)
+            let result = try runCredits(arguments: [root + "/source.md", root + "/Credits.rtf"])
+            XCTAssertEqual(result.status, 0, result.error)
             rtf = try fileService.readFile(at: root + "/Credits.rtf")
         }
         return rtf
+    }
+
+    struct CreditsResult {
+        let status: Int32
+        let output: String
+        let error: String
+    }
+
+    func runCredits(arguments: [String], oldVersion: Bool = false) throws -> CreditsResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        let script = sourceRoot + "/script/credits.py"
+        process.arguments = [script] + arguments
+        if oldVersion {
+            process.arguments = ["-c", "import runpy,sys; sys.version_info=(3,8,0); "
+                                 + "sys.argv=sys.argv[1:]; runpy.run_path(sys.argv[0],run_name='__main__')", script] + arguments
+        }
+        let output = Pipe(), error = Pipe()
+        process.standardOutput = output
+        process.standardError = error
+        try process.run()
+        let stdout = output.fileHandleForReading.readDataToEndOfFile()
+        let stderr = error.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return CreditsResult(status: process.terminationStatus, output: String(data: stdout, encoding: .utf8) ?? "",
+                             error: String(data: stderr, encoding: .utf8) ?? "")
     }
 }
