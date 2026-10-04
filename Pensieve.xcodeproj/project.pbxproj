@@ -61,6 +61,7 @@
 		1D266842C943F8CA39E9D4F9 /* CheckedYAMLLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6279A8F3703B72502AD5B474 /* CheckedYAMLLoader.swift */; };
 		1D7E847A1FA13E72C5C1C878 /* AddFromGitHubSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA396A604F05998B74C4DCC0 /* AddFromGitHubSheet.swift */; };
 		1E2B61BF3BBFDFF99A1B218B /* AppRuntime+Paths.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7B880FB3B67C6F1142E6507 /* AppRuntime+Paths.swift */; };
+		1F1807C3F71DD6B8D3FFFC1F /* AppIconAssetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEE59523116FB9B2DE396207 /* AppIconAssetTests.swift */; };
 		1F53C1399EE914A95355D60A /* DeployPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64C29DE54B3ED2AD1D3A46F4 /* DeployPaths.swift */; };
 		1F7C574F9999820281EB1BFF /* SkillSerializer+Skill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE5A0A1E1811FF4BB52DEFF /* SkillSerializer+Skill.swift */; };
 		204F61012ACABA244C206E6E /* FrontmatterRewriteFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = B92D87A42D70E89E91F04933 /* FrontmatterRewriteFixture.swift */; };
@@ -1273,6 +1274,7 @@
 		DE775F959833A27D671F6250 /* FolderImportPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderImportPresentation.swift; sourceTree = "<group>"; };
 		DE7B451F191A8C32889F6786 /* ManifestScenarioCarryTests+PreservedMtime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ManifestScenarioCarryTests+PreservedMtime.swift"; sourceTree = "<group>"; };
 		DEBBB564A16C815906D3DB0A /* AgentDetectionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDetectionServiceTests.swift; sourceTree = "<group>"; };
+		DEE59523116FB9B2DE396207 /* AppIconAssetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconAssetTests.swift; sourceTree = "<group>"; };
 		DFB832771900426C348597C9 /* SkillExportPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillExportPanel.swift; sourceTree = "<group>"; };
 		DFC6AA8891B426C7BA3D752F /* SkillSerializerTests+CheckedYAML.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillSerializerTests+CheckedYAML.swift"; sourceTree = "<group>"; };
 		E004A7122C4E34178D4396BC /* MachineIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachineIdentity.swift; sourceTree = "<group>"; };
@@ -1598,6 +1600,7 @@
 		4CF6B380E6137251F9B056F1 /* AppTests */ = {
 			isa = PBXGroup;
 			children = (
+				DEE59523116FB9B2DE396207 /* AppIconAssetTests.swift */,
 				65DAE5A1DADCBFE03DF7DEF2 /* AppRuntimeConfigurationOrderTests.swift */,
 				EC2359C92EC49337D7D6B26D /* AppRuntimeFinalReviewTests.swift */,
 				B75100FE6680DC9C0F320BA0 /* AppRuntimeFinalReviewTests+Evidence.swift */,
@@ -2460,6 +2463,7 @@
 			files = (
 				9B324666A8AE9C76EDE759FA /* AgentDetectionServiceTests.swift in Sources */,
 				F9941B0DDB9D2A8C544E175C /* AllowlistedRemoteGit.swift in Sources */,
+				1F1807C3F71DD6B8D3FFFC1F /* AppIconAssetTests.swift in Sources */,
 				08981C67B54B875AE72A54ED /* AppRuntimeConfigurationOrderTests.swift in Sources */,
 				F4AB2AD078911C5A2D9A51AD /* AppRuntimeFinalReviewTests+Evidence.swift in Sources */,
 				7B06A105D32913A7BBDC849F /* AppRuntimeFinalReviewTests.swift in Sources */,

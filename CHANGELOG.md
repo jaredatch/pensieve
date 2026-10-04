@@ -8,6 +8,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 - Pensieve is open source. The code lives at [github.com/jaredatch/pensieve](https://github.com/jaredatch/pensieve), and that's the place to report a bug or ask for something.
 
+- Pensieve has its own glyph in the menu bar, in place of the stock brain symbol.
+
 ### Removed
 
 - Scenarios are gone. Skills they deployed stay in place, and existing scenario files stay in your synced store for older builds.
