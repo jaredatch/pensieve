@@ -72,11 +72,11 @@ func removeRegisteredProject(_ project: Project, categoryStore: CategoryStorePro
         context: context,
         notifier: SyncStateNotifier.suppressed
     )
-    let blockingFailure = !result.readFailures.isEmpty || result.failures.contains { outcome in
-        guard case .project(let id)? = outcome.target else { return true }
-        return id == project.id
+    result.outcomes.removeAll { outcome in
+        guard case .project(let id)? = outcome.target else { return false }
+        return id != project.id
     }
-    guard !blockingFailure else { return result }
+    guard !result.hasFailures else { return result }
     do {
         for row in try context.fetch(FetchDescriptor<SkillProjectAssignment>()) where row.projectID == project.id {
             context.delete(row)

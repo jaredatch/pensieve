@@ -15,12 +15,13 @@ final class ProjectFolderReviewTests: XCTestCase {
                 let rule = try h.addCategory()
                 XCTAssertEqual(h.intent.reconcile(context: h.context).successes.count, 1)
                 XCTAssertEqual(h.category.reconcile(context: h.context).successes.count, 1)
-                if unknown {
-                    h.mapped.beforeProjectProbe = { path in
-                        if path == h.project.path { throw ProjectFolderError.couldNotCheck(path: path, reason: "Offline") }
+                if !unknown { try h.files.deleteDirectory(at: h.project.path) }
+                var probes = 0
+                h.mapped.beforeProjectProbe = { path in
+                    probes += 1
+                    if unknown, path == h.project.path {
+                        throw ProjectFolderError.couldNotCheck(path: path, reason: "Offline")
                     }
-                } else {
-                    try h.files.deleteDirectory(at: h.project.path)
                 }
                 if categoryRemoved { rule.skillSlugs = [] } else {
                     for intent in try h.context.fetch(FetchDescriptor<MachineDeployIntent>()) { h.context.delete(intent) }
@@ -28,6 +29,7 @@ final class ProjectFolderReviewTests: XCTestCase {
                 try h.context.save()
                 let result = categoryRemoved ? h.category.reconcile(context: h.context) : h.intent.reconcile(context: h.context)
                 XCTAssertTrue(result.outcomes.isEmpty, "Ownership handoff needs no filesystem operation")
+                XCTAssertEqual(probes, 0, "Ledger-only ownership removal never probes a project folder")
                 XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<IntentAssignment>()), categoryRemoved ? 1 : 0)
                 XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), categoryRemoved ? 0 : 1)
                 if unknown { XCTAssertTrue(h.files.isSymlink(at: h.artifact(.codex))) }
@@ -35,19 +37,47 @@ final class ProjectFolderReviewTests: XCTestCase {
         }
     }
 
-    func testUnregistrationPreservesOtherProjectsFailuresInReturnedResult() throws {
+    func testProjectListRemovalDoesNotAlertWhenAnotherProjectFails() throws {
         let h = try ProjectFolderCallerHarness()
         defer { h.cleanup() }
         _ = try h.addCategory()
         h.mapped.beforeProjectProbe = { path in
             if path == h.project.path { throw ProjectFolderError.couldNotCheck(path: path, reason: "Offline") }
         }
-        let result = removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
-            manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
-            reconciler: h.category, context: h.context)
-        XCTAssertEqual(result.failureCount, 4, "Unrelated failures still reach the caller")
-        XCTAssertTrue(result.failures.allSatisfy { $0.target == .project(h.project.id) })
-        XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.project.id])
+        var removalError: String?
+        let result = ProjectListView.removeProject(h.otherProject, removalError: &removalError) {
+            removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
+                manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
+                reconciler: h.category, context: h.context)
+        }
+        XCTAssertNil(removalError, "Removing B shows no alert when only another project's work fails")
+        XCTAssertTrue(result.outcomes.isEmpty, "The caller receives only B's outcomes and unscoped ones")
+        XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.project.id],
+                       "B is removed whenever its own removals succeed")
+    }
+
+    func testProjectListRemovalKeepsProjectAndAlertsForOwnOrUnscopedFailure() throws {
+        for unscoped in [false, true] {
+            let h = try ProjectFolderCallerHarness()
+            defer { h.cleanup() }
+            let failed = BatchPairOutcome(skillID: h.skill.id, skillName: h.skill.name, platform: .codex,
+                target: unscoped ? nil : .project(h.otherProject.id), error: "Removal failed")
+            let unrelated = BatchPairOutcome(skillID: h.skill.id, skillName: h.skill.name, platform: .codex,
+                target: .project(h.project.id), error: "Unrelated failure")
+            let reconciler = ProjectListFailureReconciler(result: BatchResult(outcomes: [failed, unrelated]))
+            var removalError: String?
+            let result = ProjectListView.removeProject(h.otherProject, removalError: &removalError) {
+                removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
+                    manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
+                    reconciler: reconciler, context: h.context)
+            }
+            XCTAssertTrue(removalError?.contains("stays registered") == true,
+                          "B's failure or an unscoped failure sets the caller's alert state")
+            XCTAssertTrue(try h.context.fetch(FetchDescriptor<Project>()).contains { $0.id == h.otherProject.id },
+                          "A failure scoped to B or no project keeps B registered")
+            XCTAssertEqual(result.outcomes.count, 1, "The result excludes another project's outcome")
+            XCTAssertEqual(result.outcomes.first?.target, failed.target)
+        }
     }
 
     func testUnavailableInSyncPairsHaveNoOutcomesAndKeepBothLedgers() throws {
@@ -133,7 +163,7 @@ final class ProjectFolderReviewTests: XCTestCase {
         let result = removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
             manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
             reconciler: h.category, context: h.context)
-        XCTAssertTrue(result.hasFailures)
+        XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.project.id])
     }
 
@@ -161,4 +191,9 @@ final class ProjectFolderReviewTests: XCTestCase {
             XCTAssertTrue(result.failures.allSatisfy { $0.target == .project(h.otherProject.id) })
         }
     }
+}
+
+private struct ProjectListFailureReconciler: CategoryReconcilerProtocol {
+    let result: BatchResult
+    func reconcile(context: ModelContext) -> BatchResult { result }
 }

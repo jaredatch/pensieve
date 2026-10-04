@@ -77,6 +77,51 @@ final class AddProjectSheetHostTests: XCTestCase {
         XCTAssertEqual(try container.mainContext.fetchCount(FetchDescriptor<Project>()), 1)
     }
 
+    func testPendingProbeShowsCheckingWithoutHeightChangeAndDisablesAdd() async throws {
+        let h = try ProjectFolderCallerHarness()
+        defer { h.cleanup() }
+        try h.files.createDirectory(at: h.project.path)
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        let model = AddProjectModel(fileService: h.mapped)
+        model.name = "Pending"
+        model.path = h.otherProject.path
+        var created: [Project] = []
+        let host = NSHostingView(rootView: AddProjectSheet(model: model,
+            manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store",
+            onCreated: { created.append($0) }).modelContainer(container)
+            .background(Color(nsColor: .windowBackgroundColor)))
+        let window = mount(host)
+        defer { window.close() }
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Initial caption") {
+            (try? self.renderedText(in: host).contains { $0.text.contains("Marker will be created") }) == true
+        }
+        let initialHeight = host.fittingSize.height
+        let started = expectation(description: "Pending disk probe")
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        h.mapped.beforeProjectProbe = { _ in
+            guard !Thread.isMainThread else { return }
+            started.fulfill()
+            _ = release.wait(timeout: .now() + 5)
+        }
+        model.path = h.project.path
+        await fulfillment(of: [started], timeout: 3)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Current path shows neutral checking text") {
+            (try? self.renderedText(in: host).contains { $0.text.contains("Checking project folder") }) == true
+        }
+        XCTAssertEqual(host.fittingSize.height, initialHeight, accuracy: 1,
+                       "Pending and completed captions reserve the same status-line height")
+        XCTAssertFalse(model.canSubmit, "The real sheet's Add binding is disabled while the current probe is pending")
+        try clickAdd(in: host, window: window)
+        XCTAssertTrue(created.isEmpty, "The pending sheet cannot add a project")
+        XCTAssertEqual(try container.mainContext.fetchCount(FetchDescriptor<Project>()), 0)
+        release.signal()
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Latest path replaces checking text") { model.isValid }
+        XCTAssertEqual(model.identityMessage, "Marker will be created on Add")
+        try clickAdd(in: host, window: window)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Completed preview permits Add") { created.count == 1 }
+    }
+
     private func mount(_ host: NSView) -> NSWindow {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 450, height: 350),
                               styleMask: [.titled], backing: .buffered, defer: false)

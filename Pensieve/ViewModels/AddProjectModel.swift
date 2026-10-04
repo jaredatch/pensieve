@@ -30,7 +30,7 @@ final class AddProjectModel {
 
     /// Submission always validates the directory again, including after a failed Add.
     var canSubmit: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isCheckingIdentity && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -47,9 +47,18 @@ final class AddProjectModel {
             hasExistingIdentity = false
             return
         }
+        identityMessage = "Checking project folder…"
+        hasIdentityError = false
+        hasExistingIdentity = false
         let files = fileService
         let identities = identityService
         previewTask = Task { @MainActor [weak self] in
+            guard !Task.isCancelled else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(150))
+            } catch {
+                return
+            }
             guard !Task.isCancelled else { return }
             let probe = Task.detached {
                 do {
@@ -67,18 +76,22 @@ final class AddProjectModel {
                 probe.cancel()
             }
             guard !Task.isCancelled, let self, self.previewGeneration == generation else { return }
-            self.isCheckingIdentity = false
-            self.hasProjectDirectory = preview.1 == nil
-            self.hasIdentityError = preview.1 != nil
-            self.hasExistingIdentity = preview.0 != nil
-            if let error = preview.1 {
-                self.identityMessage = error
-            } else {
-                switch preview.0?.kind {
-                case .remote: self.identityMessage = "Git remote: \(preview.0?.key ?? "")"
-                case .marker: self.identityMessage = "Marker found"
-                case nil: self.identityMessage = "Marker will be created on Add"
-                }
+            self.applyPreview(preview.0, error: preview.1)
+        }
+    }
+
+    private func applyPreview(_ identity: ProjectIdentity?, error: String?) {
+        isCheckingIdentity = false
+        hasProjectDirectory = error == nil
+        hasIdentityError = error != nil
+        hasExistingIdentity = identity != nil
+        if let error {
+            identityMessage = error
+        } else {
+            switch identity?.kind {
+            case .remote: identityMessage = "Git remote: \(identity?.key ?? "")"
+            case .marker: identityMessage = "Marker found"
+            case nil: identityMessage = "Marker will be created on Add"
             }
         }
     }

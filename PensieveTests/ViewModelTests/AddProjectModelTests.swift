@@ -5,15 +5,19 @@ import XCTest
 
 @MainActor
 final class AddProjectModelTests: XCTestCase {
-    func testReplacingPreviewCancelsOldProbeAndKeepsCaptionUntilResult() async throws {
+    func testReplacingPreviewCancelsOldProbeAndShowsCurrentPathCheckingStatus() async throws {
         let h = try ProjectFolderCallerHarness()
         defer { h.cleanup() }
         try h.files.createDirectory(at: h.project.path)
+        try h.files.createDirectory(at: h.otherProject.path + "/.git")
+        try h.files.writeFile(at: h.otherProject.path + "/.git/config",
+                             content: "[remote \"origin\"]\nurl = https://github.com/owner/previous.git\n")
+        try h.files.createDirectory(at: h.root + "/latest")
         let model = AddProjectModel(fileService: h.mapped)
         model.name = "Project"
         model.path = h.otherProject.path
         await TestWait.until(timeout: .seconds(3), failureMessage: "Initial preview") { model.isValid }
-        let caption = model.identityMessage
+        XCTAssertEqual(model.identityMessage, "Git remote: github.com/owner/previous")
         let started = expectation(description: "Old probe started")
         let finished = expectation(description: "Old probe released")
         let release = DispatchSemaphore(value: 0)
@@ -28,15 +32,67 @@ final class AddProjectModelTests: XCTestCase {
             finished.fulfill()
         }
         model.path = h.project.path
-        XCTAssertEqual(model.identityMessage, caption, "The caption remains while a new probe is pending")
+        XCTAssertEqual(model.identityMessage, "Checking project folder…",
+                       "Pending text describes the current path, never the previous path's identity")
+        XCTAssertFalse(model.hasExistingIdentity, "Checking uses the line's neutral existing style")
         await fulfillment(of: [started], timeout: 3)
-        model.path = h.otherProject.path
-        XCTAssertEqual(model.identityMessage, caption)
+        model.path = h.root + "/latest"
+        XCTAssertEqual(model.identityMessage, "Checking project folder…",
+                       "The current path has neutral text until its own probe finishes")
         release.signal()
         await fulfillment(of: [finished], timeout: 3)
         XCTAssertTrue(cancellation.wasCancelled, "Replacing a path cancels its previous disk probe")
         await TestWait.until(timeout: .seconds(3), failureMessage: "Latest preview") { model.isValid }
         XCTAssertEqual(model.identityMessage, "Marker will be created on Add")
+    }
+
+    func testTypingBurstStartsOneProbeAfterThePause() async throws {
+        let h = try ProjectFolderCallerHarness()
+        defer { h.cleanup() }
+        let probes = ProjectPreviewProbeRecorder()
+        h.mapped.beforeProjectProbe = { probes.record($0) }
+        let model = AddProjectModel(fileService: h.mapped)
+        model.name = "Project"
+        for suffix in ["p", "pr", "pro", "proj"] {
+            model.path = h.root + "/" + suffix
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        model.path = h.otherProject.path
+        XCTAssertEqual(probes.paths, [], "Typing starts no probe until a short pause")
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Debounced preview") { model.isValid }
+        XCTAssertEqual(probes.paths, [h.otherProject.path], "A burst starts only the latest path's probe")
+    }
+
+    func testPendingProbeDisablesAddAndCompletedProbeAllowsSamePathRetry() async throws {
+        let h = try ProjectFolderCallerHarness()
+        defer { h.cleanup() }
+        try h.files.createDirectory(at: h.project.path)
+        let model = AddProjectModel(fileService: h.mapped)
+        model.name = "Project"
+        let started = expectation(description: "Current probe started")
+        let release = DispatchSemaphore(value: 0)
+        let mainProbes = ProjectPreviewProbeRecorder()
+        defer { release.signal() }
+        h.mapped.beforeProjectProbe = { path in
+            if Thread.isMainThread { mainProbes.record(path) } else {
+                started.fulfill()
+                _ = release.wait(timeout: .now() + 3)
+            }
+        }
+        model.path = h.project.path
+        await fulfillment(of: [started], timeout: 3)
+        XCTAssertTrue(model.isCheckingIdentity)
+        XCTAssertFalse(model.canSubmit, "Add is disabled while the current path's probe is pending")
+        XCTAssertNil(model.makeProject(), "Return cannot submit during the current probe")
+        XCTAssertEqual(mainProbes.paths, [], "Pending submission never probes the disk on the main actor")
+        release.signal()
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Current preview completed") { !model.isCheckingIdentity }
+        XCTAssertTrue(model.canSubmit, "A completed probe permits Add")
+        try h.files.deleteDirectory(at: model.path)
+        XCTAssertNil(model.makeProject())
+        XCTAssertTrue(model.canSubmit, "A failed Add does not fence a completed same-path probe")
+        try h.files.createDirectory(at: model.path)
+        XCTAssertNotNil(model.makeProject(), "The same path can be tried again after Finder fixes it")
     }
 
     func testTypingDoesNotWaitForDiskAndLatestPreviewWins() async throws {
@@ -158,4 +214,13 @@ private final class PreviewProbeCancellation: @unchecked Sendable {
 
     var wasCancelled: Bool { lock.withLock { cancelled } }
     func record(_ value: Bool) { lock.withLock { cancelled = value } }
+}
+
+/// NSLock protects paths recorded by the disk task and read by the test actor.
+private final class ProjectPreviewProbeRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+
+    var paths: [String] { lock.withLock { recorded } }
+    func record(_ path: String) { lock.withLock { recorded.append(path) } }
 }
