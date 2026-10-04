@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Vetoes the main window's close while an editor draft is unsaved. SwiftUI on macOS 14 has no
-/// close hook, so this is an AppKit bridge: a proxy becomes the window's delegate, answers
+/// Vetoes the main window's close while an editor draft is unsaved. This AppKit bridge remains
+/// from macOS 14, when SwiftUI had no close hook: a proxy becomes the window's delegate, answers
 /// `windowShouldClose(_:)`, and forwards every other delegate method to the delegate SwiftUI installed.
 /// Mounted as a background view of the main window's content. `shouldClose` returns false and starts the
 /// question when there is one; the answer's Save or Don't Save asks the window to close again through

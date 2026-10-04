@@ -187,7 +187,7 @@ def canonical_xml(element, omit_items=()):
     return element.tag, tuple(sorted(element.attrib.items())), text, tuple(children)
 
 
-def appcast_provenance(text, base_text, built_dmg, download_prefix, version):
+def appcast_provenance(text, base_text, built_dmg, download_prefix, version, built_minimum=None):
     version_parts(version)
     require(built_dmg == f"Pensieve-{version}.dmg", "generated appcast names a different built DMG")
     root = appcast_root(text)
@@ -201,6 +201,13 @@ def appcast_provenance(text, base_text, built_dmg, download_prefix, version):
     require(state != "absent", "generated appcast has no item for the publication version")
     base_items = base.find("channel").findall("item")
     items = root.find("channel").findall("item")
+    if built_minimum is not None:
+        current = next(item for item in items if item.findtext(SPARKLE + "shortVersionString") == version)
+        minimums = current.findall(SPARKLE + "minimumSystemVersion")
+        require(len(minimums) == 1 and bool(minimums[0].text),
+                "generated appcast has missing, empty or duplicated minimum system version")
+        require(minimums[0].text == built_minimum,
+                f"generated appcast minimum {minimums[0].text} differs from built app minimum {built_minimum}")
     require(canonical_xml(root, items) == canonical_xml(base, base_items),
             "generated appcast changes channel or feed metadata")
     require(not any(item.findtext(SPARKLE + "shortVersionString") == version for item in base_items),
@@ -253,7 +260,7 @@ def main(args):
     elif mode == "provenance":
         text = Path(args[1]).read_text()
         base_text = Path(args[2]).read_text() if args[2] else None
-        appcast_provenance(text, base_text, args[3], args[4], args[5])
+        appcast_provenance(text, base_text, args[3], args[4], args[5], args[6] if len(args) > 6 else None)
     elif mode == "appcast":
         print(*appcast_publication_state(appcast_root(Path(args[1]).read_text()), args[2], args[3]), sep="\n")
     elif mode == "compare-versions":

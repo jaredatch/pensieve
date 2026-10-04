@@ -51,11 +51,12 @@ def assert_safe_diagnostic(test, text):
     test.assertNotIn("##[", text, "legacy Actions command markers must be escaped wherever they appear")
 
 
-def feed(version=VERSION, signature=SIGNATURE, length=len(DMG), prefix=DOWNLOAD_PREFIX, channel=None):
+def feed(version=VERSION, signature=SIGNATURE, length=len(DMG), prefix=DOWNLOAD_PREFIX, channel=None, minimum="26.0"):
     channel = PUBLICATION_CASES[version][0] if channel is None else channel
     return (f'<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
             f'<channel><title>Pensieve</title><item><sparkle:shortVersionString>{version}</sparkle:shortVersionString>'
             + (f'<sparkle:channel>{channel}</sparkle:channel>' if channel else '') +
+            (f'<sparkle:minimumSystemVersion>{minimum}</sparkle:minimumSystemVersion>' if minimum is not None else '') +
             f'<enclosure url="{prefix}/v{version}/'
             f'Pensieve-{version}.dmg" length="{length}" sparkle:edSignature="{signature}"/>'
             '</item></channel></rss>')
@@ -151,7 +152,8 @@ elif cmd == "xcodebuild":
     if dest.exists(): s["stale_survived"] = True
     for name in ["MacOS/pensieve-daemon", "Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc/file", "Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc/file", "Frameworks/Sparkle.framework/Versions/B/Autoupdate", "Frameworks/Sparkle.framework/Versions/B/Updater.app/file"]:
         f = dest / "Contents" / name; f.parent.mkdir(parents=True, exist_ok=True); f.write_text("built")
-    (dest / "Contents/Info.plist").write_text('<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>' + s["version"] + '</string></dict></plist>')
+    minimum = s.get("built_minimum", "26.0")
+    (dest / "Contents/Info.plist").write_text('<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>' + s["version"] + '</string>' + ('<key>LSMinimumSystemVersion</key><string>' + minimum + '</string>' if minimum is not None else '') + '</dict></plist>')
     s["builds"] += 1; save(); sys.exit(0)
 elif cmd == "codesign": sys.exit(0)  # models a valid Developer ID signature
 elif cmd in ["notary", "stapler", "spctl"]: sys.exit(0)
@@ -834,7 +836,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.run_release()
         self.state["cask"] = cask(VERSION, hashlib.sha256(DMG).hexdigest())
         template = self.root / "release/homebrew/pensieve.rb"
-        stanza = '  depends_on macos: ">= 26"\n'
+        stanza = '  auto_updates true\n'
         template.write_text(template.read_text().replace('  app "Pensieve.app"\n', stanza + '  app "Pensieve.app"\n'))
         self.run_release(cask_only=True)
         self.assertIn(stanza, self.state["cask"], "repo template stanza must reach the tap")
@@ -1097,7 +1099,61 @@ verify_appcast_unchanged''')
         shutil.rmtree(input_dir, ignore_errors=True); input_dir.mkdir(parents=True)
         (input_dir / "appcast.xml").write_text(self.state["appcast"])
         (input_dir.parent / ("Pensieve-" + version + ".dmg")).write_bytes(DMG)
+        info = input_dir.parent / "dmg-root/Pensieve.app/Contents/Info.plist"
+        info.parent.mkdir(parents=True, exist_ok=True)
+        info.write_bytes(plistlib.dumps({"LSMinimumSystemVersion": "26.0"}))
         return self.run_function('VERSION="' + version + '"; VERSION_CHANNEL="' + PUBLICATION_CASES[version][0] + '"; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; release_preflight; generate_appcast')
+
+    def test_generated_appcast_minimum_matches_built_app_and_preserves_history(self):
+        original = json.loads(json.dumps(self.state))
+        for version, minimum in ((VERSION, "26.0"), ("1.0.0-beta.2", "27.2")):
+            with self.subTest(version=version, minimum=minimum):
+                self.state = json.loads(json.dumps(original)); self.set_version(version)
+                old = ET.fromstring(feed("0.9.0", minimum="14.0"))
+                self.state["appcast"] = ET.tostring(old, encoding="unicode")
+                root = ET.fromstring(ET.tostring(old))
+                root.find("channel").append(ET.fromstring(feed(version, minimum=minimum)).find("channel/item"))
+                self.state.update(built_minimum=minimum, new_feed=ET.tostring(root, encoding="unicode"))
+                self.run_release()
+                published = ET.fromstring(self.state["appcast"]).findall("channel/item")
+                self.assertEqual(published[-1].findtext(self.tool.SPARKLE + "minimumSystemVersion"), minimum)
+                self.assertEqual(ET.tostring(published[0]), ET.tostring(old.find("channel/item")), "earlier release items must remain unchanged")
+                self.assertEqual(self.state["writes"], ["create", "appcast"])
+
+    def test_generated_appcast_minimum_mismatch_stops_before_publication(self):
+        original = json.loads(json.dumps(self.state))
+        for built, generated in (("26.0", "14.0"), ("27.2", "26.0")):
+            with self.subTest(built=built, generated=generated):
+                self.state = dict(json.loads(json.dumps(original)), built_minimum=built, new_feed=feed(minimum=generated))
+                output = self.run_release(expected=1)
+                self.assertIn(f"generated appcast minimum {generated} differs from built app minimum {built}", output)
+                self.assertEqual(self.state["writes"], [], "a minimum mismatch must stop before release or feed publication")
+
+    def test_generated_appcast_minimum_requires_one_value(self):
+        original = json.loads(json.dumps(self.state))
+        for minimum in (None, "", "duplicate"):
+            with self.subTest(minimum=minimum):
+                root = ET.fromstring(feed(minimum="26.0" if minimum == "duplicate" else minimum))
+                if minimum == "duplicate":
+                    ET.SubElement(root.find("channel/item"), self.tool.SPARKLE + "minimumSystemVersion").text = "26.0"
+                self.state = dict(json.loads(json.dumps(original)), new_feed=ET.tostring(root, encoding="unicode"))
+                output = self.run_release(expected=1)
+                self.assertIn("generated appcast has missing, empty or duplicated minimum system version", output)
+                self.assertEqual(self.state["writes"], [])
+
+    def test_generated_appcast_requires_built_app_minimum(self):
+        self.state["built_minimum"] = None
+        output = self.run_release(expected=1)
+        self.assertIn("built app has no minimum system version", output)
+        self.assertEqual(self.state["writes"], [])
+
+    def test_cask_declares_macos_26_and_rendering_preserves_it(self):
+        stanza = '  depends_on macos: :tahoe\n'
+        self.assertIn(stanza, (self.root / "release/homebrew/pensieve.rb").read_text())
+        self.run_release(); self.run_release(cask_only=True)
+        self.assertIn(stanza, self.state["cask"], "the macOS requirement must reach the tap through template rendering")
+        self.run_release(cask_only=True)
+        self.assertEqual(self.state["writes"], ["create", "appcast", "cask"])
 
     def test_whole_feed_provenance_stops_untrusted_urls_before_publication(self):
         original = json.loads(json.dumps(self.state))

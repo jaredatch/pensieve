@@ -413,9 +413,14 @@ generate_appcast() {
 
   # Backstop the signing-folder discipline: only VERSION's valid item is new.
   # Retained items and feed metadata must match the immutable preflight base.
-  local built_dmg
+  local built_dmg built_minimum
   built_dmg="$(basename "$DMG_PATH")"
-  verify_appcast_provenance "$APPCAST_INPUT_DIR/appcast.xml" "$APPCAST_BASE" "$built_dmg" "$DOWNLOAD_PREFIX" "$VERSION" || exit 1
+  built_minimum="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP_PATH/Contents/Info.plist" 2>/dev/null)" || built_minimum=""
+  if [ -z "$built_minimum" ]; then
+    echo "release: built app has no minimum system version" >&2
+    exit 1
+  fi
+  verify_appcast_provenance "$APPCAST_INPUT_DIR/appcast.xml" "$APPCAST_BASE" "$built_dmg" "$DOWNLOAD_PREFIX" "$VERSION" "$built_minimum" || exit 1
 
   ditto "$APPCAST_INPUT_DIR/appcast.xml" "$DIST_DIR/appcast.xml"
 }
