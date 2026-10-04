@@ -91,6 +91,8 @@ targets:
       - path: Pensieve/Services/GitService+Usability.swift
       - path: Pensieve/Services/GitServiceConflict.swift
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+ProjectFolder.swift
+      - path: Pensieve/Services/ProjectFolderError.swift
       - path: Pensieve/Services/FileService+BoundedRead.swift
       - path: Pensieve/Services/FileService+DirectoryCopy.swift
       - path: Pensieve/Services/FileService+DirectoryProbe.swift
@@ -110,6 +112,8 @@ targets:
     sources:
       - path: PensieveDaemon
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+ProjectFolder.swift
+      - path: Pensieve/Services/ProjectFolderError.swift
       - path: Pensieve/Services/FileService+BoundedRead.swift
       - path: Pensieve/Services/FileService+DirectoryCopy.swift
       - path: Pensieve/Services/FileService+DirectoryProbe.swift

@@ -63,7 +63,13 @@ final class LinkService: LinkServiceProtocol {
             throw LinkError.occupiedByRealPath(link)
         }
 
-        try fileService.createSymlink(at: link, pointingTo: target)
+        if let projectPath {
+            try fileService.writeInProject(at: link, projectPath: projectPath) {
+                try fileService.createSymlinkWithoutParents(at: link, pointingTo: target)
+            }
+        } else {
+            try fileService.createSymlink(at: link, pointingTo: target)
+        }
     }
 
     func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {

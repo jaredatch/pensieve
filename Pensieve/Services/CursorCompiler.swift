@@ -30,7 +30,13 @@ final class CursorCompiler: CursorCompilerProtocol {
         let body = SkillParser.stripFrontmatter(raw)
         let mdc = generateMDC(skill: skill, body: body)
         let path = outputPath(skill: skill, projectPath: projectPath)
-        try fileService.writeFile(at: path, content: mdc)
+        if let projectPath {
+            try fileService.writeInProject(at: path, projectPath: projectPath) {
+                try fileService.writeFileWithoutParents(at: path, content: mdc)
+            }
+        } else {
+            try fileService.writeFile(at: path, content: mdc)
+        }
     }
 
     func remove(skill: Skill, projectPath: String?) throws {

@@ -74,6 +74,11 @@ final class LinkServiceScriptedFileService: FileServiceProtocol {
         path == canonicalDirectory || (path == linkPath && state.directoryExists)
     }
     func createDirectory(at path: String) throws {}
+    func directoryExistsFollowingLinks(at path: String) throws -> Bool { path != linkPath }
+    func createDirectoryWithoutParents(at path: String) throws {}
+    func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws {
+        try createSymlink(at: linkPath, pointingTo: targetPath)
+    }
     func deleteDirectory(at path: String) throws {}
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
         createSymlinkCalled = true
@@ -109,6 +114,9 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     private let wrapped: FileServiceProtocol
     private let pathMappings: [(logical: String, physical: String)]
     private let physicalSandbox: String?
+    /// Checkpoints act on translated sandbox paths immediately before their real FileService operation.
+    var beforeDirectoryCreation: ((String) throws -> Void)?
+    var beforeArtifactCreation: ((String) throws -> Void)?
 
     init(
         wrapped: FileServiceProtocol,
@@ -216,6 +224,24 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     }
     func directoryExists(at path: String) -> Bool {
         wrapped.directoryExists(at: resolved(path))
+    }
+    func directoryExistsFollowingLinks(at path: String) throws -> Bool {
+        try wrapped.directoryExistsFollowingLinks(at: resolved(path))
+    }
+    func createDirectoryWithoutParents(at path: String) throws {
+        let physical = resolved(path)
+        try beforeDirectoryCreation?(physical)
+        try wrapped.createDirectoryWithoutParents(at: physical)
+    }
+    func writeFileWithoutParents(at path: String, content: String) throws {
+        let physical = resolved(path)
+        try beforeArtifactCreation?(physical)
+        try wrapped.writeFileWithoutParents(at: physical, content: content)
+    }
+    func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws {
+        let physical = resolved(linkPath)
+        try beforeArtifactCreation?(physical)
+        try wrapped.createSymlinkWithoutParents(at: physical, pointingTo: resolved(targetPath))
     }
     func createDirectory(at path: String) throws {
         try wrapped.createDirectory(at: resolved(path))
