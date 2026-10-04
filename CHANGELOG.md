@@ -10,6 +10,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 - Pensieve has its own glyph in the menu bar, in place of the stock brain symbol.
 
+- A skill that's close to or over a platform's token budget now says so on its Overview tab.
+
 ### Removed
 
 - Scenarios are gone. Skills they deployed stay in place, and existing scenario files stay in your synced store for older builds.

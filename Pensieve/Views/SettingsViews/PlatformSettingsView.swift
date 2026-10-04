@@ -29,6 +29,16 @@ struct PlatformTokenBudgetSetting: Identifiable, Equatable {
         ),
         Self(platform: .codex, budget: .unlimited)
     ]
+
+    static func values(defaults: UserDefaults = .standard) -> [PlatformTarget: Int] {
+        var values: [PlatformTarget: Int] = [:]
+        for setting in rows {
+            guard case let .editable(storageKey, defaultValue) = setting.budget else { continue }
+            values[setting.platform] = defaults.object(forKey: storageKey) == nil
+                ? defaultValue : defaults.integer(forKey: storageKey)
+        }
+        return values
+    }
 }
 
 struct PlatformPathSetting: Identifiable, Equatable {

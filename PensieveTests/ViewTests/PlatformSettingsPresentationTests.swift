@@ -33,4 +33,30 @@ final class PlatformSettingsPresentationTests: XCTestCase {
     func testGrokDefaultBudgetIs2500Tokens() {
         XCTAssertEqual(Constants.defaultGrokTokenBudget, 2_500)
     }
+
+    func testBudgetValuesUseSettingsDefaultsAndOmitUnlimited() throws {
+        let suite = "PlatformSettingsPresentationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertEqual(PlatformTokenBudgetSetting.values(defaults: defaults), [
+            .claudeCode: Constants.defaultClaudeCodeTokenBudget,
+            .grok: Constants.defaultGrokTokenBudget,
+            .cursor: Constants.defaultCursorTokenBudget
+        ])
+    }
+
+    func testBudgetValuesReadSettingsKeysAgainAfterAnEdit() throws {
+        let suite = "PlatformSettingsPresentationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        for setting in PlatformTokenBudgetSetting.rows {
+            guard case let .editable(storageKey, defaultValue) = setting.budget else { continue }
+            defaults.set(defaultValue + 100, forKey: storageKey)
+            XCTAssertEqual(PlatformTokenBudgetSetting.values(defaults: defaults)[setting.platform], defaultValue + 100)
+            defaults.set(defaultValue + 200, forKey: storageKey)
+            XCTAssertEqual(PlatformTokenBudgetSetting.values(defaults: defaults)[setting.platform], defaultValue + 200)
+        }
+    }
 }

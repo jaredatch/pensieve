@@ -8,7 +8,11 @@ enum TokenCounter {
 
     /// Check if a skill body exceeds a platform's token budget.
     static func budgetStatus(text: String, budget: Int) -> BudgetStatus {
-        let tokens = estimate(text)
+        budgetStatus(tokens: estimate(text), budget: budget)
+    }
+
+    /// Check an existing estimate against the same thresholds as the text estimate.
+    static func budgetStatus(tokens: Int, budget: Int) -> BudgetStatus {
         if tokens > budget {
             return .exceeded(tokens: tokens, budget: budget)
         } else if tokens > budget * 80 / 100 {
@@ -18,7 +22,7 @@ enum TokenCounter {
         }
     }
 
-    enum BudgetStatus {
+    enum BudgetStatus: Equatable {
         case ok(tokens: Int, budget: Int)
         case warning(tokens: Int, budget: Int)
         case exceeded(tokens: Int, budget: Int)

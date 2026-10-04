@@ -42,4 +42,13 @@ final class TokenCounterTests: XCTestCase {
             XCTFail("Expected .exceeded")
         }
     }
+
+    func testTokenAndTextBudgetChecksAgreeAtBoundaries() {
+        for tokens in [799, 800, 801, 1_000, 1_001] {
+            let text = String(repeating: "a", count: tokens * Constants.charsPerToken)
+
+            XCTAssertEqual(TokenCounter.budgetStatus(tokens: tokens, budget: 1_000),
+                           TokenCounter.budgetStatus(text: text, budget: 1_000))
+        }
+    }
 }

@@ -211,13 +211,15 @@ Token counting uses **char/4 heuristic** (1 token ≈ 4 characters). Advisory, n
 
 | Status | Condition | UI |
 |--------|-----------|-----|
-| OK | < 80% of budget | No indicator |
-| Warning | 80-100% of budget | Yellow |
-| Exceeded | > 100% of budget | Red |
+| OK | ≤ 80% of budget | No indicator |
+| Warning | > 80% through 100% of budget | Yellow triangle |
+| Exceeded | > 100% of budget | Red triangle and text |
 
 Default budgets: Claude Code 2,500, Grok 2,500, Cursor 5,000, Codex unlimited. User-configurable in Settings.
 
-Settings stores the budgets, but nothing reads them yet. `TokenCounter.budgetStatus` has no caller, so no skill shows the Warning or Exceeded state (#52).
+The Overview tab's Context cost card shows a warning beside the raw-file token estimate. It compares the estimate with each platform's budget when the skill is deployed user-wide or in a registered project on this Mac. Undeployed skills and unlimited budgets show no warning.
+
+The card names the worst platform: Exceeded before Warning, then the smaller budget, then Settings order if budgets tie.
 
 ---
 
