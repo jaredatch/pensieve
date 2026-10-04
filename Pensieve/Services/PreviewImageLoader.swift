@@ -6,10 +6,6 @@ protocol PreviewImageLoading {
     func loadImage(at url: URL, skillDirectory: String?, budget: PreviewImageBudgeting?) throws -> CGImage
 }
 
-protocol PreviewImageBudgeting {
-    func reserve(_ pixels: Int) throws
-}
-
 enum PreviewImageError: Error {
     case blocked, invalidImage
 }
@@ -42,6 +38,7 @@ struct PreviewImageLoader: PreviewImageLoading {
     }
 
     func loadImage(at url: URL, skillDirectory: String?, budget: PreviewImageBudgeting? = nil) throws -> CGImage {
+        try budget?.checkAvailable()
         let data: Data
         if url.scheme?.lowercased() == "data" {
             data = try embeddedData(url)

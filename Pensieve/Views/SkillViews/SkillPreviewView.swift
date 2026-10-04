@@ -26,7 +26,7 @@ struct SkillPreviewView: View {
                              revision: imageRevision, colorScheme: colorScheme))
     }
 
-    func imageProvider(budget: PreviewImageDecodeBudget, colorScheme: ColorScheme = .light) -> PreviewImageProvider {
+    func imageProvider(budget: PreviewImageBudgeting, colorScheme: ColorScheme) -> PreviewImageProvider {
         PreviewImageProvider(loader: imageLoader, skillDirectory: skillDirectory,
                              documentRelativePath: documentRelativePath, colorScheme: colorScheme, budget: budget)
     }
@@ -43,7 +43,7 @@ struct SkillPreviewView: View {
 private struct RenderedSkillMarkdown: View {
     let preview: SkillPreviewView
     let colorScheme: ColorScheme
-    @State private var budget = PreviewImageDecodeBudget()
+    @State private var budget: PreviewImageBudgeting = PreviewImageDecodeBudget()
 
     var body: some View {
         let imageProvider = preview.imageProvider(budget: budget, colorScheme: colorScheme)
@@ -56,6 +56,10 @@ private struct RenderedSkillMarkdown: View {
             }
             .textSelection(.enabled)
             .padding(Spacing.lg)
+            .id(ObjectIdentifier(budget))
+            .onAppear {
+                if budget.isCancelled { budget = PreviewImageDecodeBudget() }
+            }
             .onDisappear { budget.cancel() }
     }
 }

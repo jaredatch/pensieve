@@ -15,7 +15,7 @@ final class SkillPreviewContextTests: XCTestCase {
         try files.files.writeData(at: base + "/outside.png", data: PreviewImageFixture.png())
         let library = SkillLibraryViewModel(fileService: files, manifestRoot: base)
         let preview = tab(library, file: "references/guide.md").preview(markdownBody: "", skillsBase: base)
-        let provider = preview.imageProvider(budget: PreviewImageDecodeBudget())
+        let provider = preview.imageProvider(budget: PreviewImageDecodeBudget(), colorScheme: .light)
         let loaded = await provider.loadImage(url: URL(string: "diagram.png"))
         XCTAssertEqual(try XCTUnwrap(loaded).width, 32)
         let expectedPath = URL(fileURLWithPath: root + "/references/diagram.png").standardizedFileURL.path
@@ -36,7 +36,7 @@ final class SkillPreviewContextTests: XCTestCase {
                                        store: SkillStore(fileService: files, baseDir: base + "/skills"),
                                        workingDir: base, onDismiss: {})
         let preview = history.preview(for: SkillHistorySelection(sha: "old", document: "Past version"))
-        let provider = preview.imageProvider(budget: PreviewImageDecodeBudget())
+        let provider = preview.imageProvider(budget: PreviewImageDecodeBudget(), colorScheme: .light)
         let local = await provider.loadImage(url: URL(string: "diagram.png"))
         XCTAssertNil(local)
         let absolute = await provider.loadImage(url: URL(fileURLWithPath: base + "/skills/skill/diagram.png"))
@@ -81,7 +81,8 @@ final class SkillPreviewContextTests: XCTestCase {
         }
         XCTAssertEqual(files.bytesRead - before, changed.count * 2)
         let preview = tab(library, file: "SKILL.md").preview(markdownBody: "", skillsBase: base)
-        let decoded = await preview.imageProvider(budget: PreviewImageDecodeBudget()).loadImage(url: URL(string: "diagram.png"))
+        let provider = preview.imageProvider(budget: PreviewImageDecodeBudget(), colorScheme: .light)
+        let decoded = await provider.loadImage(url: URL(string: "diagram.png"))
         XCTAssertEqual(try XCTUnwrap(decoded).width, 16)
         XCTAssertEqual(try XCTUnwrap(decoded).height, 12)
         XCTAssertEqual(library.reloadToken, token, "An asset change is an echo for SKILL.md")

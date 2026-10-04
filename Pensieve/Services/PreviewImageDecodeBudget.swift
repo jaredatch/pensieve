@@ -1,6 +1,14 @@
 import Foundation
 import CoreGraphics
 
+protocol PreviewImageBudgeting: AnyObject {
+    var isCancelled: Bool { get }
+    func checkAvailable() throws
+    func reserve(_ pixels: Int) throws
+    func cancel()
+    func load(_ work: @escaping () -> CGImage?) async -> CGImage?
+}
+
 /// Owned by one rendered document and shared by its block and inline providers. Serial dispatch
 /// keeps compressed buffers bounded while awaiting callers suspend outside the cooperative pool.
 /// Charges declared source pixels, including repeats and failed decodes, before ImageIO decodes.
@@ -10,6 +18,14 @@ final class PreviewImageDecodeBudget: PreviewImageBudgeting {
     private let lock = NSLock()
     private var remainingPixels = maximumPixels
     private var cancelled = false
+
+    var isCancelled: Bool { lock.withLock { cancelled } }
+
+    func checkAvailable() throws {
+        try lock.withLock {
+            guard remainingPixels > 0 else { throw PreviewImageError.blocked }
+        }
+    }
 
     func reserve(_ pixels: Int) throws {
         try lock.withLock {

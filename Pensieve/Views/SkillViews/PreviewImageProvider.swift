@@ -17,7 +17,7 @@ struct PreviewImageProvider: ImageProvider, InlineImageProvider {
     let skillDirectory: String?
     var documentRelativePath = "SKILL.md"
     var colorScheme: ColorScheme = .light
-    let budget: PreviewImageDecodeBudget
+    let budget: PreviewImageBudgeting
 
     func makeImage(url: URL?) -> some View {
         PreviewBlockImage(url: url, provider: self)

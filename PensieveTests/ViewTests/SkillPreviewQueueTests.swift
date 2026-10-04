@@ -1,18 +1,43 @@
 import AppKit
+import Observation
 import SwiftUI
 import XCTest
 @testable import Pensieve
 
 @MainActor
 final class SkillPreviewQueueTests: XCTestCase {
+    func testRetainedPreviewStateLoadsImagesAfterReappearing() async throws {
+        let loader = try PausedPreviewImageLoader(pausesFirst: false)
+        let state = PreviewTabState()
+        let markdown = "![Retained](\(try embeddedURL().absoluteString))"
+        let host = NSHostingView(rootView: PreviewTabHarness(state: state, markdown: markdown, loader: loader))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        window.orderFront(nil)
+        host.layoutSubtreeIfNeeded()
+        await TestWait.until(failureMessage: "The preview must load on first appearance") { loader.finished == 1 }
+        state.selection = 1
+        await TestWait.until(failureMessage: "Switching tabs must make the preview disappear") { state.disappearances == 1 }
+        state.selection = 0
+        await TestWait.until(failureMessage: "The retained preview must appear again") { state.appearances == 2 }
+        await TestWait.until(timeout: .seconds(2), failureMessage: "Retained preview state must load after reappearing") {
+            loader.finished == 2
+        }
+        XCTAssertEqual(loader.decoded.count, 2, "A reappearing preview must decode its image again")
+        XCTAssertEqual(Set(state.identities).count, 1, "The tab must keep its SwiftUI state across appearances")
+    }
+
     func testProductionProviderFactorySharesTheSuppliedDocumentBudget() async throws {
         let bytes = try PreviewImagePolicyFixtures.png(width: 1_000, height: 1_000)
         let url = try XCTUnwrap(URL(string: "data:image/png;base64," + bytes.base64EncodedString()))
         let pixel = try PreviewImageFixture.decodedPNG()
         let preview = SkillPreviewView(markdownBody: "", imageLoader: PreviewImageLoader(decode: { _ in pixel }))
         let budget = PreviewImageDecodeBudget()
-        let block = preview.imageProvider(budget: budget)
-        let inline = preview.imageProvider(budget: budget)
+        let block = preview.imageProvider(budget: budget, colorScheme: .light)
+        let inline = preview.imageProvider(budget: budget, colorScheme: .light)
         XCTAssertTrue(block.budget === budget)
         XCTAssertTrue(inline.budget === budget)
         for _ in 0..<64 {
@@ -82,12 +107,21 @@ final class SkillPreviewQueueTests: XCTestCase {
             await TestWait.until(failureMessage: "The old document must start its first decode") {
                 loader.decoded.count == 1
             }
+            // These requests deliberately outlive the view's structured block tasks. Only the
+            // rendered document's cancellation can prevent their pending work from starting.
+            let budget = try XCTUnwrap(loader.documentBudget)
+            let provider = PreviewImageProvider(loader: loader, skillDirectory: nil, budget: budget)
+            let pending = (0..<8).map { _ in Task.detached { await provider.loadImage(url: URL(string: url)) } }
             host.rootView = rebuild
                 ? AnyView(SkillPreviewView(markdownBody: "![New](\(url))", scrolls: false, imageLoader: loader))
                 : AnyView(Text("Preview removed"))
             host.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(100))
             loader.release()
+            for task in pending {
+                let image = await task.value
+                XCTAssertNil(image, "Document cancellation must refuse requests that outlive its block tasks")
+            }
             await TestWait.until(failureMessage: "The running decode may finish, and the new document must load") {
                 loader.finished >= (rebuild ? 2 : 1)
             }
@@ -109,21 +143,54 @@ private final class PausedPreviewImageLoader: PreviewImageLoading {
     private let lock = NSLock()
     private let gate = DispatchSemaphore(value: 0)
     private let pixel: CGImage
+    private let pausesFirst: Bool
+    private var capturedBudget: PreviewImageBudgeting?
     private var urls: [URL] = []
     private var completions = 0
     var decoded: [URL] { lock.withLock { urls } }
     var finished: Int { lock.withLock { completions } }
+    var documentBudget: PreviewImageBudgeting? { lock.withLock { capturedBudget } }
 
-    init() throws { pixel = try PreviewImageFixture.decodedPNG() }
+    init(pausesFirst: Bool = true) throws {
+        pixel = try PreviewImageFixture.decodedPNG()
+        self.pausesFirst = pausesFirst
+    }
     func release() { gate.signal() }
 
     func loadImage(at url: URL, skillDirectory: String?, budget: PreviewImageBudgeting?) throws -> CGImage {
+        lock.withLock { capturedBudget = budget }
         defer { lock.withLock { completions += 1 } }
         return try PreviewImageLoader(decode: { [self] _ in
             let first = lock.withLock { urls.append(url); return urls.count == 1 }
-            if first { _ = gate.wait(timeout: .now() + 10) }
+            if first && pausesFirst { _ = gate.wait(timeout: .now() + 10) }
             return pixel
         }).loadImage(at: url, skillDirectory: skillDirectory, budget: budget)
+    }
+}
+
+@MainActor
+@Observable
+private final class PreviewTabState {
+    var selection = 0
+    var appearances = 0
+    var disappearances = 0
+    var identities: [UUID] = []
+}
+
+private struct PreviewTabHarness: View {
+    @Bindable var state: PreviewTabState
+    let markdown: String
+    let loader: PreviewImageLoading
+    @State private var identity = UUID()
+
+    var body: some View {
+        TabView(selection: $state.selection) {
+            SkillPreviewView(markdownBody: markdown, scrolls: false, imageLoader: loader)
+                .onAppear { state.appearances += 1; state.identities.append(identity) }
+                .onDisappear { state.disappearances += 1 }
+                .tabItem { Text("Preview") }.tag(0)
+            Text("Other tab").tabItem { Text("Other") }.tag(1)
+        }
     }
 }
 
