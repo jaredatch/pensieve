@@ -70,14 +70,14 @@ final class SkillPreviewContextTests: XCTestCase {
         defer { window.close() }
         window.orderFront(nil)
         host.layoutSubtreeIfNeeded()
-        await TestWait.until(failureMessage: "Mounted block and inline images must load") { files.reads.count == 2 }
+        await TestWait.until(failureMessage: "Mounted block and inline images must load") { files.finishedReads == 2 }
         let before = files.bytesRead
         let token = library.reloadToken
         let changed = try croppedPNG()
         try files.files.writeData(at: imagePath, data: changed)
         watcher.emit(slug)
         await TestWait.until(failureMessage: "The same mounted preview must reload both changed local images") {
-            files.reads.count == 4
+            files.finishedReads == 4
         }
         XCTAssertEqual(files.bytesRead - before, changed.count * 2)
         let preview = tab(library, file: "SKILL.md").preview(markdownBody: "", skillsBase: base)

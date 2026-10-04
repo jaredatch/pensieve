@@ -25,7 +25,7 @@ enum PreviewImageFixture {
     }
 }
 
-/// Models both bounded-read variants on a temporary tree. Records the actual descriptor callbacks,
+/// Models both bounded-read variants on a temporary tree. Records read starts, finishes and descriptor bytes,
 /// refusing an explicitly modeled unreadable path before reading. Other filesystem operations forward
 /// to FileService. It does not perform network I/O or model permission failures via host privileges.
 final class PreviewImageFileSpy: FileServiceProtocol {
@@ -40,12 +40,15 @@ final class PreviewImageFileSpy: FileServiceProtocol {
     private(set) var writes: [String] = []
     private let lock = NSLock()
     private var recordedReads: [Read] = []
+    private var recordedFinishedReads = 0
     private var recordedBytes = 0
     var reads: [Read] { lock.withLock { recordedReads } }
+    var finishedReads: Int { lock.withLock { recordedFinishedReads } }
     var bytesRead: Int { lock.withLock { recordedBytes } }
 
     func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data {
         lock.withLock { recordedReads.append(Read(path: path, limit: maximumBytes, root: directory)) }
+        defer { lock.withLock { recordedFinishedReads += 1 } }
         if let unreadablePath,
            URL(fileURLWithPath: path).standardizedFileURL == URL(fileURLWithPath: unreadablePath).standardizedFileURL {
             throw CocoaError(.fileReadNoPermission)
