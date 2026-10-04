@@ -24,6 +24,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- History's line counts for your local edits now match what `git diff` reports.
 - Pensieve could freeze while running git on Macs with only a few cores. Several git commands at once could wait on each other forever. They don't anymore.
 - A crafted `SKILL.md` could trick Pensieve into rewriting the wrong line of its frontmatter on import or upgrade. Pensieve now only rewrites a key when it and the YAML parser agree on exactly where that key starts, and it double-checks the result. If anything looks off, the file stays as it was.
 - Saving a skill with Windows line endings no longer shows up as a change made outside the app.

@@ -109,13 +109,15 @@ private extension UpstreamHistoryService {
             true
         }
     }
+}
 
+extension UpstreamHistoryService {
     func lineCounts(
         installed: UpstreamHistoryFileContent?,
         current: UpstreamHistoryFileContent?
     ) -> (added: Int, removed: Int)? {
-        let before: [String]
-        let after: [String]
+        let before: [Data]
+        let after: [Data]
         switch installed {
         case let .text(text): before = lines(in: text)
         case nil: before = []
@@ -137,22 +139,28 @@ private extension UpstreamHistoryService {
         return (added, removed)
     }
 
-    func lines(in text: String) -> [String] {
-        guard !text.isEmpty else { return [] }
-        var lines = text.split(
-            omittingEmptySubsequences: false,
-            whereSeparator: \.isNewline
-        ).map(String.init)
-        if text.last?.isNewline == true { lines.removeLast() }
+    private func lines(in text: String) -> [Data] {
+        // Git compares bytes and includes the LF terminator in each line's identity.
+        let bytes = Data(text.utf8)
+        var start = bytes.startIndex
+        var lines: [Data] = []
+        for index in bytes.indices where bytes[index] == 0x0a {
+            let end = bytes.index(after: index)
+            lines.append(bytes.subdata(in: start..<end))
+            start = end
+        }
+        if start != bytes.endIndex {
+            lines.append(bytes.subdata(in: start..<bytes.endIndex))
+        }
         return lines
     }
 
-    func text(from content: UpstreamHistoryFileContent?) -> String? {
+    private func text(from content: UpstreamHistoryFileContent?) -> String? {
         guard case let .text(text) = content else { return nil }
         return text
     }
 
-    func bytewiseLess(_ lhs: String, _ rhs: String) -> Bool {
+    private func bytewiseLess(_ lhs: String, _ rhs: String) -> Bool {
         Data(lhs.utf8).lexicographicallyPrecedes(Data(rhs.utf8))
     }
 }
