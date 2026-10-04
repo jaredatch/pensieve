@@ -26,10 +26,12 @@ extension SkillInstallService {
         }
         return try withCheckout(source: source, credential: credential) { checkoutPath in
             var directory = checkoutPath
+            var relative = ""
             for component in candidate.path.split(separator: "/") {
                 directory += "/" + component
+                relative += (relative.isEmpty ? "" : "/") + component
                 guard try fileService.entryTypeWithoutFollowingLinks(at: directory) == .directory else {
-                    throw SkillInstallError.unavailableCandidate("Unsafe upstream directory: .")
+                    throw SkillInstallError.unavailableCandidate("Unsafe upstream directory: \(relative)")
                 }
             }
             guard try gitService.treeHash(at: checkoutPath, path: candidate.path) == candidate.treeHash else {
@@ -39,22 +41,13 @@ extension SkillInstallService {
         }
     }
 
-    /// Normal-size files validate in full. Oversized bodies validate a bounded UTF-8 prefix,
-    /// retaining apply's strict frontmatter gate without discovery's whole-file allocation.
+    /// Checks required nonempty name/description frontmatter and UTF-8 in the bounded prefix.
+    /// Oversized bodies are not validated beyond that prefix; apply still validates the whole file.
     func requirePreviewInstallable(_ candidate: SkillCandidate, at path: String) throws {
         let maximum = FileTreeComparisonLimits.updatePreview.maximumFileBytes
-        let data: Data
-        var prefix = false
-        do {
-            data = try fileService.readRegularFileData(at: path, maximumBytes: maximum)
-        } catch {
-            let failure = error as NSError
-            guard failure.domain == NSCocoaErrorDomain, failure.code == CocoaError.Code.fileReadTooLarge.rawValue else {
-                throw error
-            }
-            prefix = true
-            data = try fileService.readRegularFilePrefix(at: path, maximumBytes: maximum)
-        }
+        let bounded = try fileService.readRegularFilePrefix(at: path, maximumBytes: maximum + 1)
+        let prefix = bounded.count > maximum
+        let data = prefix ? bounded.prefix(maximum) : bounded
         var text = String(data: data, encoding: .utf8)
         // A prefix may end in the middle of a UTF-8 scalar; a complete file must never be repaired.
         if prefix && text == nil {

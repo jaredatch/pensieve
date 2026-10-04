@@ -5,8 +5,8 @@ final class UnifiedDiffWorkTests: XCTestCase {
     func testDiffPastWorkBoundHasNoCountsAndWorstCaseStaysWithinFiveTimesBenign() throws {
         // A small adversarial pair exposes the missing bound without hanging an old implementation
         // on the 209,715-line fixture. The same test reaches the full-size timing after that guard.
-        let canary = preview(old: String(repeating: "aaaa\n", count: 1_600),
-                             new: String(repeating: "bbbb\n", count: 1_600))
+        let canary = preview(old: String(repeating: "aaaa\n", count: 5_000),
+                             new: String(repeating: "bbbb\n", count: 5_000))
         guard canary.files.first?.content == .tooLarge else {
             XCTFail("The adversarial pair must hit the named diff work bound")
             return

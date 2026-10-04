@@ -67,7 +67,7 @@ extension FileService {
         let (descriptor, status) = try Self.openRegularFile(at: path)
         defer { close(descriptor) }
         guard status.st_size >= 0 else { throw CocoaError(.fileReadUnknown) }
-        var result = Data(count: min(maximumBytes, Int(status.st_size)))
+        var result = Data(count: maximumBytes)
         var offset = 0
         while offset < result.count {
             try Task.checkCancellation()

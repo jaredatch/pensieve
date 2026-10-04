@@ -117,6 +117,74 @@ extension UpdatesViewModelTests {
         }
     }
 
+    func testPreviewReadErrorsRespectDomainsAndHandleWideCodes() throws {
+        let fixture = try prepareRealPinnedUpdate()
+        let cases: [(NSError, String)] = [
+            (NSError(domain: NSCocoaErrorDomain, code: Int(ELOOP)), "could not be read"),
+            (CocoaError(.fileReadNoPermission) as NSError, "permission denied"),
+            (NSError(domain: NSPOSIXErrorDomain, code: Int.max), "could not be read"),
+            (NSError(domain: NSPOSIXErrorDomain, code: Int.min), "could not be read"),
+            (NSError(domain: NSPOSIXErrorDomain, code: Int(ELOOP)), "symbolic links")
+        ]
+        for (failure, reason) in cases {
+            let spy = ImportBoundedReadSpy()
+            spy.comparisonFailure = { _, upstream in
+                throw NSError(domain: failure.domain, code: failure.code,
+                              userInfo: [NSFilePathErrorKey: upstream + "/nested/file"])
+            }
+            let service = makePreviewService(fixture: fixture, spy: spy)
+            var message = ""
+            XCTAssertThrowsError(try service.previewUpdate(PinnedSkillUpdate(skill: fixture.skill))) {
+                message = $0.localizedDescription
+            }
+            // Keep the old implementation's readable domain regression before its trapping case.
+            guard message.contains(reason) else { return XCTFail("Expected \(reason), got \(message)") }
+            XCTAssertTrue(message.contains("nested/file"))
+            XCTAssertFalse(message.contains("preview-scratch"))
+        }
+    }
+
+    func testPreviewChecksInstallabilityBeforeComparison() throws {
+        let fixture = try prepareRealPinnedUpdate()
+        try fileService.writeFile(at: fixture.repository + "/skills/vendor/SKILL.md",
+                                  content: "---\nname: Broken\ndescription: ''\n---\nbody\n")
+        fixture.skill.upstreamCommit = try commit(fixture.repository, message: "invalid before comparison")
+        fixture.skill.upstreamTree = try GitService().treeHash(at: fixture.repository, path: "skills/vendor")
+        let spy = ImportBoundedReadSpy()
+        XCTAssertThrowsError(try makePreviewService(fixture: fixture, spy: spy)
+            .previewUpdate(PinnedSkillUpdate(skill: fixture.skill)))
+        XCTAssertTrue(spy.comparisonThreads.isEmpty, "Invalid frontmatter must refuse before inventory or content comparison")
+    }
+
+    func testPreviewInstallabilityReadsSkillMarkdownOnceWithinBoundPlusOne() throws {
+        let fixture = try prepareRealPinnedUpdate()
+        let maximum = FileTreeComparisonLimits.updatePreview.maximumFileBytes
+        let header = "---\nname: Huge\ndescription: Huge skill\n---\n"
+        for size in [maximum, maximum + 1, maximum * 2] {
+            try fileService.writeFile(at: fixture.repository + "/skills/vendor/SKILL.md",
+                                      content: header + String(repeating: "a", count: size - header.utf8.count))
+            fixture.skill.upstreamCommit = try commit(fixture.repository, message: "bounded admission \(size)")
+            fixture.skill.upstreamTree = try GitService().treeHash(at: fixture.repository, path: "skills/vendor")
+            let spy = ImportBoundedReadSpy()
+            _ = try makePreviewService(fixture: fixture, spy: spy).previewUpdate(PinnedSkillUpdate(skill: fixture.skill))
+            XCTAssertEqual(spy.readAttempts.count, 1, "One bounded admission read, including oversized bodies")
+            XCTAssertEqual(Array(spy.limits.values), [maximum + 1])
+        }
+    }
+
+    func testUnsafeUpstreamDirectoryNamesFailingRelativeComponent() throws {
+        let fixture = try prepareRealPinnedUpdate()
+        for relative in ["skills/vendor", "skills"] {
+            try fileService.deleteDirectory(at: fixture.repository + "/" + relative)
+            try fileService.createSymlink(at: fixture.repository + "/" + relative, pointingTo: "/etc")
+            fixture.skill.upstreamCommit = try commit(fixture.repository, message: "unsafe parent \(relative)")
+            XCTAssertThrowsError(try fixture.service.previewUpdate(PinnedSkillUpdate(skill: fixture.skill))) { error in
+                XCTAssertTrue(error.localizedDescription.contains("Unsafe upstream directory: \(relative)"))
+                XCTAssertFalse(error.localizedDescription.contains("install-scratch"))
+            }
+        }
+    }
+
     private func makePreviewService(fixture: RealFixture, spy: ImportBoundedReadSpy) -> SkillInstallService {
         SkillInstallService(gitService: GitService(fileService: fileService), credentialStore: InMemoryCredentialStore(),
                             fileService: spy, scratchRoot: tempDir + "/preview-scratch", storeRoot: fixture.storeRoot,

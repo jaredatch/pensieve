@@ -65,6 +65,45 @@ final class UnifiedDiffTests: XCTestCase {
         }
     }
 
+    func testLargeRealisticRewritesGetFullDiffsMatchingGitNumstat() throws {
+        let old = (0..<2_500).map { "old \($0)\n" }.joined()
+        let new = (0..<2_500).map { "new \($0)\n" }.joined()
+        let baseline = (0..<2_000).map { "line \($0)\n" }
+        var scattered = baseline
+        for index in stride(from: 0, to: 2_000, by: 7) { scattered[index] = "changed \(index)\n" }
+        let pairs = [(old, new), ("", String(repeating: "added\n", count: 300)),
+                     (baseline.joined(), scattered.joined())]
+        let root = NSTemporaryDirectory() + "LargeDiffOracle-\(UUID().uuidString)"
+        let files = FileService()
+        try files.createDirectory(at: root)
+        defer { try? files.deleteDirectory(at: root) }
+        for (old, new) in pairs {
+            try files.writeFile(at: root + "/old", content: old)
+            try files.writeFile(at: root + "/new", content: new)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["--no-pager", "diff", "--numstat", "--no-index", "--no-ext-diff", "--no-textconv",
+                                 "--", root + "/old", root + "/new"]
+            process.environment = ["PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"]
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = Pipe()
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 1)
+            let fields = try XCTUnwrap(String(data: data, encoding: .utf8)).split(separator: "\t")
+            let preview = PinnedSkillDiff(comparison: FileTreeComparison(changes: [FileTreeChange(
+                path: "SKILL.md", kind: old.isEmpty ? .added : .modified, content: .text(old: old, new: new)
+            )], unreadFileCount: 0, bytesRead: 0))
+            let file = try XCTUnwrap(preview.files.first)
+            XCTAssertNotEqual(file.content, .tooLarge, "Realistic rewrites must have full diffs")
+            XCTAssertEqual(file.linesAdded, try XCTUnwrap(Int(fields[0])))
+            XCTAssertEqual(file.linesRemoved, try XCTUnwrap(Int(fields[1])))
+            assertReplay(old: old, new: new)
+        }
+    }
+
     private func assertReplay(old: String, new: String, file: StaticString = #filePath, line: UInt = #line) {
         let diff = UnifiedDiff(old: old, new: new)
         let oldLines = independentLines(old)

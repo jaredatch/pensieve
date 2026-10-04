@@ -18,6 +18,21 @@ extension FileTreeComparisonTests {
         XCTAssertEqual(result.bytesRead, 32 * 1_024 * 1_024 - 1, "an odd remaining byte cannot compare both sides")
         XCTAssertTrue(result.isIncomplete)
     }
+    func testSkillMarkdownIsComparedBeforeSmallerPairsAtBothBounds() throws {
+        try files.writeFile(at: old + "/SKILL.md", content: "old skill\n")
+        try files.writeFile(at: new + "/SKILL.md", content: "new skill\n")
+        for index in 0..<3 { try files.writeFile(at: new + "/small\(index)", content: "x") }
+        for limits in [FileTreeComparisonLimits(maximumFileBytes: 100, maximumFiles: 1, maximumTotalBytes: 100),
+                       FileTreeComparisonLimits(maximumFileBytes: 100, maximumFiles: 10, maximumTotalBytes: 20)] {
+            let result = try compare(limits: limits)
+            XCTAssertEqual(result.changes.map(\.path), ["SKILL.md"])
+            XCTAssertEqual(result.bytesRead, 20)
+            XCTAssertEqual(result.unreadFileCount, 3)
+        }
+        let complete = try compare()
+        XCTAssertEqual(complete.changes.map(\.path), ["SKILL.md", "small0", "small1", "small2"])
+    }
+
     func testFileCountStopsAtThousandWithExactUnreadCount() throws {
         for index in 0..<1_003 {
             try files.writeFile(at: new + String(format: "/file%04d", index), content: "line\n")

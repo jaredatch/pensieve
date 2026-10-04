@@ -29,6 +29,7 @@ extension FileService {
             try checkpoint(.directory($0))
         }
         let paths = Set(before.keys).union(after.keys).sorted {
+            if $0 == "SKILL.md" || $1 == "SKILL.md" { return $0 == "SKILL.md" && $1 != "SKILL.md" }
             let left = max(before[$0]?.status.st_size ?? 0, after[$0]?.status.st_size ?? 0)
             let right = max(before[$1]?.status.st_size ?? 0, after[$1]?.status.st_size ?? 0)
             return left == right ? $0.utf8.lexicographicallyPrecedes($1.utf8) : left < right

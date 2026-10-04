@@ -1,10 +1,10 @@
 import Foundation
 
-/// Myers' shortest edit path, with a bounded frontier and charged byte comparisons.
-/// Hash mismatches avoid rescanning long lines; matching hashes still compare exact UTF-8 bytes.
+/// Hirschberg's shortest edit script: two score rows per split, released before recursion.
+/// Work counts line comparisons and score cells, independently of edit distance.
 enum BoundedLineDifference {
-    static let maximumEditDistance = 256
-    static let maximumWork = 4 * 1_024 * 1_024
+    // Two 2,500-line sides need fewer than 2 * 2,500² cells, plus linear trimming.
+    static let maximumWork = 16 * 1_024 * 1_024
     static let checkpointInterval = 1_024
 
     struct Edits {
@@ -12,73 +12,122 @@ enum BoundedLineDifference {
         var added: Set<Int> = []
     }
 
-    struct Key {
-        let hash: UInt64
-        let count: Int
-        init(_ line: String) {
-            var hash: UInt64 = 14_695_981_039_346_656_037
-            for byte in line.utf8 { hash = (hash ^ UInt64(byte)) &* 1_099_511_628_211 }
-            self.hash = hash
-            count = line.utf8.count
-        }
-    }
-
     static func compute(before: [String], after: [String], checkpoint: (Int) throws -> Void) throws -> Edits? {
-        let oldKeys = before.map(Key.init)
-        let newKeys = after.map(Key.init)
-        let offset = maximumEditDistance + 1
-        var frontier = [Int](repeating: 0, count: 2 * maximumEditDistance + 3)
-        var trace: [[Int]] = []
-        var work = 0
-        var nextCheckpoint = checkpointInterval
-        for depth in 0...maximumEditDistance {
-            trace.append(frontier)
-            for diagonal in stride(from: -depth, through: depth, by: 2) {
-                work += 1
-                var x = diagonal == -depth || (diagonal != depth && frontier[offset + diagonal - 1]
-                    < frontier[offset + diagonal + 1])
-                    ? frontier[offset + diagonal + 1] : frontier[offset + diagonal - 1] + 1
-                var y = x - diagonal
-                while x < before.count && y < after.count {
-                    let sameHash = oldKeys[x].hash == newKeys[y].hash && oldKeys[x].count == newKeys[y].count
-                    work += sameHash ? oldKeys[x].count + 1 : 1
-                    if work > maximumWork { return nil }
-                    if work >= nextCheckpoint {
-                        try checkpoint(work)
-                        nextCheckpoint = work + checkpointInterval
-                    }
-                    guard sameHash && before[x].utf8.elementsEqual(after[y].utf8) else { break }
-                    x += 1
-                    y += 1
-                }
-                if work > maximumWork { return nil }
-                if work >= nextCheckpoint {
-                    try checkpoint(work)
-                    nextCheckpoint = work + checkpointInterval
-                }
-                frontier[offset + diagonal] = x
-                if x >= before.count && y >= after.count {
-                    return backtrack(trace: trace, depth: depth, oldCount: before.count, newCount: after.count, offset: offset)
-                }
+        // Data equality is byte-exact, unlike String's canonical Unicode equality.
+        // Interning scans the bounded input once; subsequent score cells compare integer identities.
+        var identities: [Data: Int] = [:]
+        func keys(_ lines: [String]) throws -> [Int] {
+            try lines.enumerated().map { index, line in
+                if index % checkpointInterval == 0 { try checkpoint(0) }
+                let bytes = Data(line.utf8)
+                if let identity = identities[bytes] { return identity }
+                let identity = identities.count
+                identities[bytes] = identity
+                return identity
             }
         }
-        return nil
+        let old = try keys(before)
+        let new = try keys(after)
+        return try withoutActuallyEscaping(checkpoint) { callback in
+            let search = Search(old: old, new: new, checkpoint: callback)
+            do {
+                try search.match(old.indices, new.indices)
+                return search.edits
+            } catch Failure.workExceeded { return nil }
+        }
     }
 
-    private static func backtrack(trace: [[Int]], depth: Int, oldCount: Int, newCount: Int, offset: Int) -> Edits {
-        var x = oldCount
-        var y = newCount
-        var edits = Edits()
-        for distance in stride(from: depth, through: 1, by: -1) {
-            let frontier = trace[distance]
-            let diagonal = x - y
-            let previous = diagonal == -distance || (diagonal != distance && frontier[offset + diagonal - 1]
-                < frontier[offset + diagonal + 1]) ? diagonal + 1 : diagonal - 1
-            let previousX = frontier[offset + previous]
-            let previousY = previousX - previous
-            while x > previousX && y > previousY { x -= 1; y -= 1 }
-            if x == previousX { y -= 1; edits.added.insert(y) } else { x -= 1; edits.removed.insert(x) }
+    private enum Failure: Error { case workExceeded }
+
+    private final class Search {
+        let old: [Int]
+        let new: [Int]
+        let checkpoint: (Int) throws -> Void
+        var edits: Edits
+        var work = 0
+        var nextCheckpoint = checkpointInterval
+
+        init(old: [Int], new: [Int], checkpoint: @escaping (Int) throws -> Void) {
+            self.old = old
+            self.new = new
+            self.checkpoint = checkpoint
+            edits = Edits(removed: Set(old.indices), added: Set(new.indices))
         }
-        return edits
+
+        func charge() throws {
+            guard work < maximumWork else { throw Failure.workExceeded }
+            work += 1
+            if work >= nextCheckpoint {
+                try checkpoint(work)
+                nextCheckpoint = work + checkpointInterval
+            }
+        }
+
+        func keep(_ before: Int, _ after: Int) {
+            edits.removed.remove(before)
+            edits.added.remove(after)
+        }
+
+        func match(_ before: Range<Int>, _ after: Range<Int>) throws {
+            var left = before
+            var right = after
+            while !left.isEmpty && !right.isEmpty {
+                try charge()
+                guard old[left.lowerBound] == new[right.lowerBound] else { break }
+                keep(left.lowerBound, right.lowerBound)
+                left = (left.lowerBound + 1)..<left.upperBound
+                right = (right.lowerBound + 1)..<right.upperBound
+            }
+            while !left.isEmpty && !right.isEmpty {
+                try charge()
+                guard old[left.upperBound - 1] == new[right.upperBound - 1] else { break }
+                keep(left.upperBound - 1, right.upperBound - 1)
+                left = left.lowerBound..<(left.upperBound - 1)
+                right = right.lowerBound..<(right.upperBound - 1)
+            }
+            guard !left.isEmpty && !right.isEmpty else { return }
+            if left.count == 1 {
+                for index in right {
+                    try charge()
+                    if old[left.lowerBound] == new[index] { keep(left.lowerBound, index); break }
+                }
+                return
+            }
+            let middle = left.lowerBound + left.count / 2
+            let boundary = try split(left, right, middle: middle)
+            try match(left.lowerBound..<middle, right.lowerBound..<boundary)
+            try match(middle..<left.upperBound, boundary..<right.upperBound)
+        }
+
+        func split(_ before: Range<Int>, _ after: Range<Int>, middle: Int) throws -> Int {
+            // This split necessarily evaluates count(old) * count(new) score cells.
+            // Refuse work that cannot fit before starting it (also avoids multiplying large counts).
+            guard before.count <= (maximumWork - work) / after.count else { throw Failure.workExceeded }
+            let forward = try scores(before.lowerBound..<middle, after, reversed: false)
+            let backward = try scores(middle..<before.upperBound, after, reversed: true)
+            var best = -1
+            var boundary = 0
+            for index in 0...after.count {
+                let score = forward[index] + backward[after.count - index]
+                if score > best { best = score; boundary = index }
+            }
+            return after.lowerBound + boundary
+        }
+
+        func scores(_ before: Range<Int>, _ after: Range<Int>, reversed: Bool) throws -> [Int] {
+            var row = [Int](repeating: 0, count: after.count + 1)
+            for offset in 0..<before.count {
+                let oldIndex = reversed ? before.upperBound - 1 - offset : before.lowerBound + offset
+                var diagonal = 0
+                for column in 1...after.count {
+                    try charge()
+                    let above = row[column]
+                    let newIndex = reversed ? after.upperBound - column : after.lowerBound + column - 1
+                    row[column] = old[oldIndex] == new[newIndex] ? diagonal + 1 : max(above, row[column - 1])
+                    diagonal = above
+                }
+            }
+            return row
+        }
     }
 }

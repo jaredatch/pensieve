@@ -108,11 +108,11 @@ extension SkillInstallService {
                     throw SkillInstallError.unavailableCandidate("Unsafe upstream file: SKILL.md")
                 }
                 do {
+                    try requirePreviewInstallable(update.candidate, at: upstreamDirectory + "/SKILL.md")
                     let comparison = try fileService.compareFileTrees(
                         local: localDirectory, upstream: upstreamDirectory,
                         excludingUpstreamGit: update.candidate.path.isEmpty, limits: .updatePreview
                     )
-                    try requirePreviewInstallable(update.candidate, at: upstreamDirectory + "/SKILL.md")
                     return try PinnedSkillDiff.build(comparison: comparison)
                 } catch {
                     throw previewReadError(error, local: localDirectory, upstream: upstreamDirectory)
@@ -130,16 +130,32 @@ extension SkillInstallService {
         let root = isUpstream ? upstream : local
         guard path == root || path.hasPrefix(root + "/") else { return error }
         let relative = path == root ? "." : String(path.dropFirst(root.count + 1))
-        let reason: String
-        switch Int32(failure.code) {
-        case ELOOP, EFTYPE: reason = "symbolic links and special files cannot be previewed"
-        case EACCES, EPERM: reason = "permission denied"
-        case ENOENT, ENOTDIR: reason = "the file or folder is no longer available"
-        case ESTALE: reason = "the folder changed while being read"
-        default: reason = "the file or folder could not be read"
-        }
+        let reason = previewReadReason(failure)
         let message = "Cannot preview \(isUpstream ? "upstream" : "local") path \(relative): \(reason)."
         return isUpstream ? SkillInstallError.unavailableCandidate(message) : SkillUpdateFlowError.previewReadFailed(message)
+    }
+
+    private func previewReadReason(_ failure: NSError) -> String {
+        guard failure.domain == NSPOSIXErrorDomain else { return cocoaPreviewReadReason(failure) }
+        guard let code = Int32(exactly: failure.code) else { return "the file or folder could not be read" }
+        switch code {
+        case ELOOP, EFTYPE: return "symbolic links and special files cannot be previewed"
+        case EACCES, EPERM: return "permission denied"
+        case ENOENT, ENOTDIR: return "the file or folder is no longer available"
+        case ESTALE: return "the folder changed while being read"
+        default: return "the file or folder could not be read"
+        }
+    }
+
+    private func cocoaPreviewReadReason(_ failure: NSError) -> String {
+        guard failure.domain == NSCocoaErrorDomain else { return "the file or folder could not be read" }
+        switch CocoaError.Code(rawValue: failure.code) {
+        case .fileReadNoPermission: return "permission denied"
+        case .fileNoSuchFile, .fileReadNoSuchFile: return "the file or folder is no longer available"
+        case .fileReadCorruptFile: return "the file is damaged"
+        case .fileReadTooLarge: return "the file is too large to read"
+        default: return "the file or folder could not be read"
+        }
     }
 
     func applyUpdate(_ update: PinnedSkillUpdate, allowLocalOverwrite: Bool,
