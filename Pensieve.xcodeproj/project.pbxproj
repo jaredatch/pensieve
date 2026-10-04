@@ -450,6 +450,7 @@
 		AE3E8053DC12A163E7634A7C /* MachineStateServiceTests+WriterSweep.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C53316E36F9F798576383C6 /* MachineStateServiceTests+WriterSweep.swift */; };
 		AE510BA35D1840EFCA7DEE5B /* AppRuntime+SyncAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F2685BF67F967CA7D3DA605 /* AppRuntime+SyncAccess.swift */; };
 		AF010B012967DD03167BA3ED /* SkillPreservingWriteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36220C1B93D033158A22A6F9 /* SkillPreservingWriteTests.swift */; };
+		AF083D1AF0A409449913472B /* Pensieve.icon in Resources */ = {isa = PBXBuildFile; fileRef = AC3C6F3A42E820C1CFCC5DC3 /* Pensieve.icon */; };
 		AFE7E378D7019C20091C1FF2 /* TestThreadSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD39D754D5222F81631DB38A /* TestThreadSample.swift */; };
 		B006BFE1BE62A1672C0320F7 /* SkillDetailHeaderPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 459D41F7A2012C7238F45C7D /* SkillDetailHeaderPresentationTests.swift */; };
 		B038124B2473877170EC5675 /* ManifestDeployIntentConcurrencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6798CCD9744E35660346064 /* ManifestDeployIntentConcurrencyTests.swift */; };
@@ -1158,6 +1159,7 @@
 		AB2619AE4003CE4E4DF8B68D /* AppRuntimeGitUsabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeGitUsabilityTests.swift; sourceTree = "<group>"; };
 		AB8A1509DC7E6764BA37A2D3 /* PreviewImageProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewImageProvider.swift; sourceTree = "<group>"; };
 		ABA6E4799BB788A1577FDFCF /* UpstreamHistorySequenceHarness+Lifetime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UpstreamHistorySequenceHarness+Lifetime.swift"; sourceTree = "<group>"; };
+		AC3C6F3A42E820C1CFCC5DC3 /* Pensieve.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = Pensieve.icon; sourceTree = "<group>"; };
 		AD370B5FBD6FCA4DA7CF7CC4 /* IntentReconcilerHandoverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentReconcilerHandoverTests.swift; sourceTree = "<group>"; };
 		AD45A11961E5A56B657725D5 /* SkillInstallServiceVendorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallServiceVendorTests.swift; sourceTree = "<group>"; };
 		AD56DE83E167F6DF78924E39 /* PlatformMarkTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformMarkTile.swift; sourceTree = "<group>"; };
@@ -1953,6 +1955,7 @@
 			children = (
 				85E162284E470966A3D628AE /* EditorAssets */,
 				72F65ACE5CEC51096080A6AE /* Assets.xcassets */,
+				AC3C6F3A42E820C1CFCC5DC3 /* Pensieve.icon */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -2401,6 +2404,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				02666F3FB09A65E911166824 /* Assets.xcassets in Resources */,
+				AF083D1AF0A409449913472B /* Pensieve.icon in Resources */,
 				E43BB3B9FAE657A16E0CFE58 /* editor.bundle.js in Resources */,
 				A2B698960EEBD5C4F87BF455 /* index.html in Resources */,
 			);
@@ -3149,7 +3153,7 @@
 		0F9F63229E7E2962E1FA8678 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = Pensieve;
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
@@ -3334,7 +3338,7 @@
 		68B461E927AE655D09D8C40C /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = Pensieve;
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;

@@ -1,8 +1,17 @@
 import AppKit
 import XCTest
 
-/// The built app carries its own menu bar glyph instead of a stock SF Symbol.
+/// The built app carries its own icon and menu bar glyph instead of a blank icon and a stock SF Symbol.
 final class AppIconAssetTests: XCTestCase {
+    func testInfoPlistNamesTheCompiledAppIcon() throws {
+        let appURL = try appBundleURL()
+        let info = try XCTUnwrap(Bundle(url: appURL)?.infoDictionary)
+        XCTAssertEqual(info["CFBundleIconName"] as? String, "Pensieve")
+        XCTAssertEqual(info["CFBundleIconFile"] as? String, "Pensieve")
+        let icns = appURL.appendingPathComponent("Contents/Resources/Pensieve.icns")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: icns.path), icns.path)
+    }
+
     func testMenuBarGlyphIsAnEighteenPointTemplateImage() throws {
         let bundle = try XCTUnwrap(Bundle(url: try appBundleURL()))
         let glyph = try XCTUnwrap(bundle.image(forResource: "MenuBarGlyph"))
