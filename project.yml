@@ -35,7 +35,7 @@ targets:
       - name: Generate About credits
         script: |
           set -euo pipefail
-          /usr/bin/env python3 "$SRCROOT/script/credits.py" \
+          /usr/bin/python3 "$SRCROOT/script/credits.py" \
             "$SRCROOT/THIRD-PARTY-NOTICES.md" \
             "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Credits.rtf"
         inputFiles:

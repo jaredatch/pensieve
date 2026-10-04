@@ -9,16 +9,20 @@ final class ThirdPartyNoticesTests: XCTestCase {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().path
     }
-    var inventory: NoticeInventory { NoticeInventory(fileService: fileService) }
+    var inventory: NoticeInventory { NoticeInventory(fileService: fileService, exemptions: []) }
 
     func testBundledCreditsCoverSwiftPackagesAndVendoredLicenseFiles() throws {
-        let pins = try inventory.checkSwiftPackages(
+        try auditBundledSwiftPackages()
+    }
+
+    private func auditBundledSwiftPackages() throws {
+        let inventory = NoticeInventory(fileService: fileService)
+        try inventory.checkSwiftPackages(
             resolved: sourceRoot + "/Pensieve.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
             checkouts: inventory.checkouts(for: Bundle.main.bundleURL),
             notices: readNotices(),
             credits: bundledCredits()
         )
-        try LibYAMLNoticeAudit.checkVendorVersion(pins: pins)
     }
 
     func testBundledCreditsCoverEditorPackages() throws {
@@ -40,7 +44,12 @@ final class ThirdPartyNoticesTests: XCTestCase {
     }
 
     func testLibYAMLNoticeIsComplete() throws {
-        let license = try XCTUnwrap(readNotices().license(inSection: "### libYAML"))
+        let notices = try readNotices()
+        guard notices.hasSection("### libYAML") else {
+            try auditBundledSwiftPackages()
+            return
+        }
+        let license = try XCTUnwrap(notices.license(inSection: "### libYAML"))
         XCTAssertEqual(LibYAMLNoticeAudit.noticeDigest(license), LibYAMLNoticeAudit.digest)
         XCTAssertTrue(try bundledCredits().contains("libYAML"))
     }

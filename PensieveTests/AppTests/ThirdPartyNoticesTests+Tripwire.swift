@@ -11,8 +11,7 @@ extension ThirdPartyNoticesTests {
     }
 
     func testSourceScriptAndDataExtensionsAreExcluded() throws {
-        let suffixes = ["swift", "c", "h", "m", "mm", "cpp", "py", "sh", "js", "ts", "go", "rb",
-                        "json", "yml", "yaml", "plist", "xml"]
+        let suffixes = NoticeInventory.excludedExtensions.sorted()
         for suffix in suffixes {
             try withSwiftFixture { root in
                 try fileService.writeFile(at: root + "/example/notice." + suffix, content: "Tooling fixture.")
@@ -33,7 +32,8 @@ extension ThirdPartyNoticesTests {
                     try checkSwiftFixture(root: root, credits: "Example license.")
                 }
                 let exemption = NoticeInventory.LicenseExemption(package: "example", path: path,
-                                                                 reason: "FAQ contains no third-party attribution.")
+                                                                 reason: "FAQ contains no third-party attribution.",
+                                                                 sha256: fixtureDigest("FAQ fixture."))
                 let exempted = NoticeInventory(fileService: fileService, exemptions: [exemption])
                 XCTAssertNoThrow(try exempted.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
                                  notices: parseNotices("[Example](https://github.com/vendor/example)"),
@@ -98,9 +98,9 @@ extension ThirdPartyNoticesTests {
         try withFixture { root in
             try fileService.writeFile(at: root + "/resolved.json", content: "{\"pins\":[]}")
             assertMissing("Stale libYAML notice: Yams is no longer resolved; remove its notice or audit the new vendor") {
-                let pins = try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
-                                                           notices: parseNotices(""), credits: "")
-                try LibYAMLNoticeAudit.checkVendorVersion(pins: pins)
+                try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
+                                                 notices: parseNotices("### libYAML\n```text\nCopyright Old vendor.\n```\n"),
+                                                 credits: "")
             }
         }
     }
@@ -118,9 +118,9 @@ extension ThirdPartyNoticesTests {
     func testRendererRejectsOldPythonWithClearMessage() throws {
         try withFixture { root in
             try fileService.writeFile(at: root + "/source.md", content: "# Notices\n")
-            let result = try runCredits(arguments: [root + "/source.md", root + "/Credits.rtf"], oldVersion: true)
+            let result = try runCredits(arguments: [root + "/source.md", root + "/Credits.rtf"], pythonVersion: "3,5,0")
             XCTAssertNotEqual(result.status, 0)
-            XCTAssertTrue(result.error.contains("credits.py requires Python 3.9 or later"), result.error)
+            XCTAssertTrue(result.error.contains("credits.py requires Python 3.6 or later"), result.error)
             XCTAssertFalse(fileService.fileExists(at: root + "/Credits.rtf"))
         }
     }

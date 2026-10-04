@@ -28,19 +28,36 @@ struct NoticeDocument {
         self.licenseBlocks = licenseBlocks
         var entries: [String: [EditorEntry]] = [:]
         var headers: [Heading] = []
+        var pending: [(name: String, index: Int)] = []
         var blockIndex = 0
         for (number, line) in normalized.components(separatedBy: "\n").enumerated() {
             while blockIndex < licenseBlocks.count && licenseBlocks[blockIndex].endLine < number { blockIndex += 1 }
             let block = blockIndex < licenseBlocks.count ? licenseBlocks[blockIndex] : nil
+            if let block, block.startLine == number {
+                for item in pending {
+                    if let version = entries[item.name]?[item.index].version {
+                        entries[item.name]?[item.index] = EditorEntry(version: version, license: block.text)
+                    }
+                }
+                pending.removeAll()
+            }
             if let block, block.startLine <= number { continue }
-            if Self.isHeading(line) { headers.append(Heading(line: number, text: line)) }
+            if Self.isHeading(line) {
+                headers.append(Heading(line: number, text: line))
+                pending.removeAll()
+            }
             guard line.hasPrefix("- `"), let end = line.dropFirst(3).range(of: "` ") else { continue }
             let name = String(line[line.index(line.startIndex, offsetBy: 3)..<end.lowerBound])
             let version = line[end.upperBound...].split(whereSeparator: \.isWhitespace).first.map(String.init) ?? "<missing>"
-            entries[name, default: []].append(EditorEntry(version: version, license: block?.text))
+            pending.append((name, entries[name, default: []].count))
+            entries[name, default: []].append(EditorEntry(version: version, license: nil))
         }
         editorEntries = entries
         headings = headers
+    }
+
+    func hasSection(_ heading: String) -> Bool {
+        headings.contains { $0.text == heading }
     }
 
     func license(inSection heading: String) -> String? {

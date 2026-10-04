@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Render notices as Credits.rtf, or export the exact license blocks it renders."""
 
 import sys
 
-if sys.version_info < (3, 9):
-    sys.exit("credits.py requires Python 3.9 or later (found "
+if sys.version_info < (3, 6):
+    sys.exit("credits.py requires Python 3.6 or later (found "
              + ".".join(map(str, sys.version_info[:3])) + ")")
 
 import json
