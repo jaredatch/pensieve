@@ -120,8 +120,9 @@ end
 class WorkflowTests < Minitest::Test
   ROOT = File.expand_path('..', __dir__)
   CASK_INPUTS = %w[/VERSION /Pensieve/Info.plist /release/homebrew/pensieve.rb
+                   /release/minimum-macos.txt
                    /script/release.sh /script/release_recovery.sh /script/release_state.py
-                   /script/verify_update.swift].freeze
+                   /script/verify_update.swift /script/minimum_system.py].freeze
   CASK_RUN = <<~'SH'.freeze
     set -euo pipefail
     ./script/release.sh --expect-tag "$GITHUB_REF_NAME" --publish-cask-only
@@ -295,6 +296,8 @@ class WorkflowTests < Minitest::Test
   end
 
   def assert_cask_job_shape(workflows)
+    assert_equal %w[concurrency jobs name on permissions],
+                 workflows.fetch('release.yml').keys.map { |key| key == true ? 'on' : key }.sort
     jobs = workflows.fetch('release.yml').fetch('jobs')
     assert_equal %w[cask release], jobs.keys.sort
     cask = jobs.fetch('cask')
@@ -332,6 +335,17 @@ class WorkflowTests < Minitest::Test
 
   def test_cask_job_is_isolated_and_consumes_release_artifact
     assert_cask_job_shape(@workflows)
+  end
+
+  def test_release_workflow_top_level_keys_are_pinned
+    assert_cask_job_shape(@workflows)
+    [{ 'defaults' => { 'run' => { 'working-directory' => 'build/dist' } } },
+     { 'defaults' => { 'run' => { 'shell' => 'bash build/dist/tool {0}' } } },
+     { 'env' => { 'BASH_ENV' => 'build/dist/startup.sh' } }].each do |addition|
+      fixture = Marshal.load(Marshal.dump(@workflows))
+      fixture.fetch('release.yml').merge!(addition)
+      assert_raises(Minitest::Assertion, addition.inspect) { assert_cask_job_shape(fixture) }
+    end
   end
 
   def test_unsupported_cask_conditions_are_contract_refusals
@@ -728,6 +742,8 @@ class WorkflowTests < Minitest::Test
   # Apply 2x for a slower runner before adding it to each historical runner baseline.
   # Recovery uses the complete 46.3-c3 local rehearsal, also scaled by 2x.
   CI_RUNNER_FACTOR = 2
+  # 32 existing branch commits, this fix, and the integration merge.
+  CI_LARGEST_PUSH = 34
   CI_LOCAL_WORST_SECONDS = {
     'Wrapper self-test' => 9.826, 'Hygiene added checks' => 0.731, 'Workflow suite' => 7.273,
     'Release recovery' => 204.182
@@ -737,7 +753,7 @@ class WorkflowTests < Minitest::Test
     'Generate Xcode project' => 1, 'Compute replay range' => 0,
     'Test public hygiene guard' => 156 + (CI_LOCAL_WORST_SECONDS.fetch('Hygiene added checks') * CI_RUNNER_FACTOR).ceil, 'Test workflow contracts' => [3, (CI_LOCAL_WORST_SECONDS.fetch('Workflow suite') * CI_RUNNER_FACTOR).ceil].max,
     'Test release recovery' => (CI_LOCAL_WORST_SECONDS.fetch('Release recovery') * CI_RUNNER_FACTOR).ceil, 'Test development build host selection' => 0,
-    'Check public hygiene in pushed commits' => 22, 'Replay commit guards' => 35,
+    'Check public hygiene in pushed commits' => 22 * CI_LARGEST_PUSH, 'Replay commit guards' => 35 * CI_LARGEST_PUSH,
     'Test' => 867 + (CI_LOCAL_WORST_SECONDS.fetch('Wrapper self-test') * CI_RUNNER_FACTOR).ceil, 'Upload failed test evidence' => 7, 'Headless smoke' => 14
   }.freeze
 

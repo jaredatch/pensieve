@@ -79,8 +79,13 @@ extension ThirdPartyNoticesTests {
         let sources = ["# " + prefix + " A\n", "# " + prefix + " B\n"]
         let runs = creditsRendererRuns
         let canonical = canonicalNoticeCacheCount
-        for source in sources + sources {
-            _ = try parseNotices(source)
+        try withFixture { root in
+            let cache = NoticeFileCache()
+            let path = root + "/source.md"
+            for source in sources + sources {
+                try fileService.writeFile(at: path, content: source)
+                _ = try loadNotices(at: path, cache: cache)
+            }
         }
         XCTAssertEqual(creditsRendererRuns - runs, 2, "Each distinct fixture source must be parsed once")
         XCTAssertEqual(canonicalNoticeCacheCount, canonical, "Fixtures must not populate the canonical cache")

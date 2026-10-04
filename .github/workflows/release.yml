@@ -159,10 +159,12 @@ jobs:
             /VERSION
             /Pensieve/Info.plist
             /release/homebrew/pensieve.rb
+            /release/minimum-macos.txt
             /script/release.sh
             /script/release_recovery.sh
             /script/release_state.py
             /script/verify_update.swift
+            /script/minimum_system.py
 
       - name: Download DMG artifact
         timeout-minutes: 3

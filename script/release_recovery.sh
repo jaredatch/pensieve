@@ -18,12 +18,32 @@ verify_update_archive() {
   fi
 }
 
+verify_published_dmg() (
+  local dmg="$1" length="$2" signature="$3" context="$4" source="$5" public_key mount_point
+  public_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$REPO/Pensieve/Info.plist")" || return 1
+  if ! verify_update_archive "$dmg" "$length" "$signature" "$public_key"; then
+    echo "release: $context length or EdDSA signature does not match $source" >&2
+    return 1
+  fi
+  mount_point="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-published-dmg.XXXXXX")" || return 1
+  trap 'cleanup_rc=$?; if ! hdiutil detach "$mount_point" -force >/dev/null 2>&1; then
+          echo "release: $context: local DMG detach failed" >&2; cleanup_rc=1;
+        fi;
+        if ! rmdir "$mount_point"; then
+          echo "release: $context: local mount cleanup failed" >&2; cleanup_rc=1;
+        fi; exit "$cleanup_rc"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  hdiutil attach "$dmg" -mountpoint "$mount_point" -nobrowse -readonly -quiet >&2 || return 1
+  python3 -B "$REPO/script/minimum_system.py" --app "$mount_point/Pensieve.app" --version "$VERSION" >/dev/null || return 1
+)
+
 verify_cask_artifact() (
   ! is_prerelease || return 0
   # Own a read-only snapshot outside build/dist. This path never prepares or
   # changes the signing folder, and GH_TOKEN here is the public-read credential.
   # Explicit returns also stop callers that disable errexit with an if/OR list.
-  local read_dir live_feed branch publication length signature public_key
+  local read_dir live_feed branch publication length signature
   read_dir="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-cask-appcast.XXXXXX")" || return 1
   trap 'rm -rf "$read_dir"' EXIT
   live_feed="$read_dir/appcast.xml"
@@ -32,11 +52,7 @@ verify_cask_artifact() (
   publication="$(state_tool appcast "$live_feed" "$VERSION" "$DOWNLOAD_PREFIX")" || return 1
   read -r length signature <<< "$publication"
   [ "$length" != absent ] || { echo "release: cask requires a live appcast item for $VERSION" >&2; return 1; }
-  public_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$REPO/Pensieve/Info.plist")" || return 1
-  if ! verify_update_archive "$DMG_PATH" "$length" "$signature" "$public_key"; then
-    echo "release: cask artifact length or EdDSA signature does not match live appcast" >&2
-    return 1
-  fi
+  verify_published_dmg "$DMG_PATH" "$length" "$signature" "cask artifact" "live appcast" || return 1
 )
 
 read_release_state() {
@@ -114,27 +130,22 @@ publication_preflight() {
   fi
 }
 
-recover_live_release() {
-  local download_dir length signature public_key
+recover_live_release() (
+  local download_dir length signature
   download_dir="$(mktemp -d "$DIST_DIR/recovery.XXXXXX")" || return 1
+  trap 'rm -rf "$download_dir"' EXIT
   # Downloaded bytes stay outside appcast-input and never reach generate_appcast.
   if ! run_command_seam "$GH_CMD" release download "v$VERSION" --repo "$PUBLIC_REPO" \
       --pattern "Pensieve-$VERSION.dmg" --dir "$download_dir"; then
-    rm -rf "$download_dir"
     echo "release: published DMG download failed or asset missing" >&2; return 1
   fi
   read -r length signature <<< "$APPCAST_ITEM"
-  public_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$REPO/Pensieve/Info.plist")" || return 1
-  if ! verify_update_archive "$download_dir/Pensieve-$VERSION.dmg" "$length" "$signature" "$public_key"; then
-    rm -rf "$download_dir"
-    echo "release: published DMG length or EdDSA signature does not match appcast" >&2; return 1
-  fi
-  ditto "$download_dir/Pensieve-$VERSION.dmg" "$DMG_PATH"
-  rm -rf "$download_dir"
+  verify_published_dmg "$download_dir/Pensieve-$VERSION.dmg" "$length" "$signature" "published DMG" "appcast" || return 1
+  ditto "$download_dir/Pensieve-$VERSION.dmg" "$DMG_PATH" || return 1
   # The cask step uses this verified artifact with its separate tap credential.
   echo "release: GitHub release and appcast done; verified published DMG"
   report_cask_publication
-}
+)
 
 publish_release_asset() {
   local expected="$RELEASE_STATE"

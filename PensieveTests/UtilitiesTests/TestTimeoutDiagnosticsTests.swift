@@ -88,30 +88,52 @@ final class TestTimeoutDiagnosticsTests: XCTestCase {
     func testDefaultFailedWriteReportsReachUnbufferedStderr() throws {
         let blocked = directory + "/blocked"
         try files.writeFile(at: blocked, content: "blocked")
-        var output = ""
-        var writes = 0
-        var flushes = 0
-        let observer = TestTimeoutDiagnostics(environment: ["PENSIEVE_TEST_DIAGNOSTICS_DIR": blocked],
-            standardErrorWrite: { text, stream in
-                XCTAssertEqual(stream, stderr, "Default diagnostics must select stderr")
-                output += text
-                writes += 1
-                return 0
-            }, standardErrorFlush: { stream in
-                XCTAssertEqual(stream, stderr)
-                flushes += 1
-                return 0
-            })
-        let state = "stderr state sentinel" + String(repeating: "S", count: 262144)
-        observer.recordSnapshot(state, threadSample: "stderr threads sentinel")
-        observer.testCase(self, didRecord: XCTIssue(type: .assertionFailure, compactDescription: "timeout probe"))
-        XCTAssertEqual(writes, 4, "Both write warnings and both complete reports must use the sink")
-        XCTAssertEqual(flushes, writes, "Each write must be flushed immediately")
-        XCTAssertTrue(output.contains(state), "Output past pipe capacity must remain complete")
+        let output = try captureStandardError {
+            let observer = TestTimeoutDiagnostics(environment: ["PENSIEVE_TEST_DIAGNOSTICS_DIR": blocked])
+            observer.recordSnapshot("stderr state sentinel", threadSample: "stderr threads sentinel")
+            observer.testCase(self, didRecord: XCTIssue(type: .assertionFailure, compactDescription: "timeout probe"))
+        }
+        XCTAssertEqual(output.components(separatedBy: "Timeout diagnostics could not write ").count - 1, 2)
         XCTAssertEqual(output.components(separatedBy: "BEGIN TIMEOUT DIAGNOSTIC ").count - 1, 2)
         XCTAssertEqual(output.components(separatedBy: "END TIMEOUT DIAGNOSTIC ").count - 1, 2)
         XCTAssertTrue(output.contains("stderr state sentinel"))
         XCTAssertTrue(output.contains("stderr threads sentinel"))
     }
 
+    func testDefaultPartialWriteFlushesOnlyMissingReportToStderr() throws {
+        let output = try captureStandardError {
+            let observer = TestTimeoutDiagnostics(environment: ["PENSIEVE_TEST_DIAGNOSTICS_DIR": directory],
+                writeReport: { path, content in
+                    if path.hasSuffix("-threads.txt") { throw CocoaError(.fileWriteUnknown) }
+                    try self.files.writeFile(at: path, content: content)
+                })
+            observer.recordSnapshot("saved default state", threadSample: "missing default threads")
+            observer.testCase(self, didRecord: XCTIssue(type: .assertionFailure, compactDescription: "timeout probe"))
+        }
+        XCTAssertEqual(output.components(separatedBy: "BEGIN TIMEOUT DIAGNOSTIC ").count - 1, 1)
+        XCTAssertEqual(output.components(separatedBy: "END TIMEOUT DIAGNOSTIC ").count - 1, 1)
+        XCTAssertTrue(output.contains("missing default threads"))
+        XCTAssertFalse(output.contains("saved default state"))
+        XCTAssertEqual(try files.listDirectory(at: directory).filter { $0.hasSuffix("-state.txt") }.count, 1)
+    }
+
+    private func captureStandardError(_ body: () throws -> Void) throws -> String {
+        let path = directory + "/stderr-" + UUID().uuidString + ".txt"
+        let descriptor = try FileService.openRegularFile(at: path, creatingWithPermissions: 0o600).descriptor
+        defer { close(descriptor) }
+        fflush(stderr)
+        let saved = dup(STDERR_FILENO)
+        XCTAssertGreaterThanOrEqual(saved, 0)
+        defer { close(saved) }
+        XCTAssertEqual(dup2(descriptor, STDERR_FILENO), STDERR_FILENO)
+        // Force buffering so reading before the cleanup flush detects a missing default fflush.
+        XCTAssertEqual(setvbuf(stderr, nil, _IOFBF, 65_536), 0)
+        defer {
+            fflush(stderr)
+            _ = dup2(saved, STDERR_FILENO)
+            _ = setvbuf(stderr, nil, _IONBF, 0)
+        }
+        try body()
+        return try files.readFile(at: path)
+    }
 }

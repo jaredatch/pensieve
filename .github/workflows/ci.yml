@@ -23,7 +23,7 @@ jobs:
     permissions:
       contents: read
     runs-on: macos-26
-    timeout-minutes: 106 # 96 minutes of step bounds plus 10 minutes of headroom.
+    timeout-minutes: 200 # 190 minutes of step bounds plus 10 minutes of headroom.
     # Worst times: Actions runs 37074075055 and 37063706683, with local additions scaled by 2x below.
     steps:
       - name: Checkout
@@ -105,14 +105,14 @@ jobs:
         run: python3 -B script/pull_dev_build_self_test.py
 
       - name: Check public hygiene in pushed commits
-        timeout-minutes: 2 # Worst measured: 22 s; bound >= 3x.
+        timeout-minutes: 38 # Worst measured per commit: 22 s; largest push: 34 commits (748 s); bound >= 3x.
         if: steps.replay-range.outputs.skip != 'true'
         env:
           HYGIENE_RANGE: ${{ steps.replay-range.outputs.range }}
         run: ./script/public-hygiene.sh --range "$HYGIENE_RANGE"
 
       - name: Replay commit guards
-        timeout-minutes: 2 # Worst measured: 35 s; bound >= 3x.
+        timeout-minutes: 60 # Worst measured per commit: 35 s; largest push: 34 commits (1190 s); bound >= 3x.
         if: steps.replay-range.outputs.skip != 'true'
         run: |
           RATCHET_CI_SKIP_DEFAULT_MERGE_HEAD="${{ steps.replay-range.outputs.skip_default_merge_head }}" \

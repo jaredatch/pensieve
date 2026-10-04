@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Strict readers for publication state. Unknown state never means absent."""
 import base64
-import importlib.util
 import json
 from pathlib import Path
 import re
@@ -22,6 +21,13 @@ def diagnostic_text(value):
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def normalize_version(value):
+    require(isinstance(value, str) and re.fullmatch(r"\d+(?:\.\d+){0,2}", value),
+            f"malformed macOS version: {value}")
+    parts = tuple(map(int, value.split(".")))
+    return parts + (0,) * (3 - len(parts))
 
 
 def response_json(path):
@@ -200,7 +206,7 @@ def check_generated_item(item, expected_url):
         allowed_attributes = {"url", "length", "type", SPARKLE + "edSignature"} if child.tag == "enclosure" else set()
         require(set(child.attrib) <= allowed_attributes, "unexpected generated appcast item attribute")
         values.extend(child.attrib.values())
-    for name in names:
+    for name in names - {SPARKLE + "minimumSystemVersion"}:
         count = len(item.findall(name))
         expected = count <= 1 if name == SPARKLE + "channel" else count == 1
         require(expected, f"generated appcast item has wrong element count: {name}")
@@ -226,14 +232,13 @@ def appcast_provenance(text, base_text, built_dmg, download_prefix, version, bui
     items = root.find("channel").findall("item")
     current = next(item for item in items if item.findtext(SPARKLE + "shortVersionString") == version)
     minimums = current.findall(SPARKLE + "minimumSystemVersion")
-    require(len(minimums) == 1 and bool(minimums[0].text),
+    require(len(minimums) == 1,
+            "generated appcast item has wrong element count: minimumSystemVersion; "
+            "generated appcast has missing, empty or duplicated minimum system version")
+    require(bool(minimums[0].text),
             "generated appcast has missing, empty or duplicated minimum system version")
     check_generated_item(current, f"{download_prefix}/v{version}/{built_dmg}")
-    # The cask's sparse checkout has no Mach-O validator; only feed generation needs it.
-    minimum_spec = importlib.util.spec_from_file_location("minimum_system", Path(__file__).with_name("minimum_system.py"))
-    minimum_tool = importlib.util.module_from_spec(minimum_spec)
-    minimum_spec.loader.exec_module(minimum_tool)
-    require(minimum_tool.normalize_version(minimums[0].text) == minimum_tool.normalize_version(built_minimum),
+    require(minimums[0].text == built_minimum,
             f"generated appcast minimum {minimums[0].text} differs from built app minimum {built_minimum}")
     require(canonical_xml(root, items) == canonical_xml(base, base_items),
             "generated appcast changes channel or feed metadata")

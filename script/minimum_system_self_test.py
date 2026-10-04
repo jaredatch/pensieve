@@ -3,20 +3,17 @@
 import argparse
 from pathlib import Path
 import unittest
-from minimum_system import MINIMUM_ERRORS, check_app_minimum, check_binary_minimum, normalize_version, required_minimum
+from minimum_system import MINIMUM_ERRORS, check_app_binary_minimum, check_binary_minimum, required_minimum
 
 APP = None
 
 
 class MinimumSystemTests(unittest.TestCase):
-    def assert_app_minimum(self):
+    def test_app_requires_macos_26(self):
         try:
-            self.assertEqual(normalize_version(check_app_minimum(APP)), normalize_version(required_minimum()))
+            check_app_binary_minimum(APP)
         except MINIMUM_ERRORS as error:
             self.fail(str(error))
-
-    def test_app_requires_macos_26(self):
-        self.assert_app_minimum()
 
     def test_embedded_daemon_requires_macos_26(self):
         try:

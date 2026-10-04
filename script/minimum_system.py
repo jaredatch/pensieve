@@ -7,11 +7,17 @@ import re
 import subprocess
 import sys
 from xml.parsers.expat import ExpatError
+from release_state import normalize_version
 
 
 # Tests set this seam directly; the release never reads tool paths from its environment.
 MACHO_TOOLS = ("/usr/bin/lipo", "/usr/bin/otool")
 MINIMUM_ERRORS = (ValueError, OSError, ExpatError, subprocess.SubprocessError)
+# Homebrew 7.0.7-86-g2170a64, MacOSVersion::SYMBOLS (active releases):
+# https://github.com/Homebrew/brew/blob/2170a64c0ff9549d78a9b48b26217d9fd17f6a2d/Library/Homebrew/macos_version.rb
+HOMEBREW_SYMBOL_SOURCE = "Homebrew 7.0.7-86-g2170a64 / MacOSVersion::SYMBOLS"
+HOMEBREW_MINIMUMS = {"big_sur": "11", "monterey": "12", "ventura": "13", "sonoma": "14",
+                     "sequoia": "15", "tahoe": "26", "golden_gate": "27"}
 
 
 def require(condition, message):
@@ -25,11 +31,14 @@ def required_minimum():
     return minimum
 
 
-def normalize_version(value):
-    require(isinstance(value, str) and re.fullmatch(r"\d+(?:\.\d+){0,2}", value),
-            f"malformed macOS version: {value}")
-    parts = tuple(map(int, value.split(".")))
-    return parts + (0,) * (3 - len(parts))
+def check_cask_minimum(cask):
+    requirements = re.findall(r"(?m)^\s*depends_on\s+macos:\s*:(\w+)\s*$", cask.read_text())
+    require(len(requirements) == 1, "cask minimum must have one named macOS requirement")
+    symbol = requirements[0]
+    require(symbol in HOMEBREW_MINIMUMS, f"cask minimum has unknown macOS requirement :{symbol}")
+    expected = required_minimum()
+    require(normalize_version(HOMEBREW_MINIMUMS[symbol]) == normalize_version(expected),
+            f"cask minimum :{symbol} differs from release policy macOS {expected}")
 
 
 def check_binary_minimum(binary, expected):
@@ -68,8 +77,10 @@ def check_binary_minimum(binary, expected):
     require(len(minimums) == len(architectures), f"{binary.name}: minimum count differs from architecture count")
 
 
-def check_app_minimum(app):
+def check_app_binary_minimum(app, version=None):
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+    if version is not None:
+        require(info.get("CFBundleShortVersionString") == version, "published DMG app version differs from VERSION")
     minimum = info.get("LSMinimumSystemVersion")
     require(isinstance(minimum, str) and re.fullmatch(r"\d+(?:\.\d+){1,2}", minimum),
             "built app has no minimum system version or it is malformed")
@@ -79,15 +90,26 @@ def check_app_minimum(app):
     require(isinstance(executable, str) and executable and Path(executable).name == executable,
             "built app has no valid executable name")
     check_binary_minimum(app / "Contents/MacOS" / executable, minimum)
+    return minimum
+
+
+def check_app_minimum(app, version=None):
+    minimum = check_app_binary_minimum(app, version)
     check_binary_minimum(app / "Contents/MacOS/pensieve-daemon", minimum)
     return minimum
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--app", required=True, type=Path)
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--app", type=Path)
+    target.add_argument("--cask", type=Path)
+    parser.add_argument("--version")
     args = parser.parse_args()
     try:
-        print(check_app_minimum(args.app))
+        if args.cask:
+            check_cask_minimum(args.cask)
+        else:
+            print(check_app_minimum(args.app, args.version))
     except MINIMUM_ERRORS as error:
         sys.exit("release: invalid built minimum: " + ascii(str(error))[1:-1])

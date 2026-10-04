@@ -41,9 +41,13 @@ INSPECT_BUILT_MINIMUM=""
 NOTARY_KEY=""
 NOTARY_KEY_ID=""
 NOTARY_ISSUER=""
-NOTARY_CMD="${NOTARY_CMD:-xcrun notarytool}"
-STAPLER_CMD="${STAPLER_CMD:-xcrun stapler}"
-GH_CMD="${GH_CMD:-gh}"
+# Fixed release tools. Tests substitute these constants only in their owned copy.
+NOTARY_CMD="/usr/bin/xcrun notarytool"
+STAPLER_CMD="/usr/bin/xcrun stapler"
+GH_CMD="/opt/homebrew/bin/gh"
+[ -x "$GH_CMD" ] || GH_CMD="/usr/local/bin/gh"
+GENERATE_APPCAST_CMD=""
+VERIFY_UPDATE_CMD=""
 PUBLIC_REPO="jaredatch/pensieve"
 TAP_REPO="jaredatch/homebrew-tap"
 DOWNLOAD_PREFIX="https://github.com/$PUBLIC_REPO/releases/download"
@@ -83,10 +87,11 @@ USAGE
 }
 
 RELEASE_OPTIONS=0
+INSPECT_COUNT=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --check-tag)
-      [ "$#" -ge 2 ] || { usage; exit 64; }
+      [ "$#" -ge 2 ] && [ "$CHECK_TAG_ONLY" -eq 0 ] || { usage; exit 64; }
       EXPECTED_TAG="$2"
       CHECK_TAG=1
       CHECK_TAG_ONLY=1
@@ -141,6 +146,7 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --inspect-functions)
+      INSPECT_COUNT=$((INSPECT_COUNT + 1))
       INSPECT_MODE="functions"
       shift
       ;;
@@ -158,6 +164,8 @@ while [ "$#" -gt 0 ]; do
       ;;
     --notes-for)
       [ "$#" -ge 2 ] && [ "$#" -le 3 ] || { usage; exit 64; }
+      [ "$#" -eq 2 ] || [[ "$3" != --* ]] || { usage; exit 64; }
+      INSPECT_COUNT=$((INSPECT_COUNT + 1))
       INSPECT_MODE="notes"
       VERSION="$2"
       VERSION_SOURCE="$1 version argument"
@@ -166,6 +174,8 @@ while [ "$#" -gt 0 ]; do
       ;;
     --print-release-args)
       [ "$#" -ge 2 ] && [ "$#" -le 3 ] || { usage; exit 64; }
+      [ "$#" -eq 2 ] || [[ "$3" != --* ]] || { usage; exit 64; }
+      INSPECT_COUNT=$((INSPECT_COUNT + 1))
       INSPECT_MODE="release-args"
       VERSION="$2"
       VERSION_SOURCE="$1 version argument"
@@ -173,6 +183,7 @@ while [ "$#" -gt 0 ]; do
       shift "$#"
       ;;
     --print-cask-action)
+      INSPECT_COUNT=$((INSPECT_COUNT + 1))
       [ "$#" -eq 2 ] || { usage; exit 64; }
       INSPECT_MODE="cask-action"
       VERSION="$2"
@@ -180,6 +191,7 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --verify-appcast)
+      INSPECT_COUNT=$((INSPECT_COUNT + 1))
       [ "$#" -eq 7 ] || { usage; exit 64; }
       INSPECT_MODE="verify-appcast"
       INSPECT_APPCAST="$2"
@@ -197,8 +209,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if { [ -n "$INSPECT_MODE" ] || [ "$CHECK_TAG_ONLY" -eq 1 ]; } &&
-    { [ "$RELEASE_OPTIONS" -eq 1 ] || { [ -n "$INSPECT_MODE" ] && [ "$CHECK_TAG_ONLY" -eq 1 ]; }; }; then
+if [ "$((INSPECT_COUNT + CHECK_TAG_ONLY + RELEASE_OPTIONS))" -gt 1 ]; then
   usage
   exit 64
 fi
@@ -352,15 +363,17 @@ sign_dmg() {
 # too because stapler only proves a ticket is present, not that Gatekeeper
 # accepts the bundle; with the ticket stapled this assessment is offline-capable.
 verify_dmg_app_ticket() {
-  echo "release: phase iv.c: validate stapled ticket on the app inside the dmg"
+  echo "release: phase iv.c: validate the app inside the dmg"
   local mount_point
   mount_point="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-dmg-verify.XXXXXX")"
   DMG_MINIMUM="$(
     trap 'trap_rc=$?; hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true; exit "$trap_rc"' EXIT INT TERM
     hdiutil attach "$DMG_PATH" -mountpoint "$mount_point" -nobrowse -readonly -quiet >&2 || exit 1
     test -d "$mount_point/Pensieve.app" || { echo "release: no Pensieve.app inside $DMG_PATH" >&2; exit 1; }
-    run_command_seam "$STAPLER_CMD" validate "$mount_point/Pensieve.app" >&2 || exit 1
-    spctl --assess --type exec -vv "$mount_point/Pensieve.app" >&2 || exit 1
+    if [ "$PUBLISH" -eq 1 ]; then
+      run_command_seam "$STAPLER_CMD" validate "$mount_point/Pensieve.app" >&2 || exit 1
+      spctl --assess --type exec -vv "$mount_point/Pensieve.app" >&2 || exit 1
+    fi
     python3 -B "$REPO/script/minimum_system.py" --app "$mount_point/Pensieve.app" || exit 1
   )" || { rmdir "$mount_point" 2>/dev/null || true; return 1; }
   rmdir "$mount_point" 2>/dev/null || true
@@ -528,38 +541,38 @@ cleanup_appcast_base() {
 # caller explicitly permits it; transport, local I/O and parse failures stop.
 read_live_appcast() {
   local branch="$1" output="$2" failure="$3" invalid="$4" allow_missing="${5:-0}" suffix="${6:-}"
-  local response status
+  local response status result=0
   LIVE_APPCAST_SHA=""
   LIVE_APPCAST_ABSENT=0
-  response="$(mktemp "${TMPDIR:-/tmp}/pensieve-appcast-response.XXXXXX")" || return 1
+  response="$(mktemp "${TMPDIR:-/tmp}/pensieve-appcast-response.XXXXXX")" || {
+    echo "release: $failure: local response creation failed" >&2; return 1;
+  }
   if run_command_seam "$GH_CMD" api -X GET "repos/$PUBLIC_REPO/contents/appcast.xml" \
       -f "ref=$branch" --include > "$response"; then
     if [ -n "$output" ]; then
       if ! LIVE_APPCAST_SHA="$(state_tool contents "$response" "$output")"; then
-        rm -f "$response" || return 1
         echo "release: $invalid" >&2
-        return 1
+        result=1
       fi
     elif ! LIVE_APPCAST_SHA="$(state_tool contents-sha "$response")"; then
-      rm -f "$response" || return 1
       echo "release: $invalid" >&2
-      return 1
+      result=1
     fi
   else
     status="$(http_status "$response")" || status=""
     log_response "$response" >&2 || true
-    rm -f "$response" || {
-      echo "release: $failure (HTTP $(log_text "${status:-unknown}"))$suffix" >&2
-      return 1
-    }
     if [ "$allow_missing" -eq 1 ] && [ "$status" = 404 ]; then
       LIVE_APPCAST_ABSENT=1
-      return 0
+    else
+      echo "release: $failure (HTTP $(log_text "${status:-unknown}"))$suffix" >&2
+      result=1
     fi
-    echo "release: $failure (HTTP $(log_text "${status:-unknown}"))$suffix" >&2
-    return 1
   fi
-  rm -f "$response" || return 1
+  if ! rm -f "$response"; then
+    echo "release: $failure: local response cleanup failed$suffix" >&2
+    result=1
+  fi
+  return "$result"
 }
 
 release_preflight() {
@@ -618,6 +631,7 @@ write_bumped_cask() {
 
   mkdir -p "$(dirname "$cask_output")"
   state_tool rewrite-cask "$cask_template" "$cask_output" "$VERSION" "$dmg_sha"
+  python3 -B "$REPO/script/minimum_system.py" --cask "$cask_output" || return 1
 }
 
 dry_run_local() {
@@ -772,9 +786,8 @@ package_app_only
 sign_inside_out
 verify_app
 
-# Phases iii.b and iv.c are the only publish-gated steps before the dry-run stop.
-# Both reach notarization seams, so both stay behind PUBLISH — this is what keeps
-# 18.4b's stub tooth green (a dry run must never invoke NOTARY_CMD/STAPLER_CMD).
+# App notarization and mounted ticket assessment run only for publication.
+# Dry runs still validate the packaged app's minimum without notarization tools.
 if [ "$PUBLISH" -eq 1 ]; then
   notarize_and_staple_app
 fi
@@ -782,9 +795,7 @@ fi
 package_dmg_only
 sign_dmg
 
-if [ "$PUBLISH" -eq 1 ]; then
-  verify_dmg_app_ticket
-fi
+verify_dmg_app_ticket
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "DRY RUN: built, signed, verified, and packaged $DMG_PATH; stopping before notarization/publishing."

@@ -24,6 +24,7 @@ from xml.parsers.expat import ExpatError
 ROOT = Path(__file__).resolve().parent.parent
 STATE_SPEC = importlib.util.spec_from_file_location("release_state", ROOT / "script/release_state.py")
 STATE_TOOL = importlib.util.module_from_spec(STATE_SPEC)
+sys.modules[STATE_SPEC.name] = STATE_TOOL
 STATE_SPEC.loader.exec_module(STATE_TOOL)
 MINIMUM_SPEC = importlib.util.spec_from_file_location("minimum_system", ROOT / "script/minimum_system.py")
 MINIMUM_TOOL = importlib.util.module_from_spec(MINIMUM_SPEC)
@@ -193,6 +194,7 @@ elif cmd == "hdiutil":
         shutil.copytree(source, mounted)
         info_path = mounted / "Contents/Info.plist"
         info = plistlib.loads(info_path.read_bytes())
+        if "dmg_version" in s: info["CFBundleShortVersionString"] = s["dmg_version"]
         if "dmg_minimum" in s:
             if s["dmg_minimum"] is None: info.pop("LSMinimumSystemVersion", None)
             else: info["LSMinimumSystemVersion"] = s["dmg_minimum"]
@@ -306,10 +308,27 @@ class MinimumParserTests(unittest.TestCase):
         module.APP = Path("/fixture/Pensieve.app")
         for error in (None, ValueError("pensieve-daemon [arm64] must require macOS 26.0; found 14.0")):
             with self.subTest(error=error), mock.patch.object(module, "check_binary_minimum", side_effect=error, create=True) as binary, \
-                    mock.patch.object(module, "check_app_minimum", side_effect=ValueError("Pensieve app fault")):
+                    mock.patch.object(module, "check_app_binary_minimum", side_effect=ValueError("Pensieve app fault")):
                 result = unittest.TestResult()
                 module.MinimumSystemTests("test_embedded_daemon_requires_macos_26").run(result)
                 binary.assert_called_once_with(module.APP / "Contents/MacOS/pensieve-daemon", MINIMUM_TOOL.required_minimum())
+                self.assertEqual(len(result.errors), 0)
+                self.assertEqual(len(result.failures), int(error is not None))
+                if error: self.assertIn(str(error), result.failures[0][1])
+
+    def test_app_self_test_checks_only_app_and_names_failure(self):
+        spec = importlib.util.spec_from_file_location("app_minimum_probe", ROOT / "script/minimum_system_self_test.py")
+        module = importlib.util.module_from_spec(spec)
+        with mock.patch.dict(sys.modules, minimum_system=MINIMUM_TOOL):
+            spec.loader.exec_module(module)
+        module.APP = Path("/fixture/Pensieve.app")
+        for error in (None, ValueError("Pensieve [x86_64] must require macOS 26.0; found 14.0")):
+            with self.subTest(error=error), mock.patch.object(module, "check_app_binary_minimum", side_effect=error) as app, \
+                    mock.patch.object(module, "check_binary_minimum", side_effect=ValueError("daemon fault")) as daemon:
+                result = unittest.TestResult()
+                module.MinimumSystemTests("test_app_requires_macos_26").run(result)
+                app.assert_called_once_with(module.APP)
+                daemon.assert_not_called()
                 self.assertEqual(len(result.errors), 0)
                 self.assertEqual(len(result.failures), int(error is not None))
                 if error: self.assertIn(str(error), result.failures[0][1])
@@ -355,12 +374,15 @@ class MinimumPolicyTests(unittest.TestCase):
         compare(project["options"]["deploymentTarget"]["macOS"], "project's default minimum")
         configs = set()
         def check_config(path):
+            path = path.resolve()
             if path in configs: return
             configs.add(path)
             try: text = path.read_text()
             except OSError as error: self.fail(f"cannot read xcconfig {path}: {error}")
-            for included in re.findall(r'^\s*#include\??\s+"([^"\n]+)"', text, re.MULTILINE):
-                check_config(path.parent / included)
+            for optional, included in re.findall(r'^\s*#include(\?)?\s+"([^"\n]+)"', text, re.MULTILINE):
+                included = path.parent / included
+                if optional and not included.exists(): continue
+                check_config(included)
             for value in re.findall(r'^\s*MACOSX_DEPLOYMENT_TARGET(?:\[[^]\n]+\])*\s*=\s*(.*?)\s*(?://.*)?$', text, re.MULTILINE):
                 compare(value.strip().strip('"'), str(path) + ":MACOSX_DEPLOYMENT_TARGET")
         def config_paths(value):
@@ -383,7 +405,7 @@ class MinimumPolicyTests(unittest.TestCase):
             platforms = value.get("platform", [])
             if isinstance(platforms, str): platforms = [platforms]
             for key, child in value.items():
-                if key == "MACOSX_DEPLOYMENT_TARGET": compare(child, path + "." + key)
+                if re.fullmatch(r"MACOSX_DEPLOYMENT_TARGET(?:\[[^]\n]+\])*", key): compare(child, path + "." + key)
                 elif key == "deploymentTarget": check_deployment(child, path + ".deploymentTarget", "macOS" in platforms)
                 elif key == "configFiles": config_paths(child)
                 check_settings(child, path + "." + key)
@@ -395,9 +417,7 @@ class MinimumPolicyTests(unittest.TestCase):
         requirements = re.findall(r"(?m)^\s*depends_on\s+macos:\s*:(\w+)\s*$", text)
         self.assertEqual(len(requirements), 1, "cask must have one named macOS requirement")
         symbol = requirements[0]
-        # Offline hosts still check the literal requirement without Homebrew's implementation.
-        symbols = {"big_sur": "11.0", "monterey": "12.0", "ventura": "13.0", "sonoma": "14.0",
-                   "sequoia": "15.0", "tahoe": "26.0"}
+        symbols = MINIMUM_TOOL.HOMEBREW_MINIMUMS
         if shutil.which("brew"):
             try:
                 result = subprocess.run(["brew", "ruby", "-e", 'require "macos_version"; puts MacOSVersion.from_symbol(ARGV.fetch(0).to_sym)',
@@ -406,6 +426,7 @@ class MinimumPolicyTests(unittest.TestCase):
             except (OSError, subprocess.SubprocessError) as error:
                 self.fail(f"cannot resolve Homebrew macOS requirement :{symbol}: {error}")
         else:
+            print("release policy: Homebrew unavailable; using copied symbol table from " + MINIMUM_TOOL.HOMEBREW_SYMBOL_SOURCE, flush=True)
             self.assertIn(symbol, symbols, f"unknown macOS requirement :{symbol}; extend the offline symbol table")
             minimum = symbols[symbol]
         try:
@@ -433,6 +454,7 @@ class MinimumPolicyTests(unittest.TestCase):
             (config.parent / "shared.xcconfig").write_text("MACOSX_DEPLOYMENT_TARGET[sdk=macosx*] = 14.0 // unsafe override\n")
             faults = [{"platform": ["macOS"], "deploymentTarget": "14.0"},
                       {"settings": [{"MACOSX_DEPLOYMENT_TARGET": "14.0"}]},
+                      {"settings": {"MACOSX_DEPLOYMENT_TARGET[sdk=macosx*]": "14.0"}},
                       {"deploymentTarget": [{"macOS": "14.0"}]},
                       {"configFiles": {"Release": str(config)}}]
             for fault in faults:
@@ -447,6 +469,19 @@ class MinimumPolicyTests(unittest.TestCase):
                    "targets": {"App": {"platform": ["macOS"], "deploymentTarget": "26.0.0"}}}
         with mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(project), "")):
             self.test_project_deployment_settings_match_pinned_minimum()
+
+    def test_xcconfig_optional_missing_include_and_spelled_cycle(self):
+        with tempfile.TemporaryDirectory(prefix="pensieve-xcconfig-cycle-") as directory:
+            config = Path(directory) / "policy.xcconfig"
+            config.write_text('#include? "absent.xcconfig"\n#include "./policy.xcconfig"\nMACOSX_DEPLOYMENT_TARGET = 26.0\n')
+            project = {"options": {"deploymentTarget": {"macOS": "26.0"}},
+                       "configFiles": {"Release": str(config)}}
+            with mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(project), "")):
+                self.test_project_deployment_settings_match_pinned_minimum()
+            config.write_text('#include "absent.xcconfig"\n')
+            with mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(project), "")), \
+                    self.assertRaisesRegex(AssertionError, "cannot read xcconfig"):
+                self.test_project_deployment_settings_match_pinned_minimum()
 
     def test_cask_policy_without_homebrew_uses_literal_symbol(self):
         with mock.patch.object(shutil, "which", return_value=None), mock.patch.object(subprocess, "run", side_effect=FileNotFoundError("no brew")):
@@ -525,10 +560,91 @@ class ReleaseSequenceTests(unittest.TestCase):
                         GENERATE_APPCAST_CMD=str(bin_dir / "generate"), VERIFY_UPDATE_CMD="verify",
                         GH_TOKEN="fixture-public-token", TAP_GH_TOKEN="fixture-tap-token",
                         SPARKLE_PRIVATE_KEY_FILE=str(self.root / "fixture-key"))
-        minimum_script = self.root / "script/minimum_system.py"
-        minimum_script.write_text(minimum_script.read_text().replace(
+        self.fixture_verifier = "verify"
+        for original, replacement in (
+                ('NOTARY_CMD="/usr/bin/xcrun notarytool"', 'NOTARY_CMD="notary"'),
+                ('STAPLER_CMD="/usr/bin/xcrun stapler"', 'STAPLER_CMD="stapler"'),
+                ('GH_CMD="/opt/homebrew/bin/gh"\n[ -x "$GH_CMD" ] || GH_CMD="/usr/local/bin/gh"', 'GH_CMD="gh"'),
+                ('GENERATE_APPCAST_CMD=""', "GENERATE_APPCAST_CMD=" + json.dumps(str(bin_dir / "generate"))),
+                ('VERIFY_UPDATE_CMD=""', 'VERIFY_UPDATE_CMD="verify"')):
+            self.substitute_fixture_source(self.root / "script/release.sh", original, replacement)
+        self.substitute_fixture_source(self.root / "script/minimum_system.py",
             'MACHO_TOOLS = ("/usr/bin/lipo", "/usr/bin/otool")',
-            "MACHO_TOOLS = " + repr((str(bin_dir / "lipo"), str(bin_dir / "otool")))))
+            "MACHO_TOOLS = " + repr((str(bin_dir / "lipo"), str(bin_dir / "otool"))))
+        payload = self.root / "dmg-payload/Contents"
+        (payload / "MacOS").mkdir(parents=True)
+        (payload / "Info.plist").write_bytes(plistlib.dumps({"CFBundleExecutable": "Pensieve",
+            "CFBundleShortVersionString": VERSION, "LSMinimumSystemVersion": "26.0"}))
+        for name in ("Pensieve", "pensieve-daemon"):
+            (payload / "MacOS" / name).write_text("fixture Mach-O")
+
+    def substitute_fixture_source(self, path, original, replacement):
+        source = path.read_text()
+        self.assertEqual(source.count(original), 1, f"fixture substitution must match exactly once: {original}")
+        path.write_text(source.replace(original, replacement))
+        self.assertIn(replacement, path.read_text())
+
+    def set_fixture_verifier(self, command):
+        self.substitute_fixture_source(self.root / "script/release.sh",
+            "VERIFY_UPDATE_CMD=" + json.dumps(self.fixture_verifier), "VERIFY_UPDATE_CMD=" + json.dumps(command))
+        self.fixture_verifier = command
+
+    def test_live_recovery_refuses_replayed_older_dmg(self):
+        signature = self.install_fixture_public_key()
+        original = dict(self.state, release=self.state["expected_release"], appcast=feed(signature=signature))
+        for fault, message in (({"dmg_version": "0.14.0"}, "version differs"),
+                               ({"dmg_minimum": "14.0"}, "release policy requires macOS 26.0")):
+            with self.subTest(fault=fault):
+                self.state = dict(json.loads(json.dumps(original)), **fault)
+                self.assertIn(message, self.run_release(expected=1))
+                self.assertEqual(self.state["writes"], [])
+                self.assertEqual(self.state["builds"], 0)
+                self.assertEqual(self.state["signing_inputs"], [])
+                self.assertFalse((self.root / "build/dist/Pensieve-1.0.0.dmg").exists())
+                self.assertEqual(sum(c[:2] == ["hdiutil", "attach"] for c in self.state["calls"]), 1)
+                self.assertEqual(sum(c[:2] == ["hdiutil", "detach"] for c in self.state["calls"]), 1)
+
+    def test_cask_artifact_refuses_replayed_older_dmg(self):
+        signature = self.install_fixture_public_key()
+        original = dict(self.state, appcast=feed(signature=signature))
+        for fault, message in (({"dmg_version": "0.14.0"}, "version differs"),
+                               ({"dmg_minimum": "14.0"}, "release policy requires macOS 26.0")):
+            with self.subTest(fault=fault):
+                self.state = dict(json.loads(json.dumps(original)), **fault)
+                artifact = self.cask_artifact()
+                self.assert_cask_refused_without_writes(message)
+                self.assertEqual(artifact.read_bytes(), DMG)
+                self.assertEqual(sum(c[:2] == ["hdiutil", "attach"] for c in self.state["calls"]), 1)
+                self.assertEqual(sum(c[:2] == ["hdiutil", "detach"] for c in self.state["calls"]), 1)
+
+    def test_cask_publish_refuses_template_minimum_mismatch(self):
+        self.state["appcast"] = feed()
+        self.cask_artifact()
+        template = self.root / "release/homebrew/pensieve.rb"
+        original = template.read_text()
+        for text in (original.replace(":tahoe", ":sonoma"),
+                     re.sub(r"(?m)^.*depends_on macos:.*\n", "", original)):
+            with self.subTest(template=text):
+                template.write_text(text)
+                self.assertIn("cask minimum", self.run_release(cask_only=True, expected=1))
+                self.assertEqual(self.state["writes"], [])
+
+    def test_publishing_ignores_each_release_tool_environment_override(self):
+        original = json.loads(json.dumps(self.state))
+        poison = self.root / "poison-tool"
+        poison.write_text("#!/bin/sh\necho inherited-tool-ran >&2\nexit 91\n")
+        poison.chmod(0o755)
+        for variable in ("NOTARY_CMD", "STAPLER_CMD", "GH_CMD", "GENERATE_APPCAST_CMD", "VERIFY_UPDATE_CMD"):
+            for cask_only in (False, True):
+                with self.subTest(variable=variable, cask_only=cask_only):
+                    self.state = json.loads(json.dumps(original))
+                    if cask_only or variable == "VERIFY_UPDATE_CMD":
+                        self.state.update(release=self.state["expected_release"], appcast=feed())
+                    if cask_only: self.cask_artifact()
+                    previous = self.env[variable]
+                    self.env[variable] = str(poison)
+                    try: self.assertNotIn("inherited-tool-ran", self.run_release(cask_only=cask_only))
+                    finally: self.env[variable] = previous
 
     def run_release(self, cask_only=False, expected=0, first=False):
         self.state_path.write_text(json.dumps(self.state))
@@ -555,6 +671,10 @@ class ReleaseSequenceTests(unittest.TestCase):
 
     def set_version(self, version):
         self.state["version"] = version
+        payload_info = self.root / "dmg-payload/Contents/Info.plist"
+        properties = plistlib.loads(payload_info.read_bytes())
+        properties["CFBundleShortVersionString"] = version
+        payload_info.write_bytes(plistlib.dumps(properties))
         self.state["expected_release"] = dict(self.state["expected_release"], tag_name="v" + version,
                                              prerelease=PUBLICATION_CASES[version][1],
                                              assets=[dict(self.state["expected_release"]["assets"][0], name="Pensieve-" + version + ".dmg")])
@@ -678,7 +798,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         properties = plistlib.loads(plist.read_bytes())
         properties["SUPublicEDKey"] = public
         plist.write_bytes(plistlib.dumps(properties))
-        self.env["VERIFY_UPDATE_CMD"] = str(verifier)  # Real verifier, compiled once for this suite.
+        self.set_fixture_verifier(str(verifier))  # Real verifier, compiled once for this suite.
         return signature
 
     def test_real_public_key_verification_accepts_only_matching_bytes(self):
@@ -873,6 +993,37 @@ class ReleaseSequenceTests(unittest.TestCase):
                 self.assertEqual(json.loads(self.state_path.read_text())["calls"], [])
                 self.assertFalse((self.root / "build").exists())
 
+    def test_repeated_and_mixed_inspection_modes_refuse_before_work(self):
+        self.state_path.write_text(json.dumps(self.state))
+        for args in (("--inspect-functions", "--inspect-functions"),
+                     ("--inspect-functions", "--print-cask-action", VERSION),
+                     ("--check-tag", "v" + VERSION, "--check-tag", "v" + VERSION),
+                     ("--notes-for", VERSION, "--check-tag")):
+            with self.subTest(args=args):
+                result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), *args],
+                                        env=self.env, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 64, result.stdout + result.stderr)
+                self.assertIn("usage:", result.stderr)
+                self.assertEqual(json.loads(self.state_path.read_text())["calls"], [])
+
+    def test_appcast_cleanup_failure_names_local_context_in_each_branch(self):
+        for state in ({}, {"malformed": "appcast"}, {"appcast": None}):
+            with self.subTest(state=state):
+                self.state.update(state)
+                result = self.run_function('rm() { return 1; }; read_live_appcast master "" "fixture caller" "fixture invalid" 1')
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("fixture caller: local response cleanup failed", result.stderr)
+
+    def test_dry_run_refuses_unpinned_built_minimum(self):
+        self.state["built_minimum"] = "14.0"
+        self.state_path.write_text(json.dumps(self.state))
+        result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--dry-run"],
+                                env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("release policy requires macOS 26.0", result.stderr)
+        state = json.loads(self.state_path.read_text())
+        self.assertFalse(any(c[0] in ("notary", "stapler", "gh", "generate") for c in state["calls"]))
+
     def test_feed_consumers_fail_closed_when_called_from_if(self):
         original = json.loads(json.dumps(self.state))
         for consumer in ("release_preflight", "verify_appcast_unchanged", "verify_cask_artifact"):
@@ -1007,7 +1158,7 @@ sys.exit(not result.wasSuccessful())
 
     def test_default_swift_verifier_in_spaced_checkout_and_cold_cache(self):
         signature = self.install_fixture_public_key()
-        self.env.pop("VERIFY_UPDATE_CMD")
+        self.set_fixture_verifier("")
         self.state["appcast"] = feed(signature=signature)
         self.assertIn(" ", str(self.root))
         cache = self.root / "cold swift module cache"
@@ -1115,8 +1266,10 @@ sys.exit(not result.wasSuccessful())
             self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
             self.assertEqual(self.state["builds"], 0)
             self.assertEqual(self.state["signing_inputs"], [])
-            forbidden = {"xcodegen", "xcodebuild", "codesign", "hdiutil", "notary", "stapler", "generate"}
+            forbidden = {"xcodegen", "xcodebuild", "codesign", "notary", "stapler", "generate"}
             self.assertFalse(any(call[0] in forbidden for call in self.state["calls"]))
+            for call in self.state["calls"]:
+                if call[:2] == ["hdiutil", "attach"]: self.assertIn("-readonly", call)
             return result.stdout + result.stderr
 
         self.assertIn("does not match VERSION", invoke(1, "v9.9.9"))
@@ -1513,8 +1666,14 @@ verify_appcast_unchanged''')
         self.assertEqual(self.state["writes"], [])
         self.assertEqual(self.state["signing_inputs"], [])
 
-    def test_release_normalizes_built_and_feed_minimums(self):
-        self.state.update(built_minimum="26.0.0", new_feed=feed(minimum="26.0"))
+    def test_release_requires_exact_built_and_feed_minimum_strings(self):
+        original = json.loads(json.dumps(self.state))
+        for built, generated in (("26.0.0", "26.0"), ("26.0", "26"), ("26.0", "026")):
+            with self.subTest(built=built, generated=generated):
+                self.state = dict(json.loads(json.dumps(original)), built_minimum=built, new_feed=feed(minimum=generated))
+                self.assertIn("differs from built app minimum", self.run_release(expected=1))
+                self.assertEqual(self.state["writes"], [])
+        self.state = dict(json.loads(json.dumps(original)), built_minimum="26.0.0", new_feed=feed(minimum="26.0.0"))
         self.run_release()
         self.assertEqual(self.state["writes"], ["create", "appcast"])
 
@@ -1734,9 +1893,15 @@ verify_appcast_unchanged''')
                     else: altered.remove(child)
                     root = ET.fromstring(ET.tostring(captured)); channel = root.find("channel")
                     channel.remove(channel.find("item")); channel.append(altered)
-                    with self.assertRaises(ValueError, msg="generated fields require the captured one-archive counts"):
-                        self.tool.appcast_provenance(ET.tostring(root, encoding="unicode"), None,
-                            "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION, "26.0")
+                    with self.assertRaisesRegex(ValueError, "wrong element count"):
+                        if tag == self.tool.SPARKLE + "minimumSystemVersion":
+                            self.tool.appcast_provenance(ET.tostring(root, encoding="unicode"), None,
+                                "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION, "26.0")
+                        else:
+                            self.tool.check_generated_item(altered, f"{DOWNLOAD_PREFIX}/v{VERSION}/Pensieve-{VERSION}.dmg")
+        for _ in range(2): ET.SubElement(item, self.tool.SPARKLE + "channel").text = "beta"
+        with self.assertRaisesRegex(ValueError, "wrong element count"):
+            self.tool.check_generated_item(item, f"{DOWNLOAD_PREFIX}/v{VERSION}/Pensieve-{VERSION}.dmg")
 
     def test_generated_item_refuses_delta_notes_and_link_urls(self):
         original = json.loads(json.dumps(self.state))
