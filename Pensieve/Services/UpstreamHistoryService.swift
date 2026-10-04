@@ -11,9 +11,10 @@ enum UpstreamHistoryFileContent: Codable, Equatable {
     case tooLarge
 
     static func utf8PreservingBOM(_ data: Data) -> String? {
-        // Foundation validates UTF-8 but drops its leading BOM, so restore that scalar when present.
-        guard let text = String(data: data, encoding: .utf8) else { return nil }
-        return data.starts(with: [0xef, 0xbb, 0xbf]) ? "\u{feff}" + text : text
+        guard String(data: data, encoding: .utf8) != nil else { return nil }
+        // UTF-8 is validated above; decode the original bytes to preserve every leading BOM.
+        // swiftlint:disable:next optional_data_string_conversion
+        return String(decoding: data, as: UTF8.self)
     }
 }
 

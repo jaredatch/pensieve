@@ -14,15 +14,26 @@ extension UpstreamHistoryServiceTests {
         let cases = ["\u{feff}a\r\ncafe\u{0301}\n", "\u{feff}", "\u{feff}\u{feff}a\n"]
         for source in cases {
             let bytes = Data(source.utf8)
-            for content in [service().localContent(bytes), try decodedHistoricalContent(bytes)] {
-                guard case let .text(text) = content else { return XCTFail("expected UTF-8 text") }
-                XCTAssertEqual(Array(text.utf8.prefix(3)), [0xef, 0xbb, 0xbf])
-                XCTAssertEqual(Data(text.utf8), bytes)
-                XCTAssertEqual(LineDiffView.alignedRows(this: "a\r\ncafe\u{0301}\n", other: text).first?.changed, true)
+            for (decoder, content) in [
+                ("local", service().localContent(bytes)), ("historical", try decodedHistoricalContent(bytes))
+            ] {
+                let context = "\(decoder): source UTF-8 \(Array(bytes))"
+                guard case let .text(text) = content else {
+                    XCTFail("\(context): expected UTF-8 text")
+                    continue
+                }
+                XCTAssertEqual(Array(text.utf8.prefix(3)), [0xef, 0xbb, 0xbf], context)
+                XCTAssertEqual(Array(text.utf8), Array(bytes), context)
+                XCTAssertEqual(
+                    LineDiffView.alignedRows(this: "a\r\ncafe\u{0301}\n", other: text).first?.changed, true, context
+                )
                 let encoded = try JSONEncoder().encode(content)
                 let decoded = try JSONDecoder().decode(UpstreamHistoryFileContent.self, from: encoded)
-                guard case let .text(cachedText) = decoded else { return XCTFail("expected cached UTF-8 text") }
-                XCTAssertEqual(Data(cachedText.utf8), bytes)
+                guard case let .text(cachedText) = decoded else {
+                    XCTFail("\(context): expected cached UTF-8 text")
+                    continue
+                }
+                XCTAssertEqual(Array(cachedText.utf8), Array(bytes), "\(context): cached text")
             }
         }
     }
