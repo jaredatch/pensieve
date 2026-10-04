@@ -9,6 +9,12 @@ enum UpstreamHistoryFileContent: Codable, Equatable {
     case text(String)
     case binary
     case tooLarge
+
+    static func utf8PreservingBOM(_ data: Data) -> String? {
+        // Foundation validates UTF-8 but drops its leading BOM, so restore that scalar when present.
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        return data.starts(with: [0xef, 0xbb, 0xbf]) ? "\u{feff}" + text : text
+    }
 }
 
 struct UpstreamHistoryBaselineFile: Codable, Equatable {

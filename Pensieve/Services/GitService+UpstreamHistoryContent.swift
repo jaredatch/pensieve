@@ -53,7 +53,7 @@ extension GitService {
                            textByteLimit: Int) throws -> UpstreamHistoryFileContent {
         guard size <= textByteLimit else { return .tooLarge }
         let data = try blob(object, at: repositoryPath)
-        guard !data.contains(0), let text = String(data: data, encoding: .utf8) else { return .binary }
+        guard !data.contains(0), let text = UpstreamHistoryFileContent.utf8PreservingBOM(data) else { return .binary }
         return .text(text)
     }
 

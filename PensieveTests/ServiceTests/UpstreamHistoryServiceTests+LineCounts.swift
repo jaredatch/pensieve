@@ -2,6 +2,64 @@ import XCTest
 @testable import Pensieve
 
 extension UpstreamHistoryServiceTests {
+    func testLocalLineCountsMatchGitWhenBOMIsAdded() throws {
+        try assertLineCountsMatchGit("a\n", "\u{feff}a\n", context: "BOM added", decodeFiles: true)
+    }
+
+    func testLocalLineCountsMatchGitWhenBOMIsRemoved() throws {
+        try assertLineCountsMatchGit("\u{feff}a\n", "a\n", context: "BOM removed", decodeFiles: true)
+    }
+
+    func testHistoryDecodersKeepEveryUTF8ByteIncludingBOM() throws {
+        let cases = ["\u{feff}a\r\ncafe\u{0301}\n", "\u{feff}", "\u{feff}\u{feff}a\n"]
+        for source in cases {
+            let bytes = Data(source.utf8)
+            for content in [service().localContent(bytes), try decodedHistoricalContent(bytes)] {
+                guard case let .text(text) = content else { return XCTFail("expected UTF-8 text") }
+                XCTAssertEqual(Array(text.utf8.prefix(3)), [0xef, 0xbb, 0xbf])
+                XCTAssertEqual(Data(text.utf8), bytes)
+                XCTAssertEqual(LineDiffView.alignedRows(this: "a\r\ncafe\u{0301}\n", other: text).first?.changed, true)
+                let encoded = try JSONEncoder().encode(content)
+                let decoded = try JSONDecoder().decode(UpstreamHistoryFileContent.self, from: encoded)
+                guard case let .text(cachedText) = decoded else { return XCTFail("expected cached UTF-8 text") }
+                XCTAssertEqual(Data(cachedText.utf8), bytes)
+            }
+        }
+    }
+
+    func testHistoryDecodersKeepBinaryAndSizeAdmissionRules() throws {
+        let cases: [(Data, UpstreamHistoryFileContent)] = [
+            (Data(), .text("")),
+            (Data("plain\r\n".utf8), .text("plain\r\n")),
+            (Data([0xff]), .binary),
+            (Data([0xef, 0xbb, 0xbf, 0xff]), .binary),
+            (Data([0xc0, 0xaf]), .binary),
+            (Data([0xe2, 0x82]), .binary),
+            (Data([0xed, 0xa0, 0x80]), .binary),
+            (Data([0xef, 0xbb, 0xbf, 0x61, 0, 0x0a]), .binary),
+            (Data(repeating: 0, count: UpstreamHistoryService.textByteLimit + 1), .tooLarge),
+            (Data(repeating: 0x61, count: UpstreamHistoryService.textByteLimit + 1), .tooLarge)
+        ]
+        for (bytes, expected) in cases {
+            XCTAssertEqual(service().localContent(bytes), expected)
+            XCTAssertEqual(try decodedHistoricalContent(bytes), expected)
+        }
+        let atLimit = "\u{feff}" + String(repeating: "a", count: UpstreamHistoryService.textByteLimit - 3)
+        XCTAssertEqual(service().localContent(Data(atLimit.utf8)), .text(atLimit))
+        XCTAssertEqual(try decodedHistoricalContent(Data(atLimit.utf8)), .text(atLimit))
+    }
+
+    @MainActor
+    func testRestoreWritesDecodedHistoryBOMBytesExactly() throws {
+        let bytes = Data("\u{feff}---\r\nname: Example\r\ndescription: Test\r\n---\r\nBody\r\n".utf8)
+        let content = try decodedHistoricalContent(bytes)
+        guard case let .text(document) = content else { return XCTFail("expected UTF-8 text") }
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/restored")
+        let skill = Skill(name: "Example", directoryName: "example")
+        try restoreSkillHistoryVersion(skill: skill, body: document, store: store, library: nil, notifier: {})
+        XCTAssertEqual(try store.readData(directoryName: skill.directoryName), bytes)
+    }
+
     func testLocalLineCountsMatchGitWhenFinalNewlineIsAdded() throws {
         try assertLineCountsMatchGit("last", "last\n", context: "final newline added")
         try assertLineCountsMatchGit(
@@ -91,7 +149,7 @@ extension UpstreamHistoryServiceTests {
     }
 
     private func assertLineCountsMatchGit(
-        _ installed: String?, _ current: String?, context: String,
+        _ installed: String?, _ current: String?, context: String, decodeFiles: Bool = false,
         file: StaticString = #filePath, line: UInt = #line
     ) throws {
         let beforeURL = URL(fileURLWithPath: tempDir + "/numstat-installed.txt")
@@ -115,12 +173,25 @@ extension UpstreamHistoryServiceTests {
                 XCTUnwrap(Int(columns[1]), git.stdout, file: file, line: line)
             ]
         }
-        let actual = try XCTUnwrap(
-            service().lineCounts(installed: installed.map { .text($0) }, current: current.map { .text($0) }),
-            context, file: file, line: line
-        )
+        let before: UpstreamHistoryFileContent? = decodeFiles
+            ? try decodedHistoricalContent(Data((installed ?? "").utf8)) : installed.map { .text($0) }
+        let after: UpstreamHistoryFileContent? = decodeFiles
+            ? service().localContent(Data((current ?? "").utf8)) : current.map { .text($0) }
+        let actual = try XCTUnwrap(service().lineCounts(installed: before, current: after), context, file: file, line: line)
         let message = "\(context): git diff --no-index --numstat reports +\(expected[0]) -\(expected[1]); "
             + "History reports +\(actual.added) -\(actual.removed)"
         XCTAssertEqual([actual.added, actual.removed], expected, message, file: file, line: line)
+    }
+
+    private func decodedHistoricalContent(_ bytes: Data) throws -> UpstreamHistoryFileContent {
+        let repository = try makeRepository()
+        let url = URL(fileURLWithPath: tempDir + "/decoded-history.txt")
+        try bytes.write(to: url)
+        let result = try rawGit(["-C", repository, "hash-object", "--no-filters", "-w", "--", url.path])
+        XCTAssertEqual(result.exit, 0, result.stderr)
+        return try GitService(fileService: fileService).historicalContent(
+            object: result.stdout.trimmingCharacters(in: .whitespacesAndNewlines),
+            size: bytes.count, repositoryPath: repository, textByteLimit: UpstreamHistoryService.textByteLimit
+        )
     }
 }

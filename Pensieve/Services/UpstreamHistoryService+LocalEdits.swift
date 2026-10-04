@@ -89,14 +89,6 @@ private extension UpstreamHistoryService {
         }
     }
 
-    func localContent(_ data: Data) -> UpstreamHistoryFileContent {
-        guard data.count <= Self.textByteLimit else { return .tooLarge }
-        guard !data.contains(0), let text = String(data: data, encoding: .utf8) else {
-            return .binary
-        }
-        return .text(text)
-    }
-
     func filesDiffer(_ installed: UpstreamHistoryBaselineFile?,
                      _ current: LocalFile?) -> Bool {
         switch (installed, current) {
@@ -112,6 +104,14 @@ private extension UpstreamHistoryService {
 }
 
 extension UpstreamHistoryService {
+    func localContent(_ data: Data) -> UpstreamHistoryFileContent {
+        guard data.count <= Self.textByteLimit else { return .tooLarge }
+        guard !data.contains(0), let text = UpstreamHistoryFileContent.utf8PreservingBOM(data) else {
+            return .binary
+        }
+        return .text(text)
+    }
+
     func lineCounts(
         installed: UpstreamHistoryFileContent?,
         current: UpstreamHistoryFileContent?
