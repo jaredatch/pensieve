@@ -10,14 +10,29 @@ extension FileService {
         try readRegularFileData(at: path, maximumBytes: maximumBytes, read: Darwin.read)
     }
 
+    func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data {
+        try readRegularFileData(at: path, maximumBytes: maximumBytes, read: Darwin.read, containedIn: directory)
+    }
+
     /// The injected syscall keeps descriptor admission and the read loop together when testing
     /// concurrent growth. The normal entry point always uses Darwin.read.
     func readRegularFileData(at path: String, maximumBytes: Int,
-                             read: (Int32, UnsafeMutableRawPointer?, Int) -> Int
+                             read: (Int32, UnsafeMutableRawPointer?, Int) -> Int,
+                             containedIn directory: String? = nil
     ) throws -> Data {
         guard maximumBytes >= 0 else { throw CocoaError(.fileReadTooLarge) }
         let (descriptor, status) = try Self.openRegularFile(at: path)
         defer { close(descriptor) }
+        if let directory {
+            // URL.standardizedFileURL strips /private on macOS; F_GETPATH retains it.
+            let root = realPath(at: directory)
+            var openedPath = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+            guard fcntl(descriptor, F_GETPATH, &openedPath) == 0 else {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+            }
+            let resolved = String(cString: openedPath)
+            guard resolved.hasPrefix(root + "/") else { throw CocoaError(.fileReadNoPermission) }
+        }
         guard status.st_size >= 0, status.st_size <= maximumBytes else {
             throw CocoaError(.fileReadTooLarge)
         }

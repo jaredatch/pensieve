@@ -7,6 +7,8 @@ protocol FileServiceProtocol {
     func readFile(at path: String) throws -> String
     func readData(at path: String) throws -> Data
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data
+    /// Checks the opened inode's resolved path is inside this directory before reading any bytes.
+    func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data
     func writeFile(at path: String, content: String) throws
     func writeData(at path: String, data: Data) throws
     func writeExecutableFile(at path: String, content: String) throws
@@ -86,6 +88,11 @@ extension FileServiceProtocol {
 
     /// Inert default: doubles must explicitly model bounded reads; never fall through to host I/O.
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        throw CocoaError(.featureUnsupported)
+    }
+
+    /// Inert default: containment must be modeled explicitly, never reduced to an unguarded read.
+    func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data {
         throw CocoaError(.featureUnsupported)
     }
 

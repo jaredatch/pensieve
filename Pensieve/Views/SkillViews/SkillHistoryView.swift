@@ -97,7 +97,10 @@ struct SkillHistoryView: View {
 
     @ViewBuilder private var previewPane: some View {
         if let selection {
-            SkillPreviewView(markdownBody: selection.previewBody)
+            SkillPreviewView(markdownBody: selection.previewBody,
+                             skillDirectory: PreviewImageLoader.skillDirectory(
+                                slug: skill.directoryName, base: workingDir + "/skills"),
+                             imageLoader: PreviewImageLoader(fileService: fileService))
         } else {
             ContentUnavailableView {
                 Label("Select a version", systemImage: "clock.arrow.circlepath")

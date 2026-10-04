@@ -134,6 +134,15 @@ final class FileServiceTests: XCTestCase {
             }
         }
     }
+
+    func testUnmodeledContainedReadDefaultRefusesHostBytes() throws {
+        let path = tempDir + "/contained"
+        try fileService.writeFile(at: path, content: "Host bytes must stay behind the modeled boundary")
+        let double: FileServiceProtocol = InertMetadataFileService()
+        XCTAssertThrowsError(try double.readRegularFileData(at: path, maximumBytes: 1_024, containedIn: tempDir)) { error in
+            XCTAssertEqual((error as NSError).code, CocoaError.featureUnsupported.rawValue)
+        }
+    }
 }
 
 private struct InertMetadataFileService: FileServiceProtocol {

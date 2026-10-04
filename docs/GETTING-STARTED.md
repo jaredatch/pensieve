@@ -81,6 +81,8 @@ A skill's detail is a header (name, where it came from, description, tags) over 
 
 Edit a skill's tags right in the header, with suggestions from tags you already use. Pensieve keeps them in its own metadata and leaves `SKILL.md` alone. File › Export SKILL.md… saves a copy anywhere you like.
 
+The rendered preview stays offline. Embedded images and images inside the skill's folder show normally; remote or unavailable images show their alt text instead.
+
 If you edit a `SKILL.md` outside the app (terminal, vim, whatever), Pensieve's filesystem watcher notices and refreshes, with a small notice that the file changed outside the app. If you had unsaved edits, it asks before replacing them. Useful shortcuts: `Cmd+N` new skill, `Cmd+S` save, `Cmd+Delete` delete.
 
 ### Deploy targets and install detection
@@ -169,7 +171,7 @@ No. Skills are plain `SKILL.md` markdown files in `~/.pensieve/skills/`, in the 
 Only what you deploy: symlinks (or the compiled `.mdc` for Cursor) into the agent directories you chose, plus a small `.pensieve-project` marker if you register a project that has no git remote. App-internal state lives in `~/Library/Application Support/Pensieve`. It never touches anything else.
 
 **Does it phone home?**
-No. No telemetry, no analytics, no Pensieve server. The only network traffic is git talking to the remote *you* configured, and if you never set up sync there's no network traffic at all.
+Pensieve sends no telemetry or analytics and has no server. Sync uses git to reach the remote *you* configured. GitHub installs, upstream History, and skill-update checks also use git. Those checks run weekly by default, or when you ask. Sparkle checks for app updates on GitHub and downloads releases over HTTPS. Previewing a skill makes no network requests.
 
 **What if I edit a `SKILL.md` in a terminal or another editor?**
 Totally supported. The filesystem watcher picks up the change and refreshes the app, with an indicator that the file was modified externally. Since deployed symlinks point at the same file, every agent sees your edit immediately too.
