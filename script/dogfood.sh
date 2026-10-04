@@ -63,6 +63,7 @@
 # dogfood identity is auto-denied from a headless shell.
 #
 # Written for bash 3.2 (stock macOS).
+# Keychain guard tests: python3 -B script/dogfood_self_test.py
 
 set -euo pipefail
 
