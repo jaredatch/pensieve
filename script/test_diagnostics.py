@@ -22,7 +22,12 @@ KEEP_PAIRS = 5
 def reports(directory):
     for path in sorted(directory.glob("*.txt")):
         match = REPORT_NAME.fullmatch(path.name)
-        if match and not path.is_symlink() and path.is_file():
+        try:
+            regular = match and not path.is_symlink() and path.is_file()
+        except OSError as error:
+            print(f"TestDiagnostics warning: preserved {path.name}: {error}", file=sys.stderr)
+            continue
+        if regular:
             yield path, match
 
 
@@ -98,7 +103,10 @@ def main():
     parser.add_argument("--prune", action="store_true")
     args = parser.parse_args()
     if args.prune:
-        prune(args.directory)
+        try:
+            prune(args.directory)
+        except OSError as error:
+            print(f"TestDiagnostics warning: pruning preserved evidence: {error}", file=sys.stderr)
     elif args.parent_pid is None:
         parser.error("relay requires the wrapper PID")
     else:

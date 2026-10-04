@@ -23,8 +23,8 @@ jobs:
     permissions:
       contents: read
     runs-on: macos-26
-    timeout-minutes: 95 # 85 minutes of step bounds plus 10 minutes of headroom.
-    # Worst times: Actions runs 37074075055 and 37063706683, except recovery below.
+    timeout-minutes: 106 # 96 minutes of step bounds plus 10 minutes of headroom.
+    # Worst times: Actions runs 37074075055 and 37063706683, with local additions scaled by 2x below.
     steps:
       - name: Checkout
         timeout-minutes: 2 # Worst measured: 2 s; bound >= 3x.
@@ -89,15 +89,15 @@ jobs:
           fi
 
       - name: Test public hygiene guard
-        timeout-minutes: 8 # Worst measured: 156 s; bound >= 3x.
+        timeout-minutes: 8 # Worst estimate: 158 s = 156 s runner + ceil(2 x 0.731 s local added checks); bound >= 3x.
         run: ./script/public-hygiene.sh --self-test
 
       - name: Test workflow contracts
-        timeout-minutes: 1 # Worst measured: 3 s; bound >= 3x.
+        timeout-minutes: 1 # Worst estimate: 15 s = max(3 s runner, ceil(2 x 7.273 s local full suite)); bound >= 3x.
         run: ruby script/workflow_self_test.rb
 
       - name: Test release recovery
-        timeout-minutes: 10 # Worst measured: 197.7 s local rehearsal; not yet present in the API runs; bound >= 3x.
+        timeout-minutes: 21 # Worst estimate: 409 s = ceil(2 x 204.182 s local recovery); absent from API runs; bound >= 3x.
         run: python3 -B script/release_self_test.py
 
       - name: Test development build host selection
@@ -119,7 +119,7 @@ jobs:
             ./script/ci-replay.sh "${{ steps.replay-range.outputs.range }}"
 
       - name: Test
-        timeout-minutes: 45 # Worst measured: 867 s; bound >= 3x.
+        timeout-minutes: 45 # Worst estimate: 887 s = 867 s runner + ceil(2 x 9.826 s local wrapper self-test); bound >= 3x.
         id: tests
         run: |
           set -o pipefail

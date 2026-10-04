@@ -88,10 +88,12 @@ final class TestTimeoutDiagnostics: NSObject, XCTestObservation {
         let reports = [("\(identifier)-state.txt", state), ("\(identifier)-threads.txt", sample)]
         let directory = environment["PENSIEVE_TEST_DIAGNOSTICS_DIR"] ?? fallbackDirectory
         let files = FileService()
+        var writtenReports = Set<String>()
         for (name, content) in reports {
             do {
                 try files.createDirectory(at: directory)
                 try files.writeFile(at: directory + "/" + name, content: content)
+                writtenReports.insert(name)
             } catch {
                 // Attachments remain available even when the upload directory cannot be written.
                 output("Timeout diagnostics could not write \(name): \(error)")
@@ -99,8 +101,8 @@ final class TestTimeoutDiagnostics: NSObject, XCTestObservation {
         }
         // Publish both files before interacting with XCTest's stdout/attachment transport.
         for (name, content) in reports {
-            // The live wrapper relay owns stdout; standalone Xcode still prints.
-            if environment["PENSIEVE_TEST_DIAGNOSTICS_DIR"] == nil {
+            // The relay owns successfully written reports; failed writes fall back to stdout.
+            if environment["PENSIEVE_TEST_DIAGNOSTICS_DIR"] == nil || !writtenReports.contains(name) {
                 output("BEGIN TIMEOUT DIAGNOSTIC \(name)\n\(content)\nEND TIMEOUT DIAGNOSTIC \(name)")
             }
             let attachment = XCTAttachment(string: content)

@@ -1,5 +1,7 @@
 """Exercise the real test wrapper with local Xcode stubs; never launch Xcode or touch live data."""
+import contextlib
 import fcntl
+import io
 import json
 import os
 from pathlib import Path
@@ -39,6 +41,15 @@ bundle = pathlib.Path(sys.argv[sys.argv.index('-resultBundlePath') + 1])
 bundle.mkdir()
 (bundle / 'marker').write_text('preserved evidence')
 pathlib.Path(os.environ['TEST_LIFECYCLE_READY']).write_text(json.dumps({'pid': os.getpid(), 'directory': str(bundle.parent)}))
+if os.environ.get('TEST_LIFECYCLE_MODE') == 'cascade':
+    directory = pathlib.Path(os.environ['TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR'])
+    directory.mkdir(parents=True, exist_ok=True)
+    for index in range(7):
+        identifier = str(os.getpid()) + '-' + str(uuid.UUID(int=index))
+        for kind in ('state', 'threads'):
+            path = directory / (identifier + '-' + kind + '.txt')
+            path.write_text('cascade root cause ' + str(index))
+            os.utime(path, (200 + index, 200 + index))
 if os.environ.get('TEST_LIFECYCLE_MODE') == 'diagnostics':
     directory = pathlib.Path(os.environ['TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR'])
     directory.mkdir(parents=True, exist_ok=True)
@@ -112,8 +123,8 @@ sys.exit(65)
             time.sleep(0.02)
         self.fail("wrapper never started its relay")
 
-    def failed_run(self, label="failed"):
-        process, _ = self.launch(label=label)
+    def failed_run(self, label="failed", mode="fail"):
+        process, _ = self.launch(label=label, mode=mode)
         output = process.communicate(timeout=10)[0].decode()
         self.assertEqual(process.returncode, 65, output)
         self.assertIn("PENSIEVE_TEST_COUNT=1", output)
@@ -224,6 +235,43 @@ sys.exit(65)
         self.assertEqual(target.read_text(), 'do not delete')
         self.failed_run(label='prune-repeat')
         self.assertEqual(set(directory.iterdir()), expected)
+        self.assert_current_run_reports_are_retained()
+
+    def assert_current_run_reports_are_retained(self):
+        directory = self.root / 'DerivedData/TestDiagnostics'
+        directory.mkdir(parents=True, exist_ok=True)
+        before = set(directory.iterdir())
+        self.failed_run(label='cascade', mode='cascade')
+        current = set(directory.iterdir()) - before
+        self.assertEqual(len(current), 14, 'the current cascade must retain all seven report pairs')
+        self.assertEqual(sum(path.read_text() == 'cascade root cause 0' for path in current), 2,
+                         'the first timeout is evidence of the root cause')
+
+    def test_current_run_keeps_all_seven_timeout_pairs(self):
+        self.assert_current_run_reports_are_retained()
+
+    def test_prune_failure_is_a_warning_and_preserves_run_status(self):
+        script = self.root / 'script/test_diagnostics.py'
+        script.write_text("import sys\nif '--prune' in sys.argv:\n    print('prune inspection denied', file=sys.stderr)\n    sys.exit(23)\n" + script.read_text())
+        output = self.failed_run()
+        self.assertIn('prune inspection denied', output)
+        self.assertIn('warning', output.lower())
+        self.assertEqual(list(self.runs.iterdir()), [], 'prune failure must not skip failed-run cleanup')
+        self.assertEqual(len(list((self.root / 'DerivedData/FailedRuns').glob('*.xcresult'))), 1)
+
+    def test_prune_inspection_errors_preserve_evidence_and_warn(self):
+        directory = self.root / 'reports'
+        pair = self.report_pair(directory, 1)
+        error = None
+        output = io.StringIO()
+        with contextlib.redirect_stderr(output), patch.object(Path, 'is_file', side_effect=PermissionError('inspection denied')):
+            try:
+                diagnostics.prune(directory)
+            except OSError as caught:
+                error = caught
+        self.assertIsNone(error, 'report inspection errors must only warn')
+        self.assertEqual(set(directory.iterdir()), pair)
+        self.assertIn('inspection denied', output.getvalue())
 
     def test_diagnostics_prune_preserves_unknown_liveness(self):
         directory = self.root / 'reports'

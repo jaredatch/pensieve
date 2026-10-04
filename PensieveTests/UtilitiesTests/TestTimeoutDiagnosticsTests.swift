@@ -49,4 +49,21 @@ final class TestTimeoutDiagnosticsTests: XCTestCase {
             XCTAssertTrue(printed.contains(try files.readFile(at: directory + "/" + report)))
         }
     }
+    func testWrapperPrintsReportsWhoseFilesCannotBeWritten() throws {
+        let blocked = directory + "/blocked"
+        try files.writeFile(at: blocked, content: "directory creation is blocked")
+        var output: [String] = []
+        let observer = TestTimeoutDiagnostics(environment: ["PENSIEVE_TEST_DIAGNOSTICS_DIR": blocked],
+                                              output: { output.append($0) })
+        observer.recordSnapshot("failed-write state", threadSample: "failed-write threads")
+        observer.testCase(self, didRecord: XCTIssue(type: .assertionFailure, compactDescription: "timeout probe"))
+
+        let reports = output.filter { $0.hasPrefix("BEGIN TIMEOUT DIAGNOSTIC ") }
+        XCTAssertEqual(reports.count, 2, "Unwritten reports must fall back to stdout")
+        XCTAssertEqual(reports.filter { $0.contains("failed-write state") }.count, 1)
+        XCTAssertEqual(reports.filter { $0.contains("failed-write threads") }.count, 1)
+        XCTAssertTrue(reports.allSatisfy { $0.contains("END TIMEOUT DIAGNOSTIC ") })
+        XCTAssertEqual(try files.readFile(at: blocked), "directory creation is blocked")
+    }
+
 }

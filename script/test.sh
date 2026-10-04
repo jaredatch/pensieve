@@ -92,7 +92,10 @@ mkdir -p "$HOME" "$CLANG_MODULE_CACHE_PATH" "$XDG_CACHE_HOME"
 # Keep in-progress bundles where CI can upload them even if the step kills this wrapper.
 mkdir -p "$DERIVED_DATA/TestRuns"
 python3 "$REPO/script/test_runs.py" "$DERIVED_DATA/TestRuns"
-python3 "$REPO/script/test_diagnostics.py" --prune "$TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR"
+# Prune only older evidence. Every report written by this run survives for CI upload.
+if ! python3 "$REPO/script/test_diagnostics.py" --prune "$TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR"; then
+  echo "test.sh: warning: timeout diagnostics pruning failed; continuing the test run" >&2
+fi
 rdir="$(mktemp -d "$DERIVED_DATA/TestRuns/run.XXXXXX")"
 # Xcode buffers parallel hosts' stdout. Relay completed reports while tests are still running.
 python3 -u "$REPO/script/test_diagnostics.py" "$TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR" "$$" --ready "$rdir/.diagnostics-ready" &
@@ -156,7 +159,6 @@ fi
 # the in-progress bundle stays in TestRuns instead of being deleted.
 finish_relay
 trap - EXIT
-python3 "$REPO/script/test_diagnostics.py" --prune "$TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR"
 if [ "$status" -eq 0 ]; then rm -rf "$rdir"; fi
 printf 'PENSIEVE_TEST_COUNT=%s\n' "$count"
 

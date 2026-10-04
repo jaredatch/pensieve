@@ -533,12 +533,13 @@ class WorkflowTests < Minitest::Test
   def repository_witnesses(strings)
     folded = strings.map { |string| WorkflowCondition.fold(string) }.uniq
     # All literal prefixes, plus one unseen outgoing ASCII edge per prefix,
-    # witness equality and startsWith in either direction. A full 128-edge node
+    # witness equality and startsWith in either direction. Candidates exclude A-Z,
+    # which fold onto lowercase branches. A node with every folded ASCII edge
     # needs no extra edge: its existing child prefixes already cover them all.
     prefixes = folded.flat_map { |string| (0..string.length).map { |length| string[0, length] } }.uniq
     fresh = prefixes.map do |prefix|
       following = folded.select { |string| string.start_with?(prefix) }.map { |string| string[prefix.length] }
-      character = (0..127).map(&:chr).find { |candidate| !following.include?(candidate) }
+      character = (0..127).reject { |code| (65..90).include?(code) }.map(&:chr).find { |candidate| !following.include?(candidate) }
       prefix + character if character
     end.compact
     (prefixes + fresh).uniq
@@ -611,6 +612,42 @@ class WorkflowTests < Minitest::Test
     assert_includes error.message, '"ref"=>'
   end
 
+  def test_repository_witnesses_use_unseen_folded_edges
+    strings = (0..64).map(&:chr) + ['a']
+    witnesses = repository_witnesses(strings)
+    assert witnesses.all? { |witness| WorkflowCondition.fold(witness) == witness }, 'fresh edges must already be folded'
+    assert_includes witnesses, '[', 'the first unseen folded continuation must be present'
+  end
+
+  def test_ci_test_baseline_includes_wrapper_self_test
+    assert_operator CI_WORST_SECONDS.fetch('Test'), :>, 867, 'Test includes measured wrapper self-test work'
+  end
+
+  def test_ci_hygiene_baseline_includes_stability_probe
+    assert_operator CI_WORST_SECONDS.fetch('Test public hygiene guard'), :>, 156, 'Hygiene includes measured stability work'
+  end
+
+  def test_ci_short_bound_fixtures_are_the_tight_boundary
+    baseline = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')
+    observed = {}
+    original = method(:assert_ci_timeout_budget)
+    define_singleton_method(:assert_ci_timeout_budget) do |job|
+      job.fetch('steps').zip(baseline.fetch('steps')).each do |step, live|
+        if step.key?('timeout-minutes') && step['timeout-minutes'] != live['timeout-minutes']
+          observed[step.fetch('name')] = step.fetch('timeout-minutes')
+        end
+      end
+      original.call(job)
+    end
+    test_ci_budget_rejects_missing_short_and_unsummed_bounds
+    CI_WORST_SECONDS.each do |name, worst|
+      next if worst.zero?
+      assert_equal((worst * 3 / 60.0).ceil - 1, observed.fetch(name), name + ': tight short-bound mutation')
+    end
+  ensure
+    singleton_class.send(:remove_method, :assert_ci_timeout_budget)
+  end
+
   def test_explicit_read_only_permissions
     @workflows.each do |name, workflow|
       [workflow, *workflow.fetch('jobs').values].each do |scope|
@@ -649,29 +686,38 @@ class WorkflowTests < Minitest::Test
   end
 
   # Worst seconds from Actions runs 37074075055 and 37063706683.
-  # Release recovery was added afterward: its 197.7 s baseline is the local rehearsal.
+  # Added work: worst of three local wall-time samples, rounded upward to milliseconds.
+  # Apply 2x for a slower runner before adding it to each historical runner baseline.
+  # Recovery uses the complete 46.3-c3 local rehearsal, also scaled by 2x.
+  CI_RUNNER_FACTOR = 2
+  CI_LOCAL_WORST_SECONDS = {
+    'Wrapper self-test' => 9.826, 'Hygiene added checks' => 0.731, 'Workflow suite' => 7.273,
+    'Release recovery' => 204.182
+  }.freeze
   CI_WORST_SECONDS = {
     'Checkout' => 2, 'Select Xcode 26' => 1, 'Install tools' => 3,
     'Generate Xcode project' => 1, 'Compute replay range' => 0,
-    'Test public hygiene guard' => 156, 'Test workflow contracts' => 3,
-    'Test release recovery' => 197.7, 'Test development build host selection' => 0,
+    'Test public hygiene guard' => 156 + (CI_LOCAL_WORST_SECONDS.fetch('Hygiene added checks') * CI_RUNNER_FACTOR).ceil, 'Test workflow contracts' => [3, (CI_LOCAL_WORST_SECONDS.fetch('Workflow suite') * CI_RUNNER_FACTOR).ceil].max,
+    'Test release recovery' => (CI_LOCAL_WORST_SECONDS.fetch('Release recovery') * CI_RUNNER_FACTOR).ceil, 'Test development build host selection' => 0,
     'Check public hygiene in pushed commits' => 22, 'Replay commit guards' => 35,
-    'Test' => 867, 'Upload failed test evidence' => 7, 'Headless smoke' => 14
+    'Test' => 867 + (CI_LOCAL_WORST_SECONDS.fetch('Wrapper self-test') * CI_RUNNER_FACTOR).ceil, 'Upload failed test evidence' => 7, 'Headless smoke' => 14
   }.freeze
 
   def assert_ci_timeout_budget(job)
     steps = job.fetch('steps')
     budgets = steps.map do |step|
       minutes = step.fetch('timeout-minutes', 0)
-      assert_operator minutes, :>, 0, step.fetch('name') + ': missing timeout'
       assert_operator minutes * 60, :>=, CI_WORST_SECONDS.fetch(step.fetch('name')) * 3,
                       step.fetch('name') + ': measured timeout floor'
+      assert_operator minutes, :>, 0, step.fetch('name') + ': missing timeout'
       minutes
     end
     assert_operator job.fetch('timeout-minutes'), :>=, budgets.sum + 10, 'CI: timeout headroom'
   end
 
   def test_ci_budget_rejects_missing_short_and_unsummed_bounds
+    test_ci_test_baseline_includes_wrapper_self_test
+    test_ci_hygiene_baseline_includes_stability_probe
     job = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')
     job.fetch('steps').each_with_index do |step, index|
       fixture = Marshal.load(Marshal.dump(job))
@@ -680,8 +726,12 @@ class WorkflowTests < Minitest::Test
       worst = CI_WORST_SECONDS.fetch(step.fetch('name'))
       next if worst.zero?
       fixture = Marshal.load(Marshal.dump(job))
-      fixture['steps'][index]['timeout-minutes'] = (worst * 3 / 60).ceil - 1
-      assert_raises(Minitest::Assertion, step.fetch('name')) { assert_ci_timeout_budget(fixture) }
+      short_minutes = (worst * 3 / 60.0).ceil - 1
+      fixture['steps'][index]['timeout-minutes'] = short_minutes
+      assert_operator short_minutes * 60, :<, worst * 3, 'short bound must fail its floor'
+      assert_operator (short_minutes + 1) * 60, :>=, worst * 3, 'the next whole minute must satisfy the floor'
+      error = assert_raises(Minitest::Assertion, step.fetch('name')) { assert_ci_timeout_budget(fixture) }
+      assert_includes error.message, 'measured timeout floor'
     end
     fixture = Marshal.load(Marshal.dump(job))
     fixture['timeout-minutes'] = fixture['steps'].sum { |step| step.fetch('timeout-minutes') } + 9
