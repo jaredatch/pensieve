@@ -95,13 +95,14 @@ private final class RecordingHistorySkillStore: SkillStoreProtocol {
     func readBody(directoryName: String) throws -> String { writtenBodies[directoryName] ?? "" }
 
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws {
+                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
         writtenBodies[directoryName] = SkillSerializer.rewrite(
             body: body,
             preserving: parsed,
             fallbackName: fallbackName,
             fallbackDescription: fallbackDescription
-        )
+        ).content
+        return SkillRewriteResult(content: writtenBodies[directoryName] ?? body, didChange: true)
     }
 
     func writeBody(directoryName: String, body: String) throws {

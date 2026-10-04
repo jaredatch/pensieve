@@ -51,11 +51,6 @@ struct DetailColumnView: View {
                 categoryID: id, platformVM: platformVM, notifier: notifier, onReveal: onReveal
             )
                 .id(id)
-        case .scenario(let id):
-            ScenarioDetailView(
-                scenarioID: id, platformVM: platformVM, notifier: notifier, onReveal: onReveal
-            )
-                .id(id)
         case .machine(let id):
             machineDetail(id)
         case .tag(let name):
@@ -126,10 +121,6 @@ struct DetailColumnView: View {
             Button { onAdd(.categories) } label: { Label("Add Category", systemImage: "plus") }
                 .disabled(library.addsFenced)
                 .help("Add Category")
-        case .scenarios:
-            Button { onAdd(.scenarios) } label: { Label("Add Scenario", systemImage: "plus") }
-                .disabled(library.addsFenced)
-                .help("Add Scenario")
         case .tags, .machines:
             EmptyView()
         }
@@ -201,7 +192,6 @@ struct DetailColumnView: View {
         case .skills: ("Select a Skill", "doc.text")
         case .projects: ("Select a Project", "folder")
         case .categories: ("Select a Category", "square.stack")
-        case .scenarios: ("Select a Scenario", "square.grid.2x2")
         case .tags: ("Select a Tag", "tag")
         case .machines: ("Select a Machine", "display")
         }

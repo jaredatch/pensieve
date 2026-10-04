@@ -135,7 +135,7 @@ final class SkillDetailScrollLayoutTests: XCTestCase {
 
     private func deploymentsTab() throws -> AnyView {
         let base = NSTemporaryDirectory() + "SkillDetailScrollLayoutTests-\(UUID().uuidString)"
-        let fileService = ScenarioRecordingFileService()
+        let fileService = DeployRecordingFileService()
         let platformVM = PlatformViewModel(
             fileService: fileService,
             agentDetection: EmptyMachineDetection(),

@@ -13,7 +13,7 @@ func sampleManifestSnapshot() -> ManifestSnapshot {
             ),
             CategoryRecord(name: "../evil/../name", projectKeys: [], skillSlugs: [])
         ],
-        scenarios: [],
+
         projects: [
             ProjectIdentityRecord(identityKey: "git:github.com/me/a", identityKind: "remote", name: "App A"),
             ProjectIdentityRecord(identityKey: "marker:/tmp/b", identityKind: "marker", name: "App B")
@@ -49,14 +49,6 @@ private func normalizedManifestSnapshot(_ snapshot: ManifestSnapshot) -> Manifes
                 name: $0.name,
                 projectKeys: Array(Set($0.projectKeys)).sorted(),
                 skillSlugs: Array(Set($0.skillSlugs)).sorted()
-            )
-        }.sorted { $0.name < $1.name },
-        scenarios: snapshot.scenarios.map {
-            ScenarioRecord(
-                id: $0.id,
-                name: $0.name,
-                skillSlugs: Array(Set($0.skillSlugs)).sorted(),
-                agents: Array(Set($0.agents)).sorted()
             )
         }.sorted { $0.name < $1.name },
         projects: snapshot.projects.sorted { $0.identityKey < $1.identityKey },
@@ -128,7 +120,7 @@ final class ManifestServiceTests: XCTestCase {
         let snapshot = ManifestSnapshot(
             schemaVersion: 1,
             categories: [],
-            scenarios: [],
+
             projects: [],
             skills: [SkillOverlay(slug: "frac", createdAt: fractional, scope: .user, tags: [],
                                   cursor: nil, agents: [], origin: .authored)]
@@ -168,7 +160,7 @@ final class ManifestServiceTests: XCTestCase {
         let snapshot = ManifestSnapshot(
             schemaVersion: 1,
             categories: [],
-            scenarios: [],
+
             projects: [
                 ProjectIdentityRecord(identityKey: "github.com/x/y", identityKind: "remote", name: "App B"),
                 ProjectIdentityRecord(identityKey: "github.com/x/y", identityKind: "remote", name: "App A")
@@ -189,7 +181,7 @@ final class ManifestServiceTests: XCTestCase {
             identityKind: "remote",
             name: "A, {weird} \"name\" with \\ and\ttab\nnewline"
         )
-        let snapshot = ManifestSnapshot(schemaVersion: 1, categories: [], scenarios: [], projects: [tricky], skills: [])
+        let snapshot = ManifestSnapshot(schemaVersion: 1, categories: [], projects: [tricky], skills: [])
         try service.write(snapshot, toRoot: tempDir)
         let read = try service.read(fromRoot: tempDir).projects
         XCTAssertEqual(read.count, 1)
@@ -306,7 +298,6 @@ final class ManifestServiceTests: XCTestCase {
     func testEmptyRootReadsEmptySnapshot() throws {
         let read = try service.read(fromRoot: tempDir)
         XCTAssertTrue(read.categories.isEmpty)
-        XCTAssertTrue(read.scenarios.isEmpty)
         XCTAssertTrue(read.projects.isEmpty)
         XCTAssertTrue(read.skills.isEmpty)
     }

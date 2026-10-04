@@ -48,7 +48,7 @@ extension ManifestServiceTests {
             ManifestSnapshot(
                 schemaVersion: ManifestService.currentSchemaVersion,
                 categories: [],
-                scenarios: [],
+
                 projects: [],
                 skills: [overlay]
             ),

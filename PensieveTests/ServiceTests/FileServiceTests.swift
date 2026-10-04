@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import Pensieve
 
@@ -15,6 +16,86 @@ final class FileServiceTests: XCTestCase {
         if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
             try FileManager.default.removeItem(atPath: tempDir)
         }
+    }
+
+    func testCopyFileFailurePreservesDestinationAndCleansTemporaryFile() throws {
+        let source = tempDir + "/source"
+        let destination = tempDir + "/destination"
+        try fileService.writeData(at: source, data: Data(repeating: 42, count: 128 * 1_024))
+        try fileService.writeFile(at: destination, content: "original")
+        let identity = fileService.fileIdentity(at: destination, followingLinks: false)
+        let entries = try fileService.listDirectory(at: tempDir).sorted()
+        let (descriptor, status) = try FileService.openRegularFile(at: source)
+        defer { close(descriptor) }
+        var chunks = 0
+        // Inject failure in the descriptor helper that the public copyFile entry uses.
+        XCTAssertThrowsError(try DescriptorFileCopy.copy(from: descriptor, status: status,
+                                                        sourcePath: source, to: destination) { _ in
+            chunks += 1
+            throw CocoaError(.fileWriteUnknown)
+        })
+        XCTAssertEqual(chunks, 1)
+        XCTAssertTrue(try fileService.readData(at: destination) == Data("original".utf8))
+        XCTAssertEqual(fileService.fileIdentity(at: destination, followingLinks: false), identity)
+        XCTAssertEqual(try fileService.listDirectory(at: tempDir).sorted(), entries)
+    }
+
+    func testSuccessfulCopyDoesNotUnlinkAReusedTemporaryNameAfterRename() throws {
+        let source = tempDir + "/source"
+        let destination = tempDir + "/destination"
+        try fileService.writeFile(at: source, content: "copied bytes")
+        try fileService.writeFile(at: destination, content: "previous bytes")
+        let (descriptor, status) = try FileService.openRegularFile(at: source)
+        defer { close(descriptor) }
+        var reused: String?
+        var identity: FileIdentity?
+        try DescriptorFileCopy.copy(from: descriptor, status: status, sourcePath: source, to: destination,
+                                    renameFile: { temporary, target in
+            let result = Darwin.rename(temporary, target)
+            guard result == 0 else { return result }
+            reused = temporary
+            do { try self.fileService.writeFile(at: temporary, content: "new owner's bytes") } catch {
+                XCTFail("Fixture setup: \(error)")
+            }
+            identity = self.fileService.fileIdentity(at: temporary, followingLinks: false)
+            return result
+        })
+        let temporary = try XCTUnwrap(reused, "The successful rename must run")
+        XCTAssertEqual(try fileService.readFile(at: destination), "copied bytes")
+        XCTAssertTrue(fileService.fileExists(at: temporary), "Success must not unlink a name reused after rename")
+        XCTAssertEqual(fileService.fileIdentity(at: temporary, followingLinks: false), try XCTUnwrap(identity))
+        XCTAssertEqual(try fileService.readFile(at: temporary), "new owner's bytes")
+    }
+
+    func testCopyFileReplacesSymlinkWithoutChangingItsTarget() throws {
+        let source = tempDir + "/source"
+        let target = tempDir + "/target"
+        let destination = tempDir + "/destination"
+        try fileService.writeExecutableFile(at: source, content: "new bytes")
+        try fileService.writeFile(at: target, content: "target bytes")
+        for dangling in [false, true] {
+            try fileService.createSymlink(at: destination, pointingTo: dangling ? tempDir + "/absent" : target)
+            XCTAssertNoThrow(try fileService.copyFile(at: source, to: destination))
+            XCTAssertTrue(fileService.isRegularFile(at: destination))
+            XCTAssertEqual(try fileService.readFile(at: destination), "new bytes")
+            XCTAssertTrue(fileService.isUserExecutableFile(at: destination))
+            XCTAssertEqual(try fileService.readFile(at: target), "target bytes")
+        }
+    }
+
+    func testCopyFileReplacesHardLinkedDestinationWithoutOverwritingOtherLinks() throws {
+        let source = tempDir + "/source"
+        let destination = tempDir + "/destination"
+        let other = tempDir + "/other"
+        try fileService.writeFile(at: source, content: "new bytes")
+        try fileService.writeFile(at: destination, content: "original")
+        try FileManager.default.linkItem(atPath: destination, toPath: other)
+        let identity = fileService.fileIdentity(at: other, followingLinks: false)
+        try fileService.copyFile(at: source, to: destination)
+        XCTAssertEqual(try fileService.readFile(at: destination), "new bytes")
+        XCTAssertEqual(try fileService.readFile(at: other), "original")
+        XCTAssertEqual(fileService.fileIdentity(at: other, followingLinks: false), identity)
+        XCTAssertNotEqual(fileService.fileIdentity(at: destination, followingLinks: false), identity)
     }
 
     func testIsExecutableFileReturnsTrueForExecutableRegularFile() throws {
@@ -69,6 +150,17 @@ final class FileServiceTests: XCTestCase {
         XCTAssertEqual(service.realPath(at: tempDir + "/link"), service.realPath(at: target))
         XCTAssertEqual(service.realPath(at: "/var"), "/private/var")
         XCTAssertEqual(service.realPath(at: tempDir + "/absent"), tempDir + "/absent")
+        XCTAssertEqual(try service.resolveRealPath(at: tempDir + "/link"), try service.resolveRealPath(at: target))
+        XCTAssertEqual(try service.resolveRealPath(at: "/var"), "/private/var")
+        XCTAssertThrowsError(try service.resolveRealPath(at: tempDir + "/absent")) {
+            XCTAssertEqual(($0 as NSError).domain, NSPOSIXErrorDomain)
+            XCTAssertEqual(($0 as NSError).code, Int(ENOENT))
+        }
+        XCTAssertEqual(try service.entryTypeWithoutFollowingLinks(at: target), .directory)
+        XCTAssertEqual(try service.entryTypeWithoutFollowingLinks(at: tempDir + "/link"), .symlink)
+        XCTAssertNil(try service.entryTypeWithoutFollowingLinks(at: tempDir + "/absent"))
+        try service.writeFile(at: tempDir + "/regular", content: "body")
+        XCTAssertEqual(try service.entryTypeWithoutFollowingLinks(at: tempDir + "/regular"), .regular)
     }
 
     /// Protects 39.1-h and 39.1-k: cache metadata is available only for a regular leaf, never a link.
@@ -119,6 +211,29 @@ final class FileServiceTests: XCTestCase {
 
         XCTAssertEqual(timestamp.tv_sec, 42)
         XCTAssertEqual(timestamp.tv_nsec, 0)
+    }
+
+    func testUnmodeledBoundedReadDefaultNeverLoadsHostBytes() throws {
+        let path = tempDir + "/unmodeled"
+        try fileService.writeFile(at: path, content: "Host bytes must not escape through a double")
+        let double: FileServiceProtocol = InertMetadataFileService()
+        for candidate in [path, tempDir + "/missing"] {
+            XCTAssertThrowsError(try double.readRegularFileData(at: candidate, maximumBytes: 1_024)) { error in
+                let failure = error as NSError
+                XCTAssertEqual(failure.domain, NSCocoaErrorDomain)
+                XCTAssertEqual(failure.code, CocoaError.featureUnsupported.rawValue,
+                               "An unmodeled read must refuse without inspecting \(candidate)")
+            }
+        }
+    }
+
+    func testUnmodeledContainedReadDefaultRefusesHostBytes() throws {
+        let path = tempDir + "/contained"
+        try fileService.writeFile(at: path, content: "Host bytes must stay behind the modeled boundary")
+        let double: FileServiceProtocol = InertMetadataFileService()
+        XCTAssertThrowsError(try double.readRegularFileData(at: path, maximumBytes: 1_024, containedIn: tempDir)) { error in
+            XCTAssertEqual((error as NSError).code, CocoaError.featureUnsupported.rawValue)
+        }
     }
 }
 

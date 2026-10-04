@@ -49,7 +49,7 @@ struct ParsedSkill {
     var preservedFile: PreservedSkillFile?
     /// The exact number of terminal LF characters in the source file, separate from canonical `body`.
     var trailingNewlineCount = 0
-    /// Exact terminal CR/LF bytes, retained separately so a rewrite can preserve LF and CRLF files.
+    /// Exact terminal YAML line-break bytes, retained separately from the canonical body.
     var trailingLineBreaks = ""
     /// The file's existing line-ending style. Structural lines added by a rewrite use this style.
     var preferredLineEnding = "\n"
@@ -167,12 +167,12 @@ enum SkillParser {
         let scalars = body.unicodeScalars
         var lower = scalars.startIndex
         var upper = scalars.endIndex
-        while lower < upper, scalars[lower] == "\n" || scalars[lower] == "\r" {
+        while lower < upper, isYAMLLineBreak(scalars[lower]) {
             lower = scalars.index(after: lower)
         }
         while upper > lower {
             let previous = scalars.index(before: upper)
-            guard scalars[previous] == "\n" || scalars[previous] == "\r" else { break }
+            guard isYAMLLineBreak(scalars[previous]) else { break }
             upper = previous
         }
         return lower..<upper
@@ -180,42 +180,20 @@ enum SkillParser {
 
     // MARK: - Private
 
-    /// Line-based fence detection: the file must open (after any leading blank lines) with a
-    /// line that is exactly `---`, and the frontmatter ends at the NEXT line that is exactly
-    /// `---`. Matching whole fence lines (not the substring "\n---") makes detection robust to
-    /// a YAML/markdown body that itself contains a `---` rule or a `----` setext underline.
-    private static func extractFrontmatter(
-        _ content: String
-    ) -> ExtractedFrontmatter? {
-        let lines = content.components(separatedBy: "\n")
-
-        var openIndex = 0
-        while openIndex < lines.count, lines[openIndex].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            openIndex += 1
-        }
-        guard openIndex < lines.count,
-              lines[openIndex].trimmingCharacters(in: .whitespacesAndNewlines) == "---" else {
-            return nil
-        }
-
-        var closeIndex = -1
-        var cursor = openIndex + 1
-        while cursor < lines.count {
-            if lines[cursor].trimmingCharacters(in: .whitespacesAndNewlines) == "---" {
-                closeIndex = cursor
-                break
-            }
-            cursor += 1
-        }
-        guard closeIndex > openIndex else { return nil }
-
-        let frontmatterStart = startOfLine(openIndex + 1, in: content)
-        let closeLineStart = startOfLine(closeIndex, in: content)
+    /// Frontmatter opens on the first LF/CRLF line and closes at the next column-zero fence.
+    private static func extractFrontmatter(_ content: String) -> ExtractedFrontmatter? {
+        let lines = sourceLines(in: content, yamlBreaks: false)
+        guard let first = lines.first, isFrontmatterFence(content[first.contentRange]),
+              let closeIndex = lines.indices.dropFirst().first(where: {
+                  isFrontmatterFence(content[lines[$0].contentRange])
+              }) else { return nil }
+        let frontmatterStart = first.sourceRange.upperBound
+        let closeLineStart = lines[closeIndex].sourceRange.lowerBound
         let frontmatterEnd = closeLineStart > frontmatterStart
             ? indexBeforeLineFeed(at: closeLineStart, in: content)
             : frontmatterStart
         let frontmatter = String(content[frontmatterStart..<frontmatterEnd])
-        let bodyStart = startOfLine(closeIndex + 1, in: content)
+        let bodyStart = lines[closeIndex].sourceRange.upperBound
         let rawBody = String(content[bodyStart...])
         let bodyRange = canonicalBodyRange(in: rawBody)
         let body = String(rawBody[bodyRange])
@@ -239,19 +217,10 @@ enum SkillParser {
     private static func indexBeforeLineFeed(at index: String.Index, in content: String) -> String.Index {
         guard index > content.startIndex else { return index }
         let previous = content.unicodeScalars.index(before: index)
-        return content.unicodeScalars[previous] == "\n" ? previous : index
-    }
-
-    private static func startOfLine(_ lineNumber: Int, in content: String) -> String.Index {
-        let scalars = content.unicodeScalars
-        var start = content.startIndex
-        for _ in 0..<lineNumber {
-            guard let newline = scalars[start...].firstIndex(of: "\n") else {
-                return content.endIndex
-            }
-            start = scalars.index(after: newline)
-        }
-        return start
+        guard content.unicodeScalars[previous] == "\n" else { return index }
+        guard previous > content.startIndex else { return previous }
+        let before = content.unicodeScalars.index(before: previous)
+        return content.unicodeScalars[before] == "\r" ? before : previous
     }
 
     /// Returns nil when there is no parseable YAML mapping OR no `name` key — the caller then
@@ -296,97 +265,13 @@ enum SkillParser {
             body: body,
             preservedFrontmatter: preservedFrontmatter(
                 source: yamlString,
-                yamlKeys: Set(mapping.keys),
-                root: root
+                root: root,
+                rootIsFlowMapping: loaded.rootIsFlowMapping
             ),
             preservedFile: preservedFile,
             trailingNewlineCount: trailingLineBreaks.utf8.filter { $0 == 0x0A }.count,
             trailingLineBreaks: trailingLineBreaks,
             preferredLineEnding: preferredLineEnding
         )
-    }
-}
-
-extension SkillParser {
-    private static func preservedFrontmatter(
-        source: String,
-        yamlKeys: Set<String>,
-        root: Node
-    ) -> PreservedFrontmatter {
-        let entries = scanTopLevelEntries(in: source)
-        let scannedKeys = Set(entries.map(\.key))
-        let hasUniqueKeys = scannedKeys.count == entries.count
-        let rootIsFlowMapping = root.mapping?.style == .flow
-        let trustworthy = hasUniqueKeys && scannedKeys == yamlKeys
-            && !rootIsFlowMapping && !source.contains("\t") && !containsAnchorOrAlias(in: source)
-        return PreservedFrontmatter(
-            source: source,
-            entries: entries,
-            entriesAreTrustworthy: trustworthy
-        )
-    }
-
-    private static func scanTopLevelEntries(in source: String) -> [PreservedFrontmatter.Entry] {
-        var starts: [(key: String, index: String.Index)] = []
-        var lineStart = source.startIndex
-        let scalars = source.unicodeScalars
-
-        while lineStart < source.endIndex {
-            let lineEnd = scalars[lineStart...].firstIndex(of: "\n") ?? source.endIndex
-            let line = String(scalars[lineStart..<lineEnd])
-            if let key = topLevelKey(in: line) {
-                starts.append((key, lineStart))
-            }
-            guard lineEnd < source.endIndex else { break }
-            lineStart = scalars.index(after: lineEnd)
-        }
-
-        return starts.indices.map { index in
-            let end = index + 1 < starts.count ? starts[index + 1].index : source.endIndex
-            return PreservedFrontmatter.Entry(
-                key: starts[index].key,
-                sourceRange: starts[index].index..<end
-            )
-        }
-    }
-
-    private static func topLevelKey(in line: String) -> String? {
-        guard let first = line.first, !first.isWhitespace, first != "#",
-              let colon = line.firstIndex(of: ":") else {
-            return nil
-        }
-        let afterColon = line.index(after: colon)
-        guard afterColon == line.endIndex || line[afterColon].isWhitespace else { return nil }
-        let key = line[..<colon]
-        guard !key.isEmpty, !key.contains(where: { $0.isWhitespace }) else { return nil }
-        return String(key)
-    }
-
-    static func containsAnchorOrAlias(in source: String) -> Bool {
-        let pattern = #"(^|[\s,\[\{])[&*][^\s,\[\]\{\}]+"#
-        return source.range(of: pattern, options: .regularExpression) != nil
-    }
-
-    private static func trailingLineBreaks(in content: String) -> String {
-        let bytes = Array(content.utf8)
-        var start = bytes.endIndex
-        while start > bytes.startIndex, bytes[start - 1] == 0x0A {
-            start -= 1
-            if start > bytes.startIndex, bytes[start - 1] == 0x0D {
-                start -= 1
-            }
-        }
-        return String(bytes: bytes[start...], encoding: .utf8) ?? ""
-    }
-
-    private static func terminalLineEnding(in content: String) -> String {
-        let bytes = content.utf8
-        guard bytes.last == 0x0A else { return "" }
-        guard bytes.count > 1 else { return "\n" }
-        return bytes[bytes.index(before: bytes.index(before: bytes.endIndex))] == 0x0D ? "\r\n" : "\n"
-    }
-
-    private static func preferredLineEnding(in content: String) -> String {
-        content.contains("\r\n") ? "\r\n" : "\n"
     }
 }

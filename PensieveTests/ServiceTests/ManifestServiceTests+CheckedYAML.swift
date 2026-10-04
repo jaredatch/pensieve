@@ -58,7 +58,7 @@ extension ManifestServiceTests {
         let snapshot = ManifestSnapshot(
             schemaVersion: ManifestService.currentSchemaVersion,
             categories: categories,
-            scenarios: [],
+
             projects: projects,
             skills: skills
         )
@@ -126,8 +126,6 @@ extension ManifestServiceTests {
         ManifestSnapshot(
             schemaVersion: ManifestService.currentSchemaVersion,
             categories: [CategoryRecord(name: "Category", projectKeys: [], skillSlugs: [])],
-            scenarios: [ScenarioRecord(id: "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB", name: "Scenario",
-                                       skillSlugs: [], agents: [])],
             projects: [],
             skills: [SkillOverlay(slug: "skill", createdAt: Date(timeIntervalSince1970: 0),
                                   scope: .user, tags: [], cursor: nil, agents: [], origin: .authored)],
@@ -140,7 +138,7 @@ extension ManifestServiceTests {
         switch kind {
         case .schema:
             "schema_version"
-        case .category, .scenario:
+        case .category:
             "name"
         case .skill, .deployIntent:
             "slug"
@@ -152,7 +150,6 @@ extension ManifestServiceTests {
     private enum ManifestFileKind: String, CaseIterable {
         case schema
         case category
-        case scenario
         case skill
         case projects
         case deployIntent
@@ -165,9 +162,6 @@ extension ManifestServiceTests {
         case .category:
             let name = try XCTUnwrap(try fileService.listDirectory(at: tempDir + "/manifest/categories").first)
             return "categories/" + name
-        case .scenario:
-            let name = try XCTUnwrap(try fileService.listDirectory(at: tempDir + "/manifest/scenarios").first)
-            return "scenarios/" + name
         case .skill:
             return "skills/skill.yaml"
         case .projects:

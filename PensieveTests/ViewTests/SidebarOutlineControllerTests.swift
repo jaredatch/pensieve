@@ -6,9 +6,9 @@ import XCTest
 final class SidebarOutlineControllerTests: XCTestCase {
     func testApplyBuildsRowsInOrder() {
         let (controller, window) = makeController()
-        let titles = ["Skills", "Projects", "Categories", "Scenarios", "Tags", "Machines"]
+        let titles = ["Skills", "Projects", "Categories", "Tags", "Machines"]
 
-        XCTAssertEqual(controller.outlineView.numberOfRows, 6)
+        XCTAssertEqual(controller.outlineView.numberOfRows, 5)
         for (row, title) in titles.enumerated() {
             XCTAssertEqual(cell(controller, row: row)?.textField?.stringValue, title)
             XCTAssertNotNil(cell(controller, row: row)?.imageView?.image)
@@ -35,12 +35,12 @@ final class SidebarOutlineControllerTests: XCTestCase {
 
         controller.select(.tags)
 
-        XCTAssertEqual(controller.outlineView.selectedRow, 4)
+        XCTAssertEqual(controller.outlineView.selectedRow, 3)
         XCTAssertTrue(selections.isEmpty)
 
         controller.select(.tags)
 
-        XCTAssertEqual(controller.outlineView.selectedRow, 4)
+        XCTAssertEqual(controller.outlineView.selectedRow, 3)
         XCTAssertTrue(selections.isEmpty)
         withExtendedLifetime(window) {}
     }
@@ -67,13 +67,13 @@ final class SidebarOutlineControllerTests: XCTestCase {
 
         controller.apply(items: makeItems(showsMachines: false), selection: .tags)
 
-        XCTAssertEqual(controller.outlineView.numberOfRows, 5)
-        XCTAssertEqual(controller.outlineView.selectedRow, 4)
+        XCTAssertEqual(controller.outlineView.numberOfRows, 4)
+        XCTAssertEqual(controller.outlineView.selectedRow, 3)
 
         controller.apply(items: makeItems(), selection: .tags)
 
-        XCTAssertEqual(controller.outlineView.numberOfRows, 6)
-        XCTAssertEqual(controller.outlineView.selectedRow, 4)
+        XCTAssertEqual(controller.outlineView.numberOfRows, 5)
+        XCTAssertEqual(controller.outlineView.selectedRow, 3)
         XCTAssertTrue(selections.isEmpty)
         withExtendedLifetime(window) {}
     }
@@ -86,7 +86,7 @@ final class SidebarOutlineControllerTests: XCTestCase {
 
         controller.apply(items: makeItems(showsMachines: false), selection: .machines)
 
-        XCTAssertEqual(controller.outlineView.numberOfRows, 5)
+        XCTAssertEqual(controller.outlineView.numberOfRows, 4)
         XCTAssertEqual(controller.selectedSection, .projects)
         XCTAssertTrue(selections.isEmpty)
         withExtendedLifetime(window) {}
@@ -95,13 +95,13 @@ final class SidebarOutlineControllerTests: XCTestCase {
     func testMachinesRemovedWhileSelectedConvergesWithoutEcho() {
         let (controller, window) = makeController()
         controller.select(.machines)
-        XCTAssertEqual(controller.outlineView.selectedRow, 5)
+        XCTAssertEqual(controller.outlineView.selectedRow, 4)
         var selections: [SidebarSection] = []
         controller.onSelect = { selections.append($0) }
 
         controller.apply(items: makeItems(showsMachines: false), selection: .machines)
 
-        XCTAssertEqual(controller.outlineView.numberOfRows, 5)
+        XCTAssertEqual(controller.outlineView.numberOfRows, 4)
         XCTAssertTrue(selections.isEmpty)
         XCTAssertNotNil(controller.selectedSection)
         XCTAssertTrue(controller.items.contains { $0.section == controller.selectedSection })
@@ -120,7 +120,7 @@ final class SidebarOutlineControllerTests: XCTestCase {
         var selections: [SidebarSection] = []
         controller.onSelect = { selections.append($0) }
 
-        controller.apply(items: makeItems(), selection: .scenarios)
+        controller.apply(items: makeItems(), selection: .tags)
 
         XCTAssertEqual(controller.outlineView.selectedRow, 3)
         XCTAssertTrue(selections.isEmpty)
@@ -191,7 +191,6 @@ extension SidebarOutlineControllerTests {
             RowExpectation(section: .skills, title: "Skills", symbol: "tray"),
             RowExpectation(section: .projects, title: "Projects", symbol: "folder"),
             RowExpectation(section: .categories, title: "Categories", symbol: "square.stack"),
-            RowExpectation(section: .scenarios, title: "Scenarios", symbol: "square.grid.2x2"),
             RowExpectation(section: .tags, title: "Tags", symbol: "tag"),
             RowExpectation(section: .machines, title: "Machines", symbol: "display")
         ]
@@ -207,7 +206,7 @@ extension SidebarOutlineControllerTests {
     func testRowsFactoryOmitsMachinesWhenHidden() {
         let items = SidebarRows.items(showsMachines: false)
 
-        XCTAssertEqual(items.map(\.section), [.skills, .projects, .categories, .scenarios, .tags])
+        XCTAssertEqual(items.map(\.section), [.skills, .projects, .categories, .tags])
         XCTAssertFalse(items.contains { $0.section == .machines })
     }
 }
@@ -260,7 +259,6 @@ private extension SidebarOutlineControllerTests {
             SidebarOutlineItem(section: .skills, title: "Skills", symbol: "tray"),
             SidebarOutlineItem(section: .projects, title: "Projects", symbol: "folder"),
             SidebarOutlineItem(section: .categories, title: "Categories", symbol: "square.stack"),
-            SidebarOutlineItem(section: .scenarios, title: "Scenarios", symbol: "square.grid.2x2"),
             SidebarOutlineItem(section: .tags, title: "Tags", symbol: "tag")
         ]
         if showsMachines {

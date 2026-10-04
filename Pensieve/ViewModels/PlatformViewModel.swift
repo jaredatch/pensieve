@@ -375,3 +375,21 @@ extension PlatformViewModel {
     }
 
 }
+
+extension PlatformViewModel {
+    /// Classifies user-wide legacy ownership before convergence. LinkService supplies the same
+    /// literal-target judgment used by broken-link validation; every regular Cursor file stays owned.
+    func scenarioHandoverDeployState(skill: Skill, platform: PlatformTarget) throws -> ScenarioHandoverDeployState {
+        let path = platform.usesSymlinks
+            ? linkService.linkPath(skill: skill, platform: platform, projectPath: nil)
+            : cursorCompiler.outputPath(skill: skill, projectPath: nil)
+        guard let type = try fileService.entryTypeWithoutFollowingLinks(at: path) else { return .absent }
+        if platform.usesSymlinks {
+            guard type == .symlink else { return .unmanaged }
+            let actual = try fileService.symlinkTarget(at: path)
+            let expected = linkService.targetPath(skill: skill, platform: platform, projectPath: nil)
+            return actual == expected ? .realized : .unmanaged
+        }
+        return type == .regular ? .realized : .unmanaged
+    }
+}

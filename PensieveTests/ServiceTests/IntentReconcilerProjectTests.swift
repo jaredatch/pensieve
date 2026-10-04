@@ -23,7 +23,7 @@ private func makeLaunchManifest(
         ManifestSnapshot(
             schemaVersion: 5,
             categories: [],
-            scenarios: [],
+
             projects: [],
             skills: [SkillOverlay(
                 slug: slug,
@@ -163,20 +163,20 @@ final class IntentReconcilerProjectTests: XCTestCase {
         let installedVM = PlatformViewModel(
             fileService: harness.fileService,
             linkService: harness.linkService,
-            cursorCompiler: ScenarioRecordingCursorCompiler(fileService: harness.fileService),
-            agentDetection: ScenarioStubDetection(installed: [.codex]),
+            cursorCompiler: DeployRecordingCursorCompiler(fileService: harness.fileService),
+            agentDetection: DeployStubDetection(installed: [.codex]),
             deployStateStore: DeployStateStore(fileService: harness.fileService)
         )
         let launchReconciler = IntentReconciler(
             platformVM: installedVM,
-            machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID)
+            machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID), handoverIsComplete: { false }
         )
         let result = launchReconciler.reconcile(context: harness.context)
 
         XCTAssertFalse(rebuild.storeUnreadable)
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(harness.linkService.linkCalls, [
-            ScenarioRecordedLink(directoryName: slug, platform: .codex, projectPath: project.path)
+            DeployRecordedLink(directoryName: slug, platform: .codex, projectPath: project.path)
         ])
         XCTAssertEqual(try harness.assignments().map(\.projectID), [project.id])
     }
@@ -199,7 +199,7 @@ final class IntentReconcilerProjectTests: XCTestCase {
 
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(harness.linkService.unlinkCalls, [
-            ScenarioRecordedLink(directoryName: skill.directoryName, platform: .codex, projectPath: first.path)
+            DeployRecordedLink(directoryName: skill.directoryName, platform: .codex, projectPath: first.path)
         ])
         let livePaths = harness.fileService.symlinks
         XCTAssertFalse(livePaths.contains(harness.artifactPath(skill: skill, platform: .codex, project: first)))

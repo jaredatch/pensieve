@@ -66,9 +66,15 @@ extension SkillLibraryViewModel {
 
     func wasLastWrittenByApp(directoryName: String, currentBody: String) -> Bool {
         withFingerprintLock {
-            lastWrittenBody[directoryName] == currentBody
-                || pendingAppWrittenBody[directoryName] == currentBody
+            Self.bodiesMatch(currentBody, lastWrittenBody[directoryName])
+                || Self.bodiesMatch(currentBody, pendingAppWrittenBody[directoryName])
         }
+    }
+
+    /// Editors use LF even for CRLF files. Drafts and watcher echoes compare with this same rule.
+    static func bodiesMatch(_ body: String, _ baseline: String?) -> Bool {
+        guard let baseline else { return false }
+        return SkillSerializer.comparableBody(body) == SkillSerializer.comparableBody(baseline)
     }
 
     func withFingerprintLock<Result>(_ body: () -> Result) -> Result {

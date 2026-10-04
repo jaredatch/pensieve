@@ -28,7 +28,7 @@ A skill installed from GitHub is text someone else wrote. Pensieve treats it tha
 - **It never runs a skill.** Skills are instructions for your agents, and what an agent does with them is up to the agent. Read a skill before you deploy it, as you would a script.
 - **YAML frontmatter** is checked before it's parsed, with limits on nesting, aliases and merges. A hostile file can't blow up memory ("billion laughs").
 - **The editor** is a web view locked down by a strict content security policy. It loads only Pensieve's bundled code, makes no network connections, and opens clicked links in your browser.
-- **The preview** renders markdown natively. It does load images a skill links to, so previewing a skill can tell that image's host you looked at it.
+- **The preview** renders markdown natively and makes no network requests. It shows embedded images and images inside the skill's folder, with relative paths starting from the previewed file's own folder. Remote or unavailable images show a placeholder with their alt text. Local reads refuse linked image files and special files and stop at 4 MiB. A folder link loads only when the image stays inside the skill. Before decoding, Pensieve checks that the image is PNG, JPEG, GIF, WebP or HEIC, no larger than 16,384 pixels on either side or 25 megapixels in all. Earlier versions in History show embedded images only.
 - **Installs** refuse symlinks and special files inside the downloaded skill.
 
 ## Git remotes and credentials
@@ -47,5 +47,6 @@ Pensieve sends no analytics or telemetry. It talks to the network for:
 
 - the update check (Sparkle's appcast on GitHub)
 - your own sync remote, where each Mac also records its name, the agents it found and the projects you registered
-- GitHub, when you install a skill or check installed skills for updates
-- images linked from a skill you preview
+- GitHub, when you install a skill, read its upstream History, or check installed skills for updates (weekly by default, or on request)
+
+Previewing a skill never loads remote images.

@@ -242,7 +242,7 @@ extension SyncConflictResolutionTests {
         ManifestSnapshot(
             schemaVersion: 1,
             categories: [],
-            scenarios: [],
+
             projects: [],
             skills: [Self.overlay()]
         )

@@ -5,14 +5,6 @@ extension ManifestServiceTests {
     func testUpsertSkillOverlayPreservesUnrelatedEntities() throws {
         let scenarioID = UUID().uuidString
         var snapshot = sampleManifestSnapshot()
-        snapshot.scenarios = [
-            ScenarioRecord(
-                id: scenarioID,
-                name: "Release",
-                skillSlugs: ["plain"],
-                agents: ["codex"]
-            )
-        ]
         snapshot.deployIntents = [DeployIntentRecord(
             machineID: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
             skillSlug: "plain",
@@ -20,6 +12,8 @@ extension ManifestServiceTests {
             projectKey: "github.com/owner/project"
         )]
         try service.write(snapshot, toRoot: tempDir)
+        let legacy = "id: " + scenarioID + "\nname: Release\nskill_slugs:\n  - plain\nagents:\n  - codex\n"
+        try fileService.writeFile(at: tempDir + "/manifest/scenarios/release.yaml", content: legacy)
         let before = try unrelatedManifestBytes(excludingSkill: "plain")
 
         let replacement = SkillOverlay(

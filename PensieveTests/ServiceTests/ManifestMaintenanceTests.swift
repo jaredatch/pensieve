@@ -25,10 +25,6 @@ private struct NoopReconciler: CategoryReconcilerProtocol {
     func reconcile(context: ModelContext) -> BatchResult { BatchResult() }
 }
 
-private struct NoopScenarioReconciler: ScenarioReconcilerProtocol {
-    func reconcile(context: ModelContext) -> BatchResult { BatchResult() }
-}
-
 final class ManifestMaintenanceTests: XCTestCase {
     private var tempDir: String!
     private var fileService: FileService!
@@ -158,14 +154,18 @@ final class ManifestMaintenanceTests: XCTestCase {
         let vm = SkillLibraryViewModel(skillStore: store, manifestService: manifest, manifestRoot: tempDir)
         vm.createSkill(name: "Doomed", description: "d", body: "# b", tags: [], context: context)
         XCTAssertTrue(overlayExists(slug: "doomed"))
+        let legacyPath = tempDir + "/manifest/scenarios/legacy.yaml"
+        let legacyBytes = Data([255, 0, 10]) + Data("name: Old\nskill_slugs: [doomed]\n".utf8)
+        try fileService.writeData(at: legacyPath, data: legacyBytes)
         let skill = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
-        vm.deleteSkill(
-            skill,
-            context: context,
-            categoryReconciler: NoopReconciler(),
-            scenarioReconciler: NoopScenarioReconciler()
-        )
+        XCTAssertTrue(SkillDeletionFlow.delete(
+            skill: skill, library: vm,
+            platformVM: PlatformViewModel(agentDetection: DeployStubDetection(installed: []),
+                                          deployStateStore: .memoryBacked),
+            projects: [], context: context
+        ))
         XCTAssertFalse(overlayExists(slug: "doomed"))
+        XCTAssertEqual(try fileService.readData(at: legacyPath), legacyBytes)
     }
 
     @MainActor
@@ -197,21 +197,6 @@ final class ManifestMaintenanceTests: XCTestCase {
 
         store.delete(category, context: context)
         XCTAssertFalse(fileService.fileExists(at: file))
-        try assertProjectIntentSurvives()
-    }
-
-    @MainActor
-    func testScenarioEditKeepsProjectIntents() throws {
-        let context = try makeContext()
-        try seedProjectIntent(context)
-        let suite = isolatedDefaultsSuite()
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = ScenarioStore(manifestService: manifest, manifestRoot: tempDir, defaults: defaults)
-        let scenario = try XCTUnwrap(store.create(name: "Release", context: context))
-
-        store.setAgent(.cursor, inScenario: scenario, enabled: false, context: context)
-
         try assertProjectIntentSurvives()
     }
 

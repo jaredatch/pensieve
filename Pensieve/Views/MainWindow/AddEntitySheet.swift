@@ -6,12 +6,11 @@ import SwiftUI
 enum AddSheet: String, Identifiable {
     case project
     case category
-    case scenario
 
     var id: String { rawValue }
 }
 
-/// The three add sheets that lived in their list views until PLAN-29, presented by `ContentView` so
+/// The two add sheets that lived in their list views until PLAN-29, presented by `ContentView` so
 /// the detail toolbar's + control can open them from any column. Each creates through the same store
 /// call its list view used.
 struct AddEntitySheet: View {
@@ -34,12 +33,6 @@ struct AddEntitySheet: View {
                 let created = CategoryStore(manifestService: ManifestService(), notifier: notifier)
                     .create(name: name, context: context)
                 if let created { onCreated(.category(created.id)) }
-            }
-        case .scenario:
-            EntityNameSheet(title: "New Scenario", fieldLabel: "Scenario Name", actionTitle: "Add") { name in
-                let created = ScenarioStore(manifestService: ManifestService(), notifier: notifier)
-                    .create(name: name, context: context)
-                if let created { onCreated(.scenario(created.id)) }
             }
         }
     }

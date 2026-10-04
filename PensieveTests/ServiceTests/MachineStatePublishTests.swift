@@ -239,7 +239,7 @@ final class MachineStatePublishTests: XCTestCase {
         try git.setRemote(remote, at: seed)
         try ManifestService().write(
             ManifestSnapshot(schemaVersion: ManifestService.currentSchemaVersion,
-                             categories: [], scenarios: [], projects: [], skills: []),
+                             categories: [], projects: [], skills: []),
             toRoot: seed
         )
         try fileService.writeFile(at: seed + "/.gitattributes",

@@ -107,52 +107,6 @@ struct ImportWizardView: View {
     // MARK: - Done
 
     private var doneView: some View {
-        VStack(spacing: Spacing.xxl) {
-            Spacer()
-
-            Image(systemName: importVM.hasResults ? "checkmark.circle.fill" : "tray")
-                .font(.system(size: 48))
-                .foregroundStyle(importVM.hasResults ? .green : .secondary)
-
-            if importVM.hasResults {
-                Text("Import Complete")
-                    .font(.title.bold())
-                Text("\(importVM.selectedSkills.count) skills imported into Pensieve.")
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("No Skills Found")
-                    .font(.title.bold())
-                Text("No existing skills were found. Create your first skill to get started.")
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 400)
-            }
-
-            if !importVM.importNotices.isEmpty {
-                ScrollView {
-                    Text(importVM.importNotices.joined(separator: "\n"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxHeight: 100)
-            }
-
-            if let error = importVM.error {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-            Spacer()
-
-            HStack {
-                Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-            }
-            .padding()
-        }
-        .padding()
+        ImportDoneView(importVM: importVM, onDone: { dismiss() })
     }
 }

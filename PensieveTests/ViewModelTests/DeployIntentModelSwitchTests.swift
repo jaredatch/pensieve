@@ -3,7 +3,7 @@ import XCTest
 @testable import Pensieve
 
 private struct UnreadableSwitchIdentity: MachineIdentityProviding {
-    func identifier() throws -> String { throw ScenarioStubFailure() }
+    func identifier() throws -> String { throw DeployStubFailure() }
 }
 
 @MainActor
@@ -72,7 +72,7 @@ extension DeployIntentModelTests {
     }
 
     func testManifestWriteFailuresRestoreOnAndOffSwitchState() throws {
-        let failedOn = try makeHarness(writeManifest: { _ in throw ScenarioStubFailure() })
+        let failedOn = try makeHarness(writeManifest: { _ in throw DeployStubFailure() })
         let failedOnSkill = try insertSkill(context: failedOn.context)
 
         XCTAssertThrowsError(try failedOn.model.set(
@@ -86,7 +86,7 @@ extension DeployIntentModelTests {
         var writes = 0
         let failedOff = try makeHarness(writeManifest: { _ in
             writes += 1
-            if writes == 2 { throw ScenarioStubFailure() }
+            if writes == 2 { throw DeployStubFailure() }
         })
         let failedOffSkill = try insertSkill(context: failedOff.context)
         _ = try failedOff.model.set(

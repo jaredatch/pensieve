@@ -69,10 +69,6 @@ enum SkillDeletionFlow {
             where category.skillSlugs.contains(skill.directoryName) {
             category.skillSlugs.removeAll { $0 == skill.directoryName }
         }
-        for scenario in try context.fetch(FetchDescriptor<Scenario>())
-            where scenario.skillSlugs.contains(skill.directoryName) {
-            scenario.skillSlugs.removeAll { $0 == skill.directoryName }
-        }
     }
 
     private static func present(
@@ -96,9 +92,6 @@ enum SkillDeletionFlow {
                     + "or relaunch Pensieve and the library rebuild drops it. (\(detail))" + manifestNote)
             return false
         case .retainedDirectoryDeleteFailed:
-            library.deletionNotice = .failed((library.error ?? "Couldn't delete the skill.") + manifestNote)
-            return false
-        case .retainedReconcileFailed:
             library.deletionNotice = .failed((library.error ?? "Couldn't delete the skill.") + manifestNote)
             return false
         }

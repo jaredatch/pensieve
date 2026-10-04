@@ -144,7 +144,7 @@ final class ManifestDeployIntentTests: XCTestCase {
     }
 
     func snapshot(_ records: [DeployIntentRecord]) -> ManifestSnapshot {
-        ManifestSnapshot(schemaVersion: 5, categories: [], scenarios: [], projects: [], skills: [],
+        ManifestSnapshot(schemaVersion: 5, categories: [], projects: [], skills: [],
                          deployIntents: records)
     }
 

@@ -57,7 +57,7 @@ extension SkillParserTests {
                     preserving: parsed,
                     fallbackName: "Fallback",
                     fallbackDescription: "Fallback"
-                )
+                ).content
                 let expectedFrontmatter = "---\n\(acceptedFrontmatter)\n---\n"
                     .replacingOccurrences(of: "\n", with: lineEnding)
                 let expectedTrailingLineBreaks = String(repeating: lineEnding, count: terminalCount)
@@ -334,7 +334,7 @@ extension SkillParserTests {
                     preserving: parsed,
                     fallbackName: "Fallback",
                     fallbackDescription: "Fallback"
-                )
+                ).content
                 let separator = closingEnding == "\r" ? "\n" : lineEnding
                 XCTAssertEqual(rewritten, source + separator + "Changed", name)
             }

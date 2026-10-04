@@ -11,7 +11,7 @@ struct ProjectIntentIdentityStub: MachineIdentityProviding {
     }
 
     func identifier() throws -> String {
-        if fails { throw ScenarioStubFailure() }
+        if fails { throw DeployStubFailure() }
         return id
     }
 }
@@ -24,8 +24,8 @@ struct ProjectIntentHarness {
     let context: ModelContext
     let platformVM: PlatformViewModel
     let reconciler: IntentReconciler
-    let fileService: ScenarioRecordingFileService
-    let linkService: ScenarioRecordingLinkService
+    let fileService: DeployRecordingFileService
+    let linkService: DeployRecordingLinkService
 
     init(
         installed: [PlatformTarget],
@@ -36,20 +36,20 @@ struct ProjectIntentHarness {
         context = ModelContext(try AppRuntime.makeContainer(
             configuration: ModelConfiguration(isStoredInMemoryOnly: true)
         ))
-        fileService = ScenarioRecordingFileService()
-        linkService = ScenarioRecordingLinkService(fileService: fileService)
+        fileService = DeployRecordingFileService()
+        linkService = DeployRecordingLinkService(fileService: fileService)
         platformVM = PlatformViewModel(
             fileService: fileService,
             linkService: linkService,
-            cursorCompiler: ScenarioRecordingCursorCompiler(fileService: fileService),
-            agentDetection: ScenarioStubDetection(installed: installed),
+            cursorCompiler: DeployRecordingCursorCompiler(fileService: fileService),
+            agentDetection: DeployStubDetection(installed: installed),
             deployStateStore: DeployStateStore(fileService: fileService),
             persist: persist
         )
         reconciler = IntentReconciler(
             platformVM: platformVM,
             machineIdentity: ProjectIntentIdentityStub(id: Self.localID, fails: identityFails),
-            stateFetcher: stateFetcher
+            stateFetcher: stateFetcher, handoverIsComplete: { false }
         )
     }
 

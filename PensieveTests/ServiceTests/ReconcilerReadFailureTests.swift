@@ -110,35 +110,6 @@ final class ReconcilerReadFailureTests: XCTestCase {
         XCTAssertEqual(harness.fileService.symlinks.count, 1)
     }
 
-    func testScenarioIntentLedgerReadFailureDoesNotRemoveOrChangeLedger() throws {
-        let fetcher = FailingReconcilerStateFetcher(failedRead: .intentLedger)
-        let harness = try ProjectIntentHarness(installed: [.codex], stateFetcher: fetcher)
-        let skill = try harness.insertSkill("scenario-read")
-        harness.platformVM.deploy(
-            skill: skill, platform: .codex, target: .userWide, context: harness.context
-        )
-        harness.context.insert(ScenarioAssignment(skillID: skill.id, platform: .codex))
-        try harness.context.save()
-        harness.linkService.unlinkCalls.removeAll()
-        let suite = isolatedDefaultsSuite()
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let reconciler = ScenarioReconciler(
-            platformVM: harness.platformVM,
-            scenarioStore: ScenarioStore(defaults: defaults),
-            stateFetcher: fetcher
-        )
-
-        let result = reconciler.reconcile(context: harness.context)
-
-        XCTAssertTrue(result.hasFailures)
-        XCTAssertTrue(result.failures.isEmpty)
-        XCTAssertFalse(result.readFailures.first?.message.isEmpty ?? true)
-        XCTAssertTrue(harness.linkService.unlinkCalls.isEmpty)
-        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<ScenarioAssignment>()), 1)
-        XCTAssertEqual(harness.fileService.symlinks.count, 1)
-    }
-
     func testRemovingProjectStopsWhenCategoryIntentLedgerReadFails() throws {
         let harness = try ProjectIntentHarness(installed: [.codex])
         let skill = try harness.insertSkill("category-remove-read")

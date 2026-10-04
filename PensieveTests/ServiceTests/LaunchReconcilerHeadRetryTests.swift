@@ -256,7 +256,7 @@ final class LaunchReconcilerHeadRetryTests: XCTestCase {
 
     private func seedManifestAndHead() throws -> String {
         try manifest.write(
-            ManifestSnapshot(schemaVersion: 1, categories: [], scenarios: [], projects: [], skills: []),
+            ManifestSnapshot(schemaVersion: 1, categories: [], projects: [], skills: []),
             toRoot: tempDir
         )
         let refPath = tempDir + "/.git/refs/heads/main"

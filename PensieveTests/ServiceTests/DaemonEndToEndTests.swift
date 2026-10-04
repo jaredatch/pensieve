@@ -203,7 +203,7 @@ final class DaemonEndToEndTests: XCTestCase {
             ManifestSnapshot(
                 schemaVersion: ManifestService.currentSchemaVersion,
                 categories: [],
-                scenarios: [],
+
                 projects: [],
                 skills: overlays,
                 deployIntents: [DeployIntentRecord(

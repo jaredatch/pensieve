@@ -27,15 +27,15 @@ struct ContentView: View {
     private let machineDependencies: MachineObservabilityDependencies
 
     /// Arrays, not Sets — this value is rebuilt on every body evaluation, and this plan exists partly
-    /// because expensive work in a render pass is a bug. Building five Sets per frame is the cheap
+    /// because expensive work in a render pass is a bug. Building four Sets per frame is the cheap
     /// version of that mistake; the handler builds them once, when something actually changed.
     private struct EntityKeys: Equatable {
-        let projectIDs: [UUID], categoryIDs: [UUID], scenarioIDs: [UUID]
+        let projectIDs: [UUID], categoryIDs: [UUID]
         let machineIDs: [String], tags: [String]
     }
     private var entityKeys: EntityKeys {
         EntityKeys(projectIDs: projects.map(\.id), categoryIDs: categories.map(\.id),
-                   scenarioIDs: scenarios.map(\.id), machineIDs: machineStates.map(\.machineID),
+                   machineIDs: machineStates.map(\.machineID),
                    tags: skills.flatMap(\.tags))
     }
     init(
@@ -64,7 +64,6 @@ struct ContentView: View {
     @Query private var skills: [Skill]
     @Query(sort: \Project.name) private var projects: [Project]
     @Query(sort: \Category.name) private var categories: [Category]
-    @Query(sort: \Scenario.name) private var scenarios: [Scenario]
     @Environment(AppRuntime.self) private var runtime
     @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var scenePhase
@@ -225,7 +224,6 @@ struct ContentView: View {
             entitySelection = prunedEntitySelection(entitySelection,
                                                     projectIDs: Set(keys.projectIDs),
                                                     categoryIDs: Set(keys.categoryIDs),
-                                                    scenarioIDs: Set(keys.scenarioIDs),
                                                     machineIDs: Set(keys.machineIDs),
                                                     tags: Set(keys.tags))
         }
@@ -287,7 +285,7 @@ private extension ContentView {
         case .found:
             showFolderImport = true
         case .nothingFound:
-            folderImportNotice = "\(shown) holds no readable SKILL.md. Pensieve looks in it and in its folders, never deeper."
+            folderImportNotice = importVM.nothingFoundMessage(folder: shown)
         case .insideLibrary:
             folderImportNotice = "\(shown) is Pensieve's own library. Its skills are already here."
         }
@@ -307,7 +305,6 @@ private extension ContentView {
         case .skills: library.showCreateSheet = true
         case .projects: addSheet = .project
         case .categories: addSheet = .category
-        case .scenarios: addSheet = .scenario
         case .tags, .machines: break
         }
     }

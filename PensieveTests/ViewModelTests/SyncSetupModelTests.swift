@@ -509,7 +509,6 @@ extension SyncSetupModelTests {
         let insertions: [(ModelContext) -> Void] = [
             { $0.insert(Skill(name: "S", directoryName: "s")) },
             { $0.insert(PensieveCategory(name: "C")) },
-            { $0.insert(Scenario(name: "S")) },
             { $0.insert(Project(name: "P", path: "/tmp/p")) },
             { $0.insert(MachineDeployIntent(machineID: UUID().uuidString.lowercased(), skillSlug: "s", platformRaw: "codex")) }
         ]
@@ -528,6 +527,25 @@ extension SyncSetupModelTests {
             XCTAssertEqual(model.state, .done)
             XCTAssertTrue(trace.events.first?.hasPrefix("clone:") == true, "trace: \(trace.events)")
         }
+
+        let context = try makeContext()
+        let legacy = Scenario(name: "Legacy")
+        context.insert(legacy)
+        let trace = EventTrace()
+        let model = try await runConnect(
+            file: virginScaffold(trace: trace),
+            git: RecordingGitService(trace: trace),
+            rebuilder: RecordingRebuilder(trace: trace),
+            context: context,
+            familiesEmpty: nil
+        )
+        XCTAssertEqual(model.state, .done)
+        XCTAssertEqual(trace.events, [
+            "lsremote-symref:\(remoteURL)", "lsremote-heads:\(remoteURL)", "init:\(root)",
+            "remote:\(remoteURL)", "fetch:main", "restore-fetch-head", "born:main",
+            "rebuild:\(root)", "upstream:main"
+        ])
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Scenario>()).map(\.id), [legacy.id])
     }
 
     func testSwiftDataFetchFailureRefused() async throws {
@@ -924,7 +942,7 @@ extension SyncSetupModelTests {
         try ManifestService().write(
             ManifestSnapshot(
                 schemaVersion: ManifestService.currentSchemaVersion,
-                categories: [], scenarios: [], projects: [], skills: []
+                categories: [], projects: [], skills: []
             ),
             toRoot: seed
         )
@@ -957,7 +975,7 @@ extension SyncSetupModelTests {
         try ManifestService().write(
             ManifestSnapshot(
                 schemaVersion: ManifestService.currentSchemaVersion,
-                categories: [], scenarios: [], projects: [], skills: []
+                categories: [], projects: [], skills: []
             ),
             toRoot: root
         )

@@ -28,7 +28,7 @@ final class PostSyncConvergenceTests: XCTestCase {
     func testHeadAdvanceRunsLedgerReconcilersInOrder() throws {
         let harness = try makeHarness()
         harness.component.run(after: syncedResult(headAdvanced: true))
-        XCTAssertEqual(harness.recorder.events, ["deploy", "category", "scenario", "intent"])
+        XCTAssertEqual(harness.recorder.events, ["deploy", "category", "intent"])
         XCTAssertEqual(Set(harness.recorder.contexts).count, 1, "one fresh context serves the ordered pass")
     }
 
@@ -42,7 +42,7 @@ final class PostSyncConvergenceTests: XCTestCase {
     func testLaunchIngestRunsFullConvergencePass() throws {
         let harness = try makeHarness()
         harness.component.runAfterLaunchIngest()
-        XCTAssertEqual(harness.recorder.events, ["deploy", "category", "scenario", "intent"])
+        XCTAssertEqual(harness.recorder.events, ["deploy", "category", "intent"])
         XCTAssertEqual(Set(harness.recorder.contexts).count, 1)
     }
 
@@ -65,7 +65,6 @@ final class PostSyncConvergenceTests: XCTestCase {
             deployReconciler: ConvergenceRecordingDeploy(recorder: recorder),
             contextFactory: { ModelContext(container) },
             categoryReconciler: ConvergenceRecordingLedger(name: "category", recorder: recorder),
-            scenarioReconciler: ConvergenceRecordingLedger(name: "scenario", recorder: recorder),
             intentReconciler: ConvergenceRecordingLedger(name: "intent", recorder: recorder),
             auditLog: { _, _ in },
             didConverge: {
@@ -80,7 +79,7 @@ final class PostSyncConvergenceTests: XCTestCase {
         XCTAssertEqual(count, 2)
         component.run(after: .conflicted(["skills/example/SKILL.md"]))
         XCTAssertEqual(count, 2)
-        XCTAssertEqual(eventCounts, [1, 5], "deploy must be recorded before the convergence hook fires")
+        XCTAssertEqual(eventCounts, [1, 4], "deploy must be recorded before the convergence hook fires")
     }
 
     func testConvergenceUsesFreshContext() throws {
@@ -100,14 +99,12 @@ final class PostSyncConvergenceTests: XCTestCase {
 
         let recorder = ConvergenceRecorder()
         let categoryReconciler = ConvergenceRecordingLedger(name: "category", recorder: recorder)
-        let scenarioReconciler = ConvergenceRecordingLedger(name: "scenario", recorder: recorder)
         let intentReconciler = ConvergenceRecordingLedger(name: "intent", recorder: recorder)
         let component = PostSyncConvergence(
             root: tempDir,
             deployReconciler: ConvergenceRecordingDeploy(recorder: recorder),
             contextFactory: { ModelContext(container) },
             categoryReconciler: categoryReconciler,
-            scenarioReconciler: scenarioReconciler,
             intentReconciler: intentReconciler,
             auditLog: { _, _ in }
         )
@@ -157,7 +154,6 @@ final class PostSyncConvergenceTests: XCTestCase {
             deployReconciler: deploy,
             contextFactory: { ModelContext(container) },
             categoryReconciler: ledger,
-            scenarioReconciler: ledger,
             intentReconciler: ledger,
             auditLog: { _, _ in }
         )
@@ -182,7 +178,6 @@ final class PostSyncConvergenceTests: XCTestCase {
             deployReconciler: ConvergenceRecordingDeploy(recorder: recorder),
             contextFactory: { ModelContext(container) },
             categoryReconciler: ConvergenceRecordingLedger(name: "category", recorder: recorder),
-            scenarioReconciler: ConvergenceRecordingLedger(name: "scenario", recorder: recorder),
             intentReconciler: ConvergenceRecordingLedger(name: "intent", recorder: recorder),
             auditLog: { _, _ in }
         )

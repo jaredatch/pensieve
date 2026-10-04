@@ -101,7 +101,8 @@ final class SkillDeletionFlowTests: XCTestCase {
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<Skill>()).count, 0)
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.skillSlug), ["other"])
         XCTAssertTrue(try f.context.fetch(FetchDescriptor<Pensieve.Category>()).allSatisfy { $0.skillSlugs.isEmpty })
-        XCTAssertTrue(try f.context.fetch(FetchDescriptor<Scenario>()).allSatisfy { $0.skillSlugs.isEmpty })
+        XCTAssertEqual(try f.context.fetch(FetchDescriptor<Scenario>()).map(\.skillSlugs), [["alpha"]])
+        XCTAssertEqual(try f.context.fetchCount(FetchDescriptor<ScenarioAssignment>()), 0)
         XCTAssertEqual(f.store.deleteCalls, ["alpha"]); XCTAssertNil(f.library.deletionNotice)
         XCTAssertTrue(f.manifest.snapshots.last?.skills.isEmpty == true)
         XCTAssertFalse(f.manifest.snapshots.last?.deployIntents.contains { $0.skillSlug == "alpha" } == true)
@@ -152,7 +153,7 @@ final class SkillDeletionFlowTests: XCTestCase {
 
     func testQuarantinedRowRefusesEveryWrite() throws {
         let f = try quarantinedFixture()
-        XCTAssertFalse(f.library.updateBody(f.skill, body: "resurrect"))
+        XCTAssertFalse(f.library.updateBody(f.skill, body: "resurrect").succeeded)
         f.library.noteEditorChanged(f.skill, body: "resurrect"); XCTAssertFalse(f.library.saveDraft(f.skill))
         XCTAssertThrowsError(try restoreSkillHistoryVersion(
             skill: f.skill, body: "resurrect", store: f.store, library: f.library, notifier: {}))
@@ -219,7 +220,7 @@ extension SkillDeletionFlowTests {
         let path = f.links.path(f.skill, .claudeCode, nil); f.links.linkedPaths.insert(path)
         f.library.refreshQuarantine(context: f.context, fetch: { _ in throw DeletionTestError() })
         XCTAssertFalse(delete(f)); XCTAssertTrue(f.links.unlinkCalls.isEmpty); XCTAssertEqual(f.counter.value, 0)
-        XCTAssertFalse(f.library.updateBody(f.skill, body: "x"))
+        XCTAssertFalse(f.library.updateBody(f.skill, body: "x").succeeded)
         f.library.createSkill(name: "Blocked", description: "", body: "x", tags: [],
                               context: f.context)
         XCTAssertTrue(f.store.createAvoiding.isEmpty)

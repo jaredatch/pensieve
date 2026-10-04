@@ -42,7 +42,7 @@ final class SyncCoordinatorTests: XCTestCase {
             ManifestSnapshot(
                 schemaVersion: ManifestService.currentSchemaVersion,
                 categories: [CategoryRecord(name: "Remote", projectKeys: [], skillSlugs: [])],
-                scenarios: [], projects: [], skills: []
+                projects: [], skills: []
             ),
             toRoot: peer
         )
@@ -262,7 +262,7 @@ extension SyncCoordinatorTests {
         try ManifestService().write(
             ManifestSnapshot(
                 schemaVersion: ManifestService.currentSchemaVersion,
-                categories: [], scenarios: [], projects: [], skills: []
+                categories: [], projects: [], skills: []
             ),
             toRoot: seed
         )

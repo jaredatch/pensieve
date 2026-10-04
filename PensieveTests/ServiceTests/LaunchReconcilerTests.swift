@@ -159,7 +159,7 @@ extension LaunchReconcilerTests {
         try manifest.write(
             ManifestSnapshot(
                 schemaVersion: ManifestService.currentSchemaVersion,
-                categories: [], scenarios: [], projects: [], skills: []
+                categories: [], projects: [], skills: []
             ),
             toRoot: tempDir
         )
@@ -418,7 +418,7 @@ extension LaunchReconcilerTests {
         // A COMPLETE manifest (has `projects.yaml` → `manifestHasContent` is true → rebuild runs) that lacks
         // an overlay for iota (its overlay was deferred). An empty snapshot writes manifest.yaml + projects.yaml.
         try manifest.write(
-            ManifestSnapshot(schemaVersion: 1, categories: [], scenarios: [], projects: [], skills: []),
+            ManifestSnapshot(schemaVersion: 1, categories: [], projects: [], skills: []),
             toRoot: tempDir
         )
 

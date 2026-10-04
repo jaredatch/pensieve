@@ -52,7 +52,7 @@ One heads-up: Pensieve is unsandboxed on purpose. It needs to write symlinks int
 
 1. **Launch it.** On first run with an empty library, Pensieve opens an import wizard that scans for skills you already have: `~/.claude/skills/`, `~/.codex/skills/`, `~/.grok/skills/`, and `~/.cursor/rules/`. Results are grouped by source, near-duplicates get flagged, everything is selected by default. Import what you want; each skill's whole `SKILL.md`, frontmatter and all, is copied into the canonical store. Anything already symlinked into `~/.pensieve` is skipped as already managed. You can rerun the scan anytime from the + menu's Find Skills on This Mac…, and Import from Folder… (`Cmd+Shift+I`) imports a folder of your choosing instead. One exception: if Pensieve can't read the library (say, a newer version wrote it), it says so in the window and holds off on adding anything until you update.
 
-2. **Browse the library.** Three panels: a sidebar of sections (Skills, Projects, Categories, Scenarios, Tags — plus Machines once sync is in the picture), the middle column listing whatever section you picked, and detail. Search sits at the right end of the toolbar and filters the list you're in. The detail starts on **Overview**; the **Content** tab shows the rendered file, and its source toggle turns it into an editor (syntax highlighting, line numbers; `Cmd+S` or the Save button saves, Revert drops the edit — nothing reaches your agents until you save).
+2. **Browse the library.** Three panels: a sidebar of sections (Skills, Projects, Categories, Tags — plus Machines once sync is in the picture), the middle column listing whatever section you picked, and detail. Search sits at the right end of the toolbar and filters the list you're in. The detail starts on **Overview**; the **Content** tab shows the rendered file, and its source toggle turns it into an editor (syntax highlighting, line numbers; `Cmd+S` or the Save button saves, Revert drops the edit — nothing reaches your agents until you save).
 
 3. **Deploy a skill.** Select a skill and open its **Deployments** tab. Pensieve detects which agents you actually have installed and only shows those. Deploy to Claude Code, then verify it yourself:
 
@@ -80,6 +80,8 @@ A skill's detail is a header (name, where it came from, description, tags) over 
 - **History:** the versions saved in your sync repo, newest first. View Diff shows what changed since a version, and Restore This Version… puts it back.
 
 Edit a skill's tags right in the header, with suggestions from tags you already use. Pensieve keeps them in its own metadata and leaves `SKILL.md` alone. File › Export SKILL.md… saves a copy anywhere you like.
+
+The rendered preview stays offline. Embedded images and images inside the skill's folder show normally; remote or unavailable images show their alt text instead.
 
 If you edit a `SKILL.md` outside the app (terminal, vim, whatever), Pensieve's filesystem watcher notices and refreshes, with a small notice that the file changed outside the app. If you had unsaved edits, it asks before replacing them. Useful shortcuts: `Cmd+N` new skill, `Cmd+S` save, `Cmd+Delete` delete.
 
@@ -118,12 +120,6 @@ Choose Add Skill from GitHub… from the + menu and paste a repository, a skill 
 
 When the original changes, Pensieve tells you with a notice above the Skills list, and you read the diff before anything updates. It checks on its own, or you can ask with File › Check All Skills for Updates. An installed skill's History also shows commits from its original repository and marks the version you installed.
 
-### Scenarios
-
-A scenario is a named, user-wide group of skills you switch on as a unit: "iOS work" loads your Swift and review skills, "writing" loads your prose ones. Activating a scenario deploys its members to the agents it names; switching to another removes the old scenario's deploys and adds the new one's. Skills you deployed manually are left alone; scenarios only manage their own.
-
-Scenario *definitions* sync across machines. Which scenario is *active* is per-machine, so your laptop and your desk machine can be in different modes.
-
 ### Sync setup
 
 Sync runs through a git remote you own. Setup:
@@ -139,7 +135,7 @@ Concurrent edits from two machines usually merge automatically (membership lists
 
 ### Background sync
 
-Sync runs inside the app itself. Pensieve can launch at login and stays in the menu bar after you close its last window, so it's always around to sync: at launch, every 15 minutes, after your Mac wakes, and after synced changes land. Each cycle pulls, pushes, and self-heals your deployed files; when a cycle brings in new changes, it also reapplies your category, scenario, and machine deploy rules (symlinked agents see new content immediately anyway; stale Cursor `.mdc` files get recompiled). Pensieve compares the parsed fields it knows about and republishes a machine's readable snapshot only when its content actually changes. If the snapshot is missing or corrupt, Pensieve tries to repair it. That keeps idle Macs from stamping timestamp-only commits into the sync repo's history.
+Sync runs inside the app itself. Pensieve can launch at login and stays in the menu bar after you close its last window, so it's always around to sync: at launch, every 15 minutes, after your Mac wakes, and after synced changes land. Each cycle pulls, pushes, and self-heals your deployed files; when a cycle brings in new changes, it also reapplies your category and machine deploy rules (symlinked agents see new content immediately anyway; stale Cursor `.mdc` files get recompiled). Pensieve compares the parsed fields it knows about and republishes a machine's readable snapshot only when its content actually changes. If the snapshot is missing or corrupt, Pensieve tries to repair it. That keeps idle Macs from stamping timestamp-only commits into the sync repo's history.
 
 Since always-on machines are often driven over SSH, a small companion CLI ships in the app bundle for checking on things from a terminal:
 
@@ -156,7 +152,7 @@ The binary lives inside the app bundle at `Pensieve.app/Contents/MacOS/pensieve-
 
 - Point every machine at the **same** private remote. Each machine pulls the shared store and fans out to its own local agents.
 - Absolute paths never sync, on purpose. Projects are matched by their stable identity (git remote or marker), so `~/code/foo` on the laptop and `~/dev/foo` on the desktop resolve to the same project. A synced project you haven't registered locally simply doesn't fan out on that machine.
-- Which scenario is active stays local to each machine. Everything else worth seeing (app version, detected agents, registered projects, what's actually deployed) shows up read-only in the MACHINES section, so you can check on any Mac from any other.
+- Each Mac's app version, detected agents, registered projects, and deployed skills appear in the Machines section, so you can check on any Mac from any other.
 - You can deploy to your other Macs from this one. A skill's Deployments tab lists each of them with its projects, and the bulk deploy sheet can target machines too. Each Mac picks up the change on its own next sync, for the agents it actually has installed.
 - **One real caveat, worth reading twice:** update Pensieve on *every* syncing Mac together. Some releases move the library to a newer format, and older versions refuse to read it rather than risk damaging it. A Mac left behind stops syncing and says why until you update it.
 
@@ -169,7 +165,7 @@ No. Skills are plain `SKILL.md` markdown files in `~/.pensieve/skills/`, in the 
 Only what you deploy: symlinks (or the compiled `.mdc` for Cursor) into the agent directories you chose, plus a small `.pensieve-project` marker if you register a project that has no git remote. App-internal state lives in `~/Library/Application Support/Pensieve`. It never touches anything else.
 
 **Does it phone home?**
-No. No telemetry, no analytics, no Pensieve server. The only network traffic is git talking to the remote *you* configured, and if you never set up sync there's no network traffic at all.
+Pensieve sends no telemetry or analytics and has no server. Sync uses git to reach the remote *you* configured. GitHub installs, upstream History, and skill-update checks also use git. Those checks run weekly by default, or when you ask. Sparkle checks for app updates on GitHub and downloads releases over HTTPS. Previewing a skill makes no network requests.
 
 **What if I edit a `SKILL.md` in a terminal or another editor?**
 Totally supported. The filesystem watcher picks up the change and refreshes the app, with an indicator that the file was modified externally. Since deployed symlinks point at the same file, every agent sees your edit immediately too.

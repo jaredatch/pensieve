@@ -140,10 +140,11 @@ final class RecordingDeletionSkillStore: SkillStoreProtocol {
     }
 
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws {
+                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
         writeSkillCalls.append(directoryName)
         bodies[directoryName] = body
         entries.insert(directoryName)
+        return SkillRewriteResult(content: bodies[directoryName] ?? body, didChange: true)
     }
 
     func writeBody(directoryName: String, body: String) throws {
@@ -178,15 +179,10 @@ final class RecordingDeletionManifest: ManifestSnapshotting {
     func snapshot(from context: ModelContext) throws -> ManifestSnapshot {
         let skills = try context.fetch(FetchDescriptor<Skill>())
         let categories = try context.fetch(FetchDescriptor<Pensieve.Category>())
-        let scenarios = try context.fetch(FetchDescriptor<Scenario>())
         let intents = try context.fetch(FetchDescriptor<MachineDeployIntent>())
         return ManifestSnapshot(
             schemaVersion: 3,
             categories: categories.map { CategoryRecord(name: $0.name, projectKeys: $0.projectKeys, skillSlugs: $0.skillSlugs) },
-            scenarios: scenarios.map {
-                ScenarioRecord(id: $0.id.uuidString, name: $0.name,
-                               skillSlugs: $0.skillSlugs, agents: $0.agentRawValues)
-            },
             projects: [],
             skills: skills.map {
                 SkillOverlay(slug: $0.directoryName, createdAt: $0.createdAt, scope: $0.scope,
@@ -206,7 +202,7 @@ final class RecordingDeletionManifest: ManifestSnapshotting {
     }
 
     func read(fromRoot root: String) throws -> ManifestSnapshot {
-        snapshots.last ?? ManifestSnapshot(schemaVersion: 3, categories: [], scenarios: [], projects: [], skills: [])
+        snapshots.last ?? ManifestSnapshot(schemaVersion: 3, categories: [], projects: [], skills: [])
     }
 }
 

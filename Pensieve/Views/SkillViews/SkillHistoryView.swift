@@ -97,12 +97,17 @@ struct SkillHistoryView: View {
 
     @ViewBuilder private var previewPane: some View {
         if let selection {
-            SkillPreviewView(markdownBody: selection.previewBody)
+            preview(for: selection)
         } else {
             ContentUnavailableView {
                 Label("Select a version", systemImage: "clock.arrow.circlepath")
             }
         }
+    }
+
+    func preview(for selection: SkillHistorySelection) -> SkillPreviewView {
+        SkillPreviewView(markdownBody: selection.previewBody,
+                         imageLoader: PreviewImageLoader(fileService: fileService))
     }
 
     private func commitRow(_ commit: GitCommit) -> some View {
