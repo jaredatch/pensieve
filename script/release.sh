@@ -350,9 +350,12 @@ prepare_appcast_inputs() {
   # without ever signing untrusted input.
   ditto "$DMG_PATH" "$APPCAST_INPUT_DIR/$(basename "$DMG_PATH")"
 
-  if [ -n "$APPCAST_SHA" ] && [ ! -s "$APPCAST_INPUT_DIR/appcast.xml" ]; then
-    echo "release: missing preflight appcast base" >&2
-    return 1
+  if [ -n "$APPCAST_SHA" ]; then
+    if [ -z "$APPCAST_BASE" ] || [ ! -s "$APPCAST_BASE" ]; then
+      echo "release: missing preflight appcast base" >&2
+      return 1
+    fi
+    ditto "$APPCAST_BASE" "$APPCAST_INPUT_DIR/appcast.xml"
   fi
 }
 
@@ -369,14 +372,6 @@ generate_appcast() {
 
   prepare_appcast_inputs
 
-  # Preserve the preflight feed outside the signing folder before generation
-  # overwrites appcast.xml. An empty base is only the known-404 first release.
-  local base_appcast=""
-  if [ -n "$APPCAST_SHA" ]; then
-    base_appcast="$DIST_DIR/appcast-base.xml"
-    ditto "$APPCAST_INPUT_DIR/appcast.xml" "$base_appcast"
-  fi
-
   local -a appcast_args=(
     --ed-key-file "$SPARKLE_PRIVATE_KEY_FILE"
     --download-url-prefix "$DOWNLOAD_PREFIX/$tag/"
@@ -389,12 +384,11 @@ generate_appcast() {
   "$generate_appcast_cmd" "${appcast_args[@]}"
   test -f "$APPCAST_INPUT_DIR/appcast.xml" || { echo "release: generate_appcast did not create appcast.xml" >&2; exit 1; }
 
-  # Backstop the signing-folder discipline: every URL in the generated feed
-  # must be carried from the trusted base or name this run's DMG exactly once
-  # in a valid item for VERSION.
+  # Backstop the signing-folder discipline: only VERSION's valid item is new.
+  # Retained items and feed metadata must match the immutable preflight base.
   local built_dmg
   built_dmg="$(basename "$DMG_PATH")"
-  verify_appcast_provenance "$APPCAST_INPUT_DIR/appcast.xml" "$base_appcast" "$built_dmg" "$DOWNLOAD_PREFIX" "$VERSION" || exit 1
+  verify_appcast_provenance "$APPCAST_INPUT_DIR/appcast.xml" "$APPCAST_BASE" "$built_dmg" "$DOWNLOAD_PREFIX" "$VERSION" || exit 1
 
   ditto "$APPCAST_INPUT_DIR/appcast.xml" "$DIST_DIR/appcast.xml"
 }
@@ -452,7 +446,15 @@ resolve_public_branch() {
   esac
 }
 
+cleanup_appcast_base() {
+  if [ -n "$APPCAST_BASE" ]; then
+    rm -f "$APPCAST_BASE" || true
+    APPCAST_BASE=""
+  fi
+}
+
 release_preflight() {
+  cleanup_appcast_base
   APPCAST_PREFLIGHT=0
   APPCAST_SHA=""
   PUBLIC_BRANCH="$(resolve_public_branch)" || return 1
@@ -462,14 +464,17 @@ release_preflight() {
   response="$(mktemp "${TMPDIR:-/tmp}/pensieve-appcast-response.XXXXXX")" || return 1
   if run_command_seam "$GH_CMD" api -X GET "repos/$PUBLIC_REPO/contents/appcast.xml" \
       -f "ref=$PUBLIC_BRANCH" --include > "$response"; then
-    # Decode directly to generate_appcast's input, preserving every byte. The
-    # content and SHA come from this same response. The later recheck never
-    # replaces the SHA used by PUT.
-    if ! APPCAST_SHA="$(state_tool contents "$response" "$APPCAST_INPUT_DIR/appcast.xml")"; then
+    # Own the base outside the signing folder before copying it in. Its bytes
+    # and the write-guard SHA come from this same response.
+    APPCAST_BASE="$(mktemp "$DIST_DIR/appcast-base.XXXXXX")" || { rm -f "$response"; return 1; }
+    trap cleanup_appcast_base EXIT
+    if ! APPCAST_SHA="$(state_tool contents "$response" "$APPCAST_BASE")"; then
       rm -f "$response"
+      cleanup_appcast_base
       echo "release: invalid appcast base response" >&2
       return 1
     fi
+    ditto "$APPCAST_BASE" "$APPCAST_INPUT_DIR/appcast.xml"
   else
     status="$(http_status "$response")"
     log_response "$response" >&2

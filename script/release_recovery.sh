@@ -2,6 +2,7 @@
 RELEASE_STATE="absent"
 APPCAST_ITEM="absent"
 APPCAST_NEWER="absent"
+APPCAST_BASE=""
 CASK_SHA=""
 CASK_VERSION=""
 CASK_DIGEST=""
@@ -73,8 +74,8 @@ cask_preflight() {
 
 publication_preflight() {
   local appcast_state
-  if [ -f "$APPCAST_INPUT_DIR/appcast.xml" ]; then
-    appcast_state="$(state_tool appcast "$APPCAST_INPUT_DIR/appcast.xml" "$VERSION" "$DOWNLOAD_PREFIX")" || return 1
+  if [ -n "$APPCAST_BASE" ]; then
+    appcast_state="$(state_tool appcast "$APPCAST_BASE" "$VERSION" "$DOWNLOAD_PREFIX")" || return 1
     { read -r APPCAST_ITEM; read -r APPCAST_NEWER; } <<< "$appcast_state"
   fi
   if [ "$APPCAST_NEWER" != absent ]; then

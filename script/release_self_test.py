@@ -48,8 +48,8 @@ def assert_safe_diagnostic(test, text):
 
 def feed(version=VERSION, signature=SIGNATURE, length=len(DMG), prefix=DOWNLOAD_PREFIX, channel=None):
     channel = PUBLICATION_CASES[version][0] if channel is None else channel
-    return (f'<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
-            f'<channel><item><sparkle:shortVersionString>{version}</sparkle:shortVersionString>'
+    return (f'<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
+            f'<channel><title>Pensieve</title><item><sparkle:shortVersionString>{version}</sparkle:shortVersionString>'
             + (f'<sparkle:channel>{channel}</sparkle:channel>' if channel else '') +
             f'<enclosure url="{prefix}/v{version}/'
             f'Pensieve-{version}.dmg" length="{length}" sparkle:edSignature="{signature}"/>'
@@ -61,8 +61,8 @@ def cask(version="0.9.0", sha="0" * 64):
 
 
 def feeds(*versions):
-    items = ''.join(feed(v).split('<channel>')[1].split('</channel>')[0] for v in versions)
-    return feed().split('<channel>')[0] + '<channel>' + items + '</channel></rss>'
+    items = ''.join('<item>' + feed(v).split('<item>')[1].split('</item>')[0] + '</item>' for v in versions)
+    return feed().split('<channel>')[0] + '<channel><title>Pensieve</title>' + items + '</channel></rss>'
 
 
 # The stub only handles the command shapes used by production. An unexpected
@@ -449,7 +449,7 @@ class ReleaseSequenceTests(unittest.TestCase):
             with self.subTest(version=version, other_channel=channel):
                 self.state = json.loads(json.dumps(original)); self.set_version(version)
                 self.state["appcast"] = feed(other, channel=channel)
-                self.state["new_feed"] = feed(version).replace("</channel>", feed(other, channel=channel).split("<channel>")[1].split("</channel>")[0] + "</channel>")
+                self.state["new_feed"] = feed(version).replace("</channel>", "<item>" + feed(other, channel=channel).split("<item>")[1].split("</item>")[0] + "</item>" + "</channel>")
                 output = self.run_release() + self.run_release(cask_only=True)
                 self.assertNotIn("refusing older appcast", output)
                 self.assertIn(other, self.state["appcast"])
@@ -640,7 +640,7 @@ verify_appcast_unchanged''')
         bodies = ('resolve_public_branch', 'verify_public_branch_unchanged', 'release_preflight',
                   'PUBLIC_BRANCH=master; verify_appcast_unchanged', 'read_release_state', 'cask_preflight',
                   'publish_contents_file fixture/public appcast.xml "$REPO/source.xml" fixture master aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-                  'verify_appcast_provenance "$REPO/provenance.xml" "" Pensieve-1.0.0.dmg https://github.com/jaredatch/pensieve/releases/download 1.0.0')
+                  f'verify_appcast_provenance "$REPO/provenance.xml" "" Pensieve-{VERSION}.dmg {DOWNLOAD_PREFIX} {VERSION}')
         (self.root / "source.xml").write_text(feed())
         for poison, body in itertools.product(POISON_TEXTS, bodies):
             with self.subTest(poison=poison, body=body):
@@ -672,7 +672,7 @@ verify_appcast_unchanged''')
             with self.subTest(missing_built=text):
                 result = inspect(text)
                 self.assertEqual(result.returncode, 1, "provenance must require this run's built DMG")
-                self.assertIn("DMG URL exactly once", result.stderr)
+                self.assertIn("no item for the publication version", result.stderr)
         for text in ("<rss><channel>", "not XML", '<!DOCTYPE rss><rss><channel/></rss>'):
             with self.subTest(malformed=text):
                 result = inspect(text)
@@ -700,7 +700,7 @@ verify_appcast_unchanged''')
                     text = feed().replace('<enclosure', enclosure + '<enclosure', 1) if before else feed().replace('</item>', enclosure + '</item>')
                     result = inspect(text)
                     self.assertEqual(result.returncode, 1, "every parsed DMG enclosure must have trusted provenance")
-                    self.assertIn("unexpected URL", result.stderr)
+                    self.assertIn("duplicated appcast enclosure", result.stderr)
         source.unlink(); source.mkdir()
         result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast",
                                  str(source), str(base), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION],
@@ -711,7 +711,7 @@ verify_appcast_unchanged''')
         original = json.loads(json.dumps(self.state))
         for text in (feed("0.9.0"), '<rss><channel>',
                      feed().replace('</item>', "<enclosure url='https://fixture/Pensieve-9.9.9.dmg'/></item>"),
-                     feed().replace('</item>', "<sparkle:deltas><enclosure url='https://fixture/other.zip'/></sparkle:deltas></item>"),
+                     feeds("0.9.0", VERSION).replace('</item>', "<sparkle:deltas><enclosure url='https://fixture/other.zip'/></sparkle:deltas></item>", 1),
                      feed().replace(DOWNLOAD_PREFIX, "https://evil/x")):
             with self.subTest(generated=text):
                 self.state = json.loads(json.dumps(original)); self.state["new_feed"] = text
@@ -724,7 +724,7 @@ verify_appcast_unchanged''')
         shutil.rmtree(input_dir, ignore_errors=True); input_dir.mkdir(parents=True)
         (input_dir / "appcast.xml").write_text(self.state["appcast"])
         (input_dir.parent / ("Pensieve-" + version + ".dmg")).write_bytes(DMG)
-        return self.run_function('VERSION="' + version + '"; VERSION_CHANNEL="' + PUBLICATION_CASES[version][0] + '"; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; APPCAST_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; APPCAST_PREFLIGHT=1; generate_appcast')
+        return self.run_function('VERSION="' + version + '"; VERSION_CHANNEL="' + PUBLICATION_CASES[version][0] + '"; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; release_preflight; generate_appcast')
 
     def test_whole_feed_provenance_stops_untrusted_urls_before_publication(self):
         original = json.loads(json.dumps(self.state))
@@ -734,8 +734,8 @@ verify_appcast_unchanged''')
         for url in unknown_urls:
             for placement in ("enclosure", "delta", "metadata", "namespaced", "root", "current"):
                 with self.subTest(url=url, placement=placement):
-                    root = ET.fromstring(feed()); item = root.find("channel/item")
-                    if placement == "current": item.find("enclosure").set("url", url)
+                    root = ET.fromstring(feeds("0.9.0", VERSION)); item = root.find("channel/item")
+                    if placement == "current": root.find("channel").findall("item")[-1].find("enclosure").set("url", url)
                     elif placement == "root": root.set("url", url)
                     elif placement == "metadata": ET.SubElement(root.find("channel"), "metadata", url=url)
                     elif placement == "namespaced": ET.SubElement(root.find("channel"), "metadata").set(self.tool.SPARKLE + "url", url)
@@ -745,29 +745,37 @@ verify_appcast_unchanged''')
                     self.state = json.loads(json.dumps(original)); self.state["new_feed"] = ET.tostring(root, encoding="unicode")
                     result = self.run_appcast_generation()
                     self.assertEqual(result.returncode, 1, "an untrusted URL anywhere must stop generation")
-                    self.assertIn("unexpected URL", result.stderr)
+                    message = "wrong DMG URL" if placement == "current" else "channel or feed metadata" if placement in ("metadata", "namespaced", "root") else "another item" if placement == "delta" else "duplicated appcast enclosure"
+                    self.assertIn(message, result.stderr)
 
     def test_generated_item_requires_one_current_url_and_valid_metadata(self):
-        original = json.loads(json.dumps(self.state)); expected_url = DOWNLOAD_PREFIX + "/v1.0.0/Pensieve-1.0.0.dmg"
+        original = json.loads(json.dumps(self.state)); expected_url = f"{DOWNLOAD_PREFIX}/v{VERSION}/Pensieve-{VERSION}.dmg"
         for failure in ("wrong-version", "wrong-channel", "empty-channel", "zero-length", "bad-signature", "duplicate-url", "duplicate-item", "url-outside-current-item", "no-current-item"):
             with self.subTest(failure=failure):
                 root = ET.fromstring(feed()); item = root.find("channel/item")
                 if failure == "wrong-version": item.find(self.tool.SPARKLE + "shortVersionString").text = "0.9.0"
                 elif failure in ("wrong-channel", "empty-channel"): ET.SubElement(item, self.tool.SPARKLE + "channel").text = "beta" if failure == "wrong-channel" else ""
                 elif failure == "zero-length": item.find("enclosure").set("length", "0")
-                elif failure == "bad-signature": item.find("enclosure").set(self.tool.SPARKLE + "edSignature", "bad")
-                elif failure == "duplicate-url": ET.SubElement(ET.SubElement(item, self.tool.SPARKLE + "deltas"), "enclosure", url=expected_url)
+                elif failure == "bad-signature": item.find("enclosure").set(self.tool.SPARKLE + "edSignature", base64.b64encode(b"short").decode())
+                elif failure == "duplicate-url": ET.SubElement(item, "enclosure", url=expected_url)
                 elif failure == "duplicate-item": root.find("channel").append(ET.fromstring(ET.tostring(item)))
                 elif failure == "no-current-item":
                     item.find(self.tool.SPARKLE + "shortVersionString").text = "0.9.0"
                     item.find("enclosure").set("url", DOWNLOAD_PREFIX + "/v0.9.0/Pensieve-0.9.0.dmg")
-                    root.set("url", expected_url)
                 else:
                     root.set("url", expected_url)
                     item.find("enclosure").set("url", DOWNLOAD_PREFIX + "/v0.9.0/Pensieve-0.9.0.dmg")
                 self.state = json.loads(json.dumps(original)); self.state["new_feed"] = ET.tostring(root, encoding="unicode")
                 result = self.run_appcast_generation()
                 self.assertEqual(result.returncode, 1, "the current item must be valid before publishing")
+                messages = {
+                    "wrong-version": "names this DMG under another version", "wrong-channel": "wrong channel",
+                    "empty-channel": "empty appcast channel", "zero-length": "invalid DMG length",
+                    "bad-signature": "invalid EdDSA signature", "duplicate-url": "duplicated appcast enclosure",
+                    "duplicate-item": "duplicated appcast item", "url-outside-current-item": "wrong DMG URL",
+                    "no-current-item": "no item for the publication version",
+                }
+                self.assertIn(messages[failure], result.stderr, "each fixture must reach its own provenance guard")
         source = self.root / "generated.xml"; base = self.root / "base.xml"
         root = ET.fromstring(feed()); root.set("url", DOWNLOAD_PREFIX + "/v1.0.0/Other.dmg")
         source.write_text(ET.tostring(root, encoding="unicode")); base.write_text(feed())
@@ -775,10 +783,12 @@ verify_appcast_unchanged''')
                                  str(base), "Other.dmg", DOWNLOAD_PREFIX, VERSION],
                                 env=self.env, text=True, capture_output=True, timeout=30)
         self.assertEqual(result.returncode, 1, "the supplied DMG must be the one in the VERSION item")
+        self.assertIn("different built DMG", result.stderr)
         self.set_version("1.0.0-beta.1")
         self.state["new_feed"] = feed("1.0.0-beta.1", channel="")
         result = self.run_appcast_generation()
         self.assertEqual(result.returncode, 1, "a generated prerelease must be on beta")
+        self.assertIn("wrong channel", result.stderr)
 
     def test_whole_feed_provenance_preserves_base_urls(self):
         root = ET.fromstring(feed("0.9.0"))
@@ -793,6 +803,88 @@ verify_appcast_unchanged''')
         result = self.run_appcast_generation()
         self.assertEqual(result.returncode, 0, "all previously published URLs remain trusted: " + result.stderr)
         self.assertEqual(self.state["signing_inputs"], [["Pensieve-1.0.0.dmg"]])
+
+    def test_provenance_requires_unchanged_base_content(self):
+        original = json.loads(json.dumps(self.state))
+        delta_url = "https://trusted/old.delta"
+        base = ET.fromstring(feed("0.9.0"))
+        ET.SubElement(ET.SubElement(base.find("channel/item"), self.tool.SPARKLE + "deltas"), "enclosure", url=delta_url)
+        for mutation in ("length", "signature", "title", "notes", "link", "delta-promotion", "second-item", "channel-notes", "root-element", "channel-text"):
+            with self.subTest(mutation=mutation):
+                root = ET.fromstring(ET.tostring(base)); old = root.find("channel/item")
+                root.find("channel").append(ET.fromstring(feed()).find("channel/item"))
+                if mutation == "length": old.find("enclosure").set("length", "16")
+                elif mutation == "signature": old.find("enclosure").set(self.tool.SPARKLE + "edSignature", base64.b64encode(b"t" * 64).decode())
+                elif mutation == "title": ET.SubElement(old, "title").text = "rewritten"
+                elif mutation in ("notes", "link"):
+                    ET.SubElement(old, self.tool.SPARKLE + "releaseNotesLink" if mutation == "notes" else "link").text = "https://untrusted/notes"
+                elif mutation == "delta-promotion": old.find("enclosure").set("url", delta_url)
+                elif mutation == "second-item":
+                    added = ET.fromstring(ET.tostring(old)); added.find(self.tool.SPARKLE + "shortVersionString").text = "0.8.0"
+                    root.find("channel").append(added)
+                elif mutation == "channel-notes": ET.SubElement(root.find("channel"), "link").text = "https://untrusted/notes"
+                elif mutation == "root-element": ET.SubElement(root, "unexpected").text = "new content"
+                else: root.find("channel").text = "new channel text"
+                self.state = json.loads(json.dumps(original)); self.state["appcast"] = ET.tostring(base, encoding="unicode")
+                self.state["new_feed"] = ET.tostring(root, encoding="unicode")
+                result = self.run_appcast_generation()
+                self.assertEqual(result.returncode, 1, "generation must preserve every carried item and channel field")
+                self.assertIn("channel or feed metadata" if mutation in ("channel-notes", "root-element", "channel-text") else "another item", result.stderr)
+
+    def test_provenance_allows_canonical_reordering_and_pruning(self):
+        base = ET.fromstring(feeds("0.9.0", "1.0.0-alpha.1"))
+        ET.SubElement(base.find("channel/item"), "description").text = "  meaningful text\nwith spacing  "
+        self.state["appcast"] = ET.tostring(base, encoding="unicode")
+        for prune in (False, True):
+            with self.subTest(prune=prune):
+                root = ET.fromstring(ET.tostring(base)); channel = root.find("channel")
+                items = channel.findall("item")
+                for item in items: channel.remove(item)
+                for item in reversed(items[1:] if prune else items): channel.append(item)
+                channel.insert(0, ET.fromstring(feed()).find("channel/item"))
+                for element in root.iter():
+                    element.attrib = dict(reversed(list(element.attrib.items())))
+                ET.indent(root, space="  ")
+                self.state["new_feed"] = ET.tostring(root, encoding="unicode")
+                result = self.run_appcast_generation()
+                self.assertEqual(result.returncode, 0, "formatting, attribute order and base-item reordering/pruning add no trust: " + result.stderr)
+
+    def test_provenance_requires_a_new_publication_item(self):
+        source = self.root / "generated.xml"; base = self.root / "base.xml"
+        source.write_text(feed()); base.write_text(feed())
+        result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(source),
+                                 str(base), f"Pensieve-{VERSION}.dmg", DOWNLOAD_PREFIX, VERSION],
+                                env=self.env, text=True, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 1, "generation must add exactly one new publication item")
+        self.assertIn("publication version already exists in base", result.stderr)
+
+    def test_preflight_owns_base_outside_signing_folder(self):
+        result = self.run_function('''release_preflight
+printf 'SNAPSHOT=%s\n' "${APPCAST_BASE:-}"
+if [ -n "${APPCAST_BASE:-}" ]; then
+  cat "$APPCAST_BASE" > "$REPO/preflight-snapshot.xml"
+  printf poisoned > "$APPCAST_INPUT_DIR/appcast.xml"
+  DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"
+  printf 'fresh built DMG' > "$DMG_PATH"
+  prepare_appcast_inputs
+  cat "$APPCAST_INPUT_DIR/appcast.xml" > "$REPO/prepared-base.xml"
+fi''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        path = result.stdout.split("SNAPSHOT=", 1)[1].splitlines()[0]
+        self.assertTrue(path, "preflight must own a decoded base before preparation runs")
+        self.assertNotEqual(Path(path).parent, self.root / "build/dist/appcast-input")
+        self.assertEqual((self.root / "preflight-snapshot.xml").read_text(), self.state["appcast"])
+        self.assertEqual((self.root / "prepared-base.xml").read_text(), self.state["appcast"], "preparation must copy the preflight base, not trust its mutable signing copy")
+        self.assertFalse(Path(path).exists(), "the preflight snapshot must be cleaned when the shell exits")
+
+    def test_appcast_base_is_cleaned_on_success_and_failure(self):
+        original = json.loads(json.dumps(self.state))
+        for failure in (False, True):
+            with self.subTest(failure=failure):
+                self.state = json.loads(json.dumps(original))
+                if failure: self.state["new_feed"] = "not XML"
+                self.run_release(expected=1 if failure else 0)
+                self.assertEqual(list((self.root / "build/dist").glob("appcast-base.*")), [], "a successful or refused publish must clean its base snapshot")
 
     def test_provenance_refuses_base_read_and_parse_errors(self):
         source = self.root / "generated.xml"; source.write_text(feed())
@@ -1006,10 +1098,10 @@ class PublishedTextSweepTests(unittest.TestCase):
             text = feed().split("<channel>")[0] + "<channel>" + ending + (item + ending) * items + old + "</channel></rss>" + (ending if trailing else "")
             with self.subTest(ending=ending, trailing=trailing, items=items, other=other):
                 if items == 2:
-                    with self.assertRaises(ValueError): self.tool.appcast_publication_state(text, VERSION, DOWNLOAD_PREFIX)
+                    with self.assertRaises(ValueError): self.tool.appcast_publication_state(self.tool.appcast_root(text), VERSION, DOWNLOAD_PREFIX)
                 else:
                     expected = "absent" if items == 0 else str(len(DMG)) + " " + SIGNATURE
-                    self.assertEqual(self.tool.appcast_publication_state(text, VERSION, DOWNLOAD_PREFIX), (expected, "absent"))
+                    self.assertEqual(self.tool.appcast_publication_state(self.tool.appcast_root(text), VERSION, DOWNLOAD_PREFIX), (expected, "absent"))
             count += 1
         self.assertEqual(count, 24)
         # Two enclosures must be refused whichever one would be trusted first.
@@ -1022,18 +1114,18 @@ class PublishedTextSweepTests(unittest.TestCase):
             text = ET.tostring(root, encoding="unicode").replace("><", ">" + ending + "<") + (ending if trailing else "")
             with self.subTest(ending=ending, trailing=trailing, duplicate_enclosure=position):
                 with self.assertRaisesRegex(ValueError, "duplicated appcast enclosure"):
-                    self.tool.appcast_publication_state(text, VERSION, DOWNLOAD_PREFIX)
+                    self.tool.appcast_publication_state(self.tool.appcast_root(text), VERSION, DOWNLOAD_PREFIX)
         for invalid in ("", feed().replace("<enclosure", "<other"), feed().replace('length="15"', 'length="bad"'), feed().replace(SIGNATURE, "bad"), feed().replace("v1.0.0/", "v9.0.0/")):
-            with self.assertRaises((ValueError, ET.ParseError)): self.tool.appcast_publication_state(invalid, VERSION, DOWNLOAD_PREFIX)
+            with self.assertRaises((ValueError, ET.ParseError)): self.tool.appcast_publication_state(self.tool.appcast_root(invalid), VERSION, DOWNLOAD_PREFIX)
 
     def test_appcast_publication_channels(self):
         for version in (VERSION, "1.0.0-beta.2"):
             for published, channel in (("1.1.0", ""), ("1.1.0-beta.1", "beta"), ("1.1.0-alpha.1", "alpha")):
                 with self.subTest(version=version, published=published, channel=channel):
-                    text = feed(version).replace("</channel>", feed(published, channel=channel).split("<channel>")[1].split("</channel>")[0] + "</channel>")
+                    text = feed(version).replace("</channel>", "<item>" + feed(published, channel=channel).split("<item>")[1].split("</item>")[0] + "</item>" + "</channel>")
                     visible = channel == "" or (version != VERSION and channel == "beta")
                     expected = (str(len(DMG)) + " " + SIGNATURE, published if visible else "absent")
-                    self.assertEqual(self.tool.appcast_publication_state(text, version, DOWNLOAD_PREFIX), expected)
+                    self.assertEqual(self.tool.appcast_publication_state(self.tool.appcast_root(text), version, DOWNLOAD_PREFIX), expected)
 
     def test_contents_sha_validation_and_decode(self):
         with tempfile.TemporaryDirectory(prefix="pensieve-contents-") as directory:

@@ -132,8 +132,7 @@ def appcast_root(text):
     return root
 
 
-def appcast_publication_state(text, version, download_prefix):
-    root = appcast_root(text)
+def appcast_publication_state(root, version, download_prefix):
     seen, result = set(), "absent"
     newest, newest_parts = version, version_parts(version)
     channel = publication_channel(version)
@@ -168,22 +167,48 @@ def appcast_publication_state(text, version, download_prefix):
     return result, newest if newest != version else "absent"
 
 
-def appcast_urls(root):
-    return [value for element in root.iter() for name, value in element.attrib.items()
-            if name.rsplit("}", 1)[-1] == "url"]
+def canonical_xml(element, omit_items=()):
+    """Compare expanded XML names and content, ignoring pretty-print whitespace.
+
+    Sparkle rewrites indentation and attribute order but preserves leaf text.
+    Item tails belong to the channel, so even an omitted item's nonblank tail
+    remains part of the channel metadata comparison.
+    """
+    text = element.text or ""
+    if len(element) and not text.strip():
+        text = ""
+    children = []
+    for child in element:
+        if child not in omit_items:
+            children.append(canonical_xml(child, omit_items))
+        tail = child.tail or ""
+        if tail.strip():
+            children.append(tail)
+    return element.tag, tuple(sorted(element.attrib.items())), text, tuple(children)
 
 
 def appcast_provenance(text, base_text, built_dmg, download_prefix, version):
     version_parts(version)
     require(built_dmg == f"Pensieve-{version}.dmg", "generated appcast names a different built DMG")
-    urls = appcast_urls(appcast_root(text))
-    base_urls = set(appcast_urls(appcast_root(base_text))) if base_text is not None else set()
-    expected_url = f"{download_prefix}/v{version}/{built_dmg}"
-    for url in urls:
-        require(url == expected_url or url in base_urls, f"generated appcast references an unexpected URL: {url}")
-    require(urls.count(expected_url) == 1, "generated appcast must reference this run's DMG URL exactly once")
-    state, _ = appcast_publication_state(text, version, download_prefix)
+    root = appcast_root(text)
+    if base_text is None:
+        # Sparkle's FeedXML creates this shape when no feed exists yet.
+        base = ET.Element("rss", version="2.0")
+        ET.SubElement(ET.SubElement(base, "channel"), "title").text = "Pensieve"
+    else:
+        base = appcast_root(base_text)
+    state, _ = appcast_publication_state(root, version, download_prefix)
     require(state != "absent", "generated appcast has no item for the publication version")
+    base_items = base.find("channel").findall("item")
+    items = root.find("channel").findall("item")
+    require(canonical_xml(root, items) == canonical_xml(base, base_items),
+            "generated appcast changes channel or feed metadata")
+    require(not any(item.findtext(SPARKLE + "shortVersionString") == version for item in base_items),
+            "generated appcast publication version already exists in base")
+    carried = {canonical_xml(item) for item in base_items}
+    for item in items:
+        if item.findtext(SPARKLE + "shortVersionString") != version:
+            require(canonical_xml(item) in carried, "generated appcast introduces or changes another item")
 
 
 def release_state(value, version, require_uploaded=False):
@@ -230,7 +255,7 @@ def main(args):
         base_text = Path(args[2]).read_text() if args[2] else None
         appcast_provenance(text, base_text, args[3], args[4], args[5])
     elif mode == "appcast":
-        print(*appcast_publication_state(Path(args[1]).read_text(), args[2], args[3]), sep="\n")
+        print(*appcast_publication_state(appcast_root(Path(args[1]).read_text()), args[2], args[3]), sep="\n")
     elif mode == "compare-versions":
         print(compare_versions(args[1], args[2]))
     elif mode == "channel":
