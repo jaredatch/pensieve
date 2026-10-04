@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Strict readers for publication state. Unknown state never means absent."""
 import base64
+import importlib.util
 import json
 from pathlib import Path
 import re
@@ -228,7 +229,11 @@ def appcast_provenance(text, base_text, built_dmg, download_prefix, version, bui
     require(len(minimums) == 1 and bool(minimums[0].text),
             "generated appcast has missing, empty or duplicated minimum system version")
     check_generated_item(current, f"{download_prefix}/v{version}/{built_dmg}")
-    require(minimums[0].text == built_minimum,
+    # The cask's sparse checkout has no Mach-O validator; only feed generation needs it.
+    minimum_spec = importlib.util.spec_from_file_location("minimum_system", Path(__file__).with_name("minimum_system.py"))
+    minimum_tool = importlib.util.module_from_spec(minimum_spec)
+    minimum_spec.loader.exec_module(minimum_tool)
+    require(minimum_tool.normalize_version(minimums[0].text) == minimum_tool.normalize_version(built_minimum),
             f"generated appcast minimum {minimums[0].text} differs from built app minimum {built_minimum}")
     require(canonical_xml(root, items) == canonical_xml(base, base_items),
             "generated appcast changes channel or feed metadata")

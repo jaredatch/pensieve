@@ -2,10 +2,8 @@
 """Check the minimum macOS of a built app and every embedded daemon slice."""
 import argparse
 from pathlib import Path
-import subprocess
 import unittest
-from xml.parsers.expat import ExpatError
-from minimum_system import check_app_minimum, required_minimum
+from minimum_system import MINIMUM_ERRORS, check_app_minimum, check_binary_minimum, normalize_version, required_minimum
 
 APP = None
 
@@ -13,15 +11,18 @@ APP = None
 class MinimumSystemTests(unittest.TestCase):
     def assert_app_minimum(self):
         try:
-            self.assertEqual(check_app_minimum(APP), required_minimum())
-        except (ValueError, OSError, ExpatError, subprocess.SubprocessError) as error:
+            self.assertEqual(normalize_version(check_app_minimum(APP)), normalize_version(required_minimum()))
+        except MINIMUM_ERRORS as error:
             self.fail(str(error))
 
     def test_app_requires_macos_26(self):
         self.assert_app_minimum()
 
     def test_embedded_daemon_requires_macos_26(self):
-        self.assert_app_minimum()
+        try:
+            check_binary_minimum(APP / "Contents/MacOS/pensieve-daemon", required_minimum())
+        except MINIMUM_ERRORS as error:
+            self.fail(str(error))
 
 
 if __name__ == "__main__":

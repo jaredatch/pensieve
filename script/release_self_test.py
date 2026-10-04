@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 import shutil
 import subprocess
+import struct
 import tempfile
 import unittest
 from unittest import mock
@@ -252,18 +253,66 @@ class MinimumParserTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing or malformed minos"):
             self.check_output(self.slice("arm64") + self.slice("x86_64", minimum=None))
 
-    def test_macho_tools_use_system_paths_with_explicit_test_overrides(self):
-        for overrides, expected in (({}, ("/usr/bin/lipo", "/usr/bin/otool")),
-                                    ({"LIPO_CMD": "/fixture tools/lipo", "OTOOL_CMD": "/fixture tools/otool"},
-                                     ("/fixture tools/lipo", "/fixture tools/otool"))):
-            with self.subTest(overrides=overrides), mock.patch.dict(os.environ, overrides, clear=True):
-                calls = []
-                def command(args, **kwargs):
-                    calls.append(args[0])
-                    return subprocess.CompletedProcess(args, 0, "arm64 x86_64\n" if len(calls) == 1 else self.slice("arm64") + self.slice("x86_64"), "")
-                with mock.patch.object(MINIMUM_TOOL.subprocess, "run", side_effect=command):
-                    MINIMUM_TOOL.check_binary_minimum(Path("/fixture/pensieve-daemon"), "26.0")
-                self.assertEqual(tuple(calls), expected, "only an explicit test override may replace Apple's Mach-O tools")
+    def test_macho_tools_ignore_environment_overrides(self):
+        with mock.patch.dict(os.environ, {"LIPO_CMD": "/fixture/lipo", "OTOOL_CMD": "/fixture/otool"}):
+            calls = []
+            def command(args, **kwargs):
+                calls.append(args[0])
+                return subprocess.CompletedProcess(args, 0, "arm64 x86_64\n" if len(calls) == 1 else self.slice("arm64") + self.slice("x86_64"), "")
+            with mock.patch.object(MINIMUM_TOOL.subprocess, "run", side_effect=command):
+                MINIMUM_TOOL.check_binary_minimum(Path("/fixture/pensieve-daemon"), "26.0")
+            self.assertEqual(calls, ["/usr/bin/lipo", "/usr/bin/otool"])
+
+    def test_macho_tools_allow_a_direct_fixture_seam(self):
+        paths = ("/fixture tools/lipo", "/fixture tools/otool")
+        calls = []
+        def command(args, **kwargs):
+            calls.append(args[0])
+            return subprocess.CompletedProcess(args, 0, "arm64 x86_64\n" if len(calls) == 1 else self.slice("arm64") + self.slice("x86_64"), "")
+        with mock.patch.object(MINIMUM_TOOL, "MACHO_TOOLS", paths), mock.patch.object(MINIMUM_TOOL.subprocess, "run", side_effect=command):
+            MINIMUM_TOOL.check_binary_minimum(Path("/fixture/pensieve-daemon"), "26.0")
+        self.assertEqual(tuple(calls), paths)
+
+    def test_real_macho_cli_ignores_environment_tools(self):
+        with tempfile.TemporaryDirectory(prefix="pensieve-real-macho-") as directory:
+            app = Path(directory) / "Pensieve.app"
+            binaries = app / "Contents/MacOS"; binaries.mkdir(parents=True)
+            (app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleExecutable": "Pensieve", "LSMinimumSystemVersion": "26.0"}))
+            # A minimal arm64 Mach-O has one real macOS build-version load command.
+            for name, major in (("Pensieve", 26), ("pensieve-daemon", 14)):
+                (binaries / name).write_bytes(struct.pack("<8I", 0xfeedfacf, 0x100000c, 0, 2, 1, 24, 0, 0) +
+                                             struct.pack("<6I", 0x32, 24, 1, major << 16, 26 << 16, 0))
+            fake = Path(directory) / "forged-tool"
+            fake.write_text("#!/bin/sh\nexit 0\n"); fake.chmod(0o755)
+            env = dict(os.environ, LIPO_CMD=str(fake), OTOOL_CMD=str(fake))
+            result = subprocess.run([sys.executable, "-B", str(ROOT / "script/minimum_system.py"), "--app", str(app)],
+                                    env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("pensieve-daemon [arm64] must require macOS 26.0; found 14.0", result.stderr)
+
+    def test_policy_requires_two_version_components(self):
+        with mock.patch.object(Path, "read_text", return_value="26.0.0\n"), \
+                self.assertRaisesRegex(ValueError, "malformed release minimum policy"):
+            MINIMUM_TOOL.required_minimum()
+
+    def test_trailing_zero_minimums_match(self):
+        self.check_output(self.slice("arm64", minimum="26.0.0") + self.slice("x86_64"))
+
+    def test_daemon_self_test_checks_only_the_daemon_and_names_its_failure(self):
+        spec = importlib.util.spec_from_file_location("minimum_self_test_probe", ROOT / "script/minimum_system_self_test.py")
+        module = importlib.util.module_from_spec(spec)
+        with mock.patch.dict(sys.modules, minimum_system=MINIMUM_TOOL):
+            spec.loader.exec_module(module)
+        module.APP = Path("/fixture/Pensieve.app")
+        for error in (None, ValueError("pensieve-daemon [arm64] must require macOS 26.0; found 14.0")):
+            with self.subTest(error=error), mock.patch.object(module, "check_binary_minimum", side_effect=error, create=True) as binary, \
+                    mock.patch.object(module, "check_app_minimum", side_effect=ValueError("Pensieve app fault")):
+                result = unittest.TestResult()
+                module.MinimumSystemTests("test_embedded_daemon_requires_macos_26").run(result)
+                binary.assert_called_once_with(module.APP / "Contents/MacOS/pensieve-daemon", MINIMUM_TOOL.required_minimum())
+                self.assertEqual(len(result.errors), 0)
+                self.assertEqual(len(result.failures), int(error is not None))
+                if error: self.assertIn(str(error), result.failures[0][1])
 
     def test_malformed_xml_cli_diagnostic_is_escaped(self):
         with tempfile.TemporaryDirectory(prefix="pensieve-plist-") as directory:
@@ -282,43 +331,141 @@ class MinimumParserTests(unittest.TestCase):
             self.assertEqual(str(refusal.exception), "release: invalid built minimum: fixture\\x1b\\nraw diagnostic")
 
     def test_unittest_module_loads_from_repo_root(self):
-        environment = dict(os.environ); environment.pop("PYTHONPATH", None)
-        result = subprocess.run([sys.executable, "-B", "-m", "unittest",
-                                 "script.release_self_test.MinimumParserTests.test_each_architecture_requires_a_minimum"],
-                                cwd=ROOT, env=environment, capture_output=True, text=True, timeout=30)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Ran 1 test", result.stderr)
+        spec = importlib.util.spec_from_file_location("root_import_probe", ROOT / "script/release_self_test.py")
+        module = importlib.util.module_from_spec(spec)
+        paths = [str(ROOT)] + [p for p in sys.path if Path(p or ".").resolve() != ROOT / "script"]
+        with mock.patch.object(sys, "path", paths):
+            spec.loader.exec_module(module)
+
 
 
 class MinimumPolicyTests(unittest.TestCase):
     def test_project_deployment_settings_match_pinned_minimum(self):
-        expected = (ROOT / "release/minimum-macos.txt").read_text().strip()
-        result = subprocess.run(["/usr/bin/ruby", "-ryaml", "-rjson", "-e",
+        expected = MINIMUM_TOOL.required_minimum()
+        result = subprocess.run(["ruby", "-ryaml", "-rjson", "-e",
                                  "puts JSON.generate(YAML.safe_load(File.read(ARGV.fetch(0))))", str(ROOT / "project.yml")],
                                 capture_output=True, text=True, check=True, timeout=30)
         project = json.loads(result.stdout)
-        self.assertEqual(project["options"]["deploymentTarget"]["macOS"], expected, "project's default minimum differs from policy")
+        def compare(value, path):
+            try:
+                actual = MINIMUM_TOOL.normalize_version(str(value))
+            except MINIMUM_TOOL.MINIMUM_ERRORS:
+                self.fail(path + " differs from policy: invalid version " + repr(value))
+            self.assertEqual(actual, MINIMUM_TOOL.normalize_version(expected), path + " differs from policy")
+        compare(project["options"]["deploymentTarget"]["macOS"], "project's default minimum")
+        configs = set()
+        def check_config(path):
+            if path in configs: return
+            configs.add(path)
+            try: text = path.read_text()
+            except OSError as error: self.fail(f"cannot read xcconfig {path}: {error}")
+            for included in re.findall(r'^\s*#include\??\s+"([^"\n]+)"', text, re.MULTILINE):
+                check_config(path.parent / included)
+            for value in re.findall(r'^\s*MACOSX_DEPLOYMENT_TARGET(?:\[[^]\n]+\])*\s*=\s*(.*?)\s*(?://.*)?$', text, re.MULTILINE):
+                compare(value.strip().strip('"'), str(path) + ":MACOSX_DEPLOYMENT_TARGET")
+        def config_paths(value):
+            if isinstance(value, dict):
+                for child in value.values(): config_paths(child)
+            elif isinstance(value, list):
+                for child in value: config_paths(child)
+            elif isinstance(value, str): check_config(ROOT / value)
+        def check_deployment(value, path, macos):
+            if isinstance(value, list):
+                for index, child in enumerate(value): check_deployment(child, f"{path}[{index}]", macos)
+            elif isinstance(value, dict):
+                if "macOS" in value: compare(value["macOS"], path + ".macOS")
+            elif macos: compare(value, path)
         def check_settings(value, path):
+            if isinstance(value, list):
+                for index, child in enumerate(value): check_settings(child, f"{path}[{index}]")
+                return
             if not isinstance(value, dict): return
+            platforms = value.get("platform", [])
+            if isinstance(platforms, str): platforms = [platforms]
             for key, child in value.items():
-                if key == "MACOSX_DEPLOYMENT_TARGET":
-                    self.assertEqual(child, expected, path + "." + key + " differs from policy")
-                elif key == "deploymentTarget" and isinstance(child, dict) and "macOS" in child:
-                    self.assertEqual(child["macOS"], expected, path + ".deploymentTarget.macOS differs from policy")
-                elif key == "deploymentTarget" and value.get("platform") == "macOS":
-                    self.assertEqual(child, expected, path + ".deploymentTarget differs from policy")
+                if key == "MACOSX_DEPLOYMENT_TARGET": compare(child, path + "." + key)
+                elif key == "deploymentTarget": check_deployment(child, path + ".deploymentTarget", "macOS" in platforms)
+                elif key == "configFiles": config_paths(child)
                 check_settings(child, path + "." + key)
         check_settings(project, "project")
 
     def test_cask_requirement_matches_pinned_minimum(self):
-        expected = (ROOT / "release/minimum-macos.txt").read_text().strip()
+        expected = MINIMUM_TOOL.required_minimum()
         text = (ROOT / "release/homebrew/pensieve.rb").read_text()
         requirements = re.findall(r"(?m)^\s*depends_on\s+macos:\s*:(\w+)\s*$", text)
         self.assertEqual(len(requirements), 1, "cask must have one named macOS requirement")
-        result = subprocess.run(["brew", "ruby", "-e", 'require "macos_version"; puts MacOSVersion.from_symbol(ARGV.fetch(0).to_sym)',
-                                 requirements[0]], capture_output=True, text=True, check=True, timeout=30)
-        self.assertEqual(tuple(map(int, result.stdout.strip().split('.'))) + (0,), tuple(map(int, expected.split('.'))),
-                         "Homebrew's named minimum differs from policy")
+        symbol = requirements[0]
+        # Offline hosts still check the literal requirement without Homebrew's implementation.
+        symbols = {"big_sur": "11.0", "monterey": "12.0", "ventura": "13.0", "sonoma": "14.0",
+                   "sequoia": "15.0", "tahoe": "26.0"}
+        if shutil.which("brew"):
+            try:
+                result = subprocess.run(["brew", "ruby", "-e", 'require "macos_version"; puts MacOSVersion.from_symbol(ARGV.fetch(0).to_sym)',
+                                         symbol], capture_output=True, text=True, check=True, timeout=30)
+                minimum = result.stdout.strip()
+            except (OSError, subprocess.SubprocessError) as error:
+                self.fail(f"cannot resolve Homebrew macOS requirement :{symbol}: {error}")
+        else:
+            self.assertIn(symbol, symbols, f"unknown macOS requirement :{symbol}; extend the offline symbol table")
+            minimum = symbols[symbol]
+        try:
+            actual = MINIMUM_TOOL.normalize_version(minimum)
+        except MINIMUM_TOOL.MINIMUM_ERRORS as error:
+            self.fail(f"invalid Homebrew macOS requirement :{symbol}: {error}")
+        self.assertEqual(actual, MINIMUM_TOOL.normalize_version(expected), "Homebrew's named minimum differs from policy")
+
+    def test_policy_checks_use_the_shared_loader(self):
+        project = {"options": {"deploymentTarget": {"macOS": "27.2"}}}
+        with mock.patch.object(MINIMUM_TOOL, "required_minimum", return_value="27.2"), \
+                mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(project), "")):
+            self.test_project_deployment_settings_match_pinned_minimum()
+        with mock.patch.object(MINIMUM_TOOL, "required_minimum", return_value="27.2"), \
+                mock.patch.object(shutil, "which", return_value="brew"), \
+                mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "27.2\n", "")):
+            self.test_cask_requirement_matches_pinned_minimum()
+
+    def test_project_policy_covers_lists_platform_lists_and_xcconfig(self):
+        expected = MINIMUM_TOOL.required_minimum()
+        base = {"options": {"deploymentTarget": {"macOS": expected}}}
+        with tempfile.TemporaryDirectory(prefix="pensieve-xcconfig-") as directory:
+            config = Path(directory) / "release.xcconfig"
+            config.write_text('#include "shared.xcconfig"\n')
+            (config.parent / "shared.xcconfig").write_text("MACOSX_DEPLOYMENT_TARGET[sdk=macosx*] = 14.0 // unsafe override\n")
+            faults = [{"platform": ["macOS"], "deploymentTarget": "14.0"},
+                      {"settings": [{"MACOSX_DEPLOYMENT_TARGET": "14.0"}]},
+                      {"deploymentTarget": [{"macOS": "14.0"}]},
+                      {"configFiles": {"Release": str(config)}}]
+            for fault in faults:
+                with self.subTest(fault=fault):
+                    project = dict(base, targets={"Fault": fault})
+                    result = subprocess.CompletedProcess([], 0, json.dumps(project), "")
+                    with mock.patch.object(subprocess, "run", return_value=result), self.assertRaisesRegex(AssertionError, "differs from policy"):
+                        self.test_project_deployment_settings_match_pinned_minimum()
+
+    def test_project_policy_normalizes_trailing_zeroes(self):
+        project = {"options": {"deploymentTarget": {"macOS": "26.0.0"}},
+                   "targets": {"App": {"platform": ["macOS"], "deploymentTarget": "26.0.0"}}}
+        with mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(project), "")):
+            self.test_project_deployment_settings_match_pinned_minimum()
+
+    def test_cask_policy_without_homebrew_uses_literal_symbol(self):
+        with mock.patch.object(shutil, "which", return_value=None), mock.patch.object(subprocess, "run", side_effect=FileNotFoundError("no brew")):
+            self.test_cask_requirement_matches_pinned_minimum()
+
+    def test_cask_policy_without_homebrew_names_unknown_symbols(self):
+        original = Path.read_text
+        def read(path, *args, **kwargs):
+            text = original(path, *args, **kwargs)
+            return text.replace(":tahoe", ":unknown_os") if path.name == "pensieve.rb" else text
+        with mock.patch.object(shutil, "which", return_value=None), mock.patch.object(Path, "read_text", read), \
+                self.assertRaisesRegex(AssertionError, "unknown macOS requirement :unknown_os"):
+            self.test_cask_requirement_matches_pinned_minimum()
+
+    def test_cask_policy_normalizes_homebrew_versions(self):
+        for minimum in ("26", "26.0", "26.0.0"):
+            with self.subTest(minimum=minimum), mock.patch.object(shutil, "which", return_value="brew"), \
+                    mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, minimum + "\n", "")):
+                self.test_cask_requirement_matches_pinned_minimum()
 
 
 class ReleaseSequenceTests(unittest.TestCase):
@@ -378,7 +525,10 @@ class ReleaseSequenceTests(unittest.TestCase):
                         GENERATE_APPCAST_CMD=str(bin_dir / "generate"), VERIFY_UPDATE_CMD="verify",
                         GH_TOKEN="fixture-public-token", TAP_GH_TOKEN="fixture-tap-token",
                         SPARKLE_PRIVATE_KEY_FILE=str(self.root / "fixture-key"))
-        self.env.update(LIPO_CMD=str(bin_dir / "lipo"), OTOOL_CMD=str(bin_dir / "otool"))
+        minimum_script = self.root / "script/minimum_system.py"
+        minimum_script.write_text(minimum_script.read_text().replace(
+            'MACHO_TOOLS = ("/usr/bin/lipo", "/usr/bin/otool")',
+            "MACHO_TOOLS = " + repr((str(bin_dir / "lipo"), str(bin_dir / "otool")))))
 
     def run_release(self, cask_only=False, expected=0, first=False):
         self.state_path.write_text(json.dumps(self.state))
@@ -1350,6 +1500,24 @@ verify_appcast_unchanged''')
         verify = "verify_dmg_app_ticket; " if verify_minimum else ""
         return self.run_function('VERSION="' + version + '"; VERSION_CHANNEL="' + PUBLICATION_CASES[version][0] + '"; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; ' + verify + 'release_preflight; generate_appcast')
 
+    def test_release_ignores_macho_tool_environment_overrides(self):
+        poison = self.root / "poison-tools"; poison.mkdir()
+        for name, output in (("lipo", "arm64 x86_64\n"), ("otool", MinimumParserTests.slice("arm64") + MinimumParserTests.slice("x86_64"))):
+            tool = poison / name
+            tool.write_text("#!/usr/bin/env python3\nprint(" + repr(output) + ")\n")
+            tool.chmod(0o755)
+            self.env[name.upper() + "_CMD"] = str(tool)
+        self.state["daemon_minimum"] = "14.0"
+        output = self.run_release(expected=1)
+        self.assertIn("pensieve-daemon [arm64] must require macOS 26.0; found 14.0", output)
+        self.assertEqual(self.state["writes"], [])
+        self.assertEqual(self.state["signing_inputs"], [])
+
+    def test_release_normalizes_built_and_feed_minimums(self):
+        self.state.update(built_minimum="26.0.0", new_feed=feed(minimum="26.0"))
+        self.run_release()
+        self.assertEqual(self.state["writes"], ["create", "appcast"])
+
     def test_release_refuses_an_agreeing_but_unpinned_minimum(self):
         original = json.loads(json.dumps(self.state))
         for minimum in ("14.0", "27.2"):
@@ -1419,9 +1587,10 @@ verify_appcast_unchanged''')
 
     def test_generated_appcast_minimum_matches_built_app_and_preserves_history(self):
         original = json.loads(json.dumps(self.state))
-        for version, minimum in ((VERSION, "26.0"), ("1.0.0-beta.2", "26.0")):
+        for version, minimum in ((VERSION, "26.0"), ("1.0.0-beta.2", "26.0"), (VERSION, "27.2")):
             with self.subTest(version=version, minimum=minimum):
                 self.state = json.loads(json.dumps(original)); self.set_version(version)
+                (self.root / "release/minimum-macos.txt").write_text(minimum + "\n")
                 old = ET.fromstring(feed("0.9.0"))
                 self.assertEqual(old.findtext("channel/item/" + self.tool.SPARKLE + "minimumSystemVersion"), "14.0",
                                  "the historical fixture must keep its actual macOS 14 minimum")
