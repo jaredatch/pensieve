@@ -19,18 +19,11 @@ struct SkillPreviewView: View {
     }
 
     private var markdown: some View {
-        Markdown(markdownBody)
-            .markdownImageProvider(imageProvider)
-            .markdownInlineImageProvider(imageProvider)
-            // The block provider's API has no alt-text parameter; the image theme supplies it.
-            .markdownBlockStyle(\.image) { configuration in
-                configuration.label.environment(\.previewImageAlt, configuration.content.renderPlainText())
-            }
-            .textSelection(.enabled)
-            .padding(Spacing.lg)
-            // MarkdownUI keys inline-image tasks only by markdown. Rebuild them when their
-            // document, watched assets or placeholder colors change, even if the text is identical.
-            .id(ImageContext(directory: skillDirectory, document: documentRelativePath,
+        RenderedSkillMarkdown(markdownBody: markdownBody, loader: imageLoader, directory: skillDirectory,
+                              document: documentRelativePath, colorScheme: colorScheme)
+            // MarkdownUI keys inline-image tasks only by markdown. Rebuild the document and its
+            // budget when text, watched assets, document context or placeholder colors change.
+            .id(ImageContext(markdown: markdownBody, directory: skillDirectory, document: documentRelativePath,
                              revision: imageRevision, colorScheme: colorScheme))
     }
 
@@ -40,9 +33,33 @@ struct SkillPreviewView: View {
     }
 
     private struct ImageContext: Hashable {
+        let markdown: String
         let directory: String?
         let document: String
         let revision: UInt64
         let colorScheme: ColorScheme
+    }
+}
+
+private struct RenderedSkillMarkdown: View {
+    let markdownBody: String
+    let loader: PreviewImageLoading
+    let directory: String?
+    let document: String
+    let colorScheme: ColorScheme
+    @State private var budget = PreviewImageDecodeBudget()
+
+    var body: some View {
+        let imageProvider = PreviewImageProvider(loader: loader, skillDirectory: directory,
+                                                documentRelativePath: document, colorScheme: colorScheme, budget: budget)
+        Markdown(markdownBody)
+            .markdownImageProvider(imageProvider)
+            .markdownInlineImageProvider(imageProvider)
+            // The block provider's API has no alt-text parameter; the image theme supplies it.
+            .markdownBlockStyle(\.image) { configuration in
+                configuration.label.environment(\.previewImageAlt, configuration.content.renderPlainText())
+            }
+            .textSelection(.enabled)
+            .padding(Spacing.lg)
     }
 }

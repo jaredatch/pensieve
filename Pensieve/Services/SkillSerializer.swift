@@ -1,5 +1,12 @@
 import Foundation
 
+/// Complete rewritten content and the serializer's decision that it changes the original.
+/// The store returns this same result after any required write succeeds.
+struct SkillRewriteResult {
+    let content: String
+    let didChange: Bool
+}
+
 /// Composes a skill's identity (`name` + `description`) + body into the canonical Agent-Skills
 /// YAML-frontmatter format: exactly those two keys, one fence, blank line, body. New authored skills
 /// use this composition; local imports preserve their source frontmatter when possible.
@@ -12,11 +19,6 @@ import Foundation
 /// output is diff-stable and the one-list-item-per-line granularity stays available to the
 /// later union-merge work. Round-trip-verified through CheckedYAMLLoader in SkillFrontmatterTests.
 enum SkillSerializer {
-    struct RewriteResult {
-        let content: String
-        let isUnchanged: Bool
-    }
-
     /// Value-typed entry point so composing write paths (07.2) and tests need not build a Skill.
     static func serialize(name: String, description: String, body: String) -> String {
         compose(name: name, description: description, body: body, lineEnding: "\n")
@@ -45,32 +47,21 @@ enum SkillSerializer {
         preserving parsed: ParsedSkill,
         fallbackName: String,
         fallbackDescription: String
-    ) -> String {
-        rewriteResult(body: body, preserving: parsed, fallbackName: fallbackName,
-                      fallbackDescription: fallbackDescription).content
-    }
-
-    /// Reports the existing unchanged branch so the store need not reconstruct its return value.
-    static func rewriteResult(
-        body: String,
-        preserving parsed: ParsedSkill,
-        fallbackName: String,
-        fallbackDescription: String
-    ) -> RewriteResult {
-        let originalBody = parsed.preservedFile?.body ?? SkillParser.canonicalBody(parsed.body)
-        let draft = SkillParser.canonicalBody(body)
-        if normalizeLineEndings(draft, to: "\n") == normalizeLineEndings(originalBody, to: "\n") {
-            return RewriteResult(content: parsed.preservedFile?.source ?? parsed.body, isUnchanged: true)
+    ) -> SkillRewriteResult {
+        let originalBody = parsed.preservedFile?.body ?? parsed.body
+        if comparableBody(body) == comparableBody(originalBody) {
+            return SkillRewriteResult(content: parsed.preservedFile?.source ?? parsed.body, didChange: false)
         }
+        let draft = SkillParser.canonicalBody(body)
         let body = normalizeLineEndings(draft, to: parsed.preferredLineEnding)
         if let file = parsed.preservedFile {
             let separator: String
-            switch file.bodyPrefix.utf8.last {
-            case 0x0A: separator = ""
-            case 0x0D: separator = "\n"
+            switch file.bodyPrefix.unicodeScalars.last {
+            case "\r": separator = "\n"
+            case let last? where SkillParser.isYAMLLineBreak(last): separator = ""
             default: separator = parsed.preferredLineEnding
             }
-            return RewriteResult(content: file.bodyPrefix + separator + body + file.bodySuffix, isUnchanged: false)
+            return SkillRewriteResult(content: file.bodyPrefix + separator + body + file.bodySuffix, didChange: true)
         }
         let content = compose(
             name: fallbackName,
@@ -78,7 +69,7 @@ enum SkillSerializer {
             body: body,
             lineEnding: parsed.preferredLineEnding
         ) + parsed.trailingLineBreaks
-        return RewriteResult(content: content, isUnchanged: false)
+        return SkillRewriteResult(content: content, didChange: true)
     }
 
     /// Normalize the two identity entries while retaining every other trustworthy source slice.
@@ -188,7 +179,12 @@ enum SkillSerializer {
         return inserted + (lines.last?.ending ?? "")
     }
 
-    static func normalizeLineEndings(_ value: String, to lineEnding: String) -> String {
+    /// Shared by unchanged serialization and editor/watcher comparisons.
+    static func comparableBody(_ body: String) -> String {
+        normalizeLineEndings(SkillParser.canonicalBody(body), to: "\n")
+    }
+
+    private static func normalizeLineEndings(_ value: String, to lineEnding: String) -> String {
         value.replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
             .replacingOccurrences(of: "\n", with: lineEnding)

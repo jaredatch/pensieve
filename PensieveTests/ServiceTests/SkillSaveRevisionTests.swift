@@ -1,8 +1,31 @@
+import SwiftData
 import XCTest
 @testable import Pensieve
 
 @MainActor
 final class SkillSaveRevisionTests: XCTestCase {
+    func testUnchangedDescriptionSaveLeavesModelContextClean() throws {
+        let files = FileService()
+        let root = NSTemporaryDirectory() + "DescriptionGuard-" + UUID().uuidString
+        defer { try? files.deleteDirectory(at: root) }
+        let store = SkillStore(fileService: files, baseDir: root)
+        let slug = try store.createSkill(name: "Test", description: "D", body: "Body")
+        let container = try ModelContainer(
+            for: Skill.self, Project.self, SkillProjectAssignment.self, IntentAssignment.self,
+            DeployRecord.self, Pensieve.Category.self, Scenario.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let skill = Skill(name: "Test", skillDescription: "D", directoryName: slug)
+        context.insert(skill)
+        try context.save()
+        XCTAssertFalse(context.hasChanges)
+        let library = SkillLibraryViewModel(skillStore: store)
+        XCTAssertEqual(library.updateBody(skill, body: "Body"), .unchanged)
+        XCTAssertFalse(context.hasChanges, "An equal model description must not be assigned again")
+    }
+
     func testSavedCRLFDraftAndLFEditorEchoStayCleanAndLeaveWithoutPrompt() throws {
         let files = FileService()
         let root = NSTemporaryDirectory() + "CleanCRLF-" + UUID().uuidString
@@ -57,8 +80,6 @@ final class SkillSaveRevisionTests: XCTestCase {
     }
 
     func testSaveSerializesOnlyInStoreAndFingerprintsTheStoresActualContent() throws {
-        let source = try sourceFile("Pensieve/ViewModels/SkillLibraryViewModel+Write.swift")
-        XCTAssertFalse(source.contains("SkillSerializer.rewrite"), "The store owns the single serialization")
         let store = CountingSkillStore(body: "Old")
         store.rewriteOverride = "Stored\r\nSecond"
         let skill = Skill(name: "Test", directoryName: "test")
@@ -131,35 +152,61 @@ final class SkillSaveRevisionTests: XCTestCase {
     }
 
     func testStoreUsesTheSerializersUnchangedReportWithoutRederivingIt() throws {
-        let store = try sourceFile("Pensieve/Services/SkillStore.swift")
-        XCTAssertTrue(store.contains("SkillSerializer.rewriteResult("), "The serializer reports its unchanged branch")
-        XCTAssertTrue(store.contains("guard !result.isUnchanged"), "The store writes unless the serializer reports unchanged")
-        XCTAssertFalse(store.contains("preservedFile?.source ?? parsed.body"),
-                       "The store must not copy the serializer's return rule")
-        XCTAssertFalse(store.contains("content.utf8.elementsEqual"), "The store must not infer unchanged from content")
+        let files = PreviewImageFileSpy()
+        let root = NSTemporaryDirectory() + "RewriteReport-" + UUID().uuidString
+        defer { try? files.files.deleteDirectory(at: root) }
+        let store = SkillStore(fileService: files, baseDir: root)
+        let slug = try store.createSkill(name: "Test", description: "D", body: "Body")
+        for body in ["Body\n", "Edited"] {
+            let parsed = SkillParser.parse(try store.readBody(directoryName: slug))
+            let serialized = SkillSerializer.rewrite(body: body, preserving: parsed,
+                                                    fallbackName: "Test", fallbackDescription: "D")
+            let before = files.writes.count
+            let stored = try store.rewriteSkill(directoryName: slug, body: body, preserving: parsed,
+                                                fallbackName: "Test", fallbackDescription: "D")
+            XCTAssertEqual(stored.content, serialized.content)
+            XCTAssertEqual(stored.didChange, serialized.didChange)
+            XCTAssertEqual(stored.didChange, body == "Edited")
+            XCTAssertEqual(files.writes.count - before, serialized.didChange ? 1 : 0)
+        }
     }
 
-    func testDraftAndSerializerShareOneLineEndingNormalizer() throws {
-        let reads = try sourceFile("Pensieve/ViewModels/SkillLibraryViewModel+Reads.swift")
-        let serializer = try sourceFile("Pensieve/Services/SkillSerializer.swift")
-        XCTAssertTrue(reads.contains("SkillSerializer.normalizeLineEndings("), "Draft and echo checks use the shared helper")
-        XCTAssertFalse(reads.contains("replacingOccurrences"), "Draft and echo checks must not duplicate normalization")
-        XCTAssertEqual((reads + serializer).components(separatedBy: "func normalizeLineEndings(").count - 1, 1)
+    func testDraftAndSerializerShareOneLineEndingNormalizer() {
+        let cases = [("First\r\nSecond", "\nFirst\nSecond\n", true),
+                     ("First\rSecond", "First\nSecond", true),
+                     ("Body", "Changed", false), ("\u{85}Body", "Body", true),
+                     ("Body\u{2028}", "Body", true), ("Caf\u{e9}", "Cafe\u{301}", true)]
+        for (original, draft, expected) in cases {
+            let source = "---\nname: Test\ndescription: D\n---\n" + original + "\n"
+            let parsed = SkillParser.parse(source)
+            let serialized = SkillSerializer.rewrite(body: draft, preserving: parsed,
+                                                    fallbackName: "Test", fallbackDescription: "D")
+            let matches = SkillLibraryViewModel.bodiesMatch(draft, parsed.body)
+            XCTAssertEqual(matches, expected)
+            XCTAssertEqual(matches, !serialized.didChange)
+            if matches { XCTAssertEqual(Data(serialized.content.utf8), Data(source.utf8)) }
+        }
     }
 
     func testBodyUpdateReturnsItsOutcomeWithoutANotifierTypedCallback() throws {
-        let write = try sourceFile("Pensieve/ViewModels/SkillLibraryViewModel+Write.swift")
-        let draft = try sourceFile("Pensieve/ViewModels/SkillLibraryViewModel+Draft.swift")
-        XCTAssertTrue(write.contains("func updateBody(_ skill: Skill, body: String) -> BodyUpdateOutcome"))
-        XCTAssertFalse(write.contains("SyncStateNotifying"), "A write outcome is not a sync notifier")
-        XCTAssertFalse(write.contains("onWrite"), "Return the outcome instead of invoking a report callback")
-        XCTAssertTrue(draft.contains("let outcome = updateBody("))
-        XCTAssertTrue(draft.contains("if outcome == .written { notifier() }"))
-    }
-
-    private func sourceFile(_ relativePath: String) throws -> String {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        return try FileService().readFile(at: root.appendingPathComponent(relativePath).path)
+        let files = FileService()
+        let root = NSTemporaryDirectory() + "WriteOutcome-" + UUID().uuidString
+        defer { try? files.deleteDirectory(at: root) }
+        let store = SkillStore(fileService: files, baseDir: root)
+        let slug = try store.createSkill(name: "Test", description: "D", body: "Body")
+        let skill = Skill(name: "Test", skillDescription: "D", directoryName: slug)
+        var publishedDirty: [Bool] = []
+        var library: SkillLibraryViewModel!
+        library = SkillLibraryViewModel(skillStore: store, notifier: { publishedDirty.append(library.hasUnsavedChanges) })
+        XCTAssertEqual(library.updateBody(skill, body: "Body"), .unchanged)
+        _ = library.editorBody(for: skill)
+        library.noteEditorChanged(skill, body: "Edited")
+        XCTAssertTrue(library.saveDraft(skill))
+        XCTAssertEqual(publishedDirty, [false], "The draft must be clean before a changed save notifies")
+        XCTAssertEqual(library.updateBody(skill, body: "Another"), .written)
+        XCTAssertEqual(try store.readBody(directoryName: slug),
+                       SkillSerializer.serialize(name: "Test", description: "D", body: "Another"))
+        try files.deleteFile(at: root + "/" + slug + "/SKILL.md")
+        XCTAssertEqual(library.updateBody(skill, body: "Missing"), .failed)
     }
 }

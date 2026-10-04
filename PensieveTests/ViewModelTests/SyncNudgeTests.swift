@@ -355,8 +355,8 @@ final class MemorySkillStore: SkillStoreProtocol {
             preserving: parsed,
             fallbackName: fallbackName,
             fallbackDescription: fallbackDescription
-        )
-        return SkillRewriteResult(content: bodies[directoryName] ?? body, didWrite: true)
+        ).content
+        return SkillRewriteResult(content: bodies[directoryName] ?? body, didChange: true)
     }
 
     func writeBody(directoryName: String, body: String) throws { bodies[directoryName] = body }

@@ -101,8 +101,8 @@ private final class RecordingHistorySkillStore: SkillStoreProtocol {
             preserving: parsed,
             fallbackName: fallbackName,
             fallbackDescription: fallbackDescription
-        )
-        return SkillRewriteResult(content: writtenBodies[directoryName] ?? body, didWrite: true)
+        ).content
+        return SkillRewriteResult(content: writtenBodies[directoryName] ?? body, didChange: true)
     }
 
     func writeBody(directoryName: String, body: String) throws {

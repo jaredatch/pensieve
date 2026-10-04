@@ -35,7 +35,7 @@ extension SkillSerializerTests {
                     preserving: parsed,
                     fallbackName: "Ignored",
                     fallbackDescription: "Ignored"
-                )
+                ).content
                 XCTAssertEqual(current, expected, "\(label), save \(save)")
             }
         }

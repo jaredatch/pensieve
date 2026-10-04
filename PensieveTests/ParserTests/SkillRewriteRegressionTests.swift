@@ -5,7 +5,7 @@ final class SkillRewriteRegressionTests: XCTestCase {
     private func rewrite(_ body: String, source: String) -> String {
         SkillSerializer.rewrite(
             body: body, preserving: SkillParser.parse(source), fallbackName: "A", fallbackDescription: "D"
-        )
+        ).content
     }
 
     func testCRLFSavesConvertDraftBreaksToFileStyle() {

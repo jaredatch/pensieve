@@ -74,10 +74,7 @@ extension SkillLibraryViewModel {
     /// Editors use LF even for CRLF files. Drafts and watcher echoes compare with this same rule.
     static func bodiesMatch(_ body: String, _ baseline: String?) -> Bool {
         guard let baseline else { return false }
-        func comparable(_ text: String) -> String {
-            SkillSerializer.normalizeLineEndings(SkillParser.canonicalBody(text), to: "\n")
-        }
-        return comparable(body) == comparable(baseline)
+        return SkillSerializer.comparableBody(body) == SkillSerializer.comparableBody(baseline)
     }
 
     func withFingerprintLock<Result>(_ body: () -> Result) -> Result {

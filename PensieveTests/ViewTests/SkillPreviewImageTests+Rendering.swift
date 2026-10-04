@@ -5,6 +5,34 @@ import XCTest
 @testable import Pensieve
 
 extension SkillPreviewImageTests {
+    func testInlineBudgetRefusalRendersItsAltTextPlaceholder() async throws {
+        let bytes = try PreviewImagePolicyFixtures.png(width: 1_000, height: 1_000)
+        let url = try XCTUnwrap(URL(string: "data:image/png;base64," + bytes.base64EncodedString()))
+        let pixel = try PreviewImageFixture.decodedPNG()
+        let provider = PreviewImageProvider(loader: PreviewImageLoader(decode: { _ in pixel }), skillDirectory: nil)
+        for _ in 0..<64 {
+            let loaded = await provider.loadImage(url: url)
+            XCTAssertNotNil(loaded)
+        }
+        let refused = await provider.loadImage(url: url)
+        XCTAssertNil(refused, "The next embedded decode must return its placeholder")
+        let alt = "Decode budget exhausted"
+        let image = try await provider.image(with: url, label: alt)
+        let actual = ImageRenderer(content: image)
+        actual.scale = 2
+        let expected = ImageRenderer(content: PreviewImagePlaceholder(alt: alt)
+            .frame(maxWidth: 320).fixedSize(horizontal: false, vertical: true)
+            .environment(\.colorScheme, ColorScheme.light))
+        expected.scale = 2
+        let rendered = try XCTUnwrap(actual.cgImage)
+        let reference = try XCTUnwrap(expected.cgImage)
+        assertVisible(rendered, alt)
+        assertVisible(reference, alt)
+        XCTAssertEqual(rendered.width, reference.width)
+        XCTAssertEqual(rendered.height, reference.height)
+        assertRenderedTextMatches(rendered, reference, alt)
+    }
+
     func testProvidersProduceDecodedEmbeddedAndRelativeImages() async throws {
         let fixture = try imageFixture()
         defer { try? fixture.files.deleteDirectory(at: fixture.root) }
@@ -279,11 +307,11 @@ private final class RecordingPreviewImageLoader: PreviewImageLoading {
 
     var results: [Result] { lock.withLock { recorded } }
 
-    func loadImage(at url: URL, skillDirectory: String?) throws -> CGImage {
+    func loadImage(at url: URL, skillDirectory: String?, budget: PreviewImageDecodeBudget?) throws -> CGImage {
         let onMainThread = Thread.isMainThread
         do {
             if url.lastPathComponent == unreadableLeaf { throw CocoaError(.fileReadNoPermission) }
-            let image = try PreviewImageLoader().loadImage(at: url, skillDirectory: skillDirectory)
+            let image = try PreviewImageLoader().loadImage(at: url, skillDirectory: skillDirectory, budget: budget)
             lock.withLock { recorded.append(Result(url: url, loaded: true, onMainThread: onMainThread)) }
             return image
         } catch {

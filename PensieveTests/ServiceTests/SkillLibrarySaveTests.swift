@@ -291,7 +291,7 @@ final class CountingSkillStore: SkillStoreProtocol {
                       fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
         writeCount += 1
         lastWrittenBody = rewriteOverride ?? body
-        return SkillRewriteResult(content: lastWrittenBody ?? body, didWrite: true)
+        return SkillRewriteResult(content: lastWrittenBody ?? body, didChange: true)
     }
 
     func writeBody(directoryName: String, body: String) throws {

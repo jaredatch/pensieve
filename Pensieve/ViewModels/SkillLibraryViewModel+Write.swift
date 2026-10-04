@@ -7,7 +7,6 @@ extension SkillLibraryViewModel {
         var succeeded: Bool { self != .failed }
     }
 
-    @discardableResult
     func updateBody(_ skill: Skill, body: String) -> BodyUpdateOutcome {
         guard !isWriteFenced(skill) else {
             error = "This skill's files are unavailable; delete it from the list, or restore the file and relaunch Pensieve."
@@ -28,16 +27,18 @@ extension SkillLibraryViewModel {
                 fallbackName: skill.name,
                 fallbackDescription: resolvedDescription
             )
-            skill.skillDescription = resolvedDescription
+            if skill.skillDescription != resolvedDescription {
+                skill.skillDescription = resolvedDescription
+            }
             let savedBody = SkillParser.stripFrontmatter(result.content)
-            if result.didWrite {
+            if result.didChange {
                 noteAppAuthoredBody(skill, body: savedBody)
                 skill.updatedAt = Date()
             } else {
                 setLastWrittenBody(savedBody, directoryName: skill.directoryName)
             }
             error = nil
-            return result.didWrite ? .written : .unchanged
+            return result.didChange ? .written : .unchanged
         } catch {
             self.error = "Failed to save: \(error.localizedDescription)"
             return .failed

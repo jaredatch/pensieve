@@ -2,6 +2,32 @@ import XCTest
 @testable import Pensieve
 
 final class SkillFenceAndSaveTests: XCTestCase {
+    func testUnchangedLeadingUnicodeSeparatorsKeepSourceBytes() {
+        for scalar in ["\u{85}", "\u{2028}", "\u{2029}"] {
+            for ending in ["\n", "\r\n"] {
+                let header = "---\(ending)name: A\(ending)description: D\(ending)---\(ending)"
+                let source = header + scalar + "Body" + scalar + ending
+                XCTAssertEqual(rewrite(SkillParser.stripFrontmatter(source), source: source), source)
+            }
+        }
+    }
+
+    func testRepeatedLeadingUnicodeBodyEditsAddNoUnauthoredBreaks() {
+        for scalar in ["\u{85}", "\u{2028}", "\u{2029}"] {
+            for ending in ["\n", "\r\n"] {
+                let header = "---\(ending)name: A\(ending)description: D\(ending)---\(ending)"
+                for suffix in [ending, scalar + ending] {
+                    var source = header + scalar + "Body" + suffix
+                    for body in ["Body2", "Body3", "Body4"] {
+                        source = rewrite(body, source: source)
+                        XCTAssertEqual(source, header + scalar + body + suffix)
+                        XCTAssertEqual(rewrite(body, source: source), source)
+                    }
+                }
+            }
+        }
+    }
+
     func testGeneratedFenceSweepRequiresFirstLineAndColumnZeroClosingFence() {
         for ending in ["\n", "\r\n"] {
             for opening in ["---", "--- ", "---\t", "---\r", " ---", "\n---", "\n\n---"] {
@@ -60,6 +86,7 @@ final class SkillFenceAndSaveTests: XCTestCase {
     }
 
     private func rewrite(_ body: String, source: String) -> String {
-        SkillSerializer.rewrite(body: body, preserving: SkillParser.parse(source), fallbackName: "A", fallbackDescription: "D")
+        SkillSerializer.rewrite(body: body, preserving: SkillParser.parse(source),
+                                fallbackName: "A", fallbackDescription: "D").content
     }
 }

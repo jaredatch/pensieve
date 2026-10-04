@@ -360,6 +360,6 @@ extension SkillParserTests {
             preserving: parsed,
             fallbackName: "Fallback",
             fallbackDescription: "Fallback description"
-        )
+        ).content
     }
 }

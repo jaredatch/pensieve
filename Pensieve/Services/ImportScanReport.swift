@@ -21,9 +21,10 @@ struct ImportScanSkip: Equatable {
         case notRegular, tooLarge, unreadable, invalidUTF8
 
         func label(count: Int) -> String {
-            switch self {
+            let maximumMiB = ImportScanner.maximumFileBytes / (1_024 * 1_024)
+            return switch self {
             case .notRegular: count == 1 ? "symlink or special file" : "symlinks or special files"
-            case .tooLarge: count == 1 ? "file larger than 4 MiB" : "files larger than 4 MiB"
+            case .tooLarge: count == 1 ? "file larger than \(maximumMiB) MiB" : "files larger than \(maximumMiB) MiB"
             case .unreadable: count == 1 ? "unreadable file or folder" : "unreadable files or folders"
             case .invalidUTF8: count == 1 ? "file that isn't UTF-8 text" : "files that aren't UTF-8 text"
             }

@@ -3,7 +3,23 @@ import ImageIO
 import UniformTypeIdentifiers
 
 protocol PreviewImageLoading {
-    func loadImage(at url: URL, skillDirectory: String?) throws -> CGImage
+    func loadImage(at url: URL, skillDirectory: String?, budget: PreviewImageDecodeBudget?) throws -> CGImage
+}
+
+/// Owned by one rendered document, shared by block and inline tasks, and discarded on rebuild.
+/// Serializes its reads and decodes so concurrent tasks cannot gather unbounded compressed buffers.
+/// Charges declared source pixels before decoding, including repeated references and failed decodes.
+final class PreviewImageDecodeBudget {
+    static let maximumPixels = 64_000_000
+    private let lock = NSLock()
+    private var remainingPixels = maximumPixels
+
+    fileprivate func load(_ work: (inout Int) throws -> CGImage) throws -> CGImage {
+        lock.lock()
+        defer { lock.unlock() }
+        guard remainingPixels > 0 else { throw PreviewImageError.blocked }
+        return try work(&remainingPixels)
+    }
 }
 
 enum PreviewImageError: Error {
@@ -37,7 +53,17 @@ struct PreviewImageLoader: PreviewImageLoading {
         return URL(string: url.relativeString, relativeTo: document.deletingLastPathComponent())?.absoluteURL
     }
 
-    func loadImage(at url: URL, skillDirectory: String?) throws -> CGImage {
+    func loadImage(at url: URL, skillDirectory: String?, budget: PreviewImageDecodeBudget? = nil) throws -> CGImage {
+        if let budget {
+            return try budget.load { remaining in
+                try loadImage(at: url, skillDirectory: skillDirectory, remainingPixels: &remaining)
+            }
+        }
+        var remaining = Int.max
+        return try loadImage(at: url, skillDirectory: skillDirectory, remainingPixels: &remaining)
+    }
+
+    private func loadImage(at url: URL, skillDirectory: String?, remainingPixels: inout Int) throws -> CGImage {
         let data: Data
         if url.scheme?.lowercased() == "data" {
             data = try embeddedData(url)
@@ -55,8 +81,11 @@ struct PreviewImageLoader: PreviewImageLoading {
               let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
               width.intValue > 0, height.intValue > 0,
               width.intValue <= Self.maximumSourceDimension, height.intValue <= Self.maximumSourceDimension,
-              width.intValue <= Self.maximumPixels / height.intValue,
-              let image = decode(source) else { throw PreviewImageError.invalidImage }
+              width.intValue <= Self.maximumPixels / height.intValue else { throw PreviewImageError.invalidImage }
+        let pixels = width.intValue * height.intValue
+        guard pixels <= remainingPixels else { throw PreviewImageError.blocked }
+        remainingPixels -= pixels
+        guard let image = decode(source) else { throw PreviewImageError.invalidImage }
         return image
     }
 

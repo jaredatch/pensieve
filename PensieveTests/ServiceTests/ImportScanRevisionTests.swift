@@ -5,6 +5,12 @@ import XCTest
 
 @MainActor
 final class ImportScanRevisionTests: XCTestCase {
+    func testOversizedSkipLabelsFollowTheScannerByteLimit() {
+        let cap = ImportScanner.maximumFileBytes / (1_024 * 1_024)
+        XCTAssertEqual(ImportScanSkip.Reason.tooLarge.label(count: 1), "file larger than \(cap) MiB")
+        XCTAssertEqual(ImportScanSkip.Reason.tooLarge.label(count: 2), "files larger than \(cap) MiB")
+    }
+
     func testAllSkippedNoticeExplainsScanDepthBeforeLatestFolderSummary() {
         let scanner = RevisionReportScanner()
         scanner.report = ImportScanReport(skipped: [.init(path: "skip", reason: .tooLarge)])

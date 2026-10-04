@@ -101,7 +101,7 @@ private final class RecordingSkillStore: SkillStoreProtocol {
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
                       fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
         writeCount += 1
-        return SkillRewriteResult(content: body, didWrite: true)
+        return SkillRewriteResult(content: body, didChange: true)
     }
     func writeBody(directoryName: String, body: String) throws { writeCount += 1 }
     func deleteSkill(directoryName: String) throws { deletedDirectoryNames.append(directoryName) }

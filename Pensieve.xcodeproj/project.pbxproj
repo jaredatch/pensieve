@@ -636,6 +636,7 @@
 		F9B219F6CA6E1899DBB5BF6A /* SkillScope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D6D9BBF32983DA4316CADAA /* SkillScope.swift */; };
 		FA2479D06791D4E5BE8CB6F6 /* InstallPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45732634FA0D991623CFE4DF /* InstallPickerView.swift */; };
 		FA97AB17D47C1B0BAE83EEE5 /* ManifestDeployIntentWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CA8D283F6493072A5AC35FF /* ManifestDeployIntentWriterTests.swift */; };
+		FAB403900F77F6CCE657A376 /* SkillPreviewBudgetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1FDE32CB9A748D8B54D49C5 /* SkillPreviewBudgetTests.swift */; };
 		FAFFACA73C0BF7F324C8CD89 /* PreProjectIntent.store in Resources */ = {isa = PBXBuildFile; fileRef = 37DCE4C679974A0650F3E6FC /* PreProjectIntent.store */; };
 		FC0846A1F2F109D17EBC2ED9 /* TokenCounterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05EBB77387B8F038939B931F /* TokenCounterTests.swift */; };
 		FC2E67F739760A9536B19FC5 /* InstalledSkillHistoryHostTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8586820A108F3957947663A /* InstalledSkillHistoryHostTests.swift */; };
@@ -1085,6 +1086,7 @@
 		A12D7456AC67896DBEAEBE6F /* SkillLibraryViewModel+Write.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillLibraryViewModel+Write.swift"; sourceTree = "<group>"; };
 		A153E83B00BABF7B403A13E9 /* PostSyncConvergenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostSyncConvergenceTests.swift; sourceTree = "<group>"; };
 		A1D65C2623F64F34B09588B0 /* DaemonStatusCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonStatusCommandTests.swift; sourceTree = "<group>"; };
+		A1FDE32CB9A748D8B54D49C5 /* SkillPreviewBudgetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillPreviewBudgetTests.swift; sourceTree = "<group>"; };
 		A233C222EE832AB997AE17BD /* DeployPlatformCoverageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeployPlatformCoverageTests.swift; sourceTree = "<group>"; };
 		A28DCAE650677292E246BAC3 /* SkillLibraryViewModel+Draft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillLibraryViewModel+Draft.swift"; sourceTree = "<group>"; };
 		A31C485DC33F810306E2CD09 /* UpstreamHistoryFlowReviewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpstreamHistoryFlowReviewTests.swift; sourceTree = "<group>"; };
@@ -1440,6 +1442,7 @@
 				8FB939E03D7F207D71765750 /* SkillMoreMenuStateTests.swift */,
 				649B98DFA176E1B015DAA9F7 /* SkillOverviewContentsLayoutTests.swift */,
 				87D2BBFCF65B4CB0E3DA3AF1 /* SkillOverviewPresentationTests.swift */,
+				A1FDE32CB9A748D8B54D49C5 /* SkillPreviewBudgetTests.swift */,
 				864846C344D507FFB00C3370 /* SkillPreviewContextTests.swift */,
 				B532FAF5221EA50C8B11941D /* SkillPreviewImageTests.swift */,
 				C8E956BDFB6F49E5EBBEA38F /* SkillPreviewImageTests+Rendering.swift */,
@@ -2618,6 +2621,7 @@
 				8EDD5FB5DDBB2A1558EFFBB0 /* SkillParserTests+CheckedYAML.swift in Sources */,
 				308A1018EFC4220290339FCF /* SkillParserTests.swift in Sources */,
 				AF010B012967DD03167BA3ED /* SkillPreservingWriteTests.swift in Sources */,
+				FAB403900F77F6CCE657A376 /* SkillPreviewBudgetTests.swift in Sources */,
 				1CF54AC51995795E36A3D21C /* SkillPreviewContextTests.swift in Sources */,
 				2E876403EE4C4508BD6F50E3 /* SkillPreviewImageTests+Rendering.swift in Sources */,
 				89AEAD85B8A1B75F56A9CF34 /* SkillPreviewImageTests.swift in Sources */,

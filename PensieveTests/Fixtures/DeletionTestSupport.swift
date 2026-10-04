@@ -144,7 +144,7 @@ final class RecordingDeletionSkillStore: SkillStoreProtocol {
         writeSkillCalls.append(directoryName)
         bodies[directoryName] = body
         entries.insert(directoryName)
-        return SkillRewriteResult(content: bodies[directoryName] ?? body, didWrite: true)
+        return SkillRewriteResult(content: bodies[directoryName] ?? body, didChange: true)
     }
 
     func writeBody(directoryName: String, body: String) throws {

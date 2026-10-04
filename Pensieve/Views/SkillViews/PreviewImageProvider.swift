@@ -17,6 +17,7 @@ struct PreviewImageProvider: ImageProvider, InlineImageProvider {
     let skillDirectory: String?
     var documentRelativePath = "SKILL.md"
     var colorScheme: ColorScheme = .light
+    var budget = PreviewImageDecodeBudget()
 
     func makeImage(url: URL?) -> some View {
         PreviewBlockImage(url: url, provider: self)
@@ -28,8 +29,8 @@ struct PreviewImageProvider: ImageProvider, InlineImageProvider {
         guard let url, let url = PreviewImageLoader.resolvedURL(
             url, skillDirectory: skillDirectory, documentRelativePath: documentRelativePath
         ) else { return nil }
-        return await Task.detached(priority: .userInitiated) { [loader, skillDirectory, url] in
-            try? loader.loadImage(at: url, skillDirectory: skillDirectory)
+        return await Task.detached(priority: .userInitiated) { [loader, skillDirectory, url, budget] in
+            try? loader.loadImage(at: url, skillDirectory: skillDirectory, budget: budget)
         }.value
     }
 

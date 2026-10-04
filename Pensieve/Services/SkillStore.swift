@@ -7,12 +7,6 @@ enum SkillStoreError: Error, Equatable {
     case unsafeLeaf(String)
 }
 
-/// The single serialization's complete content, and whether it changed any on-disk byte.
-struct SkillRewriteResult {
-    let content: String
-    let didWrite: Bool
-}
-
 // MARK: - Protocol
 
 protocol SkillStoreProtocol {
@@ -113,17 +107,15 @@ final class SkillStore: SkillStoreProtocol {
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
                       fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
         let path = try validatedSkillDirectory(directoryName) + "/SKILL.md"
-        let result = SkillSerializer.rewriteResult(
+        let result = SkillSerializer.rewrite(
             body: body,
             preserving: parsed,
             fallbackName: fallbackName,
             fallbackDescription: fallbackDescription
         )
-        guard !result.isUnchanged else {
-            return SkillRewriteResult(content: result.content, didWrite: false)
-        }
+        guard result.didChange else { return result }
         try fileService.writeFile(at: path, content: result.content)
-        return SkillRewriteResult(content: result.content, didWrite: true)
+        return result
     }
 
     func writeBody(directoryName: String, body: String) throws {

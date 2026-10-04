@@ -74,7 +74,7 @@ final class SkillSerializerTests: XCTestCase {
                 preserving: parsed,
                 fallbackName: "Ignored",
                 fallbackDescription: "Ignored"
-            )
+            ).content
 
             XCTAssertEqual(rewritten, "---\n\(frontmatter)\n---\n\nEdited body\(suffix)")
             XCTAssertEqual(SkillParser.parse(rewritten).preservedFrontmatter?.source,
@@ -91,7 +91,7 @@ final class SkillSerializerTests: XCTestCase {
             preserving: parsed,
             fallbackName: "Ignored",
             fallbackDescription: "Ignored"
-        )
+        ).content
 
         XCTAssertEqual(
             rewritten,
@@ -114,7 +114,7 @@ final class SkillSerializerTests: XCTestCase {
                 preserving: SkillParser.parse(original),
                 fallbackName: "Ignored",
                 fallbackDescription: "Ignored"
-            )
+            ).content
             let reparsed = SkillParser.parse(rewritten)
 
             XCTAssertEqual(rewritten, expected, "original: \(original.debugDescription)")
@@ -132,7 +132,7 @@ final class SkillSerializerTests: XCTestCase {
             preserving: SkillParser.parse(flow),
             fallbackName: "Ignored",
             fallbackDescription: "Ignored"
-        )
+        ).content
         XCTAssertEqual(flowRewrite, "---\n{name: Flow, description: Keep, license: MIT}\n---\nEdited")
 
         let bodyOnly = SkillParser.parse("Old body\n")
@@ -141,7 +141,7 @@ final class SkillSerializerTests: XCTestCase {
             preserving: bodyOnly,
             fallbackName: "Legacy",
             fallbackDescription: "Legacy description"
-        )
+        ).content
         XCTAssertEqual(
             canonical,
             SkillSerializer.serialize(name: "Legacy", description: "Legacy description", body: "Edited") + "\n"
@@ -193,7 +193,7 @@ final class SkillSerializerTests: XCTestCase {
                 preserving: SkillParser.parse(original),
                 fallbackName: "Fallback",
                 fallbackDescription: "Fallback description"
-            )
+            ).content
 
             XCTAssertEqual(rewritten, original.replacingOccurrences(of: "Old", with: "Edited"))
             XCTAssertTrue(rewritten.contains("license: MIT"))
@@ -214,13 +214,13 @@ final class SkillSerializerTests: XCTestCase {
                 preserving: SkillParser.parse(original),
                 fallbackName: "Ignored",
                 fallbackDescription: "Ignored"
-            )
+            ).content
             let second = SkillSerializer.rewrite(
                 body: "Changed",
                 preserving: SkillParser.parse(first),
                 fallbackName: "Ignored",
                 fallbackDescription: "Ignored"
-            )
+            ).content
 
             XCTAssertEqual(first, expected, original.debugDescription)
             XCTAssertEqual(second, expected, original.debugDescription)
@@ -234,7 +234,7 @@ final class SkillSerializerTests: XCTestCase {
             preserving: SkillParser.parse(original),
             fallbackName: "Ignored",
             fallbackDescription: "Ignored"
-        )
+        ).content
         let reparsed = SkillParser.parse(rewritten)
 
         XCTAssertEqual(rewritten, "---\nname: A\ndescription: D\n---\r\nBody")
@@ -251,7 +251,7 @@ final class SkillSerializerTests: XCTestCase {
             preserving: parsed,
             fallbackName: "Legacy",
             fallbackDescription: "Legacy description"
-        )
+        ).content
 
         XCTAssertEqual(
             rewritten,
@@ -361,6 +361,6 @@ extension SkillSerializerTests {
             preserving: parsed,
             fallbackName: "Fallback",
             fallbackDescription: "Fallback description"
-        )
+        ).content
     }
 }
