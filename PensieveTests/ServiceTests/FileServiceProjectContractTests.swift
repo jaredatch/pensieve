@@ -36,6 +36,16 @@ final class FileServiceProjectContractTests: XCTestCase {
                        "The race seam may observe before mkdir but cannot supply mkdir")
     }
 
+    func testTranslatedProjectProbeResolvesItsPathOnce() throws {
+        let source = try files.readFile(at: sourceRoot.appendingPathComponent(
+            "PensieveTests/ServiceTests/LinkServiceTestDoubles.swift").path)
+        let declaration = try XCTUnwrap(source.range(
+            of: #"func directoryExistsFollowingLinks\(at path: String\) throws -> Bool \{\n[\s\S]*?\n    \}"#,
+            options: .regularExpression))
+        XCTAssertEqual(source[declaration].components(separatedBy: "resolved(path)").count - 1, 1,
+                       "Probe checkpoint and operation must reuse the same resolved path")
+    }
+
     private func serviceSource() throws -> String {
         let directory = sourceRoot.appendingPathComponent("Pensieve/Services").path
         return try files.listDirectory(at: directory).sorted()

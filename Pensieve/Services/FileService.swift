@@ -30,6 +30,7 @@ protocol FileServiceProtocol {
     /// Reuses directories (following links), or creates one level without creating parents.
     func createDirectoryWithoutParents(at path: String) throws
     func writeFileWithoutParents(at path: String, content: String) throws
+    /// Replaces only links. A non-link occupant throws SymlinkCreationError.occupiedPath.
     func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws
     func deleteDirectory(at path: String) throws
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws

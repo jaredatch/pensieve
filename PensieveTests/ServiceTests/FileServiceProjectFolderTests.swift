@@ -61,6 +61,9 @@ final class FileServiceProjectFolderTests: XCTestCase {
         XCTAssertFalse(files.isSymlink(at: link))
         XCTAssertEqual(try files.readFile(at: link), "Compiled bytes")
         XCTAssertEqual(try files.readFile(at: target), "Target bytes")
+        XCTAssertThrowsError(try files.createSymlinkWithoutParents(at: link, pointingTo: target))
+        XCTAssertEqual(try files.readFile(at: link), "Compiled bytes")
+        try files.deleteFile(at: link)
         try files.createSymlinkWithoutParents(at: link, pointingTo: target)
         try files.createSymlinkWithoutParents(at: link, pointingTo: root + "/absent")
         XCTAssertEqual(try files.symlinkTarget(at: link), root + "/absent")
@@ -95,11 +98,15 @@ final class FileServiceProjectFolderTests: XCTestCase {
         for recursive in [false, true] {
             let path = root + "/replace-\(recursive)"
             try files.writeFile(at: path, content: "Replace")
-            try replaceLink(path, recursive: recursive)
-            XCTAssertTrue(files.isSymlink(at: path))
-            try files.createSymlinkWithoutParents(at: path, pointingTo: directory)
-            try replaceLink(path, recursive: recursive)
-            XCTAssertEqual(try files.symlinkTarget(at: path), root + "/absent")
+            let identity = files.fileIdentity(at: path, followingLinks: false)
+            XCTAssertThrowsError(try replaceLink(path, recursive: recursive))
+            XCTAssertEqual(try files.readFile(at: path), "Replace")
+            XCTAssertEqual(files.fileIdentity(at: path, followingLinks: false), identity)
+            XCTAssertFalse(files.isSymlink(at: path))
+            let link = root + "/replace-link-\(recursive)"
+            try files.createSymlinkWithoutParents(at: link, pointingTo: directory)
+            try replaceLink(link, recursive: recursive)
+            XCTAssertEqual(try files.symlinkTarget(at: link), root + "/absent")
             XCTAssertEqual(try files.readFile(at: directory + "/child"), "Target bytes")
         }
     }

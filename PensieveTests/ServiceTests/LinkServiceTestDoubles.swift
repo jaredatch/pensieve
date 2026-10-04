@@ -227,8 +227,9 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         wrapped.directoryExists(at: resolved(path))
     }
     func directoryExistsFollowingLinks(at path: String) throws -> Bool {
-        try beforeProjectProbe?(resolved(path))
-        return try wrapped.directoryExistsFollowingLinks(at: resolved(path))
+        let physical = resolved(path)
+        try beforeProjectProbe?(physical)
+        return try wrapped.directoryExistsFollowingLinks(at: physical)
     }
     func createDirectoryWithoutParents(at path: String) throws {
         let physical = resolved(path)
@@ -252,8 +253,10 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         try wrapped.deleteDirectory(at: resolved(path))
     }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
+        let physical = resolved(linkPath)
+        try beforeArtifactCreation?(physical)
         try wrapped.createSymlink(
-            at: resolved(linkPath),
+            at: physical,
             pointingTo: resolved(targetPath))
     }
     func symlinkTarget(at path: String) throws -> String {

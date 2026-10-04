@@ -63,10 +63,14 @@ final class LinkService: LinkServiceProtocol {
             throw LinkError.occupiedByRealPath(link)
         }
 
-        if let projectPath {
-            try fileService.createSymlinkInProject(at: link, pointingTo: target, projectPath: projectPath)
-        } else {
-            try fileService.createSymlink(at: link, pointingTo: target)
+        do {
+            if let projectPath {
+                try fileService.createSymlinkInProject(at: link, pointingTo: target, projectPath: projectPath)
+            } else {
+                try fileService.createSymlink(at: link, pointingTo: target)
+            }
+        } catch SymlinkCreationError.occupiedPath(_) {
+            throw LinkError.occupiedByRealPath(link)
         }
     }
 

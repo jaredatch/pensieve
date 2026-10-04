@@ -92,15 +92,28 @@ extension FileService {
 
     func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws {
         let manager = FileManager.default
-        if let type = try entryTypeWithoutFollowingLinks(at: linkPath) {
-            guard type == .symlink || type == .regular else {
-                throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: linkPath])
-            }
-            // unlink never removes a directory, even if it replaces the checked entry in this window.
-            if unlink(linkPath) != 0 && errno != ENOENT {
-                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [NSFilePathErrorKey: linkPath])
-            }
+        let existing = try entryTypeWithoutFollowingLinks(at: linkPath)
+        if let existing, existing != .symlink {
+            throw SymlinkCreationError.occupiedPath(linkPath)
         }
-        try manager.createSymbolicLink(atPath: linkPath, withDestinationPath: targetPath)
+        do {
+            if existing != nil {
+                // unlink never removes a directory that replaces the admitted link.
+                if unlink(linkPath) != 0 && errno != ENOENT {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [NSFilePathErrorKey: linkPath])
+                }
+            }
+            try manager.createSymbolicLink(atPath: linkPath, withDestinationPath: targetPath)
+        } catch {
+            // Classify a non-link that won the create race; inconclusive lookup preserves the write error.
+            if let occupant = try? entryTypeWithoutFollowingLinks(at: linkPath), occupant != .symlink {
+                throw SymlinkCreationError.occupiedPath(linkPath)
+            }
+            throw error
+        }
     }
+}
+
+enum SymlinkCreationError: Error {
+    case occupiedPath(String)
 }
