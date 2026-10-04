@@ -13,6 +13,8 @@ DRY_RUN=1
 DRY_RUN_LOCAL=0
 PUBLISH=0
 CASK_ONLY=0
+EXPECTED_TAG=""
+CHECK_TAG=0
 FIRST_RELEASE=0
 PUBLIC_BRANCH=""
 APPCAST_SHA=""
@@ -41,10 +43,10 @@ usage() {
   cat >&2 <<'USAGE'
 usage: script/release.sh [--dry-run | --dry-run-local] [--sign IDENTITY]
                          [--notary-key P8 --notary-key-id ID --notary-issuer ID]
-                         [--publish]
+                         [--publish] [--expect-tag TAG]
        script/release.sh --notes-for VERSION [CHANGELOG]
        script/release.sh --print-release-args VERSION [CHANGELOG]
-       script/release.sh --publish-cask-only
+       script/release.sh [--expect-tag TAG] --publish-cask-only
        script/release.sh --print-cask-action VERSION
        script/release.sh --verify-appcast APPCAST BASE_APPCAST BUILT_DMG DOWNLOAD_PREFIX VERSION
        bash -c 'source script/release.sh --inspect-functions; declare -F'
@@ -57,6 +59,9 @@ in that disposable shell.
 
 --first-release permits a missing appcast only after HTTP 404; its PUT is create-only.
 
+--expect-tag requires TAG to match vVERSION before any release work.
+--publish-cask-only reads the live feed with GH_TOKEN and accesses the tap with TAP_GH_TOKEN.
+
 Dry run is the default when --publish is absent. Dry run builds the app,
 signs it ad-hoc by default, verifies it strictly, creates the final dmg, and
 stops before notarization or publishing.
@@ -68,6 +73,12 @@ USAGE
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --expect-tag)
+      [ "$#" -ge 2 ] || { usage; exit 64; }
+      EXPECTED_TAG="$2"
+      CHECK_TAG=1
+      shift 2
+      ;;
     --dry-run)
       DRY_RUN=1
       DRY_RUN_LOCAL=0
@@ -623,6 +634,10 @@ if [ "$INSPECT_MODE" != functions ] && [ "$INSPECT_MODE" != verify-appcast ]; th
   [ -n "$VERSION" ] || { echo "release: $VERSION_SOURCE must not be empty" >&2; exit 3; }
   VERSION_CHANNEL="$(state_tool channel "$VERSION")"
   DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"
+  if [ "$CHECK_TAG" -eq 1 ] && [ "$EXPECTED_TAG" != "v$VERSION" ]; then
+    echo "release: tag $(log_text "$EXPECTED_TAG") does not match VERSION v$VERSION" >&2
+    exit 1
+  fi
 fi
 
 case "$INSPECT_MODE" in
@@ -650,7 +665,11 @@ esac
 
 if [ "${CASK_ONLY:-0}" -eq 1 ]; then
   verify_cask_artifact
-  bump_cask
+  if is_prerelease; then
+    bump_cask
+  else
+    GH_TOKEN="${TAP_GH_TOKEN:?release: TAP_GH_TOKEN is required for cask publication}" bump_cask
+  fi
   exit 0
 fi
 

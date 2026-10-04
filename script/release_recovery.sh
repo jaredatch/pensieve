@@ -18,13 +18,31 @@ verify_update_archive() {
   fi
 }
 
-verify_cask_artifact() {
+verify_cask_artifact() (
   ! is_prerelease || return 0
-  # This job has no signing authority. Read the live feed, never an artifact's
-  # accompanying XML, and verify the artifact before reading or writing the tap.
-  release_preflight || return 1
-  local publication length signature public_key
-  publication="$(state_tool appcast "$APPCAST_BASE" "$VERSION" "$DOWNLOAD_PREFIX")" || return 1
+  # Own a read-only snapshot outside build/dist. This path never prepares or
+  # changes the signing folder, and GH_TOKEN here is the public-read credential.
+  # The plain entry-point call keeps errexit active for local I/O failures.
+  local read_dir response live_feed branch status publication length signature public_key
+  read_dir="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-cask-appcast.XXXXXX")"
+  trap 'rm -rf "$read_dir"' EXIT
+  response="$(mktemp "$read_dir/appcast-response.XXXXXX")"
+  live_feed="$read_dir/appcast.xml"
+  branch="$(resolve_public_branch)" || return 1
+  if run_command_seam "$GH_CMD" api -X GET "repos/$PUBLIC_REPO/contents/appcast.xml" \
+      -f "ref=$branch" --include > "$response"; then
+    if ! state_tool contents "$response" "$live_feed" > /dev/null; then
+      echo "release: invalid cask appcast contents response" >&2
+      return 1
+    fi
+  else
+    status="$(http_status "$response")"
+    log_response "$response" >&2
+    echo "release: cask appcast read failed (HTTP $(log_text "${status:-unknown}"))" >&2
+    return 1
+  fi
+  rm -f "$response"
+  publication="$(state_tool appcast "$live_feed" "$VERSION" "$DOWNLOAD_PREFIX")" || return 1
   read -r length signature <<< "$publication"
   [ "$length" != absent ] || { echo "release: cask requires a live appcast item for $VERSION" >&2; return 1; }
   public_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$REPO/Pensieve/Info.plist")" || return 1
@@ -32,7 +50,7 @@ verify_cask_artifact() {
     echo "release: cask artifact length or EdDSA signature does not match live appcast" >&2
     return 1
   fi
-}
+)
 
 read_release_state() {
   local response="$DIST_DIR/release-response.txt" status mode=unpublished

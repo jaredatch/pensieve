@@ -45,6 +45,7 @@ class WorkflowCondition
     when :or then left || right
     when :and then left && right
     when :starts_with then self.class.fold(left).start_with?(self.class.fold(right))
+    when :contains then self.class.fold(left).include?(self.class.fold(right))
     when :==, :!=
       equal = left.is_a?(String) && right.is_a?(String) ? self.class.fold(left) == self.class.fold(right) : left == right
       kind == :== ? equal : !equal
@@ -92,12 +93,12 @@ class WorkflowCondition
       value = disjunction
       expect(/\)/)
       value
-    elsif take(/startsWith\(/i)
+    elsif (function = take(/(?:startsWith|contains)\(/i))
       value = atom
       expect(/,/)
       prefix = atom
       expect(/\)/)
-      [:starts_with, value, prefix]
+      [function.downcase.start_with?('contains') ? :contains : :starts_with, value, prefix]
     elsif (string = take(/'(?:[^']|'')*'/))
       literal = string[1...-1].gsub("''", "'")
       self.class.fold(literal) # Reject unsupported literals before admission is evaluated.
@@ -119,13 +120,10 @@ class WorkflowTests < Minitest::Test
                    /script/verify_update.swift].freeze
   CASK_RUN = <<~'SH'.freeze
     set -euo pipefail
-    expected_tag="v$(tr -d '[:space:]' < VERSION)"
-    if [ "$GITHUB_REF_NAME" != "$expected_tag" ]; then
-      echo "::error::Release tag does not match VERSION"
-      exit 1
-    fi
-    ./script/release.sh --publish-cask-only
+    ./script/release.sh --expect-tag "$GITHUB_REF_NAME" --publish-cask-only
   SH
+  CASK_ENV = { 'GH_TOKEN' => '${{ github.token }}',
+               'TAP_GH_TOKEN' => '${{ secrets.RELEASE_REPO_TOKEN }}' }.freeze
 
   def setup
     @paths = Dir[File.join(ROOT, '.github/workflows/*.{yml,yaml}')].sort
@@ -244,7 +242,7 @@ class WorkflowTests < Minitest::Test
             holders = steps.select { |step| step['name'] == step_name }
             assert_equal 1, holders.length, job_name + ': exactly one secret step'
             secrets.each do |secret|
-              key = secret == 'RELEASE_REPO_TOKEN' ? 'GH_TOKEN' : secret
+              key = secret == 'RELEASE_REPO_TOKEN' ? 'TAP_GH_TOKEN' : secret
               expected = '${{ secrets.' + secret + ' }}'
               assert_equal expected, holders.first.fetch('env').fetch(key)
               holders.first['env'].delete(key)
@@ -265,7 +263,7 @@ class WorkflowTests < Minitest::Test
     steps = cask.fetch('steps')
     holders = steps.select { |step| strings(step).any? { |value| value.match?(/RELEASE_REPO_TOKEN/i) } }
     assert_equal ['Publish Homebrew cask'], holders.map { |step| step.fetch('name') }
-    assert_equal({ 'GH_TOKEN' => '${{ secrets.RELEASE_REPO_TOKEN }}' }, holders.first.fetch('env'))
+    assert_equal CASK_ENV, holders.first.fetch('env')
     assert_equal CASK_RUN, holders.first.fetch('run')
     workflows.each do |name, workflow|
       outside = Marshal.load(Marshal.dump(workflow))
@@ -298,7 +296,7 @@ class WorkflowTests < Minitest::Test
     cask = jobs.fetch('cask')
     assert_equal %w[environment if name needs permissions runs-on steps timeout-minutes], cask.keys.sort
     assert_equal 'release', cask.fetch('needs')
-    assert_equal jobs.fetch('release').fetch('if'), cask.fetch('if')
+    assert_release_admission(cask.fetch('if'), 'jaredatch/pensieve', 'cask gate', stable_only: true)
     assert_equal 'release', cask.fetch('environment')
     assert_equal({ 'contents' => 'read' }, cask.fetch('permissions'))
     assert_equal 'macos-26', cask.fetch('runs-on')
@@ -314,7 +312,7 @@ class WorkflowTests < Minitest::Test
     assert_match(%r{\Aactions/download-artifact@}, steps[1].fetch('uses'))
     assert_equal({ 'name' => 'dmg', 'path' => 'build/dist' }, steps[1].fetch('with'))
     assert_equal CASK_RUN, steps.last.fetch('run')
-    assert_equal({ 'GH_TOKEN' => '${{ secrets.RELEASE_REPO_TOKEN }}' }, steps.last.fetch('env'))
+    assert_equal CASK_ENV, steps.last.fetch('env')
 
     release_steps = jobs.fetch('release').fetch('steps')
     uploads = release_steps.select { |step| step.fetch('uses', '').start_with?('actions/upload-artifact@') }
@@ -322,13 +320,79 @@ class WorkflowTests < Minitest::Test
     upload = uploads.first
     assert_equal 'always()', upload.fetch('if')
     assert_equal({ 'name' => 'dmg', 'path' => 'build/dist/*.dmg',
-                   'if-no-files-found' => 'ignore', 'retention-days' => 14 }, upload.fetch('with'))
+                   'if-no-files-found' => 'ignore', 'retention-days' => 14,
+                   'overwrite' => true }, upload.fetch('with'))
     signer = release_steps.find { |step| step['name'] == 'Sign, notarize, and publish' }
     assert_operator release_steps.index(upload), :>, release_steps.index(signer)
   end
 
   def test_cask_job_is_isolated_and_consumes_release_artifact
     assert_cask_job_shape(@workflows)
+  end
+
+  def test_unsupported_cask_conditions_are_contract_refusals
+    ['always()', 'unknown(github.ref)', "github.repository ==", "github.repository == 'é/repo'"].each do |condition|
+      fixture = Marshal.load(Marshal.dump(@workflows))
+      fixture.fetch('release.yml').fetch('jobs').fetch('cask')['if'] = condition
+      error = assert_raises(Minitest::Assertion) { assert_cask_job_shape(fixture) }
+      assert_includes error.message, condition
+      assert_includes error.message, 'cannot evaluate condition'
+    end
+  end
+
+  def assert_rerun_artifact_replacement(workflow)
+    uploads = workflow.fetch('jobs').fetch('release').fetch('steps').select do |step|
+      step.fetch('uses', '').start_with?('actions/upload-artifact@')
+    end
+    assert_equal 1, uploads.length
+    assert_equal 'dmg', uploads.first.fetch('with').fetch('name')
+    assert_equal true, uploads.first.fetch('with').fetch('overwrite', false),
+                 'a rerun must replace the prior attempt artifact before the cask dependency can succeed'
+  end
+
+  def test_rerun_replaces_dmg_artifact
+    workflow = @workflows.fetch('release.yml')
+    assert_rerun_artifact_replacement(workflow)
+    [false, nil].each do |value|
+      fixture = Marshal.load(Marshal.dump(workflow))
+      upload = fixture.fetch('jobs').fetch('release').fetch('steps').last
+      value.nil? ? upload.fetch('with').delete('overwrite') : upload.fetch('with')['overwrite'] = value
+      assert_raises(Minitest::Assertion) { assert_rerun_artifact_replacement(fixture) }
+    end
+  end
+
+  def test_public_and_tap_credentials_have_separate_bindings
+    step = @cask.fetch('steps').last
+    assert_equal CASK_ENV, step.fetch('env')
+    wrong_bindings = [{ 'GH_TOKEN' => '${{ secrets.RELEASE_REPO_TOKEN }}' },
+                      { 'TAP_GH_TOKEN' => '${{ github.token }}' },
+                      { 'GH_TOKEN' => nil }, { 'TAP_GH_TOKEN' => nil }]
+    wrong_bindings.each do |bindings|
+      fixture = Marshal.load(Marshal.dump(@workflows))
+      env = fixture.fetch('release.yml').fetch('jobs').fetch('cask').fetch('steps').last.fetch('env')
+      bindings.each { |key, value| value.nil? ? env.delete(key) : env[key] = value }
+      assert_raises(Minitest::Assertion) { assert_tap_token_scope(fixture) }
+    end
+  end
+
+  def test_both_jobs_use_the_shared_tag_guard
+    signer = @release.fetch('steps').find { |step| step['name'] == 'Sign, notarize, and publish' }
+    [signer, @cask.fetch('steps').last].each do |step|
+      assert_match(/\.\/script\/release\.sh[^\n]*(?:\\\n\s*)?--expect-tag "\$GITHUB_REF_NAME"/, step.fetch('run'))
+      refute_includes step.fetch('run'), 'expected_tag='
+    end
+  end
+
+  def test_cask_prereleases_are_skipped_before_runner_start
+    condition = WorkflowCondition.new(@cask.fetch('if'))
+    %w[v1.0.0-alpha v1.0.0-beta.1 v1.0.0-rc.1 V1.0.0-BETA.1].each do |tag|
+      context = { 'repository' => 'jaredatch/pensieve', 'event_name' => 'push',
+                  'ref_type' => 'tag', 'ref' => 'refs/tags/' + tag }
+      assert_equal false, condition.evaluate(context), 'prerelease must not provision the cask runner: ' + tag
+    end
+    assert_release_admission(@cask.fetch('if'), 'jaredatch/pensieve', 'cask stable/fork matrix', stable_only: true)
+    workflow_source = File.read(File.join(ROOT, '.github/workflows/release.yml'))
+    assert_equal 2, workflow_source.scan('# Canonical source repository; PLAN-45 updates this at the cutover.').length
   end
 
   def test_cask_job_rejects_extra_execution_secrets_and_checkout_files
@@ -409,7 +473,7 @@ class WorkflowTests < Minitest::Test
     # PLAN-45 changes this expectation and the workflow together at cutover.
     canonical = 'jaredatch/pensieve'
     assert_release_admission(condition, canonical, 'live workflow')
-    assert_release_admission(@cask.fetch('if'), canonical, 'live cask workflow')
+    assert_release_admission(@cask.fetch('if'), canonical, 'live cask workflow', stable_only: true)
     equality = "github.repository == '#{canonical}'"
     event_guard = "github.event_name == 'push' && github.ref_type == 'tag' && " \
                   "startsWith(github.ref, 'refs/tags/v')"
@@ -441,8 +505,12 @@ class WorkflowTests < Minitest::Test
     assert_equal 2, @paths.sum { |path| File.read(path).scan(whole_name).length }
   end
 
-  def assert_release_admission(condition, canonical, label)
-    mismatch = release_event_mismatches(condition, canonical).first
+  def assert_release_admission(condition, canonical, label, stable_only: false)
+    begin
+      mismatch = release_event_mismatches(condition, canonical, stable_only: stable_only).first
+    rescue ArgumentError, RuntimeError, KeyError => error
+      flunk "#{label}: cannot evaluate condition #{condition.inspect}: #{error.message}"
+    end
     assert mismatch.nil?, -> { "#{label}: release matrix mismatch: #{mismatch.inspect}" }
   end
 
@@ -476,7 +544,7 @@ class WorkflowTests < Minitest::Test
     (prefixes + fresh).uniq
   end
 
-  def release_event_mismatches(condition, canonical)
+  def release_event_mismatches(condition, canonical, stable_only: false)
     parsed = WorkflowCondition.new(condition)
     literals = parsed.string_literals
     owner, name = repository_parts(canonical)
@@ -496,6 +564,7 @@ class WorkflowTests < Minitest::Test
         # casecmp is the independent ASCII-domain oracle; don't reuse the evaluator's fold.
         expected = repo.casecmp(canonical).zero? && event == 'push' && type == 'tag' &&
                    ref[0, 'refs/tags/v'.length].casecmp('refs/tags/v').zero?
+        expected &&= !ref.include?('-') if stable_only
         actual = parsed.evaluate(context)
         mismatches << context.merge('expected' => expected, 'actual' => actual) unless expected == actual
       end

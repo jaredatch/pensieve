@@ -5,6 +5,7 @@ import importlib.util
 import itertools
 import json
 import os
+import plistlib
 import re
 import select
 import time
@@ -25,6 +26,18 @@ SHA = "a" * 40
 DMG = b"fresh built DMG"
 SIGNATURE = base64.b64encode(b"s" * 64).decode()
 DOWNLOAD_PREFIX = "https://github.com/jaredatch/pensieve/releases/download"
+# Empty-cache swiftc: verifier 1.292 s, generator 1.184 s; binaries 0.151/0.129 s.
+# Allow slow CI startup while bounding compilation separately from release I/O.
+SWIFT_COMPILE_TIMEOUT = 120
+CRYPTO_RUN_TIMEOUT = 30
+RELEASE_RUN_TIMEOUT = 60
+KEY_GENERATOR = '''import CryptoKit
+import Foundation
+let key = Curve25519.Signing.PrivateKey()
+let data = Data("fresh built DMG".utf8)
+print(key.publicKey.rawRepresentation.base64EncodedString())
+print(try key.signature(for: data).base64EncodedString())
+'''
 
 # This oracle is deliberately independent of the production channel helper.
 PUBLICATION_CASES = {
@@ -80,6 +93,8 @@ save()
 if cmd == "gh":
     if args[0] == "api":
         path = next(a for a in args if a.startswith("repos/"))
+        s.setdefault("credential_calls", []).append([path, os.environ.get("GH_TOKEN", "")])
+        save()
         method = args[args.index("-X") + 1] if "-X" in args else "GET"
         kind = "appcast" if "appcast.xml" in path else "cask" if "pensieve.rb" in path else "release" if "/releases/tags/" in path else "tag" if "/git/ref/" in path else "repo"
         if method == "PUT":
@@ -181,6 +196,30 @@ fail("unexpected stub call " + cmd + " " + repr(args))
 class ReleaseSequenceTests(unittest.TestCase):
     tool = STATE_TOOL
 
+    @classmethod
+    def setUpClass(cls):
+        cls.crypto_tools = None
+
+    @classmethod
+    def fixture_crypto_tools(cls):
+        if cls.crypto_tools is None:
+            scratch = tempfile.TemporaryDirectory(prefix="pensieve-crypto-tools-")
+            cls.addClassCleanup(scratch.cleanup)
+            tools = Path(scratch.name)
+            generator = tools / "key-generator.swift"
+            generator.write_text(KEY_GENERATOR)
+            binaries = (tools / "key-generator", tools / "verify-update")
+            for source, binary in zip((generator, ROOT / "script/verify_update.swift"), binaries):
+                started = time.monotonic()
+                result = subprocess.run(["/usr/bin/swiftc", "-module-cache-path", str(tools / "module-cache"),
+                                         str(source), "-o", str(binary)], capture_output=True, text=True,
+                                        timeout=SWIFT_COMPILE_TIMEOUT)
+                if result.returncode != 0:
+                    raise AssertionError("fixture compilation failed: " + result.stderr)
+                print(f"release fixture: compiled {binary.name} in {time.monotonic() - started:.3f}s", flush=True)
+            cls.crypto_tools = binaries
+        return cls.crypto_tools
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="pensieve-release test-")
         self.addCleanup(self.temp.cleanup)
@@ -208,6 +247,7 @@ class ReleaseSequenceTests(unittest.TestCase):
                         RELEASE_TEST_STATE=str(self.state_path), GH_CMD="gh",
                         NOTARY_CMD="notary", STAPLER_CMD="stapler",
                         GENERATE_APPCAST_CMD=str(bin_dir / "generate"), VERIFY_UPDATE_CMD="verify",
+                        GH_TOKEN="fixture-public-token", TAP_GH_TOKEN="fixture-tap-token",
                         SPARKLE_PRIVATE_KEY_FILE=str(self.root / "fixture-key"))
 
     def run_release(self, cask_only=False, expected=0, first=False):
@@ -220,7 +260,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         product.parent.mkdir(parents=True, exist_ok=True)
         product.write_text('<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>' + self.state["version"] + '</string></dict></plist>')
         # ditto's stub adds the plist that a real build produces after the product was cleaned.
-        result = subprocess.run(args, env=self.env, text=True, capture_output=True, timeout=30)
+        result = subprocess.run(args, env=self.env, text=True, capture_output=True, timeout=RELEASE_RUN_TIMEOUT)
         self.state = json.loads(self.state_path.read_text())
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         return result.stdout + result.stderr
@@ -350,14 +390,15 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
 
     def install_fixture_public_key(self):
-        generator = self.root / "fixture-signature.swift"
-        generator.write_text('import CryptoKit\nimport Foundation\nlet key = Curve25519.Signing.PrivateKey()\nlet data = Data("fresh built DMG".utf8)\nprint(key.publicKey.rawRepresentation.base64EncodedString())\nprint(try key.signature(for: data).base64EncodedString())\n')
-        keys = subprocess.run(["/usr/bin/swift", str(generator)], capture_output=True, text=True, timeout=30)
+        generator, verifier = self.fixture_crypto_tools()
+        keys = subprocess.run([str(generator)], capture_output=True, text=True, timeout=CRYPTO_RUN_TIMEOUT)
         self.assertEqual(keys.returncode, 0, keys.stderr)
         public, signature = keys.stdout.splitlines()
         plist = self.root / "Pensieve/Info.plist"
-        plist.write_text(plist.read_text().replace("HibOcVcc/1MTA9UQHp4cIb7qMewKaA0elSCSQ0DY8Ns=", public))
-        self.env.pop("VERIFY_UPDATE_CMD")  # Exercise the default verifier in a checkout with spaces.
+        properties = plistlib.loads(plist.read_bytes())
+        properties["SUPublicEDKey"] = public
+        plist.write_bytes(plistlib.dumps(properties))
+        self.env["VERIFY_UPDATE_CMD"] = str(verifier)  # Real verifier, compiled once for this suite.
         return signature
 
     def test_real_public_key_verification_accepts_only_matching_bytes(self):
@@ -387,11 +428,12 @@ class ReleaseSequenceTests(unittest.TestCase):
     def test_cask_artifact_requires_live_appcast_item(self):
         self.cask_artifact()
         original = json.loads(json.dumps(self.state))
-        for appcast in (feed("0.9.0"), None):
+        for appcast, message in ((feed("0.9.0"), "cask requires a live appcast item for " + VERSION),
+                                 (None, "cask appcast read failed (HTTP '404')")):
             with self.subTest(appcast=appcast):
                 self.state = dict(json.loads(json.dumps(original)), appcast=appcast,
                                   appcast_sha=SHA if appcast else "")
-                self.assert_cask_refused_without_writes("appcast")
+                self.assert_cask_refused_without_writes(message)
 
     def test_cask_artifact_rejects_length_and_signature_mismatches(self):
         self.cask_artifact()
@@ -423,11 +465,85 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.cask_artifact()
         original = json.loads(json.dumps(self.state))
         original["appcast"] = feed()
-        for problem in ({"fail_read": "appcast"}, {"malformed": "appcast"}, {"null_content": "appcast"},
-                        {"appcast": "<invalid"}, {"appcast": feed().replace('length="15"', 'length="0"')}):
+        cases = (({"fail_read": "appcast"}, "cask appcast read failed (HTTP '503')"),
+                 ({"malformed": "appcast"}, "invalid cask appcast contents response"),
+                 ({"null_content": "appcast"}, "contents response has no text content"),
+                 ({"appcast": "<invalid"}, "invalid 'appcast' state: 'unclosed token: line 1, column 0'"),
+                 ({"appcast": feed().replace('length="15"', 'length="0"')}, "appcast has invalid DMG length"))
+        for problem, message in cases:
             with self.subTest(problem=problem):
                 self.state = dict(json.loads(json.dumps(original)), **problem)
-                self.assert_cask_refused_without_writes("appcast")
+                self.assert_cask_refused_without_writes(message)
+
+    def test_cask_feed_cleanup_failure_stops_before_tap(self):
+        self.cask_artifact()
+        self.state["appcast"] = feed()
+        failure = self.root / "bin/rm"
+        failure.write_text('#!/bin/bash\ncase "$*" in\n *appcast-response.*) echo "fixture appcast cleanup failed" >&2; exit 1 ;;\nesac\nexec /bin/rm "$@"\n')
+        failure.chmod(0o755)
+        self.assert_cask_refused_without_writes("fixture appcast cleanup failed")
+
+    def test_cask_verification_leaves_signing_folder_untouched(self):
+        self.cask_artifact()
+        self.state["appcast"] = feed()
+        signing = self.root / "build/dist/appcast-input"
+        signing.mkdir()
+        (signing / "sentinel.dmg").write_bytes(b"owned signing bytes")
+        (signing / "appcast.xml").write_text("owned signing feed")
+        before = {file.name: file.read_bytes() for file in signing.iterdir()}
+        self.run_release(cask_only=True)
+        self.assertEqual({file.name: file.read_bytes() for file in signing.iterdir()}, before,
+                         "cask verification must leave signing inputs byte-identical")
+        self.assertEqual(self.state["writes"], ["cask"])
+
+    def test_cask_public_reads_and_tap_access_use_their_own_credentials(self):
+        self.cask_artifact()
+        self.state["appcast"] = feed()
+        self.env.update(GH_TOKEN="fixture-public-token", TAP_GH_TOKEN="fixture-tap-token")
+        self.run_release(cask_only=True)
+        self.assertEqual(self.state["writes"], ["cask"])
+        expected = [["repos/jaredatch/pensieve", "fixture-public-token"],
+                    ["repos/jaredatch/pensieve/contents/appcast.xml", "fixture-public-token"],
+                    ["repos/jaredatch/homebrew-tap/contents/Casks/pensieve.rb", "fixture-tap-token"],
+                    ["repos/jaredatch/homebrew-tap/contents/Casks/pensieve.rb", "fixture-tap-token"]]
+        self.assertEqual(self.state["credential_calls"], expected)
+
+    def test_expected_tag_is_checked_by_release_script_before_work(self):
+        self.cask_artifact()
+        self.state["appcast"] = feed()
+        self.state_path.write_text(json.dumps(self.state))
+        for mode in ("--publish", "--publish-cask-only", "--dry-run"):
+            with self.subTest(mode=mode):
+                result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"),
+                                         "--expect-tag", "v9.9.9", mode], env=self.env,
+                                        text=True, capture_output=True, timeout=30)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("release: tag 'v9.9.9' does not match VERSION v" + VERSION, result.stderr)
+                self.assertEqual(json.loads(self.state_path.read_text())["calls"], [])
+        result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"),
+                                 "--expect-tag", "v" + VERSION, "--publish-cask-only"],
+                                env=self.env, text=True, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(self.state_path.read_text())["writes"], ["cask"])
+
+    def test_crypto_fixtures_reuse_binaries_without_swift_sources(self):
+        self.install_fixture_public_key()
+        original_run = subprocess.run
+
+        def without_compilation(args, *positional, **keywords):
+            self.assertNotIn(args[0], ("/usr/bin/swift", "/usr/bin/swiftc"),
+                             "warm fixture use must not compile Swift again")
+            return original_run(args, *positional, **keywords)
+
+        with mock.patch.object(subprocess, "run", side_effect=without_compilation):
+            signature = self.install_fixture_public_key()
+            (self.root / "script/verify_update.swift").unlink()
+            self.state["appcast"] = feed(signature=signature)
+            self.cask_artifact()
+            self.run_release(cask_only=True)
+            self.assertEqual(self.state["writes"], ["cask"])
+            self.cask_artifact(b"wrong built DMG")
+            self.assertIn("EdDSA", self.run_release(cask_only=True, expected=1))
 
     def test_sparse_cask_job_verifies_artifact_and_retries_without_build_tools(self):
         signature = self.install_fixture_public_key()
@@ -451,13 +567,17 @@ class ReleaseSequenceTests(unittest.TestCase):
         artifact = artifact_dir / ("Pensieve-" + VERSION + ".dmg")
         artifact.write_bytes(DMG)
         command = job["steps"][-1]["run"]
-        env = dict(self.env, GITHUB_REF_NAME="v" + VERSION)
+        credentials = {"${{ github.token }}": "fixture-public-token",
+                       "${{ secrets.RELEASE_REPO_TOKEN }}": "fixture-tap-token"}
+        env = dict(self.env, GITHUB_REF_NAME="v" + VERSION,
+                   **{key: credentials[value] for key, value in job["steps"][-1]["env"].items()})
         env.pop("SPARKLE_PRIVATE_KEY_FILE")
         self.state_path.write_text(json.dumps(self.state))
 
         def invoke(expected, tag="v" + VERSION):
             result = subprocess.run(["/bin/bash", "-c", command], cwd=checkout,
-                                    env=dict(env, GITHUB_REF_NAME=tag), capture_output=True, text=True, timeout=30)
+                                    env=dict(env, GITHUB_REF_NAME=tag), capture_output=True, text=True,
+                                    timeout=RELEASE_RUN_TIMEOUT)
             self.state = json.loads(self.state_path.read_text())
             self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
             self.assertEqual(self.state["builds"], 0)
@@ -477,6 +597,9 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.assertEqual(self.state["writes"], ["cask"])
         self.assertIn("cask done", invoke(0))
         self.assertEqual(self.state["writes"], ["cask"], "rerunning only the cask job must write once")
+        for endpoint, token in self.state["credential_calls"]:
+            expected_token = "fixture-tap-token" if "/homebrew-tap/" in endpoint else "fixture-public-token"
+            self.assertEqual(token, expected_token, endpoint)
 
     def test_failed_and_malformed_reads_are_unknown(self):
         original = json.loads(json.dumps(self.state))
