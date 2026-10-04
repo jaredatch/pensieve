@@ -15,6 +15,13 @@ final class FileServiceProjectFolderTests: XCTestCase {
         try files.deleteDirectory(at: root)
     }
 
+    func testOccupiedSymlinkErrorDescribesItsPathAndExistingEntry() {
+        let path = root + "/occupied"
+        let description = SymlinkCreationError.occupiedPath(path).localizedDescription
+        XCTAssertTrue(description.contains(path), "The error must name the occupied path: \(description)")
+        XCTAssertTrue(description.contains("already"), "The error must explain the existing entry: \(description)")
+    }
+
     func testDirectoryProbeFollowsLinksAndDistinguishesNonDirectories() throws {
         let directory = root + "/directory"
         let file = root + "/file"
@@ -61,7 +68,9 @@ final class FileServiceProjectFolderTests: XCTestCase {
         XCTAssertFalse(files.isSymlink(at: link))
         XCTAssertEqual(try files.readFile(at: link), "Compiled bytes")
         XCTAssertEqual(try files.readFile(at: target), "Target bytes")
-        XCTAssertThrowsError(try files.createSymlinkWithoutParents(at: link, pointingTo: target))
+        XCTAssertThrowsError(try files.createSymlinkWithoutParents(at: link, pointingTo: target)) { error in
+            self.assertOccupied(error, path: link)
+        }
         XCTAssertEqual(try files.readFile(at: link), "Compiled bytes")
         try files.deleteFile(at: link)
         try files.createSymlinkWithoutParents(at: link, pointingTo: target)
@@ -86,20 +95,24 @@ final class FileServiceProjectFolderTests: XCTestCase {
             let path = root + "/occupied-\(recursive)"
             try files.writeFile(at: path + "/child", content: "Preserved")
             let identity = files.fileIdentity(at: path, followingLinks: false)
-            XCTAssertThrowsError(try replaceLink(path, recursive: recursive))
+            XCTAssertThrowsError(try replaceLink(path, recursive: recursive)) { error in
+                self.assertOccupied(error, path: path)
+            }
             XCTAssertEqual(files.fileIdentity(at: path, followingLinks: false), identity)
             XCTAssertEqual(try files.readFile(at: path + "/child"), "Preserved")
         }
     }
 
-    func testBothLinkWritersReplaceRegularFilesAndLinksWithoutRemovingTargets() throws {
+    func testBothLinkWritersPreserveRegularFilesAndReplaceLinksWithoutRemovingTargets() throws {
         let directory = root + "/target-directory"
         try files.writeFile(at: directory + "/child", content: "Target bytes")
         for recursive in [false, true] {
             let path = root + "/replace-\(recursive)"
             try files.writeFile(at: path, content: "Replace")
             let identity = files.fileIdentity(at: path, followingLinks: false)
-            XCTAssertThrowsError(try replaceLink(path, recursive: recursive))
+            XCTAssertThrowsError(try replaceLink(path, recursive: recursive)) { error in
+                self.assertOccupied(error, path: path)
+            }
             XCTAssertEqual(try files.readFile(at: path), "Replace")
             XCTAssertEqual(files.fileIdentity(at: path, followingLinks: false), identity)
             XCTAssertFalse(files.isSymlink(at: path))
@@ -109,6 +122,13 @@ final class FileServiceProjectFolderTests: XCTestCase {
             XCTAssertEqual(try files.symlinkTarget(at: link), root + "/absent")
             XCTAssertEqual(try files.readFile(at: directory + "/child"), "Target bytes")
         }
+    }
+
+    private func assertOccupied(_ error: Error, path: String, file: StaticString = #filePath, line: UInt = #line) {
+        guard case SymlinkCreationError.occupiedPath(let actual) = error else {
+            return XCTFail("Expected occupiedPath, got \(error)", file: file, line: line)
+        }
+        XCTAssertEqual(actual, path, file: file, line: line)
     }
 
     private func replaceLink(_ path: String, recursive: Bool) throws {

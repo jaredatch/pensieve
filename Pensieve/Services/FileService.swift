@@ -33,6 +33,7 @@ protocol FileServiceProtocol {
     /// Replaces only links. A non-link occupant throws SymlinkCreationError.occupiedPath.
     func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws
     func deleteDirectory(at path: String) throws
+    /// Replaces only links. A non-link occupant throws SymlinkCreationError.occupiedPath.
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws
     func symlinkTarget(at path: String) throws -> String
     func isSymlink(at path: String) -> Bool

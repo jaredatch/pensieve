@@ -1,8 +1,8 @@
 import XCTest
 @testable import Pensieve
 
-/// Textual API audit: checks the closure exposure and delegation requested by the stage read.
-/// Runtime deploy tests separately prove filesystem behavior. Comments are excluded from the audit.
+/// Audits API closure exposure and delegation, and exercises translated probe checkpoints.
+/// Runtime deploy tests separately prove filesystem behavior. Comments are excluded from the API audit.
 final class FileServiceProjectContractTests: XCTestCase {
     private let files = FileService()
     private var sourceRoot: URL {
@@ -37,13 +37,20 @@ final class FileServiceProjectContractTests: XCTestCase {
     }
 
     func testTranslatedProjectProbeResolvesItsPathOnce() throws {
-        let source = try files.readFile(at: sourceRoot.appendingPathComponent(
-            "PensieveTests/ServiceTests/LinkServiceTestDoubles.swift").path)
-        let declaration = try XCTUnwrap(source.range(
-            of: #"func directoryExistsFollowingLinks\(at path: String\) throws -> Bool \{\n[\s\S]*?\n    \}"#,
-            options: .regularExpression))
-        XCTAssertEqual(source[declaration].components(separatedBy: "resolved(path)").count - 1, 1,
-                       "Probe checkpoint and operation must reuse the same resolved path")
+        let logical = "/logical/project"
+        let physical = "/sandbox/project"
+        let wrapped = LinkServiceScriptedFileService(
+            linkPath: physical + "/file", canonicalDirectory: physical, state: .missing)
+        let translated = LinkServiceCanonicalDirectoryFileService(
+            wrapped: wrapped, pathMappings: [(logical, physical)])
+        var checkpointPaths: [String] = []
+        translated.beforeProjectProbe = { checkpointPaths.append($0) }
+
+        XCTAssertTrue(try translated.directoryExistsFollowingLinks(at: logical))
+        XCTAssertFalse(try translated.directoryExistsFollowingLinks(at: logical + "/file"))
+        XCTAssertEqual(checkpointPaths, [physical, physical + "/file"])
+        XCTAssertEqual(wrapped.directoryProbePaths, checkpointPaths,
+                       "The checkpoint and wrapped probe must receive the same translated paths")
     }
 
     private func serviceSource() throws -> String {

@@ -114,6 +114,13 @@ extension FileService {
     }
 }
 
-enum SymlinkCreationError: Error {
+enum SymlinkCreationError: LocalizedError {
     case occupiedPath(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .occupiedPath(let path):
+            "Something already exists at \(path)."
+        }
+    }
 }

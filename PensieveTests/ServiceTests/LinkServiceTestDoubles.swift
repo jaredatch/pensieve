@@ -38,6 +38,7 @@ final class LinkServiceScriptedFileService: FileServiceProtocol {
 
     private(set) var createSymlinkCalled = false
     private(set) var deleteFileCalled = false
+    private(set) var directoryProbePaths: [String] = []
 
     init(
         linkPath: String,
@@ -74,7 +75,10 @@ final class LinkServiceScriptedFileService: FileServiceProtocol {
         path == canonicalDirectory || (path == linkPath && state.directoryExists)
     }
     func createDirectory(at path: String) throws {}
-    func directoryExistsFollowingLinks(at path: String) throws -> Bool { path != linkPath }
+    func directoryExistsFollowingLinks(at path: String) throws -> Bool {
+        directoryProbePaths.append(path)
+        return path != linkPath
+    }
     func createDirectoryWithoutParents(at path: String) throws {}
     func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws {
         try createSymlink(at: linkPath, pointingTo: targetPath)
