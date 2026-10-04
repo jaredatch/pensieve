@@ -54,7 +54,7 @@ def contents(path, output):
 
 
 def version_parts(version):
-    require(re.fullmatch(VERSION, version), f"invalid publication version: {version!a}")
+    require(re.fullmatch(VERSION, version), f"invalid publication version: {version}")
     core, separator, suffix = version.partition("-")
     numbers = core.split(".")
     identifiers = suffix.split(".") if separator else []
@@ -143,10 +143,10 @@ def appcast_publication_state(text, version, download_prefix):
         require(len(versions) == 1, "malformed appcast version")
         current = versions[0].text or ""
         current_parts = version_parts(current)
-        require(current not in seen, f"duplicated appcast item for {current!a}")
+        require(current not in seen, f"duplicated appcast item for {current}")
         seen.add(current)
         enclosures = item.findall("enclosure")
-        require(len(enclosures) == 1, f"missing or duplicated appcast enclosure for {current!a}")
+        require(len(enclosures) == 1, f"missing or duplicated appcast enclosure for {current}")
         enclosure = enclosures[0]
         channels = item.findall(SPARKLE + "channel")
         require(len(channels) <= 1, "duplicated appcast channel")
@@ -220,7 +220,7 @@ def main(args):
         text = Path(args[1]).read_bytes().decode("utf-8")
         Path(args[2]).write_bytes(rewrite_cask(text, args[3], args[4]).encode("utf-8"))
     else:
-        raise ValueError(f"unknown state operation: {mode!a}")
+        raise ValueError(f"unknown state operation: {mode}")
 
 
 if __name__ == "__main__":

@@ -79,7 +79,7 @@ publication_preflight() {
   fi
   if [ "$APPCAST_NEWER" != absent ]; then
     echo "release: appcast already names newer version $(log_text "$APPCAST_NEWER"); keeping it"
-    [ "$APPCAST_ITEM" != absent ] || { echo "release: refusing older appcast publication for $(log_text "$VERSION")" >&2; return 1; }
+    [ "$APPCAST_ITEM" != absent ] || { echo "release: refusing older appcast publication for $VERSION" >&2; return 1; }
   fi
   read_release_state
   verify_tag_target

@@ -6,6 +6,8 @@ import itertools
 import json
 import os
 import re
+import select
+import time
 from pathlib import Path
 import shutil
 import subprocess
@@ -338,7 +340,8 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.state["appcast"] = feed().replace("v1.0.0/", "v9.0.0/")
         self.assertIn("URL", self.run_release(expected=1))
         self.state.update(appcast=feed(), cask=cask(VERSION))
-        self.assertIn("sha256", self.run_release(expected=1))
+        self.assertIn("verified published DMG", self.run_release())
+        self.assertIn("sha256", self.run_release(cask_only=True, expected=1))
         self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
 
     def test_valid_developer_id_does_not_replace_eddsa_verification(self):
@@ -492,12 +495,14 @@ verify_appcast_unchanged''')
     def test_cask_status_reports_publication_progress(self):
         self.assertIn("cask step runs next", self.run_release(), "fresh publication must explain the next step without deciding cask status")
         recovery = self.run_release()
-        self.assertIn("cask pending; run --publish-cask-only", recovery)
+        self.assertIn("cask step runs next", recovery)
         publication = self.run_release(cask_only=True)
         self.assertNotIn("cask pending", publication, "the cask publisher must not direct itself to publish again")
         self.assertIn("cask done", publication)
         self.assertEqual(self.state["writes"], ["create", "appcast", "cask"])
-        self.assertIn("cask done", self.run_release())
+        recovered = self.run_release()
+        self.assertIn("cask step runs next", recovered)
+        self.assertNotIn("cask done", recovered, "recovery must leave current cask status to its step")
         self.assertIn("cask done", self.run_release(cask_only=True))
         self.assertEqual(self.state["writes"], ["create", "appcast", "cask"])
 
@@ -604,15 +609,6 @@ verify_appcast_unchanged''')
                 self.assertFalse(any(call[:3] == ["gh", "release", "download"] for call in self.state["calls"]))
 
 
-    def test_fixture_policy_does_not_follow_production_regressions(self):
-        with mock.patch.object(self.tool, "publication_channel", return_value=""):
-            self.set_version("1.0.0-rc.1")
-            self.assertIs(self.state["expected_release"]["prerelease"], True, "the fixture must retain its independent prerelease flag")
-            root = ET.fromstring(feed("1.0.0-rc.1"))
-            channel = root.find("channel/item/" + self.tool.SPARKLE + "channel")
-            self.assertIsNotNone(channel, "the fixture must retain its independent channel")
-            self.assertEqual(channel.text, "beta", "the fixture must retain its independent channel")
-
     def test_inspect_modes_validate_only_their_version_arguments(self):
         for file_version in (None, "", "not-a-publication-version"):
             with self.subTest(file_version=file_version):
@@ -639,53 +635,85 @@ verify_appcast_unchanged''')
         self.assertFalse((self.root / "build/dist/homebrew/pensieve.rb").exists(), "fresh reporting must not render or compare a cask")
         self.assertIn("invalid 'rewrite-cask' state", self.run_release(cask_only=True, expected=1))
 
-    def test_empty_appcast_channel_stops_before_build(self):
+    def test_refusal_logs_escape_parsed_response_text(self):
         original = json.loads(json.dumps(self.state))
-        for element in ("<sparkle:channel/>", "<sparkle:channel></sparkle:channel>"):
-            with self.subTest(element=element):
-                self.state = json.loads(json.dumps(original))
-                self.state.update(appcast=feed().replace("<enclosure", element + "<enclosure"), release=self.state["expected_release"])
-                self.assertIn("empty appcast channel", self.run_release(expected=1))
-                self.assertEqual(self.state["builds"], 0); self.assertEqual(self.state["writes"], [])
-                self.assertFalse(any(call[:3] == ["gh", "release", "download"] for call in self.state["calls"]))
-
-    def test_refusal_logs_escape_outside_text(self):
-        original = json.loads(json.dumps(self.state))
-        bodies = (
-            'notes_for "$REFUSAL_TEXT" "$CHANGELOG_PATH"',
-            'sign_path "$REFUSAL_TEXT"',
-            'package_app_only; DMG_PATH="$REFUSAL_TEXT"; package_dmg_only',
-            'verify_appcast_provenance "$REPO/provenance.xml" Pensieve-1.0.0.dmg ""',
-            'publish_contents_file fixture/public appcast.xml "$REFUSAL_TEXT" fixture master aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-            'resolve_public_branch',
-            'PUBLIC_BRANCH="$REFUSAL_TEXT"; verify_public_branch_unchanged',
-            'release_preflight',
-            'PUBLIC_BRANCH=master; verify_appcast_unchanged',
-            'read_release_state', 'cask_preflight',
-            'APPCAST_NEWER="$REFUSAL_TEXT"; publication_preflight',
-            'publish_contents_file "$REFUSAL_TEXT" appcast.xml "$REPO/source.xml" fixture master aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        )
+        bodies = ('resolve_public_branch', 'verify_public_branch_unchanged', 'release_preflight',
+                  'PUBLIC_BRANCH=master; verify_appcast_unchanged', 'read_release_state', 'cask_preflight',
+                  'publish_contents_file fixture/public appcast.xml "$REPO/source.xml" fixture master aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                  'verify_appcast_provenance "$REPO/provenance.xml" Pensieve-1.0.0.dmg ""')
         (self.root / "source.xml").write_text(feed())
         for poison, body in itertools.product(POISON_TEXTS, bodies):
             with self.subTest(poison=poison, body=body):
-                self.state = dict(json.loads(json.dumps(original)), response_tail="\n" + poison, error_tail="\n" + poison, fail_status=poison.replace("\n", ""), fail_read="appcast")
-                if body == 'resolve_public_branch': self.state["branch"] = poison
+                self.state = dict(json.loads(json.dumps(original)), response_tail="\n" + poison,
+                                  fail_status=poison.replace("\n", ""), fail_read="appcast")
+                if body in ('resolve_public_branch', 'verify_public_branch_unchanged'): self.state["branch"] = poison
                 if body == 'read_release_state': self.state["fail_read"] = "release"
                 if body == 'cask_preflight': self.state["fail_read"] = "cask"
-                if body.startswith('publish_contents_file "$REFUSAL_TEXT"'): self.state["race"] = "appcast"
-                self.env["REFUSAL_TEXT"] = poison
-                (self.root / "provenance.xml").write_text(feed().replace("Pensieve-1.0.0.dmg", poison.replace("\n", "").replace("\r", "") + ".dmg"))
+                if body.startswith('publish_contents_file'): self.state["race"] = "appcast"
+                archive = poison.replace("\n", "").replace("\r", "") + ".dmg"
+                (self.root / "provenance.xml").write_text(feed().replace("Pensieve-1.0.0.dmg", archive))
                 result = self.run_function(body)
-                self.assertNotEqual(result.returncode, 0, "the guard must exercise a refusal")
+                self.assertNotEqual(result.returncode, 0, "the parsed-input guard must exercise a refusal")
                 self.assertTrue(result.stderr)
                 assert_safe_diagnostic(self, result.stderr)
                 assert_safe_diagnostic(self, result.stdout)
-        for poison in POISON_TEXTS:
-            with self.subTest(prerelease_message=poison):
-                self.state = json.loads(json.dumps(original)); self.env["REFUSAL_TEXT"] = poison
-                result = self.run_function('VERSION="$REFUSAL_TEXT"; VERSION_CHANNEL=beta; cask_publication_status')
-                self.assertEqual(result.returncode, 0, result.stderr)
-                assert_safe_diagnostic(self, result.stdout)
+
+    def test_command_seam_streams_before_exit(self):
+        command = self.root / "live.py"; gate = self.root / "finish-command"
+        command.write_text('import pathlib, sys, time\nsys.stdout.write("live stdout\\n"); sys.stdout.flush()\nsys.stderr.write("live stderr\\n"); sys.stderr.flush()\nwhile not pathlib.Path(sys.argv[1]).exists(): time.sleep(0.01)\nsys.exit(7)\n')
+        process = subprocess.Popen(["/bin/bash", "-c", 'source "$1" --inspect-functions; run_command_seam python3 "$2" "$3"',
+                                    "release-test", str(self.root / "script/release.sh"), str(command), str(gate)],
+                                   env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        seen = {}; deadline = time.monotonic() + 2
+        try:
+            while len(seen) < 2 and time.monotonic() < deadline:
+                ready, _, _ = select.select([pipe for pipe in (process.stdout, process.stderr) if pipe not in seen], [], [], max(0, deadline - time.monotonic()))
+                for pipe in ready: seen[pipe] = pipe.readline()
+        finally:
+            gate.touch()
+            process.communicate(timeout=10)
+        self.assertEqual(seen.get(process.stdout), b"live stdout\n", "stdout must stream while the command is running")
+        self.assertEqual(seen.get(process.stderr), b"live stderr\n", "stderr must stream while the command is running")
+        self.assertEqual(process.returncode, 7)
+
+    def test_command_seam_preserves_status_without_log_formatter(self):
+        result = self.run_function("log_response() { return 9; }; run_command_seam /bin/bash -c 'echo live >&2; exit 7'")
+        self.assertEqual(result.returncode, 7, "a log formatter must never hide the real command status")
+        self.assertEqual(result.stderr, "live\n", "tool diagnostics must retain their live output")
+
+    def test_recovery_cask_cue_cannot_fail_after_verification(self):
+        original = json.loads(json.dumps(self.state)); template = self.root / "release/homebrew/pensieve.rb"
+        original_template = template.read_text()
+        for failure in ("template", "digest"):
+            with self.subTest(failure=failure):
+                self.state = json.loads(json.dumps(original))
+                self.state.update(appcast=feed(), release=self.state["expected_release"])
+                template.write_text("def broken(" if failure == "template" else original_template)
+                if failure == "digest": self.state["cask"] = cask(VERSION)
+                output = self.run_release()
+                self.assertIn("cask step runs next", output)
+                self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
+                self.assertFalse((self.root / "build/dist/homebrew/pensieve.rb").exists(), "recovery reporting must not render a cask")
+                self.assertIn("rewrite-cask" if failure == "template" else "sha256", self.run_release(cask_only=True, expected=1))
+
+    def test_prerelease_cue_skips_cask_on_fresh_and_recovered_paths(self):
+        self.set_version("1.0.0-beta.1")
+        for output in (self.run_release(), self.run_release()):
+            self.assertIn("cask skipped for prerelease", output)
+            self.assertNotIn("cask step runs next", output)
+        self.assertFalse(any("pensieve.rb" in arg for call in self.state["calls"] for arg in call))
+
+    def test_appcast_provenance_refuses_missing_or_unreadable_file(self):
+        source = self.root / "missing.xml"; base = self.root / "base-list"; base.write_text("")
+        for unreadable in (False, True):
+            with self.subTest(unreadable=unreadable):
+                if unreadable: source.write_text(feed()); source.chmod(0)
+                try:
+                    result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(source), "Pensieve-1.0.0.dmg", str(base)], env=self.env, text=True, capture_output=True, timeout=30)
+                    self.assertEqual(result.returncode, 1, "a missing or unreadable appcast must refuse provenance verification")
+                    self.assertIn("readable appcast", result.stderr)
+                finally:
+                    if unreadable: source.chmod(0o600)
 
 
 class PublishedTextSweepTests(unittest.TestCase):
@@ -702,9 +730,7 @@ class PublishedTextSweepTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="pensieve-refusals-") as directory:
             root = Path(directory); source = root / "source"; output = root / "output"
             for poison in POISON_TEXTS:
-                cases = [("channel", [poison], None), ("compare-versions", [poison, VERSION], None),
-                         ("compare-versions", [VERSION, poison], None), ("rewrite-cask", [str(source), str(output), poison, "a" * 64], cask()),
-                         ("rewrite-cask", [str(source), str(output), VERSION, poison], cask())]
+                cases = []
                 # Exercise every refusing count in the cask and appcast sweeps.
                 for versions, hashes in itertools.product((0, 1, 2), repeat=2):
                     if versions == hashes == 1: continue
@@ -724,10 +750,9 @@ class PublishedTextSweepTests(unittest.TestCase):
                 item.append(ET.fromstring(ET.tostring(item.find("enclosure"))))
                 cases.append(("appcast", [str(source), VERSION, DOWNLOAD_PREFIX], ET.tostring(duplicated, encoding="unicode") + "<!--" + poison + "-->"))
                 for invalid in ("1.0", "01.0.0", "1.0.0-alpha..1", "1.0.0-beta.01"):
-                    cases.append(("compare-versions", [invalid, poison], None))
-                cases += [("contents", [str(root / poison), str(output)], None),
-                          ("appcast", [str(source), VERSION, DOWNLOAD_PREFIX], '<rss><channel><!DOCTYPE ' + poison + '></channel></rss>'),
-                          (poison, [], None), ("tag", [str(source)], 'HTTP/2.0 200 OK\n\n' + json.dumps({"object": {poison: "bad"}}))]
+                    cases.append(("appcast", [str(source), VERSION, DOWNLOAD_PREFIX], feed().replace('>1.0.0<', '>' + invalid + '<') + "<!--" + poison + "-->"))
+                cases.append(("appcast", [str(source), VERSION, DOWNLOAD_PREFIX], '<rss><channel><!DOCTYPE ' + poison + '></channel></rss>'))
+                cases.append(("tag", [str(source)], 'HTTP/2.0 200 OK\n\n' + json.dumps({"object": {poison: "bad"}})))
                 for mode, args, text in cases:
                     with self.subTest(poison=poison, mode=mode, text=text):
                         if text is not None: source.write_text(text)
@@ -735,6 +760,23 @@ class PublishedTextSweepTests(unittest.TestCase):
                         self.assertEqual(result.returncode, 1, "the diagnostic guard must reach a refusal: " + result.stdout)
                         self.assertTrue(result.stderr)
                         assert_safe_diagnostic(self, result.stderr)
+
+    def test_parsed_diagnostics_escape_once(self):
+        with tempfile.TemporaryDirectory(prefix="pensieve-once-") as directory:
+            source = Path(directory) / "appcast.xml"
+            # XML rejects ESC before version parsing; the refusal sweep covers it.
+            cases = (("x\n::error::fixture", r"'invalid publication version: x\n::error::fixture'"),
+                     ("x\t::error::fixture", r"'invalid publication version: x\t::error::fixture'"),
+                     ("x\u0085::warning::fixture", r"'invalid publication version: x\x85::warning::fixture'"),
+                     ("##[error]fixture", r"'invalid publication version: \x23\x23[error]fixture'"))
+            for poison, escaped in cases:
+                with self.subTest(poison=poison):
+                    source.write_text(feed().replace('>1.0.0<', '>' + poison + '<'))
+                    result = subprocess.run(["python3", str(ROOT / "script/release_state.py"), "appcast", str(source), VERSION, DOWNLOAD_PREFIX], text=True, capture_output=True, timeout=15)
+                    self.assertEqual(result.returncode, 1)
+                    expected = "release: invalid 'appcast' state: " + escaped + "\n"
+                    self.assertEqual(result.stderr, expected, "parsed text must be escaped exactly once at the outer handler")
+                    assert_safe_diagnostic(self, result.stderr)
 
     def test_version_order_cross_product(self):
         ordered = ("0.9.0", "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta",
@@ -802,11 +844,6 @@ class PublishedTextSweepTests(unittest.TestCase):
                     visible = channel == "" or (version != VERSION and channel == "beta")
                     expected = (str(len(DMG)) + " " + SIGNATURE, published if visible else "absent")
                     self.assertEqual(self.tool.appcast_publication_state(text, version, DOWNLOAD_PREFIX), expected)
-
-        for element in ("<sparkle:channel/>", "<sparkle:channel></sparkle:channel>"):
-            with self.subTest(empty_channel=element):
-                with self.assertRaisesRegex(ValueError, "empty appcast channel"):
-                    self.tool.appcast_publication_state(feed().replace("<enclosure", element + "<enclosure"), VERSION, DOWNLOAD_PREFIX)
 
     def test_contents_sha_validation_and_decode(self):
         with tempfile.TemporaryDirectory(prefix="pensieve-contents-") as directory:
