@@ -117,6 +117,7 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     /// Checkpoints act on translated sandbox paths immediately before their real FileService operation.
     var beforeDirectoryCreation: ((String) throws -> Void)?
     var beforeArtifactCreation: ((String) throws -> Void)?
+    var beforeProjectProbe: ((String) throws -> Void)?
 
     init(
         wrapped: FileServiceProtocol,
@@ -226,7 +227,8 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         wrapped.directoryExists(at: resolved(path))
     }
     func directoryExistsFollowingLinks(at path: String) throws -> Bool {
-        try wrapped.directoryExistsFollowingLinks(at: resolved(path))
+        try beforeProjectProbe?(resolved(path))
+        return try wrapped.directoryExistsFollowingLinks(at: resolved(path))
     }
     func createDirectoryWithoutParents(at path: String) throws {
         let physical = resolved(path)

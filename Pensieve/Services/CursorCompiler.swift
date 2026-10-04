@@ -31,9 +31,7 @@ final class CursorCompiler: CursorCompilerProtocol {
         let mdc = generateMDC(skill: skill, body: body)
         let path = outputPath(skill: skill, projectPath: projectPath)
         if let projectPath {
-            try fileService.writeInProject(at: path, projectPath: projectPath) {
-                try fileService.writeFileWithoutParents(at: path, content: mdc)
-            }
+            try fileService.writeFileInProject(at: path, content: mdc, projectPath: projectPath)
         } else {
             try fileService.writeFile(at: path, content: mdc)
         }

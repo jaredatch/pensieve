@@ -20,9 +20,20 @@ extension FileServiceProtocol {
         guard exists else { throw ProjectFolderError.missing(path) }
     }
 
-    /// Every creating step is nonrecursive, including the supplied artifact writer. Path-based
-    /// operations may fail after deletion, but cannot recreate the project or any ancestor.
-    func writeInProject(at artifactPath: String, projectPath: String, write: () throws -> Void) throws {
+    func writeFileInProject(at path: String, content: String, projectPath: String) throws {
+        try writeInProject(at: path, projectPath: projectPath) {
+            try writeFileWithoutParents(at: path, content: content)
+        }
+    }
+
+    func createSymlinkInProject(at path: String, pointingTo target: String, projectPath: String) throws {
+        try writeInProject(at: path, projectPath: projectPath) {
+            try createSymlinkWithoutParents(at: path, pointingTo: target)
+        }
+    }
+
+    /// The supplied writer stays private; callers pass content or a target to the bounded methods.
+    private func writeInProject(at artifactPath: String, projectPath: String, write: () throws -> Void) throws {
         let prefix = projectPath.hasSuffix("/") ? projectPath : projectPath + "/"
         guard artifactPath.hasPrefix(prefix) else { throw CocoaError(.fileWriteInvalidFileName) }
         let components = artifactPath.dropFirst(prefix.count).split(separator: "/")
@@ -39,8 +50,10 @@ extension FileServiceProtocol {
             try write()
         } catch {
             // A missing root has one typed error even if it vanished during mkdir or the final write.
-            // Interior occupants and write failures keep their original error when the root remains.
-            try requireProjectDirectory(at: projectPath)
+            // Inconclusive rechecks must not replace the original creating error.
+            if let exists = try? directoryExistsFollowingLinks(at: projectPath), !exists {
+                throw ProjectFolderError.missing(projectPath)
+            }
             throw error
         }
     }
@@ -58,16 +71,15 @@ extension FileService {
     }
 
     func createDirectoryWithoutParents(at path: String) throws {
-        try createDirectoryWithoutParents(at: path) { directory in
-            try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: false)
-        }
+        try createDirectoryWithoutParents(at: path, beforeCreate: { _ in })
     }
 
-    /// The injected create operation exercises a directory appearing immediately before mkdir.
-    func createDirectoryWithoutParents(at path: String, create: (String) throws -> Void) throws {
+    /// The checkpoint can stage a race but cannot replace the real nonrecursive mkdir.
+    func createDirectoryWithoutParents(at path: String, beforeCreate: (String) throws -> Void) throws {
         if try directoryExistsFollowingLinks(at: path) { return }
         do {
-            try create(path)
+            try beforeCreate(path)
+            try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: false)
         } catch {
             // A concurrent creator may have won. Accept only a directory, including a link to one.
             guard try directoryExistsFollowingLinks(at: path) else { throw error }
@@ -80,8 +92,14 @@ extension FileService {
 
     func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws {
         let manager = FileManager.default
-        if manager.fileExists(atPath: linkPath) || isSymlink(at: linkPath) {
-            try manager.removeItem(atPath: linkPath)
+        if let type = try entryTypeWithoutFollowingLinks(at: linkPath) {
+            guard type == .symlink || type == .regular else {
+                throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: linkPath])
+            }
+            // unlink never removes a directory, even if it replaces the checked entry in this window.
+            if unlink(linkPath) != 0 && errno != ENOENT {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [NSFilePathErrorKey: linkPath])
+            }
         }
         try manager.createSymbolicLink(atPath: linkPath, withDestinationPath: targetPath)
     }

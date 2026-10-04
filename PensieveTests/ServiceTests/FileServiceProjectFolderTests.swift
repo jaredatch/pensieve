@@ -78,6 +78,40 @@ final class FileServiceProjectFolderTests: XCTestCase {
         XCTAssertTrue(double.symlinks.isEmpty)
     }
 
+    func testBothLinkWritersPreserveRealDirectoriesAndTheirChildren() throws {
+        for recursive in [false, true] {
+            let path = root + "/occupied-\(recursive)"
+            try files.writeFile(at: path + "/child", content: "Preserved")
+            let identity = files.fileIdentity(at: path, followingLinks: false)
+            XCTAssertThrowsError(try replaceLink(path, recursive: recursive))
+            XCTAssertEqual(files.fileIdentity(at: path, followingLinks: false), identity)
+            XCTAssertEqual(try files.readFile(at: path + "/child"), "Preserved")
+        }
+    }
+
+    func testBothLinkWritersReplaceRegularFilesAndLinksWithoutRemovingTargets() throws {
+        let directory = root + "/target-directory"
+        try files.writeFile(at: directory + "/child", content: "Target bytes")
+        for recursive in [false, true] {
+            let path = root + "/replace-\(recursive)"
+            try files.writeFile(at: path, content: "Replace")
+            try replaceLink(path, recursive: recursive)
+            XCTAssertTrue(files.isSymlink(at: path))
+            try files.createSymlinkWithoutParents(at: path, pointingTo: directory)
+            try replaceLink(path, recursive: recursive)
+            XCTAssertEqual(try files.symlinkTarget(at: path), root + "/absent")
+            XCTAssertEqual(try files.readFile(at: directory + "/child"), "Target bytes")
+        }
+    }
+
+    private func replaceLink(_ path: String, recursive: Bool) throws {
+        if recursive {
+            try files.createSymlink(at: path, pointingTo: root + "/absent")
+        } else {
+            try files.createSymlinkWithoutParents(at: path, pointingTo: root + "/absent")
+        }
+    }
+
     func testDirectoryAppearingImmediatelyBeforeMkdirIsReused() throws {
         let path = root + "/concurrent"
         var reachedCreate = false
@@ -87,11 +121,22 @@ final class FileServiceProjectFolderTests: XCTestCase {
             reachedCreate = true
             try self.files.createDirectory(at: directory)
             identity = self.files.fileIdentity(at: directory, followingLinks: true)
-            try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: false)
         })
         XCTAssertTrue(reachedCreate)
         XCTAssertNotNil(identity)
         XCTAssertEqual(files.fileIdentity(at: path, followingLinks: true), identity)
+    }
+
+    func testMkdirCheckpointCannotBypassRealCreation() throws {
+        let path = root + "/checkpoint-directory"
+        var reachedCheckpoint = false
+        try files.createDirectoryWithoutParents(at: path) { directory in
+            reachedCheckpoint = true
+            XCTAssertEqual(directory, path)
+            XCTAssertFalse(try self.files.directoryExistsFollowingLinks(at: directory))
+        }
+        XCTAssertTrue(reachedCheckpoint)
+        XCTAssertTrue(try files.directoryExistsFollowingLinks(at: path), "The real mkdir must still run")
     }
 
     func testFileAppearingImmediatelyBeforeMkdirIsPreservedAndFails() throws {
@@ -101,7 +146,6 @@ final class FileServiceProjectFolderTests: XCTestCase {
             XCTAssertFalse(try self.files.directoryExistsFollowingLinks(at: directory))
             reachedCreate = true
             try self.files.writeFile(at: directory, content: "Preserved")
-            try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: false)
         })
         XCTAssertTrue(reachedCreate)
         XCTAssertEqual(try files.readFile(at: path), "Preserved")

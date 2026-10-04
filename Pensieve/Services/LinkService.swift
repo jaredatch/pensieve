@@ -64,9 +64,7 @@ final class LinkService: LinkServiceProtocol {
         }
 
         if let projectPath {
-            try fileService.writeInProject(at: link, projectPath: projectPath) {
-                try fileService.createSymlinkWithoutParents(at: link, pointingTo: target)
-            }
+            try fileService.createSymlinkInProject(at: link, pointingTo: target, projectPath: projectPath)
         } else {
             try fileService.createSymlink(at: link, pointingTo: target)
         }

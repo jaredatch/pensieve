@@ -206,7 +206,7 @@ final class FileService: FileServiceProtocol {
         if !fm.fileExists(atPath: parentDir) {
             try fm.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
         }
-        try content.write(to: url, atomically: true, encoding: .utf8)
+        try writeFileWithoutParents(at: path, content: content)
     }
 
     /// Preserve arbitrary bytes and replace an existing destination only once the complete write succeeds.
@@ -271,11 +271,7 @@ final class FileService: FileServiceProtocol {
         if !fm.fileExists(atPath: parentDir) {
             try fm.createDirectory(atPath: parentDir, withIntermediateDirectories: true)
         }
-        // Remove stale symlink or file if it exists
-        if fm.fileExists(atPath: linkPath) || isSymlink(at: linkPath) {
-            try fm.removeItem(atPath: linkPath)
-        }
-        try fm.createSymbolicLink(atPath: linkPath, withDestinationPath: targetPath)
+        try createSymlinkWithoutParents(at: linkPath, pointingTo: targetPath)
     }
 
     func symlinkTarget(at path: String) throws -> String {
