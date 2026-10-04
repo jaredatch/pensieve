@@ -94,7 +94,7 @@ final class ProjectFolderCallerTests: XCTestCase {
         )
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
-        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
+        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 1)
         let removed = harness.platformVM.removeBatch(
             skills: [harness.skill], platforms: [.claudeCode, .grok, .codex, .cursor], target: .project(harness.project)
         )
@@ -134,7 +134,7 @@ final class ProjectFolderCallerTests: XCTestCase {
         XCTAssertFalse(result.hasFailures, "A missing folder must not make removal present an error")
         XCTAssertTrue(result.failures.isEmpty, "The category view displays this failure list")
         XCTAssertEqual(result.skipped.count, 4)
-        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0)
+        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 4)
         XCTAssertFalse(try harness.files.entryExistsWithoutFollowingLinks(at: harness.root + "/absent"))
         let durable = try ManifestService(fileService: harness.files).read(fromRoot: harness.root + "/store").categories
         XCTAssertEqual(durable.first?.skillSlugs, removingSkill ? [] : [harness.skill.directoryName])

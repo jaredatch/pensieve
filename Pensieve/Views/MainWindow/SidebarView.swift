@@ -66,13 +66,24 @@ func removeRegisteredProject(_ project: Project, categoryStore: CategoryStorePro
     } catch {
         return BatchResult.readFailure("project intent ownership", error: error)
     }
-    let result = categoryStore.reconcileAfterRemovingProject(
+    var result = categoryStore.reconcileAfterRemovingProject(
         project,
         reconciler: reconciler,
         context: context,
         notifier: SyncStateNotifier.suppressed
     )
+    result.outcomes.removeAll { outcome in
+        guard case .project(let id)? = outcome.target else { return false }
+        return id != project.id
+    }
     guard !result.hasFailures else { return result }
+    do {
+        for row in try context.fetch(FetchDescriptor<SkillProjectAssignment>()) where row.projectID == project.id {
+            context.delete(row)
+        }
+    } catch {
+        return BatchResult.readFailure("project category ownership", error: error)
+    }
     for row in intentRows where row.projectID == project.id {
         context.delete(row)
     }

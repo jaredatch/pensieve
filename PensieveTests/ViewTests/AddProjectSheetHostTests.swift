@@ -50,6 +50,33 @@ final class AddProjectSheetHostTests: XCTestCase {
         XCTAssertFalse(try files.entryExistsWithoutFollowingLinks(at: root + "/missing"))
     }
 
+    func testFailedAddCanRetrySamePathAfterFinderRestoresFolder() async throws {
+        let root = NSTemporaryDirectory() + "AddProjectRetry-\(UUID().uuidString)"
+        let files = FileService()
+        defer { try? files.deleteDirectory(at: root) }
+        try files.createDirectory(at: root + "/project")
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        let model = AddProjectModel(fileService: files)
+        model.name = "Retry"
+        model.path = root + "/project"
+        var created: [Project] = []
+        let host = NSHostingView(rootView: AddProjectSheet(model: model,
+            manifestService: ManifestService(fileService: files), manifestRoot: root + "/store",
+            onCreated: { created.append($0) }).modelContainer(container)
+            .background(Color(nsColor: .windowBackgroundColor)))
+        let window = mount(host)
+        defer { window.close() }
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Initial folder preview") { model.isValid }
+        try files.deleteDirectory(at: model.path)
+        try clickAdd(in: host, window: window)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Failed Add reason") { model.hasIdentityError }
+        XCTAssertTrue(created.isEmpty)
+        try files.createDirectory(at: model.path)
+        try clickAdd(in: host, window: window)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Retry same path must add") { created.count == 1 }
+        XCTAssertEqual(try container.mainContext.fetchCount(FetchDescriptor<Project>()), 1)
+    }
+
     private func mount(_ host: NSView) -> NSWindow {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 450, height: 350),
                               styleMask: [.titled], backing: .buffered, defer: false)

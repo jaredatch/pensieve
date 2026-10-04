@@ -51,13 +51,13 @@ struct AddProjectSheet: View {
             if let message = model.identityMessage {
                 Text(message)
                     .font(.caption)
-                    .foregroundStyle(model.hasIdentityError ? .primary : .secondary)
+                    .foregroundStyle(model.hasExistingIdentity ? .secondary : .tertiary)
             }
 
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Add", action: submit).keyboardShortcut(.defaultAction).disabled(!model.isValid)
+                Button("Add", action: submit).keyboardShortcut(.defaultAction).disabled(!model.canSubmit)
             }
         }
         .padding(Spacing.xl)

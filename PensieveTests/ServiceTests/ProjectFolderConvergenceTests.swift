@@ -49,7 +49,7 @@ final class ProjectFolderConvergenceTests: XCTestCase {
         XCTAssertTrue(audit.contains("category:4:0:skipped:0"))
     }
 
-    func testBothLedgersDropDeletedProjectAndRedeployIntoEmptyRestoration() throws {
+    func testBothLedgersKeepRowsWhileMissingAndRedeployIntoEmptyRestoration() throws {
         for categoryOwned in [false, true] {
             let harness = try ProjectFolderCallerHarness()
             defer { harness.cleanup() }
@@ -60,10 +60,10 @@ final class ProjectFolderConvergenceTests: XCTestCase {
             XCTAssertEqual(run().successes.count, categoryOwned ? 4 : 1)
             try harness.files.deleteDirectory(at: harness.project.path)
             let missing = run()
-            XCTAssertEqual(missing.skipped.count, categoryOwned ? 4 : 1)
+            XCTAssertEqual(missing.skipped.count, 0)
             XCTAssertEqual(missing.failureCount, 0)
-            XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
-            XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0)
+            XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), categoryOwned ? 0 : 1)
+            XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), categoryOwned ? 4 : 0)
             XCTAssertFalse(try harness.files.entryExistsWithoutFollowingLinks(at: harness.project.path))
             try harness.files.createDirectory(at: harness.project.path)
             XCTAssertEqual(try harness.files.listDirectory(at: harness.project.path), [])
@@ -87,6 +87,7 @@ final class ProjectFolderConvergenceTests: XCTestCase {
                 if realized {
                     try harness.files.createDirectory(at: harness.project.path)
                     XCTAssertEqual(run().successes.count, categoryOwned ? 4 : 1)
+                    try unassign(harness, categoryOwned: categoryOwned)
                 }
                 let recordsBefore = try harness.context.fetchCount(FetchDescriptor<DeployRecord>())
                 let stateBefore = try harness.deployState.read()
@@ -130,4 +131,13 @@ final class ProjectFolderConvergenceTests: XCTestCase {
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0)
         XCTAssertFalse(try harness.files.entryExistsWithoutFollowingLinks(at: harness.project.path))
     }
+    private func unassign(_ harness: ProjectFolderCallerHarness, categoryOwned: Bool) throws {
+        if categoryOwned {
+            for rule in try harness.context.fetch(FetchDescriptor<Pensieve.Category>()) { rule.skillSlugs = [] }
+        } else {
+            for row in try harness.context.fetch(FetchDescriptor<MachineDeployIntent>()) { harness.context.delete(row) }
+        }
+        try harness.context.save()
+    }
+
 }

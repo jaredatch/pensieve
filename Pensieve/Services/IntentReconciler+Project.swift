@@ -14,34 +14,12 @@ extension IntentReconciler {
             guard let projectID = row.projectID else { return nil }
             return ProjectTriple(skillID: row.skillID, projectID: projectID, platformRaw: row.platformRaw)
         })
-        let unavailable = unavailableTriples(desired.union(current), state: state, context: context, aggregate: &aggregate)
-        deployProjects(desired.subtracting(current).subtracting(unavailable),
-                       state: state, context: context, aggregate: &aggregate)
-        removeProjects(current.subtracting(desired).subtracting(unavailable),
-                       state: state, context: context, aggregate: &aggregate)
-    }
-
-    private func unavailableTriples(
-        _ triples: Set<ProjectTriple>, state: State, context: ModelContext, aggregate: inout BatchResult
-    ) -> Set<ProjectTriple> {
-        var unavailable: Set<ProjectTriple> = []
-        for (pair, group) in groupedProjectTriples(triples) {
-            guard let project = state.projectByID[pair.projectID],
-                  let problem = platformVM.projectFolderProblem(for: project) else { continue }
-            for triple in group {
-                unavailable.insert(triple)
-                if case .missing = problem { deleteProjectRows(matching: triple, state: state, context: context) }
-                guard let skill = state.skillByID[triple.skillID],
-                      let platform = PlatformTarget(rawValue: triple.platformRaw) else { continue }
-                aggregate.append(BatchResult(outcomes: [BatchPairOutcome(
-                    skillID: skill.id, skillName: skill.name, platform: platform,
-                    target: .project(project.id),
-                    error: BatchPairOutcome.failureMessage(problem, target: .project(project)),
-                    projectFolderError: problem
-                )]).skippingMissingProjects())
-            }
-        }
-        return unavailable
+        let work = platformVM.projectReconcilePolicy.pending(
+            desired: desired, current: current, skills: state.skillByID, projects: state.projectByID, platformVM: platformVM
+        )
+        aggregate.append(work.result)
+        deployProjects(work.deploy, state: state, context: context, aggregate: &aggregate)
+        removeProjects(work.remove, state: state, context: context, aggregate: &aggregate)
     }
 
     private func desiredProjectTriples(
@@ -82,6 +60,9 @@ extension IntentReconciler {
             ).skippingMissingProjects()
             aggregate.append(result)
             for outcome in result.successes {
+                guard !state.ledger.contains(where: {
+                    $0.skillID == skill.id && $0.projectID == project.id && $0.platformRaw == outcome.platform.rawValue
+                }) else { continue }
                 context.insert(IntentAssignment(
                     skillID: outcome.skillID,
                     platformRaw: outcome.platform.rawValue,

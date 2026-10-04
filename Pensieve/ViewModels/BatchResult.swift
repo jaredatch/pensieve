@@ -79,9 +79,11 @@ struct BatchResult {
     }
 
     /// An explicit category deploy presents the same missing-folder reason as a direct deploy.
-    func reportingSkippedProjects() -> BatchResult {
+    func reportingSkippedProjects(where includes: (BatchPairOutcome) -> Bool) -> BatchResult {
         var result = self
-        for index in result.outcomes.indices { result.outcomes[index].isSkipped = false }
+        for index in result.outcomes.indices where includes(result.outcomes[index]) {
+            result.outcomes[index].isSkipped = false
+        }
         return result
     }
 

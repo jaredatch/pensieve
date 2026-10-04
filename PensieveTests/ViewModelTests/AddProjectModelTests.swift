@@ -5,7 +5,34 @@ import XCTest
 
 @MainActor
 final class AddProjectModelTests: XCTestCase {
-    func testInvalidPathsRefuseRegistrationAndCorrectedPathAddsInSameModel() throws {
+    func testTypingDoesNotWaitForDiskAndLatestPreviewWins() async throws {
+        let h = try ProjectFolderCallerHarness()
+        defer { h.cleanup() }
+        h.mapped.beforeProjectProbe = { path in
+            if path == h.project.path { Thread.sleep(forTimeInterval: 0.2) }
+        }
+        let model = AddProjectModel(fileService: h.mapped)
+        model.name = "Project"
+        let start = Date()
+        model.path = h.project.path
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.1, "Typing must not wait for a slow mount")
+        model.path = h.otherProject.path
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Latest preview must be accepted") { model.isValid }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(model.isValid, "An old missing result must not replace the latest preview")
+        XCTAssertEqual(model.identityMessage, "Marker will be created on Add")
+    }
+
+    func testEmptyPathNeverSubmitsOrShowsAnError() {
+        let model = AddProjectModel()
+        model.name = "Project"
+        model.path = "  "
+        XCTAssertNil(model.makeProject())
+        XCTAssertNil(model.identityMessage)
+        XCTAssertFalse(model.hasIdentityError)
+    }
+
+    func testInvalidPathsRefuseRegistrationAndCorrectedPathAddsInSameModel() async throws {
         let root = NSTemporaryDirectory() + "AddProjectModel-\(UUID().uuidString)"
         let files = FileService()
         defer { try? files.deleteDirectory(at: root) }
@@ -19,6 +46,7 @@ final class AddProjectModelTests: XCTestCase {
         let before = try files.listDirectory(at: root).sorted()
         for suffix in ["missing/parent/project", "file", "dangling", "file-link"] {
             model.path = root + "/" + suffix
+            await TestWait.until(timeout: .seconds(3), failureMessage: "Missing preview") { model.identityMessage != nil }
             XCTAssertFalse(model.isValid)
             XCTAssertTrue(model.hasIdentityError)
             XCTAssertTrue(model.identityMessage?.contains("folder is missing") == true)
@@ -29,6 +57,7 @@ final class AddProjectModelTests: XCTestCase {
         let valid = root + "/valid"
         try files.createDirectory(at: valid)
         model.path = valid
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Corrected preview") { model.identityMessage != nil }
         XCTAssertTrue(model.isValid)
         XCTAssertFalse(model.hasIdentityError)
         XCTAssertEqual(model.identityMessage, "Marker will be created on Add")
@@ -41,7 +70,7 @@ final class AddProjectModelTests: XCTestCase {
         XCTAssertTrue(files.fileExists(at: valid + "/.pensieve-project"))
     }
 
-    func testLookupFailureExplainsReasonAndLinkedDirectoryIsAcceptedAfterCorrection() throws {
+    func testLookupFailureExplainsReasonAndLinkedDirectoryIsAcceptedAfterCorrection() async throws {
         let root = NSTemporaryDirectory() + "AddProjectLookup-\(UUID().uuidString)"
         let files = FileService()
         defer { try? files.deleteDirectory(at: root) }
@@ -52,18 +81,20 @@ final class AddProjectModelTests: XCTestCase {
         let model = AddProjectModel(fileService: mapped)
         model.name = "Linked"
         model.path = root + "/linked"
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Lookup preview") { model.identityMessage != nil }
         XCTAssertFalse(model.isValid)
         XCTAssertTrue(model.identityMessage?.contains("couldn't be checked") == true)
         XCTAssertNil(model.makeProject())
         XCTAssertEqual(try files.listDirectory(at: root + "/directory"), [])
         mapped.beforeProjectProbe = nil
         model.refreshIdentityStatus()
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Linked preview") { model.identityMessage != nil }
         XCTAssertTrue(model.isValid)
         XCTAssertNotNil(model.makeProject())
         XCTAssertTrue(files.fileExists(at: root + "/directory/.pensieve-project"))
     }
 
-    func testDeletionBeforeSubmitKeepsModelAvailableForCorrectedPath() throws {
+    func testDeletionBeforeSubmitKeepsModelAvailableForCorrectedPath() async throws {
         let root = NSTemporaryDirectory() + "AddProjectDeletion-\(UUID().uuidString)"
         let files = FileService()
         defer { try? files.deleteDirectory(at: root) }
@@ -71,6 +102,7 @@ final class AddProjectModelTests: XCTestCase {
         let model = AddProjectModel(fileService: files)
         model.name = "Deleted"
         model.path = root + "/project"
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Initial preview") { model.identityMessage != nil }
         XCTAssertTrue(model.isValid)
         try files.deleteDirectory(at: model.path)
         XCTAssertNil(model.makeProject())
@@ -79,6 +111,7 @@ final class AddProjectModelTests: XCTestCase {
         XCTAssertEqual(try files.listDirectory(at: root), [])
         try files.createDirectory(at: root + "/corrected")
         model.path = root + "/corrected"
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Replacement preview") { model.identityMessage != nil }
         XCTAssertTrue(model.isValid)
         XCTAssertNotNil(model.makeProject())
     }

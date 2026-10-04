@@ -6,7 +6,8 @@ import SwiftUI
 final class PlatformViewModel {
     private let linkService: LinkServiceProtocol
     private let cursorCompiler: CursorCompilerProtocol
-    let fileService: FileServiceProtocol
+    private let fileService: FileServiceProtocol
+    let projectReconcilePolicy: ProjectReconcilePolicy
     private let deployStateStore: DeployStateStore
     private let now: () -> Date
     private let persist: (ModelContext) throws -> Void
@@ -33,6 +34,7 @@ final class PlatformViewModel {
     ) {
         let fs = fileService ?? FileService()
         self.fileService = fs
+        self.projectReconcilePolicy = ProjectReconcilePolicy(fileService: fs)
         self.linkService = linkService ?? LinkService(fileService: fs)
         self.cursorCompiler = cursorCompiler ?? CursorCompiler(
             fileService: fs,
