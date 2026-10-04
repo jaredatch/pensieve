@@ -71,6 +71,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          ./script/release.sh --check-tag "$GITHUB_REF_NAME"
 
           printf '::add-mask::%s\n' "$DEVELOPER_ID_P12_PASSWORD"
           printf '::add-mask::%s\n' "$NOTARY_ISSUER_ID"

@@ -31,6 +31,7 @@ DOWNLOAD_PREFIX = "https://github.com/jaredatch/pensieve/releases/download"
 SWIFT_COMPILE_TIMEOUT = 120
 CRYPTO_RUN_TIMEOUT = 30
 RELEASE_RUN_TIMEOUT = 60
+DEFAULT_SWIFT_RELEASE_TIMEOUT = 120  # Fresh-cache /usr/bin/swift: 1.190 s; includes all cask I/O.
 KEY_GENERATOR = '''import CryptoKit
 import Foundation
 let key = Curve25519.Signing.PrivateKey()
@@ -39,17 +40,8 @@ print(key.publicKey.rawRepresentation.base64EncodedString())
 print(try key.signature(for: data).base64EncodedString())
 '''
 
-# This oracle is deliberately independent of the production channel helper.
-PUBLICATION_CASES = {
-    "0.9.0": ("", False), "1.0.0": ("", False), "1.0.1": ("", False),
-    "1.1.0": ("", False), "1.9.0": ("", False), "1.10.0": ("", False),
-    "2.0.0": ("", False), "10.0.0": ("", False),
-    "1.0.0-alpha": ("beta", True), "1.0.0-alpha.1": ("beta", True),
-    "1.0.0-alpha.beta": ("beta", True), "1.0.0-beta": ("beta", True),
-    "1.0.0-beta.1": ("beta", True), "1.0.0-beta.2": ("beta", True),
-    "1.0.0-beta.11": ("beta", True), "1.0.0-rc.1": ("beta", True),
-    "1.1.0-alpha.1": ("beta", True), "1.1.0-beta.1": ("beta", True),
-}
+# Shared literal oracle; neither suite derives channels from production code.
+PUBLICATION_CASES = json.loads((ROOT / "PensieveTests/Fixtures/release-versions.json").read_text())
 POISON_TEXTS = ("x\n::error::fixture", "x\r\t\x1b\x7f", "x\u0085::warning::fixture", "##[error]fixture")
 
 
@@ -89,6 +81,8 @@ def save(): p.write_text(json.dumps(s))
 def fail(message):
     print(message + s.get("error_tail", ""), file=sys.stderr); save(); sys.exit(1)
 s["calls"].append([cmd] + args)
+s.setdefault("child_credentials", []).append([cmd, os.environ.get("TAP_GH_TOKEN"),
+    os.environ.get("CASK_TAP_TOKEN"), os.environ.get("GH_TOKEN")])
 save()
 if cmd == "gh":
     if args[0] == "api":
@@ -199,11 +193,17 @@ class ReleaseSequenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.crypto_tools = None
+        # Compile once under an adversarial allocator default, so every test
+        # reuses binaries even when the host TMPDIR contains whitespace.
+        cls.crypto_tmpdir = tempfile.TemporaryDirectory(prefix="pensieve crypto TMPDIR with spaces-", dir="/tmp")
+        cls.addClassCleanup(cls.crypto_tmpdir.cleanup)
+        with mock.patch.object(tempfile, "tempdir", cls.crypto_tmpdir.name):
+            cls.fixture_crypto_tools()
 
     @classmethod
     def fixture_crypto_tools(cls):
         if cls.crypto_tools is None:
-            scratch = tempfile.TemporaryDirectory(prefix="pensieve-crypto-tools-")
+            scratch = tempfile.TemporaryDirectory(prefix="pensieve-crypto-tools-", dir="/tmp")
             cls.addClassCleanup(scratch.cleanup)
             tools = Path(scratch.name)
             generator = tools / "key-generator.swift"
@@ -507,6 +507,144 @@ class ReleaseSequenceTests(unittest.TestCase):
                     ["repos/jaredatch/homebrew-tap/contents/Casks/pensieve.rb", "fixture-tap-token"],
                     ["repos/jaredatch/homebrew-tap/contents/Casks/pensieve.rb", "fixture-tap-token"]]
         self.assertEqual(self.state["credential_calls"], expected)
+
+    def test_tap_credential_is_absent_from_children_except_tap_gh(self):
+        self.cask_artifact()
+        self.state["appcast"] = feed()
+        # An inherited export attribute must not turn the captured shell variable into an export.
+        self.env["CASK_TAP_TOKEN"] = "inherited-export-fixture"
+        # Probe the environment inherited by state_tool's Python, in addition to gh/verifier stubs.
+        python = self.root / "bin/python3"
+        python.write_text('#!/usr/bin/python3\nimport os,json,sys\n'
+                          'p=os.environ["RELEASE_TEST_STATE"]\ns=json.load(open(p))\n'
+                          'child = "gh-python" if sys.argv[1].endswith("/gh") else "state-python" if sys.argv[1].endswith("release_state.py") else "verifier-python"\n'
+                          's.setdefault("child_credentials", []).append([child, os.environ.get("TAP_GH_TOKEN"), os.environ.get("CASK_TAP_TOKEN"), os.environ.get("GH_TOKEN")])\n'
+                          'open(p,"w").write(json.dumps(s))\nos.execv("/usr/bin/python3", ["python3"]+sys.argv[1:])\n')
+        python.chmod(0o755)
+        # DEBUG with functrace observes export flags at the absolute PlistBuddy
+        # invocation and the first dirname child; it records only fixture tokens.
+        trace = self.root / "child-export-flags"
+        startup = self.root / "export-probe.sh"
+        startup.write_text('set -T\ntrap \'case "$BASH_COMMAND" in /usr/libexec/PlistBuddy*|dirname*) printf "command=%s\\n" "$BASH_COMMAND" >> "$RELEASE_EXPORT_TRACE"; declare -p TAP_GH_TOKEN CASK_TAP_TOKEN >> "$RELEASE_EXPORT_TRACE" 2>/dev/null || true ;; esac\' DEBUG\n')
+        self.env.update(BASH_ENV=str(startup), RELEASE_EXPORT_TRACE=str(trace))
+        self.run_release(cask_only=True)
+        self.assertEqual(self.state["writes"], ["cask"])
+        exports = trace.read_text()
+        self.assertIn('/usr/libexec/PlistBuddy', exports)
+        self.assertIn('command=dirname', exports)
+        self.assertNotRegex(exports, r'declare -x (?:TAP_GH_TOKEN|CASK_TAP_TOKEN)',
+                            "absolute system children must not inherit the tap token")
+        for child, exported, captured, credential in self.state["child_credentials"]:
+            with self.subTest(child=child):
+                self.assertIsNone(exported, "no child may inherit TAP_GH_TOKEN")
+                self.assertIsNone(captured, "the captured tap token must stay unexported")
+                if child not in ("gh", "gh-python"):
+                    self.assertEqual(credential, "fixture-public-token", "only tap gh may receive the tap credential")
+        self.assertTrue(any(row[0] == "state-python" for row in self.state["child_credentials"]))
+        self.assertTrue(any(row[0] == "verify" for row in self.state["child_credentials"]))
+        self.assertEqual([token for _, token in self.state["credential_calls"]],
+                         ["fixture-public-token"] * 2 + ["fixture-tap-token"] * 2)
+
+    def test_signer_tag_check_precedes_secret_files_and_keychain(self):
+        runner = self.root / "runner temp"; runner.mkdir()
+        security = self.root / "bin/security"
+        security.write_text('#!/bin/bash\nprintf "security called\\n" >> "$RUNNER_TEMP/security-calls"\nexit 1\n')
+        security.chmod(0o755)
+        step = subprocess.run(["/usr/bin/ruby", "-ryaml", "-e",
+                               'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("release").fetch("steps").find { |s| s["name"] == "Sign, notarize, and publish" }.fetch("run")',
+                               str(ROOT / ".github/workflows/release.yml")], capture_output=True, text=True, timeout=30)
+        self.assertEqual(step.returncode, 0, step.stderr)
+        self.state_path.write_text(json.dumps(self.state))
+        env = dict(self.env, RUNNER_TEMP=str(runner), GITHUB_REF_NAME="v9.9.9",
+                   DEVELOPER_ID_P12=base64.b64encode(b"fixture-p12").decode(),
+                   DEVELOPER_ID_P12_PASSWORD="fixture-password", NOTARY_API_KEY_P8="fixture-p8",
+                   NOTARY_ISSUER_ID="fixture-issuer", NOTARY_KEY_ID="fixture-id", SPARKLE_PRIVATE_KEY="fixture-key")
+        result = subprocess.run(["/bin/bash", "-c", step.stdout], cwd=self.root, env=env,
+                                capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("tag 'v9.9.9' does not match VERSION v" + VERSION, result.stderr)
+        self.assertEqual(list(runner.iterdir()), [], "tag mismatch must precede secret files and keychain commands")
+        self.assertEqual(json.loads(self.state_path.read_text())["calls"], [])
+
+    def test_check_tag_mode_has_no_release_work_for_matching_or_mismatched_tags(self):
+        self.state_path.write_text(json.dumps(self.state))
+        for tag, expected in (("v" + VERSION, 0), ("v9.9.9", 1)):
+            with self.subTest(tag=tag):
+                result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--check-tag", tag],
+                                        env=self.env, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                if expected:
+                    self.assertIn("does not match VERSION", result.stderr)
+                self.assertEqual(json.loads(self.state_path.read_text())["calls"], [])
+                self.assertFalse((self.root / "build").exists(), "check-only must not prepare a release")
+
+    def test_missing_tap_token_fails_before_live_reads_or_verification(self):
+        self.env.pop("TAP_GH_TOKEN")
+        self.cask_artifact(); self.state["appcast"] = feed()
+        self.assertIn("TAP_GH_TOKEN is required for cask publication", self.run_release(cask_only=True, expected=1))
+        self.assertEqual(self.state["calls"], [], "missing token must stop before public reads and verification")
+        self.assertEqual(self.state["writes"], [])
+
+    def test_prerelease_cask_exits_before_token_validation_and_publication(self):
+        self.set_version("1.0.0-beta.1")
+        self.env.pop("TAP_GH_TOKEN")
+        script = self.root / "script/release.sh"
+        original = script.read_text()
+        script.write_text(original.replace('if [ "${CASK_ONLY:-0}" -eq 1 ]; then',
+            'verify_cask_artifact() { echo "fixture reached verifier" >&2; return 1; }\nbump_cask() { echo "fixture reached bump_cask" >&2; return 1; }\nif [ "${CASK_ONLY:-0}" -eq 1 ]; then'))
+        result = subprocess.run(["/bin/bash", str(script), "--publish-cask-only"], env=self.env,
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("cask skipped for prerelease 1.0.0-beta.1", result.stdout)
+        self.assertNotIn("fixture reached", result.stderr)
+        self.assertEqual(self.state["calls"], [])
+
+    def test_all_feed_consumers_use_the_same_read_helper(self):
+        self.cask_artifact(); self.state["appcast"] = feed()
+        for consumer in ("release_preflight", "verify_appcast_unchanged", "verify_cask_artifact"):
+            with self.subTest(consumer=consumer):
+                self.state["calls"] = []
+                result = self.run_function('VERSION="1.0.0"; VERSION_CHANNEL=""; PUBLIC_BRANCH=master; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; read_live_appcast() { echo "fixture shared feed refusal" >&2; return 1; }; ' + consumer)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("fixture shared feed refusal", result.stderr)
+                self.assertFalse(any("appcast.xml" in arg for call in self.state["calls"] for arg in call),
+                                 "consumers must not bypass the common fetch policy")
+
+    def test_default_swift_verifier_in_spaced_checkout_and_cold_cache(self):
+        signature = self.install_fixture_public_key()
+        self.env.pop("VERIFY_UPDATE_CMD")
+        self.state["appcast"] = feed(signature=signature)
+        self.assertIn(" ", str(self.root))
+        cache = self.root / "cold swift module cache"
+        self.assertFalse(cache.exists())
+        self.env.update(SWIFT_MODULECACHE_PATH=str(cache), CLANG_MODULE_CACHE_PATH=str(cache))
+        # Observe the actual default Swift child's credential boundary, without replacing its verifier.
+        source = self.root / "script/verify_update.swift"
+        source.write_text(source.read_text() + '\nlet env = ProcessInfo.processInfo.environment\n'
+                          'if env["TAP_GH_TOKEN"] != nil || env["CASK_TAP_TOKEN"] != nil || env["GH_TOKEN"] == "fixture-tap-token" { fputs("fixture verifier inherited tap credential\\n", stderr); exit(1) }\n')
+        self.cask_artifact()
+        self.state_path.write_text(json.dumps(self.state))
+        command = ["/bin/bash", str(self.root / "script/release.sh"), "--publish-cask-only"]
+        result = subprocess.run(command, env=self.env, capture_output=True, text=True, timeout=DEFAULT_SWIFT_RELEASE_TIMEOUT)
+        self.state = json.loads(self.state_path.read_text())
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.state["writes"], ["cask"])
+        self.assertTrue(any(cache.rglob("*.swiftmodule")), "the production Swift branch must use the cold cache")
+        self.cask_artifact(b"wrong built DMG")
+        result = subprocess.run(command, env=self.env, capture_output=True, text=True, timeout=DEFAULT_SWIFT_RELEASE_TIMEOUT)
+        self.assertNotEqual(result.returncode, 0, "the default Swift verifier must reject tampered bytes")
+        self.assertIn("Published DMG EdDSA signature does not match appcast", result.stderr)
+        self.assertEqual(json.loads(self.state_path.read_text())["writes"], ["cask"])
+
+    def test_crypto_tools_support_tmpdir_with_spaces(self):
+        scratch = self.root / "TMPDIR with spaces"; scratch.mkdir()
+        self.env["TMPDIR"] = str(scratch) + "/"
+        signature = self.install_fixture_public_key()
+        self.state["appcast"] = feed(signature=signature)
+        self.cask_artifact()
+        self.run_release(cask_only=True)
+        self.assertEqual(self.state["writes"], ["cask"])
+        self.assertNotIn(" ", self.env["VERIFY_UPDATE_CMD"], "command seam requires a space-free tool path")
 
     def test_expected_tag_is_checked_by_release_script_before_work(self):
         self.cask_artifact()

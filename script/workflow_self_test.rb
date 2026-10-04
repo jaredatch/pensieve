@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 # Local workflow contract tests. Uses macOS's bundled Ruby and YAML parser.
 require 'yaml'
+require 'json'
 require 'minitest/autorun'
 require 'strscan'
 
@@ -30,6 +31,7 @@ class WorkflowCondition
   end
 
   def self.fold(value)
+    raise ArgumentError, 'workflow probe requires string operands' unless value.is_a?(String)
     raise ArgumentError, 'workflow probe supports ASCII strings only' unless value.ascii_only?
     value.tr('A-Z', 'a-z')
   end
@@ -377,9 +379,30 @@ class WorkflowTests < Minitest::Test
 
   def test_both_jobs_use_the_shared_tag_guard
     signer = @release.fetch('steps').find { |step| step['name'] == 'Sign, notarize, and publish' }
+    assert_equal './script/release.sh --check-tag "$GITHUB_REF_NAME"', signer.fetch('run').lines.reject { |line| line.strip.empty? }[1].strip, 'tag check must precede secret setup'
     [signer, @cask.fetch('steps').last].each do |step|
       assert_match(/\.\/script\/release\.sh[^\n]*(?:\\\n\s*)?--expect-tag "\$GITHUB_REF_NAME"/, step.fetch('run'))
       refute_includes step.fetch('run'), 'expected_tag='
+    end
+  end
+
+  def test_cask_gate_matches_shared_literal_publication_channels
+    cases = JSON.parse(File.read(File.join(ROOT, 'PensieveTests/Fixtures/release-versions.json')))
+    assert_operator cases.length, :>=, 18
+    condition = WorkflowCondition.new(@cask.fetch('if'))
+    cases.each do |version, (channel, prerelease)|
+      context = { 'repository' => 'jaredatch/pensieve', 'event_name' => 'push',
+                  'ref_type' => 'tag', 'ref' => 'refs/tags/v' + version }
+      assert_equal channel.empty?, condition.evaluate(context), "#{version}: literal publication channel #{channel.inspect}"
+      assert_equal !prerelease, condition.evaluate(context), "#{version}: literal prerelease status"
+    end
+  end
+
+  def test_non_string_condition_operands_are_named_refusals
+    ['contains(github.ref, true)', 'startsWith(false, github.ref)', true, nil].each do |condition|
+      error = assert_raises(Minitest::Assertion) { assert_release_admission(condition, 'jaredatch/pensieve', 'typed gate') }
+      assert_includes error.message, condition.inspect
+      assert_includes error.message, 'cannot evaluate condition'
     end
   end
 
@@ -508,7 +531,7 @@ class WorkflowTests < Minitest::Test
   def assert_release_admission(condition, canonical, label, stable_only: false)
     begin
       mismatch = release_event_mismatches(condition, canonical, stable_only: stable_only).first
-    rescue ArgumentError, RuntimeError, KeyError => error
+    rescue StandardError => error
       flunk "#{label}: cannot evaluate condition #{condition.inspect}: #{error.message}"
     end
     assert mismatch.nil?, -> { "#{label}: release matrix mismatch: #{mismatch.inspect}" }

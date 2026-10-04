@@ -23,25 +23,12 @@ verify_cask_artifact() (
   # Own a read-only snapshot outside build/dist. This path never prepares or
   # changes the signing folder, and GH_TOKEN here is the public-read credential.
   # The plain entry-point call keeps errexit active for local I/O failures.
-  local read_dir response live_feed branch status publication length signature public_key
+  local read_dir live_feed branch publication length signature public_key
   read_dir="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-cask-appcast.XXXXXX")"
   trap 'rm -rf "$read_dir"' EXIT
-  response="$(mktemp "$read_dir/appcast-response.XXXXXX")"
   live_feed="$read_dir/appcast.xml"
   branch="$(resolve_public_branch)" || return 1
-  if run_command_seam "$GH_CMD" api -X GET "repos/$PUBLIC_REPO/contents/appcast.xml" \
-      -f "ref=$branch" --include > "$response"; then
-    if ! state_tool contents "$response" "$live_feed" > /dev/null; then
-      echo "release: invalid cask appcast contents response" >&2
-      return 1
-    fi
-  else
-    status="$(http_status "$response")"
-    log_response "$response" >&2
-    echo "release: cask appcast read failed (HTTP $(log_text "${status:-unknown}"))" >&2
-    return 1
-  fi
-  rm -f "$response"
+  read_live_appcast "$branch" "$live_feed" "cask appcast"
   publication="$(state_tool appcast "$live_feed" "$VERSION" "$DOWNLOAD_PREFIX")" || return 1
   read -r length signature <<< "$publication"
   [ "$length" != absent ] || { echo "release: cask requires a live appcast item for $VERSION" >&2; return 1; }
@@ -91,7 +78,7 @@ cask_preflight() {
   mkdir -p "$DIST_DIR/homebrew"
   CASK_REMOTE="$DIST_DIR/homebrew/base.rb"
   CASK_VERSION=""; CASK_DIGEST=""
-  if run_command_seam "$GH_CMD" api --include -X GET "repos/$TAP_REPO/contents/Casks/pensieve.rb" > "$response"; then
+  if tap_api --include -X GET "repos/$TAP_REPO/contents/Casks/pensieve.rb" > "$response"; then
     CASK_SHA="$(state_tool contents "$response" "$CASK_REMOTE")" || {
       echo "release: invalid cask contents response" >&2; return 1;
     }

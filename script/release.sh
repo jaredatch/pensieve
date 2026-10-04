@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Keep the tap-write credential in shell memory only. Clear any inherited
+# export attribute before the first child, including checkout-path resolution.
+CASK_TAP_TOKEN="${TAP_GH_TOKEN:-}"
+export -n CASK_TAP_TOKEN
+unset TAP_GH_TOKEN
+
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION_FILE="$REPO/VERSION"
 DIST_DIR="$REPO/build/dist"
@@ -15,6 +21,7 @@ PUBLISH=0
 CASK_ONLY=0
 EXPECTED_TAG=""
 CHECK_TAG=0
+CHECK_TAG_ONLY=0
 FIRST_RELEASE=0
 PUBLIC_BRANCH=""
 APPCAST_SHA=""
@@ -44,6 +51,7 @@ usage() {
 usage: script/release.sh [--dry-run | --dry-run-local] [--sign IDENTITY]
                          [--notary-key P8 --notary-key-id ID --notary-issuer ID]
                          [--publish] [--expect-tag TAG]
+       script/release.sh --check-tag TAG
        script/release.sh --notes-for VERSION [CHANGELOG]
        script/release.sh --print-release-args VERSION [CHANGELOG]
        script/release.sh [--expect-tag TAG] --publish-cask-only
@@ -60,6 +68,7 @@ in that disposable shell.
 --first-release permits a missing appcast only after HTTP 404; its PUT is create-only.
 
 --expect-tag requires TAG to match vVERSION before any release work.
+--check-tag performs that same check and exits without preparing a release.
 --publish-cask-only reads the live feed with GH_TOKEN and accesses the tap with TAP_GH_TOKEN.
 
 Dry run is the default when --publish is absent. Dry run builds the app,
@@ -73,6 +82,13 @@ USAGE
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --check-tag)
+      [ "$#" -eq 2 ] || { usage; exit 64; }
+      EXPECTED_TAG="$2"
+      CHECK_TAG=1
+      CHECK_TAG_ONLY=1
+      shift 2
+      ;;
     --expect-tag)
       [ "$#" -ge 2 ] || { usage; exit 64; }
       EXPECTED_TAG="$2"
@@ -408,6 +424,24 @@ http_status() {
   awk '/^HTTP\// {print $2; exit}' "$1"
 }
 
+tap_api() {
+  if [ "$CASK_ONLY" -eq 1 ]; then
+    GH_TOKEN="$CASK_TAP_TOKEN" run_command_seam "$GH_CMD" api "$@"
+  else
+    run_command_seam "$GH_CMD" api "$@"
+  fi
+}
+
+contents_api() {
+  local repo="$1"
+  shift
+  if [ "$repo" = "$TAP_REPO" ]; then
+    tap_api "$@"
+  else
+    run_command_seam "$GH_CMD" api "$@"
+  fi
+}
+
 publish_contents_file() {
   [ "$#" -eq 6 ] || { echo "release: contents writes require an explicit preflight SHA" >&2; return 64; }
   local repo="$1"
@@ -433,7 +467,7 @@ publish_contents_file() {
   fi
 
   response="$(mktemp "${TMPDIR:-/tmp}/pensieve-contents-response.XXXXXX")" || return 1
-  if run_command_seam "$GH_CMD" api --include "${put_args[@]}" > "$response"; then
+  if contents_api "$repo" --include "${put_args[@]}" > "$response"; then
     log_response "$response"
     rm -f "$response"
   else
@@ -464,40 +498,64 @@ cleanup_appcast_base() {
   fi
 }
 
+# A single Contents-API read policy for signing, recheck and cask verification.
+# Empty output selects SHA-only parsing. A known 404 is absent only when the
+# caller explicitly permits it; transport, local I/O and parse failures stop.
+read_live_appcast() {
+  local branch="$1" output="$2" context="$3" allow_missing="${4:-0}"
+  local response status failure="$context read failed" invalid="invalid $context response" suffix=""
+  LIVE_APPCAST_SHA=""
+  LIVE_APPCAST_ABSENT=0
+  case "$context" in
+    "appcast recheck") failure="$context failed"; suffix="; stopping before GitHub Release creation" ;;
+    "cask appcast") invalid="invalid cask appcast contents response" ;;
+  esac
+  response="$(mktemp "${TMPDIR:-/tmp}/pensieve-appcast-response.XXXXXX")"
+  if run_command_seam "$GH_CMD" api -X GET "repos/$PUBLIC_REPO/contents/appcast.xml" \
+      -f "ref=$branch" --include > "$response"; then
+    if [ -n "$output" ]; then
+      if ! LIVE_APPCAST_SHA="$(state_tool contents "$response" "$output")"; then
+        rm -f "$response"
+        echo "release: $invalid" >&2
+        return 1
+      fi
+    elif ! LIVE_APPCAST_SHA="$(state_tool contents-sha "$response")"; then
+      rm -f "$response"
+      echo "release: $invalid" >&2
+      return 1
+    fi
+  else
+    status="$(http_status "$response")"
+    log_response "$response" >&2
+    rm -f "$response"
+    if [ "$allow_missing" -eq 1 ] && [ "$status" = 404 ]; then
+      LIVE_APPCAST_ABSENT=1
+      return 0
+    fi
+    echo "release: $failure (HTTP $(log_text "${status:-unknown}"))$suffix" >&2
+    return 1
+  fi
+  rm -f "$response"
+}
+
 release_preflight() {
   cleanup_appcast_base
   APPCAST_PREFLIGHT=0
   APPCAST_SHA=""
   PUBLIC_BRANCH="$(resolve_public_branch)" || return 1
-  local response status
   rm -rf "$APPCAST_INPUT_DIR"
   mkdir -p "$APPCAST_INPUT_DIR"
-  response="$(mktemp "${TMPDIR:-/tmp}/pensieve-appcast-response.XXXXXX")" || return 1
-  if run_command_seam "$GH_CMD" api -X GET "repos/$PUBLIC_REPO/contents/appcast.xml" \
-      -f "ref=$PUBLIC_BRANCH" --include > "$response"; then
-    # Own the base outside the signing folder before copying it in. Its bytes
-    # and the write-guard SHA come from this same response.
-    APPCAST_BASE="$(mktemp "$DIST_DIR/appcast-base.XXXXXX")" || { rm -f "$response"; return 1; }
-    trap cleanup_appcast_base EXIT
-    if ! APPCAST_SHA="$(state_tool contents "$response" "$APPCAST_BASE")"; then
-      rm -f "$response"
-      cleanup_appcast_base
-      echo "release: invalid appcast base response" >&2
-      return 1
-    fi
-    ditto "$APPCAST_BASE" "$APPCAST_INPUT_DIR/appcast.xml"
+  # The immutable base is owned outside the signing folder. Its bytes and SHA
+  # come from the same response before any copy is supplied to generate_appcast.
+  APPCAST_BASE="$(mktemp "$DIST_DIR/appcast-base.XXXXXX")"
+  trap cleanup_appcast_base EXIT
+  read_live_appcast "$PUBLIC_BRANCH" "$APPCAST_BASE" "appcast base" "$FIRST_RELEASE"
+  if [ "$LIVE_APPCAST_ABSENT" -eq 1 ]; then
+    cleanup_appcast_base
   else
-    status="$(http_status "$response")"
-    log_response "$response" >&2
-    rm -f "$response"
-    if [ "$FIRST_RELEASE" -eq 1 ] && [ "$status" = 404 ]; then
-      APPCAST_PREFLIGHT=1
-      return 0
-    fi
-    echo "release: appcast base read failed (HTTP $(log_text "${status:-unknown}"))" >&2
-    return 1
+    APPCAST_SHA="$LIVE_APPCAST_SHA"
+    ditto "$APPCAST_BASE" "$APPCAST_INPUT_DIR/appcast.xml"
   fi
-  rm -f "$response"
   APPCAST_PREFLIGHT=1
 }
 
@@ -511,27 +569,11 @@ verify_public_branch_unchanged() {
 }
 
 verify_appcast_unchanged() {
-  local response current status
-  response="$(mktemp "${TMPDIR:-/tmp}/pensieve-appcast-response.XXXXXX")" || return 1
-  if run_command_seam "$GH_CMD" api -X GET "repos/$PUBLIC_REPO/contents/appcast.xml" \
-      -f "ref=$PUBLIC_BRANCH" --include > "$response"; then
-    if ! current="$(state_tool contents-sha "$response")"; then
-      rm -f "$response"
-      echo "release: invalid appcast recheck response" >&2
-      return 1
-    fi
-  else
-    status="$(http_status "$response")"
-    log_response "$response" >&2
-    rm -f "$response"
-    if [ "$FIRST_RELEASE" -eq 1 ] && [ -z "$APPCAST_SHA" ] && [ "$status" = 404 ]; then
-      return 0
-    fi
-    echo "release: appcast recheck failed (HTTP $(log_text "${status:-unknown}")); stopping before GitHub Release creation" >&2
-    return 1
-  fi
-  rm -f "$response"
-  if [ "$current" != "$APPCAST_SHA" ]; then
+  local allow_missing=0
+  if [ "$FIRST_RELEASE" -eq 1 ] && [ -z "$APPCAST_SHA" ]; then allow_missing=1; fi
+  read_live_appcast "$PUBLIC_BRANCH" "" "appcast recheck" "$allow_missing"
+  if [ "$LIVE_APPCAST_ABSENT" -eq 1 ]; then return 0; fi
+  if [ "$LIVE_APPCAST_SHA" != "$APPCAST_SHA" ]; then
     echo "release: appcast changed since preflight; stopping before GitHub Release creation" >&2
     return 1
   fi
@@ -640,6 +682,8 @@ if [ "$INSPECT_MODE" != functions ] && [ "$INSPECT_MODE" != verify-appcast ]; th
   fi
 fi
 
+if [ "$CHECK_TAG_ONLY" -eq 1 ]; then exit 0; fi
+
 case "$INSPECT_MODE" in
   functions)
     return 0 2>/dev/null || exit 0
@@ -664,12 +708,13 @@ case "$INSPECT_MODE" in
 esac
 
 if [ "${CASK_ONLY:-0}" -eq 1 ]; then
-  verify_cask_artifact
   if is_prerelease; then
-    bump_cask
-  else
-    GH_TOKEN="${TAP_GH_TOKEN:?release: TAP_GH_TOKEN is required for cask publication}" bump_cask
+    report_cask_publication
+    exit 0
   fi
+  [ -n "$CASK_TAP_TOKEN" ] || { echo "release: TAP_GH_TOKEN is required for cask publication" >&2; exit 1; }
+  verify_cask_artifact
+  bump_cask
   exit 0
 fi
 
