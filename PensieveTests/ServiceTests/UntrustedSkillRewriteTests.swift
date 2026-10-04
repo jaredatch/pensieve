@@ -145,7 +145,7 @@ final class UntrustedSkillRewriteTests: XCTestCase {
             let header = fixture.header ?? "---\(ending)name: A\(ending)description: D\(ending)---" + ending + ending
             let expected = header + expectedBody + fixture.terminal
             for draft in [edited, edited + "\n", edited + "\r\n\r\n"] {
-                XCTAssertTrue(model.updateBody(skill, body: draft), fixture.label)
+                XCTAssertTrue(model.updateBody(skill, body: draft).succeeded, fixture.label)
                 XCTAssertEqual(try files.files.readData(at: path), Data(expected.utf8), fixture.label)
             }
         }

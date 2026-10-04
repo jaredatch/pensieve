@@ -113,11 +113,11 @@ extension SkillLibraryViewModel {
             return false
         }
         guard hasUnsavedChanges(forDirectory: skill.directoryName) else { return true }
-        var didWrite = false
-        guard updateBody(skill, body: draft.body, onWrite: { didWrite = true }) else { return false }
+        let outcome = updateBody(skill, body: draft.body)
+        guard outcome.succeeded else { return false }
         drafts[skill.directoryName] = nil
         externallyModified.remove(skill.directoryName)
-        if didWrite { notifier() }
+        if outcome == .written { notifier() }
         return true
     }
 

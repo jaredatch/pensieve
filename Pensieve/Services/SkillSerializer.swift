@@ -12,6 +12,11 @@ import Foundation
 /// output is diff-stable and the one-list-item-per-line granularity stays available to the
 /// later union-merge work. Round-trip-verified through CheckedYAMLLoader in SkillFrontmatterTests.
 enum SkillSerializer {
+    struct RewriteResult {
+        let content: String
+        let isUnchanged: Bool
+    }
+
     /// Value-typed entry point so composing write paths (07.2) and tests need not build a Skill.
     static func serialize(name: String, description: String, body: String) -> String {
         compose(name: name, description: description, body: body, lineEnding: "\n")
@@ -41,10 +46,21 @@ enum SkillSerializer {
         fallbackName: String,
         fallbackDescription: String
     ) -> String {
+        rewriteResult(body: body, preserving: parsed, fallbackName: fallbackName,
+                      fallbackDescription: fallbackDescription).content
+    }
+
+    /// Reports the existing unchanged branch so the store need not reconstruct its return value.
+    static func rewriteResult(
+        body: String,
+        preserving parsed: ParsedSkill,
+        fallbackName: String,
+        fallbackDescription: String
+    ) -> RewriteResult {
         let originalBody = parsed.preservedFile?.body ?? SkillParser.canonicalBody(parsed.body)
         let draft = SkillParser.canonicalBody(body)
         if normalizeLineEndings(draft, to: "\n") == normalizeLineEndings(originalBody, to: "\n") {
-            return parsed.preservedFile?.source ?? parsed.body
+            return RewriteResult(content: parsed.preservedFile?.source ?? parsed.body, isUnchanged: true)
         }
         let body = normalizeLineEndings(draft, to: parsed.preferredLineEnding)
         if let file = parsed.preservedFile {
@@ -54,14 +70,15 @@ enum SkillSerializer {
             case 0x0D: separator = "\n"
             default: separator = parsed.preferredLineEnding
             }
-            return file.bodyPrefix + separator + body + file.bodySuffix
+            return RewriteResult(content: file.bodyPrefix + separator + body + file.bodySuffix, isUnchanged: false)
         }
-        return compose(
+        let content = compose(
             name: fallbackName,
             description: fallbackDescription,
             body: body,
             lineEnding: parsed.preferredLineEnding
         ) + parsed.trailingLineBreaks
+        return RewriteResult(content: content, isUnchanged: false)
     }
 
     /// Normalize the two identity entries while retaining every other trustworthy source slice.
@@ -171,7 +188,7 @@ enum SkillSerializer {
         return inserted + (lines.last?.ending ?? "")
     }
 
-    private static func normalizeLineEndings(_ value: String, to lineEnding: String) -> String {
+    static func normalizeLineEndings(_ value: String, to lineEnding: String) -> String {
         value.replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
             .replacingOccurrences(of: "\n", with: lineEnding)

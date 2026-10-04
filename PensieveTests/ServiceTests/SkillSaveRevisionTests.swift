@@ -48,7 +48,7 @@ final class SkillSaveRevisionTests: XCTestCase {
         var nudges = 0
         let library = SkillLibraryViewModel(skillStore: store, notifier: { nudges += 1 })
         let writes = files.writes.count
-        XCTAssertTrue(library.updateBody(skill, body: "Body\n"))
+        XCTAssertTrue(library.updateBody(skill, body: "Body\n").succeeded)
         XCTAssertEqual(files.writes.count, writes, "Byte-identical saves must not write the file")
         XCTAssertEqual(files.files.regularFileMetadata(at: path), before)
         XCTAssertEqual(skill.updatedAt, timestamp)
@@ -63,7 +63,7 @@ final class SkillSaveRevisionTests: XCTestCase {
         store.rewriteOverride = "Stored\r\nSecond"
         let skill = Skill(name: "Test", directoryName: "test")
         let library = SkillLibraryViewModel(skillStore: store)
-        XCTAssertTrue(library.updateBody(skill, body: "Requested\nSecond"))
+        XCTAssertTrue(library.updateBody(skill, body: "Requested\nSecond").succeeded)
         XCTAssertEqual(store.writeCount, 1)
         XCTAssertTrue(library.wasLastWrittenByApp(directoryName: "test", currentBody: "Stored\r\nSecond"),
                       "The fingerprint must describe the content returned by the store")
@@ -93,6 +93,68 @@ final class SkillSaveRevisionTests: XCTestCase {
         XCTAssertEqual(nudges, 0, "A byte-identical save must not nudge sync")
         XCTAssertTrue(library.drafts.isEmpty)
         XCTAssertTrue(library.wasLastWrittenByApp(directoryName: slug, currentBody: "Edited"))
+    }
+
+    func testNoOpSaveAppliesDescriptionFallbackWithoutWritingOrNudging() throws {
+        for description in ["", " \t\n"] {
+            for fromDraft in [false, true] {
+                let files = PreviewImageFileSpy()
+                let root = NSTemporaryDirectory() + "NoOpDescription-" + UUID().uuidString
+                defer { try? files.files.deleteDirectory(at: root) }
+                let store = SkillStore(fileService: files, baseDir: root)
+                let slug = try store.createSkill(name: "Fallback", description: "D", body: "Old")
+                let skill = Skill(name: "Fallback", skillDescription: description, directoryName: slug)
+                var nudges = 0
+                let library = SkillLibraryViewModel(skillStore: store, notifier: { nudges += 1 })
+                let path = root + "/" + slug + "/SKILL.md"
+                if fromDraft {
+                    _ = library.editorBody(for: skill)
+                    library.noteEditorChanged(skill, body: "Edited")
+                    try files.files.writeFile(at: path, content: SkillSerializer.serialize(
+                        name: "Fallback", description: "D", body: "Edited"
+                    ))
+                }
+                let source = try files.files.readFile(at: path)
+                let metadata = try XCTUnwrap(files.files.regularFileMetadata(at: path))
+                let timestamp = skill.updatedAt
+                let writes = files.writes.count
+                let succeeded = fromDraft ? library.saveDraft(skill) : library.updateBody(skill, body: "Old").succeeded
+                XCTAssertTrue(succeeded)
+                XCTAssertEqual(skill.skillDescription, "Fallback", "A successful no-op save still fills the model description")
+                XCTAssertEqual(files.writes.count, writes)
+                XCTAssertEqual(files.files.regularFileMetadata(at: path), metadata)
+                XCTAssertEqual(try files.files.readFile(at: path), source)
+                XCTAssertEqual(skill.updatedAt, timestamp)
+                XCTAssertEqual(nudges, 0)
+            }
+        }
+    }
+
+    func testStoreUsesTheSerializersUnchangedReportWithoutRederivingIt() throws {
+        let store = try sourceFile("Pensieve/Services/SkillStore.swift")
+        XCTAssertTrue(store.contains("SkillSerializer.rewriteResult("), "The serializer reports its unchanged branch")
+        XCTAssertTrue(store.contains("guard !result.isUnchanged"), "The store writes unless the serializer reports unchanged")
+        XCTAssertFalse(store.contains("preservedFile?.source ?? parsed.body"),
+                       "The store must not copy the serializer's return rule")
+        XCTAssertFalse(store.contains("content.utf8.elementsEqual"), "The store must not infer unchanged from content")
+    }
+
+    func testDraftAndSerializerShareOneLineEndingNormalizer() throws {
+        let reads = try sourceFile("Pensieve/ViewModels/SkillLibraryViewModel+Reads.swift")
+        let serializer = try sourceFile("Pensieve/Services/SkillSerializer.swift")
+        XCTAssertTrue(reads.contains("SkillSerializer.normalizeLineEndings("), "Draft and echo checks use the shared helper")
+        XCTAssertFalse(reads.contains("replacingOccurrences"), "Draft and echo checks must not duplicate normalization")
+        XCTAssertEqual((reads + serializer).components(separatedBy: "func normalizeLineEndings(").count - 1, 1)
+    }
+
+    func testBodyUpdateReturnsItsOutcomeWithoutANotifierTypedCallback() throws {
+        let write = try sourceFile("Pensieve/ViewModels/SkillLibraryViewModel+Write.swift")
+        let draft = try sourceFile("Pensieve/ViewModels/SkillLibraryViewModel+Draft.swift")
+        XCTAssertTrue(write.contains("func updateBody(_ skill: Skill, body: String) -> BodyUpdateOutcome"))
+        XCTAssertFalse(write.contains("SyncStateNotifying"), "A write outcome is not a sync notifier")
+        XCTAssertFalse(write.contains("onWrite"), "Return the outcome instead of invoking a report callback")
+        XCTAssertTrue(draft.contains("let outcome = updateBody("))
+        XCTAssertTrue(draft.contains("if outcome == .written { notifier() }"))
     }
 
     private func sourceFile(_ relativePath: String) throws -> String {

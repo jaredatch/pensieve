@@ -75,8 +75,7 @@ extension SkillLibraryViewModel {
     static func bodiesMatch(_ body: String, _ baseline: String?) -> Bool {
         guard let baseline else { return false }
         func comparable(_ text: String) -> String {
-            SkillParser.canonicalBody(text).replacingOccurrences(of: "\r\n", with: "\n")
-                .replacingOccurrences(of: "\r", with: "\n")
+            SkillSerializer.normalizeLineEndings(SkillParser.canonicalBody(text), to: "\n")
         }
         return comparable(body) == comparable(baseline)
     }

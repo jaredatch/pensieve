@@ -1,11 +1,17 @@
 import Foundation
 
 extension SkillLibraryViewModel {
+    enum BodyUpdateOutcome {
+        case failed, unchanged, written
+
+        var succeeded: Bool { self != .failed }
+    }
+
     @discardableResult
-    func updateBody(_ skill: Skill, body: String, onWrite: SyncStateNotifying? = nil) -> Bool {
+    func updateBody(_ skill: Skill, body: String) -> BodyUpdateOutcome {
         guard !isWriteFenced(skill) else {
             error = "This skill's files are unavailable; delete it from the list, or restore the file and relaunch Pensieve."
-            return false
+            return .failed
         }
         do {
             // Keep the model's description non-empty without rewriting identity in the existing file.
@@ -22,20 +28,19 @@ extension SkillLibraryViewModel {
                 fallbackName: skill.name,
                 fallbackDescription: resolvedDescription
             )
+            skill.skillDescription = resolvedDescription
             let savedBody = SkillParser.stripFrontmatter(result.content)
             if result.didWrite {
-                skill.skillDescription = resolvedDescription
                 noteAppAuthoredBody(skill, body: savedBody)
                 skill.updatedAt = Date()
-                onWrite?()
             } else {
                 setLastWrittenBody(savedBody, directoryName: skill.directoryName)
             }
             error = nil
-            return true
+            return result.didWrite ? .written : .unchanged
         } catch {
             self.error = "Failed to save: \(error.localizedDescription)"
-            return false
+            return .failed
         }
     }
 }

@@ -113,18 +113,17 @@ final class SkillStore: SkillStoreProtocol {
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
                       fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
         let path = try validatedSkillDirectory(directoryName) + "/SKILL.md"
-        let content = SkillSerializer.rewrite(
+        let result = SkillSerializer.rewriteResult(
             body: body,
             preserving: parsed,
             fallbackName: fallbackName,
             fallbackDescription: fallbackDescription
         )
-        let original = parsed.preservedFile?.source ?? parsed.body
-        guard !content.utf8.elementsEqual(original.utf8) else {
-            return SkillRewriteResult(content: content, didWrite: false)
+        guard !result.isUnchanged else {
+            return SkillRewriteResult(content: result.content, didWrite: false)
         }
-        try fileService.writeFile(at: path, content: content)
-        return SkillRewriteResult(content: content, didWrite: true)
+        try fileService.writeFile(at: path, content: result.content)
+        return SkillRewriteResult(content: result.content, didWrite: true)
     }
 
     func writeBody(directoryName: String, body: String) throws {

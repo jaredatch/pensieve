@@ -152,7 +152,7 @@ final class SkillDeletionFlowTests: XCTestCase {
 
     func testQuarantinedRowRefusesEveryWrite() throws {
         let f = try quarantinedFixture()
-        XCTAssertFalse(f.library.updateBody(f.skill, body: "resurrect"))
+        XCTAssertFalse(f.library.updateBody(f.skill, body: "resurrect").succeeded)
         f.library.noteEditorChanged(f.skill, body: "resurrect"); XCTAssertFalse(f.library.saveDraft(f.skill))
         XCTAssertThrowsError(try restoreSkillHistoryVersion(
             skill: f.skill, body: "resurrect", store: f.store, library: f.library, notifier: {}))
@@ -219,7 +219,7 @@ extension SkillDeletionFlowTests {
         let path = f.links.path(f.skill, .claudeCode, nil); f.links.linkedPaths.insert(path)
         f.library.refreshQuarantine(context: f.context, fetch: { _ in throw DeletionTestError() })
         XCTAssertFalse(delete(f)); XCTAssertTrue(f.links.unlinkCalls.isEmpty); XCTAssertEqual(f.counter.value, 0)
-        XCTAssertFalse(f.library.updateBody(f.skill, body: "x"))
+        XCTAssertFalse(f.library.updateBody(f.skill, body: "x").succeeded)
         f.library.createSkill(name: "Blocked", description: "", body: "x", tags: [],
                               context: f.context)
         XCTAssertTrue(f.store.createAvoiding.isEmpty)
