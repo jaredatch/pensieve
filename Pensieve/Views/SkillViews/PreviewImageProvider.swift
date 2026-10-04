@@ -17,21 +17,21 @@ struct PreviewImageProvider: ImageProvider, InlineImageProvider {
     let skillDirectory: String?
     var documentRelativePath = "SKILL.md"
     var colorScheme: ColorScheme = .light
-    var budget = PreviewImageDecodeBudget()
+    let budget: PreviewImageDecodeBudget
 
     func makeImage(url: URL?) -> some View {
         PreviewBlockImage(url: url, provider: self)
     }
 
-    /// Shared by the mounted block task and inline provider. Leaf reads and ImageIO decoding are
-    /// synchronous, so detach them explicitly even when the caller inherits the main actor.
+    /// Shared by the mounted block task and inline provider. Await the document's serial dispatch
+    /// queue so synchronous leaf reads and decodes leave both the main actor and cooperative pool.
     func loadImage(url: URL?) async -> CGImage? {
         guard let url, let url = PreviewImageLoader.resolvedURL(
             url, skillDirectory: skillDirectory, documentRelativePath: documentRelativePath
         ) else { return nil }
-        return await Task.detached(priority: .userInitiated) { [loader, skillDirectory, url, budget] in
+        return await budget.load { [loader, skillDirectory, url, budget] in
             try? loader.loadImage(at: url, skillDirectory: skillDirectory, budget: budget)
-        }.value
+        }
     }
 
     func image(with url: URL, label: String) async throws -> Image {

@@ -9,7 +9,8 @@ extension SkillPreviewImageTests {
         let bytes = try PreviewImagePolicyFixtures.png(width: 1_000, height: 1_000)
         let url = try XCTUnwrap(URL(string: "data:image/png;base64," + bytes.base64EncodedString()))
         let pixel = try PreviewImageFixture.decodedPNG()
-        let provider = PreviewImageProvider(loader: PreviewImageLoader(decode: { _ in pixel }), skillDirectory: nil)
+        let provider = PreviewImageProvider(loader: PreviewImageLoader(decode: { _ in pixel }), skillDirectory: nil,
+                                            budget: PreviewImageDecodeBudget())
         for _ in 0..<64 {
             let loaded = await provider.loadImage(url: url)
             XCTAssertNotNil(loaded)
@@ -37,7 +38,8 @@ extension SkillPreviewImageTests {
         let fixture = try imageFixture()
         defer { try? fixture.files.deleteDirectory(at: fixture.root) }
         let embedded = "data:image/png;base64," + (try PreviewImageFixture.png()).base64EncodedString()
-        let provider = PreviewImageProvider(loader: PreviewImageLoader(), skillDirectory: fixture.root)
+        let provider = PreviewImageProvider(loader: PreviewImageLoader(), skillDirectory: fixture.root,
+                                            budget: PreviewImageDecodeBudget())
         let reference = try PreviewImageFixture.decodedPNG()
         assertVisible(reference, "Decoded PNG reference")
         for source in [embedded, "red.png"] {
@@ -66,7 +68,8 @@ extension SkillPreviewImageTests {
     func testProvidersReturnPlaceholdersForEscapingAndUnsupportedURLs() async throws {
         let fixture = try imageFixture()
         defer { try? fixture.files.deleteDirectory(at: fixture.root) }
-        let provider = PreviewImageProvider(loader: PreviewImageLoader(), skillDirectory: fixture.root)
+        let provider = PreviewImageProvider(loader: PreviewImageLoader(), skillDirectory: fixture.root,
+                                            budget: PreviewImageDecodeBudget())
         let sources = ["../outside.png", "%2e%2e/outside.png", "file:///outside.png",
                        "https://preview.example/red.png", "http://preview.example/red.png",
                        "ftp://preview.example/red.png", "custom:red.png", "javascript:alert(1)"]
@@ -91,7 +94,7 @@ extension SkillPreviewImageTests {
         assertVisible(reference, "Decoded neighbor reference")
         for leaf in ["linked.png", "pipe.png", "unreadable.png", "invalid.png"] {
             let provider = PreviewImageProvider(loader: RecordingPreviewImageLoader(unreadableLeaf: "unreadable.png"),
-                                                skillDirectory: fixture.root)
+                                                skillDirectory: fixture.root, budget: PreviewImageDecodeBudget())
             let failedURL = try XCTUnwrap(URL(string: leaf))
             let blockImage = await provider.loadImage(url: failedURL)
             XCTAssertNil(blockImage, leaf)
@@ -146,7 +149,8 @@ extension SkillPreviewImageTests {
         XCTAssertFalse(blockLoader.results.contains(where: \.onMainThread), "Block reads and decodes must leave the main thread")
 
         let inlineLoader = RecordingPreviewImageLoader()
-        let provider = PreviewImageProvider(loader: inlineLoader, skillDirectory: fixture.root)
+        let provider = PreviewImageProvider(loader: inlineLoader, skillDirectory: fixture.root,
+                                            budget: PreviewImageDecodeBudget())
         for url in [URL(string: embedded)!, URL(string: "red.png")!] {
             _ = try await provider.image(with: url, label: "Inline")
         }
@@ -213,7 +217,8 @@ extension SkillPreviewImageTests {
     func testInlinePlaceholderRendersAltTextAndEmptyFallback() async throws {
         for scheme in [ColorScheme.light, .dark] {
             for alt in ["Diagram unavailable here", ""] {
-                let provider = PreviewImageProvider(loader: PreviewImageLoader(), skillDirectory: nil, colorScheme: scheme)
+                let provider = PreviewImageProvider(loader: PreviewImageLoader(), skillDirectory: nil, colorScheme: scheme,
+                                                    budget: PreviewImageDecodeBudget())
                 let image = try await provider.image(with: URL(string: "https://preview.example/blocked.png")!, label: alt)
                 let actual = ImageRenderer(content: image)
                 actual.scale = 2
@@ -307,7 +312,7 @@ private final class RecordingPreviewImageLoader: PreviewImageLoading {
 
     var results: [Result] { lock.withLock { recorded } }
 
-    func loadImage(at url: URL, skillDirectory: String?, budget: PreviewImageDecodeBudget?) throws -> CGImage {
+    func loadImage(at url: URL, skillDirectory: String?, budget: PreviewImageBudgeting?) throws -> CGImage {
         let onMainThread = Thread.isMainThread
         do {
             if url.lastPathComponent == unreadableLeaf { throw CocoaError(.fileReadNoPermission) }

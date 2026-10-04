@@ -15,12 +15,13 @@ final class SkillPreviewContextTests: XCTestCase {
         try files.files.writeData(at: base + "/outside.png", data: PreviewImageFixture.png())
         let library = SkillLibraryViewModel(fileService: files, manifestRoot: base)
         let preview = tab(library, file: "references/guide.md").preview(markdownBody: "", skillsBase: base)
-        let loaded = await preview.imageProvider.loadImage(url: URL(string: "diagram.png"))
+        let provider = preview.imageProvider(budget: PreviewImageDecodeBudget())
+        let loaded = await provider.loadImage(url: URL(string: "diagram.png"))
         XCTAssertEqual(try XCTUnwrap(loaded).width, 32)
         let expectedPath = URL(fileURLWithPath: root + "/references/diagram.png").standardizedFileURL.path
         XCTAssertEqual(files.reads.map(\.path), [expectedPath])
         XCTAssertEqual(files.reads.map(\.root), [root])
-        let escaped = await preview.imageProvider.loadImage(url: URL(string: "../../outside.png"))
+        let escaped = await provider.loadImage(url: URL(string: "../../outside.png"))
         XCTAssertNil(escaped)
         XCTAssertEqual(files.reads.count, 1, "Escaping paths must never reach the file service")
     }
@@ -35,13 +36,14 @@ final class SkillPreviewContextTests: XCTestCase {
                                        store: SkillStore(fileService: files, baseDir: base + "/skills"),
                                        workingDir: base, onDismiss: {})
         let preview = history.preview(for: SkillHistorySelection(sha: "old", document: "Past version"))
-        let local = await preview.imageProvider.loadImage(url: URL(string: "diagram.png"))
+        let provider = preview.imageProvider(budget: PreviewImageDecodeBudget())
+        let local = await provider.loadImage(url: URL(string: "diagram.png"))
         XCTAssertNil(local)
-        let absolute = await preview.imageProvider.loadImage(url: URL(fileURLWithPath: base + "/skills/skill/diagram.png"))
+        let absolute = await provider.loadImage(url: URL(fileURLWithPath: base + "/skills/skill/diagram.png"))
         XCTAssertNil(absolute)
         XCTAssertTrue(files.reads.isEmpty, "A historical preview cannot read today's assets")
         let data = "data:image/png;base64," + (try PreviewImageFixture.png()).base64EncodedString()
-        let embedded = await preview.imageProvider.loadImage(url: URL(string: data))
+        let embedded = await provider.loadImage(url: URL(string: data))
         XCTAssertEqual(try XCTUnwrap(embedded).width, 32)
     }
 
@@ -79,7 +81,7 @@ final class SkillPreviewContextTests: XCTestCase {
         }
         XCTAssertEqual(files.bytesRead - before, changed.count * 2)
         let preview = tab(library, file: "SKILL.md").preview(markdownBody: "", skillsBase: base)
-        let decoded = await preview.imageProvider.loadImage(url: URL(string: "diagram.png"))
+        let decoded = await preview.imageProvider(budget: PreviewImageDecodeBudget()).loadImage(url: URL(string: "diagram.png"))
         XCTAssertEqual(try XCTUnwrap(decoded).width, 16)
         XCTAssertEqual(try XCTUnwrap(decoded).height, 12)
         XCTAssertEqual(library.reloadToken, token, "An asset change is an echo for SKILL.md")

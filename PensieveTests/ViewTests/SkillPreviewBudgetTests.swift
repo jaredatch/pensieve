@@ -91,7 +91,7 @@ private final class BudgetImageRecorder: PreviewImageLoading {
 
     init() throws { pixel = try PreviewImageFixture.decodedPNG() }
 
-    func loadImage(at url: URL, skillDirectory: String?, budget: PreviewImageDecodeBudget?) throws -> CGImage {
+    func loadImage(at url: URL, skillDirectory: String?, budget: PreviewImageBudgeting?) throws -> CGImage {
         defer { lock.withLock { if url.scheme == "data" { embedded += 1 } else { local += 1 } } }
         let loader = PreviewImageLoader(decode: { [self] source in
             let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]

@@ -17,7 +17,7 @@ final class PreviewContextRevisionTests: XCTestCase {
         XCTAssertEqual(files.reads.map(\.path), [standardized + "/existing.png", standardized + "/missing.png"],
                        "Existence must not decide whether a contained relative leaf reaches the reader")
         XCTAssertEqual(files.reads.map(\.root), [root, root])
-        let provider = PreviewImageProvider(loader: loader, skillDirectory: root)
+        let provider = PreviewImageProvider(loader: loader, skillDirectory: root, budget: PreviewImageDecodeBudget())
         let existing = await provider.loadImage(url: URL(string: "existing.png"))
         XCTAssertEqual(try XCTUnwrap(existing).width, 32)
         let missing = await provider.loadImage(url: URL(string: "missing.png"))
