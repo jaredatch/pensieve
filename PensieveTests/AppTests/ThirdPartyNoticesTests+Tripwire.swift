@@ -102,6 +102,52 @@ extension ThirdPartyNoticesTests {
                                                  notices: parseNotices("### libYAML\n```text\nCopyright Old vendor.\n```\n"),
                                                  credits: "")
             }
+            XCTAssertNoThrow(try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
+                                                              notices: parseNotices(""), credits: ""))
+        }
+    }
+
+    func testRemovedYamsFindsLibYAMLInHeadings() throws {
+        try withFixture { root in
+            try fileService.writeFile(at: root + "/resolved.json", content: "{\"pins\":[]}")
+            for marks in 1...6 {
+                for name in ["libYAML", "LibYAML", "LIBYAML"] {
+                    let source = String(repeating: "#", count: marks) + " " + name + "\n"
+                    assertMissing("Stale libYAML notice: Yams is no longer resolved; remove its notice or audit the new vendor") {
+                        try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
+                                                         notices: parseNotices(source), credits: "")
+                    }
+                }
+            }
+        }
+    }
+
+    func testRemovedYamsFindsLibYAMLInLicenseBlocks() throws {
+        try withFixture { root in
+            try fileService.writeFile(at: root + "/resolved.json", content: "{\"pins\":[]}")
+            for name in ["libYAML", "LibYAML", "LIBYAML"] {
+                let source = "### Renamed vendor\n```text\nCopyright " + name + ".\n```\n"
+                assertMissing("Stale libYAML notice: Yams is no longer resolved; remove its notice or audit the new vendor") {
+                    try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
+                                                     notices: parseNotices(source), credits: "")
+                }
+            }
+        }
+    }
+
+    func testUnreadableExemptCandidateNamesItsPath() throws {
+        try withSwiftFixture { root in
+            let path = "license-fixture.dmg"
+            try fileService.writeFile(at: root + "/example/" + path, content: "Fixture bytes.")
+            let exemption = NoticeInventory.LicenseExemption(package: "example", path: path, reason: "Test fixture.",
+                                                              sha256: fixtureDigest("Fixture bytes."))
+            let files = NoticeUnreadableFiles(base: fileService, unreadable: root + "/example/" + path)
+            XCTAssertThrowsError(try NoticeInventory(fileService: files, exemptions: [exemption]).checkSwiftPackages(
+                resolved: root + "/resolved.json", checkouts: root,
+                notices: parseNotices("[Example](https://github.com/vendor/example)"), credits: "Example license.")) { error in
+                let message = (error as? NoticeInventory.MissingNotice)?.description ?? ""
+                XCTAssertTrue(message.hasPrefix("Unreadable license candidate: example/" + path + ":"), "\(error)")
+            }
         }
     }
 
@@ -112,16 +158,6 @@ extension ThirdPartyNoticesTests {
             XCTAssertEqual(result.status, 0, result.error)
             let blocks = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(result.output.utf8)) as? [[String: Any]])
             XCTAssertEqual(blocks.compactMap { $0["text"] as? String }, ["", "Copyright JSON."])
-        }
-    }
-
-    func testRendererRejectsOldPythonWithClearMessage() throws {
-        try withFixture { root in
-            try fileService.writeFile(at: root + "/source.md", content: "# Notices\n")
-            let result = try runCredits(arguments: [root + "/source.md", root + "/Credits.rtf"], pythonVersion: "3,5,0")
-            XCTAssertNotEqual(result.status, 0)
-            XCTAssertTrue(result.error.contains("credits.py requires Python 3.6 or later"), result.error)
-            XCTAssertFalse(fileService.fileExists(at: root + "/Credits.rtf"))
         }
     }
 
@@ -136,4 +172,18 @@ extension ThirdPartyNoticesTests {
         }
     }
 
+}
+
+/// Reuses the real-file delegate; only the exempted candidate's binary-read guard fails.
+private final class NoticeUnreadableFiles: CountingHistoryFileService {
+    private let unreadable: String
+
+    init(base: FileService, unreadable: String) {
+        self.unreadable = unreadable
+        super.init(base: base)
+    }
+
+    override func isRegularFile(at path: String) -> Bool {
+        path != unreadable && super.isRegularFile(at: path)
+    }
 }

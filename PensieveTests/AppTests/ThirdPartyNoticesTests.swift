@@ -12,10 +12,6 @@ final class ThirdPartyNoticesTests: XCTestCase {
     var inventory: NoticeInventory { NoticeInventory(fileService: fileService, exemptions: []) }
 
     func testBundledCreditsCoverSwiftPackagesAndVendoredLicenseFiles() throws {
-        try auditBundledSwiftPackages()
-    }
-
-    private func auditBundledSwiftPackages() throws {
         let inventory = NoticeInventory(fileService: fileService)
         try inventory.checkSwiftPackages(
             resolved: sourceRoot + "/Pensieve.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
@@ -45,10 +41,7 @@ final class ThirdPartyNoticesTests: XCTestCase {
 
     func testLibYAMLNoticeIsComplete() throws {
         let notices = try readNotices()
-        guard notices.hasSection("### libYAML") else {
-            try auditBundledSwiftPackages()
-            return
-        }
+        guard notices.hasSection("### libYAML") else { return }
         let license = try XCTUnwrap(notices.license(inSection: "### libYAML"))
         XCTAssertEqual(LibYAMLNoticeAudit.noticeDigest(license), LibYAMLNoticeAudit.digest)
         XCTAssertTrue(try bundledCredits().contains("libYAML"))

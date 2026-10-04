@@ -1,23 +1,17 @@
 import CryptoKit
+import Darwin
 import XCTest
 @testable import Pensieve
 
 extension ThirdPartyNoticesTests {
-    func testRendererAcceptsItsActualPythonFloor() throws {
-        try withFixture { root in
-            try fileService.writeFile(at: root + "/source.md", content: "# Notices\n")
-            let result = try runCredits(arguments: [root + "/source.md", root + "/Credits.rtf"], pythonVersion: "3,6,0")
-            XCTAssertEqual(result.status, 0, result.error)
-            XCTAssertTrue(fileService.fileExists(at: root + "/Credits.rtf"))
-        }
-    }
-
     func testBuildPhaseIgnoresPythonOnPATH() throws {
         let data = try fileService.readData(at: sourceRoot + "/Pensieve.xcodeproj/project.pbxproj")
         let project = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
         let objects = try XCTUnwrap(project["objects"] as? [String: [String: Any]])
         let phase = try XCTUnwrap(objects.values.first { $0["name"] as? String == "Generate About credits" })
-        let command = try XCTUnwrap(phase["shellScript"] as? String)
+        let shell = try XCTUnwrap(phase["shellPath"] as? String)
+        let command = "test \"$0\" = \"\(shell)\" || exit 92\n"
+            + (try XCTUnwrap(phase["shellScript"] as? String))
         try withFixture { root in
             try fileService.createDirectory(at: root + "/script")
             try fileService.writeFile(at: root + "/script/credits.py",
@@ -26,7 +20,7 @@ extension ThirdPartyNoticesTests {
             try fileService.createDirectory(at: root + "/bin")
             try fileService.writeExecutableFile(at: root + "/bin/python3", content: "#!/bin/sh\nexit 91\n")
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.executableURL = URL(fileURLWithPath: shell)
             process.arguments = ["-c", command]
             process.environment = ["PATH": root + "/bin:/usr/bin:/bin", "SRCROOT": root,
                                    "TARGET_BUILD_DIR": root, "UNLOCALIZED_RESOURCES_FOLDER_PATH": "Resources"]
@@ -36,24 +30,16 @@ extension ThirdPartyNoticesTests {
         }
     }
 
-    func testRendererDrainsLargeStderrBeforeStdout() throws {
+    func testCreditsProcessDrainsLargeStderrBeforeStdout() throws {
         let code = "import os,signal,sys; signal.signal(signal.SIGALRM,lambda *args:os._exit(72)); signal.alarm(3); "
             + "sys.stderr.write('E'*262144); sys.stderr.flush(); sys.stdout.write('DONE'); sys.stdout.flush()"
-        let result = try runCredits(arguments: [], code: code)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = ["-c", code]
+        let result = try runCreditsProcess(process)
         XCTAssertEqual(result.status, 0)
         XCTAssertEqual(result.output, "DONE")
         XCTAssertEqual(result.error.count, 262144)
-    }
-
-    func testRemovingStaleLibYAMLNoticeClearsFailure() throws {
-        try withFixture { root in
-            try fileService.writeFile(at: root + "/resolved.json", content: "{\"pins\":[]}")
-            let stale = "### libYAML\n```text\nCopyright Old vendor.\n```\n"
-            assertMissing("Stale libYAML notice: Yams is no longer resolved; remove its notice or audit the new vendor") {
-                try auditLifecycleFixture(root: root, notices: stale)
-            }
-            XCTAssertNoThrow(try auditLifecycleFixture(root: root, notices: ""))
-        }
     }
 
     func testPackageAuditEnforcesYamsVersionWithoutCallerChaining() throws {
@@ -145,13 +131,47 @@ extension ThirdPartyNoticesTests {
         }
     }
 
-    func testNoticePathIsParsedOncePerRun() throws {
+    func testNoticeCacheTracksSourceContent() throws {
         try withFixture { root in
-            let path = root + "/notices.md"
+            let path = root + "/THIRD-PARTY-NOTICES.md"
+            try fileService.writeFile(at: path, content: "```text\nCopyright First.\n```\n")
+            XCTAssertEqual(try loadNotices(at: path).licenseBlocks.map(\.text), ["Copyright First."])
+            XCTAssertEqual(try loadNotices(at: path).licenseBlocks.map(\.text), ["Copyright First."])
+            try fileService.writeFile(at: path, content: "```text\nCopyright Changed.\n```\n")
+            XCTAssertEqual(try loadNotices(at: path).licenseBlocks.map(\.text), ["Copyright Changed."])
+        }
+    }
+
+    func testNoticeCacheDoesNotHideMissingSource() throws {
+        try withFixture { root in
+            let path = root + "/THIRD-PARTY-NOTICES.md"
             try fileService.writeFile(at: path, content: "```text\nCopyright Cached.\n```\n")
-            let original = try loadNotices(at: path)
+            _ = try loadNotices(at: path)
             try fileService.deleteFile(at: path)
-            XCTAssertEqual(try loadNotices(at: path).licenseBlocks.map(\.text), original.licenseBlocks.map(\.text))
+            XCTAssertThrowsError(try loadNotices(at: path))
+        }
+    }
+
+    func testCreditsProcessThrowsAndReapsOnPipeReadFailure() throws {
+        for side in ["stdout", "stderr"] {
+            var io = GitService.ProcessIO()
+            let failing = side == "stdout" ? io.stdout.fileHandleForReading : io.stderr.fileHandleForReading
+            io.read = { handle in
+                if handle === failing { throw CocoaError(.fileReadUnknown) }
+                return try handle.readToEnd()
+            }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            process.arguments = ["-c", "import os,signal,sys; signal.signal(signal.SIGALRM,lambda *a:os._exit(72)); "
+                                 + "signal.alarm(3); sys.stderr.write('E'*262144); sys.stderr.flush(); print('DONE'); "
+                                 + "sys.stdout.flush(); __import__('time').sleep(60)"]
+            XCTAssertThrowsError(try runCreditsProcess(process, io: io), side)
+            XCTAssertFalse(process.isRunning, side)
+            XCTAssertEqual(process.terminationReason, .uncaughtSignal, side)
+            XCTAssertEqual(process.terminationStatus, SIGKILL, side)
+            var status: Int32 = 0
+            XCTAssertEqual(waitpid(process.processIdentifier, &status, WNOHANG), -1, side)
+            XCTAssertEqual(errno, ECHILD, side)
         }
     }
 
@@ -165,8 +185,4 @@ extension ThirdPartyNoticesTests {
             notices: parseNotices("[Example](https://github.com/vendor/example)"), credits: "Example license.")
     }
 
-    private func auditLifecycleFixture(root: String, notices: String) throws {
-        try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
-                                                   notices: parseNotices(notices), credits: "")
-    }
 }

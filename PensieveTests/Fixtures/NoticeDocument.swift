@@ -56,6 +56,11 @@ struct NoticeDocument {
         headings = headers
     }
 
+    var mentionsLibYAML: Bool {
+        headings.contains { $0.text.range(of: "libYAML", options: .caseInsensitive) != nil }
+            || licenseBlocks.contains { $0.text.range(of: "libYAML", options: .caseInsensitive) != nil }
+    }
+
     func hasSection(_ heading: String) -> Bool {
         headings.contains { $0.text == heading }
     }

@@ -3,22 +3,26 @@ import XCTest
 @testable import Pensieve
 
 extension ThirdPartyNoticesTests {
-    private static var noticesByPath: [String: NoticeDocument] = [:]
-    private static var fixtureNotices: [String: NoticeDocument] = [:]
+    private static var cachedNotices: (source: String, document: NoticeDocument)?
 
     func readNotices() throws -> NoticeDocument {
         try loadNotices(at: sourceRoot + "/THIRD-PARTY-NOTICES.md")
     }
 
+    /// Only the real notices loader caches. Read content every time; fixture parsing is uncached.
     func loadNotices(at path: String) throws -> NoticeDocument {
-        if let cached = Self.noticesByPath[path] { return cached }
         let source = try fileService.readFile(at: path)
+        if let cached = Self.cachedNotices, cached.source == source { return cached.document }
+        let document = try parseNoticeFile(source, at: path)
+        Self.cachedNotices = (source, document)
+        return document
+    }
+
+    private func parseNoticeFile(_ source: String, at path: String) throws -> NoticeDocument {
         let result = try runCredits(arguments: ["--license-blocks", path])
         XCTAssertEqual(result.status, 0, result.error)
         let blocks = try JSONDecoder().decode([NoticeDocument.LicenseBlock].self, from: Data(result.output.utf8))
-        let document = NoticeDocument(source, licenseBlocks: blocks)
-        Self.noticesByPath[path] = document
-        return document
+        return NoticeDocument(source, licenseBlocks: blocks)
     }
 
     func decodeCredits(_ data: Data) throws -> NSAttributedString {
@@ -27,16 +31,13 @@ extension ThirdPartyNoticesTests {
     }
 
     func parseNotices(_ source: String) throws -> NoticeDocument {
-        if let cached = Self.fixtureNotices[source] { return cached }
         var document: NoticeDocument?
         try withFixture { root in
             let path = root + "/source.md"
             try fileService.writeFile(at: path, content: source)
-            document = try loadNotices(at: path)
+            document = try parseNoticeFile(source, at: path)
         }
-        let parsed = try XCTUnwrap(document)
-        Self.fixtureNotices[source] = parsed
-        return parsed
+        return try XCTUnwrap(document)
     }
 
     func renderFixture(_ source: String) throws -> String {
@@ -56,58 +57,25 @@ extension ThirdPartyNoticesTests {
         let error: String
     }
 
-    func runCredits(arguments: [String], pythonVersion: String? = nil, code: String? = nil) throws -> CreditsResult {
+    func runCredits(arguments: [String]) throws -> CreditsResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        let script = sourceRoot + "/script/credits.py"
-        process.arguments = [script] + arguments
-        if let pythonVersion {
-            process.arguments = ["-c", "import runpy,sys; sys.version_info=(" + pythonVersion + "); "
-                                 + "sys.argv=sys.argv[1:]; runpy.run_path(sys.argv[0],run_name='__main__')", script] + arguments
-        }
-        if let code { process.arguments = ["-c", code] + arguments }
+        process.arguments = [sourceRoot + "/script/credits.py"] + arguments
         return try runCreditsProcess(process)
     }
 
-    func runCreditsProcess(_ process: Process) throws -> CreditsResult {
-        let output = Pipe(), error = Pipe()
-        process.standardOutput = output
-        process.standardError = error
+    func runCreditsProcess(_ process: Process, io: GitService.ProcessIO = GitService.ProcessIO()) throws -> CreditsResult {
+        process.standardOutput = io.stdout
+        process.standardError = io.stderr
         try process.run()
-        let drain = CreditsPipeDrain(error.fileHandleForReading)
-        let stdout = output.fileHandleForReading.readDataToEndOfFile()
+        let cleanup = GitService.ReadFailureCleanup(process)
+        let drain = GitService.PipeDrain(io.stderr.fileHandleForReading, read: io.read, onFailure: cleanup.stop)
+        let stdout = Result { try io.read(io.stdout.fileHandleForReading) ?? Data() }
+        if case .failure = stdout { cleanup.stop() }
         let stderr = drain.join()
         process.waitUntilExit()
-        return CreditsResult(status: process.terminationStatus, output: String(data: stdout, encoding: .utf8) ?? "",
-                             error: String(data: stderr, encoding: .utf8) ?? "")
-    }
-}
-
-/// A dedicated reader drains stderr while the caller drains stdout. Only pipe I/O;
-/// the process and both readers finish before the helper returns.
-private final class CreditsPipeDrain {
-    private let condition = NSCondition()
-    private var data: Data?
-
-    init(_ handle: FileHandle) {
-        let thread = Thread {
-            let data = handle.readDataToEndOfFile()
-            self.condition.lock()
-            self.data = data
-            self.condition.signal()
-            self.condition.unlock()
-        }
-        thread.name = "Pensieve notices stderr drain"
-        thread.qualityOfService = Thread.current.qualityOfService
-        thread.start()
-    }
-
-    func join() -> Data {
-        condition.lock()
-        defer { condition.unlock() }
-        while true {
-            if let data { return data }
-            condition.wait()
-        }
+        return try CreditsResult(status: process.terminationStatus,
+                                 output: String(data: stdout.get(), encoding: .utf8) ?? "",
+                                 error: String(data: stderr.get(), encoding: .utf8) ?? "")
     }
 }

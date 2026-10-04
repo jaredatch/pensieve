@@ -25,7 +25,8 @@ extension GitService {
         }
     }
 
-    private final class ReadFailureCleanup {
+    /// Internal pipe transport cleanup shared with tests; it performs no file reads.
+    final class ReadFailureCleanup {
         private let process: Process
         private let lock = NSLock()
         private var stopped = false
@@ -43,7 +44,8 @@ extension GitService {
         }
     }
 
-    private final class PipeDrain {
+    /// Internal reader for pipe handles only. File reads stay behind FileService.
+    final class PipeDrain {
         private let condition = NSCondition()
         private var result: Result<Data, Error>?
 

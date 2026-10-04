@@ -3,10 +3,6 @@
 
 import sys
 
-if sys.version_info < (3, 6):
-    sys.exit("credits.py requires Python 3.6 or later (found "
-             + ".".join(map(str, sys.version_info[:3])) + ")")
-
 import json
 import re
 from pathlib import Path

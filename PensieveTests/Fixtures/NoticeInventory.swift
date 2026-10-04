@@ -85,7 +85,13 @@ struct NoticeInventory {
     private func checkCandidate(at path: String, key: String, bundled: String,
                                 exemption: LicenseExemption?) throws -> Bool {
         if let exemption {
-            let actual = SHA256.hash(data: try fileService.readData(at: path))
+            let data: Data
+            do {
+                data = try fileService.readData(at: path)
+            } catch {
+                throw MissingNotice(description: "Unreadable license candidate: \(key): \(error)")
+            }
+            let actual = SHA256.hash(data: data)
                 .map { String(format: "%02x", $0) }.joined()
             guard actual == exemption.sha256.lowercased() else {
                 throw MissingNotice(description: "Changed license exemption: \(key): SHA-256 expected "
@@ -195,7 +201,7 @@ struct LibYAMLNoticeAudit {
 
     static func checkVendorVersion(pins: [[String: Any]], notices: NoticeDocument) throws {
         guard let pin = pins.first(where: { ($0["identity"] as? String)?.lowercased() == "yams" }) else {
-            guard notices.hasSection("### libYAML") else { return }
+            guard notices.mentionsLibYAML else { return }
             throw NoticeInventory.MissingNotice(description: "Stale libYAML notice: Yams is no longer resolved; "
                                                 + "remove its notice or audit the new vendor")
         }
