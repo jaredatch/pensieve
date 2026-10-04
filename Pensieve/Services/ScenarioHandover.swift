@@ -7,9 +7,15 @@ protocol ScenarioHandingOver {
 }
 
 struct ScenarioHandoverReadiness {
-    var manifestWritten = true
-    var rebuildSaveFailed = false
-    var ingestionNeedsRetry = false
+    let manifestWritten: Bool
+    let rebuildSaveFailed: Bool
+    let ingestionNeedsRetry: Bool
+    let storeUnreadable: Bool
+    let quarantined: Bool
+}
+
+enum ScenarioHandoverDeployState {
+    case realized, absent, unmanaged
 }
 
 /// Transfers legacy ownership without touching agent folders. Batched durable intents precede the
@@ -30,13 +36,13 @@ struct ScenarioHandover: ScenarioHandingOver {
     private let fetcher: ReconcilerStateFetching
     private let save: (ModelContext) throws -> Void
     private let log: (String) -> Void
-    private let artifactExists: (Skill, PlatformTarget) -> Bool
+    private let deployState: (Skill, PlatformTarget) throws -> ScenarioHandoverDeployState
     private let notifier: SyncStateNotifying
     private let fileService: FileServiceProtocol
 
     init(machineIdentity: MachineIdentityProviding, manifest: ManifestSnapshotting,
          root: String, defaults: UserDefaults,
-         artifactExists: @escaping (Skill, PlatformTarget) -> Bool,
+         deployState: @escaping (Skill, PlatformTarget) throws -> ScenarioHandoverDeployState,
          notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
          fileService: FileServiceProtocol = FileService(),
          fetcher: ReconcilerStateFetching = ReconcilerStateFetcher(),
@@ -49,22 +55,24 @@ struct ScenarioHandover: ScenarioHandingOver {
         self.fetcher = fetcher
         self.save = save
         self.log = log
-        self.artifactExists = artifactExists
+        self.deployState = deployState
         self.notifier = notifier
         self.fileService = fileService
     }
 
     private struct TransferPair {
         let skill: Skill
-        let row: ScenarioAssignment
+        let state: ScenarioHandoverDeployState
         let record: DeployIntentRecord
     }
 
     func handOver(context caller: ModelContext, readiness: ScenarioHandoverReadiness) throws {
         guard !defaults.bool(forKey: Self.doneKey) else { return }
-        guard readiness.manifestWritten, !readiness.rebuildSaveFailed, !readiness.ingestionNeedsRetry else {
+        guard readiness.manifestWritten, !readiness.rebuildSaveFailed, !readiness.ingestionNeedsRetry,
+              !readiness.storeUnreadable, !readiness.quarantined else {
             log("Deferred until next launch ingest: manifest written=\(readiness.manifestWritten), "
-                + "rebuild save failed=\(readiness.rebuildSaveFailed), ingest retry=\(readiness.ingestionNeedsRetry).")
+                + "rebuild save failed=\(readiness.rebuildSaveFailed), ingest retry=\(readiness.ingestionNeedsRetry), "
+                + "store unreadable=\(readiness.storeUnreadable), quarantined=\(readiness.quarantined).")
             return
         }
         let context = ModelContext(caller.container)
@@ -77,10 +85,10 @@ struct ScenarioHandover: ScenarioHandingOver {
         let assignments = try fetcher.intentAssignments(context: context)
         let durable = try manifest.read(fromRoot: root)
         var snapshot = try preservedSnapshot(context: context, disk: durable)
-        let transfer = preparePairs(rows: rows, skills: skills, machineID: machineID, snapshot: &snapshot)
+        let transfer = try preparePairs(rows: rows, skills: skills, machineID: machineID, snapshot: &snapshot)
         do {
             // Disk is authoritative: never save ownership that a subsequent rebuild can retract.
-            if transfer.pairs.contains(where: { !durable.deployIntents.contains($0.record) }) {
+            if transfer.pairs.contains(where: { $0.state != .unmanaged && !durable.deployIntents.contains($0.record) }) {
                 try manifest.write(snapshot, toRoot: root)
                 notifier()
             }
@@ -99,10 +107,11 @@ struct ScenarioHandover: ScenarioHandingOver {
     }
 
     private func preparePairs(rows: [ScenarioAssignment], skills: [Skill], machineID: String,
-                              snapshot: inout ManifestSnapshot) -> (pairs: [TransferPair], unmanagedCount: Int) {
+                              snapshot: inout ManifestSnapshot) throws -> (pairs: [TransferPair], unmanagedCount: Int) {
         let skillByID = Dictionary(skills.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var pairs: [TransferPair] = []
         var unmanagedCount = 0
+        var listedSkills = false
         for row in rows {
             guard let skill = skillByID[row.skillID] else { continue }
             let platform = row.platform.rawValue
@@ -113,18 +122,36 @@ struct ScenarioHandover: ScenarioHandingOver {
                 log("Left unmanaged: skill '\(skill.directoryName)', agent '\(platform)'.")
                 continue
             }
-            guard let directory = SkillStore.safeSkillDirectory(slug: skill.directoryName, base: root + "/skills",
-                                                                fileService: fileService),
-                  fileService.directoryExists(at: directory) else {
+            if !listedSkills {
+                _ = try fileService.listDirectory(at: root + "/skills")
+                listedSkills = true
+            }
+            guard try hasStoreFolder(skill) else {
                 log("Dropped orphan: skill '\(skill.directoryName)' has no safe store folder, agent '\(platform)'.")
                 continue
             }
+            let state = try deployState(skill, row.platform)
+            if state == .unmanaged {
+                unmanagedCount += 1
+                log("Left unmanaged: skill '\(skill.directoryName)', agent '\(platform)'.")
+            }
             let record = DeployIntentRecord(machineID: machineID, skillSlug: skill.directoryName,
                                             platformRaw: platform, projectKey: nil)
-            pairs.append(TransferPair(skill: skill, row: row, record: record))
-            if !snapshot.deployIntents.contains(record) { snapshot.deployIntents.append(record) }
+            pairs.append(TransferPair(skill: skill, state: state, record: record))
+            if state != .unmanaged, !snapshot.deployIntents.contains(record) { snapshot.deployIntents.append(record) }
         }
         return (pairs, unmanagedCount)
+    }
+
+    private func hasStoreFolder(_ skill: Skill) throws -> Bool {
+        let path = root + "/skills/" + skill.directoryName
+        guard try fileService.entryExistsWithoutFollowingLinks(at: path) else { return false }
+        guard let directory = SkillStore.safeSkillDirectory(slug: skill.directoryName, base: root + "/skills",
+                                                           fileService: fileService) else {
+            throw SkillStoreError.invalidDirectory(skill.directoryName)
+        }
+        guard fileService.directoryExists(at: directory) else { throw CocoaError(.fileReadUnknown) }
+        return true
     }
 
     private func recordOwnership(_ pairs: [TransferPair], intents: [MachineDeployIntent],
@@ -135,9 +162,9 @@ struct ScenarioHandover: ScenarioHandingOver {
             let record = pair.record
             let intent = MachineDeployIntent(machineID: record.machineID, skillSlug: record.skillSlug,
                                               platformRaw: record.platformRaw)
-            if intentKeys.insert(intent.key).inserted { context.insert(intent) }
+            if pair.state != .unmanaged, intentKeys.insert(intent.key).inserted { context.insert(intent) }
             let assignment = IntentAssignment(skillID: pair.skill.id, platformRaw: record.platformRaw)
-            if artifactExists(pair.skill, pair.row.platform) {
+            if pair.state == .realized {
                 if assignmentKeys.insert(assignment.key).inserted { context.insert(assignment) }
             } else {
                 for existing in assignments where existing.key == assignment.key { context.delete(existing) }

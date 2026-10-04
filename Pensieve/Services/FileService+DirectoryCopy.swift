@@ -77,6 +77,8 @@ private struct CopyEntryStamp: Equatable {
     let fileType: mode_t
     let modifiedSeconds: Int
     let modifiedNanoseconds: Int
+    let changedSeconds: Int
+    let changedNanoseconds: Int
     var isRegular: Bool { fileType == S_IFREG }
 
     init(_ status: stat) {
@@ -86,11 +88,13 @@ private struct CopyEntryStamp: Equatable {
         fileType = status.st_mode & S_IFMT
         modifiedSeconds = status.st_mtimespec.tv_sec
         modifiedNanoseconds = status.st_mtimespec.tv_nsec
+        changedSeconds = status.st_ctimespec.tv_sec
+        changedNanoseconds = status.st_ctimespec.tv_nsec
     }
 }
 
 /// Owns one no-follow directory stream. Each validation re-lists it and checks the live path,
-/// directory identity/mtime and every entry's identity, type, size and modification time.
+/// directory identity/timestamps and every entry's identity, type, size, mtime and ctime.
 private final class DirectoryCopySource {
     let path: String
     let directory: UnsafeMutablePointer<DIR>

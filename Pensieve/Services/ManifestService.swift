@@ -25,7 +25,7 @@ struct ManifestService: ManifestReadWriting {
 
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
         let acquired = Self.writeLock.try()
-        // Reports an actual lock attempt from inside write; tests need no dispatch-timing inference.
+        // Reports contention before waiting; copy checkpoints independently prove exclusion.
         writeLockAttempted(acquired)
         if !acquired { Self.writeLock.lock() }
         defer { Self.writeLock.unlock() }

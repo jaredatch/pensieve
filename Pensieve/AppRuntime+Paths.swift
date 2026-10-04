@@ -151,7 +151,7 @@ struct AppRuntimePaths {
                     manifest: ManifestService(fileService: fileService),
                     root: storeRoot,
                     defaults: defaults,
-                    artifactExists: { platformVM.workingArtifactExists(skill: $0, platform: $1) },
+                    deployState: { try platformVM.scenarioHandoverDeployState(skill: $0, platform: $1) },
                     notifier: notifier,
                     fileService: fileService
                 )

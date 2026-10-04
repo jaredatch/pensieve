@@ -377,16 +377,16 @@ extension PlatformViewModel {
 }
 
 extension PlatformViewModel {
-    /// Handover's realization probe; kept separate from removal's broad occupied-entry probe.
-    func workingArtifactExists(skill: Skill, platform: PlatformTarget) -> Bool {
+    /// Classifies user-wide legacy ownership before convergence. LinkService supplies the same
+    /// literal-target judgment used by broken-link validation; every regular Cursor file stays owned.
+    func scenarioHandoverDeployState(skill: Skill, platform: PlatformTarget) throws -> ScenarioHandoverDeployState {
+        let path = platform.usesSymlinks
+            ? linkService.linkPath(skill: skill, platform: platform, projectPath: nil)
+            : cursorCompiler.outputPath(skill: skill, projectPath: nil)
+        guard try fileService.entryExistsWithoutFollowingLinks(at: path) else { return .absent }
         if platform.usesSymlinks {
-            let path = linkService.linkPath(skill: skill, platform: platform, projectPath: nil)
-            let expected = linkService.targetPath(skill: skill, platform: platform, projectPath: nil)
-            guard fileService.isSymlink(at: path), fileService.directoryExists(at: expected),
-                  let identity = fileService.fileIdentity(at: expected, followingLinks: true) else { return false }
-            return fileService.fileIdentity(at: path, followingLinks: true) == identity
+            return linkService.isLinked(skill: skill, platform: platform, projectPath: nil) ? .realized : .unmanaged
         }
-        let path = cursorCompiler.outputPath(skill: skill, projectPath: nil)
-        return fileService.isRegularFile(at: path) && cursorCompiler.isUpToDate(skill: skill, projectPath: nil)
+        return fileService.isRegularFile(at: path) ? .realized : .unmanaged
     }
 }

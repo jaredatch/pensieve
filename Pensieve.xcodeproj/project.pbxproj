@@ -49,6 +49,7 @@
 		19B258F8421D551D6D44FA7E /* RecordingUpdateGitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC75833362770FBDB6611BBC /* RecordingUpdateGitService.swift */; };
 		1ABD238E55C0DFB156BA9A23 /* SyncEngineLockTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B8D109C7C54D1756CB77B5A /* SyncEngineLockTests.swift */; };
 		1B9045FEFEB1E28A80644F83 /* WindowPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45248026A35BAB81A65DA559 /* WindowPolicyTests.swift */; };
+		1BF7DAC2857A10A8F1560FDD /* ScenarioHandoverTests+ReadFailure.swift in Sources */ = {isa = PBXBuildFile; fileRef = 434E0CCB670A0DBB7202EF5E /* ScenarioHandoverTests+ReadFailure.swift */; };
 		1C10BC5A955D364F13AAA40C /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = E11E661F870A06624A209BFA /* Yams */; };
 		1D266842C943F8CA39E9D4F9 /* CheckedYAMLLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6279A8F3703B72502AD5B474 /* CheckedYAMLLoader.swift */; };
 		1D7E847A1FA13E72C5C1C878 /* AddFromGitHubSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA396A604F05998B74C4DCC0 /* AddFromGitHubSheet.swift */; };
@@ -127,6 +128,7 @@
 		4079234AAC49C5F365711EE6 /* GitUsabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD05DE056E0716984F9E2F6C /* GitUsabilityTests.swift */; };
 		40F7076ED2050DAC8590C490 /* IntentReconcilerProjectTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFC8A9EA400D022AA32CBCAE /* IntentReconcilerProjectTestSupport.swift */; };
 		417CF3BE043058C828B406BF /* UpstreamHistoryReviewPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31309790DB771244B135C72E /* UpstreamHistoryReviewPolicyTests.swift */; };
+		41C6D6325870342BB26C55CE /* AppRuntime+LaunchSignals.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D8ECEDE5D2C85033D1278A8 /* AppRuntime+LaunchSignals.swift */; };
 		41E2BBEA13F60B7876B45E9D /* SkillInstallServiceVendorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD45A11961E5A56B657725D5 /* SkillInstallServiceVendorTests.swift */; };
 		42067AF12B8D39CAC814AA0F /* CursorCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC71DC2E440ABBC0022FCD71 /* CursorCompiler.swift */; };
 		420936722DC41FD2DD7DB33E /* ProjectIdentityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FFC18877570754FD15ADBA3 /* ProjectIdentityService.swift */; };
@@ -275,6 +277,7 @@
 		7730540763E74776D3DEAE28 /* DeployTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 434E930F09AF67D29461076D /* DeployTarget.swift */; };
 		7772817E799403C97FFEF634 /* ListRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DAE126FF838442F2098DF8D /* ListRows.swift */; };
 		782B9DEDA9CA37B50AF0ADC1 /* StoreRebuildServiceTests+CheckedYAML.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E6508FA3B393A962FF22465 /* StoreRebuildServiceTests+CheckedYAML.swift */; };
+		78356E53AA90C56E66A18EE9 /* AppRuntimeLaunchCompletionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 031B2028544D61F0A1986F26 /* AppRuntimeLaunchCompletionTests.swift */; };
 		785006B21A2CC9CEF3B6B2D1 /* ManifestService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C7EF0F5FBE6434FEDE72758 /* ManifestService.swift */; };
 		7859F9ECC739C640FCB33F4B /* UpdatesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EFED54571C0A47E86F78572 /* UpdatesViewModel.swift */; };
 		78FEEA4329FFF7F2F4F142B4 /* PlatformViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26ED8D9EDA8729984655172B /* PlatformViewModel.swift */; };
@@ -459,6 +462,7 @@
 		BB8ED293748956CE0FEFB3AA /* UpdateChannelPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44F77FB036F91DF2C61A570 /* UpdateChannelPolicy.swift */; };
 		BBCEADC5EF854424FC7BD61F /* CheckAllSkillUpdatesCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE3E3A5E61571D2B8B6620CA /* CheckAllSkillUpdatesCommand.swift */; };
 		BBFF85E8DA5211C893DC45A7 /* SkillListQueryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36F1573491DD670919D855A3 /* SkillListQueryTests.swift */; };
+		BC49D080098E4AD6243AADEF /* ManifestScenarioCarryTests+PreservedMtime.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7B451F191A8C32889F6786 /* ManifestScenarioCarryTests+PreservedMtime.swift */; };
 		BCA568A0867982CF5E68B226 /* TestThreadCensus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7461C09B4495329DC0040228 /* TestThreadCensus.swift */; };
 		BCE039512DFB16EFF162EA38 /* DetailTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2B6DFA0F4FB2CC3C649183 /* DetailTab.swift */; };
 		BD4D9507F0F6C571E99485C5 /* UpdatesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0097D30342966FA05504E748 /* UpdatesView.swift */; };
@@ -687,6 +691,7 @@
 		01A0836EE840B36D2F08A73C /* SafeSkillFileGUISinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafeSkillFileGUISinkTests.swift; sourceTree = "<group>"; };
 		01CFDD258E411599E861AAE5 /* SkillInstallViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallViewModel.swift; sourceTree = "<group>"; };
 		02BB28665E7E2430F94CC53E /* SidebarOutline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarOutline.swift; sourceTree = "<group>"; };
+		031B2028544D61F0A1986F26 /* AppRuntimeLaunchCompletionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeLaunchCompletionTests.swift; sourceTree = "<group>"; };
 		032B6A04ADBA66A59F7C422B /* AppRuntime+UpdateCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppRuntime+UpdateCheck.swift"; sourceTree = "<group>"; };
 		033592DE630FA224F8DF06F4 /* StoreMigrationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreMigrationServiceTests.swift; sourceTree = "<group>"; };
 		04E3E03E841FF88FA03C4F1F /* UpstreamHistoryCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpstreamHistoryCache.swift; sourceTree = "<group>"; };
@@ -834,6 +839,7 @@
 		413E232EFE809F2D74C9219B /* UpstreamHistoryBoundaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpstreamHistoryBoundaryTests.swift; sourceTree = "<group>"; };
 		41966F864A9E8377E636BF0B /* GitHubSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubSettingsView.swift; sourceTree = "<group>"; };
 		4254D76D01ED648CFD21B0BC /* SkillParserTests+CheckedYAML.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillParserTests+CheckedYAML.swift"; sourceTree = "<group>"; };
+		434E0CCB670A0DBB7202EF5E /* ScenarioHandoverTests+ReadFailure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScenarioHandoverTests+ReadFailure.swift"; sourceTree = "<group>"; };
 		434E930F09AF67D29461076D /* DeployTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeployTarget.swift; sourceTree = "<group>"; };
 		43B9770075996E7A088AEF81 /* SkillBundleInventoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillBundleInventoryTests.swift; sourceTree = "<group>"; };
 		441CC2733D1E732755DEBB28 /* SyncNudgeTests+WriteBrackets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SyncNudgeTests+WriteBrackets.swift"; sourceTree = "<group>"; };
@@ -940,6 +946,7 @@
 		6C5B74C0A8F1923D5FABCE41 /* MarkdownEditorHostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorHostTests.swift; sourceTree = "<group>"; };
 		6C7EA2EAB5EA0602859D5D73 /* ManifestScenarioCarryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestScenarioCarryTests.swift; sourceTree = "<group>"; };
 		6CA8D283F6493072A5AC35FF /* ManifestDeployIntentWriterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestDeployIntentWriterTests.swift; sourceTree = "<group>"; };
+		6D8ECEDE5D2C85033D1278A8 /* AppRuntime+LaunchSignals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppRuntime+LaunchSignals.swift"; sourceTree = "<group>"; };
 		6DF549CF04EE96ADE8590316 /* DeployIntentModelTests+DisplayPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DeployIntentModelTests+DisplayPath.swift"; sourceTree = "<group>"; };
 		6EEA806C2B9CC4F2F43F8F7A /* UpstreamHistoryViewModel+Refresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UpstreamHistoryViewModel+Refresh.swift"; sourceTree = "<group>"; };
 		6F2DDE8B4F2A8D3EDE5AF947 /* DaemonCLI+Deployed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DaemonCLI+Deployed.swift"; sourceTree = "<group>"; };
@@ -1189,6 +1196,7 @@
 		DE3025957B0D902516F3B3E9 /* SkillInstallViewModel+Collisions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillInstallViewModel+Collisions.swift"; sourceTree = "<group>"; };
 		DE74541AF4A63D898A6DEC37 /* DeploymentsPresentation+Machines.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DeploymentsPresentation+Machines.swift"; sourceTree = "<group>"; };
 		DE775F959833A27D671F6250 /* FolderImportPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderImportPresentation.swift; sourceTree = "<group>"; };
+		DE7B451F191A8C32889F6786 /* ManifestScenarioCarryTests+PreservedMtime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ManifestScenarioCarryTests+PreservedMtime.swift"; sourceTree = "<group>"; };
 		DEBBB564A16C815906D3DB0A /* AgentDetectionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDetectionServiceTests.swift; sourceTree = "<group>"; };
 		DFB832771900426C348597C9 /* SkillExportPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillExportPanel.swift; sourceTree = "<group>"; };
 		DFC6AA8891B426C7BA3D752F /* SkillSerializerTests+CheckedYAML.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillSerializerTests+CheckedYAML.swift"; sourceTree = "<group>"; };
@@ -1504,6 +1512,7 @@
 				1A7CE5F21FF26D6FFEF3E57F /* AppRuntimeGitRecoveryTests.swift */,
 				B1292A4499021174E1C6FC2B /* AppRuntimeGitRulesTests.swift */,
 				AB2619AE4003CE4E4DF8B68D /* AppRuntimeGitUsabilityTests.swift */,
+				031B2028544D61F0A1986F26 /* AppRuntimeLaunchCompletionTests.swift */,
 				FB34D09EBCFE77942E6D0E43 /* AppRuntimeMachineDisplayNameTests.swift */,
 				F5B40D3C2D013AED2EC01834 /* AppRuntimeStatusOrderTests.swift */,
 				7D52BB22884198779082E61C /* AppRuntimeStatusOrderTests+Completion.swift */,
@@ -1922,6 +1931,7 @@
 				4C80B9D82B995F2C6065961F /* AppRuntime+Container.swift */,
 				921578DE515C831D13F49D4E /* AppRuntime+DeployIndex.swift */,
 				B9DFC0236FAE06BE4D24B005 /* AppRuntime+ImportWizard.swift */,
+				6D8ECEDE5D2C85033D1278A8 /* AppRuntime+LaunchSignals.swift */,
 				E7B880FB3B67C6F1142E6507 /* AppRuntime+Paths.swift */,
 				1F2685BF67F967CA7D3DA605 /* AppRuntime+SyncAccess.swift */,
 				032B6A04ADBA66A59F7C422B /* AppRuntime+UpdateCheck.swift */,
@@ -2051,6 +2061,7 @@
 				58531BB7EF893174F299A0A9 /* ManifestProjectDeployIntentTests.swift */,
 				0B4F9A147EB6D2426E47CED2 /* ManifestProjectsRetiredTests.swift */,
 				6C7EA2EAB5EA0602859D5D73 /* ManifestScenarioCarryTests.swift */,
+				DE7B451F191A8C32889F6786 /* ManifestScenarioCarryTests+PreservedMtime.swift */,
 				62BABE699B265B187CCBA8A2 /* ManifestScenarioCarryTests+RoundOne.swift */,
 				BFEFD5B0F2EE3FE1FEAC6303 /* ManifestScenarioCarryTests+RoundTwo.swift */,
 				64D6587BCACB53D50A16599E /* ManifestScenarioTests.swift */,
@@ -2075,6 +2086,7 @@
 				067B2AADCEE30CC8B95DAF81 /* SafeSkillFileTests.swift */,
 				E3A2FFD9EAB99D5DAD76A36F /* ScenarioHandoverMetadataTests.swift */,
 				6840F19174C79DF89D3AB3C3 /* ScenarioHandoverTests.swift */,
+				434E0CCB670A0DBB7202EF5E /* ScenarioHandoverTests+ReadFailure.swift */,
 				5A4FE85FA3EE5AC1979082FD /* ScenarioHandoverTests+RoundOne.swift */,
 				22E137C28F90A30AFCA57888 /* ScenarioHandoverTests+RoundTwo.swift */,
 				0B3537E3115F2246E30F15C7 /* ScenarioHandoverTestSupport.swift */,
@@ -2333,6 +2345,7 @@
 				2AA6169A9193965C614427B2 /* AppRuntimeGitRecoveryTests.swift in Sources */,
 				D8DDE57BB5DCE7948DAA4896 /* AppRuntimeGitRulesTests.swift in Sources */,
 				425BDAF75F377FD48B127353 /* AppRuntimeGitUsabilityTests.swift in Sources */,
+				78356E53AA90C56E66A18EE9 /* AppRuntimeLaunchCompletionTests.swift in Sources */,
 				22D1E3F9D80C1F9B2EB2363B /* AppRuntimeMachineDisplayNameTests.swift in Sources */,
 				9D9942E324978EB05FBFEA22 /* AppRuntimePathsFixture.swift in Sources */,
 				EAAFC51372BCAD06607C645D /* AppRuntimePathsTests.swift in Sources */,
@@ -2459,6 +2472,7 @@
 				8A050DFA30FF7608F74198F2 /* ManifestMaintenanceTests.swift in Sources */,
 				68DAE30243FB305C7FC79813 /* ManifestProjectDeployIntentTests.swift in Sources */,
 				AA87DEE3E37BD00F6336359A /* ManifestProjectsRetiredTests.swift in Sources */,
+				BC49D080098E4AD6243AADEF /* ManifestScenarioCarryTests+PreservedMtime.swift in Sources */,
 				846E82A375051FAA57B363A2 /* ManifestScenarioCarryTests+RoundOne.swift in Sources */,
 				B463D10D467317DF2F68ACCE /* ManifestScenarioCarryTests+RoundTwo.swift in Sources */,
 				4D0DF1E03BD88197082FCA7D /* ManifestScenarioCarryTests.swift in Sources */,
@@ -2500,6 +2514,7 @@
 				8FE4606843AFCF5D16E26A79 /* ScenarioHandoverLaunchTests.swift in Sources */,
 				7D20E285173F762C7A73E40F /* ScenarioHandoverMetadataTests.swift in Sources */,
 				F535AC8FFEEACC64C8BDB92D /* ScenarioHandoverTestSupport.swift in Sources */,
+				1BF7DAC2857A10A8F1560FDD /* ScenarioHandoverTests+ReadFailure.swift in Sources */,
 				97692532EF2BF88C6AE2E223 /* ScenarioHandoverTests+RoundOne.swift in Sources */,
 				CC73EEBEAB50C32CA9E69FD9 /* ScenarioHandoverTests+RoundTwo.swift in Sources */,
 				816B7B7898001E34707278B4 /* ScenarioHandoverTests.swift in Sources */,
@@ -2664,6 +2679,7 @@
 				2ED52D605A7F122BBFE884E1 /* AppRuntime+Container.swift in Sources */,
 				36862B9C028AD67C7D92EB56 /* AppRuntime+DeployIndex.swift in Sources */,
 				E0D16130F516091BF78D067D /* AppRuntime+ImportWizard.swift in Sources */,
+				41C6D6325870342BB26C55CE /* AppRuntime+LaunchSignals.swift in Sources */,
 				1E2B61BF3BBFDFF99A1B218B /* AppRuntime+Paths.swift in Sources */,
 				AE510BA35D1840EFCA7DEE5B /* AppRuntime+SyncAccess.swift in Sources */,
 				E906EC77689867A0695B10AF /* AppRuntime+UpdateCheck.swift in Sources */,

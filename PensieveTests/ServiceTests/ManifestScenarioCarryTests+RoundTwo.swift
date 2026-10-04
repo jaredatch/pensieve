@@ -34,8 +34,11 @@ extension ManifestScenarioCarryTests {
             }
             var changed = empty
             changed.categories = [CategoryRecord(name: kind, projectKeys: [], skillSlugs: [])]
-            XCTAssertNoThrow(try ManifestService(fileService: guarded).write(changed, toRoot: root), kind)
+            let before = try treeBytes(at: root + "/manifest")
+            XCTAssertThrowsError(try ManifestService(fileService: guarded).write(changed, toRoot: root), kind)
             XCTAssertTrue(fired, kind)
+            XCTAssertEqual(try treeBytes(at: root + "/manifest"), before, kind)
+            try manifest.write(changed, toRoot: root)
             XCTAssertEqual(try manifest.read(fromRoot: root).categories, changed.categories, kind)
             XCTAssertEqual(try files.readFile(at: path), "unchanged bytes", kind)
             if kind == "hard-link" { try files.deleteFile(at: root + "/extra-link") }

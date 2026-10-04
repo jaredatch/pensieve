@@ -8,6 +8,7 @@ extension ManifestScenarioCarryTests {
         let firstOpened = DispatchSemaphore(value: 0)
         let releaseFirst = DispatchSemaphore(value: 0)
         let secondAttempted = DispatchSemaphore(value: 0)
+        let secondOpened = DispatchSemaphore(value: 0)
         let order = CarryOrder()
         let finished = DispatchGroup()
         let errors = CarryErrors()
@@ -17,7 +18,10 @@ extension ManifestScenarioCarryTests {
             if releaseFirst.wait(timeout: .now() + 5) != .success { errors.record(DeployStubFailure()) }
         }
         let second = ScenarioCarryFileService()
-        second.afterDirectoryCheck = { order.record("second opened") }
+        second.afterDirectoryCheck = {
+            order.record("second opened")
+            secondOpened.signal()
+        }
         let root = try XCTUnwrap(root)
         let snapshot = empty
         finished.enter()
@@ -38,8 +42,11 @@ extension ManifestScenarioCarryTests {
         }
         XCTAssertEqual(secondAttempted.wait(timeout: .now() + 5), .success)
         XCTAssertEqual(order.values, ["second blocked"], "second writer must encounter the held process lock")
+        XCTAssertEqual(secondOpened.wait(timeout: .now() + 0.5), .timedOut,
+                       "second writer entered the locked region before the first writer was released")
         order.record("first released")
         releaseFirst.signal()
+        XCTAssertEqual(secondOpened.wait(timeout: .now() + 5), .success)
         XCTAssertEqual(finished.wait(timeout: .now() + 5), .success)
         XCTAssertTrue(errors.values.isEmpty, "\(errors.values)")
         XCTAssertEqual(order.values, ["second blocked", "first released", "second opened"])

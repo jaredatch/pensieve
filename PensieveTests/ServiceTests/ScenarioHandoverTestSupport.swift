@@ -106,12 +106,15 @@ final class HandoverHarness {
     func freshContext() -> ModelContext { ModelContext(container) }
 
     func handover(save: @escaping (ModelContext) throws -> Void = { try $0.save() },
-                  fetcher: ReconcilerStateFetching = ReconcilerStateFetcher()) -> ScenarioHandover {
+                  fetcher: ReconcilerStateFetching = ReconcilerStateFetcher(),
+                  fileService: FileServiceProtocol? = nil) -> ScenarioHandover {
         ScenarioHandover(machineIdentity: identity, manifest: manifest, root: root, defaults: defaults,
-                         artifactExists: { [root] skill, platform in
-                             HandoverDeployments(root: root).platformVM.workingArtifactExists(skill: skill, platform: platform)
+                         deployState: { [root] skill, platform in
+                             try HandoverDeployments(root: root).platformVM.scenarioHandoverDeployState(
+                                 skill: skill, platform: platform)
                          }, notifier: { [weak self] in self?.nudges += 1 },
-                         fetcher: fetcher, save: save, log: { [weak self] in self?.logs.append($0) })
+                         fileService: fileService ?? files, fetcher: fetcher, save: save,
+                         log: { [weak self] in self?.logs.append($0) })
     }
 
     func launch(_ handover: ScenarioHandingOver? = nil) -> LaunchReconcileOutcome {
@@ -128,7 +131,7 @@ final class HandoverHarness {
             return (path, HandoverArtifact(
                 identity: files.fileIdentity(at: path, followingLinks: false),
                 modified: try XCTUnwrap(attributes[.modificationDate] as? Date),
-                bytes: files.isSymlink(at: path) ? nil : try files.readData(at: path),
+                bytes: files.isRegularFile(at: path) ? try files.readData(at: path) : nil,
                 linkTarget: files.isSymlink(at: path) ? try files.symlinkTarget(at: path) : nil
             ))
         })
@@ -220,7 +223,7 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
         try files.deleteFile(at: linkPath(skill: skill, platform: platform, projectPath: projectPath))
     }
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
-        files.isSymlink(at: linkPath(skill: skill, platform: platform, projectPath: projectPath))
+        literalLinks.isLinked(skill: skill, platform: platform, projectPath: projectPath)
     }
     func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
         root + "/agents/" + platform.rawValue + "/" + skill.directoryName
@@ -228,7 +231,16 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
     func targetPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
         root + "/skills/" + skill.directoryName
     }
-    func validateAll(skills: [Skill]) -> [BrokenLink] { [] }
+    private var literalLinks: LinkService {
+        let mappings = PlatformTarget.allCases.filter(\.usesSymlinks).map { platform in
+            (logical: (DeployPaths.linkPath(directoryName: "skill", platform: platform, projectPath: nil) as NSString)
+                .deletingLastPathComponent,
+             physical: root + "/agents/" + platform.rawValue)
+        }
+        return LinkService(fileService: LinkServiceCanonicalDirectoryFileService(wrapped: files,
+            pathMappings: [(Constants.pensieveSkillsDir, root + "/skills")] + mappings))
+    }
+    func validateAll(skills: [Skill]) -> [BrokenLink] { literalLinks.validateAll(skills: skills) }
     func compile(skill: Skill, projectPath: String?) throws {
         createCalls += 1
         guard allowCreation else { throw DeployStubFailure() }

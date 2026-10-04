@@ -8,7 +8,7 @@ final class ScenarioRemovalTests: XCTestCase {
     @MainActor
     func testRetiredFeatureHasNoAppSourceOrNavigationEntry() async throws {
         try assertRetiredSourcesAndRoutes()
-        try await assertLaunchedWindowSelectsSkills()
+        for deferred in [false, true] { try await assertLaunchedWindowSelectsSkills(deferred: deferred) }
     }
 
     private func assertRetiredSourcesAndRoutes() throws {
@@ -41,7 +41,7 @@ final class ScenarioRemovalTests: XCTestCase {
     }
 
     @MainActor
-    private func assertLaunchedWindowSelectsSkills() async throws {
+    private func assertLaunchedWindowSelectsSkills(deferred: Bool) async throws {
         let paths = try AppRuntimePaths.temporary(named: "ScenarioRemovalLaunch")
         let temporaryRoot = (paths.storeRoot as NSString).deletingLastPathComponent
         defer { try? FileService().deleteDirectory(at: temporaryRoot) }
@@ -49,9 +49,10 @@ final class ScenarioRemovalTests: XCTestCase {
         defaults.set(false, forKey: AppRuntime.backgroundSyncEnabledKey)
         defaults.set(true, forKey: AppRuntime.migrationDefaultsKey)
         defaults.set(true, forKey: ScenarioHandover.doneKey)
-        let launchLock = try XCTUnwrap(SyncLock.tryAcquire(at: paths.syncLockPath))
-        defer { launchLock.release() }
-        let runtime = try AppRuntime(defaults: defaults, paths: paths, gitUsabilityProbe: { .usable })
+        let launchLock: SyncLock? = deferred ? try XCTUnwrap(SyncLock.tryAcquire(at: paths.syncLockPath)) : nil
+        defer { launchLock?.release() }
+        let runtime = try AppRuntime(defaults: defaults, launchIngestRetryNanoseconds: 10_000_000,
+                                     paths: paths, gitUsabilityProbe: { .usable })
         let skill = Skill(name: "Launch skill", skillDescription: "Description", directoryName: "launch")
         runtime.container.mainContext.insert(skill)
         try runtime.container.mainContext.save()
@@ -71,12 +72,14 @@ final class ScenarioRemovalTests: XCTestCase {
             return runtime.launchWorkInvocationCount == 1 && self.sidebar(in: host) != nil
         }
         await runtime.mainWindowAppeared()
-        launchLock.release()
-        await TestWait.until(failureMessage: "launch ingest and coordinator signaling did not finish and render",
-                             diagnostics: { "signaled=\(runtime.launchIngestSignaled), rendered=\(launchRendered)" }, {
+        XCTAssertEqual(runtime.storeQuarantined, deferred)
+        XCTAssertEqual(runtime.launchWorkCompleted, !deferred)
+        launchLock?.release()
+        await TestWait.until(failureMessage: "launch work did not finish and render",
+                             diagnostics: { "completed=\(runtime.launchWorkCompleted), rendered=\(launchRendered)" }, {
 
             host.layoutSubtreeIfNeeded()
-            return runtime.launchIngestSignaled && launchRendered
+            return runtime.launchWorkCompleted && launchRendered
         })
         host.layoutSubtreeIfNeeded()
         let outline = try XCTUnwrap(sidebar(in: host))
@@ -106,7 +109,7 @@ final class ScenarioRemovalTests: XCTestCase {
     }
 }
 
-/// Observes completion inside a SwiftUI body, so the fence represents a real post-ingest render.
+/// Observes completed launch work inside a SwiftUI body before inspecting sidebar selection.
 private struct LaunchRenderFence: View {
     let content: ContentView
     let onRendered: () -> Void
@@ -114,7 +117,7 @@ private struct LaunchRenderFence: View {
 
     var body: some View {
         content.overlay {
-            if runtime.launchIngestSignaled {
+            if runtime.launchWorkCompleted {
                 Color.clear.onAppear(perform: onRendered)
             }
         }

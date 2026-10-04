@@ -89,7 +89,9 @@ final class ScenarioHandoverMetadataTests: XCTestCase {
         disk.deployIntents = [DeployIntentRecord(machineID: harness.identity.id, skillSlug: "disk",
                                                 platformRaw: "codex", projectKey: nil)]
         try harness.manifest.live.write(disk, toRoot: harness.root)
-        try harness.handover().handOver(context: harness.freshContext(), readiness: .init())
+        try harness.handover().handOver(context: harness.freshContext(), readiness: ScenarioHandoverReadiness(
+                manifestWritten: true, rebuildSaveFailed: false,
+                ingestionNeedsRetry: false, storeUnreadable: false, quarantined: false))
         let written = try harness.manifest.read(fromRoot: harness.root)
         XCTAssertTrue((cached.categories + disk.categories).allSatisfy(written.categories.contains))
         XCTAssertTrue((cached.skills + disk.skills).allSatisfy(written.skills.contains))

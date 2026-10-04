@@ -24,8 +24,12 @@ final class AppRuntime {
 
     private(set) var coordinator: SyncCoordinator?
     private(set) var launchWorkInvocationCount = 0
-    /// True after completed ingest has seeded the coordinator and notified the scheduler.
-    private(set) var launchIngestSignaled = false
+
+    /// True after the launch attempt reaches a terminal outcome, including unreadable/quarantined stores,
+    /// and initial callbacks and watcher startup finish. A deferred ingest waits for its retry.
+    /// Coordinator signaling and any backfill deferred to a later sync cycle are separate.
+    var launchWorkCompleted = false
+
     private(set) var storeQuarantined = false
     private(set) var updateCheckInFlight = false
     private(set) var updateCheckError: String?
@@ -46,11 +50,13 @@ final class AppRuntime {
     /// Where the store and App Support live; every collaborator built here is pointed at them (`AppRuntime+Paths.swift`).
     private let paths: AppRuntimePaths
     private var didPerformLaunchWork = false
-    private var didCompleteLaunchIngest = false
-    private var didSignalLaunchIngest = false
-    private var launchIngestHeadStamp: String?
+    var didCompleteLaunchIngest = false
+    var didFinishInitialLaunchCallbacks = false
+
+    var didSignalLaunchIngest = false
+    var launchIngestHeadStamp: String?
     private var needsLaunchBackfillAfterCoordinator = false
-    private var forceLaunchPreflight = false
+    var forceLaunchPreflight = false
     @ObservationIgnored private var launchIngestRetryTask: Task<Void, Never>?
     @ObservationIgnored private var openMainWindowAction: (() -> Void)?
     @ObservationIgnored private(set) lazy var upstreamHistory = paths.makeUpstreamHistoryViewModel()
@@ -221,6 +227,7 @@ final class AppRuntime {
     }
 
     func clearUpdateCheckAlert() { updateCheckAlertError = nil }
+
     /// Runs process-lifetime launch work at most once. The callback keeps the existing auto-update check
     /// between deploy-state backfill and watcher startup while the view retains its presentation state.
     @discardableResult
@@ -244,6 +251,8 @@ final class AppRuntime {
             beforeStartingWatcher()
             library.startWatching()
             scheduleLaunchIngestRetry(context: context)
+            didFinishInitialLaunchCallbacks = true
+            completeLaunchWorkIfPossible()
             return true
         }
         let launchOutcome = launchReconcile(context, alreadyMigrated)
@@ -257,6 +266,8 @@ final class AppRuntime {
         if launchOutcome.ingestionNeedsRetry {
             scheduleLaunchIngestRetry(context: context)
         }
+        didFinishInitialLaunchCallbacks = true
+        completeLaunchWorkIfPossible()
         return true
     }
 }
@@ -283,6 +294,7 @@ private extension AppRuntime {
             || !outcome.ingestionNeedsRetry
         signalLaunchIngestIfPossible()
         library.refreshQuarantine(context: context)
+        completeLaunchWorkIfPossible()
     }
 
     private func scheduleLaunchIngestRetry(context: ModelContext) {
@@ -305,24 +317,6 @@ private extension AppRuntime {
                 }
                 lock.release()
             }
-        }
-    }
-
-    private func signalLaunchIngestIfPossible() {
-        guard didCompleteLaunchIngest,
-              !didSignalLaunchIngest,
-              let coordinator else { return }
-        didSignalLaunchIngest = true
-        let stamp = launchIngestHeadStamp
-        Task { [weak self] in
-            await coordinator.seedLastIngestedHeadStamp(stamp)
-            guard let self else { return }
-            if self.forceLaunchPreflight {
-                self.forceLaunchPreflight = false
-                self.scheduler.enqueueManualTrigger()
-            }
-            self.scheduler.launchIngestCompleted()
-            self.launchIngestSignaled = true
         }
     }
 }

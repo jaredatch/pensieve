@@ -206,7 +206,8 @@ struct LaunchReconciler {
         do {
             try scenarioHandover?.handOver(context: context, readiness: ScenarioHandoverReadiness(
                 manifestWritten: manifestWritten, rebuildSaveFailed: result.rebuild.saveFailed,
-                ingestionNeedsRetry: result.ingestionNeedsRetry
+                ingestionNeedsRetry: result.ingestionNeedsRetry,
+                storeUnreadable: result.rebuild.storeUnreadable, quarantined: false
             ))
         } catch {
             let warning = "Scenario handover deferred until next launch: \(error.localizedDescription)"
