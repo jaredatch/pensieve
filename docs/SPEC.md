@@ -161,7 +161,7 @@ children are. It never scans deeper and refuses Pensieve's own library.
 2. Results shown grouped by source platform
 3. Duplicate detection: skills with >80% word-level similarity (Jaccard) are flagged
 4. User selects which skills to import (all selected by default)
-5. Each imported skill's whole `SKILL.md` is written to `~/.pensieve/skills/{slug}/SKILL.md` with only `name` and `description` set, and its metadata goes into SwiftData. When its frontmatter can't be kept safely, a fresh `name`/`description` header goes on top and the whole source follows as the body, and the done step names that skill. A `SKILL.md` that's a symlink or a special file isn't offered (PLAN-42)
+5. Each imported skill's whole `SKILL.md` is written to `~/.pensieve/skills/{slug}/SKILL.md` with only `name` and `description` set, and its metadata goes into SwiftData. When its frontmatter can't be kept safely, a fresh `name`/`description` header goes on top and the whole source follows as the body, and the done step names that skill. A `SKILL.md` that's a symlink or a special file isn't offered (PLAN-42). Neither is a scanned `SKILL.md` or `.mdc` that's a link, a special file or over 4 MiB, and the results and done steps say how many entries were skipped and why (PLAN-48)
 6. Cursor `.mdc` imports extract frontmatter (description, globs, alwaysApply) and store as Cursor adapter config
 
 ### Slug Generation
@@ -356,6 +356,6 @@ Used for freshness checking and deployment history. `DeployRecord` is **append-o
 | Permission denied | Show error with full path |
 | Cursor write fails | Show error with full path |
 | `~/.claude/` doesn't exist | Skip gracefully during import |
-| YAML frontmatter absent, unparseable, or refused by the checked loader (a non-scalar key, an alias bomb) | Treat body as all-content; not admitted unless `name`+`description` are present |
+| YAML frontmatter absent (it must open on the file's first line and close at a column-0 `---`), unparseable, or refused by the checked loader (a non-scalar key, an alias bomb) | Treat body as all-content; not admitted unless `name`+`description` are present |
 | Skill name collision | Append `-2`, `-3` suffix |
 | Deploy to Cursor via symlink | Reject with error — Cursor uses compiled output |

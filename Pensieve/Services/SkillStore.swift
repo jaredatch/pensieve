@@ -25,7 +25,7 @@ protocol SkillStoreProtocol {
     func readData(directoryName: String) throws -> Data
     /// Rewrite an existing SKILL.md from caller-supplied parsed preservation data.
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws
+                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult
     /// Write raw SKILL.md content verbatim - no frontmatter synthesis. Low-level primitive.
     func writeBody(directoryName: String, body: String) throws
     /// Delete a skill directory and its contents.
@@ -103,16 +103,19 @@ final class SkillStore: SkillStoreProtocol {
         return try fileService.readRegularFileData(at: path, maximumBytes: Int.max)
     }
 
+    @discardableResult
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws {
+                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
         let path = try validatedSkillDirectory(directoryName) + "/SKILL.md"
-        let content = SkillSerializer.rewrite(
+        let result = SkillSerializer.rewrite(
             body: body,
             preserving: parsed,
             fallbackName: fallbackName,
             fallbackDescription: fallbackDescription
         )
-        try fileService.writeFile(at: path, content: content)
+        guard result.didChange else { return result }
+        try fileService.writeFile(at: path, content: result.content)
+        return result
     }
 
     func writeBody(directoryName: String, body: String) throws {
@@ -177,6 +180,12 @@ final class SkillStore: SkillStoreProtocol {
             && !slug.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7F }
     }
 
+    /// Pure path construction for render-time context. Filesystem admission still uses C7.
+    static func skillDirectoryPath(slug: String, base: String) -> String? {
+        guard !slug.isEmpty, !slug.contains("/"), slug != ".", slug != ".." else { return nil }
+        return base + "/" + slug
+    }
+
     // MARK: - Private
 
     /// The single C7 guard. Returns `<base>/<slug>` iff `slug` is a safe single directory
@@ -184,8 +193,7 @@ final class SkillStore: SkillStoreProtocol {
     /// realpaths outside `<base>`. Returns nil otherwise. PURE check — the caller decides what to
     /// do with nil (throw / skip / return 0), so a fail-safe skip site never has to catch a throw.
     static func safeSkillDirectory(slug: String, base: String, fileService: FileServiceProtocol) -> String? {
-        guard !slug.isEmpty, !slug.contains("/"), slug != ".", slug != ".." else { return nil }
-        let dirPath = base + "/" + slug
+        guard let dirPath = skillDirectoryPath(slug: slug, base: base) else { return nil }
         if fileService.isSymlink(at: dirPath) { return nil }
         let realBase = URL(fileURLWithPath: base).resolvingSymlinksInPath().path
         let realDir = URL(fileURLWithPath: dirPath).resolvingSymlinksInPath().path

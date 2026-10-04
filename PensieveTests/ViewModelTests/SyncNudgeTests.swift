@@ -339,13 +339,14 @@ final class MemorySkillStore: SkillStoreProtocol {
     func readBody(directoryName: String) throws -> String { bodies[directoryName] ?? "" }
 
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws {
+                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
         bodies[directoryName] = SkillSerializer.rewrite(
             body: body,
             preserving: parsed,
             fallbackName: fallbackName,
             fallbackDescription: fallbackDescription
-        )
+        ).content
+        return SkillRewriteResult(content: bodies[directoryName] ?? body, didChange: true)
     }
 
     func writeBody(directoryName: String, body: String) throws { bodies[directoryName] = body }

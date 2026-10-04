@@ -37,6 +37,7 @@ private final class ImportScanResult {
 final class ImportReadSpy: FileServiceProtocol {
     let files: FileService
     var returnedBytes: [Data] = []
+    var writtenPaths: [String] = []
     init(files: FileService) { self.files = files }
     func readFile(at path: String) throws -> String {
         let content = try files.readFile(at: path)
@@ -48,9 +49,19 @@ final class ImportReadSpy: FileServiceProtocol {
         returnedBytes.append(data)
         return data
     }
-    func writeFile(at path: String, content: String) throws { try files.writeFile(at: path, content: content) }
+    func writeFile(at path: String, content: String) throws {
+        writtenPaths.append(path)
+        try files.writeFile(at: path, content: content)
+    }
     func deleteFile(at path: String) throws { try files.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { files.fileExists(at: path) }
+    func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {
+        try files.entryExistsWithoutFollowingLinks(at: path)
+    }
+    func realPath(at path: String) -> String { files.realPath(at: path) }
+    func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? {
+        files.fileIdentity(at: path, followingLinks: followingLinks)
+    }
     func isExecutableFile(at path: String) -> Bool { files.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { files.directoryExists(at: path) }
     func createDirectory(at path: String) throws { try files.createDirectory(at: path) }

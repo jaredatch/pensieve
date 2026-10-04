@@ -20,8 +20,29 @@ final class ImportViewModel {
     var importProgress: Double = 0
     var error: String?
     var importNotices: [String] = []
+    var scanSkips: [ImportScanSkip] = []
+    private var latestFolderReport = ImportScanReport()
+    private(set) var importedSkillCount = 0
 
     var hasResults: Bool { !discoveredSkills.isEmpty }
+
+    var doneTitle: String {
+        if !hasResults { return scanSkips.isEmpty ? "No Skills Found" : "No Skills Imported" }
+        return error == nil && importedSkillCount == selectedSkills.count ? "Import Complete" : "Import Finished"
+    }
+
+    var doneMessage: String {
+        if hasResults {
+            let noun = importedSkillCount == 1 ? "skill" : "skills"
+            return "\(importedSkillCount) \(noun) imported into Pensieve."
+        }
+        return scanSkips.isEmpty ? "No existing skills were found. Create your first skill to get started."
+            : "No skills could be imported from the scanned entries."
+    }
+
+    var scanSummary: String? {
+        ImportScanReport(skipped: scanSkips).summary
+    }
 
     init(
         fileService: FileServiceProtocol? = nil,
@@ -44,10 +65,14 @@ final class ImportViewModel {
     // MARK: - Scan
 
     func scan() {
+        latestFolderReport = ImportScanReport()
         importNotices = []
+        importedSkillCount = 0
         error = nil
         isScanning = true
-        discoveredSkills = scanner.scan()
+        let report = scanner.scanWithReport()
+        discoveredSkills = report.skills
+        scanSkips = report.skipped
         duplicateGroups = ImportScanner.findDuplicates(discoveredSkills)
         // Select all by default
         selectedSkills = Set(discoveredSkills.map(\.sourcePath))
@@ -59,17 +84,32 @@ final class ImportViewModel {
     /// clears the last import's notices and error first (PLAN-42).
     @discardableResult
     func scanFolder(_ path: String) -> FolderScanOutcome {
+        latestFolderReport = ImportScanReport()
         importNotices = []
+        importedSkillCount = 0
         error = nil
         guard !scanner.isInsideStore(path) else { return .insideLibrary }
         isScanning = true
         defer { isScanning = false }
-        let found = scanner.scanFolder(path)
-        guard !found.isEmpty else { return .nothingFound }
+        let report = scanner.scanFolderWithReport(path)
+        latestFolderReport = report
+        let found = report.skills
+        guard !found.isEmpty else {
+            // A report belongs to its results. Keep both when retaining an earlier non-empty scan.
+            if discoveredSkills.isEmpty { scanSkips = report.skipped }
+            return .nothingFound
+        }
         discoveredSkills = found
+        scanSkips = report.skipped
         duplicateGroups = ImportScanner.findDuplicates(discoveredSkills)
         selectedSkills = Set(discoveredSkills.map(\.sourcePath))
         return .found(found.count)
+    }
+
+    func nothingFoundMessage(folder shown: String) -> String {
+        let explanation = "\(shown) holds no readable SKILL.md. Pensieve looks in it and in its folders, never deeper."
+        guard let summary = latestFolderReport.summary else { return explanation }
+        return explanation + "\n\n\(shown): \(summary)"
     }
 
     func toggleSelection(_ skill: DiscoveredSkill) {
@@ -104,9 +144,11 @@ final class ImportViewModel {
 
     func importSelected(
         context: ModelContext,
-        takenSlugs: (ModelContext) throws -> Set<String> = { Set(try $0.fetch(FetchDescriptor<Skill>()).map(\.directoryName)) }
+        takenSlugs: (ModelContext) throws -> Set<String> = { Set(try $0.fetch(FetchDescriptor<Skill>()).map(\.directoryName)) },
+        saveContext: (ModelContext) throws -> Void = { try $0.save() }
     ) {
         importNotices = []
+        importedSkillCount = 0
         error = nil
         let toImport = discoveredSkills.filter { selectedSkills.contains($0.sourcePath) }
         guard !toImport.isEmpty else { return }
@@ -149,7 +191,8 @@ final class ImportViewModel {
         }
 
         do {
-            try context.save()
+            try saveContext(context)
+            importedSkillCount = writtenSlugs.count
             regenerateManifest(context: context)
             echoRegistrar(writtenSlugs)
             notifier()
@@ -181,35 +224,15 @@ final class ImportViewModel {
         guard let source = discovered.sourceContent else { return (nil, false) }
         let parsed = SkillParser.parse(source)
         if parsed.preservedFrontmatter != nil,
-           let normalized = SkillSerializer.normalizeIdentity(name: discovered.name, description: description, parsed: parsed),
-           normalizationPreservesSource(normalized, parsed: parsed, name: discovered.name, description: description) {
+           let normalized = SkillSerializer.normalizeIdentity(name: discovered.name, description: description, parsed: parsed) {
             return (normalized, false)
         }
-        let firstLine = source.components(separatedBy: "\n")
-            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let startsWithFence = firstLine?.trimmingCharacters(in: .whitespacesAndNewlines) == "---"
+        let firstLine = SkillParser.sourceLines(in: source, yamlBreaks: false)[0]
+        let startsWithFence = SkillParser.isFrontmatterFence(source[firstLine.contentRange])
         return (
             SkillSerializer.serialize(name: discovered.name, description: description, body: source),
             startsWithFence
         )
-    }
-
-    /// Import verifies the splice independently of the parser's line-based entry ranges.
-    /// Compare loaded mappings so keys hidden by quoted scalars or YAML line breaks cannot disappear.
-    private func normalizationPreservesSource(
-        _ normalized: String, parsed: ParsedSkill, name: String, description: String
-    ) -> Bool {
-        let written = SkillParser.parse(normalized)
-        guard written.hasRequiredFrontmatter, written.name == name, written.description == description,
-              let sourceYAML = parsed.preservedFrontmatter?.source,
-              let writtenYAML = written.preservedFrontmatter?.source,
-              var sourceEntries = try? CheckedYAMLLoader.load(yaml: sourceYAML) as? [String: Any],
-              var writtenEntries = try? CheckedYAMLLoader.load(yaml: writtenYAML) as? [String: Any] else { return false }
-        for key in ["name", "description"] {
-            sourceEntries.removeValue(forKey: key)
-            writtenEntries.removeValue(forKey: key)
-        }
-        return (sourceEntries as NSDictionary).isEqual(to: writtenEntries)
     }
 
 }

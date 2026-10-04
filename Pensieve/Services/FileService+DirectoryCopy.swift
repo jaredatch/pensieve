@@ -52,8 +52,7 @@ extension FileService {
             guard opened.entries[name]?.isRegular == true else { continue }
             let path = source + "/" + name
             try checkpoint(.copying(name))
-            let child = openat(descriptor, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-            guard child >= 0 else { throw DescriptorFileCopy.error("openat", path: path, code: errno) }
+            let (child, _) = try Self.openRegularFile(at: name, relativeTo: descriptor, reportingPath: path)
             defer { close(child) }
             guard try DirectoryCopySource.descriptorStamp(child, path: path) == opened.entries[name] else {
                 throw DescriptorFileCopy.error("source changed", path: path, code: ESTALE)
@@ -191,8 +190,9 @@ enum DescriptorFileCopy {
         guard status.st_mode & S_IFMT == S_IFREG else { throw error("not regular", path: sourcePath, code: EFTYPE) }
         let parent = URL(fileURLWithPath: destination).deletingLastPathComponent().path
         let temporary = parent + "/.pensieve-copy-" + UUID().uuidString + ".tmp"
-        let output = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, status.st_mode & 0o777)
-        guard output >= 0 else { throw error("open", path: destination, code: errno) }
+        let (output, _) = try FileService.openRegularFile(
+            at: temporary, creatingWithPermissions: status.st_mode & 0o777, reportingPath: destination
+        )
         defer {
             close(output)
             unlink(temporary)

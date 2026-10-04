@@ -5,6 +5,31 @@ import XCTest
 /// Explicit save (PLAN-33): the draft owner on the library view model — a keystroke is a draft,
 /// nothing reaches disk until Save, Revert drops it, and every way out passes `confirmLeaving`.
 final class SkillLibrarySaveTests: XCTestCase {
+    @MainActor
+    func testCRLFEditorSaveIsAnEchoWithoutReloadOrOutsideChange() throws {
+        let files = FileService()
+        let root = NSTemporaryDirectory() + "CRLFSave-" + UUID().uuidString
+        defer { try? files.deleteDirectory(at: root) }
+        let store = SkillStore(fileService: files, baseDir: root)
+        let slug = try store.createSkill(name: "Test", description: "D", body: "Old")
+        try files.writeFile(at: root + "/" + slug + "/SKILL.md",
+                            content: "---\r\nname: Test\r\ndescription: D\r\n---\r\n\r\nOld\r\n")
+        let watcher = RecordingWatcher()
+        let library = SkillLibraryViewModel(skillStore: store, fileService: files, fileWatchService: watcher)
+        let skill = Skill(name: "Test", directoryName: slug)
+        library.startWatching()
+        _ = library.editorBody(for: skill)
+        let token = library.reloadToken
+        library.noteEditorChanged(skill, body: "Edited\nSecond")
+        XCTAssertTrue(library.saveDraft(skill))
+        let body = library.currentOnDiskBody(directoryName: slug)
+        XCTAssertEqual(body, "Edited\r\nSecond")
+        XCTAssertTrue(library.wasLastWrittenByApp(directoryName: slug, currentBody: body))
+        watcher.emit(slug)
+        XCTAssertEqual(library.reloadToken, token)
+        XCTAssertTrue(library.externallyModified.isEmpty)
+    }
+
     private func makeSkill() -> Skill { Skill(name: "Test Skill", directoryName: "test-skill") }
 
     func testLoadIsCleanAndSeedsTheFingerprint() {
@@ -227,7 +252,7 @@ final class ThrowingSkillStore: SkillStoreProtocol {
     func createSkill(name: String, description: String, body: String) throws -> String { "created-skill" }
     func readBody(directoryName: String) throws -> String { "A" }
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws { throw SaveFailure() }
+                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult { throw SaveFailure() }
     func writeBody(directoryName: String, body: String) throws { throw SaveFailure() }
     func deleteSkill(directoryName: String) throws {}
     func listSkills() throws -> [String] { [] }
@@ -238,6 +263,7 @@ final class CountingSkillStore: SkillStoreProtocol {
     private(set) var lastWrittenBody: String?
     /// The skill's files removed from under the app: every read fails, as `FileService` would.
     var filesGone = false
+    var rewriteOverride: String?
 
     init(body: String? = nil) {
         lastWrittenBody = body
@@ -253,9 +279,10 @@ final class CountingSkillStore: SkillStoreProtocol {
     }
 
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws {
+                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
         writeCount += 1
-        lastWrittenBody = body
+        lastWrittenBody = rewriteOverride ?? body
+        return SkillRewriteResult(content: lastWrittenBody ?? body, didChange: true)
     }
 
     func writeBody(directoryName: String, body: String) throws {

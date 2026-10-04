@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 // MARK: - Discovered Skill
@@ -28,11 +29,19 @@ protocol ImportScannerProtocol {
     func scan() -> [DiscoveredSkill]
     func scanFolder(_ path: String) -> [DiscoveredSkill]
     func isInsideStore(_ path: String) -> Bool
+    func scanWithReport() -> ImportScanReport
+    func scanFolderWithReport(_ path: String) -> ImportScanReport
+}
+
+extension ImportScannerProtocol {
+    func scanWithReport() -> ImportScanReport { ImportScanReport(skills: scan()) }
+    func scanFolderWithReport(_ path: String) -> ImportScanReport { ImportScanReport(skills: scanFolder(path)) }
 }
 
 // MARK: - Implementation
 
 final class ImportScanner: ImportScannerProtocol {
+    static let maximumFileBytes = 4 * 1_024 * 1_024
     private let fileService: FileServiceProtocol
     private let claudeSkillsDir: String
     private let grokSkillsDir: String
@@ -56,34 +65,47 @@ final class ImportScanner: ImportScannerProtocol {
         self.storeRoot = storeRoot
     }
 
-    func scan() -> [DiscoveredSkill] {
-        var discovered: [DiscoveredSkill] = []
-        discovered += scanClaudeCode()
-        discovered += scanGrok()
-        discovered += scanCursor()
-        discovered += scanCodex()
-        return discovered
+    func scan() -> [DiscoveredSkill] { scanWithReport().skills }
+
+    func scanWithReport() -> ImportScanReport {
+        var skipped: [ImportScanSkip] = []
+        var skills = scanSkillDirectory(claudeSkillsDir, platform: "claude-code", skipped: &skipped)
+        skills += scanSkillDirectory(grokSkillsDir, platform: "grok", skipped: &skipped)
+        skills += scanCursor(skipped: &skipped)
+        skills += scanSkillDirectory(codexSkillsDir, platform: "codex", skipped: &skipped)
+        return ImportScanReport(skills: skills, skipped: skipped)
     }
 
     /// A `<dir>/<entry>/SKILL.md` scan shared by Claude Code, Grok, Codex, and Import from Folder….
     /// Dot-entries are skipped (Codex keeps a `.system` directory beside its skills).
-    private func scanSkillDirectory(_ skillsDir: String, platform: String) -> [DiscoveredSkill] {
-        guard fileService.directoryExists(at: skillsDir),
-              let entries = try? fileService.listDirectory(at: skillsDir) else { return [] }
+    private func scanSkillDirectory(
+        _ skillsDir: String, platform: String, skipped: inout [ImportScanSkip]
+    ) -> [DiscoveredSkill] {
+        guard fileService.directoryExists(at: skillsDir) else { return [] }
+        let entries: [String]
+        do { entries = try fileService.listDirectory(at: skillsDir) } catch {
+            skipped.append(ImportScanSkip(path: skillsDir, reason: .unreadable))
+            return []
+        }
         return entries
             .filter { !$0.hasPrefix(".") }
-            .compactMap { discoveredSkill(inDirectory: skillsDir, entry: $0, platform: platform) }
+            .compactMap { discoveredSkill(inDirectory: skillsDir, entry: $0, platform: platform, skipped: &skipped) }
     }
 
     /// One `<dir>/<entry>/SKILL.md`: nil when there is none, when it cannot be read, or when it
     /// resolves into Pensieve's store (a deploy symlink on the entry, or a link anywhere along the
     /// path — a store skill must never be re-imported as a duplicate). With frontmatter, adopt the
     /// upstream identity and retain the original file for the import write.
-    private func discoveredSkill(inDirectory skillsDir: String, entry: String, platform: String) -> DiscoveredSkill? {
+    private func discoveredSkill(
+        inDirectory skillsDir: String, entry: String, platform: String, skipped: inout [ImportScanSkip]
+    ) -> DiscoveredSkill? {
         let skillPath = skillsDir + "/" + entry + "/SKILL.md"
-        guard fileService.isRegularFile(at: skillPath), !isInsideStore(skillPath),
-              let data = try? fileService.readRegularFileData(at: skillPath, maximumBytes: Int.max),
-              let content = String(bytes: Self.sourceTextBytes(data), encoding: .utf8) else { return nil }
+        guard !isInsideStore(skillPath),
+              let content = scannedText(at: skillPath, skipped: &skipped) else { return nil }
+        return discoveredSkill(content: content, path: skillPath, entry: entry, platform: platform)
+    }
+
+    private func discoveredSkill(content: String, path skillPath: String, entry: String, platform: String) -> DiscoveredSkill {
         // The byte boundary removes the encoding signature before decoding or frontmatter detection.
         let parsed = SkillParser.parse(content)
         if parsed.hasFrontmatter {
@@ -112,10 +134,6 @@ final class ImportScanner: ImportScannerProtocol {
     static func sourceTextBytes(_ data: Data) -> Data {
         data.starts(with: [0xEF, 0xBB, 0xBF]) ? Data(data.dropFirst(3)) : data
     }
-
-    private func scanClaudeCode() -> [DiscoveredSkill] { scanSkillDirectory(claudeSkillsDir, platform: "claude-code") }
-    private func scanGrok() -> [DiscoveredSkill] { scanSkillDirectory(grokSkillsDir, platform: "grok") }
-    private func scanCodex() -> [DiscoveredSkill] { scanSkillDirectory(codexSkillsDir, platform: "codex") }
 
     /// True when the path is Pensieve's own library or inside it — as written, resolved, or at any
     /// symlink on the way there. The last clause is C7 (`docs/CONVENTIONS.md` §15): a deploy link into
@@ -172,45 +190,79 @@ final class ImportScanner: ImportScannerProtocol {
     /// import its vendored agent directories. The chosen folder may be a dot-folder; only children
     /// are subject to the dot rule. The library itself is refused: importing `~/.pensieve/skills`
     /// would duplicate every skill under a new slug with frontmatter tags in place of its overlay's.
-    func scanFolder(_ path: String) -> [DiscoveredSkill] {
-        guard !isInsideStore(path) else { return [] }   // never re-import the library into itself
-        if fileService.fileExists(at: path + "/SKILL.md") {
-            // The folder is a skill: its own SKILL.md decides, readable or not. An unreadable one
-            // yields nothing rather than silently widening the import to the children.
-            let parent = (path as NSString).deletingLastPathComponent
+    func scanFolder(_ path: String) -> [DiscoveredSkill] { scanFolderWithReport(path).skills }
+
+    func scanFolderWithReport(_ path: String) -> ImportScanReport {
+        guard !isInsideStore(path) else { return ImportScanReport() }
+        var skipped: [ImportScanSkip] = []
+        let skillPath = path + "/SKILL.md"
+        guard !isInsideStore(skillPath) else { return ImportScanReport() }
+        let content = scannedText(at: skillPath, directoryIsContainer: true, skipped: &skipped)
+        let skills: [DiscoveredSkill]
+        if let content {
             let entry = (path as NSString).lastPathComponent
-            return discoveredSkill(inDirectory: parent, entry: entry, platform: "folder").map { [$0] } ?? []
+            skills = [discoveredSkill(content: content, path: skillPath, entry: entry, platform: "folder")]
+        } else if skipped.isEmpty {
+            // Missing files and directories named SKILL.md leave this a collection. A refused leaf,
+            // including a dangling link, decides the folder's result without widening to children.
+            skills = scanSkillDirectory(path, platform: "folder", skipped: &skipped)
+        } else {
+            skills = []
         }
-        return scanSkillDirectory(path, platform: "folder")
+        return ImportScanReport(skills: skills, skipped: skipped)
     }
 
     // MARK: - Cursor
 
-    private func scanCursor() -> [DiscoveredSkill] {
-        var results: [DiscoveredSkill] = []
-
-        // ~/.cursor/rules/*.mdc
-        let rulesDir = cursorRulesDir
-        if fileService.directoryExists(at: rulesDir),
-           let entries = try? fileService.listDirectory(at: rulesDir) {
-            for entry in entries where entry.hasSuffix(".mdc") {
-                let mdcPath = rulesDir + "/" + entry
-                if let content = try? fileService.readFile(at: mdcPath) {
-                    let parsed = SkillParser.parseMDC(content)
-                    let name = String(entry.dropLast(4)) // remove .mdc
-                    results.append(DiscoveredSkill(
-                        name: name,
-                        body: parsed.body,
-                        sourcePlatform: "cursor",
-                        sourcePath: mdcPath,
-                        skillDescription: parsed.description,
-                        cursorConfig: parsed.cursorConfig
-                    ))
-                }
-            }
+    private func scanCursor(skipped: inout [ImportScanSkip]) -> [DiscoveredSkill] {
+        guard fileService.directoryExists(at: cursorRulesDir) else { return [] }
+        let entries: [String]
+        do { entries = try fileService.listDirectory(at: cursorRulesDir) } catch {
+            skipped.append(ImportScanSkip(path: cursorRulesDir, reason: .unreadable))
+            return []
         }
+        return entries.filter { $0.hasSuffix(".mdc") }.compactMap { entry in
+            let path = cursorRulesDir + "/" + entry
+            guard let content = scannedText(at: path, skipped: &skipped) else { return nil }
+            let parsed = SkillParser.parseMDC(content)
+            return DiscoveredSkill(
+                name: String(entry.dropLast(4)), body: parsed.body, sourcePlatform: "cursor", sourcePath: path,
+                skillDescription: parsed.description, cursorConfig: parsed.cursorConfig
+            )
+        }
+    }
 
-        return results
+    /// The descriptor decides the leaf once, so replacement or deletion cannot leave a stale
+    /// admission result. A chosen folder's own SKILL.md directory remains a collection.
+    private func scannedText(
+        at path: String, directoryIsContainer: Bool = false, skipped: inout [ImportScanSkip]
+    ) -> String? {
+        do {
+            let data = try fileService.readRegularFileData(at: path, maximumBytes: Self.maximumFileBytes)
+            guard let content = String(bytes: Self.sourceTextBytes(data), encoding: .utf8) else {
+                skipped.append(ImportScanSkip(path: path, reason: .invalidUTF8))
+                return nil
+            }
+            return content
+        } catch {
+            let failure = error as NSError
+            let reason: ImportScanSkip.Reason
+            if failure.domain == NSPOSIXErrorDomain {
+                switch Int32(failure.code) {
+                case ENOENT, ENOTDIR: return nil
+                case EISDIR where directoryIsContainer: return nil
+                // Darwin rejects a socket at open with EOPNOTSUPP, before fstat is possible.
+                case ELOOP, EFTYPE, EISDIR, EOPNOTSUPP: reason = .notRegular
+                default: reason = .unreadable
+                }
+            } else if failure.domain == NSCocoaErrorDomain && failure.code == CocoaError.fileReadTooLarge.rawValue {
+                reason = .tooLarge
+            } else {
+                reason = .unreadable
+            }
+            skipped.append(ImportScanSkip(path: path, reason: reason))
+            return nil
+        }
     }
 
     // MARK: - Duplicate Detection

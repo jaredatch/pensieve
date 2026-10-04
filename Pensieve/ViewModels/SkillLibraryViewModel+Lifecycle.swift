@@ -122,6 +122,7 @@ extension SkillLibraryViewModel {
     /// a file that vanishes under a known body is an external change to nothing.
     private func handleExternalChange(directoryName: String) {
         watcherEventSequence &+= 1
+        folderChangeRevisions[directoryName, default: 0] &+= 1
         let currentBody = currentOnDiskBody(directoryName: directoryName)
         if wasLastWrittenByApp(directoryName: directoryName, currentBody: currentBody) {
             return

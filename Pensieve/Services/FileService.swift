@@ -7,6 +7,8 @@ protocol FileServiceProtocol {
     func readFile(at path: String) throws -> String
     func readData(at path: String) throws -> Data
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data
+    /// Checks the opened inode's resolved path is inside this directory before reading any bytes.
+    func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data
     func writeFile(at path: String, content: String) throws
     func writeData(at path: String, data: Data) throws
     func writeExecutableFile(at path: String, content: String) throws
@@ -105,52 +107,14 @@ extension FileServiceProtocol {
         return try Data(contentsOf: URL(fileURLWithPath: path))
     }
 
-    /// Reads one bounded regular file through one no-follow descriptor. `O_NONBLOCK` ensures a FIFO
-    /// substituted before `open` cannot hang the caller, while `fstat` rejects every non-regular node.
-    /// The size is checked both before and during the read because another process can grow a file
-    /// after it is opened. (PLAN-39 / 39.1.)
+    /// Inert default: doubles must explicitly model bounded reads; never fall through to host I/O.
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
-        guard maximumBytes >= 0 else { throw CocoaError(.fileReadTooLarge) }
-        let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-        guard descriptor >= 0 else {
-            throw NSError(
-                domain: NSPOSIXErrorDomain,
-                code: Int(errno),
-                userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))]
-            )
-        }
-        defer { close(descriptor) }
+        throw CocoaError(.featureUnsupported)
+    }
 
-        var status = stat()
-        guard fstat(descriptor, &status) == 0,
-              (status.st_mode & S_IFMT) == S_IFREG else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(EFTYPE))
-        }
-        guard status.st_size >= 0, status.st_size <= maximumBytes else {
-            throw CocoaError(.fileReadTooLarge)
-        }
-
-        var data = Data()
-        let bufferSize = min(max(maximumBytes, 1), 64 * 1_024)
-        var buffer = [UInt8](repeating: 0, count: bufferSize)
-        while true {
-            let count = buffer.withUnsafeMutableBytes { bytes in
-                read(descriptor, bytes.baseAddress, bytes.count)
-            }
-            if count == 0 { return data }
-            if count < 0 {
-                if errno == EINTR { continue }
-                throw NSError(
-                    domain: NSPOSIXErrorDomain,
-                    code: Int(errno),
-                    userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))]
-                )
-            }
-            guard count <= maximumBytes, data.count <= maximumBytes - count else {
-                throw CocoaError(.fileReadTooLarge)
-            }
-            data.append(buffer, count: count)
-        }
+    /// Inert default: containment must be modeled explicitly, never reduced to an unguarded read.
+    func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data {
+        throw CocoaError(.featureUnsupported)
     }
 
     /// Copy one untrusted repository entry through one no-follow descriptor, so the regular-file check
@@ -160,17 +124,7 @@ extension FileServiceProtocol {
     /// substituted FIFO from blocking the open before `fstat` can reject it — for a regular file the
     /// flag has no effect on the subsequent reads.
     func copyFile(at sourcePath: String, to destinationPath: String) throws {
-        let fd = open(sourcePath, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-        guard fd >= 0 else {
-            throw NSError(
-                domain: NSPOSIXErrorDomain,
-                code: Int(errno),
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        "open(\(sourcePath)): " + String(cString: strerror(errno))
-                ]
-            )
-        }
+        let (fd, _) = try FileService.openRegularFile(at: sourcePath)
         defer { close(fd) }
         try DescriptorFileCopy.copy(from: fd, sourcePath: sourcePath, to: destinationPath)
     }
@@ -350,16 +304,8 @@ final class FileService: FileServiceProtocol {
 
     /// Updates recency through a no-follow descriptor whose type is checked before `futimens`.
     func touchRegularFile(at path: String, date: Date) throws {
-        let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-        guard descriptor >= 0 else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
-        }
+        let (descriptor, status) = try Self.openRegularFile(at: path)
         defer { close(descriptor) }
-        var status = stat()
-        guard fstat(descriptor, &status) == 0,
-              (status.st_mode & S_IFMT) == S_IFREG else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(EFTYPE))
-        }
         let interval = date.timeIntervalSince1970
         let seconds = floor(interval)
         let nanoseconds = Int64((interval - seconds) * 1_000_000_000)

@@ -50,8 +50,8 @@ extension SkillLibraryViewModel {
     /// reads dirty again with the text intact — a transient body during a sync cycle never costs the draft.
     func hasUnsavedChanges(forDirectory directoryName: String) -> Bool {
         guard let draft = drafts[directoryName] else { return false }
-        // the store's canonical form: newlines trimmed at both ends (SkillParser.canonicalBody)
-        return SkillParser.canonicalBody(draft.body) != withFingerprintLock { lastWrittenBody[directoryName] }
+        // Compare the trimmed editor body and stored body in the same LF form as watcher echoes.
+        return !Self.bodiesMatch(draft.body, withFingerprintLock { lastWrittenBody[directoryName] })
     }
 
     /// The text the editor shows for `skill`: its draft when one exists, else the file. The fingerprint ends
@@ -65,7 +65,7 @@ extension SkillLibraryViewModel {
         let directoryName = skill.directoryName
         let onDisk = readBody(skill)
         let known = withFingerprintLock { lastWrittenBody[directoryName] }
-        if let known, known != onDisk, !wasLastWrittenByApp(directoryName: directoryName, currentBody: onDisk) {
+        if let known, !Self.bodiesMatch(onDisk, known), !wasLastWrittenByApp(directoryName: directoryName, currentBody: onDisk) {
             // Accounted for as a watcher event would be: counted in the sequence a clean sample is checked
             // against, observed by a running cycle, and nudging sync at once outside one (the watcher's
             // later event is an echo and nudges nothing).
@@ -84,8 +84,8 @@ extension SkillLibraryViewModel {
     func noteEditorChanged(_ skill: Skill, body: String) {
         let directoryName = skill.directoryName
         let baseline = withFingerprintLock { lastWrittenBody[directoryName] }
-        // the store's canonical form: newlines trimmed at both ends (SkillParser.canonicalBody)
-        if SkillParser.canonicalBody(body) == baseline {
+        // Compare the trimmed editor body and stored body in the same LF form as watcher echoes.
+        if Self.bodiesMatch(body, baseline) {
             drafts[directoryName] = nil
         } else {
             drafts[directoryName] = EditorDraft(skill: skill, body: body)
@@ -113,12 +113,11 @@ extension SkillLibraryViewModel {
             return false
         }
         guard hasUnsavedChanges(forDirectory: skill.directoryName) else { return true }
-        guard updateBody(skill, body: draft.body) else { return false }
-        // the store's canonical form: newlines trimmed at both ends (SkillParser.canonicalBody)
-        noteAppAuthoredBody(skill, body: SkillParser.canonicalBody(draft.body))
+        let outcome = updateBody(skill, body: draft.body)
+        guard outcome.succeeded else { return false }
         drafts[skill.directoryName] = nil
         externallyModified.remove(skill.directoryName)
-        notifier()
+        if outcome == .written { notifier() }
         return true
     }
 

@@ -19,6 +19,12 @@ enum CheckedYAMLLoader {
     private static let implicitMappingTagByteCount = "tag:yaml.org,2002:map".utf8.count
     static let resolver = Resolver.default
 
+    struct Document {
+        let root: Node?
+        let value: Any?
+        let rootIsFlowMapping: Bool
+    }
+
     enum LoaderError: Error, Equatable {
         case invalidYAML
         case nonScalarKey
@@ -40,24 +46,22 @@ enum CheckedYAMLLoader {
     }()
 
     static func load(yaml: String) throws -> Any? {
-        try validate(yaml)
+        _ = try validate(yaml)
         return try Yams.load(yaml: yaml, resolver, checkedConstructor)
     }
 
     /// SkillParser needs both the composed node for source-preservation metadata and its value.
     /// Construction remains inside this chokepoint so a caller cannot bypass event validation.
-    static func composeAndLoad(yaml: String) throws -> (root: Node?, value: Any?) {
-        try validate(yaml)
+    static func composeAndLoad(yaml: String) throws -> Document {
+        let rootIsFlowMapping = try validate(yaml)
         let root = try Yams.compose(yaml: yaml, resolver, checkedConstructor)
-        return (root, root?.any)
+        return Document(root: root, value: root?.any, rootIsFlowMapping: rootIsFlowMapping)
     }
 
     /// Compose an untrusted bare scalar once through the checked path for the writer's quoting
     /// oracle. The compatibility flag identifies the checked integer fallback that older builds
     /// cannot construct safely; other resolved tags may still construct as the original String.
-    static func inspectBareScalar(
-        yaml: String
-    ) throws -> (value: Any?, requiresLegacyIntegerQuote: Bool) {
+    static func inspectBareScalar(yaml: String) throws -> (value: Any?, requiresLegacyIntegerQuote: Bool) {
         let inspected = try composeAndLoad(yaml: yaml)
         guard let root = inspected.root else {
             return (value: nil, requiresLegacyIntegerQuote: false)
@@ -89,27 +93,36 @@ enum CheckedYAMLLoader {
         }
     }
 
-    private static func validate(_ yaml: String) throws {
+    /// Returns the first document's root style from its start event. Yams 6.2.2 takes a mapping's
+    /// style from the end event instead, where libyaml leaves the style field zeroed.
+    private static func validate(_ yaml: String) throws -> Bool {
         var parser = yaml_parser_t()
         guard yaml_parser_initialize(&parser) == 1 else { throw LoaderError.invalidYAML }
         defer { yaml_parser_delete(&parser) }
 
         let bytes = yaml.utf8CString
-        try bytes.withUnsafeBufferPointer { buffer in
+        return try bytes.withUnsafeBufferPointer { buffer in
             guard let baseAddress = buffer.baseAddress else { throw LoaderError.invalidYAML }
-            try baseAddress.withMemoryRebound(to: UInt8.self, capacity: buffer.count) { input in
+            return try baseAddress.withMemoryRebound(to: UInt8.self, capacity: buffer.count) { input in
                 yaml_parser_set_input_string(&parser, input, buffer.count - 1)
                 var validator = EventValidator()
                 var reachedEnd = false
+                var rootFlow: Bool?
                 while !reachedEnd {
                     var event = yaml_event_t()
                     guard yaml_parser_parse(&parser, &event) == 1 else {
                         throw LoaderError.invalidYAML
                     }
                     defer { yaml_event_delete(&event) }
+                    if rootFlow == nil,
+                       [YAML_SCALAR_EVENT, YAML_SEQUENCE_START_EVENT, YAML_MAPPING_START_EVENT].contains(event.type) {
+                        rootFlow = event.type == YAML_MAPPING_START_EVENT
+                            && event.data.mapping_start.style == YAML_FLOW_MAPPING_STYLE
+                    }
                     reachedEnd = event.type == YAML_STREAM_END_EVENT
                     try validator.consume(event)
                 }
+                return rootFlow ?? false
             }
         }
     }

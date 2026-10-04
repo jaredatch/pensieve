@@ -91,6 +91,7 @@ targets:
       - path: Pensieve/Services/GitService+Usability.swift
       - path: Pensieve/Services/GitServiceConflict.swift
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+BoundedRead.swift
       - path: Pensieve/Services/FileService+DirectoryCopy.swift
       - path: Pensieve/Services/FileService+DirectoryProbe.swift
       - path: Pensieve/Services/RemoteURLPolicy.swift
@@ -109,6 +110,7 @@ targets:
     sources:
       - path: PensieveDaemon
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+BoundedRead.swift
       - path: Pensieve/Services/FileService+DirectoryCopy.swift
       - path: Pensieve/Services/FileService+DirectoryProbe.swift
       - path: Pensieve/Services/GitService.swift
@@ -120,6 +122,7 @@ targets:
       - path: Pensieve/Services/RemoteURLPolicy.swift
       - path: Pensieve/Services/CheckedYAMLLoader.swift
       - path: Pensieve/Services/SkillParser.swift
+      - path: Pensieve/Services/SkillParser+Preservation.swift
       - path: Pensieve/Services/SkillSerializer.swift
       - path: Pensieve/Services/SkillStore.swift
       - path: Pensieve/Services/ManifestTypes.swift

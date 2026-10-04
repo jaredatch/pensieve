@@ -89,7 +89,10 @@ private final class RecordingSkillStore: SkillStoreProtocol {
     func createSkill(name: String, description: String, body: String) throws -> String { "created" }
     func readBody(directoryName: String) throws -> String { "" }
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws { writeCount += 1 }
+                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
+        writeCount += 1
+        return SkillRewriteResult(content: body, didChange: true)
+    }
     func writeBody(directoryName: String, body: String) throws { writeCount += 1 }
 
     func deleteSkill(directoryName: String) throws {

@@ -285,7 +285,7 @@ private extension ContentView {
         case .found:
             showFolderImport = true
         case .nothingFound:
-            folderImportNotice = "\(shown) holds no readable SKILL.md. Pensieve looks in it and in its folders, never deeper."
+            folderImportNotice = importVM.nothingFoundMessage(folder: shown)
         case .insideLibrary:
             folderImportNotice = "\(shown) is Pensieve's own library. Its skills are already here."
         }
