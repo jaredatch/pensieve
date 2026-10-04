@@ -102,10 +102,20 @@ extension ScenarioHandoverTests {
             $0.key == ledger.key
         }.map(\.persistentModelID), [ledger.persistentModelID])
         let durable = try harness.manifest.read(fromRoot: harness.root).deployIntents
-        XCTAssertFalse(durable.contains { $0.skillSlug == "skill" && $0.projectKey == nil })
+        XCTAssertTrue(durable.contains { $0.skillSlug == "skill" && $0.projectKey == nil })
         XCTAssertTrue(durable.contains { $0.skillSlug == "healthy" && $0.platformRaw == "cursor" })
         XCTAssertEqual(try context.fetch(FetchDescriptor<ScenarioAssignment>()).map(\.skillID), [skill.id])
         XCTAssertFalse(harness.defaults.bool(forKey: ScenarioHandover.doneKey))
+        let rebuild = StoreRebuildService(fileService: harness.files, manifestService: harness.manifest)
+        let rebuilt = rebuild.rebuild(fromRoot: harness.root, context: context)
+        XCTAssertFalse(rebuilt.saveFailed)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<MachineDeployIntent>()).filter {
+            $0.key == intent.key
+        }.map(\.persistentModelID), [intent.persistentModelID])
+        XCTAssertEqual(try context.fetch(FetchDescriptor<IntentAssignment>()).filter {
+            $0.key == ledger.key
+        }.map(\.persistentModelID), [ledger.persistentModelID])
+        XCTAssertEqual(try context.fetch(FetchDescriptor<ScenarioAssignment>()).map(\.skillID), [skill.id])
         XCTAssertEqual(try harness.deployedFiles(), before)
     }
 
@@ -163,6 +173,11 @@ extension ScenarioHandoverTests {
     }
 
     func testDuplicateScenarioRowsUseOnePairClassificationAndOneStoreProbe() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("Pensieve/Services/ScenarioHandover.swift"),
+                                encoding: .utf8)
+        XCTAssertFalse(source.contains("enum PairState"), "Use one handover state enum without a parallel mapping.")
         for first in ["realized", "absent", "unmanaged", "deferred"] {
             let harness = try HandoverHarness(defaults: isolatedDefaults(first))
             defer { try? harness.cleanUp() }

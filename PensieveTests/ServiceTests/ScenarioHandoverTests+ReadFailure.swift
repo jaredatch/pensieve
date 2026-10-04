@@ -79,7 +79,8 @@ extension ScenarioHandoverTests {
 }
 
 /// Forwards I/O to the temporary store; injects whole-folder readability failures, per-entry
-/// lookup/read failures and deploy-path EACCES/EIO. No operation falls back to a live user path.
+/// lookup/read/realpath failures, deploy-path EACCES/EIO and false legacy Boolean probes.
+/// No operation falls back to a live user path. Resolution can also model a containment mismatch.
 final class HandoverReadFileService: FileServiceProtocol {
     let live = FileService()
     let skillsRoot: String
@@ -89,6 +90,10 @@ final class HandoverReadFileService: FileServiceProtocol {
     var folderChecks: [String: Int] = [:]
     var probeError = EACCES
     var listings = 0
+    var deployBooleanChecks = 0
+    var readlinkChecks = 0
+    var resolutionChecks: [String: Int] = [:]
+    private var lastResolvedFolder: String?
     init(skillsRoot: String, failure: String) {
         self.skillsRoot = skillsRoot
         self.failure = failure
@@ -130,9 +135,37 @@ final class HandoverReadFileService: FileServiceProtocol {
     func createDirectory(at path: String) throws { try live.createDirectory(at: path) }
     func deleteDirectory(at path: String) throws { try live.deleteDirectory(at: path) }
     func createSymlink(at path: String, pointingTo target: String) throws { try live.createSymlink(at: path, pointingTo: target) }
-    func symlinkTarget(at path: String) throws -> String { try live.symlinkTarget(at: path) }
-    func isSymlink(at path: String) -> Bool { live.isSymlink(at: path) }
-    func isRegularFile(at path: String) -> Bool { live.isRegularFile(at: path) }
+    func resolveRealPath(at path: String) throws -> String {
+        resolutionChecks[path, default: 0] += 1
+        if path.hasPrefix(skillsRoot + "/") { lastResolvedFolder = path }
+        if (failure == "resolve-folder" && path == skillsRoot + "/skill")
+            || (failure == "resolve-base" && path == skillsRoot && lastResolvedFolder == skillsRoot + "/skill") {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(probeError))
+        }
+        if failure == "resolve-escape", path == skillsRoot + "/skill" { return skillsRoot + "/../outside" }
+        return try live.resolveRealPath(at: path)
+    }
+    func symlinkTarget(at path: String) throws -> String {
+        if path.contains("/agents/") {
+            readlinkChecks += 1
+            if failure == "readlink" { throw NSError(domain: NSPOSIXErrorDomain, code: Int(probeError)) }
+        }
+        return try live.symlinkTarget(at: path)
+    }
+    func isSymlink(at path: String) -> Bool {
+        if path.contains("/agents/") {
+            deployBooleanChecks += 1
+            if failure == "symlink-boolean" { return false }
+        }
+        return live.isSymlink(at: path)
+    }
+    func isRegularFile(at path: String) -> Bool {
+        if path.contains("/agents/") {
+            deployBooleanChecks += 1
+            if failure == "regular-boolean" { return false }
+        }
+        return live.isRegularFile(at: path)
+    }
     func listDirectory(at path: String) throws -> [String] {
         listings += 1
         if failure == "listing", path == skillsRoot { throw CocoaError(.fileReadNoPermission) }

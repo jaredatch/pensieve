@@ -40,11 +40,13 @@ protocol FileServiceProtocol {
     /// `realpath(3)`: every link resolved and `/private` kept, unlike `resolvingSymlinksInPath`. A path
     /// that does not exist comes back as given. (Inert default below.)
     func realPath(at path: String) -> String
+    /// Resolves every link with realpath(3); every failure, including absence, throws.
+    func resolveRealPath(at path: String) throws -> String
     func regularFileMetadata(at path: String) -> RegularFileMetadata?
     func touchRegularFile(at path: String, date: Date) throws
 }
 
-enum FileEntryType { case directory, symlink, other }
+enum FileEntryType { case directory, symlink, regular, other }
 
 /// A file's identity on its volume; see `FileServiceProtocol.fileIdentity(at:followingLinks:)`.
 struct FileIdentity: Equatable {
@@ -84,6 +86,9 @@ extension FileServiceProtocol {
 
     /// Inert default: no resolution.
     func realPath(at path: String) -> String { path }
+
+    /// Inert default: unmodeled resolution is unknown and performs no host I/O.
+    func resolveRealPath(at path: String) throws -> String { throw CocoaError(.fileReadUnknown) }
 
     /// Inert default: a double that does not model regular-file metadata answers unknown.
     func regularFileMetadata(at path: String) -> RegularFileMetadata? { nil }
@@ -277,6 +282,7 @@ final class FileService: FileServiceProtocol {
         switch info.st_mode & S_IFMT {
         case S_IFDIR: return .directory
         case S_IFLNK: return .symlink
+        case S_IFREG: return .regular
         default: return .other
         }
     }
@@ -325,12 +331,6 @@ final class FileService: FileServiceProtocol {
         var info = stat()
         let status = followingLinks ? stat(path, &info) : lstat(path, &info)
         return status == 0 ? FileIdentity(device: info.st_dev, inode: info.st_ino) : nil
-    }
-
-    func realPath(at path: String) -> String {
-        guard let resolved = realpath(path, nil) else { return path }
-        defer { free(resolved) }
-        return String(cString: resolved)
     }
 
     /// Reads size and recency from one `lstat`, refusing links and non-regular nodes without opening them.

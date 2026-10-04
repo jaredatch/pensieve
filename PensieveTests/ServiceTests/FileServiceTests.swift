@@ -123,6 +123,17 @@ final class FileServiceTests: XCTestCase {
         XCTAssertEqual(service.realPath(at: tempDir + "/link"), service.realPath(at: target))
         XCTAssertEqual(service.realPath(at: "/var"), "/private/var")
         XCTAssertEqual(service.realPath(at: tempDir + "/absent"), tempDir + "/absent")
+        XCTAssertEqual(try service.resolveRealPath(at: tempDir + "/link"), try service.resolveRealPath(at: target))
+        XCTAssertEqual(try service.resolveRealPath(at: "/var"), "/private/var")
+        XCTAssertThrowsError(try service.resolveRealPath(at: tempDir + "/absent")) {
+            XCTAssertEqual(($0 as NSError).domain, NSPOSIXErrorDomain)
+            XCTAssertEqual(($0 as NSError).code, Int(ENOENT))
+        }
+        XCTAssertEqual(try service.entryTypeWithoutFollowingLinks(at: target), .directory)
+        XCTAssertEqual(try service.entryTypeWithoutFollowingLinks(at: tempDir + "/link"), .symlink)
+        XCTAssertNil(try service.entryTypeWithoutFollowingLinks(at: tempDir + "/absent"))
+        try service.writeFile(at: tempDir + "/regular", content: "body")
+        XCTAssertEqual(try service.entryTypeWithoutFollowingLinks(at: tempDir + "/regular"), .regular)
     }
 
     /// Protects 39.1-h and 39.1-k: cache metadata is available only for a regular leaf, never a link.

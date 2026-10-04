@@ -55,7 +55,7 @@ extension ScenarioHandoverTests {
         XCTAssertEqual(try harness.manifest.read(fromRoot: harness.root).deployIntents,
                        harness.unrelated.sorted { $0.machineID < $1.machineID })
         XCTAssertEqual(harness.manifest.writes, 0)
-        XCTAssertTrue(harness.logs.contains { $0.contains("no safe store folder") && $0.contains("skill") })
+        XCTAssertTrue(harness.logs.contains { $0.contains("store folder is missing") && $0.contains("skill") })
         let deploys = HandoverDeployments(root: harness.root)
         let reconciler = IntentReconciler(platformVM: deploys.platformVM, machineIdentity: harness.identity,
                                          handoverIsComplete: { true })

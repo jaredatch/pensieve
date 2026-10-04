@@ -383,10 +383,13 @@ extension PlatformViewModel {
         let path = platform.usesSymlinks
             ? linkService.linkPath(skill: skill, platform: platform, projectPath: nil)
             : cursorCompiler.outputPath(skill: skill, projectPath: nil)
-        guard try fileService.entryExistsWithoutFollowingLinks(at: path) else { return .absent }
+        guard let type = try fileService.entryTypeWithoutFollowingLinks(at: path) else { return .absent }
         if platform.usesSymlinks {
-            return linkService.isLinked(skill: skill, platform: platform, projectPath: nil) ? .realized : .unmanaged
+            guard type == .symlink else { return .unmanaged }
+            let actual = try fileService.symlinkTarget(at: path)
+            let expected = linkService.targetPath(skill: skill, platform: platform, projectPath: nil)
+            return actual == expected ? .realized : .unmanaged
         }
-        return fileService.isRegularFile(at: path) ? .realized : .unmanaged
+        return type == .regular ? .realized : .unmanaged
     }
 }
