@@ -20,11 +20,14 @@ struct ProjectReconcilePolicy {
     }
 
     func pending<Triple: ProjectReconcileTriple>(
-        desired: Set<Triple>, current: Set<Triple>, skills: [UUID: Skill], projects: [UUID: Project],
+        desired: Set<Triple>, current: Set<Triple>, ownedByOtherReconciler: Set<Triple>,
+        skills: [UUID: Skill], projects: [UUID: Project],
         platformVM: PlatformViewModel
     ) -> Work<Triple> {
+        let remove = current.subtracting(desired)
+        let unlink = remove.subtracting(ownedByOtherReconciler)
         var problems: [UUID: ProjectFolderError] = [:]
-        for id in Set(desired.union(current).map(\.projectID)) {
+        for id in Set(desired.union(unlink).map(\.projectID)) {
             guard let project = projects[id] else { continue }
             do {
                 try fileService.requireProjectDirectory(at: project.path)
@@ -34,17 +37,16 @@ struct ProjectReconcilePolicy {
                 problems[id] = .couldNotCheck(path: project.path, reason: error.localizedDescription)
             }
         }
-        let realized = current.filter { triple in
+        let realized = current.intersection(desired).filter { triple in
             guard problems[triple.projectID] == nil,
                   let project = projects[triple.projectID], let skill = skills[triple.skillID],
                   let platform = triple.platformTarget else { return true }
             return platformVM.artifactExists(skill: skill, platform: platform, target: .project(project))
         }
         let deploy = desired.subtracting(realized)
-        let remove = current.subtracting(desired)
         var unavailable: Set<Triple> = []
         var result = BatchResult()
-        for triple in deploy.union(remove) {
+        for triple in deploy.union(unlink) {
             guard let problem = problems[triple.projectID] else { continue }
             unavailable.insert(triple)
             guard let project = projects[triple.projectID], let skill = skills[triple.skillID],

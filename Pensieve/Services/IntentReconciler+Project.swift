@@ -15,10 +15,11 @@ extension IntentReconciler {
             return ProjectTriple(skillID: row.skillID, projectID: projectID, platformRaw: row.platformRaw)
         })
         let work = platformVM.projectReconcilePolicy.pending(
-            desired: desired, current: current, skills: state.skillByID, projects: state.projectByID, platformVM: platformVM
+            desired: desired, current: current, ownedByOtherReconciler: state.categoryTriples,
+            skills: state.skillByID, projects: state.projectByID, platformVM: platformVM
         )
         aggregate.append(work.result)
-        deployProjects(work.deploy, state: state, context: context, aggregate: &aggregate)
+        deployProjects(work.deploy, ledgerTriples: current, state: state, context: context, aggregate: &aggregate)
         removeProjects(work.remove, state: state, context: context, aggregate: &aggregate)
     }
 
@@ -45,10 +46,12 @@ extension IntentReconciler {
 
     private func deployProjects(
         _ triples: Set<ProjectTriple>,
+        ledgerTriples: Set<ProjectTriple>,
         state: State,
         context: ModelContext,
         aggregate: inout BatchResult
     ) {
+        var recorded = ledgerTriples
         for (pair, group) in groupedProjectTriples(triples) {
             guard let skill = state.skillByID[pair.skillID],
                   let project = state.projectByID[pair.projectID] else { continue }
@@ -60,9 +63,8 @@ extension IntentReconciler {
             ).skippingMissingProjects()
             aggregate.append(result)
             for outcome in result.successes {
-                guard !state.ledger.contains(where: {
-                    $0.skillID == skill.id && $0.projectID == project.id && $0.platformRaw == outcome.platform.rawValue
-                }) else { continue }
+                guard recorded.insert(ProjectTriple(skillID: skill.id, projectID: project.id,
+                                                    platformRaw: outcome.platform.rawValue)).inserted else { continue }
                 context.insert(IntentAssignment(
                     skillID: outcome.skillID,
                     platformRaw: outcome.platform.rawValue,

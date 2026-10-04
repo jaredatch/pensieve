@@ -5,6 +5,51 @@ import XCTest
 
 @MainActor
 final class ProjectFolderReviewTests: XCTestCase {
+    func testSharedOwnershipRemovalReleasesOnlyItsLedgerForUnavailableProjects() throws {
+        for categoryRemoved in [false, true] {
+            for unknown in [false, true] {
+                let h = try ProjectFolderCallerHarness(installed: [.codex])
+                defer { h.cleanup() }
+                try h.files.createDirectory(at: h.project.path)
+                try h.addIntent()
+                let rule = try h.addCategory()
+                XCTAssertEqual(h.intent.reconcile(context: h.context).successes.count, 1)
+                XCTAssertEqual(h.category.reconcile(context: h.context).successes.count, 1)
+                if unknown {
+                    h.mapped.beforeProjectProbe = { path in
+                        if path == h.project.path { throw ProjectFolderError.couldNotCheck(path: path, reason: "Offline") }
+                    }
+                } else {
+                    try h.files.deleteDirectory(at: h.project.path)
+                }
+                if categoryRemoved { rule.skillSlugs = [] } else {
+                    for intent in try h.context.fetch(FetchDescriptor<MachineDeployIntent>()) { h.context.delete(intent) }
+                }
+                try h.context.save()
+                let result = categoryRemoved ? h.category.reconcile(context: h.context) : h.intent.reconcile(context: h.context)
+                XCTAssertTrue(result.outcomes.isEmpty, "Ownership handoff needs no filesystem operation")
+                XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<IntentAssignment>()), categoryRemoved ? 1 : 0)
+                XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), categoryRemoved ? 0 : 1)
+                if unknown { XCTAssertTrue(h.files.isSymlink(at: h.artifact(.codex))) }
+            }
+        }
+    }
+
+    func testUnregistrationPreservesOtherProjectsFailuresInReturnedResult() throws {
+        let h = try ProjectFolderCallerHarness()
+        defer { h.cleanup() }
+        _ = try h.addCategory()
+        h.mapped.beforeProjectProbe = { path in
+            if path == h.project.path { throw ProjectFolderError.couldNotCheck(path: path, reason: "Offline") }
+        }
+        let result = removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
+            manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
+            reconciler: h.category, context: h.context)
+        XCTAssertEqual(result.failureCount, 4, "Unrelated failures still reach the caller")
+        XCTAssertTrue(result.failures.allSatisfy { $0.target == .project(h.project.id) })
+        XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.project.id])
+    }
+
     func testUnavailableInSyncPairsHaveNoOutcomesAndKeepBothLedgers() throws {
         for categoryOwned in [false, true] {
             let h = try ProjectFolderCallerHarness()
@@ -88,7 +133,7 @@ final class ProjectFolderReviewTests: XCTestCase {
         let result = removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
             manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
             reconciler: h.category, context: h.context)
-        XCTAssertFalse(result.hasFailures)
+        XCTAssertTrue(result.hasFailures)
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.project.id])
     }
 

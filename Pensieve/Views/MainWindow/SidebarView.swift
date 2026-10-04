@@ -72,17 +72,18 @@ func removeRegisteredProject(_ project: Project, categoryStore: CategoryStorePro
         context: context,
         notifier: SyncStateNotifier.suppressed
     )
-    result.outcomes.removeAll { outcome in
-        guard case .project(let id)? = outcome.target else { return false }
-        return id != project.id
+    let blockingFailure = !result.readFailures.isEmpty || result.failures.contains { outcome in
+        guard case .project(let id)? = outcome.target else { return true }
+        return id == project.id
     }
-    guard !result.hasFailures else { return result }
+    guard !blockingFailure else { return result }
     do {
         for row in try context.fetch(FetchDescriptor<SkillProjectAssignment>()) where row.projectID == project.id {
             context.delete(row)
         }
     } catch {
-        return BatchResult.readFailure("project category ownership", error: error)
+        result.append(BatchResult.readFailure("project category ownership", error: error))
+        return result
     }
     for row in intentRows where row.projectID == project.id {
         context.delete(row)

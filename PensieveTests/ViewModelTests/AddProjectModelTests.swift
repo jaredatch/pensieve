@@ -5,6 +5,40 @@ import XCTest
 
 @MainActor
 final class AddProjectModelTests: XCTestCase {
+    func testReplacingPreviewCancelsOldProbeAndKeepsCaptionUntilResult() async throws {
+        let h = try ProjectFolderCallerHarness()
+        defer { h.cleanup() }
+        try h.files.createDirectory(at: h.project.path)
+        let model = AddProjectModel(fileService: h.mapped)
+        model.name = "Project"
+        model.path = h.otherProject.path
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Initial preview") { model.isValid }
+        let caption = model.identityMessage
+        let started = expectation(description: "Old probe started")
+        let finished = expectation(description: "Old probe released")
+        let release = DispatchSemaphore(value: 0)
+        let cancellation = PreviewProbeCancellation()
+        defer { release.signal() }
+        let pendingPath = h.project.path
+        h.mapped.beforeProjectProbe = { path in
+            guard path == pendingPath else { return }
+            started.fulfill()
+            _ = release.wait(timeout: .now() + 3)
+            cancellation.record(Task.isCancelled)
+            finished.fulfill()
+        }
+        model.path = h.project.path
+        XCTAssertEqual(model.identityMessage, caption, "The caption remains while a new probe is pending")
+        await fulfillment(of: [started], timeout: 3)
+        model.path = h.otherProject.path
+        XCTAssertEqual(model.identityMessage, caption)
+        release.signal()
+        await fulfillment(of: [finished], timeout: 3)
+        XCTAssertTrue(cancellation.wasCancelled, "Replacing a path cancels its previous disk probe")
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Latest preview") { model.isValid }
+        XCTAssertEqual(model.identityMessage, "Marker will be created on Add")
+    }
+
     func testTypingDoesNotWaitForDiskAndLatestPreviewWins() async throws {
         let h = try ProjectFolderCallerHarness()
         defer { h.cleanup() }
@@ -46,7 +80,7 @@ final class AddProjectModelTests: XCTestCase {
         let before = try files.listDirectory(at: root).sorted()
         for suffix in ["missing/parent/project", "file", "dangling", "file-link"] {
             model.path = root + "/" + suffix
-            await TestWait.until(timeout: .seconds(3), failureMessage: "Missing preview") { model.identityMessage != nil }
+            await TestWait.until(timeout: .seconds(3), failureMessage: "Missing preview") { !model.isCheckingIdentity }
             XCTAssertFalse(model.isValid)
             XCTAssertTrue(model.hasIdentityError)
             XCTAssertTrue(model.identityMessage?.contains("folder is missing") == true)
@@ -57,7 +91,7 @@ final class AddProjectModelTests: XCTestCase {
         let valid = root + "/valid"
         try files.createDirectory(at: valid)
         model.path = valid
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Corrected preview") { model.identityMessage != nil }
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Corrected preview") { !model.isCheckingIdentity }
         XCTAssertTrue(model.isValid)
         XCTAssertFalse(model.hasIdentityError)
         XCTAssertEqual(model.identityMessage, "Marker will be created on Add")
@@ -81,14 +115,14 @@ final class AddProjectModelTests: XCTestCase {
         let model = AddProjectModel(fileService: mapped)
         model.name = "Linked"
         model.path = root + "/linked"
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Lookup preview") { model.identityMessage != nil }
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Lookup preview") { !model.isCheckingIdentity }
         XCTAssertFalse(model.isValid)
         XCTAssertTrue(model.identityMessage?.contains("couldn't be checked") == true)
         XCTAssertNil(model.makeProject())
         XCTAssertEqual(try files.listDirectory(at: root + "/directory"), [])
         mapped.beforeProjectProbe = nil
         model.refreshIdentityStatus()
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Linked preview") { model.identityMessage != nil }
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Linked preview") { !model.isCheckingIdentity }
         XCTAssertTrue(model.isValid)
         XCTAssertNotNil(model.makeProject())
         XCTAssertTrue(files.fileExists(at: root + "/directory/.pensieve-project"))
@@ -102,7 +136,7 @@ final class AddProjectModelTests: XCTestCase {
         let model = AddProjectModel(fileService: files)
         model.name = "Deleted"
         model.path = root + "/project"
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Initial preview") { model.identityMessage != nil }
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Initial preview") { !model.isCheckingIdentity }
         XCTAssertTrue(model.isValid)
         try files.deleteDirectory(at: model.path)
         XCTAssertNil(model.makeProject())
@@ -111,8 +145,17 @@ final class AddProjectModelTests: XCTestCase {
         XCTAssertEqual(try files.listDirectory(at: root), [])
         try files.createDirectory(at: root + "/corrected")
         model.path = root + "/corrected"
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Replacement preview") { model.identityMessage != nil }
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Replacement preview") { !model.isCheckingIdentity }
         XCTAssertTrue(model.isValid)
         XCTAssertNotNil(model.makeProject())
     }
+}
+
+/// NSLock protects the cancellation flag shared by the disk task and the test actor.
+private final class PreviewProbeCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var wasCancelled: Bool { lock.withLock { cancelled } }
+    func record(_ value: Bool) { lock.withLock { cancelled = value } }
 }

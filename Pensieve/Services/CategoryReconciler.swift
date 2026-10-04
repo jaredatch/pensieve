@@ -62,10 +62,11 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
         })
 
         let work = platformVM.projectReconcilePolicy.pending(
-            desired: desired, current: current, skills: state.skillByID, projects: state.projectByID, platformVM: platformVM
+            desired: desired, current: current, ownedByOtherReconciler: state.intentTriples,
+            skills: state.skillByID, projects: state.projectByID, platformVM: platformVM
         )
         aggregate.append(work.result)
-        deploy(work.deploy, state: state, context: context, aggregate: &aggregate)
+        deploy(work.deploy, ledgerTriples: current, state: state, context: context, aggregate: &aggregate)
         remove(work.remove, state: state, context: context, aggregate: &aggregate)
         try? context.save()
         return aggregate
@@ -119,10 +120,12 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
 
     private func deploy(
         _ triplesToDeploy: Set<Triple>,
+        ledgerTriples: Set<Triple>,
         state: State,
         context: ModelContext,
         aggregate: inout BatchResult
     ) {
+        var recorded = ledgerTriples
         for (pair, triples) in grouped(triplesToDeploy) {
             guard let skill = state.skillByID[pair.skillID],
                   let project = state.projectByID[pair.projectID] else { continue }
@@ -135,9 +138,8 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
             ).skippingMissingProjects()
             aggregate.append(result)
             for outcome in result.successes {
-                guard !state.ledger.contains(where: {
-                    $0.skillID == skill.id && $0.projectID == project.id && $0.platform == outcome.platform
-                }) else { continue }
+                guard recorded.insert(Triple(skillID: skill.id, projectID: project.id,
+                                             platform: outcome.platform)).inserted else { continue }
                 context.insert(SkillProjectAssignment(
                     skillID: skill.id,
                     projectID: project.id,

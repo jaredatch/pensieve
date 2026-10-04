@@ -12,7 +12,9 @@ final class AddProjectModel {
     private(set) var hasIdentityError = false
     private(set) var hasProjectDirectory = false
     private(set) var hasExistingIdentity = false
+    private(set) var isCheckingIdentity = false
     private var previewGeneration = 0
+    @ObservationIgnored private var previewTask: Task<Void, Never>?
 
     private let fileService: FileServiceProtocol
     private let identityService: ProjectIdentityServiceProtocol
@@ -33,29 +35,39 @@ final class AddProjectModel {
     }
 
     func refreshIdentityStatus() {
+        previewTask?.cancel()
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         hasProjectDirectory = false
-        hasIdentityError = false
-        hasExistingIdentity = false
         previewGeneration += 1
         let generation = previewGeneration
+        isCheckingIdentity = !trimmed.isEmpty
         guard !trimmed.isEmpty else {
             identityMessage = nil
+            hasIdentityError = false
+            hasExistingIdentity = false
             return
         }
-        identityMessage = nil
         let files = fileService
         let identities = identityService
-        Task { @MainActor [weak self] in
-            let preview = await Task.detached {
+        previewTask = Task { @MainActor [weak self] in
+            guard !Task.isCancelled else { return }
+            let probe = Task.detached {
                 do {
+                    try Task.checkCancellation()
                     try files.requireProjectDirectory(at: trimmed)
+                    try Task.checkCancellation()
                     return (identities.peekIdentity(forProjectAt: trimmed), Optional<String>.none)
                 } catch {
                     return (Optional<ProjectIdentity>.none, Optional(error.localizedDescription))
                 }
-            }.value
-            guard let self, self.previewGeneration == generation else { return }
+            }
+            let preview = await withTaskCancellationHandler {
+                await probe.value
+            } onCancel: {
+                probe.cancel()
+            }
+            guard !Task.isCancelled, let self, self.previewGeneration == generation else { return }
+            self.isCheckingIdentity = false
             self.hasProjectDirectory = preview.1 == nil
             self.hasIdentityError = preview.1 != nil
             self.hasExistingIdentity = preview.0 != nil
@@ -73,7 +85,9 @@ final class AddProjectModel {
 
     func makeProject() -> Project? {
         guard canSubmit else { return nil }
+        previewTask?.cancel()
         previewGeneration += 1
+        isCheckingIdentity = false
         do {
             return try ProjectRegistration.makeProject(
                 name: name.trimmingCharacters(in: .whitespacesAndNewlines),

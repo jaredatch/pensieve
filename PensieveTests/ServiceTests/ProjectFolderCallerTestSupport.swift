@@ -19,7 +19,7 @@ struct ProjectFolderCallerHarness {
     let project: Project
     let otherProject: Project
 
-    init() throws {
+    init(installed: [PlatformTarget] = [.claudeCode, .grok, .codex, .cursor]) throws {
         root = NSTemporaryDirectory() + "ProjectFolderCallers-\(UUID().uuidString)"
         let store = SkillStore(fileService: files, baseDir: root + "/store/skills")
         let slug = try store.createSkill(name: "Caller Skill", description: "Caller", body: "# Body")
@@ -34,7 +34,7 @@ struct ProjectFolderCallerHarness {
         deployState = DeployStateStore(fileService: mapped, appSupportDir: root + "/support")
         platformVM = PlatformViewModel(
             fileService: mapped,
-            agentDetection: DeployStubDetection(installed: [.claudeCode, .grok, .codex, .cursor]),
+            agentDetection: DeployStubDetection(installed: installed),
             deployStateStore: deployState
         )
         intent = IntentReconciler(
