@@ -58,16 +58,27 @@ struct ScenarioHandover: ScenarioHandingOver {
         self.fileService = fileService
     }
 
+    private enum PairState {
+        case realized, absent, unmanaged, orphan, deferred
+        var requiresIntent: Bool { self == .realized || self == .absent }
+    }
+
+    private struct PairKey: Hashable {
+        let skillID: UUID
+        let platform: PlatformTarget
+    }
+
     private struct TransferPair {
         let skill: Skill
-        let state: ScenarioHandoverDeployState
+        let state: PairState
         let record: DeployIntentRecord
     }
 
     private struct TransferBatch {
-        let pairs: [TransferPair]
-        let unmanagedCount: Int
-        let removedIntent: Bool
+        var pairs: [TransferPair] = []
+        var retiredRows: [ScenarioAssignment] = []
+        var unmanagedRecords: [DeployIntentRecord] = []
+        var removedIntent = false
     }
 
     func handOver(context caller: ModelContext, readiness: ScenarioHandoverReadiness) throws {
@@ -87,71 +98,106 @@ struct ScenarioHandover: ScenarioHandingOver {
         let assignments = try fetcher.intentAssignments(context: context)
         let durable = try manifest.read(fromRoot: root)
         var snapshot = try preservedSnapshot(context: context, disk: durable)
-        let transfer = try preparePairs(rows: rows, skills: skills, machineID: machineID, snapshot: &snapshot)
+        let transfer = try preparePairs(rows: rows, skills: skills, machineID: machineID,
+                                        snapshot: &snapshot, durable: durable.deployIntents)
         do {
             // Disk is authoritative: never save ownership that a subsequent rebuild can retract.
             if transfer.removedIntent
-                || transfer.pairs.contains(where: { $0.state != .unmanaged && !durable.deployIntents.contains($0.record) }) {
+                || transfer.pairs.contains(where: { $0.state.requiresIntent && !durable.deployIntents.contains($0.record) }) {
                 try manifest.write(snapshot, toRoot: root)
                 notifier()
             }
             recordOwnership(transfer.pairs, intents: intents, assignments: assignments, context: context)
             try save(context)
-            for row in rows { context.delete(row) }
+            for row in transfer.retiredRows { context.delete(row) }
             try save(context)
         } catch {
             context.rollback()
             throw error
         }
-        defaults.removeObject(forKey: Self.activeKey)
-        defaults.set(true, forKey: Self.doneKey)
-        log("Completed for \(machineID): \(rows.count) legacy rows retired; "
-            + "\(transfer.unmanagedCount) left unmanaged in this run.")
+        let remaining = try context.fetchCount(FetchDescriptor<ScenarioAssignment>())
+        if remaining == 0 {
+            defaults.removeObject(forKey: Self.activeKey)
+            defaults.set(true, forKey: Self.doneKey)
+        }
+        log("\(remaining == 0 ? "Completed" : "Deferred") for \(machineID): "
+            + "\(transfer.retiredRows.count) legacy rows retired; \(remaining) remain; "
+            + "\(transfer.unmanagedRecords.count) left unmanaged in this run.")
     }
 
     private func preparePairs(rows: [ScenarioAssignment], skills: [Skill], machineID: String,
-                              snapshot: inout ManifestSnapshot) throws -> TransferBatch {
+                              snapshot: inout ManifestSnapshot, durable: [DeployIntentRecord]) throws -> TransferBatch {
         let skillByID = Dictionary(skills.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        var pairs: [TransferPair] = []
-        var unmanagedCount = 0
-        var removedIntent = false
-        var checkedSkills = false
-        for row in rows {
-            guard let skill = skillByID[row.skillID] else { continue }
-            let platform = row.platform.rawValue
-            let record = DeployIntentRecord(machineID: machineID, skillSlug: skill.directoryName,
-                                            platformRaw: platform, projectKey: nil)
-            var state = ScenarioHandoverDeployState.unmanaged
-            if canRepresent(skill: skill, platform: platform) {
-                if !checkedSkills {
-                    try fileService.checkDirectoryReadable(at: root + "/skills")
-                    checkedSkills = true
-                }
-                switch storeFolderState(skill) {
-                case .absent:
-                    log("Dropped orphan: skill '\(skill.directoryName)' has no safe store folder, agent '\(platform)'.")
-                    continue
-                case .safe:
-                    do { state = try deployState(skill, row.platform) } catch {
-                        log("Deploy probe failed for '\(skill.directoryName)', agent '\(platform)': "
-                            + error.localizedDescription)
-                    }
-                case .unmanaged: break
-                }
-            }
-            if state == .unmanaged {
-                unmanagedCount += 1
-                log("Left unmanaged: skill '\(skill.directoryName)', agent '\(platform)'.")
-            }
-            pairs.append(TransferPair(skill: skill, state: state, record: record))
-            removedIntent = updateIntent(record, state: state, snapshot: &snapshot) || removedIntent
+        if rows.contains(where: { skillByID[$0.skillID] != nil }) {
+            try fileService.checkDirectoryReadable(at: root + "/skills")
         }
-        return TransferBatch(pairs: pairs, unmanagedCount: unmanagedCount, removedIntent: removedIntent)
+        var batch = TransferBatch()
+        var states: [PairKey: PairState] = [:]
+        var folders: [UUID: StoreFolderState] = [:]
+        for row in rows {
+            guard let skill = skillByID[row.skillID] else { batch.retiredRows.append(row); continue }
+            let key = PairKey(skillID: row.skillID, platform: row.platform)
+            let record = DeployIntentRecord(machineID: machineID, skillSlug: skill.directoryName,
+                                            platformRaw: row.platform.rawValue, projectKey: nil)
+            let state: PairState
+            if let cached = states[key] { state = cached } else {
+                state = classify(skill: skill, platform: row.platform, folders: &folders)
+                states[key] = state
+                if state == .deferred {
+                    // A healthy pair's write must preserve this deferred pair's exact disk intent too.
+                    if !durable.contains(record) { snapshot.deployIntents.removeAll { $0 == record } }
+                } else {
+                    batch.pairs.append(TransferPair(skill: skill, state: state, record: record))
+                    batch.removedIntent = updateIntent(record, state: state, snapshot: &snapshot) || batch.removedIntent
+                }
+                if state == .unmanaged, !batch.unmanagedRecords.contains(record) { batch.unmanagedRecords.append(record) }
+            }
+            if state != .deferred { batch.retiredRows.append(row) }
+        }
+        return batch
     }
 
-    private func updateIntent(_ record: DeployIntentRecord, state: ScenarioHandoverDeployState,
+    private func classify(skill: Skill, platform: PlatformTarget, folders: inout [UUID: StoreFolderState]) -> PairState {
+        guard canRepresent(skill: skill, platform: platform.rawValue) else {
+            log("Left unmanaged: skill '\(skill.directoryName)', agent '\(platform.rawValue)'.")
+            return .unmanaged
+        }
+        let folder = folders[skill.id] ?? storeFolderState(skill)
+        folders[skill.id] = folder
+        var state: PairState
+        switch folder {
+        case .absent: state = .orphan
+        case .unmanaged: state = .unmanaged
+        case .deferred: state = .deferred
+        case .safe: state = probeDeployState(skill: skill, platform: platform)
+        }
+        switch state {
+        case .unmanaged: log("Left unmanaged: skill '\(skill.directoryName)', agent '\(platform.rawValue)'.")
+        case .deferred: log("Deferred: skill '\(skill.directoryName)', agent '\(platform.rawValue)'.")
+        case .orphan:
+            log("Dropped orphan: skill '\(skill.directoryName)' has no safe store folder, agent '\(platform.rawValue)'.")
+        case .realized, .absent: break
+        }
+        return state
+    }
+
+    private func probeDeployState(skill: Skill, platform: PlatformTarget) -> PairState {
+        do {
+            switch try deployState(skill, platform) {
+            case .realized: return .realized
+            case .absent: return .absent
+            case .unmanaged: return .unmanaged
+            }
+        } catch {
+            log("Deploy probe failed for '\(skill.directoryName)', agent '\(platform.rawValue)': "
+                + error.localizedDescription)
+            return .deferred
+        }
+    }
+
+    private func updateIntent(_ record: DeployIntentRecord, state: PairState,
                               snapshot: inout ManifestSnapshot) -> Bool {
-        if state == .unmanaged {
+        if !state.requiresIntent {
             let count = snapshot.deployIntents.count
             snapshot.deployIntents.removeAll { $0 == record }
             return count != snapshot.deployIntents.count
@@ -165,18 +211,19 @@ struct ScenarioHandover: ScenarioHandingOver {
             && SkillStore.isPathSafeSlug(skill.directoryName) && ManifestService.isAdmittedIntentComponent(platform)
     }
 
-    private enum StoreFolderState { case safe, absent, unmanaged }
+    private enum StoreFolderState { case safe, absent, unmanaged, deferred }
 
     private func storeFolderState(_ skill: Skill) -> StoreFolderState {
         let path = root + "/skills/" + skill.directoryName
         do {
-            guard try fileService.entryExistsWithoutFollowingLinks(at: path) else { return .absent }
-            guard let directory = SkillStore.safeSkillDirectory(slug: skill.directoryName, base: root + "/skills",
-                                                               fileService: fileService) else { return .unmanaged }
-            try fileService.checkDirectoryReadable(at: directory)
+            guard let type = try fileService.entryTypeWithoutFollowingLinks(at: path) else { return .absent }
+            guard type == .directory else { return .unmanaged }
+            try fileService.checkDirectoryReadable(at: path)
+            guard SkillStore.safeSkillDirectory(slug: skill.directoryName, base: root + "/skills",
+                                               fileService: fileService) != nil else { return .unmanaged }
         } catch {
             log("Store entry probe failed for '\(skill.directoryName)': \(error.localizedDescription)")
-            return .unmanaged
+            return .deferred
         }
         return .safe
     }
@@ -189,7 +236,7 @@ struct ScenarioHandover: ScenarioHandingOver {
             let record = pair.record
             let intent = MachineDeployIntent(machineID: record.machineID, skillSlug: record.skillSlug,
                                               platformRaw: record.platformRaw)
-            if pair.state == .unmanaged {
+            if !pair.state.requiresIntent {
                 for existing in intents where existing.key == intent.key { context.delete(existing) }
                 intentKeys.remove(intent.key)
             } else if intentKeys.insert(intent.key).inserted {

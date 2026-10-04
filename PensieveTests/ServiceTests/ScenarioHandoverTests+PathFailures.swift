@@ -27,7 +27,7 @@ extension ScenarioHandoverTests {
             let platformVM = PlatformViewModel(fileService: faulty, linkService: deploys, cursorCompiler: deploys,
                 agentDetection: DeployStubDetection(installed: [.codex, .cursor]), deployStateStore: .memoryBacked)
             if ["ENOTDIR", "EACCES", "ELOOP"].contains(kind) {
-                XCTAssertNoThrow(try platformVM.scenarioHandoverDeployState(skill: skill, platform: .codex), kind)
+                XCTAssertThrowsError(try platformVM.scenarioHandoverDeployState(skill: skill, platform: .codex), kind)
             }
             let handover = ScenarioHandover(machineIdentity: harness.identity, manifest: harness.manifest,
                 root: harness.root, defaults: harness.defaults, deployState: platformVM.scenarioHandoverDeployState,
@@ -39,7 +39,8 @@ extension ScenarioHandoverTests {
             XCTAssertEqual(faulty.directoryChecks, 1, kind)
             XCTAssertEqual(faulty.listings, 0, "handover must probe rather than enumerate skills: " + kind)
             XCTAssertFalse(IntentReconciler(platformVM: deploys.platformVM, machineIdentity: harness.identity,
-                handoverIsComplete: { true }).reconcile(context: context).hasFailures, kind)
+                handoverIsComplete: { harness.defaults.bool(forKey: ScenarioHandover.doneKey) })
+                .reconcile(context: context).hasFailures, kind)
             XCTAssertEqual(deploys.createCalls, 0, kind)
             XCTAssertEqual(deploys.removeCalls, 0, kind)
             XCTAssertEqual(try harness.deployedFiles(), before, kind)
@@ -50,18 +51,30 @@ extension ScenarioHandoverTests {
 
     private func assertOwnershipAfterBadPath(context: ModelContext, harness: HandoverHarness,
                                              healthy: Skill, kind: String) throws {
-        XCTAssertTrue(harness.defaults.bool(forKey: ScenarioHandover.doneKey), kind)
-        XCTAssertEqual(try context.fetchCount(FetchDescriptor<ScenarioAssignment>()), 0, kind)
-        XCTAssertEqual(try context.fetch(FetchDescriptor<IntentAssignment>()).map(\.skillID), [healthy.id], kind)
-        let expected = harness.unrelated + [DeployIntentRecord(machineID: harness.identity.id,
+        let deferred = !["store-file", "store-link"].contains(kind)
+        XCTAssertEqual(harness.defaults.bool(forKey: ScenarioHandover.doneKey), !deferred, kind)
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<ScenarioAssignment>()), deferred ? 1 : 0, kind)
+        let ledger = try context.fetch(FetchDescriptor<IntentAssignment>())
+        XCTAssertEqual(ledger.count, deferred ? 2 : 1, kind)
+        XCTAssertTrue(ledger.contains { $0.skillID == healthy.id }, kind)
+        var expected = harness.unrelated + [DeployIntentRecord(machineID: harness.identity.id,
             skillSlug: "healthy", platformRaw: "cursor", projectKey: nil)]
+        if deferred {
+            expected.append(DeployIntentRecord(machineID: harness.identity.id,
+                skillSlug: "skill", platformRaw: "codex", projectKey: nil))
+            XCTAssertNotNil(harness.defaults.object(forKey: ScenarioHandover.activeKey), kind)
+        } else {
+            XCTAssertNil(harness.defaults.object(forKey: ScenarioHandover.activeKey), kind)
+        }
         let durable = try harness.manifest.read(fromRoot: harness.root).deployIntents
         let cached = try harness.manifest.snapshot(from: context).deployIntents
         XCTAssertEqual(durable.count, expected.count, kind)
         XCTAssertEqual(cached.count, expected.count, kind)
         XCTAssertTrue(durable.allSatisfy(expected.contains), kind)
         XCTAssertTrue(cached.allSatisfy(expected.contains), kind)
-        XCTAssertTrue(harness.logs.contains { $0.contains("Left unmanaged:") && $0.contains("skill") }, kind)
+        XCTAssertTrue(harness.logs.contains {
+            $0.contains(deferred ? "Deferred:" : "Left unmanaged:") && $0.contains("skill")
+        }, kind)
         XCTAssertFalse(harness.logs.contains { $0.contains("Dropped orphan:") }, kind)
     }
 

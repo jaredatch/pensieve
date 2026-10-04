@@ -17,6 +17,8 @@ protocol FileServiceProtocol {
     func fileExists(at path: String) -> Bool
     /// The final entry itself, including dangling links. Only ENOENT is absence; other failures throw.
     func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool
+    /// No-follow entry type. Only ENOENT is nil; every other lookup failure throws.
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType?
     func isExecutableFile(at path: String) -> Bool
     func isUserExecutableFile(at path: String) -> Bool
     func directoryExists(at path: String) -> Bool
@@ -27,7 +29,7 @@ protocol FileServiceProtocol {
     func isSymlink(at path: String) -> Bool
     func isRegularFile(at path: String) -> Bool
     func listDirectory(at path: String) throws -> [String]
-    /// Proves a folder can be opened for reading without enumerating its entries.
+    /// Proves read and search access to a folder without enumerating its entries.
     func checkDirectoryReadable(at path: String) throws
     func contentsHash(at path: String) throws -> String
     /// The file system's identity for a path — device and inode: the link itself when
@@ -41,6 +43,8 @@ protocol FileServiceProtocol {
     func regularFileMetadata(at path: String) -> RegularFileMetadata?
     func touchRegularFile(at path: String, date: Date) throws
 }
+
+enum FileEntryType { case directory, symlink, other }
 
 /// A file's identity on its volume; see `FileServiceProtocol.fileIdentity(at:followingLinks:)`.
 struct FileIdentity: Equatable {
@@ -66,6 +70,11 @@ extension FileServiceProtocol {
 
     /// Inert default: an unmodeled lookup is unknown and performs no host I/O.
     func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {
+        throw CocoaError(.fileReadUnknown)
+    }
+
+    /// Inert default: an unmodeled entry type is unknown and performs no host I/O.
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
         throw CocoaError(.fileReadUnknown)
     }
 
@@ -255,11 +264,21 @@ final class FileService: FileServiceProtocol {
     }
 
     func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {
+        try entryTypeWithoutFollowingLinks(at: path) != nil
+    }
+
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
         var info = stat()
-        if lstat(path, &info) == 0 { return true }
-        let code = errno
-        if code == ENOENT { return false }
-        throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [NSFilePathErrorKey: path])
+        guard lstat(path, &info) == 0 else {
+            let code = errno
+            if code == ENOENT { return nil }
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [NSFilePathErrorKey: path])
+        }
+        switch info.st_mode & S_IFMT {
+        case S_IFDIR: return .directory
+        case S_IFLNK: return .symlink
+        default: return .other
+        }
     }
 
     func isExecutableFile(at path: String) -> Bool {
