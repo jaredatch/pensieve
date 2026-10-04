@@ -5,6 +5,7 @@ import XCTest
 @MainActor
 final class ThirdPartyNoticesTests: XCTestCase {
     let fileService = FileService()
+    var noticeParseCount = 0
     var sourceRoot: String {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().path
@@ -41,10 +42,15 @@ final class ThirdPartyNoticesTests: XCTestCase {
 
     func testLibYAMLNoticeIsComplete() throws {
         let notices = try readNotices()
-        guard notices.hasSection("### libYAML") else { return }
-        let license = try XCTUnwrap(notices.license(inSection: "### libYAML"))
-        XCTAssertEqual(LibYAMLNoticeAudit.noticeDigest(license), LibYAMLNoticeAudit.digest)
-        XCTAssertTrue(try bundledCredits().contains("libYAML"))
+        let pins = try inventory.swiftPackagePins(resolved:
+            sourceRoot + "/Pensieve.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved")
+        if pins.contains(where: { ($0["identity"] as? String)?.lowercased() == "yams" }) {
+            let license = try XCTUnwrap(LibYAMLNoticeAudit.license(in: notices), "Missing pinned libYAML license block")
+            XCTAssertEqual(LibYAMLNoticeAudit.noticeDigest(license), LibYAMLNoticeAudit.digest)
+            XCTAssertTrue(try NoticeInventory.normalized(bundledCredits()).contains(NoticeInventory.normalized(license)))
+        } else {
+            XCTAssertNil(notices.text.range(of: "libYAML", options: .caseInsensitive), "Remove all libYAML mentions")
+        }
     }
 
     func testNewSwiftPackageWithoutNoticeIsNamed() throws {

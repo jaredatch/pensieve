@@ -10,8 +10,7 @@ extension ThirdPartyNoticesTests {
         let objects = try XCTUnwrap(project["objects"] as? [String: [String: Any]])
         let phase = try XCTUnwrap(objects.values.first { $0["name"] as? String == "Generate About credits" })
         let shell = try XCTUnwrap(phase["shellPath"] as? String)
-        let command = "test \"$0\" = \"\(shell)\" || exit 92\n"
-            + (try XCTUnwrap(phase["shellScript"] as? String))
+        let command = try XCTUnwrap(phase["shellScript"] as? String)
         try withFixture { root in
             try fileService.createDirectory(at: root + "/script")
             try fileService.writeFile(at: root + "/script/credits.py",
@@ -56,7 +55,7 @@ extension ThirdPartyNoticesTests {
         }
     }
 
-    func testLinkedYamsStillRequiresLibYAMLSection() throws {
+    func testLinkedYamsStillRequiresLibYAMLContent() throws {
         try withFixture { root in
             try fileService.createDirectory(at: root + "/yams")
             try fileService.writeFile(at: root + "/yams/LICENSE", content: "Yams license.")
@@ -154,9 +153,9 @@ extension ThirdPartyNoticesTests {
 
     func testCreditsProcessThrowsAndReapsOnPipeReadFailure() throws {
         for side in ["stdout", "stderr"] {
-            var io = GitService.ProcessIO()
-            let failing = side == "stdout" ? io.stdout.fileHandleForReading : io.stderr.fileHandleForReading
-            io.read = { handle in
+            let stdout = Pipe(), stderr = Pipe()
+            let failing = side == "stdout" ? stdout.fileHandleForReading : stderr.fileHandleForReading
+            let read: (FileHandle) throws -> Data? = { handle in
                 if handle === failing { throw CocoaError(.fileReadUnknown) }
                 return try handle.readToEnd()
             }
@@ -165,14 +164,77 @@ extension ThirdPartyNoticesTests {
             process.arguments = ["-c", "import os,signal,sys; signal.signal(signal.SIGALRM,lambda *a:os._exit(72)); "
                                  + "signal.alarm(3); sys.stderr.write('E'*262144); sys.stderr.flush(); print('DONE'); "
                                  + "sys.stdout.flush(); __import__('time').sleep(60)"]
-            XCTAssertThrowsError(try runCreditsProcess(process, io: io), side)
+            XCTAssertThrowsError(try runCreditsProcess(process, stdout: stdout, stderr: stderr, read: read), side)
             XCTAssertFalse(process.isRunning, side)
             XCTAssertEqual(process.terminationReason, .uncaughtSignal, side)
             XCTAssertEqual(process.terminationStatus, SIGKILL, side)
             var status: Int32 = 0
-            XCTAssertEqual(waitpid(process.processIdentifier, &status, WNOHANG), -1, side)
-            XCTAssertEqual(errno, ECHILD, side)
+            let reaped = (waitpid(process.processIdentifier, &status, WNOHANG), errno)
+            errno = EINTR // Model another call between the syscall and assertions.
+            XCTAssertEqual(reaped.0, -1, side)
+            XCTAssertEqual(reaped.1, ECHILD, side)
         }
+    }
+
+    func testRemovedYamsFindsLibYAMLInProse() throws {
+        for name in ["libYAML", "LibYAML", "LIBYAML"] {
+            let source = "[" + name + "](https://example.invalid), vendored by Yams.\n"
+            assertMissing("Stale libYAML notice: Yams is no longer resolved; remove all libYAML mentions") {
+                try LibYAMLNoticeAudit.checkVendorVersion(pins: [], notices: parseNotices(source))
+            }
+        }
+    }
+
+    func testResolvedYamsFindsLibYAMLByContent() throws {
+        let pins: [[String: Any]] = [["identity": "yams", "state": ["version": "6.2.2"]]]
+        let license = try pinnedLibYAMLFixture()
+        let spaced = license.replacingOccurrences(of: " ", with: " \t")
+        XCTAssertNoThrow(try LibYAMLNoticeAudit.checkVendorVersion(pins: pins,
+            notices: parseNotices("```text\n" + spaced + "\n```\n")))
+        for prefix in ["", "## Renamed vendor\n", "###### LIBYAML\n", "[libYAML](https://example.invalid)\n"] {
+            let source = prefix + "```text\n" + license + "\n```\n"
+            XCTAssertNoThrow(try LibYAMLNoticeAudit.checkVendorVersion(pins: pins, notices: parseNotices(source)), prefix)
+        }
+    }
+
+    func testResolvedYamsRejectsAlteredLibYAMLBlock() throws {
+        let pins: [[String: Any]] = [["identity": "yams", "state": ["version": "6.2.2"]]]
+        let source = "### libYAML\n```text\n" + (try pinnedLibYAMLFixture()) + " Changed terms.\n```\n"
+        assertMissing("Missing libYAML notice for Swift package yams 6.2.2") {
+            try LibYAMLNoticeAudit.checkVendorVersion(pins: pins, notices: parseNotices(source))
+        }
+    }
+
+    func testFixtureNoticeCacheMemoizesEachSource() throws {
+        let first = "```text\nCopyright " + UUID().uuidString + ".\n```\n"
+        let second = first.replacingOccurrences(of: "Copyright", with: "Notice")
+        let start = noticeParseCount
+        let original = try parseNotices(first)
+        _ = try parseNotices(first)
+        _ = try parseNotices(second)
+        XCTAssertEqual(try parseNotices(first).licenseBlocks.map(\.text), original.licenseBlocks.map(\.text))
+        XCTAssertEqual(noticeParseCount - start, 2, "Only distinct fixture sources should launch the parser")
+    }
+
+    func testRealNoticeCacheRetainsContentAcrossFixtureLoads() throws {
+        try withFixture { root in
+            let path = root + "/THIRD-PARTY-NOTICES.md"
+            let first = "```text\nCopyright " + UUID().uuidString + ".\n```\n"
+            let second = first.replacingOccurrences(of: "Copyright", with: "Notice")
+            let start = noticeParseCount
+            try fileService.writeFile(at: path, content: first)
+            let original = try loadNotices(at: path)
+            _ = try parseNotices("```text\nFixture " + UUID().uuidString + ".\n```\n")
+            try fileService.writeFile(at: path, content: second)
+            _ = try loadNotices(at: path)
+            try fileService.writeFile(at: path, content: first)
+            XCTAssertEqual(try loadNotices(at: path).licenseBlocks.map(\.text), original.licenseBlocks.map(\.text))
+            XCTAssertEqual(noticeParseCount - start, 3, "Real and fixture content caches must retain their own entries")
+        }
+    }
+
+    func pinnedLibYAMLFixture() throws -> String {
+        try fileService.readFile(at: sourceRoot + "/PensieveTests/Fixtures/libyaml-license.txt")
     }
 
     func fixtureDigest(_ text: String) -> String {

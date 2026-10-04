@@ -11,22 +11,31 @@ extension GitService {
     }
 
     func readOutput(_ io: ProcessIO, args: [String]) throws -> (Data, Data) {
-        // Drain both pipes concurrently, without queued GCD work. A read failure on either
-        // side stops the child immediately so the other reader can reach EOF and join.
-        let cleanup = ReadFailureCleanup(io.process)
-        let drain = PipeDrain(io.stderr.fileHandleForReading, read: io.read, onFailure: cleanup.stop)
-        let stdout = Result { try io.read(io.stdout.fileHandleForReading) ?? Data() }
-        if case .failure = stdout { cleanup.stop() }
-        let stderr = drain.join()
-        io.process.waitUntilExit()
+        let (stdout, stderr) = Self.readProcessOutput(process: io.process, stdout: io.stdout,
+                                                     stderr: io.stderr, read: io.read)
         do { return (try stdout.get(), try stderr.get()) } catch {
             throw GitError.commandFailed(args: args, exitCode: io.process.terminationStatus,
                                          stderr: "Could not read git output: \(error.localizedDescription)")
         }
     }
 
-    /// Internal pipe transport cleanup shared with tests; it performs no file reads.
-    final class ReadFailureCleanup {
+    /// Drain a launched child's pipe handles, stop it on read failure, join both readers and reap it.
+    /// This transport performs pipe I/O only; file I/O stays behind FileService.
+    static func readProcessOutput(process: Process, stdout stdoutPipe: Pipe, stderr stderrPipe: Pipe,
+                                  read: @escaping (FileHandle) throws -> Data? = { try $0.readToEnd() })
+        -> (Result<Data, Error>, Result<Data, Error>) {
+        // Drain both pipes concurrently, without queued GCD work. A read failure on either
+        // side stops the child immediately so the other reader can reach EOF and join.
+        let cleanup = ReadFailureCleanup(process)
+        let drain = PipeDrain(stderrPipe.fileHandleForReading, read: read, onFailure: cleanup.stop)
+        let stdout = Result { try read(stdoutPipe.fileHandleForReading) ?? Data() }
+        if case .failure = stdout { cleanup.stop() }
+        let stderr = drain.join()
+        process.waitUntilExit()
+        return (stdout, stderr)
+    }
+
+    private final class ReadFailureCleanup {
         private let process: Process
         private let lock = NSLock()
         private var stopped = false
@@ -44,8 +53,7 @@ extension GitService {
         }
     }
 
-    /// Internal reader for pipe handles only. File reads stay behind FileService.
-    final class PipeDrain {
+    private final class PipeDrain {
         private let condition = NSCondition()
         private var result: Result<Data, Error>?
 

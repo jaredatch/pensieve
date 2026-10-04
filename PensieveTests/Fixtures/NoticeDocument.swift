@@ -1,7 +1,7 @@
 import Foundation
 
 /// License blocks come from credits.py, the renderer itself. Source line numbers
-/// associate grouped editor entries and exact headings without another fence parser.
+/// associate grouped editor entries without another fence parser.
 struct NoticeDocument {
     struct LicenseBlock: Decodable {
         let startLine: Int
@@ -12,22 +12,15 @@ struct NoticeDocument {
         let version: String
         let license: String?
     }
-    struct Heading {
-        let line: Int
-        let text: String
-    }
-
     let text: String
     let licenseBlocks: [LicenseBlock]
     let editorEntries: [String: [EditorEntry]]
-    private let headings: [Heading]
 
     init(_ source: String, licenseBlocks: [LicenseBlock]) {
         let normalized = source.replacingOccurrences(of: "\r\n", with: "\n")
         text = normalized
         self.licenseBlocks = licenseBlocks
         var entries: [String: [EditorEntry]] = [:]
-        var headers: [Heading] = []
         var pending: [(name: String, index: Int)] = []
         var blockIndex = 0
         for (number, line) in normalized.components(separatedBy: "\n").enumerated() {
@@ -43,7 +36,6 @@ struct NoticeDocument {
             }
             if let block, block.startLine <= number { continue }
             if Self.isHeading(line) {
-                headers.append(Heading(line: number, text: line))
                 pending.removeAll()
             }
             guard line.hasPrefix("- `"), let end = line.dropFirst(3).range(of: "` ") else { continue }
@@ -53,23 +45,6 @@ struct NoticeDocument {
             entries[name, default: []].append(EditorEntry(version: version, license: nil))
         }
         editorEntries = entries
-        headings = headers
-    }
-
-    var mentionsLibYAML: Bool {
-        headings.contains { $0.text.range(of: "libYAML", options: .caseInsensitive) != nil }
-            || licenseBlocks.contains { $0.text.range(of: "libYAML", options: .caseInsensitive) != nil }
-    }
-
-    func hasSection(_ heading: String) -> Bool {
-        headings.contains { $0.text == heading }
-    }
-
-    func license(inSection heading: String) -> String? {
-        guard let index = headings.firstIndex(where: { $0.text == heading }) else { return nil }
-        let start = headings[index].line
-        let end = index + 1 < headings.count ? headings[index + 1].line : Int.max
-        return licenseBlocks.first { $0.startLine > start && $0.startLine < end }?.text
     }
 
     private static func isHeading(_ line: String) -> Bool {

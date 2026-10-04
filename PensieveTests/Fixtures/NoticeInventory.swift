@@ -40,11 +40,7 @@ struct NoticeInventory {
                             notices: NoticeDocument, credits: String) throws {
         let reviewed = try validatedExemptions()
         var used: Set<String> = []
-        let data = try fileService.readData(at: resolved)
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        guard let pins = json?["pins"] as? [[String: Any]] else {
-            throw MissingNotice(description: "Invalid Package.resolved")
-        }
+        let pins = try swiftPackagePins(resolved: resolved)
         try LibYAMLNoticeAudit.checkVendorVersion(pins: pins, notices: notices)
         let directories = try fileService.listDirectory(at: checkouts)
         let bundled = Self.normalized(credits)
@@ -80,6 +76,15 @@ struct NoticeInventory {
         if let unused = reviewed.keys.sorted().first(where: { !used.contains($0) }) {
             throw MissingNotice(description: "Unused license exemption: \(unused); remove or review the entry")
         }
+    }
+
+    func swiftPackagePins(resolved: String) throws -> [[String: Any]] {
+        let data = try fileService.readData(at: resolved)
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let pins = json?["pins"] as? [[String: Any]] else {
+            throw MissingNotice(description: "Invalid Package.resolved")
+        }
+        return pins
     }
 
     private func checkCandidate(at path: String, key: String, bundled: String,
@@ -201,18 +206,22 @@ struct LibYAMLNoticeAudit {
 
     static func checkVendorVersion(pins: [[String: Any]], notices: NoticeDocument) throws {
         guard let pin = pins.first(where: { ($0["identity"] as? String)?.lowercased() == "yams" }) else {
-            guard notices.mentionsLibYAML else { return }
+            guard notices.text.range(of: "libYAML", options: .caseInsensitive) != nil else { return }
             throw NoticeInventory.MissingNotice(description: "Stale libYAML notice: Yams is no longer resolved; "
-                                                + "remove its notice or audit the new vendor")
+                                                + "remove all libYAML mentions")
         }
         let version = (pin["state"] as? [String: Any])?["version"] as? String ?? "<missing>"
         guard version == yamsVersion else {
             throw NoticeInventory.MissingNotice(description: "Recheck libYAML notice for Swift package yams \(version); "
                                                 + "audited Yams version is \(yamsVersion)")
         }
-        guard notices.hasSection("### libYAML") else {
+        guard license(in: notices) != nil else {
             throw NoticeInventory.MissingNotice(description: "Missing libYAML notice for Swift package yams \(version)")
         }
+    }
+
+    static func license(in notices: NoticeDocument) -> String? {
+        notices.licenseBlocks.first { noticeDigest($0.text) == digest }?.text
     }
 
     static func noticeDigest(_ license: String) -> String {

@@ -37,7 +37,6 @@ extension ThirdPartyNoticesTests {
         let source = "### libYAML\r\n```text\r\n\(license)\r\n```\r\n"
         let notices = try parseNotices(source)
         XCTAssertEqual(notices.licenseBlocks.map(\.text), [license])
-        XCTAssertEqual(notices.license(inSection: "### libYAML"), license)
         let decoded = try decodeCredits(Data(renderFixture(source).utf8))
         XCTAssertTrue(decoded.string.contains(license))
     }

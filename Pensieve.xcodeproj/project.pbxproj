@@ -327,6 +327,7 @@
 		8A050DFA30FF7608F74198F2 /* ManifestMaintenanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81DC44B20441682383DC4292 /* ManifestMaintenanceTests.swift */; };
 		8A2D62F4A4B80C773B40C140 /* MarkdownEditorBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5099269F8F6DE6A9557D865 /* MarkdownEditorBridgeTests.swift */; };
 		8A3EC3CD7AED399C235F8B95 /* UnsavedChangesNavigationGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2922322CAC6936D869763A61 /* UnsavedChangesNavigationGuard.swift */; };
+		8BBD7673612B85602A487EBC /* libyaml-license.txt in Resources */ = {isa = PBXBuildFile; fileRef = A106BE2BDD9B1FA1E8272392 /* libyaml-license.txt */; };
 		8BFA7EC6C7E4954DF8BC4B9B /* ConflictResolutionModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C19EDA8355F0AD1FF6B2835 /* ConflictResolutionModelTests.swift */; };
 		8C0BE39DD7E5561109F3CA6A /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A342DB613E954A27CB3D2B85 /* Constants.swift */; };
 		8C48F0E6B584C9FF8DBB546B /* SkillEditorIdentityPreservationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FD51B8D80CDD1E9B2C82EBB /* SkillEditorIdentityPreservationTests.swift */; };
@@ -1052,6 +1053,7 @@
 		9EFED54571C0A47E86F78572 /* UpdatesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdatesViewModel.swift; sourceTree = "<group>"; };
 		9F022937A434A5A11A964A32 /* AddProjectSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddProjectSheet.swift; sourceTree = "<group>"; };
 		A0C450635ECB55BAB3A2145E /* CheckedYAMLLoaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckedYAMLLoaderTests.swift; sourceTree = "<group>"; };
+		A106BE2BDD9B1FA1E8272392 /* libyaml-license.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "libyaml-license.txt"; sourceTree = "<group>"; };
 		A12D7456AC67896DBEAEBE6F /* SkillLibraryViewModel+Write.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillLibraryViewModel+Write.swift"; sourceTree = "<group>"; };
 		A153E83B00BABF7B403A13E9 /* PostSyncConvergenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostSyncConvergenceTests.swift; sourceTree = "<group>"; };
 		A1D65C2623F64F34B09588B0 /* DaemonStatusCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonStatusCommandTests.swift; sourceTree = "<group>"; };
@@ -1970,6 +1972,7 @@
 				6B88DABB4634017DF744895B /* GitFailureFixture.swift */,
 				CAEEE3F84D0F473D3321B9D6 /* GitProcessProbeRunner.swift */,
 				3DACB4687F3E214FE37C447B /* IsolatedDefaults.swift */,
+				A106BE2BDD9B1FA1E8272392 /* libyaml-license.txt */,
 				C4D1E9F8A17B4E8425D1F327 /* NoticeDocument.swift */,
 				8AFBA9F02D4394206FFA7350 /* NoticeInventory.swift */,
 				37DCE4C679974A0650F3E6FC /* PreProjectIntent.store */,
@@ -2284,6 +2287,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FAFFACA73C0BF7F324C8CD89 /* PreProjectIntent.store in Resources */,
+				8BBD7673612B85602A487EBC /* libyaml-license.txt in Resources */,
 				DA7A7515049193F564101AC0 /* sample-claude-skill.md in Resources */,
 				28F08A6801D814F7B3E114F7 /* sample-cursorrule.mdc in Resources */,
 				F0C739B71D19E6D0ECD47F8A /* sample-skill-basic.md in Resources */,

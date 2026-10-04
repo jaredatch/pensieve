@@ -65,21 +65,6 @@ extension ThirdPartyNoticesTests {
         XCTAssertFalse(rtf.contains("```text"))
     }
 
-    func testLibYAMLHeadingIsAnExactLine() throws {
-        for heading in ["#### libYAML", "prefix ### libYAML"] {
-            let document = try parseNotices(heading + "\n```text\nCopyright Other.\n```\n")
-            XCTAssertNil(document.license(inSection: "### libYAML"), heading)
-        }
-    }
-
-    func testLibYAMLBlockCannotCrossNextHeading() throws {
-        for heading in ["# Next", "## Next", "### Next", "#### Next", "##### Next", "###### Next"] {
-            let document = try parseNotices("### libYAML\nNo license here.\n" + heading
-                                             + "\n```text\nCopyright Other.\n```\n")
-            XCTAssertNil(document.license(inSection: "### libYAML"), heading)
-        }
-    }
-
     func testBackticksDoNotTurnParagraphsIntoHeadings() throws {
         let decoded = try decodeCredits(Data(renderFixture("`# include` directives\n").utf8))
         XCTAssertEqual(decoded.string.trimmingCharacters(in: .whitespacesAndNewlines), "# include directives")
@@ -97,7 +82,7 @@ extension ThirdPartyNoticesTests {
     func testRemovedYamsNamesStaleLibYAMLNotice() throws {
         try withFixture { root in
             try fileService.writeFile(at: root + "/resolved.json", content: "{\"pins\":[]}")
-            assertMissing("Stale libYAML notice: Yams is no longer resolved; remove its notice or audit the new vendor") {
+            assertMissing("Stale libYAML notice: Yams is no longer resolved; remove all libYAML mentions") {
                 try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
                                                  notices: parseNotices("### libYAML\n```text\nCopyright Old vendor.\n```\n"),
                                                  credits: "")
@@ -113,7 +98,7 @@ extension ThirdPartyNoticesTests {
             for marks in 1...6 {
                 for name in ["libYAML", "LibYAML", "LIBYAML"] {
                     let source = String(repeating: "#", count: marks) + " " + name + "\n"
-                    assertMissing("Stale libYAML notice: Yams is no longer resolved; remove its notice or audit the new vendor") {
+                    assertMissing("Stale libYAML notice: Yams is no longer resolved; remove all libYAML mentions") {
                         try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
                                                          notices: parseNotices(source), credits: "")
                     }
@@ -127,7 +112,7 @@ extension ThirdPartyNoticesTests {
             try fileService.writeFile(at: root + "/resolved.json", content: "{\"pins\":[]}")
             for name in ["libYAML", "LibYAML", "LIBYAML"] {
                 let source = "### Renamed vendor\n```text\nCopyright " + name + ".\n```\n"
-                assertMissing("Stale libYAML notice: Yams is no longer resolved; remove its notice or audit the new vendor") {
+                assertMissing("Stale libYAML notice: Yams is no longer resolved; remove all libYAML mentions") {
                     try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
                                                      notices: parseNotices(source), credits: "")
                 }
@@ -147,6 +132,7 @@ extension ThirdPartyNoticesTests {
                 notices: parseNotices("[Example](https://github.com/vendor/example)"), credits: "Example license.")) { error in
                 let message = (error as? NoticeInventory.MissingNotice)?.description ?? ""
                 XCTAssertTrue(message.hasPrefix("Unreadable license candidate: example/" + path + ":"), "\(error)")
+                XCTAssertEqual(files.readAttempts, [root + "/resolved.json", root + "/example/" + path])
             }
         }
     }
@@ -174,16 +160,34 @@ extension ThirdPartyNoticesTests {
 
 }
 
-/// Reuses the real-file delegate; only the exempted candidate's binary-read guard fails.
-private final class NoticeUnreadableFiles: CountingHistoryFileService {
+/// Injects an explicit binary read failure for one candidate. Directory/text probes
+/// delegate to FileService. The double is scoped to the notice audit.
+private final class NoticeUnreadableFiles: FileServiceProtocol {
+    private let base: FileService
     private let unreadable: String
+    var readAttempts: [String] = []
 
     init(base: FileService, unreadable: String) {
+        self.base = base
         self.unreadable = unreadable
-        super.init(base: base)
     }
 
-    override func isRegularFile(at path: String) -> Bool {
-        path != unreadable && super.isRegularFile(at: path)
+    func readData(at path: String) throws -> Data {
+        readAttempts.append(path)
+        if path == unreadable { throw CocoaError(.fileReadUnknown) }
+        return try base.readData(at: path)
     }
+    func readFile(at path: String) throws -> String { try base.readFile(at: path) }
+    func listDirectory(at path: String) throws -> [String] { try base.listDirectory(at: path) }
+    func directoryExists(at path: String) -> Bool { base.directoryExists(at: path) }
+    func isSymlink(at path: String) -> Bool { base.isSymlink(at: path) }
+    func writeFile(at path: String, content: String) throws { throw CocoaError(.featureUnsupported) }
+    func deleteFile(at path: String) throws { throw CocoaError(.featureUnsupported) }
+    func fileExists(at path: String) -> Bool { false }
+    func isExecutableFile(at path: String) -> Bool { false }
+    func createDirectory(at path: String) throws { throw CocoaError(.featureUnsupported) }
+    func deleteDirectory(at path: String) throws { throw CocoaError(.featureUnsupported) }
+    func createSymlink(at linkPath: String, pointingTo targetPath: String) throws { throw CocoaError(.featureUnsupported) }
+    func symlinkTarget(at path: String) throws -> String { throw CocoaError(.featureUnsupported) }
+    func contentsHash(at path: String) throws -> String { throw CocoaError(.featureUnsupported) }
 }
