@@ -91,6 +91,46 @@ final class UntrustedSkillRewriteTests: XCTestCase {
     }
 
     @MainActor
+    func testEmbeddedFenceImportKeepsAllSourceBytesAndMigrationRefusesWrites() throws {
+        let context = try context()
+        var originals: [String: String] = [:]
+        for (index, value) in ["description: before---after", "description: '---'",
+                               "description: |\n  ---\n  text", "description: D\n# --- comment"].enumerated() {
+            for ending in ["\n", "\r\n"] {
+                let source = "---\nname: A\n\(value)\nlicense: MIT\n---\nBody\n"
+                    .replacingOccurrences(of: "\n", with: ending)
+                let slug = "embedded-\(index)-" + (ending == "\r\n" ? "crlf" : "lf")
+                let path = root + "/store/skills/\(slug)/SKILL.md"
+                originals[path] = source
+                let skill = Skill(name: "New", skillDescription: "New description", directoryName: slug)
+                context.insert(skill)
+                try files.writeFile(at: path, content: source)
+                let scanner = ImportScanner(fileService: files, storeRoot: root + "/store")
+                let model = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: root + "/store")
+                model.discoveredSkills = [DiscoveredSkill(name: "New", body: SkillParser.stripFrontmatter(source),
+                    sourcePlatform: "Claude Code", sourcePath: path, skillDescription: "New description", sourceContent: source)]
+                model.selectedSkills = [path]
+                let beforeIDs = Set(try context.fetch(FetchDescriptor<Skill>()).map(\.id))
+                model.importSelected(context: context)
+                XCTAssertNil(model.error)
+                let imported = try context.fetch(FetchDescriptor<Skill>()).first { !beforeIDs.contains($0.id) }
+                let importedSlug = try XCTUnwrap(imported).directoryName
+                XCTAssertEqual(try files.files.readData(at: root + "/store/skills/\(importedSlug)/SKILL.md"),
+                               Data(("---\nname: New\ndescription: New description\n---\n\n" + source).utf8))
+            }
+        }
+        files.writtenPaths = []
+        let result = StoreMigrationService(fileService: files, manifestService: ManifestService(fileService: files),
+                                           skillStore: store).migrateIfNeeded(fromRoot: root + "/store", context: context)
+        for skill in try context.fetch(FetchDescriptor<Skill>()) where skill.directoryName.hasPrefix("embedded-") {
+            let path = root + "/store/skills/\(skill.directoryName)/SKILL.md"
+            XCTAssertEqual(try files.files.readData(at: path), Data(try XCTUnwrap(originals[path]).utf8))
+            XCTAssertFalse(files.writtenPaths.contains(path))
+            XCTAssertTrue(result.warnings.contains { $0.contains("'\(skill.directoryName)'") && $0.contains("not normalized") })
+        }
+    }
+
+    @MainActor
     func testGeneratedBodySavesKeepFrontmatterAndExactEditedBytes() throws {
         let model = SkillLibraryViewModel(skillStore: store, fileService: files, manifestRoot: root + "/store")
         let edited = "First\nSecond\r\nThird\rFourth\u{85}Fifth\u{2028}Sixth\u{2029}Last"

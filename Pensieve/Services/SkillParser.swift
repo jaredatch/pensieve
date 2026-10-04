@@ -180,43 +180,20 @@ enum SkillParser {
 
     // MARK: - Private
 
-    /// Fences split on LF, matching agent readers; YAML entry positions count all six breaks.
-    /// Line-based fence detection: the file must open (after any leading blank lines) with a
-    /// line that is exactly `---`, and the frontmatter ends at the NEXT line that is exactly
-    /// `---`. Matching whole fence lines (not the substring "\n---") makes detection robust to
-    /// a YAML/markdown body that itself contains a `---` rule or a `----` setext underline.
-    private static func extractFrontmatter(
-        _ content: String
-    ) -> ExtractedFrontmatter? {
-        let lines = content.components(separatedBy: "\n")
-
-        var openIndex = 0
-        while openIndex < lines.count, lines[openIndex].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            openIndex += 1
-        }
-        guard openIndex < lines.count,
-              lines[openIndex].trimmingCharacters(in: .whitespacesAndNewlines) == "---" else {
-            return nil
-        }
-
-        var closeIndex = -1
-        var cursor = openIndex + 1
-        while cursor < lines.count {
-            if lines[cursor].trimmingCharacters(in: .whitespacesAndNewlines) == "---" {
-                closeIndex = cursor
-                break
-            }
-            cursor += 1
-        }
-        guard closeIndex > openIndex else { return nil }
-
-        let frontmatterStart = startOfLine(openIndex + 1, in: content)
-        let closeLineStart = startOfLine(closeIndex, in: content)
+    /// Frontmatter opens on the first LF/CRLF line and closes at the next column-zero fence.
+    private static func extractFrontmatter(_ content: String) -> ExtractedFrontmatter? {
+        let lines = sourceLines(in: content, yamlBreaks: false)
+        guard let first = lines.first, isFrontmatterFence(content[first.contentRange]),
+              let closeIndex = lines.indices.dropFirst().first(where: {
+                  isFrontmatterFence(content[lines[$0].contentRange])
+              }) else { return nil }
+        let frontmatterStart = first.sourceRange.upperBound
+        let closeLineStart = lines[closeIndex].sourceRange.lowerBound
         let frontmatterEnd = closeLineStart > frontmatterStart
             ? indexBeforeLineFeed(at: closeLineStart, in: content)
             : frontmatterStart
         let frontmatter = String(content[frontmatterStart..<frontmatterEnd])
-        let bodyStart = startOfLine(closeIndex + 1, in: content)
+        let bodyStart = lines[closeIndex].sourceRange.upperBound
         let rawBody = String(content[bodyStart...])
         let bodyRange = canonicalBodyRange(in: rawBody)
         let body = String(rawBody[bodyRange])
@@ -244,18 +221,6 @@ enum SkillParser {
         guard previous > content.startIndex else { return previous }
         let before = content.unicodeScalars.index(before: previous)
         return content.unicodeScalars[before] == "\r" ? before : previous
-    }
-
-    private static func startOfLine(_ lineNumber: Int, in content: String) -> String.Index {
-        let scalars = content.unicodeScalars
-        var start = content.startIndex
-        for _ in 0..<lineNumber {
-            guard let newline = scalars[start...].firstIndex(of: "\n") else {
-                return content.endIndex
-            }
-            start = scalars.index(after: newline)
-        }
-        return start
     }
 
     /// Returns nil when there is no parseable YAML mapping OR no `name` key — the caller then
@@ -300,7 +265,6 @@ enum SkillParser {
             body: body,
             preservedFrontmatter: preservedFrontmatter(
                 source: yamlString,
-                yamlKeys: Set(mapping.keys),
                 root: root,
                 rootIsFlowMapping: loaded.rootIsFlowMapping
             ),

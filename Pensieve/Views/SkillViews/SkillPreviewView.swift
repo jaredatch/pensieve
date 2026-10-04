@@ -6,6 +6,8 @@ struct SkillPreviewView: View {
     let markdownBody: String
     var scrolls = true
     var skillDirectory: String?
+    var documentRelativePath = "SKILL.md"
+    var imageRevision: UInt64 = 0
     var imageLoader: PreviewImageLoading = PreviewImageLoader()
 
     @ViewBuilder var body: some View {
@@ -27,16 +29,20 @@ struct SkillPreviewView: View {
             .textSelection(.enabled)
             .padding(Spacing.lg)
             // MarkdownUI keys inline-image tasks only by markdown. Rebuild them when their
-            // folder or rasterized placeholder colors change, even if the text is identical.
-            .id(ImageContext(directory: skillDirectory, colorScheme: colorScheme))
+            // document, watched assets or placeholder colors change, even if the text is identical.
+            .id(ImageContext(directory: skillDirectory, document: documentRelativePath,
+                             revision: imageRevision, colorScheme: colorScheme))
     }
 
-    private var imageProvider: PreviewImageProvider {
-        PreviewImageProvider(loader: imageLoader, skillDirectory: skillDirectory, colorScheme: colorScheme)
+    var imageProvider: PreviewImageProvider {
+        PreviewImageProvider(loader: imageLoader, skillDirectory: skillDirectory,
+                             documentRelativePath: documentRelativePath, colorScheme: colorScheme)
     }
 
     private struct ImageContext: Hashable {
         let directory: String?
+        let document: String
+        let revision: UInt64
         let colorScheme: ColorScheme
     }
 }

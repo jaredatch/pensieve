@@ -28,7 +28,7 @@ A skill installed from GitHub is text someone else wrote. Pensieve treats it tha
 - **It never runs a skill.** Skills are instructions for your agents, and what an agent does with them is up to the agent. Read a skill before you deploy it, as you would a script.
 - **YAML frontmatter** is checked before it's parsed, with limits on nesting, aliases and merges. A hostile file can't blow up memory ("billion laughs").
 - **The editor** is a web view locked down by a strict content security policy. It loads only Pensieve's bundled code, makes no network connections, and opens clicked links in your browser.
-- **The preview** renders markdown natively and makes no network requests. It shows embedded images and images inside the skill's folder. Remote or unavailable images show a placeholder with their alt text. Local reads refuse symlinks and special files and stop at 4 MiB.
+- **The preview** renders markdown natively and makes no network requests. It shows embedded images and images inside the skill's folder, with relative paths starting from the previewed file's own folder. Remote or unavailable images show a placeholder with their alt text. Local reads refuse linked image files and special files and stop at 4 MiB. A folder link loads only when the image stays inside the skill. Before decoding, Pensieve checks that the image is PNG, JPEG, GIF, WebP or HEIC, no larger than 16,384 pixels on either side or 25 megapixels in all. Earlier versions in History show embedded images only.
 - **Installs** refuse symlinks and special files inside the downloaded skill.
 
 ## Git remotes and credentials

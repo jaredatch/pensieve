@@ -299,7 +299,8 @@ extension SkillParserTests {
             ),
             EmptyFrontmatterFixture(source: "---\n---", stripped: "", changed: "---\n---\nChanged"),
             EmptyFrontmatterFixture(
-                source: "\n---\n---\n", stripped: "", changed: "\n---\n---\nChanged\n"
+                source: "\n---\n---\n", stripped: "---\n---",
+                changed: "---\nname: Fallback\ndescription: Fallback description\n---\n\nChanged\n"
             ),
             EmptyFrontmatterFixture(
                 source: "--- \t\r\n--- \t\r", stripped: "", changed: "--- \t\r\n--- \t\r\nChanged"
@@ -308,6 +309,10 @@ extension SkillParserTests {
 
         for fixture in fixtures {
             let parsed = SkillParser.parse(fixture.source)
+            if fixture.source.hasPrefix("\n") {
+                assertBodyOnlyEmptyFrontmatterFixture(fixture, parsed: parsed)
+                continue
+            }
             let preservedFile = try XCTUnwrap(parsed.preservedFile)
 
             XCTAssertNil(parsed.name, fixture.source.debugDescription)
@@ -329,6 +334,24 @@ extension SkillParserTests {
             XCTAssertEqual(changed, fixture.changed, fixture.source.debugDescription)
             XCTAssertEqual(SkillParser.stripFrontmatter(changed), "Changed")
         }
+    }
+
+    private func assertBodyOnlyEmptyFrontmatterFixture(_ fixture: EmptyFrontmatterFixture, parsed: ParsedSkill) {
+        XCTAssertNil(parsed.name, fixture.source.debugDescription)
+        XCTAssertNil(parsed.description, fixture.source.debugDescription)
+        XCTAssertFalse(parsed.hasFrontmatter, fixture.source.debugDescription)
+        XCTAssertFalse(parsed.hasRequiredFrontmatter, fixture.source.debugDescription)
+        XCTAssertTrue(parsed.tags.isEmpty, fixture.source.debugDescription)
+        XCTAssertNil(parsed.scope, fixture.source.debugDescription)
+        XCTAssertNil(parsed.preservedFrontmatter)
+        XCTAssertNil(parsed.preservedFile)
+        XCTAssertEqual(parsed.body, fixture.source, fixture.source.debugDescription)
+        XCTAssertEqual(SkillParser.stripFrontmatter(fixture.source), fixture.stripped)
+        let unchanged = rewrite(fixture.stripped, preserving: parsed)
+        XCTAssertEqual(unchanged, fixture.source, fixture.source.debugDescription)
+        let changed = rewrite("Changed", preserving: parsed)
+        XCTAssertEqual(changed, fixture.changed, fixture.source.debugDescription)
+        XCTAssertEqual(SkillParser.stripFrontmatter(changed), "Changed")
     }
 
     private func rewrite(_ body: String, preserving parsed: ParsedSkill) -> String {

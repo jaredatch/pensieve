@@ -37,18 +37,21 @@ final class PreviewImageFileSpy: FileServiceProtocol {
 
     let files = FileService()
     var unreadablePath: String?
-    private(set) var reads: [Read] = []
-    private(set) var bytesRead = 0
+    private let lock = NSLock()
+    private var recordedReads: [Read] = []
+    private var recordedBytes = 0
+    var reads: [Read] { lock.withLock { recordedReads } }
+    var bytesRead: Int { lock.withLock { recordedBytes } }
 
     func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data {
-        reads.append(Read(path: path, limit: maximumBytes, root: directory))
+        lock.withLock { recordedReads.append(Read(path: path, limit: maximumBytes, root: directory)) }
         if let unreadablePath,
            URL(fileURLWithPath: path).standardizedFileURL == URL(fileURLWithPath: unreadablePath).standardizedFileURL {
             throw CocoaError(.fileReadNoPermission)
         }
         return try files.readRegularFileData(at: path, maximumBytes: maximumBytes, read: { descriptor, buffer, count in
             let result = Darwin.read(descriptor, buffer, count)
-            if result > 0 { self.bytesRead += result }
+            if result > 0 { self.lock.withLock { self.recordedBytes += result } }
             return result
         }, containedIn: directory)
     }

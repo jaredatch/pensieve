@@ -1,19 +1,13 @@
 import Foundation
 import ImageIO
+import UniformTypeIdentifiers
 
 protocol PreviewImageLoading {
     func loadImage(at url: URL, skillDirectory: String?) throws -> CGImage
 }
 
-enum PreviewImageError: LocalizedError {
+enum PreviewImageError: Error {
     case blocked, invalidImage
-
-    var errorDescription: String? {
-        switch self {
-        case .blocked: "This image is outside the skill folder or uses an unsupported URL."
-        case .invalidImage: "This image could not be decoded."
-        }
-    }
 }
 
 /// Has no network transport. Only embedded image bytes and bounded regular files inside the
@@ -21,16 +15,20 @@ enum PreviewImageError: LocalizedError {
 struct PreviewImageLoader: PreviewImageLoading {
     static let maximumBytes = 4 * 1_024 * 1_024
     static let maximumDimension = 2_048
+    static let maximumSourceDimension = 16_384
+    static let maximumPixels = 25_000_000
+    private static let allowedTypes = Set([UTType.png, .jpeg, .gif, .webP, .heic].map(\.identifier))
     private let fileService: FileServiceProtocol
+    private let decode: (CGImageSource) -> CGImage?
 
-    init(fileService: FileServiceProtocol = FileService()) {
+    init(fileService: FileServiceProtocol = FileService(), decode: ((CGImageSource) -> CGImage?)? = nil) {
         self.fileService = fileService
+        self.decode = decode ?? Self.thumbnail
     }
 
     /// Path derivation only. The C7 filesystem guard runs in loadImage, off the view's render path.
     static func skillDirectory(slug: String, base: String) -> String? {
-        guard !slug.isEmpty, !slug.contains("/"), slug != ".", slug != ".." else { return nil }
-        return base + "/" + slug
+        SkillStore.skillDirectoryPath(slug: slug, base: base)
     }
 
     func loadImage(at url: URL, skillDirectory: String?) throws -> CGImage {
@@ -44,14 +42,25 @@ struct PreviewImageLoader: PreviewImageLoading {
                                                       containedIn: skillDirectory)
         }
         guard data.count <= Self.maximumBytes,
-              let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+              let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let type = CGImageSourceGetType(source), Self.allowedTypes.contains(type as String),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+              width.intValue > 0, height.intValue > 0,
+              width.intValue <= Self.maximumSourceDimension, height.intValue <= Self.maximumSourceDimension,
+              width.intValue <= Self.maximumPixels / height.intValue,
+              let image = decode(source) else { throw PreviewImageError.invalidImage }
+        return image
+    }
+
+    private static func thumbnail(_ source: CGImageSource) -> CGImage? {
+        CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
                 kCGImageSourceThumbnailMaxPixelSize: Self.maximumDimension,
                 kCGImageSourceShouldCacheImmediately: true
-              ] as CFDictionary) else { throw PreviewImageError.invalidImage }
-        return image
+              ] as CFDictionary)
     }
 
     private func localPath(_ url: URL, skillDirectory: String?) throws -> String {

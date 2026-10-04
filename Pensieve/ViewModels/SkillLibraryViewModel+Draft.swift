@@ -114,8 +114,6 @@ extension SkillLibraryViewModel {
         }
         guard hasUnsavedChanges(forDirectory: skill.directoryName) else { return true }
         guard updateBody(skill, body: draft.body) else { return false }
-        // the store's canonical form: newlines trimmed at both ends (SkillParser.canonicalBody)
-        noteAppAuthoredBody(skill, body: SkillParser.canonicalBody(draft.body))
         drafts[skill.directoryName] = nil
         externallyModified.remove(skill.directoryName)
         notifier()

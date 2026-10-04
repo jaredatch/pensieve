@@ -41,14 +41,13 @@ enum SkillSerializer {
         fallbackName: String,
         fallbackDescription: String
     ) -> String {
-        let body = normalizeLineEndings(
-            bodyWithoutTerminalLineBreaks(body),
-            to: parsed.preferredLineEnding
-        )
+        let originalBody = parsed.preservedFile?.body ?? SkillParser.canonicalBody(parsed.body)
+        let draft = SkillParser.canonicalBody(body)
+        if normalizeLineEndings(draft, to: "\n") == normalizeLineEndings(originalBody, to: "\n") {
+            return parsed.preservedFile?.source ?? parsed.body
+        }
+        let body = normalizeLineEndings(draft, to: parsed.preferredLineEnding)
         if let file = parsed.preservedFile {
-            if SkillParser.canonicalBody(body) == file.body {
-                return file.source
-            }
             let separator: String
             switch file.bodyPrefix.utf8.last {
             case 0x0A: separator = ""
@@ -153,7 +152,11 @@ enum SkillSerializer {
         additionalLine: String?,
         lineEnding: String
     ) -> String {
-        let lines = sourceLines(source, lineEnding: lineEnding)
+        let sourceLines = SkillParser.sourceLines(in: source, yamlBreaks: false)
+        let lines = sourceLines.compactMap { line -> (content: String, ending: String)? in
+            guard !line.sourceRange.isEmpty else { return nil }
+            return (String(source[line.contentRange]), String(source[line.contentRange.upperBound..<line.sourceRange.upperBound]))
+        }
         var triviaStart = lines.count
         while triviaStart > 1 {
             let content = lines[triviaStart - 1].content
@@ -166,45 +169,6 @@ enum SkillSerializer {
                 + lines[triviaStart...].map { $0.content + $0.ending }.joined()
         }
         return inserted + (lines.last?.ending ?? "")
-    }
-
-    private static func sourceLines(_ source: String, lineEnding: String) -> [(content: String, ending: String)] {
-        var result: [(String, String)] = []
-        var start = source.startIndex
-        let scalars = source.unicodeScalars
-        while start < source.endIndex {
-            if let newline = scalars[start...].firstIndex(of: "\n") {
-                var contentEnd = newline
-                var ending = "\n"
-                if contentEnd > start, scalars[scalars.index(before: contentEnd)] == "\r" {
-                    contentEnd = scalars.index(before: contentEnd)
-                    ending = "\r\n"
-                }
-                result.append((String(scalars[start..<contentEnd]), ending))
-                start = scalars.index(after: newline)
-            } else {
-                var contentEnd = source.endIndex
-                var ending = ""
-                if lineEnding == "\r\n", scalars[scalars.index(before: contentEnd)] == "\r" {
-                    contentEnd = scalars.index(before: contentEnd)
-                    ending = "\r"
-                }
-                result.append((String(scalars[start..<contentEnd]), ending))
-                break
-            }
-        }
-        return result
-    }
-
-    private static func bodyWithoutTerminalLineBreaks(_ body: String) -> String {
-        let scalars = body.unicodeScalars
-        var end = scalars.endIndex
-        while end > scalars.startIndex {
-            let previous = scalars.index(before: end)
-            guard scalars[previous] == "\n" || scalars[previous] == "\r" else { break }
-            end = previous
-        }
-        return String(scalars[..<end])
     }
 
     private static func normalizeLineEndings(_ value: String, to lineEnding: String) -> String {

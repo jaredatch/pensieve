@@ -90,12 +90,18 @@ struct SkillContentTab: View {
         }
     }
 
+    func preview(markdownBody: String, skillsBase: String) -> SkillPreviewView {
+        SkillPreviewView(markdownBody: markdownBody, scrolls: false,
+                         skillDirectory: PreviewImageLoader.skillDirectory(slug: skill.directoryName, base: skillsBase),
+                         documentRelativePath: file,
+                         imageRevision: library.watcherEventSequence,
+                         imageLoader: PreviewImageLoader(fileService: library.fileService))
+    }
+
     @ViewBuilder private var content: some View {
         if choice.isSkillFile {
             if shownMode == .rendered {
-                SkillPreviewView(markdownBody: snapshot.body, scrolls: false,
-                                 skillDirectory: PreviewImageLoader.skillDirectory(
-                                    slug: skill.directoryName, base: Constants.pensieveSkillsDir))
+                preview(markdownBody: snapshot.body, skillsBase: Constants.pensieveSkillsDir)
             } else {
                 SkillEditorView(skill: skill, library: library)
                     // One editor per skill: switching skills tears the prior WKWebView down, so a late
@@ -104,9 +110,7 @@ struct SkillContentTab: View {
                     .frame(minHeight: Self.sourceEditorMinimumHeight, maxHeight: .infinity)
             }
         } else if shownMode == .rendered {
-            SkillPreviewView(markdownBody: otherFileText ?? "", scrolls: false,
-                             skillDirectory: PreviewImageLoader.skillDirectory(
-                                slug: skill.directoryName, base: Constants.pensieveSkillsDir))
+            preview(markdownBody: otherFileText ?? "", skillsBase: Constants.pensieveSkillsDir)
         } else if let otherFileText {
             MarkdownEditorWebView(bodyToLoad: otherFileText, loadVersion: otherFileText.hashValue, readOnly: true)
                 .id(file)

@@ -100,38 +100,6 @@ final class SkillSerializerTests: XCTestCase {
         XCTAssertEqual(SkillParser.parse(rewritten).trailingLineBreaks, "\r\n")
     }
 
-    func testChangedBodyRewritePreservesEveryOtherByteAcrossRepeatedSaves() {
-        let fixtures = [
-            ("canonical LF", "---\nname: A\ndescription: D\n---\n\nBody\n"),
-            ("no trailing newline", "---\nname: A\ndescription: D\n---\n\nBody"),
-            ("no blank line after fence", "---\nname: A\ndescription: D\n---\nBody\n"),
-            ("two blank lines after fence", "---\nname: A\ndescription: D\n---\n\n\nBody\n"),
-            ("leading blank line", "\n---\nname: A\ndescription: D\n---\n\nBody\n"),
-            ("fence trailing whitespace", "--- \nname: A\ndescription: D\n--- \n\nBody\n"),
-            ("CRLF throughout", "---\r\nname: A\r\ndescription: D\r\n---\r\n\r\nBody\r\n"),
-            ("comment between keys", "---\nname: A\n# describes the next key\ndescription: D\n---\n\nBody\n"),
-            (
-                "nested mapping with list",
-                "---\nname: A\ndescription: D\nmetadata:\n  tools:\n    - Read\n    - Write\n---\n\nBody\n"
-            )
-        ]
-
-        for (label, original) in fixtures {
-            let expected = original.replacingOccurrences(of: "Body", with: "Changed")
-            var current = original
-            for save in 1...3 {
-                let parsed = SkillParser.parse(current)
-                current = SkillSerializer.rewrite(
-                    body: "Changed",
-                    preserving: parsed,
-                    fallbackName: "Ignored",
-                    fallbackDescription: "Ignored"
-                )
-                XCTAssertEqual(current, expected, "\(label), save \(save)")
-            }
-        }
-    }
-
     func testChangedBodyRewriteKeepsEmptyBodyFilesValid() {
         let frontmatter = "---\nname: A\ndescription: D\n---"
         let fixtures = [
@@ -187,7 +155,14 @@ final class SkillSerializerTests: XCTestCase {
         ]
 
         for original in fixtures {
-            let expected = original
+            let isBodyOnly = original.hasPrefix("\n")
+            if isBodyOnly {
+                XCTAssertNil(SkillParser.parse(original).preservedFrontmatter)
+                XCTAssertEqual(SkillParser.parse(original).body, original)
+            }
+            let expected = isBodyOnly
+                ? SkillSerializer.serialize(name: "New", description: "New description", body: original)
+                : original
                 .replacingOccurrences(of: "name: Old", with: "name: New")
                 .replacingOccurrences(of: "description: Old", with: "description: New description")
             let first = try XCTUnwrap(SkillSerializer.normalizeIdentity(

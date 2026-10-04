@@ -77,6 +77,18 @@ final class PreviewImageLoaderTests: XCTestCase {
         XCTAssertEqual(spy.reads.count, 1)
     }
 
+    func testContainedFolderLinkLoadsButLinkedImageLeafStillRefusesBytes() throws {
+        try spy.files.createSymlink(at: skillDirectory + "/alias", pointingTo: skillDirectory + "/assets")
+        try spy.files.createSymlink(at: skillDirectory + "/assets/linked.png",
+                                    pointingTo: skillDirectory + "/assets/red image.png")
+        let loader = PreviewImageLoader(fileService: spy)
+        let image = try loader.loadImage(at: URL(string: "alias/red%20image.png")!, skillDirectory: skillDirectory)
+        XCTAssertEqual(image.width, 32)
+        let before = spy.bytesRead
+        XCTAssertThrowsError(try loader.loadImage(at: URL(string: "alias/linked.png")!, skillDirectory: skillDirectory))
+        XCTAssertEqual(spy.bytesRead, before)
+    }
+
     func testUnreadableInvalidAndOversizedImagesAreRefused() throws {
         let loader = PreviewImageLoader(fileService: spy)
         spy.unreadablePath = skillDirectory + "/assets/red image.png"

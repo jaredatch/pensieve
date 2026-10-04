@@ -65,8 +65,9 @@ extension FileService {
     static func openRegularFile(at path: String) throws -> (descriptor: Int32, status: stat) {
         let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
         guard descriptor >= 0 else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno),
-                          userInfo: [NSLocalizedDescriptionKey: "open(\(path)): " + String(cString: strerror(errno))])
+            let errorCode = errno
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errorCode),
+                          userInfo: [NSLocalizedDescriptionKey: "open(\(path)): " + String(cString: strerror(errorCode))])
         }
         do {
             var status = stat()

@@ -21,6 +21,7 @@ final class ImportViewModel {
     var error: String?
     var importNotices: [String] = []
     var scanSkips: [ImportScanSkip] = []
+    private var latestFolderReport = ImportScanReport()
     private(set) var importedSkillCount = 0
 
     var hasResults: Bool { !discoveredSkills.isEmpty }
@@ -40,14 +41,7 @@ final class ImportViewModel {
     }
 
     var scanSummary: String? {
-        guard !scanSkips.isEmpty else { return nil }
-        let reasons = ImportScanSkip.Reason.allCases.compactMap { reason -> String? in
-            let count = scanSkips.filter { $0.reason == reason }.count
-            guard count > 0 else { return nil }
-            return "\(count) \(reason.label(count: count))"
-        }
-        let entries = scanSkips.count == 1 ? "entry" : "entries"
-        return "Skipped \(scanSkips.count) \(entries): " + reasons.joined(separator: "; ") + "."
+        ImportScanReport(skipped: scanSkips).summary
     }
 
     init(
@@ -71,6 +65,7 @@ final class ImportViewModel {
     // MARK: - Scan
 
     func scan() {
+        latestFolderReport = ImportScanReport()
         importNotices = []
         importedSkillCount = 0
         error = nil
@@ -89,6 +84,7 @@ final class ImportViewModel {
     /// clears the last import's notices and error first (PLAN-42).
     @discardableResult
     func scanFolder(_ path: String) -> FolderScanOutcome {
+        latestFolderReport = ImportScanReport()
         importNotices = []
         importedSkillCount = 0
         error = nil
@@ -96,6 +92,7 @@ final class ImportViewModel {
         isScanning = true
         defer { isScanning = false }
         let report = scanner.scanFolderWithReport(path)
+        latestFolderReport = report
         let found = report.skills
         guard !found.isEmpty else {
             // A report belongs to its results. Keep both when retaining an earlier non-empty scan.
@@ -107,6 +104,11 @@ final class ImportViewModel {
         duplicateGroups = ImportScanner.findDuplicates(discoveredSkills)
         selectedSkills = Set(discoveredSkills.map(\.sourcePath))
         return .found(found.count)
+    }
+
+    func nothingFoundMessage(folder shown: String) -> String {
+        if let summary = latestFolderReport.summary { return "\(shown): \(summary)" }
+        return "\(shown) holds no readable SKILL.md. Pensieve looks in it and in its folders, never deeper."
     }
 
     func toggleSelection(_ skill: DiscoveredSkill) {
@@ -224,9 +226,8 @@ final class ImportViewModel {
            let normalized = SkillSerializer.normalizeIdentity(name: discovered.name, description: description, parsed: parsed) {
             return (normalized, false)
         }
-        let firstLine = source.components(separatedBy: "\n")
-            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let startsWithFence = firstLine?.trimmingCharacters(in: .whitespacesAndNewlines) == "---"
+        let firstLine = SkillParser.sourceLines(in: source, yamlBreaks: false)[0]
+        let startsWithFence = SkillParser.isFrontmatterFence(source[firstLine.contentRange])
         return (
             SkillSerializer.serialize(name: discovered.name, description: description, body: source),
             startsWithFence

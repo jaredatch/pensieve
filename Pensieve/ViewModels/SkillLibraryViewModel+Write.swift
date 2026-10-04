@@ -18,6 +18,8 @@ extension SkillLibraryViewModel {
                 skill.skillDescription = resolvedDescription
             }
             let parsed = SkillParser.parse(try skillStore.readBody(directoryName: skill.directoryName))
+            let written = SkillSerializer.rewrite(body: body, preserving: parsed,
+                                                  fallbackName: skill.name, fallbackDescription: resolvedDescription)
             try skillStore.rewriteSkill(
                 directoryName: skill.directoryName,
                 body: body,
@@ -25,6 +27,7 @@ extension SkillLibraryViewModel {
                 fallbackName: skill.name,
                 fallbackDescription: resolvedDescription
             )
+            noteAppAuthoredBody(skill, body: SkillParser.stripFrontmatter(written))
             skill.updatedAt = Date()
             error = nil
             return true

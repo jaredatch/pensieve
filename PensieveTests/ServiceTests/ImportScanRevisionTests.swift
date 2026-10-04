@@ -5,6 +5,29 @@ import XCTest
 
 @MainActor
 final class ImportScanRevisionTests: XCTestCase {
+    func testNothingFoundNoticeUsesLatestFolderSkipsWhileRetainingEarlierResultsAndReport() {
+        let scanner = RevisionReportScanner()
+        let model = ImportViewModel(scanner: scanner)
+        scanner.report = ImportScanReport(skills: [skill("old")], skipped: [.init(path: "old", reason: .notRegular)])
+        model.scan()
+        let oldSummary = model.scanSummary
+        scanner.report = ImportScanReport(skipped: [.init(path: "new", reason: .tooLarge),
+                                                  .init(path: "denied", reason: .unreadable)])
+        XCTAssertEqual(model.scanFolder("/chosen"), .nothingFound)
+        XCTAssertEqual(model.nothingFoundMessage(folder: "Chosen"),
+                       "Chosen: Skipped 2 entries: 1 file larger than 4 MiB; 1 unreadable file or folder.")
+        XCTAssertEqual(model.discoveredSkills.map(\.name), ["old"])
+        XCTAssertEqual(model.scanSummary, oldSummary)
+        scanner.report = ImportScanReport(skipped: [.init(path: "one", reason: .invalidUTF8)])
+        let fresh = ImportViewModel(scanner: scanner)
+        XCTAssertEqual(fresh.scanFolder("/new"), .nothingFound)
+        XCTAssertEqual(fresh.nothingFoundMessage(folder: "New"), "New: Skipped 1 entry: 1 file that isn't UTF-8 text.")
+        scanner.report = ImportScanReport()
+        XCTAssertEqual(fresh.scanFolder("/empty"), .nothingFound)
+        XCTAssertEqual(fresh.nothingFoundMessage(folder: "Empty"),
+                       "Empty holds no readable SKILL.md. Pensieve looks in it and in its folders, never deeper.")
+    }
+
     func testRejectedFolderScanRetainsResultsAndTheirReport() {
         let scanner = RevisionReportScanner()
         let model = ImportViewModel(scanner: scanner)

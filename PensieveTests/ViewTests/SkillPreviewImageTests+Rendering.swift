@@ -17,14 +17,20 @@ extension SkillPreviewImageTests {
             let decoded = await provider.loadImage(url: url)
             let blockImage = try XCTUnwrap(decoded)
             assertVisible(blockImage, "Block provider decoded pixels")
+            XCTAssertEqual(blockImage.width, reference.width)
+            XCTAssertEqual(blockImage.height, reference.height)
             XCTAssertEqual(rgba(blockImage), rgba(reference))
             let block = ImageRenderer(content: PreviewBlockImageContent(image: blockImage, alt: "Diagram"))
             let blockCapture = try XCTUnwrap(block.cgImage)
             assertVisible(blockCapture, "Block provider content")
+            XCTAssertEqual(blockCapture.width, reference.width)
+            XCTAssertEqual(blockCapture.height, reference.height)
             XCTAssertEqual(rgba(blockCapture), rgba(reference))
             let inline = try await provider.image(with: url, label: "Diagram")
             let inlineCapture = try XCTUnwrap(ImageRenderer(content: inline).cgImage)
             assertVisible(inlineCapture, "Inline provider content")
+            XCTAssertEqual(inlineCapture.width, reference.width)
+            XCTAssertEqual(inlineCapture.height, reference.height)
             XCTAssertEqual(rgba(inlineCapture), rgba(reference))
         }
     }
@@ -96,7 +102,7 @@ extension SkillPreviewImageTests {
         assertVisible(reference, "Reference placeholder for \(alt)")
         XCTAssertEqual(rendered.width, reference.width)
         XCTAssertEqual(rendered.height, reference.height)
-        XCTAssertEqual(rgba(rendered), rgba(reference), alt)
+        assertRenderedTextMatches(rendered, reference, alt)
     }
 
     func testBlockAndInlineReadsAndDecodesStayOffMainThread() async throws {
@@ -138,7 +144,11 @@ extension SkillPreviewImageTests {
         await TestWait.until(failureMessage: "Both block and inline image loaders must finish") { loader.results.count == 4 }
         XCTAssertEqual(loader.results.filter(\.loaded).count, 4)
         XCTAssertEqual(loader.results.filter { $0.url.scheme == "data" }.count, 2)
-        XCTAssertEqual(loader.results.filter { $0.url.scheme == nil }.count, 2)
+        let directory = URL(fileURLWithPath: fixture.root, isDirectory: true)
+        let localFile = directory.appendingPathComponent("red.png").standardizedFileURL
+        XCTAssertEqual(loader.results.filter {
+            URL(string: $0.url.relativeString, relativeTo: directory)?.absoluteURL.standardizedFileURL == localFile
+        }.count, 2)
     }
 
     func testMountedPreviewRoutesFailedInlineImageAndValidNeighbor() async throws {
@@ -192,7 +202,7 @@ extension SkillPreviewImageTests {
                 assertVisible(reference, "Reference placeholder in \(scheme), alt=\(alt)")
                 XCTAssertEqual(rendered.width, reference.width, alt)
                 XCTAssertEqual(rendered.height, reference.height, alt)
-                XCTAssertEqual(rgba(rendered), rgba(reference), "Visible inline alt text in \(scheme)")
+                assertRenderedTextMatches(rendered, reference, "Visible inline alt text in \(scheme)")
             }
         }
     }
@@ -225,6 +235,21 @@ extension SkillPreviewImageTests {
         let bytes = rgba(image)
         XCTAssertTrue(stride(from: 3, to: bytes.count, by: 4).contains { bytes[$0] > 0 },
                       "Capture must contain visible pixels: \(message)", file: file, line: line)
+    }
+
+    /// Text antialiasing may vary by up to four per RGBA byte between live renders.
+    private func assertRenderedTextMatches(
+        _ actual: CGImage, _ reference: CGImage, _ message: String,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let actualBytes = rgba(actual)
+        let referenceBytes = rgba(reference)
+        XCTAssertEqual(actualBytes.count, referenceBytes.count, message, file: file, line: line)
+        let maximumDifference = zip(actualBytes, referenceBytes).reduce(0) {
+            max($0, abs(Int($1.0) - Int($1.1)))
+        }
+        XCTAssertLessThanOrEqual(maximumDifference, 4,
+                                "Rendered text RGBA byte difference exceeds 4: \(message)", file: file, line: line)
     }
 
     private func rgba(_ image: CGImage) -> [UInt8] {

@@ -4,24 +4,22 @@ import Yams
 extension SkillParser {
     static func preservedFrontmatter(
         source: String,
-        yamlKeys: Set<String>,
         root: Node,
         rootIsFlowMapping: Bool
     ) -> PreservedFrontmatter {
-        let entries = scanTopLevelEntries(in: source)
-        let scannedKeys = Set(entries.map(\.key))
-        let hasUniqueKeys = scannedKeys.count == entries.count
         let lines = sourceLines(in: source)
+        let entries = scanTopLevelEntries(in: source, lines: lines)
         let positionsAgree = root.mapping.map { mapping in
-            mapping.count == entries.count && zip(mapping, entries).allSatisfy { pair, entry in
+            mapping.count == entries.count && Set(entries.map(\.key)).count == entries.count
+                && zip(mapping, entries).allSatisfy { pair, entry in
                 guard let mark = pair.key.mark, mark.line > 0, mark.line <= lines.count else { return false }
                 return pair.key.string == entry.key && mark.column == 1
                     && lines[mark.line - 1].sourceRange.lowerBound == entry.sourceRange.lowerBound
             }
         } ?? false
-        let trustworthy = hasUniqueKeys && scannedKeys == yamlKeys && positionsAgree
+        let trustworthy = positionsAgree
             && !rootIsFlowMapping && !hasOddLineBreak(in: source)
-            && !source.contains("\t") && !containsAnchorOrAlias(in: source)
+            && !source.contains("\t") && !source.contains("---") && !containsAnchorOrAlias(in: source)
         return PreservedFrontmatter(
             source: source,
             entries: entries,
@@ -29,9 +27,9 @@ extension SkillParser {
         )
     }
 
-    private static func scanTopLevelEntries(in source: String) -> [PreservedFrontmatter.Entry] {
+    private static func scanTopLevelEntries(in source: String, lines: [SourceLine]) -> [PreservedFrontmatter.Entry] {
         var starts: [(key: String, index: String.Index)] = []
-        for sourceLine in sourceLines(in: source) {
+        for sourceLine in lines {
             let line = String(source[sourceLine.contentRange])
             if let key = topLevelKey(in: line) {
                 starts.append((key, sourceLine.sourceRange.lowerBound))
@@ -57,6 +55,11 @@ extension SkillParser {
         let key = line[..<colon]
         guard !key.isEmpty, !key.contains(where: { $0.isWhitespace }) else { return nil }
         return String(key)
+    }
+
+    /// Agent fences are at column zero, with only trailing ASCII spaces, tabs or CR.
+    static func isFrontmatterFence(_ line: Substring) -> Bool {
+        line.hasPrefix("---") && line.dropFirst(3).allSatisfy { $0 == " " || $0 == "\t" || $0 == "\r" }
     }
 
     static func containsAnchorOrAlias(in source: String) -> Bool {
@@ -93,16 +96,20 @@ extension SkillParser {
     }
 
     /// Matches libyaml's line counting, with CRLF treated as a single break, without changing bytes.
-    static func sourceLines(in source: String) -> [SourceLine] {
+    static func sourceLines(in source: String, yamlBreaks: Bool = true) -> [SourceLine] {
         let scalars = source.unicodeScalars
         var lines: [SourceLine] = []
         var start = scalars.startIndex
-        while let newline = scalars[start...].firstIndex(where: isYAMLLineBreak) {
+        while let newline = scalars[start...].firstIndex(where: { yamlBreaks ? isYAMLLineBreak($0) : $0 == "\n" }) {
+            var contentEnd = newline
+            if !yamlBreaks, newline > start, scalars[scalars.index(before: newline)] == "\r" {
+                contentEnd = scalars.index(before: newline)
+            }
             var next = scalars.index(after: newline)
             if scalars[newline] == "\r", next < scalars.endIndex, scalars[next] == "\n" {
                 next = scalars.index(after: next)
             }
-            lines.append(SourceLine(contentRange: start..<newline, sourceRange: start..<next))
+            lines.append(SourceLine(contentRange: start..<contentEnd, sourceRange: start..<next))
             start = next
         }
         lines.append(SourceLine(contentRange: start..<scalars.endIndex, sourceRange: start..<scalars.endIndex))

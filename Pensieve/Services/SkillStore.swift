@@ -179,13 +179,18 @@ final class SkillStore: SkillStoreProtocol {
 
     // MARK: - Private
 
+    /// Pure path construction for render-time context. Filesystem admission still uses C7.
+    static func skillDirectoryPath(slug: String, base: String) -> String? {
+        guard !slug.isEmpty, !slug.contains("/"), slug != ".", slug != ".." else { return nil }
+        return base + "/" + slug
+    }
+
     /// The single C7 guard. Returns `<base>/<slug>` iff `slug` is a safe single directory
     /// component (non-empty; no `/`; not `.`/`..`) AND `<base>/<slug>` is neither a symlink nor
     /// realpaths outside `<base>`. Returns nil otherwise. PURE check — the caller decides what to
     /// do with nil (throw / skip / return 0), so a fail-safe skip site never has to catch a throw.
     static func safeSkillDirectory(slug: String, base: String, fileService: FileServiceProtocol) -> String? {
-        guard !slug.isEmpty, !slug.contains("/"), slug != ".", slug != ".." else { return nil }
-        let dirPath = base + "/" + slug
+        guard let dirPath = skillDirectoryPath(slug: slug, base: base) else { return nil }
         if fileService.isSymlink(at: dirPath) { return nil }
         let realBase = URL(fileURLWithPath: base).resolvingSymlinksInPath().path
         let realDir = URL(fileURLWithPath: dirPath).resolvingSymlinksInPath().path

@@ -3,6 +3,17 @@ import Foundation
 struct ImportScanReport: Equatable {
     var skills: [DiscoveredSkill] = []
     var skipped: [ImportScanSkip] = []
+
+    var summary: String? {
+        guard !skipped.isEmpty else { return nil }
+        let reasons = ImportScanSkip.Reason.allCases.compactMap { reason -> String? in
+            let count = skipped.filter { $0.reason == reason }.count
+            guard count > 0 else { return nil }
+            return "\(count) \(reason.label(count: count))"
+        }
+        let entries = skipped.count == 1 ? "entry" : "entries"
+        return "Skipped \(skipped.count) \(entries): " + reasons.joined(separator: "; ") + "."
+    }
 }
 
 struct ImportScanSkip: Equatable {
