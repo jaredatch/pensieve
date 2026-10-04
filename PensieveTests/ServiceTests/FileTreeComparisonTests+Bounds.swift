@@ -3,6 +3,21 @@ import XCTest
 @testable import Pensieve
 
 extension FileTreeComparisonTests {
+    func testSmallChangesAreReadBeforeLargeUnchangedPairsAndReturnedByPath() throws {
+        for index in 0..<2 {
+            for side in [old, new] {
+                try files.writeData(at: side + "/a-large\(index)", data: Data(repeating: 65, count: 20 * 1_024 * 1_024))
+            }
+        }
+        try files.writeFile(at: old + "/z-change", content: "old\n")
+        try files.writeFile(at: new + "/z-change", content: "new\n")
+        try files.writeFile(at: new + "/zz-add", content: "a")
+        let result = try compare()
+        XCTAssertEqual(result.changes.map(\.path), ["z-change", "zz-add"])
+        XCTAssertEqual(result.unreadFileCount, 2)
+        XCTAssertEqual(result.bytesRead, 32 * 1_024 * 1_024 - 1, "an odd remaining byte cannot compare both sides")
+        XCTAssertTrue(result.isIncomplete)
+    }
     func testFileCountStopsAtThousandWithExactUnreadCount() throws {
         for index in 0..<1_003 {
             try files.writeFile(at: new + String(format: "/file%04d", index), content: "line\n")

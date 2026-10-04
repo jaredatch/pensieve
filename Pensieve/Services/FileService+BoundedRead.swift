@@ -60,6 +60,28 @@ extension FileService {
         }
     }
 
+    /// Prefix admission uses the same regular-leaf helper and one bounded retained buffer.
+    /// It does not infer equality or completeness for bytes beyond the requested prefix.
+    func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data {
+        guard maximumBytes >= 0 else { throw CocoaError(.fileReadTooLarge) }
+        let (descriptor, status) = try Self.openRegularFile(at: path)
+        defer { close(descriptor) }
+        guard status.st_size >= 0 else { throw CocoaError(.fileReadUnknown) }
+        var result = Data(count: min(maximumBytes, Int(status.st_size)))
+        var offset = 0
+        while offset < result.count {
+            try Task.checkCancellation()
+            let requested = min(64 * 1_024, result.count - offset)
+            let count = result.withUnsafeMutableBytes { Darwin.read(descriptor, $0.baseAddress?.advanced(by: offset), requested) }
+            if count < 0 && errno == EINTR { continue }
+            guard count >= 0 else { throw DescriptorFileCopy.error("read", path: path, code: errno) }
+            if count == 0 { break }
+            offset += count
+        }
+        result.count = offset
+        return result
+    }
+
     /// Admit one regular leaf for reading, copying or timestamp updates, optionally relative to a
     /// held directory. Creation is exclusive for atomic copy siblings. Failed admission removes any
     /// created leaf and closes the descriptor; success transfers temporary-file cleanup to the caller.

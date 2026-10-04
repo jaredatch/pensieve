@@ -118,7 +118,7 @@ protocol SkillInstallServiceProtocol {
 struct SkillInstallService: SkillInstallServiceProtocol {
     static let defaultScratchRoot = PathConstants.pensieveAppSupportDir + "/skill-install-scratch"
 
-    private static let invalidFrontmatterReason =
+    static let invalidFrontmatterReason =
         "SKILL.md needs parseable frontmatter with non-empty name and description"
     private static let symlinkReason = "skill contains a symbolic link"
 

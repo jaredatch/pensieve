@@ -70,6 +70,53 @@ extension UpdatesViewModelTests {
         XCTAssertEqual(spy.comparisonThreads, [false])
     }
 
+    func testPreviewRefusesBrokenUpstreamFrontmatterBeforeApply() throws {
+        let fixture = try prepareRealPinnedUpdate()
+        let local = fixture.storeRoot + "/skills/vendor/SKILL.md"
+        let before = try fileService.readData(at: local)
+        for body in ["---\nname: Vendor\ndescription: ''\n---\nbody\n",
+                     "---\nname: [broken\n---\nbody\n",
+                     "---\nname: Vendor\ndescription: ''\n---\n" + String(repeating: "a", count: 2 * 1_024 * 1_024)] {
+            try fileService.writeFile(at: fixture.repository + "/skills/vendor/SKILL.md", content: body)
+            fixture.skill.upstreamCommit = try commit(fixture.repository, message: "invalid frontmatter")
+            fixture.skill.upstreamTree = try GitService().treeHash(at: fixture.repository, path: "skills/vendor")
+            XCTAssertThrowsError(try fixture.service.previewUpdate(PinnedSkillUpdate(skill: fixture.skill))) { error in
+                guard case SkillInstallError.unavailableCandidate = error else {
+                    return XCTFail("Expected the same admission refusal as apply: \(error)")
+                }
+            }
+            XCTAssertEqual(try fileService.readData(at: local), before)
+        }
+    }
+
+    func testPreviewErrorsNameRelativePathsAndRemapUpstreamRoot() throws {
+        let fixture = try prepareRealPinnedUpdate()
+        for upstreamSide in [false, true] {
+            for relative in ["", "nested/file"] {
+                let spy = ImportBoundedReadSpy()
+                spy.comparisonFailure = { local, upstream in
+                    let directory = upstreamSide ? upstream : local
+                    let path = relative.isEmpty ? directory : directory + "/" + relative
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(ENOENT), userInfo: [
+                        NSFilePathErrorKey: path, NSLocalizedDescriptionKey: "open(\(path)): No such file or directory"
+                    ])
+                }
+                let service = makePreviewService(fixture: fixture, spy: spy)
+                XCTAssertThrowsError(try service.previewUpdate(PinnedSkillUpdate(skill: fixture.skill))) { error in
+                    XCTAssertFalse(error.localizedDescription.contains(fixture.storeRoot))
+                    XCTAssertFalse(error.localizedDescription.contains("preview-scratch"))
+                    XCTAssertFalse(error.localizedDescription.contains("open("))
+                    XCTAssertTrue(error.localizedDescription.contains(relative.isEmpty ? "." : relative))
+                    if upstreamSide {
+                        guard case SkillInstallError.unavailableCandidate = error else {
+                            return XCTFail("The upstream root must be remapped too: \(error)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func makePreviewService(fixture: RealFixture, spy: ImportBoundedReadSpy) -> SkillInstallService {
         SkillInstallService(gitService: GitService(fileService: fileService), credentialStore: InMemoryCredentialStore(),
                             fileService: spy, scratchRoot: tempDir + "/preview-scratch", storeRoot: fixture.storeRoot,

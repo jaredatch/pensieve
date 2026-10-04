@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import SwiftData
 
@@ -58,6 +59,7 @@ enum SkillUpdateFlowError: LocalizedError, Equatable {
     case skillNotFound
     case unsafeSkillDirectory(String)
     case unsafeSkillFile(String)
+    case previewReadFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -71,6 +73,8 @@ enum SkillUpdateFlowError: LocalizedError, Equatable {
             "The skill is no longer available"
         case let .unsafeSkillDirectory(slug):
             "The local skill directory is unsafe: \(slug)"
+        case let .previewReadFailed(message):
+            message
         case let .unsafeSkillFile(slug):
             "The skill file is unsafe: \(slug)/SKILL.md"
         }
@@ -101,25 +105,41 @@ extension SkillInstallService {
                     throw SkillUpdateFlowError.unsafeSkillFile(update.existingSlug)
                 }
                 guard fileService.isRegularFile(at: upstreamDirectory + "/SKILL.md") else {
-                    throw SkillInstallError.unavailableCandidate("Unsafe upstream file: \(upstreamDirectory)/SKILL.md")
+                    throw SkillInstallError.unavailableCandidate("Unsafe upstream file: SKILL.md")
                 }
                 do {
                     let comparison = try fileService.compareFileTrees(
                         local: localDirectory, upstream: upstreamDirectory,
                         excludingUpstreamGit: update.candidate.path.isEmpty, limits: .updatePreview
                     )
-                    return PinnedSkillDiff(comparison: comparison)
+                    try requirePreviewInstallable(update.candidate, at: upstreamDirectory + "/SKILL.md")
+                    return try PinnedSkillDiff.build(comparison: comparison)
                 } catch {
-                    let path = (error as NSError).userInfo[NSFilePathErrorKey] as? String ?? ""
-                    if path.hasPrefix(upstreamDirectory + "/") {
-                        throw SkillInstallError.unavailableCandidate(error.localizedDescription)
-                    }
-                    throw error
+                    throw previewReadError(error, local: localDirectory, upstream: upstreamDirectory)
                 }
             }
         } catch SkillInstallError.repositoryChanged {
             throw SkillUpdateFlowError.repositoryChanged
         }
+    }
+
+    private func previewReadError(_ error: Error, local: String, upstream: String) -> Error {
+        let failure = error as NSError
+        guard let path = failure.userInfo[NSFilePathErrorKey] as? String else { return error }
+        let isUpstream = path == upstream || path.hasPrefix(upstream + "/")
+        let root = isUpstream ? upstream : local
+        guard path == root || path.hasPrefix(root + "/") else { return error }
+        let relative = path == root ? "." : String(path.dropFirst(root.count + 1))
+        let reason: String
+        switch Int32(failure.code) {
+        case ELOOP, EFTYPE: reason = "symbolic links and special files cannot be previewed"
+        case EACCES, EPERM: reason = "permission denied"
+        case ENOENT, ENOTDIR: reason = "the file or folder is no longer available"
+        case ESTALE: reason = "the folder changed while being read"
+        default: reason = "the file or folder could not be read"
+        }
+        let message = "Cannot preview \(isUpstream ? "upstream" : "local") path \(relative): \(reason)."
+        return isUpstream ? SkillInstallError.unavailableCandidate(message) : SkillUpdateFlowError.previewReadFailed(message)
     }
 
     func applyUpdate(_ update: PinnedSkillUpdate, allowLocalOverwrite: Bool,

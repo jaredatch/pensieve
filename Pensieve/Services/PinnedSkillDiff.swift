@@ -5,19 +5,24 @@ struct PinnedSkillFileDiff: Equatable {
     let kind: FileTreeChange.Kind
     let content: FileTreeChange.Content
     let diff: UnifiedDiff?
-    var linesAdded: Int? { diff?.linesAdded }
-    var linesRemoved: Int? { diff?.linesRemoved }
+    var linesAdded: Int? { if case .modeOnly = content { return 0 }; return diff?.linesAdded }
+    var linesRemoved: Int? { if case .modeOnly = content { return 0 }; return diff?.linesRemoved }
 
     init(change: FileTreeChange) {
+        let result: UnifiedDiff?
+        if case let .text(old, new) = change.content {
+            result = UnifiedDiff(old: old, new: new)
+        } else { result = nil }
+        self.init(change: change, result: result)
+    }
+
+    init(change: FileTreeChange, result: UnifiedDiff?) {
         path = change.path
         kind = change.kind
-        content = change.content
-        if case let .text(old, new) = change.content {
-            diff = UnifiedDiff(old: old, new: new)
-        } else {
-            diff = nil
-        }
+        content = result?.isTooLarge == true ? .tooLarge : change.content
+        diff = result?.isTooLarge == true ? nil : result
     }
+
 }
 
 struct PinnedSkillDiff: Equatable {
@@ -30,6 +35,32 @@ struct PinnedSkillDiff: Equatable {
         files = comparison.changes.map(PinnedSkillFileDiff.init)
         unreadFileCount = comparison.unreadFileCount
         bytesRead = comparison.bytesRead
+    }
+
+    /// Throwing preview builder exposes diff progress so cancellation can stop inside the work.
+    static func build(comparison: FileTreeComparison, checkpoint: (Int) throws -> Void = { _ in }) throws -> PinnedSkillDiff {
+        try Task.checkCancellation()
+        var files: [PinnedSkillFileDiff] = []
+        for change in comparison.changes {
+            try Task.checkCancellation()
+            let result: UnifiedDiff?
+            if case let .text(old, new) = change.content {
+                result = try UnifiedDiff(old: old, new: new) { work in
+                    try Task.checkCancellation()
+                    try checkpoint(work)
+                    try Task.checkCancellation()
+                }
+            } else { result = nil }
+            try Task.checkCancellation()
+            files.append(PinnedSkillFileDiff(change: change, result: result))
+        }
+        return PinnedSkillDiff(files: files, unreadFileCount: comparison.unreadFileCount, bytesRead: comparison.bytesRead)
+    }
+
+    private init(files: [PinnedSkillFileDiff], unreadFileCount: Int, bytesRead: Int) {
+        self.files = files
+        self.unreadFileCount = unreadFileCount
+        self.bytesRead = bytesRead
     }
 
     /// Compatibility for the sheet's current one-file presentation until it consumes the file list.

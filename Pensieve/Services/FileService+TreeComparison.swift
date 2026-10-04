@@ -19,12 +19,20 @@ extension FileService {
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
                           limits: FileTreeComparisonLimits,
                           checkpoint: @escaping (ComparisonCheckpoint) throws -> Void) throws -> FileTreeComparison {
-        guard limits.maximumFileBytes >= 0, limits.maximumFiles >= 0, limits.maximumTotalBytes >= 0 else {
+        guard limits.maximumFileBytes >= 0, limits.maximumFiles >= 0, limits.maximumTotalBytes >= 0,
+              limits.maximumEntries >= 0, limits.maximumDepth >= 0 else {
             throw CocoaError(.fileReadTooLarge)
         }
-        let before = try comparisonInventory(at: local, excludingGit: false) { try checkpoint(.directory($0)) }
-        let after = try comparisonInventory(at: upstream, excludingGit: excludingUpstreamGit) { try checkpoint(.directory($0)) }
-        let paths = Set(before.keys).union(after.keys).sorted { $0.utf8.lexicographicallyPrecedes($1.utf8) }
+        let budget = ComparisonInventoryBudget(limits: limits)
+        let before = try comparisonInventory(at: local, excludingGit: false, budget: budget) { try checkpoint(.directory($0)) }
+        let after = try comparisonInventory(at: upstream, excludingGit: excludingUpstreamGit, budget: budget) {
+            try checkpoint(.directory($0))
+        }
+        let paths = Set(before.keys).union(after.keys).sorted {
+            let left = max(before[$0]?.status.st_size ?? 0, after[$0]?.status.st_size ?? 0)
+            let right = max(before[$1]?.status.st_size ?? 0, after[$1]?.status.st_size ?? 0)
+            return left == right ? $0.utf8.lexicographicallyPrecedes($1.utf8) : left < right
+        }
         var changes: [FileTreeChange] = []
         var processed = 0
         let reader = ComparisonReader(limits: limits, checkpoint: checkpoint)
@@ -40,7 +48,8 @@ extension FileService {
                 break
             }
         }
-        return FileTreeComparison(changes: changes, unreadFileCount: paths.count - processed, bytesRead: reader.bytesRead)
+        return FileTreeComparison(changes: changes.sorted { $0.path.utf8.lexicographicallyPrecedes($1.path.utf8) },
+                                  unreadFileCount: paths.count - processed, bytesRead: reader.bytesRead)
     }
 }
 
@@ -66,16 +75,23 @@ private final class ComparisonReader {
         if oversized {
             let equal = try oversizedEqual(before, after)
             let unstable = try changed(before, after)
-            return equal && !unstable ? nil : .tooLarge
+            if unstable || !equal { return .tooLarge }
+            return modeChange(before, after)
         }
         let oldData = try data(before)
         let newData = try data(after)
         if try changed(before, after) { return .tooLarge }
-        let sameMode = (before?.initial.st_mode ?? 0) & 0o777 == (after?.initial.st_mode ?? 0) & 0o777
-        if before != nil && after != nil && oldData == newData && sameMode { return nil }
+        if before != nil && after != nil && oldData == newData { return modeChange(before, after) }
         guard let oldText = String(data: oldData, encoding: .utf8), let newText = String(data: newData, encoding: .utf8),
               !oldData.contains(0), !newData.contains(0) else { return .binary }
         return .text(old: oldText, new: newText)
+    }
+
+    private func modeChange(_ old: ComparisonOpenedFile?, _ new: ComparisonOpenedFile?) -> FileTreeChange.Content? {
+        guard let old, let new else { return nil }
+        let before = UInt32(old.initial.st_mode & 0o7777)
+        let after = UInt32(new.initial.st_mode & 0o7777)
+        return before == after ? nil : .modeOnly(old: before, new: after)
     }
 
     private func changed(_ old: ComparisonOpenedFile?, _ new: ComparisonOpenedFile?) throws -> Bool {
@@ -102,7 +118,7 @@ private final class ComparisonReader {
 
     private func oversizedEqual(_ old: ComparisonOpenedFile?, _ new: ComparisonOpenedFile?) throws -> Bool {
         guard let old, let new, old.initial.st_size == new.initial.st_size,
-              old.initial.st_mode & 0o777 == new.initial.st_mode & 0o777 else { return false }
+              old.initial.st_size >= 0 else { return false }
         var offset: off_t = 0
         while offset < old.initial.st_size {
             guard remaining >= 2 else { throw Failure.budgetExceeded }
@@ -133,6 +149,7 @@ private final class ComparisonReader {
                       maximum: Int, retained: Int = 0) throws -> Int {
         guard remaining > 0 else { throw Failure.budgetExceeded }
         while true {
+            try Task.checkCancellation()
             let request = min(maximum, remaining)
             let count = buffer.withUnsafeMutableBytes {
                 Darwin.read(file.descriptor, $0.baseAddress?.advanced(by: offset), request)

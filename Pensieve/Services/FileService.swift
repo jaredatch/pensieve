@@ -12,6 +12,8 @@ protocol FileServiceProtocol {
     /// Inventories both no-follow trees before reading, then compares their regular files under shared limits.
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
                           limits: FileTreeComparisonLimits) throws -> FileTreeComparison
+    /// Reads only a bounded prefix even when the regular file is larger, for frontmatter admission.
+    func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data
     func writeFile(at path: String, content: String) throws
     func writeData(at path: String, data: Data) throws
     func writeExecutableFile(at path: String, content: String) throws
@@ -67,6 +69,10 @@ struct RegularFileMetadata: Equatable {
 // MARK: - Default implementations
 
 extension FileServiceProtocol {
+    /// Inert default: unmodeled prefix reads never fall back to whole-file reads.
+    func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data {
+        throw CocoaError(.featureUnsupported)
+    }
     /// Inert default: tree comparisons must be modeled explicitly by filesystem doubles.
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
                           limits: FileTreeComparisonLimits) throws -> FileTreeComparison {

@@ -1,19 +1,37 @@
 import Darwin
 import Foundation
 
-/// Metadata and live parent descriptors bind the walk and the subsequent leaf admission to one tree.
-/// Directory identities are rechecked so a disappeared or replaced directory never becomes an absent file.
-final class ComparisonDirectory {
+/// Inventory identities retain no descriptors. Reopening holds and validates only this parent chain.
+final class ComparisonDirectoryReference {
     let path: String
-    let stream: UnsafeMutablePointer<DIR>
-    let parent: ComparisonDirectory?
     let name: String
+    let parent: ComparisonDirectoryReference?
     let identity: FileIdentity
-    var descriptor: Int32 { dirfd(stream) }
+    let depth: Int
 
-    init(path: String, name: String, parent: ComparisonDirectory?) throws {
+    init(path: String, name: String, parent: ComparisonDirectoryReference?, identity: FileIdentity) {
         self.path = path
         self.name = name
+        self.parent = parent
+        self.identity = identity
+        depth = parent.map { $0.depth + 1 } ?? 0
+    }
+
+    func open() throws -> ComparisonDirectory {
+        let parent = try parent?.open()
+        return try ComparisonDirectory(path: path, name: name, parent: parent, expectedIdentity: identity)
+    }
+}
+
+/// Owns one live directory during traversal or leaf reading, and closes it when that scope ends.
+final class ComparisonDirectory {
+    let stream: UnsafeMutablePointer<DIR>
+    let parent: ComparisonDirectory?
+    let reference: ComparisonDirectoryReference
+    var path: String { reference.path }
+    var descriptor: Int32 { dirfd(stream) }
+
+    init(path: String, name: String, parent: ComparisonDirectory?, expectedIdentity: FileIdentity? = nil) throws {
         self.parent = parent
         let descriptor = try FileService.openDirectory(at: parent == nil ? path : name,
                                                        relativeTo: parent?.descriptor ?? AT_FDCWD,
@@ -30,13 +48,17 @@ final class ComparisonDirectory {
             closedir(stream)
             throw DescriptorFileCopy.error("fstat", path: path, code: code)
         }
-        identity = FileIdentity(device: status.st_dev, inode: status.st_ino)
-        // fstat follows no name; admission already required a directory. Check access on that inode.
+        let identity = FileIdentity(device: status.st_dev, inode: status.st_ino)
+        guard expectedIdentity == nil || expectedIdentity == identity else {
+            closedir(stream)
+            throw DescriptorFileCopy.error("directory changed", path: path, code: ESTALE)
+        }
         guard faccessat(descriptor, ".", R_OK | X_OK, 0) == 0 else {
             let code = errno
             closedir(stream)
             throw DescriptorFileCopy.error("directory access", path: path, code: code)
         }
+        reference = ComparisonDirectoryReference(path: path, name: name, parent: parent?.reference, identity: identity)
     }
 
     deinit { closedir(stream) }
@@ -44,73 +66,91 @@ final class ComparisonDirectory {
     func validate() throws {
         try parent?.validate()
         var current = stat()
-        guard fstatat(parent?.descriptor ?? AT_FDCWD, parent == nil ? path : name,
+        guard fstatat(parent?.descriptor ?? AT_FDCWD, parent == nil ? path : reference.name,
                       &current, AT_SYMLINK_NOFOLLOW) == 0 else {
             throw DescriptorFileCopy.error("directory lookup", path: path, code: errno)
         }
         guard current.st_mode & S_IFMT == S_IFDIR,
-              FileIdentity(device: current.st_dev, inode: current.st_ino) == identity else {
+              FileIdentity(device: current.st_dev, inode: current.st_ino) == reference.identity else {
             throw DescriptorFileCopy.error("directory changed", path: path, code: ESTALE)
         }
     }
 
-    func entries() throws -> [(String, stat)] {
+    /// Stream entries into the shared budget before retaining metadata or opening a child.
+    func forEachEntry(excludingGit: Bool, budget: ComparisonInventoryBudget,
+                      body: (String, stat) throws -> Void) throws {
         try validate()
-        var result: [(String, stat)] = []
         while true {
+            try Task.checkCancellation()
             errno = 0
             guard let entry = readdir(stream) else {
                 guard errno == 0 else { throw DescriptorFileCopy.error("readdir", path: path, code: errno) }
                 try validate()
-                return result.sorted { $0.0.utf8.lexicographicallyPrecedes($1.0.utf8) }
+                return
             }
             let capacity = Int(entry.pointee.d_namlen) + 1
             let name = withUnsafePointer(to: &entry.pointee.d_name) {
                 $0.withMemoryRebound(to: CChar.self, capacity: capacity) { String(cString: $0) }
             }
-            if name == "." || name == ".." { continue }
+            if name == "." || name == ".." || (excludingGit && name == ".git") { continue }
+            try budget.consumeEntry()
             var status = stat()
             guard fstatat(descriptor, name, &status, AT_SYMLINK_NOFOLLOW) == 0 else {
                 throw DescriptorFileCopy.error("entry lookup", path: path + "/" + name, code: errno)
             }
-            result.append((name, status))
+            try body(name, status)
         }
     }
 }
 
+final class ComparisonInventoryBudget {
+    let limits: FileTreeComparisonLimits
+    var entries = 0
+    init(limits: FileTreeComparisonLimits) { self.limits = limits }
+    func consumeEntry() throws {
+        guard entries < limits.maximumEntries else { throw FileTreeComparisonError.treeTooLarge }
+        entries += 1
+    }
+    func checkDepth(_ depth: Int) throws {
+        guard depth <= limits.maximumDepth else { throw FileTreeComparisonError.treeTooLarge }
+    }
+}
+
 struct ComparisonFile {
-    let directory: ComparisonDirectory
+    let directory: ComparisonDirectoryReference
     let name: String
     let status: stat
     var path: String { directory.path + "/" + name }
 
     func open() throws -> ComparisonOpenedFile {
-        try directory.validate()
-        let (descriptor, status) = try FileService.openRegularFile(at: name, relativeTo: directory.descriptor,
-                                                                  reportingPath: path)
-        return ComparisonOpenedFile(descriptor: descriptor, entry: self, initial: status)
+        let parent = try directory.open()
+        try parent.validate()
+        let (descriptor, status) = try FileService.openRegularFile(at: name, relativeTo: parent.descriptor, reportingPath: path)
+        return ComparisonOpenedFile(descriptor: descriptor, directory: parent, entry: self, initial: status)
     }
 }
 
 final class ComparisonOpenedFile {
     let descriptor: Int32
+    let directory: ComparisonDirectory
     let entry: ComparisonFile
     let initial: stat
-    init(descriptor: Int32, entry: ComparisonFile, initial: stat) {
+    init(descriptor: Int32, directory: ComparisonDirectory, entry: ComparisonFile, initial: stat) {
         self.descriptor = descriptor
+        self.directory = directory
         self.entry = entry
         self.initial = initial
     }
     deinit { close(descriptor) }
 
     func changed() throws -> Bool {
-        try entry.directory.validate()
+        try directory.validate()
         var current = stat()
         guard fstat(descriptor, &current) == 0 else {
             throw DescriptorFileCopy.error("fstat", path: entry.path, code: errno)
         }
         var named = stat()
-        guard fstatat(entry.directory.descriptor, entry.name, &named, AT_SYMLINK_NOFOLLOW) == 0 else {
+        guard fstatat(directory.descriptor, entry.name, &named, AT_SYMLINK_NOFOLLOW) == 0 else {
             throw DescriptorFileCopy.error("file lookup", path: entry.path, code: errno)
         }
         guard named.st_mode & S_IFMT == S_IFREG else {
@@ -120,36 +160,34 @@ final class ComparisonOpenedFile {
     }
 
     private static func same(_ left: stat, _ right: stat) -> Bool {
-        left.st_dev == right.st_dev && left.st_ino == right.st_ino && left.st_size == right.st_size
-            && left.st_mode == right.st_mode
-            && left.st_mtimespec.tv_sec == right.st_mtimespec.tv_sec
-            && left.st_mtimespec.tv_nsec == right.st_mtimespec.tv_nsec
-            && left.st_ctimespec.tv_sec == right.st_ctimespec.tv_sec
-            && left.st_ctimespec.tv_nsec == right.st_ctimespec.tv_nsec
+        FileEntryStamp(left) == FileEntryStamp(right) && left.st_mode == right.st_mode
     }
 }
 
 extension FileService {
-    func comparisonInventory(at path: String, excludingGit: Bool,
+    func comparisonInventory(at path: String, excludingGit: Bool, budget: ComparisonInventoryBudget,
                              checkpoint: (String) throws -> Void) throws -> [String: ComparisonFile] {
         let root = try ComparisonDirectory(path: path, name: "", parent: nil)
         var files: [String: ComparisonFile] = [:]
-        try collectComparisonFiles(root, relative: "", excludingGit: excludingGit, files: &files, checkpoint: checkpoint)
+        try collectComparisonFiles(root, relative: "", excludingGit: excludingGit,
+                                   files: &files, budget: budget, checkpoint: checkpoint)
         return files
     }
 
     private func collectComparisonFiles(_ directory: ComparisonDirectory, relative: String, excludingGit: Bool,
-                                        files: inout [String: ComparisonFile], checkpoint: (String) throws -> Void) throws {
+                                        files: inout [String: ComparisonFile], budget: ComparisonInventoryBudget,
+                                        checkpoint: (String) throws -> Void) throws {
         try checkpoint(directory.path)
-        for (name, status) in try directory.entries() {
-            if relative.isEmpty && excludingGit && name == ".git" { continue }
+        try directory.forEachEntry(excludingGit: excludingGit, budget: budget) { name, status in
             let path = relative.isEmpty ? name : relative + "/" + name
             switch status.st_mode & S_IFMT {
             case S_IFDIR:
+                try budget.checkDepth(directory.reference.depth + 1)
                 let child = try ComparisonDirectory(path: directory.path + "/" + name, name: name, parent: directory)
-                try collectComparisonFiles(child, relative: path, excludingGit: false, files: &files, checkpoint: checkpoint)
+                try collectComparisonFiles(child, relative: path, excludingGit: false,
+                                           files: &files, budget: budget, checkpoint: checkpoint)
             case S_IFREG:
-                files[path] = ComparisonFile(directory: directory, name: name, status: status)
+                files[path] = ComparisonFile(directory: directory.reference, name: name, status: status)
             default:
                 throw DescriptorFileCopy.error("symlink or special file", path: directory.path + "/" + name, code: EFTYPE)
             }

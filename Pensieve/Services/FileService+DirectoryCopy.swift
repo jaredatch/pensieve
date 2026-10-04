@@ -68,7 +68,7 @@ extension FileService {
             try checkpoint(.copying(name))
             let (child, status) = try Self.openRegularFile(at: name, relativeTo: descriptor, reportingPath: path)
             defer { close(child) }
-            guard CopyEntryStamp(status) == opened.entries[name] else {
+            guard FileEntryStamp(status) == opened.entries[name] else {
                 throw DescriptorFileCopy.error("source changed", path: path, code: ESTALE)
             }
             try DescriptorFileCopy.copy(from: child, status: status, sourcePath: path, to: destination + "/" + name) { count in
@@ -83,7 +83,7 @@ extension FileService {
     }
 }
 
-private struct CopyEntryStamp: Equatable {
+struct FileEntryStamp: Equatable {
     let device: dev_t
     let inode: ino_t
     let size: off_t
@@ -111,8 +111,8 @@ private struct CopyEntryStamp: Equatable {
 private final class DirectoryCopySource {
     let path: String
     let directory: UnsafeMutablePointer<DIR>
-    let initial: CopyEntryStamp
-    var entries: [String: CopyEntryStamp] = [:]
+    let initial: FileEntryStamp
+    var entries: [String: FileEntryStamp] = [:]
     var descriptor: Int32 { dirfd(directory) }
 
     init(path: String, directory: UnsafeMutablePointer<DIR>) throws {
@@ -125,22 +125,22 @@ private final class DirectoryCopySource {
     }
     deinit { closedir(directory) }
 
-    static func descriptorStamp(_ descriptor: Int32, path: String) throws -> CopyEntryStamp {
+    static func descriptorStamp(_ descriptor: Int32, path: String) throws -> FileEntryStamp {
         var status = stat()
         guard fstat(descriptor, &status) == 0 else {
             throw DescriptorFileCopy.error("fstat", path: path, code: errno)
         }
-        return CopyEntryStamp(status)
+        return FileEntryStamp(status)
     }
 
-    static func pathStamp(_ path: String) throws -> CopyEntryStamp? {
+    static func pathStamp(_ path: String) throws -> FileEntryStamp? {
         var status = stat()
         guard lstat(path, &status) == 0 else {
             let code = errno
             if code == ENOENT || code == ENOTDIR { return nil }
             throw DescriptorFileCopy.error("lstat", path: path, code: code)
         }
-        return CopyEntryStamp(status)
+        return FileEntryStamp(status)
     }
 
     func captureEntries() throws {
@@ -164,9 +164,9 @@ private final class DirectoryCopySource {
         }
     }
 
-    private func entryStamps() throws -> [String: CopyEntryStamp] {
+    private func entryStamps() throws -> [String: FileEntryStamp] {
         rewinddir(directory)
-        var result: [String: CopyEntryStamp] = [:]
+        var result: [String: FileEntryStamp] = [:]
         while true {
             errno = 0
             guard let entry = readdir(directory) else {
@@ -182,7 +182,7 @@ private final class DirectoryCopySource {
             guard fstatat(descriptor, name, &status, AT_SYMLINK_NOFOLLOW) == 0 else {
                 throw DescriptorFileCopy.error("fstatat", path: path + "/" + name, code: errno)
             }
-            result[name] = CopyEntryStamp(status)
+            result[name] = FileEntryStamp(status)
         }
     }
 }

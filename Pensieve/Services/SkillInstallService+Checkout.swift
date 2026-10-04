@@ -29,7 +29,7 @@ extension SkillInstallService {
             for component in candidate.path.split(separator: "/") {
                 directory += "/" + component
                 guard try fileService.entryTypeWithoutFollowingLinks(at: directory) == .directory else {
-                    throw SkillInstallError.unavailableCandidate("Unsafe upstream directory: \(directory)")
+                    throw SkillInstallError.unavailableCandidate("Unsafe upstream directory: .")
                 }
             }
             guard try gitService.treeHash(at: checkoutPath, path: candidate.path) == candidate.treeHash else {
@@ -37,6 +37,38 @@ extension SkillInstallService {
             }
             return try body(checkoutPath)
         }
+    }
+
+    /// Normal-size files validate in full. Oversized bodies validate a bounded UTF-8 prefix,
+    /// retaining apply's strict frontmatter gate without discovery's whole-file allocation.
+    func requirePreviewInstallable(_ candidate: SkillCandidate, at path: String) throws {
+        let maximum = FileTreeComparisonLimits.updatePreview.maximumFileBytes
+        let data: Data
+        var prefix = false
+        do {
+            data = try fileService.readRegularFileData(at: path, maximumBytes: maximum)
+        } catch {
+            let failure = error as NSError
+            guard failure.domain == NSCocoaErrorDomain, failure.code == CocoaError.Code.fileReadTooLarge.rawValue else {
+                throw error
+            }
+            prefix = true
+            data = try fileService.readRegularFilePrefix(at: path, maximumBytes: maximum)
+        }
+        var text = String(data: data, encoding: .utf8)
+        // A prefix may end in the middle of a UTF-8 scalar; a complete file must never be repaired.
+        if prefix && text == nil {
+            for omitted in 1...min(3, data.count) where text == nil {
+                text = String(data: data.dropLast(omitted), encoding: .utf8)
+            }
+        }
+        guard let text else { throw SkillInstallError.unavailableCandidate(Self.invalidFrontmatterReason) }
+        let parsed = SkillParser.parse(text)
+        try requireInstallable(SkillCandidate(
+            path: candidate.path, slug: candidate.slug, name: parsed.name, skillDescription: parsed.description,
+            treeHash: candidate.treeHash, containsSymlink: false,
+            unavailableReason: parsed.hasRequiredFrontmatter ? nil : Self.invalidFrontmatterReason
+        ))
     }
 
     private func withCheckout<Result>(source: SkillFetchResult, credential: GitCredential?,

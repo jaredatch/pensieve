@@ -8,6 +8,7 @@ import XCTest
 /// create device nodes. Its text-read sentinel exposes an unsafe scanner. Other fixtures are real
 /// files, links, directories and FIFOs.
 /// Tree comparisons forward to the same filesystem and record the caller's main-thread status.
+/// An optional comparison failure injects a path-bearing error after checkout admission.
 final class ImportBoundedReadSpy: FileServiceProtocol {
     let files = FileService()
     var devicePath: String?
@@ -24,6 +25,7 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
     var directoryProbes: [String] = []
     var readFailures: [String: Int32] = [:]
     var comparisonThreads: [Bool] = []
+    var comparisonFailure: ((String, String) throws -> Void)?
 
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
         try files.entryTypeWithoutFollowingLinks(at: path)
@@ -32,6 +34,7 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
                           limits: FileTreeComparisonLimits) throws -> FileTreeComparison {
         comparisonThreads.append(Thread.isMainThread)
+        try comparisonFailure?(local, upstream)
         return try files.compareFileTrees(local: local, upstream: upstream, excludingUpstreamGit: excludingUpstreamGit,
                                           limits: limits)
     }
@@ -40,6 +43,12 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
         textReads.append(path)
         if path == devicePath { return "device sentinel" }
         return try files.readFile(at: path)
+    }
+
+    func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data {
+        readAttempts.append(path)
+        limits[path] = maximumBytes
+        return try files.readRegularFilePrefix(at: path, maximumBytes: maximumBytes)
     }
 
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {

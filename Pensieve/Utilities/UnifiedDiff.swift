@@ -23,22 +23,39 @@ struct UnifiedDiff: Equatable {
     let linesAdded: Int
     let linesRemoved: Int
 
+    let isTooLarge: Bool
+
     init(old: String, new: String) {
+        self = (try? Self.compute(old: old, new: new, checkpoint: { _ in })) ?? Self.exceeded
+    }
+
+    init(old: String, new: String, checkpoint: (Int) throws -> Void) throws {
+        self = try Self.compute(old: old, new: new, checkpoint: checkpoint)
+    }
+
+    private init(hunks: [UnifiedDiffHunk], linesAdded: Int, linesRemoved: Int, isTooLarge: Bool) {
+        self.hunks = hunks
+        self.linesAdded = linesAdded
+        self.linesRemoved = linesRemoved
+        self.isTooLarge = isTooLarge
+    }
+
+    private static var exceeded: UnifiedDiff {
+        UnifiedDiff(hunks: [], linesAdded: 0, linesRemoved: 0, isTooLarge: true)
+    }
+
+    private static func compute(old: String, new: String, checkpoint: (Int) throws -> Void) throws -> UnifiedDiff {
+        try checkpoint(0)
         let before = Self.lines(old)
         let after = Self.lines(new)
-        let difference = after.difference(from: before) { $0.utf8.elementsEqual($1.utf8) }
-        var removed = Set<Int>()
-        var added = Set<Int>()
-        for change in difference {
-            switch change {
-            case let .remove(offset, _, _): removed.insert(offset)
-            case let .insert(offset, _, _): added.insert(offset)
-            }
+        try checkpoint(0)
+        guard let difference = try BoundedLineDifference.compute(before: before, after: after, checkpoint: checkpoint) else {
+            return exceeded
         }
-        linesAdded = added.count
-        linesRemoved = removed.count
-        let rows = Self.rows(before: before, after: after, removed: removed, added: added)
-        hunks = Self.hunks(rows)
+        let rows = Self.rows(before: before, after: after, removed: difference.removed, added: difference.added)
+        try checkpoint(0)
+        return UnifiedDiff(hunks: Self.hunks(rows), linesAdded: difference.added.count,
+                           linesRemoved: difference.removed.count, isTooLarge: false)
     }
 
     /// Git counts LF-terminated records, with one last record for an unterminated final line.
