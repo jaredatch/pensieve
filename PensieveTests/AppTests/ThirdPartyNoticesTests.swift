@@ -5,17 +5,19 @@ import XCTest
 @MainActor
 final class ThirdPartyNoticesTests: XCTestCase {
     let fileService = FileService()
-    var noticeParseCount = 0
     var sourceRoot: String {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().path
+    }
+    var resolvedPackagesPath: String {
+        sourceRoot + "/Pensieve.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
     }
     var inventory: NoticeInventory { NoticeInventory(fileService: fileService, exemptions: []) }
 
     func testBundledCreditsCoverSwiftPackagesAndVendoredLicenseFiles() throws {
         let inventory = NoticeInventory(fileService: fileService)
         try inventory.checkSwiftPackages(
-            resolved: sourceRoot + "/Pensieve.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
+            resolved: resolvedPackagesPath,
             checkouts: inventory.checkouts(for: Bundle.main.bundleURL),
             notices: readNotices(),
             credits: bundledCredits()
@@ -42,14 +44,9 @@ final class ThirdPartyNoticesTests: XCTestCase {
 
     func testLibYAMLNoticeIsComplete() throws {
         let notices = try readNotices()
-        let pins = try inventory.swiftPackagePins(resolved:
-            sourceRoot + "/Pensieve.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved")
-        if pins.contains(where: { ($0["identity"] as? String)?.lowercased() == "yams" }) {
-            let license = try XCTUnwrap(LibYAMLNoticeAudit.license(in: notices), "Missing pinned libYAML license block")
-            XCTAssertEqual(LibYAMLNoticeAudit.noticeDigest(license), LibYAMLNoticeAudit.digest)
-            XCTAssertTrue(try NoticeInventory.normalized(bundledCredits()).contains(NoticeInventory.normalized(license)))
-        } else {
-            XCTAssertNil(notices.text.range(of: "libYAML", options: .caseInsensitive), "Remove all libYAML mentions")
+        let pins = try inventory.swiftPackagePins(resolved: resolvedPackagesPath)
+        if try LibYAMLNoticeAudit.checkVendorVersion(pins: pins, notices: notices) != nil {
+            XCTAssertTrue(try bundledCredits().contains("libYAML"), "Bundled credits omitted the libYAML label")
         }
     }
 

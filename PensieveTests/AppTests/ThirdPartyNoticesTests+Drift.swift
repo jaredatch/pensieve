@@ -115,7 +115,7 @@ extension ThirdPartyNoticesTests {
     private func checkYamsFixture(root: String) throws {
         let license = try pinnedLibYAMLFixture()
         try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
-            notices: parseNotices("[Yams](https://github.com/jpsim/Yams)\n```text\n" + license + "\n```\n"),
+            notices: parseNotices("[Yams](https://github.com/jpsim/Yams)\n### libYAML\n```text\n" + license + "\n```\n"),
             credits: "Yams license.\n" + license)
     }
 

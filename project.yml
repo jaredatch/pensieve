@@ -100,6 +100,7 @@ targets:
       - path: PensieveTests/Fixtures/GitProcessProbe
       - path: Pensieve/Services/GitService.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
+      - path: Pensieve/Utilities/ProcessOutputReader.swift
       - path: Pensieve/Services/GitService+Usability.swift
       - path: Pensieve/Services/GitServiceConflict.swift
       - path: Pensieve/Services/FileService.swift
@@ -121,6 +122,7 @@ targets:
       - path: Pensieve/Services/FileService.swift
       - path: Pensieve/Services/GitService.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
+      - path: Pensieve/Utilities/ProcessOutputReader.swift
       - path: Pensieve/Services/GitService+Usability.swift
       - path: Pensieve/Services/GitService+FastForward.swift
       - path: Pensieve/Services/GitServiceConflict.swift

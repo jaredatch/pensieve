@@ -10,9 +10,11 @@ extension ThirdPartyNoticesTests {
         try loadNotices(at: sourceRoot + "/THIRD-PARTY-NOTICES.md")
     }
 
-    /// Real documents and pure fixture sources have separate content caches. Read files before reuse.
+    /// Only the canonical notices fill the real content cache. Fixtures share the pure-source cache.
+    /// Read files before reuse so changed or missing sources remain observable.
     func loadNotices(at path: String) throws -> NoticeDocument {
         let source = try fileService.readFile(at: path)
+        guard path == sourceRoot + "/THIRD-PARTY-NOTICES.md" else { return try parseNotices(source) }
         if let cached = Self.realNotices[source] { return cached }
         let document = try parseNoticeFile(source, at: path)
         Self.realNotices[source] = document
@@ -20,7 +22,6 @@ extension ThirdPartyNoticesTests {
     }
 
     private func parseNoticeFile(_ source: String, at path: String) throws -> NoticeDocument {
-        noticeParseCount += 1
         let result = try runCredits(arguments: ["--license-blocks", path])
         XCTAssertEqual(result.status, 0, result.error)
         let blocks = try JSONDecoder().decode([NoticeDocument.LicenseBlock].self, from: Data(result.output.utf8))
@@ -70,11 +71,12 @@ extension ThirdPartyNoticesTests {
     }
 
     func runCreditsProcess(_ process: Process, stdout: Pipe = Pipe(), stderr: Pipe = Pipe(),
-                           read: @escaping (FileHandle) throws -> Data? = { try $0.readToEnd() }) throws -> CreditsResult {
+                           read: @escaping (FileHandle) throws -> Data? = ProcessOutputReader.defaultRead)
+        throws -> CreditsResult {
         process.standardOutput = stdout
         process.standardError = stderr
         try process.run()
-        let (output, error) = GitService.readProcessOutput(process: process, stdout: stdout, stderr: stderr, read: read)
+        let (output, error) = ProcessOutputReader.read(process: process, stdout: stdout, stderr: stderr, read: read)
         return try CreditsResult(status: process.terminationStatus,
                                  output: String(data: output.get(), encoding: .utf8) ?? "",
                                  error: String(data: error.get(), encoding: .utf8) ?? "")

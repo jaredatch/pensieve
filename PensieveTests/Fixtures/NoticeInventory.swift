@@ -204,24 +204,23 @@ struct LibYAMLNoticeAudit {
     // yaml/libyaml 0.2.5's complete License, normalized only for whitespace.
     static let digest = "6cc0c393c5cb002fce678ab4f5e7642c58fdb32f9e7ee27ada2ef111df5ac021"
 
-    static func checkVendorVersion(pins: [[String: Any]], notices: NoticeDocument) throws {
+    /// Returns the audited section's license while Yams is resolved, nil after its removal.
+    @discardableResult
+    static func checkVendorVersion(pins: [[String: Any]], notices: NoticeDocument) throws -> String? {
         guard let pin = pins.first(where: { ($0["identity"] as? String)?.lowercased() == "yams" }) else {
-            guard notices.text.range(of: "libYAML", options: .caseInsensitive) != nil else { return }
+            guard notices.hasSection("### libYAML") else { return nil }
             throw NoticeInventory.MissingNotice(description: "Stale libYAML notice: Yams is no longer resolved; "
-                                                + "remove all libYAML mentions")
+                                                + "remove the ### libYAML section")
         }
         let version = (pin["state"] as? [String: Any])?["version"] as? String ?? "<missing>"
         guard version == yamsVersion else {
             throw NoticeInventory.MissingNotice(description: "Recheck libYAML notice for Swift package yams \(version); "
                                                 + "audited Yams version is \(yamsVersion)")
         }
-        guard license(in: notices) != nil else {
+        guard let license = notices.license(inSection: "### libYAML"), noticeDigest(license) == digest else {
             throw NoticeInventory.MissingNotice(description: "Missing libYAML notice for Swift package yams \(version)")
         }
-    }
-
-    static func license(in notices: NoticeDocument) -> String? {
-        notices.licenseBlocks.first { noticeDigest($0.text) == digest }?.text
+        return license
     }
 
     static func noticeDigest(_ license: String) -> String {

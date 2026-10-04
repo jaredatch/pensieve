@@ -82,7 +82,7 @@ extension ThirdPartyNoticesTests {
     func testRemovedYamsNamesStaleLibYAMLNotice() throws {
         try withFixture { root in
             try fileService.writeFile(at: root + "/resolved.json", content: "{\"pins\":[]}")
-            assertMissing("Stale libYAML notice: Yams is no longer resolved; remove all libYAML mentions") {
+            assertMissing("Stale libYAML notice: Yams is no longer resolved; remove the ### libYAML section") {
                 try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
                                                  notices: parseNotices("### libYAML\n```text\nCopyright Old vendor.\n```\n"),
                                                  credits: "")
@@ -92,31 +92,31 @@ extension ThirdPartyNoticesTests {
         }
     }
 
-    func testRemovedYamsFindsLibYAMLInHeadings() throws {
-        try withFixture { root in
-            try fileService.writeFile(at: root + "/resolved.json", content: "{\"pins\":[]}")
-            for marks in 1...6 {
-                for name in ["libYAML", "LibYAML", "LIBYAML"] {
-                    let source = String(repeating: "#", count: marks) + " " + name + "\n"
-                    assertMissing("Stale libYAML notice: Yams is no longer resolved; remove all libYAML mentions") {
-                        try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
-                                                         notices: parseNotices(source), credits: "")
-                    }
-                }
-            }
+    func testRemovedYamsAllowsOtherVendorHeadings() throws {
+        for heading in ["## libYAML", "#### libYAML", "### LibYAML", "Prose ### libYAML"] {
+            XCTAssertNoThrow(try LibYAMLNoticeAudit.checkVendorVersion(pins: [], notices: parseNotices(heading + "\n")))
         }
     }
 
-    func testRemovedYamsFindsLibYAMLInLicenseBlocks() throws {
+    func testRemovedYamsAllowsLibYAMLInVerbatimLicenseBlocks() throws {
+        for name in ["libYAML", "LibYAML", "LIBYAML"] {
+            let source = "### Other vendor\n```text\nCopyright " + name + ".\n### libYAML\n```\n"
+            XCTAssertNoThrow(try LibYAMLNoticeAudit.checkVendorVersion(pins: [], notices: parseNotices(source)))
+        }
+    }
+
+    func testUnreadableFilesDelegateProbesAndMutations() throws {
         try withFixture { root in
-            try fileService.writeFile(at: root + "/resolved.json", content: "{\"pins\":[]}")
-            for name in ["libYAML", "LibYAML", "LIBYAML"] {
-                let source = "### Renamed vendor\n```text\nCopyright " + name + ".\n```\n"
-                assertMissing("Stale libYAML notice: Yams is no longer resolved; remove all libYAML mentions") {
-                    try inventory.checkSwiftPackages(resolved: root + "/resolved.json", checkouts: root,
-                                                     notices: parseNotices(source), credits: "")
-                }
-            }
+            let executable = root + "/tool"
+            try fileService.writeExecutableFile(at: executable, content: "#!/bin/sh\nexit 0\n")
+            let files = NoticeUnreadableFiles(base: fileService, unreadable: root + "/fault")
+            XCTAssertTrue(files.fileExists(at: executable))
+            XCTAssertTrue(files.isExecutableFile(at: executable))
+            try files.writeFile(at: root + "/text", content: "Delegate this write.")
+            XCTAssertEqual(try files.readFile(at: root + "/text"), "Delegate this write.")
+            XCTAssertEqual(try files.contentsHash(at: root + "/text"), try fileService.contentsHash(at: root + "/text"))
+            try files.deleteFile(at: root + "/text")
+            XCTAssertFalse(files.fileExists(at: root + "/text"))
         }
     }
 
@@ -160,8 +160,8 @@ extension ThirdPartyNoticesTests {
 
 }
 
-/// Injects an explicit binary read failure for one candidate. Directory/text probes
-/// delegate to FileService. The double is scoped to the notice audit.
+/// Injects a binary read failure for one candidate. Every other operation delegates
+/// to FileService. The double is scoped to temporary notice-audit fixtures.
 private final class NoticeUnreadableFiles: FileServiceProtocol {
     private let base: FileService
     private let unreadable: String
@@ -178,16 +178,35 @@ private final class NoticeUnreadableFiles: FileServiceProtocol {
         return try base.readData(at: path)
     }
     func readFile(at path: String) throws -> String { try base.readFile(at: path) }
-    func listDirectory(at path: String) throws -> [String] { try base.listDirectory(at: path) }
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        try base.readRegularFileData(at: path, maximumBytes: maximumBytes)
+    }
+    func writeFile(at path: String, content: String) throws { try base.writeFile(at: path, content: content) }
+    func writeData(at path: String, data: Data) throws { try base.writeData(at: path, data: data) }
+    func writeExecutableFile(at path: String, content: String) throws { try base.writeExecutableFile(at: path, content: content) }
+    func copyFile(at sourcePath: String, to destinationPath: String) throws {
+        try base.copyFile(at: sourcePath, to: destinationPath)
+    }
+    func deleteFile(at path: String) throws { try base.deleteFile(at: path) }
+    func fileExists(at path: String) -> Bool { base.fileExists(at: path) }
+    func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool { try base.entryExistsWithoutFollowingLinks(at: path) }
+    func isExecutableFile(at path: String) -> Bool { base.isExecutableFile(at: path) }
+    func isUserExecutableFile(at path: String) -> Bool { base.isUserExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { base.directoryExists(at: path) }
+    func createDirectory(at path: String) throws { try base.createDirectory(at: path) }
+    func deleteDirectory(at path: String) throws { try base.deleteDirectory(at: path) }
+    func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
+        try base.createSymlink(at: linkPath, pointingTo: targetPath)
+    }
+    func symlinkTarget(at path: String) throws -> String { try base.symlinkTarget(at: path) }
     func isSymlink(at path: String) -> Bool { base.isSymlink(at: path) }
-    func writeFile(at path: String, content: String) throws { throw CocoaError(.featureUnsupported) }
-    func deleteFile(at path: String) throws { throw CocoaError(.featureUnsupported) }
-    func fileExists(at path: String) -> Bool { false }
-    func isExecutableFile(at path: String) -> Bool { false }
-    func createDirectory(at path: String) throws { throw CocoaError(.featureUnsupported) }
-    func deleteDirectory(at path: String) throws { throw CocoaError(.featureUnsupported) }
-    func createSymlink(at linkPath: String, pointingTo targetPath: String) throws { throw CocoaError(.featureUnsupported) }
-    func symlinkTarget(at path: String) throws -> String { throw CocoaError(.featureUnsupported) }
-    func contentsHash(at path: String) throws -> String { throw CocoaError(.featureUnsupported) }
+    func isRegularFile(at path: String) -> Bool { base.isRegularFile(at: path) }
+    func listDirectory(at path: String) throws -> [String] { try base.listDirectory(at: path) }
+    func contentsHash(at path: String) throws -> String { try base.contentsHash(at: path) }
+    func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? {
+        base.fileIdentity(at: path, followingLinks: followingLinks)
+    }
+    func realPath(at path: String) -> String { base.realPath(at: path) }
+    func regularFileMetadata(at path: String) -> RegularFileMetadata? { base.regularFileMetadata(at: path) }
+    func touchRegularFile(at path: String, date: Date) throws { try base.touchRegularFile(at: path, date: date) }
 }

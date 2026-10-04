@@ -170,71 +170,68 @@ extension ThirdPartyNoticesTests {
             XCTAssertEqual(process.terminationStatus, SIGKILL, side)
             var status: Int32 = 0
             let reaped = (waitpid(process.processIdentifier, &status, WNOHANG), errno)
-            errno = EINTR // Model another call between the syscall and assertions.
             XCTAssertEqual(reaped.0, -1, side)
             XCTAssertEqual(reaped.1, ECHILD, side)
         }
     }
 
-    func testRemovedYamsFindsLibYAMLInProse() throws {
+    func testRemovedYamsAllowsLibYAMLInOtherProse() throws {
         for name in ["libYAML", "LibYAML", "LIBYAML"] {
-            let source = "[" + name + "](https://example.invalid), vendored by Yams.\n"
-            assertMissing("Stale libYAML notice: Yams is no longer resolved; remove all libYAML mentions") {
-                try LibYAMLNoticeAudit.checkVendorVersion(pins: [], notices: parseNotices(source))
+            let source = "[" + name + "](https://example.invalid), used by another vendor.\n"
+            XCTAssertNoThrow(try LibYAMLNoticeAudit.checkVendorVersion(pins: [], notices: parseNotices(source)))
+        }
+    }
+
+    func testResolvedYamsAcceptsItsSectionWithNormalizedWhitespace() throws {
+        let pins: [[String: Any]] = [["identity": "yams", "state": ["version": "6.2.2"]]]
+        let license = try pinnedLibYAMLFixture()
+        let spaced = license.replacingOccurrences(of: " ", with: " \t")
+        for body in [license, spaced] {
+            let source = "### libYAML\n```text\n" + body + "\n```\n"
+            XCTAssertNoThrow(try LibYAMLNoticeAudit.checkVendorVersion(pins: pins, notices: parseNotices(source)))
+            XCTAssertNoThrow(try LibYAMLNoticeAudit.checkVendorVersion(pins: pins,
+                notices: parseNotices(source.replacingOccurrences(of: "\n", with: "\r\n"))))
+        }
+    }
+
+    func testResolvedYamsRejectsAlteredLibYAMLBlockBesidePristineCopy() throws {
+        let pins: [[String: Any]] = [["identity": "yams", "state": ["version": "6.2.2"]]]
+        let license = try pinnedLibYAMLFixture()
+        for other in ["", "### Other vendor\n```text\n" + license + "\n```\n"] {
+            let source = "### libYAML\n```text\n" + license + " Changed terms.\n```\n" + other
+            assertMissing("Missing libYAML notice for Swift package yams 6.2.2") {
+                try LibYAMLNoticeAudit.checkVendorVersion(pins: pins, notices: parseNotices(source))
             }
         }
     }
 
-    func testResolvedYamsFindsLibYAMLByContent() throws {
+    func testResolvedYamsRequiresExactLibYAMLSection() throws {
         let pins: [[String: Any]] = [["identity": "yams", "state": ["version": "6.2.2"]]]
         let license = try pinnedLibYAMLFixture()
-        let spaced = license.replacingOccurrences(of: " ", with: " \t")
-        XCTAssertNoThrow(try LibYAMLNoticeAudit.checkVendorVersion(pins: pins,
-            notices: parseNotices("```text\n" + spaced + "\n```\n")))
-        for prefix in ["", "## Renamed vendor\n", "###### LIBYAML\n", "[libYAML](https://example.invalid)\n"] {
-            let source = prefix + "```text\n" + license + "\n```\n"
-            XCTAssertNoThrow(try LibYAMLNoticeAudit.checkVendorVersion(pins: pins, notices: parseNotices(source)), prefix)
+        for prefix in ["", "## libYAML\n", "#### libYAML\n", "### LibYAML\n",
+                       "### Other vendor\n", "Prose ### libYAML\n"] {
+            assertMissing("Missing libYAML notice for Swift package yams 6.2.2") {
+                try LibYAMLNoticeAudit.checkVendorVersion(pins: pins,
+                    notices: parseNotices(prefix + "```text\n" + license + "\n```\n"))
+            }
         }
     }
 
-    func testResolvedYamsRejectsAlteredLibYAMLBlock() throws {
+    func testLibYAMLSectionCannotBorrowLicensePastNextHeading() throws {
         let pins: [[String: Any]] = [["identity": "yams", "state": ["version": "6.2.2"]]]
-        let source = "### libYAML\n```text\n" + (try pinnedLibYAMLFixture()) + " Changed terms.\n```\n"
-        assertMissing("Missing libYAML notice for Swift package yams 6.2.2") {
-            try LibYAMLNoticeAudit.checkVendorVersion(pins: pins, notices: parseNotices(source))
-        }
-    }
-
-    func testFixtureNoticeCacheMemoizesEachSource() throws {
-        let first = "```text\nCopyright " + UUID().uuidString + ".\n```\n"
-        let second = first.replacingOccurrences(of: "Copyright", with: "Notice")
-        let start = noticeParseCount
-        let original = try parseNotices(first)
-        _ = try parseNotices(first)
-        _ = try parseNotices(second)
-        XCTAssertEqual(try parseNotices(first).licenseBlocks.map(\.text), original.licenseBlocks.map(\.text))
-        XCTAssertEqual(noticeParseCount - start, 2, "Only distinct fixture sources should launch the parser")
-    }
-
-    func testRealNoticeCacheRetainsContentAcrossFixtureLoads() throws {
-        try withFixture { root in
-            let path = root + "/THIRD-PARTY-NOTICES.md"
-            let first = "```text\nCopyright " + UUID().uuidString + ".\n```\n"
-            let second = first.replacingOccurrences(of: "Copyright", with: "Notice")
-            let start = noticeParseCount
-            try fileService.writeFile(at: path, content: first)
-            let original = try loadNotices(at: path)
-            _ = try parseNotices("```text\nFixture " + UUID().uuidString + ".\n```\n")
-            try fileService.writeFile(at: path, content: second)
-            _ = try loadNotices(at: path)
-            try fileService.writeFile(at: path, content: first)
-            XCTAssertEqual(try loadNotices(at: path).licenseBlocks.map(\.text), original.licenseBlocks.map(\.text))
-            XCTAssertEqual(noticeParseCount - start, 3, "Real and fixture content caches must retain their own entries")
+        let license = try pinnedLibYAMLFixture()
+        for marks in 1...6 {
+            let source = "### libYAML\n[Upstream](https://example.invalid)\n"
+                + String(repeating: "#", count: marks) + " Other vendor\n```text\n" + license + "\n```\n"
+            assertMissing("Missing libYAML notice for Swift package yams 6.2.2") {
+                try LibYAMLNoticeAudit.checkVendorVersion(pins: pins, notices: parseNotices(source))
+            }
         }
     }
 
     func pinnedLibYAMLFixture() throws -> String {
-        try fileService.readFile(at: sourceRoot + "/PensieveTests/Fixtures/libyaml-license.txt")
+        let path = try XCTUnwrap(Bundle(for: ThirdPartyNoticesTests.self).path(forResource: "libyaml-license", ofType: "txt"))
+        return try fileService.readFile(at: path)
     }
 
     func fixtureDigest(_ text: String) -> String {

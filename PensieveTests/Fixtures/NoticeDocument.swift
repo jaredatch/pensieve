@@ -12,6 +12,11 @@ struct NoticeDocument {
         let version: String
         let license: String?
     }
+    private struct Heading {
+        let line: Int
+        let text: String
+    }
+    private let headings: [Heading]
     let text: String
     let licenseBlocks: [LicenseBlock]
     let editorEntries: [String: [EditorEntry]]
@@ -20,6 +25,7 @@ struct NoticeDocument {
         let normalized = source.replacingOccurrences(of: "\r\n", with: "\n")
         text = normalized
         self.licenseBlocks = licenseBlocks
+        var headings: [Heading] = []
         var entries: [String: [EditorEntry]] = [:]
         var pending: [(name: String, index: Int)] = []
         var blockIndex = 0
@@ -36,6 +42,7 @@ struct NoticeDocument {
             }
             if let block, block.startLine <= number { continue }
             if Self.isHeading(line) {
+                headings.append(Heading(line: number, text: line))
                 pending.removeAll()
             }
             guard line.hasPrefix("- `"), let end = line.dropFirst(3).range(of: "` ") else { continue }
@@ -44,7 +51,19 @@ struct NoticeDocument {
             pending.append((name, entries[name, default: []].count))
             entries[name, default: []].append(EditorEntry(version: version, license: nil))
         }
+        self.headings = headings
         editorEntries = entries
+    }
+
+    func hasSection(_ heading: String) -> Bool {
+        headings.contains { $0.text == heading }
+    }
+
+    func license(inSection heading: String) -> String? {
+        guard let index = headings.firstIndex(where: { $0.text == heading }) else { return nil }
+        let start = headings[index].line
+        let end = headings.dropFirst(index + 1).first?.line ?? Int.max
+        return licenseBlocks.first { $0.startLine > start && $0.endLine < end }?.text
     }
 
     private static func isHeading(_ line: String) -> Bool {
