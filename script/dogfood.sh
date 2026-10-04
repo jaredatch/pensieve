@@ -14,9 +14,12 @@
 #             by git and every other child process
 #   identity  a copy of the app is staged under the sandbox root re-identified as
 #             com.jaredatch.Pensieve.dogfood (Info.plist edit + ad-hoc re-seal), so
-#             UserDefaults and Keychain — written by cfprefsd/securityd, out of the
-#             fence's reach — are separate from both the released app and the
-#             live-data dev build, and --reset can wipe them too
+#             UserDefaults — written by cfprefsd, out of the fence's reach — are
+#             separate from both the released app and the live-data dev build, and
+#             --reset can wipe them too
+#   keychain  a throwaway keychain inside the fake home, its default (password
+#             "dogfood", not a secret), so a token saved in a sandbox run stays in
+#             the sandbox and --reset removes it
 #   flag      PENSIEVE_DOGFOOD=1 tells the app to skip Sparkle and the legacy
 #             launchd-agent migration, the two paths the fence cannot see
 # The fence is self-tested before each launch: a write into the real home must
@@ -229,6 +232,46 @@ fi
 [ ! -e "$probe_leak" ] || { rm -f "$probe_leak"; die "fence self-test: probe file appeared in the real home"; }
 rm -f "$probe_out"
 say "fence holds: real home denied, fake home allowed"
+
+# --- a throwaway keychain inside the fake home --------------------------------
+# Under CFFIXED_USER_HOME the Security framework reads the keychain search list and
+# default from the fake home's preferences. With no keychain there, the first Keychain
+# write (a GitHub token saved in Settings) raises macOS's "Keychain Not Found" dialog,
+# whose Reset To Defaults button acts on the REAL login keychain. So the fake home gets
+# its own keychain, set as its default and its whole search list. `security` runs under
+# the fake home too, so the real search list and default never change.
+# Not login.keychain-db: in testing (macOS 26), securityd would not unlock a sandbox
+# keychain by that name with the password it was created with.
+FAKE_KEYCHAIN="$FAKE_HOME/Library/Keychains/dogfood.keychain-db"
+# Not a secret: it guards only throwaway sandbox tokens. `security` reads -p "" as no
+# password given rather than an empty one, so the keychain gets a fixed one.
+FAKE_KEYCHAIN_PASSWORD="dogfood"
+in_fake_home() { env HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" "$@"; }
+if [ "$DRY_RUN" -eq 0 ]; then
+  if [ ! -f "$FAKE_KEYCHAIN" ]; then
+    say "creating a throwaway keychain at $FAKE_KEYCHAIN"
+    mkdir -p "$FAKE_HOME/Library/Keychains"
+    in_fake_home security create-keychain -p "$FAKE_KEYCHAIN_PASSWORD" "$FAKE_KEYCHAIN" \
+      || die "could not create $FAKE_KEYCHAIN"
+  fi
+  # No auto-lock and no lock on sleep: a locked sandbox keychain would prompt for its password.
+  in_fake_home security set-keychain-settings "$FAKE_KEYCHAIN" || die "could not configure $FAKE_KEYCHAIN"
+  in_fake_home security unlock-keychain -p "$FAKE_KEYCHAIN_PASSWORD" "$FAKE_KEYCHAIN" \
+    || die "could not unlock $FAKE_KEYCHAIN"
+  in_fake_home security default-keychain -d user -s "$FAKE_KEYCHAIN" || die "could not make $FAKE_KEYCHAIN the default"
+  in_fake_home security list-keychains -d user -s "$FAKE_KEYCHAIN" || die "could not set the sandbox keychain search list"
+  fake_default="$(in_fake_home security default-keychain -d user | sed 's/^ *"//; s/" *$//')"
+  [ "$fake_default" = "$FAKE_KEYCHAIN" ] \
+    || die "the fake home's default keychain is '$fake_default', not $FAKE_KEYCHAIN — refusing to launch"
+  if security list-keychains -d user | grep -qF "$FAKE_HOME/"; then
+    die "the real keychain search list names a keychain in $FAKE_HOME — remove it (security list-keychains -d user -s …) and re-run"
+  fi
+  real_default="$(security default-keychain -d user | sed 's/^ *"//; s/" *$//')"
+  case "$real_default" in
+    "$FAKE_HOME"/*) die "the real default keychain is $real_default, inside the fake home — reset it with security default-keychain -d user -s" ;;
+  esac
+  say "keychain: $FAKE_KEYCHAIN (sandbox only)"
+fi
 
 # --- launch ------------------------------------------------------------------
 LOG="$SANDBOX_ROOT/pensieve.log"
