@@ -130,6 +130,7 @@ final class IntentReconcilerProjectTests: XCTestCase {
         XCTAssertTrue(harness.reconciler.reconcile(context: harness.context).outcomes.isEmpty)
 
         let project = Project(name: "Registered", path: "/projects/registered")
+        harness.fileService.directories.insert(project.path)
         project.identityKey = "register-key"
         registerProject(
             project,

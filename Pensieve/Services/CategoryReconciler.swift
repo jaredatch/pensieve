@@ -60,10 +60,34 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
             Triple(skillID: $0.skillID, projectID: $0.projectID, platform: $0.platform)
         })
 
-        deploy(desired.subtracting(current), state: state, context: context, aggregate: &aggregate)
-        remove(current.subtracting(desired), state: state, context: context, aggregate: &aggregate)
+        let unavailable = unavailableTriples(desired.union(current), state: state, context: context, aggregate: &aggregate)
+        deploy(desired.subtracting(current).subtracting(unavailable), state: state, context: context, aggregate: &aggregate)
+        remove(current.subtracting(desired).subtracting(unavailable), state: state, context: context, aggregate: &aggregate)
         try? context.save()
         return aggregate
+    }
+
+    private func unavailableTriples(
+        _ triples: Set<Triple>, state: State, context: ModelContext, aggregate: inout BatchResult
+    ) -> Set<Triple> {
+        var unavailable: Set<Triple> = []
+        for (pair, group) in grouped(triples) {
+            guard let project = state.projectByID[pair.projectID],
+                  let problem = platformVM.projectFolderProblem(for: project) else { continue }
+            for triple in group {
+                unavailable.insert(triple)
+                if case .missing = problem { deleteLedgerRow(matching: triple, state: state, context: context) }
+                guard let skill = state.skillByID[triple.skillID] else { continue }
+                let result = BatchResult(outcomes: [BatchPairOutcome(
+                    skillID: skill.id, skillName: skill.name, platform: triple.platform,
+                    target: .project(project.id),
+                    error: BatchPairOutcome.failureMessage(problem, target: .project(project)),
+                    projectFolderError: problem
+                )]).skippingMissingProjects()
+                aggregate.append(result)
+            }
+        }
+        return unavailable
     }
 
     private func fetchState(context: ModelContext, intentLedger: [IntentAssignment]) -> State {
@@ -127,9 +151,9 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
                 platforms: groupPlatforms,
                 target: .project(project),
                 context: context
-            )
-            aggregate.outcomes.append(contentsOf: result.outcomes)
-            for outcome in result.outcomes where outcome.error == nil {
+            ).skippingMissingProjects()
+            aggregate.append(result)
+            for outcome in result.successes {
                 context.insert(SkillProjectAssignment(
                     skillID: skill.id,
                     projectID: project.id,

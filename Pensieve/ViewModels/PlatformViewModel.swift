@@ -6,7 +6,7 @@ import SwiftUI
 final class PlatformViewModel {
     private let linkService: LinkServiceProtocol
     private let cursorCompiler: CursorCompilerProtocol
-    private let fileService: FileServiceProtocol
+    let fileService: FileServiceProtocol
     private let deployStateStore: DeployStateStore
     private let now: () -> Date
     private let persist: (ModelContext) throws -> Void
@@ -230,7 +230,7 @@ final class PlatformViewModel {
             _ = try deployOne(skill: skill, platform: platform, target: target, context: context)
             error = nil
         } catch {
-            self.error = "Deploy failed: \(error.localizedDescription)"
+            self.error = "Deploy failed: \(BatchPairOutcome.failureMessage(error, target: target))"
         }
     }
 
@@ -277,7 +277,8 @@ final class PlatformViewModel {
                 } catch {
                     result.outcomes.append(BatchPairOutcome(
                         skillID: skill.id, skillName: skill.name, platform: platform,
-                        target: BatchPairTarget(target), error: error.localizedDescription
+                        target: BatchPairTarget(target), error: BatchPairOutcome.failureMessage(error, target: target),
+                        projectFolderError: error as? ProjectFolderError
                     ))
                 }
             }
@@ -304,7 +305,8 @@ final class PlatformViewModel {
                 } catch {
                     result.outcomes.append(BatchPairOutcome(
                         skillID: skill.id, skillName: skill.name, platform: platform,
-                        target: BatchPairTarget(target), error: error.localizedDescription
+                        target: BatchPairTarget(target), error: BatchPairOutcome.failureMessage(error, target: target),
+                        projectFolderError: error as? ProjectFolderError
                     ))
                 }
             }

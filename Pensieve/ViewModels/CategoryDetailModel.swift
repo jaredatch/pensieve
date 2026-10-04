@@ -20,12 +20,14 @@ final class CategoryDetailModel {
 
     func setSkill(_ skill: Skill, inCategory category: Category, assigned: Bool, context: ModelContext) {
         lastActionVerb = assigned ? "deployed" : "removed"
-        lastResult = store.setSkill(skill, inCategory: category, assigned: assigned, reconciler: reconciler, context: context)
+        let result = store.setSkill(skill, inCategory: category, assigned: assigned, reconciler: reconciler, context: context)
+        lastResult = assigned ? result.reportingSkippedProjects() : result
     }
 
     func setProject(_ project: Project, inCategory category: Category, member: Bool, context: ModelContext) {
         lastActionVerb = member ? "deployed" : "removed"
-        lastResult = store.setProject(project, inCategory: category, member: member, reconciler: reconciler, context: context)
+        let result = store.setProject(project, inCategory: category, member: member, reconciler: reconciler, context: context)
+        lastResult = member ? result.reportingSkippedProjects() : result
     }
 
     func rename(_ category: Category, to name: String, context: ModelContext) {

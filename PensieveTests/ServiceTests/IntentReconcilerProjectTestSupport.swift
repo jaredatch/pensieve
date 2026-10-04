@@ -66,6 +66,7 @@ struct ProjectIntentHarness {
 
     @discardableResult
     func insertProject(name: String, path: String, key: String) throws -> Project {
+        fileService.directories.insert(path)
         let project = Project(name: name, path: path)
         project.identityKey = key
         context.insert(project)

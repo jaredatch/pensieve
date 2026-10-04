@@ -23,6 +23,7 @@ struct ProjectIdentityService: ProjectIdentityServiceProtocol {
     }
 
     func identity(forProjectAt path: String) throws -> ProjectIdentity {
+        try fileService.requireProjectDirectory(at: path)
         if let existing = peekIdentity(forProjectAt: path) {
             return existing
         }
@@ -34,7 +35,7 @@ struct ProjectIdentityService: ProjectIdentityServiceProtocol {
         id = \(id)
         format_version = 1
         """
-        try fileService.writeFile(at: markerPath, content: content)
+        try fileService.writeFileInProject(at: markerPath, content: content, projectPath: path)
         return ProjectIdentity(kind: .marker, key: id)
     }
 

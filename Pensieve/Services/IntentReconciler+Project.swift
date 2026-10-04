@@ -14,8 +14,34 @@ extension IntentReconciler {
             guard let projectID = row.projectID else { return nil }
             return ProjectTriple(skillID: row.skillID, projectID: projectID, platformRaw: row.platformRaw)
         })
-        deployProjects(desired.subtracting(current), state: state, context: context, aggregate: &aggregate)
-        removeProjects(current.subtracting(desired), state: state, context: context, aggregate: &aggregate)
+        let unavailable = unavailableTriples(desired.union(current), state: state, context: context, aggregate: &aggregate)
+        deployProjects(desired.subtracting(current).subtracting(unavailable),
+                       state: state, context: context, aggregate: &aggregate)
+        removeProjects(current.subtracting(desired).subtracting(unavailable),
+                       state: state, context: context, aggregate: &aggregate)
+    }
+
+    private func unavailableTriples(
+        _ triples: Set<ProjectTriple>, state: State, context: ModelContext, aggregate: inout BatchResult
+    ) -> Set<ProjectTriple> {
+        var unavailable: Set<ProjectTriple> = []
+        for (pair, group) in groupedProjectTriples(triples) {
+            guard let project = state.projectByID[pair.projectID],
+                  let problem = platformVM.projectFolderProblem(for: project) else { continue }
+            for triple in group {
+                unavailable.insert(triple)
+                if case .missing = problem { deleteProjectRows(matching: triple, state: state, context: context) }
+                guard let skill = state.skillByID[triple.skillID],
+                      let platform = PlatformTarget(rawValue: triple.platformRaw) else { continue }
+                aggregate.append(BatchResult(outcomes: [BatchPairOutcome(
+                    skillID: skill.id, skillName: skill.name, platform: platform,
+                    target: .project(project.id),
+                    error: BatchPairOutcome.failureMessage(problem, target: .project(project)),
+                    projectFolderError: problem
+                )]).skippingMissingProjects())
+            }
+        }
+        return unavailable
     }
 
     private func desiredProjectTriples(
@@ -53,9 +79,9 @@ extension IntentReconciler {
             guard !platforms.isEmpty else { continue }
             let result = platformVM.deployBatch(
                 skills: [skill], platforms: platforms, target: .project(project), context: context
-            )
-            aggregate.outcomes.append(contentsOf: result.outcomes)
-            for outcome in result.outcomes where outcome.error == nil {
+            ).skippingMissingProjects()
+            aggregate.append(result)
+            for outcome in result.successes {
                 context.insert(IntentAssignment(
                     skillID: outcome.skillID,
                     platformRaw: outcome.platform.rawValue,

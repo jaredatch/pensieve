@@ -81,7 +81,7 @@ final class FileServiceProjectFolderTests: XCTestCase {
 
     func testUnmodeledProjectOperationsThrowWithoutMutatingDouble() throws {
         let double = DeployRecordingFileService()
-        XCTAssertThrowsError(try double.directoryExistsFollowingLinks(at: root))
+        XCTAssertThrowsError(try UnmodeledProjectFileService().directoryExistsFollowingLinks(at: root))
         XCTAssertThrowsError(try double.createDirectoryWithoutParents(at: root + "/new"))
         XCTAssertThrowsError(try double.writeFileWithoutParents(at: root + "/file", content: "Bytes"))
         XCTAssertThrowsError(try double.createSymlinkWithoutParents(at: root + "/link", pointingTo: root))
@@ -177,4 +177,22 @@ final class FileServiceProjectFolderTests: XCTestCase {
         XCTAssertTrue(reachedCreate)
         XCTAssertEqual(try files.readFile(at: path), "Preserved")
     }
+}
+
+/// Required operations stay inert; the new project operations deliberately use protocol defaults.
+private struct UnmodeledProjectFileService: FileServiceProtocol {
+    func readFile(at path: String) throws -> String { throw CocoaError(.featureUnsupported) }
+    func writeFile(at path: String, content: String) throws { throw CocoaError(.featureUnsupported) }
+    func deleteFile(at path: String) throws { throw CocoaError(.featureUnsupported) }
+    func fileExists(at path: String) -> Bool { false }
+    func isExecutableFile(at path: String) -> Bool { false }
+    func directoryExists(at path: String) -> Bool { false }
+    func createDirectory(at path: String) throws { throw CocoaError(.featureUnsupported) }
+    func deleteDirectory(at path: String) throws { throw CocoaError(.featureUnsupported) }
+    func createSymlink(at linkPath: String, pointingTo targetPath: String) throws { throw CocoaError(.featureUnsupported) }
+    func symlinkTarget(at path: String) throws -> String { throw CocoaError(.featureUnsupported) }
+    func isSymlink(at path: String) -> Bool { false }
+    func isRegularFile(at path: String) -> Bool { false }
+    func listDirectory(at path: String) throws -> [String] { throw CocoaError(.featureUnsupported) }
+    func contentsHash(at path: String) throws -> String { throw CocoaError(.featureUnsupported) }
 }
