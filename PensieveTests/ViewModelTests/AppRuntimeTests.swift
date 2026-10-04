@@ -37,12 +37,12 @@ final class AppRuntimeTests: XCTestCase {
         }
     }
 
-    private struct NoopLedgerReconciler: CategoryReconcilerProtocol, ScenarioReconcilerProtocol,
+    private struct NoopLedgerReconciler: CategoryReconcilerProtocol,
         IntentReconcilerProtocol {
         func reconcile(context: ModelContext) -> BatchResult { BatchResult() }
     }
 
-    private final class RecordingLedgerReconciler: CategoryReconcilerProtocol, ScenarioReconcilerProtocol,
+    private final class RecordingLedgerReconciler: CategoryReconcilerProtocol,
         IntentReconcilerProtocol {
         private(set) var calls = 0
 
@@ -87,7 +87,6 @@ final class AppRuntimeTests: XCTestCase {
         hasRemoteConfigured: (() -> Bool)? = nil,
         deployReconciler: DeployReconciling = NoopDeployReconciler(),
         categoryReconciler: CategoryReconcilerProtocol = NoopLedgerReconciler(),
-        scenarioReconciler: ScenarioReconcilerProtocol = NoopLedgerReconciler(),
         launchIngestLockPath: String? = nil
     ) throws -> RuntimeHarness {
         let paths = try AppRuntimePaths.temporary(named: "AppRuntimeTests")
@@ -103,7 +102,6 @@ final class AppRuntimeTests: XCTestCase {
             deployReconciler: deployReconciler,
             contextFactory: { ModelContext(container) },
             categoryReconciler: categoryReconciler,
-            scenarioReconciler: scenarioReconciler,
             intentReconciler: NoopLedgerReconciler(),
             auditLog: { _, _ in }
         )
@@ -349,11 +347,9 @@ extension AppRuntimeTests {
     func testInspectionClearedUpToDateRunsDeployButSkipsLedgerReconcilers() throws {
         let deploy = RecordingDeployReconciler()
         let category = RecordingLedgerReconciler()
-        let scenario = RecordingLedgerReconciler()
         let harness = try makeRuntime(
             deployReconciler: deploy,
-            categoryReconciler: category,
-            scenarioReconciler: scenario
+            categoryReconciler: category
         )
 
         try harness.runtime.beginConflictResolution()(.synced(
@@ -365,17 +361,14 @@ extension AppRuntimeTests {
 
         XCTAssertEqual(deploy.calls, 1)
         XCTAssertEqual(category.calls, 0)
-        XCTAssertEqual(scenario.calls, 0)
     }
 
     func testConflictResolutionHeadAdvanceRunsDeployAndLedgerReconcilers() throws {
         let deploy = RecordingDeployReconciler()
         let category = RecordingLedgerReconciler()
-        let scenario = RecordingLedgerReconciler()
         let harness = try makeRuntime(
             deployReconciler: deploy,
-            categoryReconciler: category,
-            scenarioReconciler: scenario
+            categoryReconciler: category
         )
 
         try harness.runtime.beginConflictResolution()(.synced(
@@ -387,6 +380,5 @@ extension AppRuntimeTests {
 
         XCTAssertEqual(deploy.calls, 1)
         XCTAssertEqual(category.calls, 1)
-        XCTAssertEqual(scenario.calls, 1)
     }
 }

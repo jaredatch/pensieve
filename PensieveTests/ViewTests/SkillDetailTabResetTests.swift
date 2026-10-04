@@ -61,7 +61,7 @@ final class SkillDetailTabResetTests: XCTestCase {
 
     func testChangingSkillsCollapsesProjectsAndClearsDeploymentAlert() throws {
         let base = NSTemporaryDirectory() + "SkillDetailTabResetTests-\(UUID().uuidString)"
-        let fileService = ScenarioRecordingFileService()
+        let fileService = DeployRecordingFileService()
         let platformVM = PlatformViewModel(
             fileService: fileService,
             agentDetection: EmptyMachineDetection(),

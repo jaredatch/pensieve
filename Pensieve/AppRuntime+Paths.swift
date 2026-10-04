@@ -132,8 +132,9 @@ struct AppRuntimePaths {
 
     /// AppRuntime invokes the closure only while it holds sync.lock (initial launch and the retry loop
     /// both acquire before calling) — the reconciler must not re-acquire.
-    func makeLaunchReconcile() -> AppRuntime.LaunchReconcile {
-        { context, alreadyMigrated in
+    func makeLaunchReconcile(defaults: UserDefaults, platformVM: PlatformViewModel,
+                             notifier: @escaping SyncStateNotifying) -> AppRuntime.LaunchReconcile {
+        return { context, alreadyMigrated in
             let fileService = FileService()
             let migrationService = StoreMigrationService(
                 fileService: fileService,
@@ -144,7 +145,16 @@ struct AppRuntimePaths {
                 migrationService: migrationService,
                 fileService: fileService,
                 root: storeRoot,
-                lockPath: syncLockPath
+                lockPath: syncLockPath,
+                scenarioHandover: ScenarioHandover(
+                    machineIdentity: MachineIdentity(fileService: fileService, appSupportDir: appSupportDir),
+                    manifest: ManifestService(fileService: fileService),
+                    root: storeRoot,
+                    defaults: defaults,
+                    deployState: { try platformVM.scenarioHandoverDeployState(skill: $0, platform: $1) },
+                    notifier: notifier,
+                    fileService: fileService
+                )
             ).reconcileOnLaunch(
                 context: context,
                 alreadyMigrated: alreadyMigrated,
@@ -315,7 +325,6 @@ extension AppRuntimePaths {
             deployReconciler: makeDeployReconciler(),
             contextFactory: { ModelContext(container) },
             categoryReconciler: CategoryReconciler(platformVM: platformVM),
-            scenarioReconciler: ScenarioReconciler(platformVM: platformVM),
             intentReconciler: intentReconciler,
             auditLog: { SyncAudit(appSupport: appSupportDir).append(category: $0, detail: $1) },
             didConverge: { platformVM.noteDeployStateChanged() }

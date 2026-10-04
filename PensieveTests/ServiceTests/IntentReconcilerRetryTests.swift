@@ -8,7 +8,7 @@ private final class OneShotDeployPersistFailure {
     func persist(_ context: ModelContext) throws {
         if remainingFailures > 0 {
             remainingFailures -= 1
-            throw ScenarioStubFailure()
+            throw DeployStubFailure()
         }
         try context.save()
     }

@@ -5,19 +5,30 @@ import Foundation
 
 struct ManifestService: ManifestReadWriting {
     static let currentSchemaVersion = 5
+    /// Shared across all service instances and callers in this process. SyncLock ownership stays with callers.
+    private static let writeLock = NSLock()
 
     let fileService: FileServiceProtocol
     private let supportedSchemaVersion: Int
+    /// Diagnostic checkpoint after an actual lock try; callbacks must not reenter write.
+    private let writeLockAttempted: (Bool) -> Void
 
     init(fileService: FileServiceProtocol = FileService(),
-         supportedSchemaVersion: Int = Self.currentSchemaVersion) {
+         supportedSchemaVersion: Int = Self.currentSchemaVersion,
+         writeLockAttempted: @escaping (Bool) -> Void = { _ in }) {
         self.fileService = fileService
         self.supportedSchemaVersion = supportedSchemaVersion
+        self.writeLockAttempted = writeLockAttempted
     }
 
     // MARK: Write (idempotent, prunes stale)
 
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
+        let acquired = Self.writeLock.try()
+        // Reports contention before waiting; copy checkpoints independently prove exclusion.
+        writeLockAttempted(acquired)
+        if !acquired { Self.writeLock.lock() }
+        defer { Self.writeLock.unlock() }
         let manifestDir = root + "/manifest"
         try refuseNewerExistingManifest(at: manifestDir)
         try validateSnapshotForWrite(snapshot)
@@ -46,12 +57,7 @@ struct ManifestService: ManifestReadWriting {
                     content: Self.serializeCategory(category)
                 )
             }
-            for scenario in snapshot.scenarios {
-                try fileService.writeFile(
-                    at: scenariosDir + "/" + Self.scenarioFileName(name: scenario.name, id: scenario.id),
-                    content: Self.serializeScenario(scenario)
-                )
-            }
+            let carried = try carryScenarioFiles(from: manifestDir + "/scenarios", to: scenariosDir)
             for skill in snapshot.skills {
                 try fileService.writeFile(
                     at: skillsDir + "/" + skill.slug + ".yaml",
@@ -66,6 +72,7 @@ struct ManifestService: ManifestReadWriting {
             if !fileService.directoryExists(at: root) {
                 try fileService.createDirectory(at: root)
             }
+            try carried.validateSource()
             try fileService.replaceItem(at: manifestDir, with: tmpDir)
         } catch {
             try? fileService.deleteDirectory(at: tmpDir)
@@ -100,7 +107,6 @@ struct ManifestService: ManifestReadWriting {
         return ManifestSnapshot(
             schemaVersion: schema,
             categories: try readCategories(from: manifestDir).sorted { $0.name < $1.name },
-            scenarios: try readScenarios(from: manifestDir).sorted { ($0.name, $0.id) < ($1.name, $1.id) },
             projects: try readProjects(from: manifestDir).sorted { $0.identityKey < $1.identityKey },
             skills: try readSkills(from: manifestDir).sorted { $0.slug < $1.slug },
             deployIntents: schema >= 4
@@ -139,32 +145,10 @@ struct ManifestService: ManifestReadWriting {
         return categories
     }
 
-    private func readScenarios(from manifestDir: String) throws -> [ScenarioRecord] {
-        var scenariosByID: [String: ScenarioRecord] = [:]
-        let scenariosDir = manifestDir + "/scenarios"
-        guard fileService.directoryExists(at: scenariosDir) else { return [] }
-        let entries = try fileService.listDirectory(at: scenariosDir).filter { $0.hasSuffix(".yaml") }.sorted()
-        for entry in entries {
-            guard let content = try? fileService.readFile(at: scenariosDir + "/" + entry),
-                  let obj = (try? CheckedYAMLLoader.load(yaml: content)) as? [String: Any],
-                  let rawID = obj["id"] as? String,
-                  let uuid = UUID(uuidString: rawID),
-                  let name = obj["name"] as? String else {
-                throw ManifestError.corruptManifestFile("scenarios/" + entry)
-            }
-            let canonicalID = uuid.uuidString
-            let skillSlugs = try Self.requireStringList(obj, "skill_slugs", file: "scenarios/" + entry)
-            let agents = try Self.requireStringList(obj, "agents", file: "scenarios/" + entry)
-            if scenariosByID[canonicalID] == nil {
-                scenariosByID[canonicalID] = ScenarioRecord(
-                    id: canonicalID,
-                    name: name,
-                    skillSlugs: skillSlugs,
-                    agents: agents
-                )
-            }
-        }
-        return Array(scenariosByID.values)
+    /// Legacy definitions belong to older builds. Keep opaque regular-file bytes in the atomic
+    /// replacement tree, and never traverse a symlinked scenarios directory or entry.
+    private func carryScenarioFiles(from source: String, to destination: String) throws -> RegularFileCopyReceipt {
+        try fileService.copyRegularFiles(fromDirectory: source, toDirectory: destination)
     }
 
     private func readSkills(from manifestDir: String) throws -> [SkillOverlay] {
@@ -246,11 +230,6 @@ extension ManifestService {
         return prefix + "-" + sha256Hex16(name) + ".yaml"
     }
 
-    static func scenarioFileName(name: String, id: String) -> String {
-        let prefix = slugify(name, fallback: "scn")
-        return prefix + "-" + sha256Hex16(id) + ".yaml"
-    }
-
     private static func slugify(_ value: String, fallback: String) -> String {
         let slug = value.lowercased()
             .replacing(/[^a-z0-9\s-]/, with: "")
@@ -271,15 +250,6 @@ extension ManifestService {
         lines.append("name: \(SkillSerializer.quotedScalar(category.name))")
         appendBlockList(&lines, key: "project_keys", values: category.projectKeys)
         appendBlockList(&lines, key: "skill_slugs", values: category.skillSlugs)
-        return lines.joined(separator: "\n") + "\n"
-    }
-
-    static func serializeScenario(_ scenario: ScenarioRecord) -> String {
-        var lines: [String] = []
-        lines.append("id: \(SkillSerializer.quotedScalar(scenario.id))")
-        lines.append("name: \(SkillSerializer.quotedScalar(scenario.name))")
-        appendBlockList(&lines, key: "skill_slugs", values: scenario.skillSlugs)
-        appendBlockList(&lines, key: "agents", values: scenario.agents)
         return lines.joined(separator: "\n") + "\n"
     }
 

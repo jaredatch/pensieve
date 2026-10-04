@@ -91,34 +91,4 @@ final class IntentReconcilerOwnershipLifecycleTests: XCTestCase {
         XCTAssertEqual(harness.fileService.symlinks.count, 2)
     }
 
-    func testProjectIntentLedgerDoesNotProtectScenarioArtifact() throws {
-        let harness = try ProjectIntentHarness(installed: [.codex])
-        let skill = try harness.insertSkill("scenario-filter")
-        let project = try harness.insertProject(name: "Project", path: "/projects/scenario", key: "key")
-        let suite = isolatedDefaultsSuite()
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = ScenarioStore(defaults: defaults)
-        let scenario = Scenario(name: "Work")
-        scenario.skillSlugs = [skill.directoryName]
-        scenario.agentRawValues = [PlatformTarget.codex.rawValue]
-        harness.context.insert(scenario)
-        try harness.context.save()
-        let reconciler = ScenarioReconciler(platformVM: harness.platformVM, scenarioStore: store)
-        _ = store.activate(scenario, reconciler: reconciler, context: harness.context)
-        harness.context.insert(IntentAssignment(
-            skillID: skill.id, platformRaw: "codex", projectID: project.id
-        ))
-        try harness.context.save()
-        harness.linkService.unlinkCalls.removeAll()
-
-        let result = store.deactivate(reconciler: reconciler, context: harness.context)
-
-        XCTAssertFalse(result.hasFailures)
-        XCTAssertEqual(harness.linkService.unlinkCalls, [
-            ScenarioRecordedLink(directoryName: skill.directoryName, platform: .codex, projectPath: nil)
-        ])
-        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<ScenarioAssignment>()), 0)
-        XCTAssertEqual(try harness.assignments().count, 1)
-    }
 }

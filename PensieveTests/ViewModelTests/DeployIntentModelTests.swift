@@ -186,7 +186,7 @@ final class DeployIntentModelTests: XCTestCase {
     }
 
     func testSetSelectedWriteFailureLeavesNoLocalDeploy() throws {
-        let harness = try makeHarness(writeManifest: { _ in throw ScenarioStubFailure() })
+        let harness = try makeHarness(writeManifest: { _ in throw DeployStubFailure() })
         let skill = try insertSkill(context: harness.context)
 
         XCTAssertThrowsError(try harness.model.setSelected(
@@ -247,7 +247,7 @@ final class DeployIntentModelTests: XCTestCase {
         var writeAttempts = 0
         let retrying = try makeHarness(writeManifest: { _ in
             writeAttempts += 1
-            if writeAttempts == 1 { throw ScenarioStubFailure() }
+            if writeAttempts == 1 { throw DeployStubFailure() }
         })
         let retryingSkill = try insertSkill(context: retrying.context)
         XCTAssertThrowsError(try retrying.model.apply(
@@ -301,7 +301,7 @@ extension DeployIntentModelTests {
         let context: ModelContext
         let model: DeployIntentModel
         let platformVM: PlatformViewModel
-        let linkService: ScenarioRecordingLinkService
+        let linkService: DeployRecordingLinkService
         let root: String
         let manifestFileService: FileService
     }
@@ -324,13 +324,13 @@ extension DeployIntentModelTests {
         let context = ModelContext(try AppRuntime.makeContainer(
             configuration: ModelConfiguration(isStoredInMemoryOnly: true)
         ))
-        let fileService = ScenarioRecordingFileService()
-        let linkService = ScenarioRecordingLinkService(fileService: fileService)
+        let fileService = DeployRecordingFileService()
+        let linkService = DeployRecordingLinkService(fileService: fileService)
         let platformVM = PlatformViewModel(
             fileService: fileService,
             linkService: linkService,
-            cursorCompiler: ScenarioRecordingCursorCompiler(fileService: fileService),
-            agentDetection: ScenarioStubDetection(installed: [.codex]),
+            cursorCompiler: DeployRecordingCursorCompiler(fileService: fileService),
+            agentDetection: DeployStubDetection(installed: [.codex]),
             deployStateStore: DeployStateStore(fileService: fileService)
         )
         let root = NSTemporaryDirectory() + "PensieveDeployIntent-" + UUID().uuidString
@@ -353,7 +353,7 @@ extension DeployIntentModelTests {
                 onReconcile?()
                 return IntentReconciler(
                     platformVM: platformVM,
-                    machineIdentity: DeployIntentIdentityStub(id: self.localID)
+                    machineIdentity: DeployIntentIdentityStub(id: self.localID), handoverIsComplete: { false }
                 ).reconcile(context: context)
             },
             lockPath: lockPath ?? root + "-sync.lock",

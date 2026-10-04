@@ -57,6 +57,8 @@ struct LaunchReconciler {
     private let gitHeadStamp: GitHeadStamp
     private let headStampOverride: (() -> String?)?
     private let git: GitServiceProtocol
+    private let scenarioHandover: ScenarioHandingOver?
+    private let log: (String) -> Void
 
     init(rebuildService: StoreRebuildServiceProtocol = StoreRebuildService(),
          migrationService: StoreMigrationServiceProtocol = StoreMigrationService(),
@@ -65,6 +67,8 @@ struct LaunchReconciler {
          root: String = Constants.pensieveBaseDir,
          lockPath: String = PathConstants.pensieveAppSupportDir + "/sync.lock",
          git: GitServiceProtocol = GitService(),
+         scenarioHandover: ScenarioHandingOver? = nil,
+         log: @escaping (String) -> Void = { NSLog("Pensieve: \($0)") },
          headStampOverride: (() -> String?)? = nil) {
         self.rebuildService = rebuildService
         self.migrationService = migrationService
@@ -75,6 +79,8 @@ struct LaunchReconciler {
         self.gitHeadStamp = GitHeadStamp(fileService: fileService)
         self.headStampOverride = headStampOverride
         self.git = git
+        self.scenarioHandover = scenarioHandover
+        self.log = log
     }
 
     @discardableResult
@@ -147,7 +153,7 @@ struct LaunchReconciler {
             ingestionNeedsRetry: ingestionNeedsRetry
         ), alreadyMigrated: alreadyMigrated, externallyHeldLock: externallyHeldLock, context: context)
         return LaunchReconcileOutcome(
-            rebuild: rebuild,
+            rebuild: validation.rebuild,
             migrationRan: validation.migrationRan,
             ingestedHeadStamp: validation.ingestedHeadStamp,
             ingestionNeedsRetry: validation.ingestionNeedsRetry
@@ -191,9 +197,22 @@ struct LaunchReconciler {
             result.ingestionNeedsRetry = true
             return result
         }
-        guard !alreadyMigrated else { return result }
-        let migration = migrationService.migrateIfNeeded(fromRoot: root, context: context)
-        result.migrationRan = migration.manifestWritten && migration.warnings.isEmpty
+        var manifestWritten = alreadyMigrated
+        if !alreadyMigrated {
+            let migration = migrationService.migrateIfNeeded(fromRoot: root, context: context)
+            result.migrationRan = migration.manifestWritten && migration.warnings.isEmpty
+            manifestWritten = migration.manifestWritten
+        }
+        // Quarantine returns from reconcileOnLaunch; unreadable stores return above. Neither reaches handover.
+        do {
+            try scenarioHandover?.handOver(context: context, readiness: ScenarioHandoverReadiness(
+                manifestWritten: manifestWritten, rebuildSaveFailed: result.rebuild.saveFailed,
+                ingestionNeedsRetry: result.ingestionNeedsRetry
+            ))
+        } catch {
+            let warning = "Scenario handover deferred until next launch: \(error.localizedDescription)"
+            log(warning)
+        }
         return result
     }
 

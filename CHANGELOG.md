@@ -8,6 +8,10 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 - Pensieve is open source. The code lives at [github.com/jaredatch/pensieve](https://github.com/jaredatch/pensieve), and that's the place to report a bug or ask for something.
 
+### Removed
+
+- Scenarios are gone. Skills they deployed stay in place, and existing scenario files stay in your synced store for older builds.
+
 ### Changed
 
 - The skill preview stays offline. An image a skill links from the web shows its alt text instead of loading, so opening a skill never pings someone else's server. Images in the skill's own folder, and images embedded in the file, still show.

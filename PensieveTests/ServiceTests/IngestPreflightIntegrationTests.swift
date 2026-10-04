@@ -22,7 +22,7 @@ extension IngestPreflightTests {
             ManifestSnapshot(
                 schemaVersion: ManifestService.currentSchemaVersion,
                 categories: [CategoryRecord(name: "Pulled", projectKeys: [], skillSlugs: [])],
-                scenarios: [], projects: [], skills: []
+                projects: [], skills: []
             ),
             toRoot: cliClone
         )
@@ -136,7 +136,7 @@ extension IngestPreflightTests {
         try manifest.write(
             ManifestSnapshot(
                 schemaVersion: ManifestService.currentSchemaVersion,
-                categories: [], scenarios: [], projects: [], skills: []
+                categories: [], projects: [], skills: []
             ),
             toRoot: seed
         )

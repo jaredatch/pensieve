@@ -205,7 +205,7 @@ final class SkillLibrarySaveTests: XCTestCase {
         // draft would write an orphan SKILL.md back onto disk.
         let container = try ModelContainer(
             for: Skill.self, Project.self, SkillProjectAssignment.self, IntentAssignment.self,
-            DeployRecord.self, Category.self, Scenario.self,
+            MachineDeployIntent.self, ScenarioAssignment.self, DeployRecord.self, Category.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = ModelContext(container)
@@ -215,16 +215,11 @@ final class SkillLibrarySaveTests: XCTestCase {
         context.insert(skill)
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "edited")
-        let reconciler = CategoryReconciler(platformVM: PlatformViewModel(
-            agentDetection: ZeroInstalledAgentDetection(), deployStateStore: .memoryBacked
+        XCTAssertTrue(SkillDeletionFlow.delete(
+            skill: skill, library: library,
+            platformVM: PlatformViewModel(agentDetection: ZeroInstalledAgentDetection(), deployStateStore: .memoryBacked),
+            projects: [], context: context
         ))
-
-        library.deleteSkill(
-            skill,
-            context: context,
-            categoryReconciler: reconciler,
-            scenarioReconciler: NoopScenarioReconciler()
-        )
 
         XCTAssertFalse(library.hasUnsavedChanges(for: skill))
         XCTAssertTrue(library.saveDraft(skill))            // nothing left to save
@@ -247,10 +242,6 @@ final class RecordingPresenter {
 private struct ZeroInstalledAgentDetection: AgentDetectionServiceProtocol {
     func isInstalled(_ platform: PlatformTarget) -> Bool { false }
     func installedPlatforms() -> [PlatformTarget] { [] }
-}
-
-private struct NoopScenarioReconciler: ScenarioReconcilerProtocol {
-    func reconcile(context: ModelContext) -> BatchResult { BatchResult() }
 }
 
 private struct SaveFailure: Error {}

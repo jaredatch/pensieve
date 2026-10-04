@@ -14,9 +14,6 @@ struct RebuildResult: Equatable {
     var categoriesInserted: Int = 0
     var categoriesUpdated: Int = 0
     var categoriesRemoved: Int = 0
-    var scenariosInserted: Int = 0
-    var scenariosUpdated: Int = 0
-    var scenariosRemoved: Int = 0
     var deployIntentsInserted: Int = 0
     var deployIntentsUpdated: Int = 0
     var deployIntentsRemoved: Int = 0
@@ -25,6 +22,8 @@ struct RebuildResult: Equatable {
     /// nothing was ingested. Distinct from per-item `warnings`. `SyncEngine` refuses to push over a store
     /// it couldn't read (a downgrade) and surfaces "update Pensieve" instead. (PLAN-08 / 08.4 review)
     var storeUnreadable: Bool = false
+    /// The rebuild computed changes but its save failed. Unrelated caller edits do not set this flag.
+    var saveFailed: Bool = false
 }
 
 // MARK: - Protocol
@@ -45,11 +44,14 @@ protocol StoreRebuildServiceProtocol {
 struct StoreRebuildService: StoreRebuildServiceProtocol {
     private let fileService: FileServiceProtocol
     private let manifestService: ManifestReadWriting
+    private let save: (ModelContext) throws -> Void
 
     init(fileService: FileServiceProtocol = FileService(),
-         manifestService: ManifestReadWriting = ManifestService()) {
+         manifestService: ManifestReadWriting = ManifestService(),
+         save: @escaping (ModelContext) throws -> Void = { try $0.save() }) {
         self.fileService = fileService
         self.manifestService = manifestService
+        self.save = save
     }
 
     @discardableResult
@@ -83,57 +85,19 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
         warnOverlaysWithoutFiles(snapshot: snapshot, filePresentSlugs: filePresentSlugs, result: &result)
         if manifestIsAuthoritative {
             rebuildCategories(snapshot: snapshot, context: context, result: &result)
-            rebuildScenarios(snapshot: snapshot, context: context, result: &result)
         }
         rebuildDeployIntents(snapshot: snapshot, context: context, result: &result)
 
         // Surface a persistence failure instead of returning success counts over an unsaved store
         // (PLAN-07 / 07.4 review — the codebase's surface-don't-swallow rule).
         do {
-            try context.save()
+            try save(context)
         } catch {
+            result.saveFailed = true
             result.warnings.append(
                 "Rebuild computed changes but saving the local store failed: \(error.localizedDescription)")
         }
         return result
-    }
-}
-
-// MARK: - Scenarios reconcile
-
-extension StoreRebuildService {
-    private func rebuildScenarios(snapshot: ManifestSnapshot,
-                                  context: ModelContext,
-                                  result: inout RebuildResult) {
-        let existingScenarios = (try? context.fetch(FetchDescriptor<Scenario>())) ?? []
-        var existingByID = Dictionary(existingScenarios.map { ($0.id.uuidString, $0) },
-                                      uniquingKeysWith: { first, _ in first })
-
-        for record in snapshot.scenarios {
-            guard let id = UUID(uuidString: record.id) else { continue }
-            let canonicalID = id.uuidString
-            let skillSlugs = Array(Set(record.skillSlugs)).sorted()
-            let agents = Array(Set(record.agents)).sorted()
-
-            if let existing = existingByID.removeValue(forKey: canonicalID) {
-                var changed = false
-                if existing.name != record.name { existing.name = record.name; changed = true }
-                if existing.skillSlugs != skillSlugs { existing.skillSlugs = skillSlugs; changed = true }
-                if existing.agentRawValues != agents { existing.agentRawValues = agents; changed = true }
-                if changed { result.scenariosUpdated += 1 }
-            } else {
-                let scenario = Scenario(id: id, name: record.name)
-                scenario.skillSlugs = skillSlugs
-                scenario.agentRawValues = agents
-                context.insert(scenario)
-                result.scenariosInserted += 1
-            }
-        }
-
-        for scenario in existingByID.values {
-            context.delete(scenario)
-            result.scenariosRemoved += 1
-        }
     }
 }
 

@@ -16,7 +16,7 @@ struct ConvergenceRecordingDeploy: DeployReconciling {
     }
 }
 
-struct ConvergenceRecordingLedger: CategoryReconcilerProtocol, ScenarioReconcilerProtocol,
+struct ConvergenceRecordingLedger: CategoryReconcilerProtocol,
     IntentReconcilerProtocol {
     let name: String
     let recorder: ConvergenceRecorder

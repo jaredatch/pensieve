@@ -49,10 +49,12 @@ final class SyncNudgeTests: XCTestCase {
     func testSkillDeleteNudges() throws {
         let fixture = try libraryFixture()
         let skill = try insertSkill(slug: "delete", store: fixture.store, context: fixture.context)
-        fixture.library.deleteSkill(
-            skill, context: fixture.context,
-            categoryReconciler: ResultReconciler(), scenarioReconciler: ResultReconciler()
-        )
+        XCTAssertTrue(SkillDeletionFlow.delete(
+            skill: skill, library: fixture.library,
+            platformVM: PlatformViewModel(agentDetection: DeployStubDetection(installed: []),
+                                          deployStateStore: .memoryBacked),
+            projects: [], context: fixture.context
+        ))
         XCTAssertEqual(fixture.counter.value, 1)
     }
 
@@ -78,16 +80,6 @@ final class SyncNudgeTests: XCTestCase {
         context.insert(skill)
         counter.reset()
         store.setSkill(skill, inCategory: category, assigned: true, context: context)
-        XCTAssertEqual(counter.value, 1)
-    }
-
-    func testScenarioDefinitionChangeNudges() throws {
-        let context = try makeContext()
-        let counter = Counter()
-        let store = ScenarioStore(defaults: try isolatedDefaults(), notifier: counter.notify)
-        let scenario = try XCTUnwrap(store.create(name: "Focus", context: context))
-        counter.reset()
-        store.setAgent(.codex, inScenario: scenario, enabled: false, context: context)
         XCTAssertEqual(counter.value, 1)
     }
 
@@ -210,24 +202,22 @@ final class SyncNudgeTests: XCTestCase {
         let context = try makeContext()
         let counter = Counter()
         let categoryStore = CategoryStore(notifier: counter.notify)
-        let scenarioStore = ScenarioStore(defaults: try isolatedDefaults(), notifier: counter.notify)
         let memoryStore = MemorySkillStore()
         let library = SkillLibraryViewModel(
-            skillStore: memoryStore, categoryStore: categoryStore, scenarioStore: scenarioStore,
-            fileService: FileService(),
+            skillStore: memoryStore, fileService: FileService(),
             fileWatchService: RecordingWatcher(), notifier: counter.notify
         )
         let skill = try insertSkill(slug: "compound", store: memoryStore, context: context)
         let category = try XCTUnwrap(categoryStore.create(name: "Rules", context: context))
         categoryStore.setSkill(skill, inCategory: category, assigned: true, context: context)
-        let scenario = try XCTUnwrap(scenarioStore.create(name: "Focus", context: context))
-        scenarioStore.setSkill(skill, inScenario: scenario, assigned: true, context: context)
         counter.reset()
 
-        library.deleteSkill(
-            skill, context: context,
-            categoryReconciler: ResultReconciler(), scenarioReconciler: ResultReconciler()
-        )
+        XCTAssertTrue(SkillDeletionFlow.delete(
+            skill: skill, library: library,
+            platformVM: PlatformViewModel(agentDetection: DeployStubDetection(installed: []),
+                                          deployStateStore: .memoryBacked),
+            projects: [], context: context
+        ))
         XCTAssertEqual(counter.value, 1)
     }
 
@@ -378,7 +368,7 @@ private struct FixedImportScanner: ImportScannerProtocol {
     func isInsideStore(_ path: String) -> Bool { false }
 }
 
-private struct ResultReconciler: CategoryReconcilerProtocol, ScenarioReconcilerProtocol {
+private struct ResultReconciler: CategoryReconcilerProtocol {
     var fails = false
 
     func reconcile(context: ModelContext) -> BatchResult {

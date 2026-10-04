@@ -18,7 +18,6 @@ final class PostSyncConvergence: PostSyncConverging {
     private let deployReconciler: DeployReconciling
     private let contextFactory: ContextFactory
     private let categoryReconciler: CategoryReconcilerProtocol
-    private let scenarioReconciler: ScenarioReconcilerProtocol
     private let intentReconciler: IntentReconcilerProtocol
     private let auditLog: (_ category: String, _ detail: String) -> Void
     /// Fires after each convergence pass; AppRuntime refreshes the deploy index here (PLAN-29).
@@ -29,7 +28,6 @@ final class PostSyncConvergence: PostSyncConverging {
         deployReconciler: DeployReconciling,
         contextFactory: @escaping ContextFactory,
         categoryReconciler: CategoryReconcilerProtocol,
-        scenarioReconciler: ScenarioReconcilerProtocol,
         intentReconciler: IntentReconcilerProtocol,
         auditLog: @escaping (_ category: String, _ detail: String) -> Void = {
             SyncAudit().append(category: $0, detail: $1)
@@ -40,7 +38,6 @@ final class PostSyncConvergence: PostSyncConverging {
         self.deployReconciler = deployReconciler
         self.contextFactory = contextFactory
         self.categoryReconciler = categoryReconciler
-        self.scenarioReconciler = scenarioReconciler
         self.intentReconciler = intentReconciler
         self.auditLog = auditLog
         self.didConverge = didConverge
@@ -67,7 +64,6 @@ final class PostSyncConvergence: PostSyncConverging {
         guard runLedgerReconcilers else { return }
         let context = contextFactory()
         record(categoryReconciler.reconcile(context: context), name: "category")
-        record(scenarioReconciler.reconcile(context: context), name: "scenario")
         record(intentReconciler.reconcile(context: context), name: "intent")
     }
 

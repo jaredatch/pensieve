@@ -13,10 +13,14 @@ protocol FileServiceProtocol {
     func writeData(at path: String, data: Data) throws
     func writeExecutableFile(at path: String, content: String) throws
     func copyFile(at sourcePath: String, to destinationPath: String) throws
+    /// Copies regular entries from one no-follow directory descriptor; never traverses child links.
+    func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws -> RegularFileCopyReceipt
     func deleteFile(at path: String) throws
     func fileExists(at path: String) -> Bool
     /// The final entry itself, including dangling links. Only ENOENT is absence; other failures throw.
     func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool
+    /// No-follow entry type. Only ENOENT is nil; every other lookup failure throws.
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType?
     func isExecutableFile(at path: String) -> Bool
     func isUserExecutableFile(at path: String) -> Bool
     func directoryExists(at path: String) -> Bool
@@ -27,6 +31,8 @@ protocol FileServiceProtocol {
     func isSymlink(at path: String) -> Bool
     func isRegularFile(at path: String) -> Bool
     func listDirectory(at path: String) throws -> [String]
+    /// Proves read and search access to a folder without enumerating its entries.
+    func checkDirectoryReadable(at path: String) throws
     func contentsHash(at path: String) throws -> String
     /// The file system's identity for a path — device and inode: the link itself when
     /// `followingLinks` is false, what it reaches when true; nil when nothing is there. Two spellings
@@ -36,9 +42,13 @@ protocol FileServiceProtocol {
     /// `realpath(3)`: every link resolved and `/private` kept, unlike `resolvingSymlinksInPath`. A path
     /// that does not exist comes back as given. (Inert default below.)
     func realPath(at path: String) -> String
+    /// Resolves every link with realpath(3); every failure, including absence, throws.
+    func resolveRealPath(at path: String) throws -> String
     func regularFileMetadata(at path: String) -> RegularFileMetadata?
     func touchRegularFile(at path: String, date: Date) throws
 }
+
+enum FileEntryType { case directory, symlink, regular, other }
 
 /// A file's identity on its volume; see `FileServiceProtocol.fileIdentity(at:followingLinks:)`.
 struct FileIdentity: Equatable {
@@ -54,6 +64,9 @@ struct RegularFileMetadata: Equatable {
 // MARK: - Default implementations
 
 extension FileServiceProtocol {
+    /// Inert default: an unmodeled directory probe is unknown and never accesses the host.
+    func checkDirectoryReadable(at path: String) throws { throw CocoaError(.fileReadUnknown) }
+
     /// Existing doubles refuse byte writes unless they explicitly support them; never fall through to host I/O.
     func writeData(at path: String, data: Data) throws {
         throw CocoaError(.featureUnsupported)
@@ -64,12 +77,20 @@ extension FileServiceProtocol {
         throw CocoaError(.fileReadUnknown)
     }
 
+    /// Inert default: an unmodeled entry type is unknown and performs no host I/O.
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        throw CocoaError(.fileReadUnknown)
+    }
+
     /// Inert default: a double that does not model identity answers "unknown", and a
     /// consumer falls back to spelling.
     func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? { nil }
 
     /// Inert default: no resolution.
     func realPath(at path: String) -> String { path }
+
+    /// Inert default: unmodeled resolution is unknown and performs no host I/O.
+    func resolveRealPath(at path: String) throws -> String { throw CocoaError(.fileReadUnknown) }
 
     /// Inert default: a double that does not model regular-file metadata answers unknown.
     func regularFileMetadata(at path: String) -> RegularFileMetadata? { nil }
@@ -104,22 +125,8 @@ extension FileServiceProtocol {
     /// flag has no effect on the subsequent reads.
     func copyFile(at sourcePath: String, to destinationPath: String) throws {
         let (fd, status) = try FileService.openRegularFile(at: sourcePath)
-        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        let data = handle.readDataToEndOfFile()
-        let created = FileManager.default.createFile(
-            atPath: destinationPath,
-            contents: data,
-            attributes: [.posixPermissions: status.st_mode & 0o777]
-        )
-        guard created, FileManager.default.fileExists(atPath: destinationPath) else {
-            throw NSError(
-                domain: NSCocoaErrorDomain,
-                code: NSFileWriteUnknownError,
-                userInfo: [
-                    NSLocalizedDescriptionKey: "failed to create \(destinationPath)"
-                ]
-            )
-        }
+        defer { close(fd) }
+        try DescriptorFileCopy.copy(from: fd, status: status, sourcePath: sourcePath, to: destinationPath)
     }
 
     /// True iff the owner/user executable bit is set on a regular file. Group/world execute bits do
@@ -216,11 +223,22 @@ final class FileService: FileServiceProtocol {
     }
 
     func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {
+        try entryTypeWithoutFollowingLinks(at: path) != nil
+    }
+
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
         var info = stat()
-        if lstat(path, &info) == 0 { return true }
-        let code = errno
-        if code == ENOENT { return false }
-        throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [NSFilePathErrorKey: path])
+        guard lstat(path, &info) == 0 else {
+            let code = errno
+            if code == ENOENT { return nil }
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [NSFilePathErrorKey: path])
+        }
+        switch info.st_mode & S_IFMT {
+        case S_IFDIR: return .directory
+        case S_IFLNK: return .symlink
+        case S_IFREG: return .regular
+        default: return .other
+        }
     }
 
     func isExecutableFile(at path: String) -> Bool {
@@ -267,12 +285,6 @@ final class FileService: FileServiceProtocol {
         var info = stat()
         let status = followingLinks ? stat(path, &info) : lstat(path, &info)
         return status == 0 ? FileIdentity(device: info.st_dev, inode: info.st_ino) : nil
-    }
-
-    func realPath(at path: String) -> String {
-        guard let resolved = realpath(path, nil) else { return path }
-        defer { free(resolved) }
-        return String(cString: resolved)
     }
 
     /// Reads size and recency from one `lstat`, refusing links and non-regular nodes without opening them.

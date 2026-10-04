@@ -78,7 +78,6 @@ final class SyncSetupModel {
             do {
                 return try context.fetchCount(FetchDescriptor<Skill>()) == 0
                     && context.fetchCount(FetchDescriptor<Category>()) == 0
-                    && context.fetchCount(FetchDescriptor<Scenario>()) == 0
                     && context.fetchCount(FetchDescriptor<Project>()) == 0
                     && context.fetchCount(FetchDescriptor<MachineDeployIntent>()) == 0
             } catch {

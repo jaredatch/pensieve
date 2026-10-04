@@ -20,17 +20,6 @@ final class RelatedSkillsTests: XCTestCase {
         XCTAssertTrue(RelatedSkills.forCategory(category, in: [skill]).isEmpty)
     }
 
-    func testForScenarioReturnsAssignedSkills() {
-        let assigned = Skill(name: "Assigned", directoryName: "assigned")
-        let unrelated = Skill(name: "Unrelated", directoryName: "unrelated")
-        let scenario = Scenario(name: "Writing")
-        scenario.skillSlugs = [assigned.directoryName]
-
-        let result = RelatedSkills.forScenario(scenario, in: [assigned, unrelated])
-
-        XCTAssertEqual(result.map(\.directoryName), ["assigned"])
-    }
-
     func testForTagReturnsTaggedSkills() {
         let tagged = Skill(name: "Tagged", tags: ["swift"], directoryName: "tagged")
         let unrelated = Skill(name: "Unrelated", tags: ["writing"], directoryName: "unrelated")

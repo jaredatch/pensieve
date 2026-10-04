@@ -138,7 +138,7 @@ extension SkillLibraryViewModel {
     // MARK: - The unreadable-store fence (PLAN-31); its two writers sit with the flag
 
     /// Every entry point that creates a new entity — a skill by sheet, scan, folder, or GitHub; a
-    /// project; a category; a scenario — and the first-launch wizard read this, never
+    /// project; a category — and the first-launch wizard read this, never
     /// `libraryUnavailable` alone. Edits read `libraryUnavailable` / `isWriteFenced` as before.
     var addsFenced: Bool { libraryUnavailable || storeUnreadable }
 

@@ -8,9 +8,6 @@ final class SkillLibraryViewModel {
         case deleted
         /// Deleted, but the manifest rewrite failed (`error` carries the message); the manifest lags until the next mutation.
         case deletedManifestStale
-        /// A category/scenario reconcile failed (only `deleteSkill` produces this); the skill and its
-        /// pending edit are retained.
-        case retainedReconcileFailed(failures: Int)
         /// `skillStore.deleteSkill` threw; the directory and the row are both still there. The pending
         /// edit was already cancelled.
         case retainedDirectoryDeleteFailed(String)
@@ -41,8 +38,6 @@ final class SkillLibraryViewModel {
     }
 
     let skillStore: SkillStoreProtocol
-    private let categoryStore: CategoryStoreProtocol
-    private let scenarioStore: ScenarioStoreProtocol
     let fileService: FileServiceProtocol
     /// The self-write fingerprint by slug: the body the app last wrote or loaded, in the store's canonical form
     /// (`SkillParser.canonicalBody`). NOT observed: the install and update finalizers mutate it off the main thread
@@ -97,8 +92,6 @@ final class SkillLibraryViewModel {
     var deletionNotice: DeletionNotice?
     init(
         skillStore: SkillStoreProtocol? = nil,
-        categoryStore: CategoryStoreProtocol = CategoryStore(),
-        scenarioStore: ScenarioStoreProtocol = ScenarioStore(),
         fileService: FileServiceProtocol? = nil,
         fileWatchService: FileWatchServiceProtocol? = nil,
         manifestService: ManifestSnapshotting? = nil,
@@ -108,8 +101,6 @@ final class SkillLibraryViewModel {
         let fs = fileService ?? FileService()
         self.fileService = fs
         self.skillStore = skillStore ?? SkillStore(fileService: fs)
-        self.categoryStore = categoryStore
-        self.scenarioStore = scenarioStore
         self.fileWatchService = fileWatchService ?? FileWatchService()
         self.manifestService = manifestService
         self.manifestRoot = manifestRoot
@@ -183,54 +174,6 @@ final class SkillLibraryViewModel {
 }
 
 extension SkillLibraryViewModel {
-    @discardableResult
-    func deleteSkill(
-        _ skill: Skill,
-        context: ModelContext,
-        categoryReconciler: CategoryReconcilerProtocol,
-        scenarioReconciler: ScenarioReconcilerProtocol
-    ) -> SkillDeletionResult {
-        defer { notifier() }
-        // (1) prune the skill's slug from every category/scenario, (2) reconcile while the skill is still live.
-        // NOTE: the draft is discarded only in deleteSkillEntry, after the reconcile — if the reconcile fails the
-        // skill is RETAINED for retry, and dropping the draft here would silently lose the user's unsaved edit to a
-        // skill that survives.
-        let categoryResult = categoryStore.reconcileAfterRemovingSkill(
-            skill,
-            reconciler: categoryReconciler,
-            context: context,
-            notifier: SyncStateNotifier.suppressed
-        )
-        let scenarioResult = scenarioStore.reconcileAfterRemovingSkill(
-            skill,
-            reconciler: scenarioReconciler,
-            context: context,
-            notifier: SyncStateNotifier.suppressed
-        )
-        let failureCount = categoryResult.failureCount + scenarioResult.failureCount
-        guard !categoryResult.hasFailures && !scenarioResult.hasFailures else {
-            // A failed unlink keeps its ledger row; leave the skill (and its pending edit) so the next
-            // attempt can retry (§C — no silent orphan, and no silent edit loss).
-            // The membership prune above WAS committed to SwiftData, so regenerate the manifest to match it
-            // (otherwise the overlay lists a membership the store no longer has). Set the deploy-failure
-            // error AFTER regenerate so it stays the surfaced message (PLAN-07 / 07.3 review).
-            regenerateManifest(context: context)
-            let pairFailureCount = categoryResult.failures.count + scenarioResult.failures.count
-            var messages = categoryResult.readFailures.map(\.message) + scenarioResult.readFailures.map(\.message)
-            if pairFailureCount > 0 {
-                messages.insert(
-                    "Couldn't remove this skill from all its categories or scenarios — "
-                        + "\(pairFailureCount) deploy(s) failed.",
-                    at: 0
-                )
-            }
-            messages.append("The skill was kept so you can retry.")
-            self.error = messages.joined(separator: " ")
-            return .retainedReconcileFailed(failures: failureCount)
-        }
-        return deleteSkillEntry(skill, context: context)
-    }
-
     /// Delete a skill's files and its row — nothing else. Callers retire memberships/ledgers/intent first.
     /// Never nudges sync; the caller does, once, after its own authoritative manifest write.
     @discardableResult

@@ -10,7 +10,7 @@ private struct IntentEndToEndIdentity: MachineIdentityProviding {
 
 private struct IntentEndToEndStateService: MachineStateServicing {
     func compose(machineID: String, context: ModelContext, publishedAt: Date) throws -> MachineState {
-        throw ScenarioStubFailure()
+        throw DeployStubFailure()
     }
     func write(_ state: MachineState, toRoot root: String) throws {}
     func readAll(fromRoot root: String) -> [MachineState] { [] }
@@ -43,8 +43,8 @@ final class IntentEndToEndTests: XCTestCase {
         try syncIntentToTarget(harness)
 
         XCTAssertEqual(Set(harness.linkService.linkCalls), Set([
-            ScenarioRecordedLink(directoryName: "managed", platform: .claudeCode, projectPath: nil),
-            ScenarioRecordedLink(directoryName: "managed", platform: .codex, projectPath: nil)
+            DeployRecordedLink(directoryName: "managed", platform: .claudeCode, projectPath: nil),
+            DeployRecordedLink(directoryName: "managed", platform: .codex, projectPath: nil)
         ]))
         let rows = try assignmentRows(container: harness.containerB)
         let targetSkill = try skill("managed", context: ModelContext(harness.containerB))
@@ -70,7 +70,7 @@ final class IntentEndToEndTests: XCTestCase {
         try syncIntentToTarget(harness)
 
         XCTAssertEqual(harness.linkService.unlinkCalls, [
-            ScenarioRecordedLink(directoryName: "managed", platform: .codex, projectPath: nil)
+            DeployRecordedLink(directoryName: "managed", platform: .codex, projectPath: nil)
         ])
         let targetSkill = try skill("managed", context: ModelContext(harness.containerB))
         XCTAssertEqual(try assignmentRows(container: harness.containerB).map(\.key), [
@@ -155,8 +155,8 @@ private extension IntentEndToEndTests {
         let modelA: DeployIntentModel
         let convergenceB: PostSyncConvergence
         let platformVMB: PlatformViewModel
-        let fileService: ScenarioRecordingFileService
-        let linkService: ScenarioRecordingLinkService
+        let fileService: DeployRecordingFileService
+        let linkService: DeployRecordingLinkService
     }
 
     func makeHarness() throws -> Harness {
@@ -179,13 +179,13 @@ private extension IntentEndToEndTests {
         _ = StoreRebuildService().rebuild(fromRoot: cloneA, context: contextA)
         _ = StoreRebuildService().rebuild(fromRoot: cloneB, context: contextB)
 
-        let fileService = ScenarioRecordingFileService()
-        let linkService = ScenarioRecordingLinkService(fileService: fileService)
+        let fileService = DeployRecordingFileService()
+        let linkService = DeployRecordingLinkService(fileService: fileService)
         let platformVMB = makePlatformVM(
             fileService: fileService, linkService: linkService, installed: [.claudeCode, .codex]
         )
         let platformVMA = makePlatformVM(
-            fileService: ScenarioRecordingFileService(), installed: [.claudeCode, .codex]
+            fileService: DeployRecordingFileService(), installed: [.claudeCode, .codex]
         )
         let identityA = IntentEndToEndIdentity(id: machineA)
         let identityB = IntentEndToEndIdentity(id: machineB)
@@ -223,7 +223,7 @@ private extension IntentEndToEndTests {
                 },
                 notifier: {},
                 reconcile: { context in
-                    IntentReconciler(platformVM: platformVM, machineIdentity: identity)
+                    IntentReconciler(platformVM: platformVM, machineIdentity: identity, handoverIsComplete: { false })
                         .reconcile(context: context)
                 },
                 lockPath: tempDir + "/cloneA-sync.lock"
@@ -242,7 +242,7 @@ private extension IntentEndToEndTests {
         ).makeConvergence(
             container: container,
             platformVM: platformVM,
-            intentReconciler: IntentReconciler(platformVM: platformVM, machineIdentity: identity)
+            intentReconciler: IntentReconciler(platformVM: platformVM, machineIdentity: identity, handoverIsComplete: { false })
         )
     }
 
@@ -259,16 +259,16 @@ private extension IntentEndToEndTests {
     }
 
     func makePlatformVM(
-        fileService: ScenarioRecordingFileService,
-        linkService: ScenarioRecordingLinkService? = nil,
+        fileService: DeployRecordingFileService,
+        linkService: DeployRecordingLinkService? = nil,
         installed: [PlatformTarget]
     ) -> PlatformViewModel {
-        let resolvedLink = linkService ?? ScenarioRecordingLinkService(fileService: fileService)
+        let resolvedLink = linkService ?? DeployRecordingLinkService(fileService: fileService)
         return PlatformViewModel(
             fileService: fileService,
             linkService: resolvedLink,
-            cursorCompiler: ScenarioRecordingCursorCompiler(fileService: fileService),
-            agentDetection: ScenarioStubDetection(installed: installed),
+            cursorCompiler: DeployRecordingCursorCompiler(fileService: fileService),
+            agentDetection: DeployStubDetection(installed: installed),
             deployStateStore: DeployStateStore(fileService: fileService)
         )
     }
@@ -320,7 +320,7 @@ private extension IntentEndToEndTests {
         }
         try manifest.write(
             ManifestSnapshot(
-                schemaVersion: 4, categories: [], scenarios: [], projects: [], skills: overlays
+                schemaVersion: 4, categories: [], projects: [], skills: overlays
             ),
             toRoot: seed
         )

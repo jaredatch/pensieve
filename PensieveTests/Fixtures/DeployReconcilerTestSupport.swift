@@ -2,29 +2,29 @@ import Foundation
 import SwiftData
 @testable import Pensieve
 
-struct ScenarioRecordedLink: Hashable {
+struct DeployRecordedLink: Hashable {
     let directoryName: String
     let platform: PlatformTarget
     let projectPath: String?
 }
 
-struct ScenarioRecordedCursorCall: Hashable {
+struct DeployRecordedCursorCall: Hashable {
     let directoryName: String
     let projectPath: String?
 }
 
-struct ScenarioStubFailure: LocalizedError {
+struct DeployStubFailure: LocalizedError {
     let errorDescription: String? = "stub failure"
 }
 
-struct ScenarioStubDetection: AgentDetectionServiceProtocol {
+struct DeployStubDetection: AgentDetectionServiceProtocol {
     let installed: [PlatformTarget]
 
     func isInstalled(_ platform: PlatformTarget) -> Bool { installed.contains(platform) }
     func installedPlatforms() -> [PlatformTarget] { installed }
 }
 
-final class ScenarioRecordingFileService: FileServiceProtocol {
+final class DeployRecordingFileService: FileServiceProtocol {
     var files: Set<String> = []
     var symlinks: Set<String> = []
     var contents: [String: String] = [:]
@@ -52,40 +52,40 @@ final class ScenarioRecordingFileService: FileServiceProtocol {
     func contentsHash(at path: String) throws -> String { "hash" }
 }
 
-final class ScenarioRecordingLinkService: LinkServiceProtocol {
-    let fileService: ScenarioRecordingFileService
-    var linkCalls: [ScenarioRecordedLink] = []
-    var unlinkCalls: [ScenarioRecordedLink] = []
+final class DeployRecordingLinkService: LinkServiceProtocol {
+    let fileService: DeployRecordingFileService
+    var linkCalls: [DeployRecordedLink] = []
+    var unlinkCalls: [DeployRecordedLink] = []
     var throwOnLink: Set<PlatformTarget> = []
     var throwOnUnlink: Set<PlatformTarget> = []
     var throwOnLinkPaths: Set<String> = []
     var throwOnUnlinkPaths: Set<String> = []
     var onLink: (() -> Void)?
 
-    init(fileService: ScenarioRecordingFileService) {
+    init(fileService: DeployRecordingFileService) {
         self.fileService = fileService
     }
 
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
         onLink?()
-        linkCalls.append(ScenarioRecordedLink(
+        linkCalls.append(DeployRecordedLink(
             directoryName: skill.directoryName,
             platform: platform,
             projectPath: projectPath
         ))
         let path = linkPath(skill: skill, platform: platform, projectPath: projectPath)
-        if throwOnLink.contains(platform) || throwOnLinkPaths.contains(path) { throw ScenarioStubFailure() }
+        if throwOnLink.contains(platform) || throwOnLinkPaths.contains(path) { throw DeployStubFailure() }
         fileService.symlinks.insert(path)
     }
 
     func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
-        unlinkCalls.append(ScenarioRecordedLink(
+        unlinkCalls.append(DeployRecordedLink(
             directoryName: skill.directoryName,
             platform: platform,
             projectPath: projectPath
         ))
         let path = linkPath(skill: skill, platform: platform, projectPath: projectPath)
-        if throwOnUnlink.contains(platform) || throwOnUnlinkPaths.contains(path) { throw ScenarioStubFailure() }
+        if throwOnUnlink.contains(platform) || throwOnUnlinkPaths.contains(path) { throw DeployStubFailure() }
         try fileService.deleteFile(at: path)
     }
 
@@ -104,26 +104,26 @@ final class ScenarioRecordingLinkService: LinkServiceProtocol {
     func validateAll(skills: [Skill]) -> [BrokenLink] { [] }
 }
 
-final class ScenarioRecordingCursorCompiler: CursorCompilerProtocol {
-    let fileService: ScenarioRecordingFileService
-    var compileCalls: [ScenarioRecordedCursorCall] = []
-    var removeCalls: [ScenarioRecordedCursorCall] = []
+final class DeployRecordingCursorCompiler: CursorCompilerProtocol {
+    let fileService: DeployRecordingFileService
+    var compileCalls: [DeployRecordedCursorCall] = []
+    var removeCalls: [DeployRecordedCursorCall] = []
     var throwOnCompile = false
     var throwOnRemove = false
 
-    init(fileService: ScenarioRecordingFileService) {
+    init(fileService: DeployRecordingFileService) {
         self.fileService = fileService
     }
 
     func compile(skill: Skill, projectPath: String?) throws {
-        compileCalls.append(ScenarioRecordedCursorCall(directoryName: skill.directoryName, projectPath: projectPath))
-        if throwOnCompile { throw ScenarioStubFailure() }
+        compileCalls.append(DeployRecordedCursorCall(directoryName: skill.directoryName, projectPath: projectPath))
+        if throwOnCompile { throw DeployStubFailure() }
         fileService.files.insert(outputPath(skill: skill, projectPath: projectPath))
     }
 
     func remove(skill: Skill, projectPath: String?) throws {
-        removeCalls.append(ScenarioRecordedCursorCall(directoryName: skill.directoryName, projectPath: projectPath))
-        if throwOnRemove { throw ScenarioStubFailure() }
+        removeCalls.append(DeployRecordedCursorCall(directoryName: skill.directoryName, projectPath: projectPath))
+        if throwOnRemove { throw DeployStubFailure() }
         try fileService.deleteFile(at: outputPath(skill: skill, projectPath: projectPath))
     }
 
@@ -132,12 +132,4 @@ final class ScenarioRecordingCursorCompiler: CursorCompilerProtocol {
     func outputPath(skill: Skill, projectPath: String?) -> String {
         (projectPath ?? "/tmp/user-wide") + "/cursor/" + skill.directoryName + ".mdc"
     }
-}
-
-struct ScenarioHarness {
-    let store: ScenarioStore
-    let reconciler: ScenarioReconciler
-    let fileService: ScenarioRecordingFileService
-    let linkService: ScenarioRecordingLinkService
-    let cursorCompiler: ScenarioRecordingCursorCompiler
 }

@@ -33,7 +33,6 @@ enum SkillOrigin: Equatable {
 struct SkillOverlay: Equatable { var slug: String; var createdAt: Date; var scope: SkillScope; var tags: [String]
     var cursor: CursorAdapterConfig?; var agents: [String]; var origin: SkillOrigin }
 struct CategoryRecord: Equatable { var name: String; var projectKeys: [String]; var skillSlugs: [String] }
-struct ScenarioRecord: Equatable { var id: String; var name: String; var skillSlugs: [String]; var agents: [String] }
 struct ProjectIdentityRecord: Equatable { var identityKey: String; var identityKind: String; var name: String }
 struct DeployIntentRecord: Equatable {
     var machineID: String
@@ -45,20 +44,17 @@ struct DeployIntentRecord: Equatable {
 struct ManifestSnapshot: Equatable {
     var schemaVersion: Int
     var categories: [CategoryRecord]
-    var scenarios: [ScenarioRecord]
     var projects: [ProjectIdentityRecord]
     var skills: [SkillOverlay]
     var deployIntents: [DeployIntentRecord]
 
     init(schemaVersion: Int,
          categories: [CategoryRecord],
-         scenarios: [ScenarioRecord],
          projects: [ProjectIdentityRecord],
          skills: [SkillOverlay],
          deployIntents: [DeployIntentRecord] = []) {
         self.schemaVersion = schemaVersion
         self.categories = categories
-        self.scenarios = scenarios
         self.projects = projects
         self.skills = skills
         self.deployIntents = deployIntents

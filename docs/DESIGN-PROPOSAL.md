@@ -50,7 +50,7 @@ A developer opens Pensieve for the first time. They see a clean sidebar with the
 
 ## Visual Audit: Current State
 
-> **Staleness note (2026-07-27):** the audit below dates from the pre-PLAN-02 era and was largely addressed by PLAN-02's polish pass (June 2026). It is retained as design rationale, but it no longer describes the live app — and the ~16 backend-dominant plans since PLAN-02 accreted **unaudited surfaces** this document never covered: the Projects / Categories / Scenarios sidebar sections (currently three stacked "Add X…" placeholder buttons when empty), sync affordances (bottom-corner "Set up sync" CTA), the Platforms collapsed panel, and toolbar growth. A 2026-07-27 side-by-side against Chops identified four gap themes for the pre-1.0 design pass: **list density & row design** (our heavy solid-fill card + "0 tags" noise vs compact rows with per-tool glyphs at 200+-skill scale), **empty states** (admin buttons standing where content should be), **detail-header hierarchy** (flat header, dead left gutter, cramped meta; Chops's frontmatter-as-code-block + bottom status bar are patterns worth stealing), and **chrome craft** (scattered toolbar icons, buried search). The design *system* in this file (colors/type/spacing/components) remains binding; the pass is about applying it to the new surfaces and re-judging density with a populated library. The approach is settled: design work runs as small changes against Apple's stock apps as the north star.
+> **Staleness note (2026-07-27):** the audit below dates from the pre-PLAN-02 era and was largely addressed by PLAN-02's polish pass (June 2026). It is retained as design rationale, but it no longer describes the live app — and the ~16 backend-dominant plans since PLAN-02 accreted **unaudited surfaces** this document never covered: the Projects / Categories sidebar sections (then stacked "Add X…" placeholder buttons when empty), sync affordances (bottom-corner "Set up sync" CTA), the Platforms collapsed panel, and toolbar growth. A 2026-07-27 side-by-side against Chops identified four gap themes for the pre-1.0 design pass: **list density & row design** (our heavy solid-fill card + "0 tags" noise vs compact rows with per-tool glyphs at 200+-skill scale), **empty states** (admin buttons standing where content should be), **detail-header hierarchy** (flat header, dead left gutter, cramped meta; Chops's frontmatter-as-code-block + bottom status bar are patterns worth stealing), and **chrome craft** (scattered toolbar icons, buried search). The design *system* in this file (colors/type/spacing/components) remains binding; the pass is about applying it to the new surfaces and re-judging density with a populated library. The approach is settled: design work runs as small changes against Apple's stock apps as the north star.
 
 ### Problems
 
@@ -269,7 +269,7 @@ Note: `Capsule()` is still used for pill-shaped badges — these tokens are for 
 
 **Reference apps:** Photos' People and Places, and Music's Artists and Genres. These tier-1 precedents put entity types in the sidebar and the entities themselves in the content area.
 
-**Design:** The sidebar uses six section rows: Skills, Projects, Categories, Scenarios, Tags, and Machines. Machines appears only when sync is configured or a machine state exists, so an unconfigured app shows five rows. Selecting a row opens that section's searchable list in the middle column; selecting an entity opens its detail. The sidebar never grows one row per project, category, scenario, tag, or machine.
+**Design:** The sidebar uses five section rows: Skills, Projects, Categories, Tags, and Machines. Machines appears only when sync is configured or a machine state exists, so an unconfigured app shows four rows. Selecting a row opens that section's searchable list in the middle column; selecting an entity opens its detail. The sidebar never grows one row per project, category, tag, or machine.
 
 **Implementation notes:**
 - Use one title-case row per `SidebarSection`, with no extra section headers.
@@ -293,7 +293,6 @@ Section     Line 1 (bold)          Trailing                    Line 2 (primary) 
 Skills      name                   [conflict|update|mark] date  deploy summary on this Mac     description
 Projects    name                   "N skills" / unavailable    path, tilde-abbreviated, middle  git remote / marker / pending
 Categories  name                   "N projects · M skills"     member project names             assigned skill names
-Scenarios   name                   "Active" when active        member skill names               enabled agents
 Tags        tag                    "N skills"                  carrying skill names             —
 Machines    name [+ " (This Mac)"] last published              detected agents                  "N user-wide skills · M project deploys"
 ```
@@ -522,7 +521,7 @@ The sidebar and content columns carry these widths (`ContentView`, `ContentColum
 
 The toolbar has three regions. The sidebar toggle comes first. The content column holds the title and subtitle, then Filter on Skills and View on every section. The detail region starts with +, followed by a flexible space, More, and Search.
 
-The + adds what the current sidebar section holds: a skill, project, category, or scenario. It is absent for Tags and Machines.
+The + adds what the current sidebar section holds: a skill, project, or category. It is absent for Tags and Machines.
 
 ---
 

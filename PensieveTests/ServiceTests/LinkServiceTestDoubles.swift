@@ -202,6 +202,12 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     func fileExists(at path: String) -> Bool {
         wrapped.fileExists(at: resolved(path))
     }
+    func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {
+        try wrapped.entryExistsWithoutFollowingLinks(at: resolved(path))
+    }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try wrapped.entryTypeWithoutFollowingLinks(at: resolved(path))
+    }
     func isExecutableFile(at path: String) -> Bool {
         wrapped.isExecutableFile(at: resolved(path))
     }

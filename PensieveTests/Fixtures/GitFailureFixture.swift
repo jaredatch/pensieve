@@ -46,7 +46,7 @@ struct GitFailureFixture {
                             content: "---\nname: Example\ndescription: Fixture\n---\nBody\n")
         try ManifestService().write(
             ManifestSnapshot(schemaVersion: ManifestService.currentSchemaVersion,
-                             categories: [], scenarios: [], projects: [], skills: []), toRoot: root
+                             categories: [], projects: [], skills: []), toRoot: root
         )
         try git.stageAllAndCommit(at: root, message: "fixture")
         if let remote { try git.setRemote(remote, at: root) }

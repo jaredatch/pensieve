@@ -52,7 +52,7 @@ final class DeployReconcilerCursorTests: XCTestCase {
     }
 
     private func snapshot(_ overlays: [SkillOverlay]) -> ManifestSnapshot {
-        ManifestSnapshot(schemaVersion: 1, categories: [], scenarios: [], projects: [], skills: overlays)
+        ManifestSnapshot(schemaVersion: 1, categories: [], projects: [], skills: overlays)
     }
 
     private func record(slug: String, artifactPath: String) -> DeployStateRecord {

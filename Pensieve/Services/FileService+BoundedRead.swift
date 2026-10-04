@@ -60,27 +60,44 @@ extension FileService {
         }
     }
 
-    /// Admit one regular leaf for reading, copying or timestamp updates. Failure closes the
-    /// descriptor; success transfers it to the caller, who must close it after using this inode.
-    static func openRegularFile(at path: String) throws -> (descriptor: Int32, status: stat) {
-        let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+    /// Admit one regular leaf for reading, copying or timestamp updates, optionally relative to a
+    /// held directory. Creation is exclusive for atomic copy siblings. Failed admission removes any
+    /// created leaf and closes the descriptor; success transfers temporary-file cleanup to the caller.
+    /// The injected inspection syscall lets tests force failure after exclusive creation.
+    static func openRegularFile(at path: String, relativeTo directory: Int32 = AT_FDCWD,
+                                creatingWithPermissions permissions: mode_t? = nil,
+                                reportingPath: String? = nil,
+                                inspect: (Int32, UnsafeMutablePointer<stat>) -> Int32 = Darwin.fstat
+    ) throws -> (descriptor: Int32, status: stat) {
+        let errorPath = reportingPath ?? path
+        let access = permissions == nil ? O_RDONLY : O_WRONLY | O_CREAT | O_EXCL
+        let descriptor = openat(directory, path, access | O_NOFOLLOW | O_NONBLOCK, permissions ?? 0)
         guard descriptor >= 0 else {
             let errorCode = errno
+            let operation = directory == AT_FDCWD ? "open" : "openat"
             throw NSError(domain: NSPOSIXErrorDomain, code: Int(errorCode),
-                          userInfo: [NSLocalizedDescriptionKey: "open(\(path)): " + String(cString: strerror(errorCode))])
+                          userInfo: [NSFilePathErrorKey: errorPath,
+                                     NSLocalizedDescriptionKey:
+                                        "\(operation)(\(errorPath)): " + String(cString: strerror(errorCode))])
         }
         do {
             var status = stat()
-            guard fstat(descriptor, &status) == 0 else {
+            guard inspect(descriptor, &status) == 0 else {
                 throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
             }
             let kind = status.st_mode & S_IFMT
             guard kind == S_IFREG else {
                 throw NSError(domain: NSPOSIXErrorDomain, code: Int(kind == S_IFDIR ? EISDIR : EFTYPE),
-                              userInfo: [NSLocalizedDescriptionKey: "not a regular file: \(path)"])
+                              userInfo: [NSFilePathErrorKey: errorPath,
+                                         NSLocalizedDescriptionKey: "not a regular file: \(errorPath)"])
             }
             return (descriptor, status)
         } catch {
+            if permissions != nil {
+                // Copy siblings have fresh UUID names created by this call with O_EXCL, so this
+                // name-based unlink cannot remove a pre-existing leaf. Keep the directory held.
+                unlinkat(directory, path, 0)
+            }
             close(descriptor)
             throw error
         }

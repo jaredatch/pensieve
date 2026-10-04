@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-/// Per-agent realized-state ledger for scenario-managed user-wide assignments.
+/// Legacy per-agent ownership retained until this Mac completes the one-time handover.
 @Model
 final class ScenarioAssignment {
     @Attribute(.unique) var id: UUID

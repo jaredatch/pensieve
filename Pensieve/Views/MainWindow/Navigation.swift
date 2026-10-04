@@ -1,12 +1,11 @@
 import Foundation
 
-/// The sidebar's six rows. Selection is a section — never an instance (Photos' People/Places,
+/// The sidebar's five rows. Selection is a section — never an instance (Photos' People/Places,
 /// Music's Artists/Genres). Raw values are stable identifiers, not display strings.
 enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
     case skills
     case projects
     case categories
-    case scenarios
     case tags
     case machines
 
@@ -18,7 +17,6 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
 enum EntitySelection: Hashable {
     case project(UUID)
     case category(UUID)
-    case scenario(UUID)
     case machine(String)
     case tag(String)
 
@@ -28,7 +26,6 @@ enum EntitySelection: Hashable {
         switch self {
         case .project:  return .projects
         case .category: return .categories
-        case .scenario: return .scenarios
         case .machine:  return .machines
         case .tag:      return .tags
         }
@@ -39,7 +36,6 @@ enum ContentColumn: Equatable {
     case skillList
     case projectList
     case categoryList
-    case scenarioList
     case tagList
     case machineList
 }
@@ -47,7 +43,6 @@ enum ContentColumn: Equatable {
 enum DetailColumn: Equatable {
     case project(UUID)
     case category(UUID)
-    case scenario(UUID)
     case machine(String)
     case tag(String)
     case skill
@@ -64,7 +59,6 @@ func contentColumn(for section: SidebarSection) -> ContentColumn {
     case .skills:     return .skillList
     case .projects:   return .projectList
     case .categories: return .categoryList
-    case .scenarios:  return .scenarioList
     case .tags:       return .tagList
     case .machines:   return .machineList
     }
@@ -82,7 +76,6 @@ func detailColumn(for section: SidebarSection, entity: EntitySelection?,
         switch entity {
         case .project(let id):  return .project(id)
         case .category(let id): return .category(id)
-        case .scenario(let id): return .scenario(id)
         case .machine(let id):  return .machine(id)
         case .tag(let name):    return .tag(name)
         }
@@ -97,12 +90,11 @@ func detailColumn(for section: SidebarSection, entity: EntitySelection?,
 /// the detail column showing "Project Not Found" until the user clicks elsewhere; Finder clears the
 /// selection instead. Tags are included: a tag stops existing when its last carrier loses it.
 func prunedEntitySelection(_ entity: EntitySelection?, projectIDs: Set<UUID>,
-                           categoryIDs: Set<UUID>, scenarioIDs: Set<UUID>,
+                           categoryIDs: Set<UUID>,
                            machineIDs: Set<String>, tags: Set<String>) -> EntitySelection? {
     switch entity {
     case .project(let id):  return projectIDs.contains(id) ? entity : nil
     case .category(let id): return categoryIDs.contains(id) ? entity : nil
-    case .scenario(let id): return scenarioIDs.contains(id) ? entity : nil
     case .machine(let id):  return machineIDs.contains(id) ? entity : nil
     case .tag(let name):    return tags.contains(name) ? entity : nil
     case nil:               return nil
