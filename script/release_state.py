@@ -6,7 +6,6 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from urllib.parse import unquote, urlsplit
 import xml.etree.ElementTree as ET
 
 SPARKLE = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
@@ -133,20 +132,6 @@ def appcast_root(text):
     return root
 
 
-def appcast_dmg_basenames(text):
-    root = appcast_root(text)
-    basenames = set()
-    for item in root.find("channel").findall("item"):
-        for enclosure in item.findall("enclosure"):
-            url = enclosure.get("url")
-            require(url, "appcast enclosure has no URL")
-            basename = unquote(urlsplit(url).path.rsplit("/", 1)[-1])
-            require(not re.search(r"[\x00-\x1f\x7f-\x9f/\\]", basename), f"invalid appcast enclosure basename: {basename}")
-            if basename.endswith(".dmg"):
-                basenames.add(basename)
-    return sorted(basenames)
-
-
 def appcast_publication_state(text, version, download_prefix):
     root = appcast_root(text)
     seen, result = set(), "absent"
@@ -181,6 +166,24 @@ def appcast_publication_state(text, version, download_prefix):
         require(len(base64.b64decode(signature, validate=True)) == 64, "appcast has invalid EdDSA signature")
         result = length + " " + signature
     return result, newest if newest != version else "absent"
+
+
+def appcast_urls(root):
+    return [value for element in root.iter() for name, value in element.attrib.items()
+            if name.rsplit("}", 1)[-1] == "url"]
+
+
+def appcast_provenance(text, base_text, built_dmg, download_prefix, version):
+    version_parts(version)
+    require(built_dmg == f"Pensieve-{version}.dmg", "generated appcast names a different built DMG")
+    urls = appcast_urls(appcast_root(text))
+    base_urls = set(appcast_urls(appcast_root(base_text))) if base_text is not None else set()
+    expected_url = f"{download_prefix}/v{version}/{built_dmg}"
+    for url in urls:
+        require(url == expected_url or url in base_urls, f"generated appcast references an unexpected URL: {url}")
+    require(urls.count(expected_url) == 1, "generated appcast must reference this run's DMG URL exactly once")
+    state, _ = appcast_publication_state(text, version, download_prefix)
+    require(state != "absent", "generated appcast has no item for the publication version")
 
 
 def release_state(value, version, require_uploaded=False):
@@ -222,9 +225,10 @@ def main(args):
         obj = response_json(args[1])["object"]
         require(obj["type"] in ("commit", "tag") and re.fullmatch(r"[a-f0-9]{40}", obj["sha"]), "invalid tag target")
         print(obj["type"], obj["sha"])
-    elif mode == "appcast-dmgs":
-        for basename in appcast_dmg_basenames(Path(args[1]).read_text()):
-            print(basename)
+    elif mode == "provenance":
+        text = Path(args[1]).read_text()
+        base_text = Path(args[2]).read_text() if args[2] else None
+        appcast_provenance(text, base_text, args[3], args[4], args[5])
     elif mode == "appcast":
         print(*appcast_publication_state(Path(args[1]).read_text(), args[2], args[3]), sep="\n")
     elif mode == "compare-versions":

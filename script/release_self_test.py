@@ -13,7 +13,6 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-from urllib.parse import quote
 from unittest import mock
 import xml.etree.ElementTree as ET
 
@@ -618,9 +617,9 @@ verify_appcast_unchanged''')
                 else: version_file.write_text(file_version)
                 inspected = self.run_function('printf "inspected\\n"')
                 self.assertEqual(inspected.returncode, 0, "function inspection must not depend on VERSION: " + inspected.stderr)
-                base = self.root / "base-list"; base.write_text("")
+                base = self.root / "base.xml"; base.write_text(feed("0.9.0"))
                 appcast = self.root / "inspect.xml"; appcast.write_text(feed())
-                result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(appcast), "Pensieve-1.0.0.dmg", str(base)], env=self.env, text=True, capture_output=True, timeout=30)
+                result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(appcast), str(base), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION], env=self.env, text=True, capture_output=True, timeout=30)
                 self.assertEqual(result.returncode, 0, "provenance inspection must not depend on VERSION: " + result.stderr)
                 for option in ("--notes-for", "--print-release-args", "--print-cask-action"):
                     printed = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), option, VERSION], env=self.env, text=True, capture_output=True, timeout=30)
@@ -641,7 +640,7 @@ verify_appcast_unchanged''')
         bodies = ('resolve_public_branch', 'verify_public_branch_unchanged', 'release_preflight',
                   'PUBLIC_BRANCH=master; verify_appcast_unchanged', 'read_release_state', 'cask_preflight',
                   'publish_contents_file fixture/public appcast.xml "$REPO/source.xml" fixture master aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-                  'verify_appcast_provenance "$REPO/provenance.xml" Pensieve-1.0.0.dmg ""')
+                  'verify_appcast_provenance "$REPO/provenance.xml" "" Pensieve-1.0.0.dmg https://github.com/jaredatch/pensieve/releases/download 1.0.0')
         (self.root / "source.xml").write_text(feed())
         for poison, body in itertools.product(POISON_TEXTS, bodies):
             with self.subTest(poison=poison, body=body):
@@ -651,9 +650,9 @@ verify_appcast_unchanged''')
                 if body == 'read_release_state': self.state["fail_read"] = "release"
                 if body == 'cask_preflight': self.state["fail_read"] = "cask"
                 if body.startswith('publish_contents_file'): self.state["race"] = "appcast"
-                archive = poison.replace("\n", "").replace("\r", "") + ".dmg"
+                archive = poison + ".dmg"
                 root = ET.fromstring(feed())
-                ET.SubElement(root.find("channel/item"), "enclosure", url="https://fixture/" + quote(archive, safe=""))
+                ET.SubElement(root.find("channel/item"), "enclosure", url="https://fixture/" + archive)
                 (self.root / "provenance.xml").write_text(ET.tostring(root, encoding="unicode"))
                 result = self.run_function(body)
                 self.assertNotEqual(result.returncode, 0, "the parsed-input guard must exercise a refusal")
@@ -662,29 +661,36 @@ verify_appcast_unchanged''')
                 assert_safe_diagnostic(self, result.stdout)
 
     def test_appcast_provenance_parses_enclosures_and_requires_built_dmg(self):
-        source = self.root / "provenance.xml"; base = self.root / "base-list"
-        base.write_text("Pensieve-0.9.0.dmg\n")
+        source = self.root / "provenance.xml"; base = self.root / "base.xml"
+        base.write_text(feed("0.9.0"))
         def inspect(text):
             source.write_text(text)
             return subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast",
-                                   str(source), "Pensieve-1.0.0.dmg", str(base)],
+                                   str(source), str(base), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION],
                                   env=self.env, text=True, capture_output=True, timeout=30)
         for text in (feed("0.9.0"), '<rss><channel/></rss>'):
             with self.subTest(missing_built=text):
                 result = inspect(text)
                 self.assertEqual(result.returncode, 1, "provenance must require this run's built DMG")
-                self.assertIn("does not reference the DMG built this run", result.stderr)
+                self.assertIn("DMG URL exactly once", result.stderr)
         for text in ("<rss><channel>", "not XML", '<!DOCTYPE rss><rss><channel/></rss>'):
             with self.subTest(malformed=text):
                 result = inspect(text)
                 self.assertEqual(result.returncode, 1, "provenance must fail closed on invalid XML")
-                self.assertIn("invalid 'appcast-dmgs' state", result.stderr)
-        for url in (f"{DOWNLOAD_PREFIX}/v1.0.0/Pensieve-1.0.0.dmg?download=1&amp;source=release",
-                    f"{DOWNLOAD_PREFIX}/v1.0.0/Pensieve-1.0.0.&#100;mg",
-                    f"{DOWNLOAD_PREFIX}/v1.0.0/Pensieve-1.0.0.%64mg"):
-            with self.subTest(valid_url=url):
-                text = feeds("0.9.0", VERSION).replace('url="' + DOWNLOAD_PREFIX + '/v1.0.0/Pensieve-1.0.0.dmg"', "url='" + url + "'")
-                self.assertEqual(inspect(text).returncode, 0, "XML URL quoting/entities/query strings must preserve valid provenance")
+                self.assertIn("invalid 'provenance' state", result.stderr)
+        for url in (f"{DOWNLOAD_PREFIX}/v0.9.0/Pensieve-0.9.0.dmg?download=1&amp;source=release",
+                    f"{DOWNLOAD_PREFIX}/v0.9.0/Pensieve-0.9.0.&#100;mg",
+                    f"{DOWNLOAD_PREFIX}/v0.9.0/Pensieve-0.9.0.%64mg"):
+            with self.subTest(trusted_base_url=url):
+                old_url = 'url="' + DOWNLOAD_PREFIX + '/v0.9.0/Pensieve-0.9.0.dmg"'
+                base.write_text(feed("0.9.0").replace(old_url, "url='" + url + "'"))
+                text = feeds("0.9.0", VERSION).replace(old_url, "url='" + url + "'")
+                self.assertEqual(inspect(text).returncode, 0, "carried full URLs must preserve trusted XML quoting/entities/query strings")
+        base.write_text(feed("0.9.0"))
+        canonical = 'url="' + DOWNLOAD_PREFIX + '/v1.0.0/Pensieve-1.0.0.dmg"'
+        self.assertEqual(inspect(feed().replace(canonical, "url='" + DOWNLOAD_PREFIX + "/v1.0.0/Pensieve-1.0.0.&#100;mg'")).returncode, 0)
+        for url in (DOWNLOAD_PREFIX + "/v1.0.0/Pensieve-1.0.0.dmg?download=1", DOWNLOAD_PREFIX + "/v1.0.0/Pensieve-1.0.0.%64mg"):
+            self.assertEqual(inspect(feed().replace(canonical, 'url="' + url + '"')).returncode, 1, "this run's URL must match exactly")
         for enclosure in ("<enclosure url='https://fixture/Pensieve-9.9.9.dmg'/>",
                           '<enclosure url="https://fixture/Pensieve-9.9.9.&#100;mg"/>',
                           '<enclosure url="https://fixture/Pensieve-9.9.9.%64mg"/>',
@@ -694,21 +700,127 @@ verify_appcast_unchanged''')
                     text = feed().replace('<enclosure', enclosure + '<enclosure', 1) if before else feed().replace('</item>', enclosure + '</item>')
                     result = inspect(text)
                     self.assertEqual(result.returncode, 1, "every parsed DMG enclosure must have trusted provenance")
-                    self.assertIn("unexpected archive", result.stderr)
+                    self.assertIn("unexpected URL", result.stderr)
         source.unlink(); source.mkdir()
         result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast",
-                                 str(source), "Pensieve-1.0.0.dmg", str(base)],
+                                 str(source), str(base), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION],
                                 env=self.env, text=True, capture_output=True, timeout=30)
         self.assertEqual(result.returncode, 1, "provenance must refuse read errors")
 
     def test_generated_appcast_provenance_failure_prevents_publication(self):
         original = json.loads(json.dumps(self.state))
         for text in (feed("0.9.0"), '<rss><channel>',
-                     feed().replace('</item>', "<enclosure url='https://fixture/Pensieve-9.9.9.dmg'/></item>")):
+                     feed().replace('</item>', "<enclosure url='https://fixture/Pensieve-9.9.9.dmg'/></item>"),
+                     feed().replace('</item>', "<sparkle:deltas><enclosure url='https://fixture/other.zip'/></sparkle:deltas></item>"),
+                     feed().replace(DOWNLOAD_PREFIX, "https://evil/x")):
             with self.subTest(generated=text):
                 self.state = json.loads(json.dumps(original)); self.state["new_feed"] = text
                 self.run_release(expected=1)
                 self.assertEqual(self.state["writes"], [], "unproven generated enclosures must stop before release or appcast publication")
+
+    def run_appcast_generation(self):
+        version = self.state["version"]
+        input_dir = self.root / "build/dist/appcast-input"
+        shutil.rmtree(input_dir, ignore_errors=True); input_dir.mkdir(parents=True)
+        (input_dir / "appcast.xml").write_text(self.state["appcast"])
+        (input_dir.parent / ("Pensieve-" + version + ".dmg")).write_bytes(DMG)
+        return self.run_function('VERSION="' + version + '"; VERSION_CHANNEL="' + PUBLICATION_CASES[version][0] + '"; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; APPCAST_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; APPCAST_PREFLIGHT=1; generate_appcast')
+
+    def test_whole_feed_provenance_stops_untrusted_urls_before_publication(self):
+        original = json.loads(json.dumps(self.state))
+        unknown_urls = ("https://fixture/other.zip", "https://fixture/other.DMG",
+                        "https://fixture/other.dmg;x", "https://fixture/archive/",
+                        "https://evil/x/Pensieve-1.0.0.dmg")
+        for url in unknown_urls:
+            for placement in ("enclosure", "delta", "metadata", "namespaced", "root", "current"):
+                with self.subTest(url=url, placement=placement):
+                    root = ET.fromstring(feed()); item = root.find("channel/item")
+                    if placement == "current": item.find("enclosure").set("url", url)
+                    elif placement == "root": root.set("url", url)
+                    elif placement == "metadata": ET.SubElement(root.find("channel"), "metadata", url=url)
+                    elif placement == "namespaced": ET.SubElement(root.find("channel"), "metadata").set(self.tool.SPARKLE + "url", url)
+                    else:
+                        parent = item if placement == "enclosure" else ET.SubElement(item, self.tool.SPARKLE + "deltas")
+                        ET.SubElement(parent, "enclosure", url=url)
+                    self.state = json.loads(json.dumps(original)); self.state["new_feed"] = ET.tostring(root, encoding="unicode")
+                    result = self.run_appcast_generation()
+                    self.assertEqual(result.returncode, 1, "an untrusted URL anywhere must stop generation")
+                    self.assertIn("unexpected URL", result.stderr)
+
+    def test_generated_item_requires_one_current_url_and_valid_metadata(self):
+        original = json.loads(json.dumps(self.state)); expected_url = DOWNLOAD_PREFIX + "/v1.0.0/Pensieve-1.0.0.dmg"
+        for failure in ("wrong-version", "wrong-channel", "empty-channel", "zero-length", "bad-signature", "duplicate-url", "duplicate-item", "url-outside-current-item", "no-current-item"):
+            with self.subTest(failure=failure):
+                root = ET.fromstring(feed()); item = root.find("channel/item")
+                if failure == "wrong-version": item.find(self.tool.SPARKLE + "shortVersionString").text = "0.9.0"
+                elif failure in ("wrong-channel", "empty-channel"): ET.SubElement(item, self.tool.SPARKLE + "channel").text = "beta" if failure == "wrong-channel" else ""
+                elif failure == "zero-length": item.find("enclosure").set("length", "0")
+                elif failure == "bad-signature": item.find("enclosure").set(self.tool.SPARKLE + "edSignature", "bad")
+                elif failure == "duplicate-url": ET.SubElement(ET.SubElement(item, self.tool.SPARKLE + "deltas"), "enclosure", url=expected_url)
+                elif failure == "duplicate-item": root.find("channel").append(ET.fromstring(ET.tostring(item)))
+                elif failure == "no-current-item":
+                    item.find(self.tool.SPARKLE + "shortVersionString").text = "0.9.0"
+                    item.find("enclosure").set("url", DOWNLOAD_PREFIX + "/v0.9.0/Pensieve-0.9.0.dmg")
+                    root.set("url", expected_url)
+                else:
+                    root.set("url", expected_url)
+                    item.find("enclosure").set("url", DOWNLOAD_PREFIX + "/v0.9.0/Pensieve-0.9.0.dmg")
+                self.state = json.loads(json.dumps(original)); self.state["new_feed"] = ET.tostring(root, encoding="unicode")
+                result = self.run_appcast_generation()
+                self.assertEqual(result.returncode, 1, "the current item must be valid before publishing")
+        source = self.root / "generated.xml"; base = self.root / "base.xml"
+        root = ET.fromstring(feed()); root.set("url", DOWNLOAD_PREFIX + "/v1.0.0/Other.dmg")
+        source.write_text(ET.tostring(root, encoding="unicode")); base.write_text(feed())
+        result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(source),
+                                 str(base), "Other.dmg", DOWNLOAD_PREFIX, VERSION],
+                                env=self.env, text=True, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 1, "the supplied DMG must be the one in the VERSION item")
+        self.set_version("1.0.0-beta.1")
+        self.state["new_feed"] = feed("1.0.0-beta.1", channel="")
+        result = self.run_appcast_generation()
+        self.assertEqual(result.returncode, 1, "a generated prerelease must be on beta")
+
+    def test_whole_feed_provenance_preserves_base_urls(self):
+        root = ET.fromstring(feed("0.9.0"))
+        for url in ("https://trusted/old.zip", "https://trusted/old.DMG", "https://trusted/old.dmg;x", "https://trusted/archive/"):
+            ET.SubElement(root.find("channel"), "metadata", url=url)
+        delta = ET.SubElement(root.find("channel/item"), self.tool.SPARKLE + "deltas")
+        ET.SubElement(delta, "enclosure", url="https://trusted/old.delta")
+        root.set(self.tool.SPARKLE + "url", "https://trusted/namespace-url")
+        self.state["appcast"] = ET.tostring(root, encoding="unicode")
+        root.find("channel").append(ET.fromstring(feed()).find("channel/item"))
+        self.state["new_feed"] = ET.tostring(root, encoding="unicode")
+        result = self.run_appcast_generation()
+        self.assertEqual(result.returncode, 0, "all previously published URLs remain trusted: " + result.stderr)
+        self.assertEqual(self.state["signing_inputs"], [["Pensieve-1.0.0.dmg"]])
+
+    def test_provenance_refuses_base_read_and_parse_errors(self):
+        source = self.root / "generated.xml"; source.write_text(feed())
+        base = self.root / "unreadable-base.xml"
+        def inspect(base_argument):
+            return subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(source),
+                                   base_argument, "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION],
+                                  env=self.env, text=True, capture_output=True, timeout=30)
+        self.assertEqual(inspect("").returncode, 0, "an explicitly absent base is the first-release path")
+        self.assertEqual(inspect(str(base)).returncode, 1, "a named but missing base is unknown")
+        base.mkdir()
+        self.assertEqual(inspect(str(base)).returncode, 1, "a base read error must refuse")
+        base.rmdir()
+        for text in ("", "not XML", '<!DOCTYPE rss><rss><channel/></rss>'):
+            with self.subTest(malformed_base=text):
+                base.write_text(text)
+                self.assertEqual(inspect(str(base)).returncode, 1, "a malformed base must refuse")
+        base.write_text(feed("0.9.0")); base.chmod(0)
+        try: self.assertEqual(inspect(str(base)).returncode, 1, "an unreadable base must refuse")
+        finally: base.chmod(0o600)
+
+    def test_cask_policy_uses_cached_prerelease_predicate(self):
+        result = self.run_function('VERSION=1.0.0-beta.1; VERSION_CHANNEL=beta; cask_action_for() { printf "bump\\n"; return 9; }; cask_preflight; cask_publication_status; report_cask_publication; printf "%s %s\\n" "$CASK_PREFLIGHT" "$CASK_STATUS"')
+        self.assertEqual(result.returncode, 0, "publication must use the predicate independently of the action printer")
+        self.assertIn("cask skipped for prerelease", result.stdout)
+        self.assertIn("1 skip", result.stdout)
+        self.assertNotIn("cask step runs next", result.stdout)
+        self.assertEqual(self.state["calls"], [], "cached prerelease policy must skip the tap")
 
     def test_cask_render_uses_the_verified_digest(self):
         import hashlib
@@ -782,14 +894,14 @@ verify_appcast_unchanged''')
         self.assertFalse(any("pensieve.rb" in arg for call in self.state["calls"] for arg in call))
 
     def test_appcast_provenance_refuses_missing_or_unreadable_file(self):
-        source = self.root / "missing.xml"; base = self.root / "base-list"; base.write_text("")
+        source = self.root / "missing.xml"; base = self.root / "base.xml"; base.write_text(feed("0.9.0"))
         for unreadable in (False, True):
             with self.subTest(unreadable=unreadable):
                 if unreadable: source.write_text(feed()); source.chmod(0)
                 try:
-                    result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(source), "Pensieve-1.0.0.dmg", str(base)], env=self.env, text=True, capture_output=True, timeout=30)
+                    result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(source), str(base), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION], env=self.env, text=True, capture_output=True, timeout=30)
                     self.assertEqual(result.returncode, 1, "a missing or unreadable appcast must refuse provenance verification")
-                    self.assertIn("readable appcast", result.stderr)
+                    self.assertIn("invalid 'provenance' state", result.stderr)
                 finally:
                     if unreadable: source.chmod(0o600)
 

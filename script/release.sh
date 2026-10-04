@@ -24,7 +24,9 @@ VERSION_SOURCE="VERSION file"
 CHANGELOG_PATH="$REPO/CHANGELOG.md"
 INSPECT_APPCAST=""
 INSPECT_BUILT_DMG=""
-INSPECT_BASE_LIST_FILE=""
+INSPECT_BASE_APPCAST=""
+INSPECT_DOWNLOAD_PREFIX=""
+INSPECT_VERSION=""
 NOTARY_KEY=""
 NOTARY_KEY_ID=""
 NOTARY_ISSUER=""
@@ -44,12 +46,14 @@ usage: script/release.sh [--dry-run | --dry-run-local] [--sign IDENTITY]
        script/release.sh --print-release-args VERSION [CHANGELOG]
        script/release.sh --publish-cask-only
        script/release.sh --print-cask-action VERSION
-       script/release.sh --verify-appcast APPCAST BUILT_DMG BASE_LIST
+       script/release.sh --verify-appcast APPCAST BASE_APPCAST BUILT_DMG DOWNLOAD_PREFIX VERSION
        bash -c 'source script/release.sh --inspect-functions; declare -F'
 
 --inspect-functions is for bash -c only: sourcing sets shell options
 (errexit, nounset, pipefail), configuration defaults and function definitions
 in that disposable shell.
+
+--verify-appcast takes an empty BASE_APPCAST only when no base exists.
 
 --first-release permits a missing appcast only after HTTP 404; its PUT is create-only.
 
@@ -136,12 +140,14 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --verify-appcast)
-      [ "$#" -eq 4 ] || { usage; exit 64; }
+      [ "$#" -eq 6 ] || { usage; exit 64; }
       INSPECT_MODE="verify-appcast"
       INSPECT_APPCAST="$2"
-      INSPECT_BUILT_DMG="$3"
-      INSPECT_BASE_LIST_FILE="$4"
-      shift 4
+      INSPECT_BASE_APPCAST="$3"
+      INSPECT_BUILT_DMG="$4"
+      INSPECT_DOWNLOAD_PREFIX="$5"
+      INSPECT_VERSION="$6"
+      shift 6
       ;;
     *)
       usage
@@ -350,30 +356,8 @@ prepare_appcast_inputs() {
   fi
 }
 
-# Extract the .dmg enclosure basenames from a readable appcast file.
-appcast_dmg_basenames() {
-  local file="$1"
-  [ -f "$file" ] && [ -r "$file" ] || { echo "release: expected a readable appcast at $file" >&2; return 1; }
-  state_tool appcast-dmgs "$file"
-}
-
 verify_appcast_provenance() {
-  local appcast_file="$1"
-  local built_dmg="$2"
-  local base_dmgs="$3"
-  local fn basenames
-  basenames="$(appcast_dmg_basenames "$appcast_file")" || return 1
-  grep -qxF "$built_dmg" <<< "$basenames" || {
-    echo "release: generated appcast does not reference the DMG built this run: $built_dmg" >&2
-    return 1
-  }
-  while IFS= read -r fn; do
-    [ -n "$fn" ] || continue
-    [ "$fn" = "$built_dmg" ] && continue
-    grep -qxF "$fn" <<< "$base_dmgs" && continue
-    echo "release: generated appcast references an unexpected archive: $(log_text "$fn") (not built this run and not in the signed base) — aborting" >&2
-    return 1
-  done <<< "$basenames"
+  state_tool provenance "$@"
 }
 
 generate_appcast() {
@@ -385,12 +369,12 @@ generate_appcast() {
 
   prepare_appcast_inputs
 
-  # Capture the already-signed base enclosures BEFORE generate_appcast overwrites
-  # appcast.xml, so the post-check below can distinguish "carried forward from the
-  # trusted base" from "newly signed this run".
-  local base_dmgs=""
-  if [ -f "$APPCAST_INPUT_DIR/appcast.xml" ]; then
-    base_dmgs="$(appcast_dmg_basenames "$APPCAST_INPUT_DIR/appcast.xml")" || return 1
+  # Preserve the preflight feed outside the signing folder before generation
+  # overwrites appcast.xml. An empty base is only the known-404 first release.
+  local base_appcast=""
+  if [ -n "$APPCAST_SHA" ]; then
+    base_appcast="$DIST_DIR/appcast-base.xml"
+    ditto "$APPCAST_INPUT_DIR/appcast.xml" "$base_appcast"
   fi
 
   local -a appcast_args=(
@@ -405,13 +389,12 @@ generate_appcast() {
   "$generate_appcast_cmd" "${appcast_args[@]}"
   test -f "$APPCAST_INPUT_DIR/appcast.xml" || { echo "release: generate_appcast did not create appcast.xml" >&2; exit 1; }
 
-  # SECURITY defense-in-depth: abort if the generated appcast references any dmg
-  # we did not build this run and that was not already in the signed base. This
-  # backstops the input-directory discipline above — generate_appcast must never
-  # emit an item for an archive of unknown provenance.
+  # Backstop the signing-folder discipline: every URL in the generated feed
+  # must be carried from the trusted base or name this run's DMG exactly once
+  # in a valid item for VERSION.
   local built_dmg
   built_dmg="$(basename "$DMG_PATH")"
-  verify_appcast_provenance "$APPCAST_INPUT_DIR/appcast.xml" "$built_dmg" "$base_dmgs" || exit 1
+  verify_appcast_provenance "$APPCAST_INPUT_DIR/appcast.xml" "$base_appcast" "$built_dmg" "$DOWNLOAD_PREFIX" "$VERSION" || exit 1
 
   ditto "$APPCAST_INPUT_DIR/appcast.xml" "$DIST_DIR/appcast.xml"
 }
@@ -565,7 +548,7 @@ dry_run_local() {
 
 cask_publication_status() {
   CASK_STATUS=skip
-  [ "$(cask_action_for)" != skip ] || return 0
+  ! is_prerelease || return 0
   [ "$CASK_PREFLIGHT" -eq 1 ] || cask_preflight || return 1
   local digest comparison=0
   CASK_OUTPUT="$DIST_DIR/homebrew/pensieve.rb"
@@ -589,7 +572,7 @@ cask_publication_status() {
 }
 
 report_cask_publication() {
-  if [ "$(cask_action_for)" = skip ]; then
+  if is_prerelease; then
     echo "release: cask skipped for prerelease $VERSION"
   else
     echo "release: cask step runs next with the verified artifact (--publish-cask-only)"
@@ -655,8 +638,7 @@ case "$INSPECT_MODE" in
     exit
     ;;
   verify-appcast)
-    INSPECT_BASE_LIST="$(cat "$INSPECT_BASE_LIST_FILE")" || exit 1
-    verify_appcast_provenance "$INSPECT_APPCAST" "$INSPECT_BUILT_DMG" "$INSPECT_BASE_LIST"
+    verify_appcast_provenance "$INSPECT_APPCAST" "$INSPECT_BASE_APPCAST" "$INSPECT_BUILT_DMG" "$INSPECT_DOWNLOAD_PREFIX" "$INSPECT_VERSION"
     exit
     ;;
 esac

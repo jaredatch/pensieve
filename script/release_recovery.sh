@@ -51,7 +51,7 @@ verify_tag_target() {
 }
 
 cask_preflight() {
-  [ "$(cask_action_for)" != skip ] || { CASK_PREFLIGHT=1; return 0; }
+  ! is_prerelease || { CASK_PREFLIGHT=1; return 0; }
   local response="$DIST_DIR/cask-response.txt" fields status
   mkdir -p "$DIST_DIR/homebrew"
   CASK_REMOTE="$DIST_DIR/homebrew/base.rb"
