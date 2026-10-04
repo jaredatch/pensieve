@@ -354,9 +354,7 @@ prepare_appcast_inputs() {
 appcast_dmg_basenames() {
   local file="$1"
   [ -f "$file" ] && [ -r "$file" ] || { echo "release: expected a readable appcast at $file" >&2; return 1; }
-  grep -oE 'url="[^"]+\.dmg"' "$file" \
-    | sed -E 's#.*/([^/"]+\.dmg)"#\1#' \
-    | sort -u || true
+  state_tool appcast-dmgs "$file"
 }
 
 verify_appcast_provenance() {
@@ -365,6 +363,10 @@ verify_appcast_provenance() {
   local base_dmgs="$3"
   local fn basenames
   basenames="$(appcast_dmg_basenames "$appcast_file")" || return 1
+  grep -qxF "$built_dmg" <<< "$basenames" || {
+    echo "release: generated appcast does not reference the DMG built this run: $built_dmg" >&2
+    return 1
+  }
   while IFS= read -r fn; do
     [ -n "$fn" ] || continue
     [ "$fn" = "$built_dmg" ] && continue
@@ -504,7 +506,7 @@ verify_public_branch_unchanged() {
   local current
   current="$(resolve_public_branch)" || return 1
   if [ "$current" != "$PUBLIC_BRANCH" ]; then
-    echo "release: public default branch changed from $(log_text "$PUBLIC_BRANCH") to $(log_text "$current") since preflight; stopping publication" >&2
+    echo "release: public default branch changed from $PUBLIC_BRANCH to $current since preflight; stopping publication" >&2
     return 1
   fi
 }
@@ -540,15 +542,14 @@ verify_appcast_unchanged() {
 publish_appcast() {
   [ "$APPCAST_PREFLIGHT" -eq 1 ] || { echo "release: appcast preflight required" >&2; return 1; }
   verify_public_branch_unchanged
-  echo "release: phase v.e: publish appcast.xml to $PUBLIC_REPO $(log_text "$PUBLIC_BRANCH")"
+  echo "release: phase v.e: publish appcast.xml to $PUBLIC_REPO $PUBLIC_BRANCH"
   publish_contents_file "$PUBLIC_REPO" "appcast.xml" "$DIST_DIR/appcast.xml" "appcast: v$VERSION" "$PUBLIC_BRANCH" "$APPCAST_SHA"
 }
 
 write_bumped_cask() {
   local cask_output="$1"
   local cask_template="$REPO/release/homebrew/pensieve.rb"
-  local dmg_sha
-  dmg_sha="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
+  local dmg_sha="$2"
   test "${#dmg_sha}" -eq 64 || { echo "release: invalid dmg sha256 for $DMG_PATH" >&2; exit 1; }
 
   mkdir -p "$(dirname "$cask_output")"
@@ -558,13 +559,13 @@ write_bumped_cask() {
 dry_run_local() {
   echo "release: local dry run: write bumped Homebrew cask only"
   local cask_output="$DIST_DIR/homebrew/pensieve.rb"
-  write_bumped_cask "$cask_output"
+  write_bumped_cask "$cask_output" "$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
   echo "DRY RUN LOCAL: wrote bumped cask $cask_output; stopping before notarization/publishing."
 }
 
 cask_publication_status() {
   CASK_STATUS=skip
-  ! is_prerelease || { report_cask_publication; return 0; }
+  [ "$(cask_action_for)" != skip ] || return 0
   [ "$CASK_PREFLIGHT" -eq 1 ] || cask_preflight || return 1
   local digest comparison=0
   CASK_OUTPUT="$DIST_DIR/homebrew/pensieve.rb"
@@ -578,7 +579,7 @@ cask_publication_status() {
   if [ "$CASK_VERSION" = "$VERSION" ]; then
     [ "$CASK_DIGEST" = "$digest" ] || { echo "release: cask sha256 does not match DMG" >&2; return 1; }
   fi
-  write_bumped_cask "$CASK_OUTPUT" || return 1
+  write_bumped_cask "$CASK_OUTPUT" "$digest" || return 1
   if [ -n "$CASK_SHA" ] && cmp -s "$CASK_OUTPUT" "$CASK_REMOTE"; then
     CASK_STATUS=done
     echo "release: cask done"
@@ -588,7 +589,7 @@ cask_publication_status() {
 }
 
 report_cask_publication() {
-  if is_prerelease; then
+  if [ "$(cask_action_for)" = skip ]; then
     echo "release: cask skipped for prerelease $VERSION"
   else
     echo "release: cask step runs next with the verified artifact (--publish-cask-only)"
@@ -597,6 +598,7 @@ report_cask_publication() {
 
 bump_cask() {
   cask_publication_status || return 1
+  if [ "$CASK_STATUS" = skip ]; then report_cask_publication; return 0; fi
   [ "$CASK_STATUS" = pending ] || return 0
   echo "release: phase v.f: bump Homebrew cask in $TAP_REPO"
   publish_contents_file "$TAP_REPO" "Casks/pensieve.rb" "$CASK_OUTPUT" "cask: v$VERSION" "" "$CASK_SHA" || return 1

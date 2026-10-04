@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from urllib.parse import quote
 from unittest import mock
 import xml.etree.ElementTree as ET
 
@@ -402,7 +403,7 @@ class ReleaseSequenceTests(unittest.TestCase):
 
     def test_cask_race_stops_and_second_run_is_done(self):
         self.run_release()
-        result = self.run_function('VERSION=1.0.0; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; write_bumped_cask "$DIST_DIR/homebrew/pensieve.rb"')
+        result = self.run_function('VERSION=1.0.0; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; write_bumped_cask "$DIST_DIR/homebrew/pensieve.rb" "$(shasum -a 256 "$DMG_PATH" | awk \'{print $1}\')"')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.state.update(race="cask", race_content=(self.root / "build/dist/homebrew/pensieve.rb").read_text())
         self.assertIn("409", self.run_release(cask_only=True, expected=1))
@@ -651,12 +652,88 @@ verify_appcast_unchanged''')
                 if body == 'cask_preflight': self.state["fail_read"] = "cask"
                 if body.startswith('publish_contents_file'): self.state["race"] = "appcast"
                 archive = poison.replace("\n", "").replace("\r", "") + ".dmg"
-                (self.root / "provenance.xml").write_text(feed().replace("Pensieve-1.0.0.dmg", archive))
+                root = ET.fromstring(feed())
+                ET.SubElement(root.find("channel/item"), "enclosure", url="https://fixture/" + quote(archive, safe=""))
+                (self.root / "provenance.xml").write_text(ET.tostring(root, encoding="unicode"))
                 result = self.run_function(body)
                 self.assertNotEqual(result.returncode, 0, "the parsed-input guard must exercise a refusal")
                 self.assertTrue(result.stderr)
                 assert_safe_diagnostic(self, result.stderr)
                 assert_safe_diagnostic(self, result.stdout)
+
+    def test_appcast_provenance_parses_enclosures_and_requires_built_dmg(self):
+        source = self.root / "provenance.xml"; base = self.root / "base-list"
+        base.write_text("Pensieve-0.9.0.dmg\n")
+        def inspect(text):
+            source.write_text(text)
+            return subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast",
+                                   str(source), "Pensieve-1.0.0.dmg", str(base)],
+                                  env=self.env, text=True, capture_output=True, timeout=30)
+        for text in (feed("0.9.0"), '<rss><channel/></rss>'):
+            with self.subTest(missing_built=text):
+                result = inspect(text)
+                self.assertEqual(result.returncode, 1, "provenance must require this run's built DMG")
+                self.assertIn("does not reference the DMG built this run", result.stderr)
+        for text in ("<rss><channel>", "not XML", '<!DOCTYPE rss><rss><channel/></rss>'):
+            with self.subTest(malformed=text):
+                result = inspect(text)
+                self.assertEqual(result.returncode, 1, "provenance must fail closed on invalid XML")
+                self.assertIn("invalid 'appcast-dmgs' state", result.stderr)
+        for url in (f"{DOWNLOAD_PREFIX}/v1.0.0/Pensieve-1.0.0.dmg?download=1&amp;source=release",
+                    f"{DOWNLOAD_PREFIX}/v1.0.0/Pensieve-1.0.0.&#100;mg",
+                    f"{DOWNLOAD_PREFIX}/v1.0.0/Pensieve-1.0.0.%64mg"):
+            with self.subTest(valid_url=url):
+                text = feeds("0.9.0", VERSION).replace('url="' + DOWNLOAD_PREFIX + '/v1.0.0/Pensieve-1.0.0.dmg"', "url='" + url + "'")
+                self.assertEqual(inspect(text).returncode, 0, "XML URL quoting/entities/query strings must preserve valid provenance")
+        for enclosure in ("<enclosure url='https://fixture/Pensieve-9.9.9.dmg'/>",
+                          '<enclosure url="https://fixture/Pensieve-9.9.9.&#100;mg"/>',
+                          '<enclosure url="https://fixture/Pensieve-9.9.9.%64mg"/>',
+                          '<enclosure url="https://fixture/Pensieve-9.9.9.dmg?download=1&amp;source=release"/>'):
+            for before in (False, True):
+                with self.subTest(untrusted=enclosure, before=before):
+                    text = feed().replace('<enclosure', enclosure + '<enclosure', 1) if before else feed().replace('</item>', enclosure + '</item>')
+                    result = inspect(text)
+                    self.assertEqual(result.returncode, 1, "every parsed DMG enclosure must have trusted provenance")
+                    self.assertIn("unexpected archive", result.stderr)
+        source.unlink(); source.mkdir()
+        result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast",
+                                 str(source), "Pensieve-1.0.0.dmg", str(base)],
+                                env=self.env, text=True, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 1, "provenance must refuse read errors")
+
+    def test_generated_appcast_provenance_failure_prevents_publication(self):
+        original = json.loads(json.dumps(self.state))
+        for text in (feed("0.9.0"), '<rss><channel>',
+                     feed().replace('</item>', "<enclosure url='https://fixture/Pensieve-9.9.9.dmg'/></item>")):
+            with self.subTest(generated=text):
+                self.state = json.loads(json.dumps(original)); self.state["new_feed"] = text
+                self.run_release(expected=1)
+                self.assertEqual(self.state["writes"], [], "unproven generated enclosures must stop before release or appcast publication")
+
+    def test_cask_render_uses_the_verified_digest(self):
+        import hashlib
+        self.run_release()
+        digest = hashlib.sha256(DMG).hexdigest()
+        hasher = self.root / "bin/shasum"; reads = self.root / "digest-read"
+        hasher.write_text('#!/bin/bash\nif [ -e "' + str(reads) + '" ]; then echo "second digest read refused" >&2; exit 1; fi\ntouch "' + str(reads) + '"\nexec /usr/bin/shasum "$@"\n')
+        hasher.chmod(0o755)
+        self.run_release(cask_only=True)
+        self.assertIn('sha256 "' + digest + '"', self.state["cask"], "the rendered cask must use the digest already verified in this run")
+        self.assertEqual(self.state["writes"], ["create", "appcast", "cask"])
+
+    def test_cask_status_is_separate_from_reporting(self):
+        result = self.run_function('VERSION=1.0.0-beta.1; VERSION_CHANNEL=beta; report_cask_publication() { echo unexpected-report >&2; return 9; }; cask_publication_status; printf "%s\\n" "$CASK_STATUS"')
+        self.assertEqual(result.returncode, 0, "status must not depend on the cue reporter")
+        self.assertEqual(result.stdout, "skip\n")
+        self.assertEqual(result.stderr, "", "status must not print the publication cue")
+
+    def test_validated_publication_branch_logs_do_not_escape(self):
+        (self.root / "build/dist").mkdir(parents=True)
+        (self.root / "build/dist/appcast.xml").write_text(feed())
+        result = self.run_function('PUBLIC_BRANCH=master; APPCAST_PREFLIGHT=1; APPCAST_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; log_text() { echo validated-value-went-to-formatter >&2; return 9; }; publish_appcast')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("validated-value-went-to-formatter", result.stderr, "validated branch logging must not invoke the parsed-text formatter")
+        self.assertIn("publish appcast.xml to jaredatch/pensieve master", result.stdout)
 
     def test_command_seam_streams_before_exit(self):
         command = self.root / "live.py"; gate = self.root / "finish-command"
@@ -664,16 +741,17 @@ verify_appcast_unchanged''')
         process = subprocess.Popen(["/bin/bash", "-c", 'source "$1" --inspect-functions; run_command_seam python3 "$2" "$3"',
                                     "release-test", str(self.root / "script/release.sh"), str(command), str(gate)],
                                    env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        seen = {}; deadline = time.monotonic() + 2
+        seen = {}; deadline = time.monotonic() + 60
         try:
             while len(seen) < 2 and time.monotonic() < deadline:
                 ready, _, _ = select.select([pipe for pipe in (process.stdout, process.stderr) if pipe not in seen], [], [], max(0, deadline - time.monotonic()))
                 for pipe in ready: seen[pipe] = pipe.readline()
+            self.assertEqual(seen.get(process.stdout), b"live stdout\n", "stdout must stream before the test releases the command")
+            self.assertEqual(seen.get(process.stderr), b"live stderr\n", "stderr must stream before the test releases the command")
+            self.assertIsNone(process.poll(), "the command must still be waiting when both live lines arrive")
         finally:
             gate.touch()
-            process.communicate(timeout=10)
-        self.assertEqual(seen.get(process.stdout), b"live stdout\n", "stdout must stream while the command is running")
-        self.assertEqual(seen.get(process.stderr), b"live stderr\n", "stderr must stream while the command is running")
+            process.communicate(timeout=60)
         self.assertEqual(process.returncode, 7)
 
     def test_command_seam_preserves_status_without_log_formatter(self):
@@ -698,7 +776,7 @@ verify_appcast_unchanged''')
 
     def test_prerelease_cue_skips_cask_on_fresh_and_recovered_paths(self):
         self.set_version("1.0.0-beta.1")
-        for output in (self.run_release(), self.run_release()):
+        for output in (self.run_release(), self.run_release(), self.run_release(cask_only=True)):
             self.assertIn("cask skipped for prerelease", output)
             self.assertNotIn("cask step runs next", output)
         self.assertFalse(any("pensieve.rb" in arg for call in self.state["calls"] for arg in call))

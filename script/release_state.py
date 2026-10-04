@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from urllib.parse import unquote, urlsplit
 import xml.etree.ElementTree as ET
 
 SPARKLE = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
@@ -132,6 +133,20 @@ def appcast_root(text):
     return root
 
 
+def appcast_dmg_basenames(text):
+    root = appcast_root(text)
+    basenames = set()
+    for item in root.find("channel").findall("item"):
+        for enclosure in item.findall("enclosure"):
+            url = enclosure.get("url")
+            require(url, "appcast enclosure has no URL")
+            basename = unquote(urlsplit(url).path.rsplit("/", 1)[-1])
+            require(not re.search(r"[\x00-\x1f\x7f-\x9f/\\]", basename), f"invalid appcast enclosure basename: {basename}")
+            if basename.endswith(".dmg"):
+                basenames.add(basename)
+    return sorted(basenames)
+
+
 def appcast_publication_state(text, version, download_prefix):
     root = appcast_root(text)
     seen, result = set(), "absent"
@@ -207,6 +222,9 @@ def main(args):
         obj = response_json(args[1])["object"]
         require(obj["type"] in ("commit", "tag") and re.fullmatch(r"[a-f0-9]{40}", obj["sha"]), "invalid tag target")
         print(obj["type"], obj["sha"])
+    elif mode == "appcast-dmgs":
+        for basename in appcast_dmg_basenames(Path(args[1]).read_text()):
+            print(basename)
     elif mode == "appcast":
         print(*appcast_publication_state(Path(args[1]).read_text(), args[2], args[3]), sep="\n")
     elif mode == "compare-versions":
