@@ -20,6 +20,9 @@ final class SkillPreviewQueueTests: XCTestCase {
         window.orderFront(nil)
         host.layoutSubtreeIfNeeded()
         await TestWait.until(failureMessage: "The preview must load on first appearance") { loader.finished == 1 }
+        await TestWait.until(failureMessage: "The initial paragraph probe must report its document budget") {
+            !state.appearingBudgets.isEmpty
+        }
         let initialBudget = try XCTUnwrap(loader.documentBudget)
         XCTAssertTrue(state.appearingBudgets.first === initialBudget)
         state.selection = 1
@@ -28,15 +31,27 @@ final class SkillPreviewQueueTests: XCTestCase {
             initialBudget.isCancelled
         }
         state.appearingBudgets.removeAll()
+        state.defersReports = true
         state.selection = 0
         await TestWait.until(failureMessage: "The retained preview must appear again") { state.appearances == 2 }
+        // Publish the paragraph's report on a separate main-actor turn, after the outer appearance.
+        Task { state.publishDeferredReports() }
+        await TestWait.until(failureMessage: "The reappearing paragraph probe must report its own budget") {
+            !state.appearingBudgets.isEmpty
+        }
         XCTAssertTrue(state.appearingBudgets.first === initialBudget,
                       "The reappearing preview must still hold its cancelled budget before replacing it")
         await TestWait.until(timeout: .seconds(2), failureMessage: "Retained preview state must load after reappearing") {
             loader.finished == 2
         }
         XCTAssertEqual(loader.decoded.count, 2, "A reappearing preview must decode its image again")
-        XCTAssertFalse(try XCTUnwrap(loader.documentBudget).isCancelled)
+        await TestWait.until(failureMessage: "The paragraph probe must report the replacement document budget") {
+            state.appearingBudgets.last?.isCancelled == false
+        }
+        let reappearedBudget = try XCTUnwrap(state.appearingBudgets.last, "The reappeared view must report its own budget")
+        XCTAssertTrue(reappearedBudget === loader.documentBudget,
+                      "The loader must use the reappeared document's own budget")
+        XCTAssertFalse(reappearedBudget.isCancelled, "The reappeared document's own budget must not be cancelled")
     }
 
     func testProductionProviderFactorySharesTheSuppliedDocumentBudget() async throws {
@@ -79,14 +94,21 @@ final class SkillPreviewQueueTests: XCTestCase {
     }
 
     func testCancelledQueuedImageLoadsNeverReachTheDecoder() async throws {
+        guard #available(macOS 15.0, *) else { return XCTFail("Queue observation requires the supported modern test host") }
         let loader = try PausedPreviewImageLoader()
         defer { loader.release() }
         let provider = PreviewImageProvider(loader: loader, skillDirectory: nil, budget: PreviewImageDecodeBudget())
         let url = try embeddedURL()
         let first = Task { await provider.loadImage(url: url) }
         await TestWait.until(failureMessage: "The first decode must start") { loader.decoded.count == 1 }
-        let pending = (0..<16).map { _ in Task { await provider.loadImage(url: url) } }
-        try await Task.sleep(for: .milliseconds(100))
+        let submissions = PreviewSubmissionExecutor()
+        defer { submissions.start() }
+        let pending = submissions.loads(count: 16, provider: provider, url: url)
+        Task { submissions.start() }
+        await TestWait.until(failureMessage: "All cancellable requests must be queued behind the paused decode") {
+            submissions.isQueued(count: 16)
+        }
+        XCTAssertTrue(submissions.isQueued(count: 16), "Queued requests must be observed before caller cancellation")
         pending.forEach { $0.cancel() }
         loader.release()
         let initialImage = await first.value
@@ -99,6 +121,7 @@ final class SkillPreviewQueueTests: XCTestCase {
     }
 
     func testRebuiltAndRemovedDocumentsCancelTheirPendingImageLoads() async throws {
+        guard #available(macOS 15.0, *) else { return XCTFail("Queue observation requires the supported modern test host") }
         for rebuild in [true, false] {
             let loader = try PausedPreviewImageLoader()
             defer { loader.release() }
@@ -120,7 +143,14 @@ final class SkillPreviewQueueTests: XCTestCase {
             // rendered document's cancellation can prevent their pending work from starting.
             let budget = try XCTUnwrap(loader.documentBudget)
             let provider = PreviewImageProvider(loader: loader, skillDirectory: nil, budget: budget)
-            let pending = (0..<8).map { _ in Task.detached { await provider.loadImage(url: URL(string: url)) } }
+            let submissions = PreviewSubmissionExecutor()
+            defer { submissions.start() }
+            let pending = submissions.loads(count: 8, provider: provider, url: try XCTUnwrap(URL(string: url)))
+            Task { submissions.start() }
+            await TestWait.until(failureMessage: "All independent requests must be queued behind the paused decode") {
+                submissions.isQueued(count: 8)
+            }
+            XCTAssertTrue(submissions.isQueued(count: 8), "Queued requests must be observed before document cancellation")
             host.rootView = rebuild
                 ? AnyView(SkillPreviewView(markdownBody: "![New](\(url))", scrolls: false, imageLoader: loader))
                 : AnyView(Text("Preview removed"))
@@ -136,7 +166,6 @@ final class SkillPreviewQueueTests: XCTestCase {
             await TestWait.until(failureMessage: "The running decode may finish, and the new document must load") {
                 loader.finished >= (rebuild ? 2 : 1)
             }
-            try await Task.sleep(for: .milliseconds(100))
             XCTAssertEqual(loader.decoded.count, rebuild ? 2 : 1,
                            "Replacing or removing a document must discard its pending decodes")
         }
@@ -173,7 +202,7 @@ private final class PausedPreviewImageLoader: PreviewImageLoading {
         defer { lock.withLock { completions += 1 } }
         return try PreviewImageLoader(decode: { [self] _ in
             let first = lock.withLock { urls.append(url); return urls.count == 1 }
-            if first && pausesFirst { _ = gate.wait(timeout: .now() + 10) }
+            if first && pausesFirst { _ = gate.wait(timeout: .now() + TestWait.timeoutSeconds * 3) }
             return pixel
         }).loadImage(at: url, skillDirectory: skillDirectory, budget: budget)
     }
@@ -186,6 +215,18 @@ private final class PreviewTabState {
     var appearances = 0
     var disappearances = 0
     var appearingBudgets: [PreviewImageBudgeting] = []
+    var defersReports = false
+    private var deferredReports: [PreviewImageBudgeting] = []
+
+    func report(_ budget: PreviewImageBudgeting) {
+        if defersReports { deferredReports.append(budget) } else { appearingBudgets.append(budget) }
+    }
+
+    func publishDeferredReports() {
+        defersReports = false
+        appearingBudgets.append(contentsOf: deferredReports)
+        deferredReports.removeAll()
+    }
 }
 
 private struct PreviewTabHarness: View {
@@ -219,7 +260,7 @@ private struct PreviewBudgetAppearanceProbe<Label: View>: View {
             guard let provider = provider as? PreviewImageProvider else {
                 return XCTFail("The mounted document must install its production image provider")
             }
-            state.appearingBudgets.append(provider.budget)
+            state.report(provider.budget)
         }
     }
 }
@@ -233,4 +274,53 @@ private final class PreviewQueueProgress {
     var decodesBeforeRelease: Int { lock.withLock { decodes } }
     func noteUnrelatedWork() { lock.withLock { completed = true } }
     func observeBeforeRelease(decodes: Int) { lock.withLock { observed = completed; self.decodes = decodes } }
+}
+
+/// Observes scheduling only on the modern XCTest host (CI uses macOS 26). The preferred executor
+/// runs provider tasks until they suspend; after every request starts and no runnable job or
+/// completed request remains, their only suspension is the real budget's queued continuation.
+/// It never replaces the budget, its queue, cancellation, reads or decoding. A paused start
+/// supplies a controlled ordering rather than assuming a fixed delay is enough for submission.
+@available(macOS 15.0, *)
+private final class PreviewSubmissionExecutor: TaskExecutor, @unchecked Sendable {
+    private let queue = DispatchQueue(label: "PreviewSubmissionExecutor")
+    private let lock = NSLock()
+    private var resumed = false
+    private var runnable = 0
+    private var started = 0
+    private var completed = 0
+
+    init() { queue.suspend() }
+
+    func start() {
+        let shouldResume = lock.withLock {
+            guard !resumed else { return false }
+            resumed = true
+            return true
+        }
+        if shouldResume { queue.resume() }
+    }
+
+    func isQueued(count: Int) -> Bool {
+        lock.withLock { started == count && runnable == 0 && completed == 0 }
+    }
+
+    func enqueue(_ job: consuming ExecutorJob) {
+        let job = UnownedJob(job)
+        lock.withLock { runnable += 1 }
+        queue.async {
+            job.runSynchronously(on: self.asUnownedTaskExecutor())
+            self.lock.withLock { self.runnable -= 1 }
+        }
+    }
+
+    func loads(count: Int, provider: PreviewImageProvider, url: URL) -> [Task<CGImage?, Never>] {
+        (0..<count).map { _ in
+            Task.detached(executorPreference: self) {
+                self.lock.withLock { self.started += 1 }
+                defer { self.lock.withLock { self.completed += 1 } }
+                return await provider.loadImage(url: url)
+            }
+        }
+    }
 }
