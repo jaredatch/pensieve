@@ -2,6 +2,7 @@ import AppKit
 import Observation
 import SwiftUI
 import XCTest
+@testable import MarkdownUI
 @testable import Pensieve
 
 @MainActor
@@ -19,15 +20,23 @@ final class SkillPreviewQueueTests: XCTestCase {
         window.orderFront(nil)
         host.layoutSubtreeIfNeeded()
         await TestWait.until(failureMessage: "The preview must load on first appearance") { loader.finished == 1 }
+        let initialBudget = try XCTUnwrap(loader.documentBudget)
+        XCTAssertTrue(state.appearingBudgets.first === initialBudget)
         state.selection = 1
         await TestWait.until(failureMessage: "Switching tabs must make the preview disappear") { state.disappearances == 1 }
+        await TestWait.until(failureMessage: "The retained document must be cancelled while its tab is hidden") {
+            initialBudget.isCancelled
+        }
+        state.appearingBudgets.removeAll()
         state.selection = 0
         await TestWait.until(failureMessage: "The retained preview must appear again") { state.appearances == 2 }
+        XCTAssertTrue(state.appearingBudgets.first === initialBudget,
+                      "The reappearing preview must still hold its cancelled budget before replacing it")
         await TestWait.until(timeout: .seconds(2), failureMessage: "Retained preview state must load after reappearing") {
             loader.finished == 2
         }
         XCTAssertEqual(loader.decoded.count, 2, "A reappearing preview must decode its image again")
-        XCTAssertEqual(Set(state.identities).count, 1, "The tab must keep its SwiftUI state across appearances")
+        XCTAssertFalse(try XCTUnwrap(loader.documentBudget).isCancelled)
     }
 
     func testProductionProviderFactorySharesTheSuppliedDocumentBudget() async throws {
@@ -116,7 +125,9 @@ final class SkillPreviewQueueTests: XCTestCase {
                 ? AnyView(SkillPreviewView(markdownBody: "![New](\(url))", scrolls: false, imageLoader: loader))
                 : AnyView(Text("Preview removed"))
             host.layoutSubtreeIfNeeded()
-            try await Task.sleep(for: .milliseconds(100))
+            await TestWait.until(failureMessage: "The replaced or removed document must cancel before its decode is released") {
+                budget.isCancelled
+            }
             loader.release()
             for task in pending {
                 let image = await task.value
@@ -174,22 +185,41 @@ private final class PreviewTabState {
     var selection = 0
     var appearances = 0
     var disappearances = 0
-    var identities: [UUID] = []
+    var appearingBudgets: [PreviewImageBudgeting] = []
 }
 
 private struct PreviewTabHarness: View {
     @Bindable var state: PreviewTabState
     let markdown: String
     let loader: PreviewImageLoading
-    @State private var identity = UUID()
 
     var body: some View {
         TabView(selection: $state.selection) {
             SkillPreviewView(markdownBody: markdown, scrolls: false, imageLoader: loader)
-                .onAppear { state.appearances += 1; state.identities.append(identity) }
+                .markdownBlockStyle(\.paragraph) { configuration in
+                    PreviewBudgetAppearanceProbe(label: configuration.label, state: state)
+                }
+                .onAppear { state.appearances += 1 }
                 .onDisappear { state.disappearances += 1 }
                 .tabItem { Text("Preview") }.tag(0)
             Text("Other tab").tabItem { Text("Other") }.tag(1)
+        }
+    }
+}
+
+/// Reads the provider installed inside the rendered document, before its parent onAppear replaces
+/// a retained cancelled budget. It preserves the paragraph label and does not intercept loading.
+private struct PreviewBudgetAppearanceProbe<Label: View>: View {
+    @Environment(\.inlineImageProvider) private var provider
+    let label: Label
+    let state: PreviewTabState
+
+    var body: some View {
+        label.onAppear {
+            guard let provider = provider as? PreviewImageProvider else {
+                return XCTFail("The mounted document must install its production image provider")
+            }
+            state.appearingBudgets.append(provider.budget)
         }
     }
 }
