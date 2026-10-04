@@ -21,6 +21,9 @@ ROOT = Path(__file__).resolve().parent.parent
 STATE_SPEC = importlib.util.spec_from_file_location("release_state", ROOT / "script/release_state.py")
 STATE_TOOL = importlib.util.module_from_spec(STATE_SPEC)
 STATE_SPEC.loader.exec_module(STATE_TOOL)
+MINIMUM_SPEC = importlib.util.spec_from_file_location("minimum_self_test", ROOT / "script/minimum_system_self_test.py")
+MINIMUM_TOOL = importlib.util.module_from_spec(MINIMUM_SPEC)
+MINIMUM_SPEC.loader.exec_module(MINIMUM_TOOL)
 VERSION = "1.0.0"
 SHA = "a" * 40
 DMG = b"fresh built DMG"
@@ -51,7 +54,12 @@ def assert_safe_diagnostic(test, text):
     test.assertNotIn("##[", text, "legacy Actions command markers must be escaped wherever they appear")
 
 
-def feed(version=VERSION, signature=SIGNATURE, length=len(DMG), prefix=DOWNLOAD_PREFIX, channel=None, minimum="26.0"):
+_DEFAULT_MINIMUM = object()
+
+
+def feed(version=VERSION, signature=SIGNATURE, length=len(DMG), prefix=DOWNLOAD_PREFIX, channel=None, minimum=_DEFAULT_MINIMUM):
+    if minimum is _DEFAULT_MINIMUM:
+        minimum = "26.0" if version == VERSION else "14.0"
     channel = PUBLICATION_CASES[version][0] if channel is None else channel
     return (f'<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
             f'<channel><title>Pensieve</title><item><sparkle:shortVersionString>{version}</sparkle:shortVersionString>'
@@ -66,8 +74,8 @@ def cask(version="0.9.0", sha="0" * 64):
     return f'cask "pensieve" do\n  version "{version}"\n  sha256 "{sha}"\nend\n'
 
 
-def feeds(*versions):
-    items = ''.join('<item>' + feed(v).split('<item>')[1].split('</item>')[0] + '</item>' for v in versions)
+def feeds(*versions, publication_version=VERSION):
+    items = ''.join('<item>' + feed(v, minimum="26.0" if v == publication_version else _DEFAULT_MINIMUM).split('<item>')[1].split('</item>')[0] + '</item>' for v in versions)
     return feed().split('<channel>')[0] + '<channel><title>Pensieve</title>' + items + '</channel></rss>'
 
 
@@ -150,10 +158,10 @@ elif cmd == "xcodegen": sys.exit(0)
 elif cmd == "xcodebuild":
     dest = pathlib.Path(args[args.index("-derivedDataPath") + 1]) / "Build/Products/Release/Pensieve.app"
     if dest.exists(): s["stale_survived"] = True
-    for name in ["MacOS/pensieve-daemon", "Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc/file", "Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc/file", "Frameworks/Sparkle.framework/Versions/B/Autoupdate", "Frameworks/Sparkle.framework/Versions/B/Updater.app/file"]:
+    for name in ["MacOS/Pensieve", "MacOS/pensieve-daemon", "Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc/file", "Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc/file", "Frameworks/Sparkle.framework/Versions/B/Autoupdate", "Frameworks/Sparkle.framework/Versions/B/Updater.app/file"]:
         f = dest / "Contents" / name; f.parent.mkdir(parents=True, exist_ok=True); f.write_text("built")
     minimum = s.get("built_minimum", "26.0")
-    (dest / "Contents/Info.plist").write_text('<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>' + s["version"] + '</string>' + ('<key>LSMinimumSystemVersion</key><string>' + minimum + '</string>' if minimum is not None else '') + '</dict></plist>')
+    (dest / "Contents/Info.plist").write_text('<plist version="1.0"><dict><key>CFBundleExecutable</key><string>Pensieve</string><key>CFBundleShortVersionString</key><string>' + s["version"] + '</string>' + ('<key>LSMinimumSystemVersion</key><string>' + minimum + '</string>' if minimum is not None else '') + '</dict></plist>')
     s["builds"] += 1; save(); sys.exit(0)
 elif cmd == "codesign": sys.exit(0)  # models a valid Developer ID signature
 elif cmd in ["notary", "stapler", "spctl"]: sys.exit(0)
@@ -168,12 +176,37 @@ elif cmd == "hdiutil":
         import shutil
         source = pathlib.Path(args[args.index("-srcfolder") + 1])
         s["packaged_stale"] = (source / "Pensieve.app/Contents/stale-proof").exists()
+        payload = p.parent / "dmg-payload"
+        if payload.exists(): shutil.rmtree(payload)
+        shutil.copytree(source / "Pensieve.app", payload)
         pathlib.Path(args[-1]).write_text("fresh built DMG"); save()
     elif args[0] == "attach":
-        (pathlib.Path(args[args.index("-mountpoint") + 1]) / "Pensieve.app").mkdir()
+        import plistlib, shutil
+        mounted = pathlib.Path(args[args.index("-mountpoint") + 1]) / "Pensieve.app"
+        source = p.parent / "dmg-payload"
+        if not source.exists(): source = p.parent / "build/dist/dmg-root/Pensieve.app"
+        shutil.copytree(source, mounted)
+        info_path = mounted / "Contents/Info.plist"
+        info = plistlib.loads(info_path.read_bytes())
+        if "dmg_minimum" in s:
+            if s["dmg_minimum"] is None: info.pop("LSMinimumSystemVersion", None)
+            else: info["LSMinimumSystemVersion"] = s["dmg_minimum"]
+        info_path.write_bytes(plistlib.dumps(info))
     elif args[0] == "detach":
         import shutil; shutil.rmtree(pathlib.Path(args[1]) / "Pensieve.app")
     else: fail("unexpected hdiutil")
+    sys.exit(0)
+elif cmd in ["lipo", "otool"]:
+    import plistlib
+    binary = pathlib.Path(args[-1])
+    if cmd == "lipo": print("arm64 x86_64"); sys.exit(0)
+    info = plistlib.loads((binary.parent.parent / "Info.plist").read_bytes())
+    minimum = info.get("LSMinimumSystemVersion", "26.0")
+    kind = "daemon" if binary.name == "pensieve-daemon" else "app"
+    for arch in ["arm64", "x86_64"]:
+        value = s.get(kind + "_minimum_by_arch", {}).get(arch, s.get(kind + "_minimum", minimum))
+        print(str(binary) + " (architecture " + arch + "):")
+        print("Load command 0\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform 1\n    minos " + value + "\n      sdk 26.0")
     sys.exit(0)
 elif cmd == "generate":
     dest = pathlib.Path(args[-1])
@@ -187,6 +220,33 @@ elif cmd == "verify":
     sys.exit(0)
 fail("unexpected stub call " + cmd + " " + repr(args))
 '''
+
+
+class MinimumParserTests(unittest.TestCase):
+    def check_output(self, output):
+        def command(args, **kwargs):
+            return subprocess.CompletedProcess(args, 0, "arm64 x86_64\n" if "lipo" in args[0] else output, "")
+        with mock.patch.object(MINIMUM_TOOL.subprocess, "run", side_effect=command):
+            MINIMUM_TOOL.MinimumSystemTests().assert_binary_minimum(Path("/fixture/pensieve-daemon"))
+
+    @staticmethod
+    def slice(arch, command="LC_BUILD_VERSION", platform="1", minimum="26.0"):
+        entry = "    minos " + minimum + "\n" if minimum is not None else ""
+        return f"/fixture/pensieve-daemon (architecture {arch}):\nLoad command 0\n      cmd {command}\n platform {platform}\n" + entry
+
+    def test_each_architecture_requires_a_minimum(self):
+        output = self.slice("arm64") + "/fixture/pensieve-daemon (architecture x86_64):\nLoad command 0\n cmd LC_UUID\n"
+        with self.assertRaisesRegex(AssertionError, "missing or duplicated minimum load command"):
+            self.check_output(output)
+
+    def test_build_version_requires_the_macos_platform(self):
+        for platform in ("6", "2", "MACCATALYST", ""):
+            with self.subTest(platform=platform), self.assertRaisesRegex(AssertionError, "platform must be macOS"):
+                self.check_output(self.slice("arm64") + self.slice("x86_64", platform=platform))
+
+    def test_malformed_minimum_is_a_named_failure(self):
+        with self.assertRaisesRegex(AssertionError, "missing or malformed minos"):
+            self.check_output(self.slice("arm64") + self.slice("x86_64", minimum=None))
 
 
 class ReleaseSequenceTests(unittest.TestCase):
@@ -221,7 +281,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         (self.root / "script").mkdir()
-        for name in ("release.sh", "release_recovery.sh", "package.sh", "build-number.sh", "release_state.py", "verify_update.swift"):
+        for name in ("release.sh", "release_recovery.sh", "package.sh", "build-number.sh", "release_state.py", "verify_update.swift", "minimum_system.py", "minimum_system_self_test.py"):
             if (ROOT / "script" / name).exists(): shutil.copy2(ROOT / "script" / name, self.root / "script" / name)
         shutil.copytree(ROOT / "release/homebrew", self.root / "release/homebrew")
         shutil.copytree(ROOT / "Pensieve", self.root / "Pensieve", ignore=shutil.ignore_patterns("*.swift", "Resources"))
@@ -231,7 +291,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         (self.root / "CHANGELOG.md").write_text("## [1.0.0]\nRelease fixture.\n")
         (self.root / "fixture-key").write_text("not a signing key")
         bin_dir = self.root / "bin"; bin_dir.mkdir()
-        for name in ("gh", "git", "xcodegen", "xcodebuild", "codesign", "ditto", "hdiutil", "spctl", "notary", "stapler", "generate", "verify"):
+        for name in ("gh", "git", "xcodegen", "xcodebuild", "codesign", "ditto", "hdiutil", "spctl", "notary", "stapler", "generate", "verify", "lipo", "otool"):
             f = bin_dir / name; f.write_text(STUB); f.chmod(0o755)
         self.state_path = self.root / "state.json"
         release = {"id": 1, "tag_name": "v" + VERSION, "draft": False, "prerelease": PUBLICATION_CASES[VERSION][1],
@@ -274,7 +334,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.state["expected_release"] = dict(self.state["expected_release"], tag_name="v" + version,
                                              prerelease=PUBLICATION_CASES[version][1],
                                              assets=[dict(self.state["expected_release"]["assets"][0], name="Pensieve-" + version + ".dmg")])
-        self.state["new_feed"] = feed(version)
+        self.state["new_feed"] = feed(version, minimum="26.0")
         (self.root / "VERSION").write_text(version)
         (self.root / "project.yml").write_text('MARKETING_VERSION: "' + version + '"\n')
         (self.root / "CHANGELOG.md").write_text("## [" + version + "]\nRelease fixture.\n")
@@ -576,7 +636,7 @@ class ReleaseSequenceTests(unittest.TestCase):
 
     def test_check_tag_rejects_combined_modes_before_work(self):
         self.state_path.write_text(json.dumps(self.state))
-        modes = (("--inspect-functions",), ("--verify-appcast", "missing", "", "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION),
+        modes = (("--inspect-functions",), ("--verify-appcast", "missing", "", "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION, "26.0"),
                  ("--publish",), ("--publish-cask-only",), ("--dry-run",), ("--first-release",))
         for mode in modes:
             with self.subTest(mode=mode):
@@ -860,7 +920,7 @@ sys.exit(not result.wasSuccessful())
     def test_older_version_cannot_move_publications_back(self):
         self.run_release(); self.run_release(cask_only=True)
         self.set_version("1.1.0")
-        self.state.update(release=None, new_feed=feeds("1.1.0", VERSION))
+        self.state.update(release=None, new_feed=feeds("1.1.0", VERSION, publication_version="1.1.0"))
         self.run_release(); self.run_release(cask_only=True)
         published_feed, published_cask = self.state["appcast"], self.state["cask"]
         self.set_version(VERSION)
@@ -884,7 +944,7 @@ sys.exit(not result.wasSuccessful())
             with self.subTest(version=version, other_channel=channel):
                 self.state = json.loads(json.dumps(original)); self.set_version(version)
                 self.state["appcast"] = feed(other, channel=channel)
-                self.state["new_feed"] = feed(version).replace("</channel>", "<item>" + feed(other, channel=channel).split("<item>")[1].split("</item>")[0] + "</item>" + "</channel>")
+                self.state["new_feed"] = feed(version, minimum="26.0").replace("</channel>", "<item>" + feed(other, channel=channel).split("<item>")[1].split("</item>")[0] + "</item>" + "</channel>")
                 output = self.run_release() + self.run_release(cask_only=True)
                 self.assertNotIn("refusing older appcast", output)
                 self.assertIn(other, self.state["appcast"])
@@ -1054,7 +1114,7 @@ verify_appcast_unchanged''')
                 self.assertEqual(inspected.returncode, 0, "function inspection must not depend on VERSION: " + inspected.stderr)
                 base = self.root / "base.xml"; base.write_text(feed("0.9.0"))
                 appcast = self.root / "inspect.xml"; appcast.write_text(feed())
-                result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(appcast), str(base), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION], env=self.env, text=True, capture_output=True, timeout=30)
+                result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(appcast), str(base), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION, "26.0"], env=self.env, text=True, capture_output=True, timeout=30)
                 self.assertEqual(result.returncode, 0, "provenance inspection must not depend on VERSION: " + result.stderr)
                 for option in ("--notes-for", "--print-release-args", "--print-cask-action"):
                     printed = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), option, VERSION], env=self.env, text=True, capture_output=True, timeout=30)
@@ -1075,7 +1135,7 @@ verify_appcast_unchanged''')
         bodies = ('resolve_public_branch', 'verify_public_branch_unchanged', 'release_preflight',
                   'PUBLIC_BRANCH=master; verify_appcast_unchanged', 'read_release_state', 'cask_preflight',
                   'publish_contents_file fixture/public appcast.xml "$REPO/source.xml" fixture master aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-                  f'verify_appcast_provenance "$REPO/provenance.xml" "" Pensieve-{VERSION}.dmg {DOWNLOAD_PREFIX} {VERSION}')
+                  f'verify_appcast_provenance "$REPO/provenance.xml" "" Pensieve-{VERSION}.dmg {DOWNLOAD_PREFIX} {VERSION} 26.0')
         (self.root / "source.xml").write_text(feed())
         for poison, body in itertools.product(POISON_TEXTS, bodies):
             with self.subTest(poison=poison, body=body):
@@ -1101,7 +1161,7 @@ verify_appcast_unchanged''')
         def inspect(text):
             source.write_text(text)
             return subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast",
-                                   str(source), str(base), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION],
+                                   str(source), str(base), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION, "26.0"],
                                   env=self.env, text=True, capture_output=True, timeout=30)
         for text in (feed("0.9.0"), '<rss><channel/></rss>'):
             with self.subTest(missing_built=text):
@@ -1138,7 +1198,7 @@ verify_appcast_unchanged''')
                     self.assertIn("duplicated appcast enclosure", result.stderr)
         source.unlink(); source.mkdir()
         result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast",
-                                 str(source), str(base), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION],
+                                 str(source), str(base), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION, "26.0"],
                                 env=self.env, text=True, capture_output=True, timeout=30)
         self.assertEqual(result.returncode, 1, "provenance must refuse read errors")
 
@@ -1160,15 +1220,69 @@ verify_appcast_unchanged''')
         (input_dir.parent / ("Pensieve-" + version + ".dmg")).write_bytes(DMG)
         info = input_dir.parent / "dmg-root/Pensieve.app/Contents/Info.plist"
         info.parent.mkdir(parents=True, exist_ok=True)
-        info.write_bytes(plistlib.dumps({"LSMinimumSystemVersion": "26.0"}))
-        return self.run_function('VERSION="' + version + '"; VERSION_CHANNEL="' + PUBLICATION_CASES[version][0] + '"; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; release_preflight; generate_appcast')
+        info.write_bytes(plistlib.dumps({"LSMinimumSystemVersion": "26.0", "CFBundleExecutable": "Pensieve"}))
+        for name in ("Pensieve", "pensieve-daemon"):
+            binary = info.parent / "MacOS" / name
+            binary.parent.mkdir(parents=True, exist_ok=True); binary.write_text("fixture Mach-O")
+        return self.run_function('VERSION="' + version + '"; VERSION_CHANNEL="' + PUBLICATION_CASES[version][0] + '"; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; verify_dmg_app_ticket; release_preflight; generate_appcast')
+
+    def test_release_checks_app_and_daemon_slices_before_publication(self):
+        original = json.loads(json.dumps(self.state))
+        for fault in ({"daemon_minimum": "14.0"}, {"daemon_minimum_by_arch": {"x86_64": "14.0"}},
+                      {"app_minimum_by_arch": {"arm64": "14.0"}}):
+            with self.subTest(fault=fault):
+                self.state = dict(json.loads(json.dumps(original)), **fault)
+                output = self.run_release(expected=1)
+                self.assertIn("must require macOS 26.0", output)
+                self.assertIn("14.0", output)
+                self.assertEqual(self.state["writes"], [], "invalid app or daemon slices must stop before publication")
+
+    def test_release_reads_minimum_from_the_dmg_app(self):
+        original = json.loads(json.dumps(self.state))
+        for staged, mounted in (("26.0", "27.2"), ("14.0", "26.0")):
+            with self.subTest(staged=staged, mounted=mounted):
+                self.state = dict(json.loads(json.dumps(original)), built_minimum=staged,
+                                  dmg_minimum=mounted, new_feed=feed(minimum=mounted))
+                self.run_release()
+                self.assertEqual(self.state["writes"], ["create", "appcast"])
+        self.state = dict(json.loads(json.dumps(original)), dmg_minimum="14.0")
+        output = self.run_release(expected=1)
+        self.assertIn("generated appcast minimum 26.0 differs from built app minimum 14.0", output)
+        self.assertEqual(self.state["writes"], [])
+        self.state = dict(json.loads(json.dumps(original)), dmg_minimum=None)
+        self.assertIn("built app has no minimum system version", self.run_release(expected=1))
+        self.assertEqual(self.state["writes"], [])
+
+    def test_appcast_verification_requires_a_minimum(self):
+        source = self.root / "inspect.xml"; source.write_text(feed())
+        base = self.root / "base.xml"; base.write_text(feed("0.9.0"))
+        command = ["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(source),
+                   str(base), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION]
+        self.assertEqual(subprocess.run(command, env=self.env, capture_output=True, timeout=30).returncode, 64,
+                         "inspection must refuse an omitted built minimum")
+        source.write_text(feed(minimum="14.0"))
+        result = subprocess.run(command + ["26.0"], env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("generated appcast minimum 14.0 differs from built app minimum 26.0", result.stderr)
+        with self.assertRaises(TypeError, msg="the Python provenance API requires a minimum too"):
+            self.tool.appcast_provenance(feed(), feed("0.9.0"), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION)
+        for minimum in (None, ""):
+            with self.subTest(minimum=minimum), self.assertRaisesRegex(ValueError, "built app minimum is required"):
+                self.tool.appcast_provenance(feed(), feed("0.9.0"), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION, minimum)
+
+    def test_fixture_history_defaults_to_macos_14(self):
+        for version in ("0.9.0", "1.0.0-alpha.1"):
+            self.assertEqual(ET.fromstring(feed(version)).findtext("channel/item/" + self.tool.SPARKLE + "minimumSystemVersion"), "14.0")
+        self.assertEqual(ET.fromstring(feed()).findtext("channel/item/" + self.tool.SPARKLE + "minimumSystemVersion"), "26.0")
 
     def test_generated_appcast_minimum_matches_built_app_and_preserves_history(self):
         original = json.loads(json.dumps(self.state))
         for version, minimum in ((VERSION, "26.0"), ("1.0.0-beta.2", "27.2")):
             with self.subTest(version=version, minimum=minimum):
                 self.state = json.loads(json.dumps(original)); self.set_version(version)
-                old = ET.fromstring(feed("0.9.0", minimum="14.0"))
+                old = ET.fromstring(feed("0.9.0"))
+                self.assertEqual(old.findtext("channel/item/" + self.tool.SPARKLE + "minimumSystemVersion"), "14.0",
+                                 "the historical fixture must keep its actual macOS 14 minimum")
                 self.state["appcast"] = ET.tostring(old, encoding="unicode")
                 root = ET.fromstring(ET.tostring(old))
                 root.find("channel").append(ET.fromstring(feed(version, minimum=minimum)).find("channel/item"))
@@ -1268,7 +1382,7 @@ verify_appcast_unchanged''')
         root = ET.fromstring(feed()); root.set("url", DOWNLOAD_PREFIX + "/v1.0.0/Other.dmg")
         source.write_text(ET.tostring(root, encoding="unicode")); base.write_text(feed())
         result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(source),
-                                 str(base), "Other.dmg", DOWNLOAD_PREFIX, VERSION],
+                                 str(base), "Other.dmg", DOWNLOAD_PREFIX, VERSION, "26.0"],
                                 env=self.env, text=True, capture_output=True, timeout=30)
         self.assertEqual(result.returncode, 1, "the supplied DMG must be the one in the VERSION item")
         self.assertIn("different built DMG", result.stderr)
@@ -1382,7 +1496,7 @@ verify_appcast_unchanged''')
         source = self.root / "generated.xml"; base = self.root / "base.xml"
         source.write_text(feed()); base.write_text(feed())
         result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(source),
-                                 str(base), f"Pensieve-{VERSION}.dmg", DOWNLOAD_PREFIX, VERSION],
+                                 str(base), f"Pensieve-{VERSION}.dmg", DOWNLOAD_PREFIX, VERSION, "26.0"],
                                 env=self.env, text=True, capture_output=True, timeout=30)
         self.assertEqual(result.returncode, 1, "generation must add exactly one new publication item")
         self.assertIn("publication version already exists in base", result.stderr)
@@ -1420,7 +1534,7 @@ fi''')
         base = self.root / "unreadable-base.xml"
         def inspect(base_argument):
             return subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(source),
-                                   base_argument, "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION],
+                                   base_argument, "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION, "26.0"],
                                   env=self.env, text=True, capture_output=True, timeout=30)
         self.assertEqual(inspect("").returncode, 0, "an explicitly absent base is the first-release path")
         self.assertEqual(inspect(str(base)).returncode, 1, "a named but missing base is unknown")
@@ -1520,7 +1634,7 @@ fi''')
             with self.subTest(unreadable=unreadable):
                 if unreadable: source.write_text(feed()); source.chmod(0)
                 try:
-                    result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(source), str(base), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION], env=self.env, text=True, capture_output=True, timeout=30)
+                    result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), "--verify-appcast", str(source), str(base), "Pensieve-1.0.0.dmg", DOWNLOAD_PREFIX, VERSION, "26.0"], env=self.env, text=True, capture_output=True, timeout=30)
                     self.assertEqual(result.returncode, 1, "a missing or unreadable appcast must refuse provenance verification")
                     self.assertIn("invalid 'provenance' state", result.stderr)
                 finally:

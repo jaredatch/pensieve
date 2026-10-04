@@ -14,6 +14,7 @@ APPCAST_INPUT_DIR="$DIST_DIR/appcast-input"
 DMG_ROOT="$DIST_DIR/dmg-root"
 APP_PATH="$DMG_ROOT/Pensieve.app"
 DMG_PATH=""
+DMG_MINIMUM=""
 SIGN_IDENTITY="-"
 DRY_RUN=1
 DRY_RUN_LOCAL=0
@@ -36,6 +37,7 @@ INSPECT_BUILT_DMG=""
 INSPECT_BASE_APPCAST=""
 INSPECT_DOWNLOAD_PREFIX=""
 INSPECT_VERSION=""
+INSPECT_BUILT_MINIMUM=""
 NOTARY_KEY=""
 NOTARY_KEY_ID=""
 NOTARY_ISSUER=""
@@ -56,7 +58,7 @@ usage: script/release.sh [--dry-run | --dry-run-local] [--sign IDENTITY]
        script/release.sh --print-release-args VERSION [CHANGELOG]
        script/release.sh [--expect-tag TAG] --publish-cask-only
        script/release.sh --print-cask-action VERSION
-       script/release.sh --verify-appcast APPCAST BASE_APPCAST BUILT_DMG DOWNLOAD_PREFIX VERSION
+       script/release.sh --verify-appcast APPCAST BASE_APPCAST BUILT_DMG DOWNLOAD_PREFIX VERSION BUILT_MINIMUM
        bash -c 'source script/release.sh --inspect-functions; declare -F'
 
 --inspect-functions is for bash -c only: sourcing sets shell options
@@ -168,14 +170,15 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --verify-appcast)
-      [ "$#" -eq 6 ] || { usage; exit 64; }
+      [ "$#" -eq 7 ] || { usage; exit 64; }
       INSPECT_MODE="verify-appcast"
       INSPECT_APPCAST="$2"
       INSPECT_BASE_APPCAST="$3"
       INSPECT_BUILT_DMG="$4"
       INSPECT_DOWNLOAD_PREFIX="$5"
       INSPECT_VERSION="$6"
-      shift 6
+      INSPECT_BUILT_MINIMUM="$7"
+      shift 7
       ;;
     *)
       usage
@@ -336,13 +339,14 @@ verify_dmg_app_ticket() {
   echo "release: phase iv.c: validate stapled ticket on the app inside the dmg"
   local mount_point
   mount_point="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-dmg-verify.XXXXXX")"
-  (
+  DMG_MINIMUM="$(
     trap 'trap_rc=$?; hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true; exit "$trap_rc"' EXIT INT TERM
-    hdiutil attach "$DMG_PATH" -mountpoint "$mount_point" -nobrowse -readonly -quiet || exit 1
+    hdiutil attach "$DMG_PATH" -mountpoint "$mount_point" -nobrowse -readonly -quiet >&2 || exit 1
     test -d "$mount_point/Pensieve.app" || { echo "release: no Pensieve.app inside $DMG_PATH" >&2; exit 1; }
-    run_command_seam "$STAPLER_CMD" validate "$mount_point/Pensieve.app" || exit 1
-    spctl --assess --type exec -vv "$mount_point/Pensieve.app" || exit 1
-  )
+    run_command_seam "$STAPLER_CMD" validate "$mount_point/Pensieve.app" >&2 || exit 1
+    spctl --assess --type exec -vv "$mount_point/Pensieve.app" >&2 || exit 1
+    python3 -B "$REPO/script/minimum_system.py" --app "$mount_point/Pensieve.app" || exit 1
+  )" || { rmdir "$mount_point" 2>/dev/null || true; return 1; }
   rmdir "$mount_point" 2>/dev/null || true
 }
 
@@ -414,14 +418,13 @@ generate_appcast() {
 
   # Backstop the signing-folder discipline: only VERSION's valid item is new.
   # Retained items and feed metadata must match the immutable preflight base.
-  local built_dmg built_minimum
+  local built_dmg
   built_dmg="$(basename "$DMG_PATH")"
-  built_minimum="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP_PATH/Contents/Info.plist" 2>/dev/null)" || built_minimum=""
-  if [ -z "$built_minimum" ]; then
-    echo "release: built app has no minimum system version" >&2
+  if [ -z "$DMG_MINIMUM" ]; then
+    echo "release: DMG app minimum has not been verified" >&2
     exit 1
   fi
-  verify_appcast_provenance "$APPCAST_INPUT_DIR/appcast.xml" "$APPCAST_BASE" "$built_dmg" "$DOWNLOAD_PREFIX" "$VERSION" "$built_minimum" || exit 1
+  verify_appcast_provenance "$APPCAST_INPUT_DIR/appcast.xml" "$APPCAST_BASE" "$built_dmg" "$DOWNLOAD_PREFIX" "$VERSION" "$DMG_MINIMUM" || exit 1
 
   ditto "$APPCAST_INPUT_DIR/appcast.xml" "$DIST_DIR/appcast.xml"
 }
@@ -702,7 +705,7 @@ case "$INSPECT_MODE" in
     exit
     ;;
   verify-appcast)
-    verify_appcast_provenance "$INSPECT_APPCAST" "$INSPECT_BASE_APPCAST" "$INSPECT_BUILT_DMG" "$INSPECT_DOWNLOAD_PREFIX" "$INSPECT_VERSION"
+    verify_appcast_provenance "$INSPECT_APPCAST" "$INSPECT_BASE_APPCAST" "$INSPECT_BUILT_DMG" "$INSPECT_DOWNLOAD_PREFIX" "$INSPECT_VERSION" "$INSPECT_BUILT_MINIMUM"
     exit
     ;;
 esac

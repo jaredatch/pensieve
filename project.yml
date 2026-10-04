@@ -3,7 +3,7 @@ options:
   bundleIdPrefix: com.jaredatch
   deploymentTarget:
     macOS: "26.0"
-  xcodeVersion: "16.0"
+  xcodeVersion: "26.0"
   minimumXcodeGenVersion: "2.40"
   groupSortPosition: top
 

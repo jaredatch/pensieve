@@ -3,22 +3,19 @@
 import argparse
 from pathlib import Path
 import plistlib
-import re
 import subprocess
 import unittest
+from minimum_system import check_binary_minimum
 
 APP = None
 
 
 class MinimumSystemTests(unittest.TestCase):
     def assert_binary_minimum(self, binary):
-        result = subprocess.run(["/usr/bin/otool", "-arch", "all", "-l", str(binary)],
-                                capture_output=True, text=True, timeout=30, check=True)
-        # Limit legacy 'version' matches to LC_VERSION_MIN_MACOSX, rather than dylib versions.
-        commands = re.findall(r"cmd LC_(?:BUILD_VERSION|VERSION_MIN_MACOSX)\n(.*?)(?=Load command|\Z)", result.stdout, re.DOTALL)
-        versions = [re.search(r"^\s*(?:minos|version)\s+(\S+)", command, re.MULTILINE).group(1) for command in commands]
-        self.assertTrue(versions, f"{binary.name} has no macOS minimum load command")
-        self.assertEqual(set(versions), {"26.0"}, f"{binary.name} must require macOS 26.0 in every architecture")
+        try:
+            check_binary_minimum(binary, "26.0")
+        except (ValueError, OSError, subprocess.SubprocessError) as error:
+            self.fail(str(error))
 
     def test_app_requires_macos_26(self):
         info = plistlib.loads((APP / "Contents/Info.plist").read_bytes())
