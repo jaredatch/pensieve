@@ -72,17 +72,15 @@ struct DetailColumnView: View {
                         + "Update Pensieve, then relaunch to see your skills and add new ones.")
                 )
             } else {
-                ContentUnavailableView {
-                    Label("No Skills Yet", systemImage: "sparkles")
-                } description: {
-                    Text("Import existing skills or create your first one.")
-                } actions: {
-                    Button("Find Skills on This Mac", action: onImport)
-                        .buttonStyle(.borderedProminent).disabled(library.addsFenced)
-                    Button("Import from Folder…", action: onImportFolder)
-                        .buttonStyle(.bordered).disabled(library.addsFenced)
-                    Button("Create Skill", action: onCreate)
-                        .buttonStyle(.bordered).disabled(library.addsFenced)
+                EmptyStateView("No Skills Yet", description: "Import existing skills or create your first one.") {
+                    VStack(spacing: Spacing.sm) {
+                        Button("Find Skills on This Mac", action: onImport)
+                            .buttonStyle(.borderedProminent).disabled(library.addsFenced)
+                        Button("Import from Folder…", action: onImportFolder)
+                            .buttonStyle(.bordered).disabled(library.addsFenced)
+                        Button("Create Skill", action: onCreate)
+                            .buttonStyle(.bordered).disabled(library.addsFenced)
+                    }
                 }
             }
         case .selectSkillPrompt:
@@ -164,37 +162,20 @@ struct DetailColumnView: View {
     }
 
     private var bulkPlaceholder: some View {
-        ContentUnavailableView {
-            Label("\(selectedSkills.count) Skills Selected", systemImage: "checklist")
-        } description: {
-            Text("Deploy or remove these skills across your agents in one pass.")
-        } actions: {
+        EmptyStateView("\(selectedSkills.count) Skills Selected",
+                       description: "Deploy or remove these skills across your agents in one pass.") {
             Button("Deploy to Agents…", action: onBulkDeploy)
                 .buttonStyle(.borderedProminent)
         }
     }
 
+    /// Mail's "No Message Selected": the title alone, tertiary, centered in the detail column.
     private var selectSkillPrompt: some View {
-        ContentUnavailableView {
-            Label("Select a Skill", systemImage: "doc.text")
-        } description: {
-            Text("Choose a skill from the list, or press ⌘N to create one.")
-        }
+        EmptyStateView.noSelection(.skills)
     }
 
     private func selectEntityPrompt(_ section: SidebarSection) -> some View {
-        let prompt = entityPrompt(for: section)
-        return ContentUnavailableView(prompt.title, systemImage: prompt.symbol)
-    }
-
-    private func entityPrompt(for section: SidebarSection) -> (title: String, symbol: String) {
-        switch section {
-        case .skills: ("Select a Skill", "doc.text")
-        case .projects: ("Select a Project", "folder")
-        case .categories: ("Select a Category", "square.stack")
-        case .tags: ("Select a Tag", "tag")
-        case .machines: ("Select a Machine", "display")
-        }
+        EmptyStateView.noSelection(section)
     }
 
     @ViewBuilder

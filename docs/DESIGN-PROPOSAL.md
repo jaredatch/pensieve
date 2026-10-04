@@ -364,40 +364,16 @@ Brand tiles are 20 × 20 pt with a 5 pt radius, the mark at 12 pt, and an 8 % in
 
 ### 6. Empty States
 
-**Reference apps:** Things 3 (empty states inspire action), Craft (welcoming onboarding moments)
+**Reference app:** Mail ("No Message Selected")
 
-**Current state:** Generic `ContentUnavailableView` with "No Skill Selected."
+**Design:** one empty state for every list and detail column, drawn in the Sketch `Empty state` masters and built as `EmptyStateView`. It has no icon. A large light title (24 pt) carries it, with an optional 13 pt description and an optional action below, 10 pt apart.
 
-**Target design:**
+- **A list with nothing in it:** the title in the secondary label color, a description saying what goes here, and the add button when the section has one ("No Projects", then Add Project).
+- **A search that matched nothing:** "No Results for" over the query in quotes, then "Check the spelling or try a new search."
+- **A detail column with nothing selected:** the title alone in the tertiary label color, as Mail does it ("No Skill Selected", "No Project Selected").
+- **A library with no skills:** "No Skills Yet" with the three ways to add one.
 
-```swift
-// No skill selected
-ContentUnavailableView {
-    Label("Select a Skill", systemImage: "doc.text")
-} description: {
-    Text("Choose a skill from the list, or press ⌘N to create one.")
-}
-
-// No skills exist
-ContentUnavailableView {
-    Label("No Skills Yet", systemImage: "sparkles")
-} description: {
-    Text("Import existing skills or create your first one.")
-} actions: {
-    Button("Import Skills") { showImportWizard = true }
-         .buttonStyle(.borderedProminent)
-    Button("Create Skill") { showCreateSheet = true }
-         .buttonStyle(.bordered)
-}
-
-// No search results
-ContentUnavailableView.search(text: searchText)
-```
-
-**Key changes:**
-- Add actionable description text with keyboard shortcut hints
-- Add action buttons in the "no skills" empty state
-- Use `.search` variant for empty search results (system-provided)
+Error states (a library Pensieve can't read, a skill whose files are gone) keep the system `ContentUnavailableView` with its warning symbol.
 - Choose SF Symbols that communicate purpose, not decoration
 
 ---

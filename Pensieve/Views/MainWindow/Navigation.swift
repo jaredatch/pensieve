@@ -121,7 +121,7 @@ func availableSection(_ section: SidebarSection, showsMachines: Bool) -> Sidebar
 /// Whether a section change clears the skill multi-selection. LEAVING Skills drops it; ARRIVING at
 /// Skills must NOT — `revealSkill` writes `section = .skills` and `selectedSkills = [skill]` in the
 /// same update, so an unconditional clear in the section-change handler would erase the very
-/// selection the reveal just made and land the user on the "Select a Skill" prompt instead.
+/// selection the reveal just made and land the user on the "No Skill Selected" state instead.
 func clearsSkillSelection(movingFrom old: SidebarSection, to new: SidebarSection) -> Bool {
     old == .skills && new != .skills
 }

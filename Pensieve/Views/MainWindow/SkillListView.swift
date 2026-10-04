@@ -104,20 +104,12 @@ struct SkillListView: View {
         .overlay {
             if visible.isEmpty {
                 if !searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-                    ContentUnavailableView.search(text: searchText)
+                    EmptyStateView.search(text: searchText)
                 } else if filter.isActive {
-                    ContentUnavailableView(
-                        "No Matching Skills",
-                        systemImage: "line.3.horizontal.decrease",
-                        description: Text("Clear the filter to see every skill.")
-                    )
+                    EmptyStateView("No Matching Skills", description: "Clear the filter to see every skill.")
                 } else {
-                    ContentUnavailableView(
-                        "No Skills",
-                        systemImage: "doc.text",
-                        description: Text(library.storeUnreadable
-                            ? "This library can't be read." : "Create a new skill or import existing ones.")
-                    )
+                    EmptyStateView("No Skills", description: library.storeUnreadable
+                        ? "This library can't be read." : "Create a new skill or import existing ones.")
                 }
             }
         }
