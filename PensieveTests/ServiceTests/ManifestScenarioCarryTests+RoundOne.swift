@@ -61,6 +61,44 @@ extension ManifestScenarioCarryTests {
         try assertChangedSourceFails(beforeSwap: false, replacement: false)
     }
 
+    func testEntrySwappedForFIFOAtCopyingFailsClosedAndPreservesManifestBytes() throws {
+        let live = root + "/manifest"
+        let source = live + "/scenarios/legacy.yaml"
+        let parked = root + "/parked.yaml"
+        try files.writeFile(at: source, content: "original legacy bytes")
+        let before = try treeBytes(at: live)
+        let identity = files.fileIdentity(at: live, followingLinks: false)
+        let guarded = ScenarioCarryFileService()
+        var swapped = false
+        guarded.checkpointAction = { point in
+            guard case .copying("legacy.yaml") = point, !swapped else { return }
+            try self.files.replaceItem(at: parked, with: source)
+            guard mkfifo(source, 0o600) == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+            swapped = true
+        }
+        var changed = empty
+        changed.categories = [CategoryRecord(name: "Must not publish", projectKeys: [], skillSlugs: [])]
+
+        XCTAssertThrowsError(try ManifestService(fileService: guarded).write(changed, toRoot: root)) { error in
+            XCTAssertEqual((error as NSError).domain, NSPOSIXErrorDomain)
+            XCTAssertEqual((error as NSError).code, Int(EFTYPE))
+            XCTAssertEqual((error as NSError).userInfo[NSFilePathErrorKey] as? String, source)
+            XCTAssertEqual(error.localizedDescription, "not a regular file: \(source)")
+        }
+        XCTAssertTrue(swapped)
+        XCTAssertEqual(files.fileIdentity(at: live, followingLinks: false), identity)
+        var status = stat()
+        XCTAssertEqual(lstat(source, &status), 0)
+        XCTAssertEqual(status.st_mode & S_IFMT, S_IFIFO, "The failed write must leave the externally swapped entry in place")
+        // Undo only the fixture's external swap so every previous manifest byte can be compared.
+        try files.deleteFile(at: source)
+        try files.replaceItem(at: source, with: parked)
+        XCTAssertEqual(try treeBytes(at: live), before)
+        try manifest.write(changed, toRoot: root)
+        XCTAssertEqual(try manifest.read(fromRoot: root).categories, changed.categories)
+        XCTAssertEqual(try files.readFile(at: source), "original legacy bytes")
+    }
+
     func testDirectoryModifiedDuringCarryFailsClosedAndRetries() throws {
         let source = root + "/manifest/scenarios"
         for initiallyAbsent in [false, true] {
@@ -133,12 +171,18 @@ extension ManifestScenarioCarryTests {
         try files.writeFile(at: source, content: "keep")
         let missing = root + "/missing/legacy.yaml"
         XCTAssertThrowsError(try files.copyFile(at: source, to: missing)) { error in
-            XCTAssertTrue(error.localizedDescription.contains(missing))
+            let temporary = (error as NSError).userInfo[NSFilePathErrorKey] as? String ?? ""
+            XCTAssertTrue(temporary.hasPrefix(self.root + "/missing/.pensieve-copy-"), temporary)
+            XCTAssertTrue(temporary.hasSuffix(".tmp"), temporary)
+            XCTAssertEqual(error.localizedDescription, "open(\(temporary)): " + String(cString: strerror(ENOENT)))
             XCTAssertTrue(error.localizedDescription.contains(String(cString: strerror(ENOENT))))
         }
         XCTAssertThrowsError(try files.copyRegularFiles(fromDirectory: root + "/manifest/scenarios",
                                                        toDirectory: root + "/missing")) { error in
-            XCTAssertTrue(error.localizedDescription.contains(missing))
+            let temporary = (error as NSError).userInfo[NSFilePathErrorKey] as? String ?? ""
+            XCTAssertTrue(temporary.hasPrefix(self.root + "/missing/.pensieve-copy-"), temporary)
+            XCTAssertTrue(temporary.hasSuffix(".tmp"), temporary)
+            XCTAssertEqual(error.localizedDescription, "open(\(temporary)): " + String(cString: strerror(ENOENT)))
             XCTAssertTrue(error.localizedDescription.contains(String(cString: strerror(ENOENT))))
         }
     }

@@ -59,28 +59,59 @@ final class FileServiceAdmissionTests: XCTestCase {
         XCTAssertEqual(status.st_mode & 0o777, 0o751)
     }
 
-    /// Audit direct open/openat calls spelling both safety flags, including line breaks and either
-    /// flag order. Only the carry's exact O_DIRECTORY open is exempt from regular-file admission.
-    /// Standalone comments are ignored. This catches ordinary admission copies, not aliases,
-    /// computed flags or arbitrary Swift syntax. Source enumeration and reads use FileService.
+    func testAdmissionErrorsNamePlainAndDirectoryRelativeCalls() throws {
+        let missing = root + "/missing"
+        let operations: [() throws -> Void] = [
+            { _ = try self.files.readRegularFileData(at: missing, maximumBytes: 1_024) },
+            { try self.files.copyFile(at: missing, to: self.root + "/destination") },
+            { try self.files.touchRegularFile(at: missing, date: Date()) }
+        ]
+        for operation in operations {
+            XCTAssertThrowsError(try operation()) { error in
+                self.assertPOSIX(error, code: ENOENT, operation: "open", path: missing)
+                XCTAssertEqual((error as NSError).userInfo[NSFilePathErrorKey] as? String, missing)
+                XCTAssertEqual(error.localizedDescription, "open(\(missing)): " + String(cString: strerror(ENOENT)))
+            }
+        }
+        let directory = open(root, O_RDONLY | O_DIRECTORY)
+        XCTAssertGreaterThanOrEqual(directory, 0)
+        defer { close(directory) }
+        XCTAssertThrowsError(try FileService.openRegularFile(at: "missing", relativeTo: directory, reportingPath: missing)) {
+            self.assertPOSIX($0, code: ENOENT, operation: "openat", path: missing)
+            XCTAssertEqual($0.localizedDescription, "openat(\(missing)): " + String(cString: strerror(ENOENT)))
+        }
+    }
+
+    func testCopyCreationErrorNamesTheHiddenSiblingTemporary() throws {
+        let source = root + "/source"
+        let destination = root + "/missing/destination"
+        try files.writeFile(at: source, content: "Keep source bytes")
+        XCTAssertThrowsError(try files.copyFile(at: source, to: destination)) { error in
+            self.assertPOSIX(error, code: ENOENT, operation: "create", path: destination)
+            let temporary = (error as NSError).userInfo[NSFilePathErrorKey] as? String ?? ""
+            XCTAssertTrue(temporary.hasPrefix(self.root + "/missing/.pensieve-copy-"), temporary)
+            XCTAssertTrue(temporary.hasSuffix(".tmp"), temporary)
+            XCTAssertEqual(error.localizedDescription, "open(\(temporary)): " + String(cString: strerror(ENOENT)))
+        }
+        XCTAssertFalse(files.fileExists(at: destination))
+        XCTAssertEqual(try files.readFile(at: source), "Keep source bytes")
+        XCTAssertEqual(try files.listDirectory(at: root), ["source"])
+    }
+
+    /// Audit every direct no-follow open/openat in app sources, including nested argument calls.
+    /// Only flags containing O_DIRECTORY exempt an open from regular-file admission. Standalone
+    /// comments are ignored; aliases and computed flags remain outside this textual audit.
     func testNoFollowNonblockingAdmissionHasOneImplementation() throws {
         let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-        let pattern = try NSRegularExpression(
-            pattern: #"\bopen(?:at)?\s*\((?=[^)]*\bO_NOFOLLOW\b)(?=[^)]*\bO_NONBLOCK\b)[^)]*\)"#
-        )
         var matches: [String] = []
         var directoryMatches: [String] = []
-        let directoryOpen = "open(source,O_RDONLY|O_NOFOLLOW|O_DIRECTORY|O_NONBLOCK)"
         let directoryCopyPath = sourceRoot.appendingPathComponent("Pensieve/Services/FileService+DirectoryCopy.swift").path
         for path in try swiftSources(in: sourceRoot.appendingPathComponent("Pensieve").path) {
             let source = try files.readFile(at: path).components(separatedBy: "\n")
                 .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }.joined(separator: "\n")
-            let range = NSRange(source.startIndex..<source.endIndex, in: source)
-            for match in pattern.matches(in: source, range: range) {
-                let expression = (source as NSString).substring(with: match.range)
-                    .components(separatedBy: .whitespacesAndNewlines).joined()
-                if path == directoryCopyPath && expression == directoryOpen {
+            for flags in try openFlags(in: source) where flags.range(of: #"\bO_NOFOLLOW\b"#, options: .regularExpression) != nil {
+                if flags.range(of: #"\bO_DIRECTORY\b"#, options: .regularExpression) != nil {
                     directoryMatches.append(path)
                 } else {
                     matches.append(path)
@@ -90,6 +121,32 @@ final class FileServiceAdmissionTests: XCTestCase {
         XCTAssertEqual(matches, [sourceRoot.appendingPathComponent("Pensieve/Services/FileService+BoundedRead.swift").path],
                        "Regular-file descriptor admission must have one implementation: \(matches)")
         XCTAssertEqual(directoryMatches, [directoryCopyPath], "Only the held source directory needs separate admission")
+    }
+
+    private func openFlags(in source: String) throws -> [String] {
+        let pattern = try NSRegularExpression(pattern: #"\b(open(?:at)?)\s*\("#)
+        let text = source as NSString
+        return pattern.matches(in: source, range: NSRange(location: 0, length: text.length)).compactMap { match in
+            let flagIndex = text.substring(with: match.range(at: 1)) == "openat" ? 2 : 1
+            var depth = 1
+            var argument = 0
+            var start = NSMaxRange(match.range)
+            for offset in start..<text.length {
+                switch text.character(at: offset) {
+                case 40: depth += 1 // (
+                case 41: depth -= 1 // )
+                default: break
+                }
+                let argumentEnd = depth == 0 || (depth == 1 && text.character(at: offset) == 44)
+                if argumentEnd {
+                    if argument == flagIndex { return text.substring(with: NSRange(location: start, length: offset - start)) }
+                    argument += 1
+                    start = offset + 1
+                }
+                if depth == 0 { break }
+            }
+            return nil
+        }
     }
 
     private func assertPOSIX(_ error: Error, code: Int32, operation: String, path: String) {

@@ -52,12 +52,12 @@ extension FileService {
             guard opened.entries[name]?.isRegular == true else { continue }
             let path = source + "/" + name
             try checkpoint(.copying(name))
-            let (child, _) = try Self.openRegularFile(at: name, relativeTo: descriptor, reportingPath: path)
+            let (child, status) = try Self.openRegularFile(at: name, relativeTo: descriptor, reportingPath: path)
             defer { close(child) }
-            guard try DirectoryCopySource.descriptorStamp(child, path: path) == opened.entries[name] else {
+            guard CopyEntryStamp(status) == opened.entries[name] else {
                 throw DescriptorFileCopy.error("source changed", path: path, code: ESTALE)
             }
-            try DescriptorFileCopy.copy(from: child, sourcePath: path, to: destination + "/" + name) { count in
+            try DescriptorFileCopy.copy(from: child, status: status, sourcePath: path, to: destination + "/" + name) { count in
                 try checkpoint(.copiedChunk(name, count))
             }
             guard try DirectoryCopySource.descriptorStamp(child, path: path) == opened.entries[name] else {
@@ -183,15 +183,13 @@ enum DescriptorFileCopy {
         ])
     }
 
-    static func copy(from descriptor: Int32, sourcePath: String, to destination: String,
+    /// The source descriptor and metadata must come from FileService.openRegularFile.
+    static func copy(from descriptor: Int32, status: stat, sourcePath: String, to destination: String,
                      copiedChunk: (Int) throws -> Void = { _ in }) throws {
-        var status = stat()
-        guard fstat(descriptor, &status) == 0 else { throw error("fstat", path: sourcePath, code: errno) }
-        guard status.st_mode & S_IFMT == S_IFREG else { throw error("not regular", path: sourcePath, code: EFTYPE) }
         let parent = URL(fileURLWithPath: destination).deletingLastPathComponent().path
         let temporary = parent + "/.pensieve-copy-" + UUID().uuidString + ".tmp"
         let (output, _) = try FileService.openRegularFile(
-            at: temporary, creatingWithPermissions: status.st_mode & 0o777, reportingPath: destination
+            at: temporary, creatingWithPermissions: status.st_mode & 0o777
         )
         defer {
             close(output)

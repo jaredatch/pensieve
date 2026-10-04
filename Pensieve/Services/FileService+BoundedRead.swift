@@ -61,8 +61,8 @@ extension FileService {
     }
 
     /// Admit one regular leaf for reading, copying or timestamp updates, optionally relative to a
-    /// held directory. Creation is exclusive for atomic copy siblings. Failure closes the descriptor
-    /// and removes a newly created leaf; success transfers the descriptor to the caller.
+    /// held directory. Creation is exclusive for atomic copy siblings. Failure closes the descriptor;
+    /// success transfers it to the caller, which owns temporary-file cleanup.
     static func openRegularFile(at path: String, relativeTo directory: Int32 = AT_FDCWD,
                                 creatingWithPermissions permissions: mode_t? = nil,
                                 reportingPath: String? = nil) throws -> (descriptor: Int32, status: stat) {
@@ -71,10 +71,11 @@ extension FileService {
         let descriptor = openat(directory, path, access | O_NOFOLLOW | O_NONBLOCK, permissions ?? 0)
         guard descriptor >= 0 else {
             let errorCode = errno
+            let operation = directory == AT_FDCWD ? "open" : "openat"
             throw NSError(domain: NSPOSIXErrorDomain, code: Int(errorCode),
                           userInfo: [NSFilePathErrorKey: errorPath,
                                      NSLocalizedDescriptionKey:
-                                        "openat(\(errorPath)): " + String(cString: strerror(errorCode))])
+                                        "\(operation)(\(errorPath)): " + String(cString: strerror(errorCode))])
         }
         do {
             var status = stat()
@@ -90,7 +91,6 @@ extension FileService {
             return (descriptor, status)
         } catch {
             close(descriptor)
-            if permissions != nil { unlinkat(directory, path, 0) }
             throw error
         }
     }

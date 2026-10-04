@@ -124,9 +124,9 @@ extension FileServiceProtocol {
     /// substituted FIFO from blocking the open before `fstat` can reject it — for a regular file the
     /// flag has no effect on the subsequent reads.
     func copyFile(at sourcePath: String, to destinationPath: String) throws {
-        let (fd, _) = try FileService.openRegularFile(at: sourcePath)
+        let (fd, status) = try FileService.openRegularFile(at: sourcePath)
         defer { close(fd) }
-        try DescriptorFileCopy.copy(from: fd, sourcePath: sourcePath, to: destinationPath)
+        try DescriptorFileCopy.copy(from: fd, status: status, sourcePath: sourcePath, to: destinationPath)
     }
 
     /// True iff the owner/user executable bit is set on a regular file. Group/world execute bits do

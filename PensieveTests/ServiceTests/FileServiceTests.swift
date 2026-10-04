@@ -25,12 +25,13 @@ final class FileServiceTests: XCTestCase {
         try fileService.writeFile(at: destination, content: "original")
         let identity = fileService.fileIdentity(at: destination, followingLinks: false)
         let entries = try fileService.listDirectory(at: tempDir).sorted()
-        let descriptor = open(source, O_RDONLY | O_NOFOLLOW)
+        let (descriptor, status) = try FileService.openRegularFile(at: source)
         XCTAssertGreaterThanOrEqual(descriptor, 0)
         defer { close(descriptor) }
         var chunks = 0
         // Inject failure in the descriptor helper that the public copyFile entry uses.
-        XCTAssertThrowsError(try DescriptorFileCopy.copy(from: descriptor, sourcePath: source, to: destination) { _ in
+        XCTAssertThrowsError(try DescriptorFileCopy.copy(from: descriptor, status: status,
+                                                        sourcePath: source, to: destination) { _ in
             chunks += 1
             throw CocoaError(.fileWriteUnknown)
         })
