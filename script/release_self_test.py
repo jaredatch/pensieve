@@ -349,7 +349,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         self.assertIn("EdDSA", self.run_release(expected=1))
         self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
 
-    def test_real_public_key_verification_accepts_only_matching_bytes(self):
+    def install_fixture_public_key(self):
         generator = self.root / "fixture-signature.swift"
         generator.write_text('import CryptoKit\nimport Foundation\nlet key = Curve25519.Signing.PrivateKey()\nlet data = Data("fresh built DMG".utf8)\nprint(key.publicKey.rawRepresentation.base64EncodedString())\nprint(try key.signature(for: data).base64EncodedString())\n')
         keys = subprocess.run(["/usr/bin/swift", str(generator)], capture_output=True, text=True, timeout=30)
@@ -358,6 +358,10 @@ class ReleaseSequenceTests(unittest.TestCase):
         plist = self.root / "Pensieve/Info.plist"
         plist.write_text(plist.read_text().replace("HibOcVcc/1MTA9UQHp4cIb7qMewKaA0elSCSQ0DY8Ns=", public))
         self.env.pop("VERIFY_UPDATE_CMD")  # Exercise the default verifier in a checkout with spaces.
+        return signature
+
+    def test_real_public_key_verification_accepts_only_matching_bytes(self):
+        signature = self.install_fixture_public_key()
         self.state.update(release=self.state["expected_release"], appcast=feed(signature=signature))
         self.run_release()
         self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
@@ -365,6 +369,114 @@ class ReleaseSequenceTests(unittest.TestCase):
             self.state["asset"] = bad
             self.assertIn("does not match appcast", self.run_release(expected=1))
             self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
+
+    def cask_artifact(self, data=DMG):
+        artifact = self.root / "build/dist" / ("Pensieve-" + self.state["version"] + ".dmg")
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_bytes(data)
+        return artifact
+
+    def assert_cask_refused_without_writes(self, message):
+        self.assertIn(message, self.run_release(cask_only=True, expected=1))
+        self.assertEqual(self.state["writes"], [], "unverified artifacts must not reach the tap")
+        self.assertEqual(self.state["builds"], 0)
+        self.assertEqual(self.state["signing_inputs"], [])
+        self.assertFalse(any("pensieve.rb" in arg for call in self.state["calls"] for arg in call),
+                         "verification must precede even the tap read")
+
+    def test_cask_artifact_requires_live_appcast_item(self):
+        self.cask_artifact()
+        original = json.loads(json.dumps(self.state))
+        for appcast in (feed("0.9.0"), None):
+            with self.subTest(appcast=appcast):
+                self.state = dict(json.loads(json.dumps(original)), appcast=appcast,
+                                  appcast_sha=SHA if appcast else "")
+                self.assert_cask_refused_without_writes("appcast")
+
+    def test_cask_artifact_rejects_length_and_signature_mismatches(self):
+        self.cask_artifact()
+        original = json.loads(json.dumps(self.state))
+        for appcast in (feed(length=len(DMG) + 1), feed(signature=base64.b64encode(b"x" * 64).decode())):
+            with self.subTest(appcast=appcast):
+                self.state = dict(json.loads(json.dumps(original)), appcast=appcast)
+                self.assert_cask_refused_without_writes("length or EdDSA signature")
+
+    def test_cask_artifact_uses_real_public_key_before_tap_write(self):
+        signature = self.install_fixture_public_key()
+        self.state["appcast"] = feed(signature=signature)
+        original = json.loads(json.dumps(self.state))
+        for bad in (b"wrong built DMG", b"short"):
+            with self.subTest(data=bad):
+                self.state = json.loads(json.dumps(original))
+                self.cask_artifact(bad)
+                self.assert_cask_refused_without_writes("does not match appcast")
+        self.state = json.loads(json.dumps(original))
+        self.cask_artifact()
+        self.assertIn("cask done", self.run_release(cask_only=True))
+        self.assertEqual(self.state["writes"], ["cask"])
+        self.assertEqual(self.state["builds"], 0)
+        self.assertEqual(self.state["signing_inputs"], [])
+        self.run_release(cask_only=True)
+        self.assertEqual(self.state["writes"], ["cask"], "a cask-only retry must be a no-op")
+
+    def test_cask_artifact_refuses_failed_and_malformed_appcast_reads(self):
+        self.cask_artifact()
+        original = json.loads(json.dumps(self.state))
+        original["appcast"] = feed()
+        for problem in ({"fail_read": "appcast"}, {"malformed": "appcast"}, {"null_content": "appcast"},
+                        {"appcast": "<invalid"}, {"appcast": feed().replace('length="15"', 'length="0"')}):
+            with self.subTest(problem=problem):
+                self.state = dict(json.loads(json.dumps(original)), **problem)
+                self.assert_cask_refused_without_writes("appcast")
+
+    def test_sparse_cask_job_verifies_artifact_and_retries_without_build_tools(self):
+        signature = self.install_fixture_public_key()
+        self.state["appcast"] = feed(signature=signature)
+        job_result = subprocess.run(["/usr/bin/ruby", "-ryaml", "-rjson", "-e",
+                                     'puts JSON.generate(YAML.load_file(ARGV[0]).fetch("jobs").fetch("cask"))',
+                                     str(ROOT / ".github/workflows/release.yml")],
+                                    capture_output=True, text=True, timeout=30)
+        self.assertEqual(job_result.returncode, 0, job_result.stderr)
+        job = json.loads(job_result.stdout)
+        checkout = self.root / "sparse cask checkout"; checkout.mkdir()
+        inputs = job["steps"][0]["with"]["sparse-checkout"].splitlines()
+        for pattern in inputs:
+            relative = pattern.lstrip("/")
+            dest = checkout / relative; dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(self.root / relative, dest)
+        self.assertFalse((checkout / "project.yml").exists())
+        self.assertFalse((checkout / "script/package.sh").exists())
+        artifact_dir = checkout / job["steps"][1]["with"]["path"]
+        artifact_dir.mkdir(parents=True)
+        artifact = artifact_dir / ("Pensieve-" + VERSION + ".dmg")
+        artifact.write_bytes(DMG)
+        command = job["steps"][-1]["run"]
+        env = dict(self.env, GITHUB_REF_NAME="v" + VERSION)
+        env.pop("SPARKLE_PRIVATE_KEY_FILE")
+        self.state_path.write_text(json.dumps(self.state))
+
+        def invoke(expected, tag="v" + VERSION):
+            result = subprocess.run(["/bin/bash", "-c", command], cwd=checkout,
+                                    env=dict(env, GITHUB_REF_NAME=tag), capture_output=True, text=True, timeout=30)
+            self.state = json.loads(self.state_path.read_text())
+            self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+            self.assertEqual(self.state["builds"], 0)
+            self.assertEqual(self.state["signing_inputs"], [])
+            forbidden = {"xcodegen", "xcodebuild", "codesign", "hdiutil", "notary", "stapler", "generate"}
+            self.assertFalse(any(call[0] in forbidden for call in self.state["calls"]))
+            return result.stdout + result.stderr
+
+        self.assertIn("does not match VERSION", invoke(1, "v9.9.9"))
+        self.assertEqual(self.state["calls"], [])
+        artifact.write_bytes(b"wrong built DMG")
+        self.assertIn("EdDSA", invoke(1))
+        self.assertEqual(self.state["writes"], [])
+        self.assertFalse(any("pensieve.rb" in arg for call in self.state["calls"] for arg in call))
+        artifact.write_bytes(DMG)
+        self.assertIn("cask done", invoke(0))
+        self.assertEqual(self.state["writes"], ["cask"])
+        self.assertIn("cask done", invoke(0))
+        self.assertEqual(self.state["writes"], ["cask"], "rerunning only the cask job must write once")
 
     def test_failed_and_malformed_reads_are_unknown(self):
         original = json.loads(json.dumps(self.state))

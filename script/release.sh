@@ -649,6 +649,7 @@ case "$INSPECT_MODE" in
 esac
 
 if [ "${CASK_ONLY:-0}" -eq 1 ]; then
+  verify_cask_artifact
   bump_cask
   exit 0
 fi

@@ -59,7 +59,7 @@ jobs:
           xcodegen generate
 
       - name: Sign, notarize, and publish
-        # Setup, signing and cask timeouts retain 10 minutes for upload.
+        # Setup, signing and upload leave 10 minutes below the job cap.
         timeout-minutes: 60
         env:
           DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
@@ -122,20 +122,65 @@ jobs:
               --notary-issuer "$NOTARY_ISSUER_ID" \
               --publish
 
-      - name: Publish Homebrew cask
-        timeout-minutes: 5
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
-        run: ./script/release.sh --publish-cask-only
-
       # The signed DMG exists on disk before release.sh reaches notarytool, so
       # preserving it on failure/cancellation means a stuck Apple queue never
       # strands the run's only DMG copy. No secret material lands in build/dist.
       - name: Preserve DMG artifact
         if: always()
+        timeout-minutes: 5
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dmg
           path: build/dist/*.dmg
           if-no-files-found: ignore
           retention-days: 14
+
+  cask:
+    name: Homebrew cask
+    needs: release
+    if: >-
+      github.repository == 'jaredatch/pensieve' &&
+      github.event_name == 'push' &&
+      github.ref_type == 'tag' &&
+      startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+    environment: release
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - name: Checkout cask inputs
+        timeout-minutes: 3
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /VERSION
+            /Pensieve/Info.plist
+            /release/homebrew/pensieve.rb
+            /script/release.sh
+            /script/release_recovery.sh
+            /script/release_state.py
+            /script/verify_update.swift
+
+      - name: Download DMG artifact
+        timeout-minutes: 3
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dmg
+          path: build/dist
+
+      - name: Publish Homebrew cask
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          expected_tag="v$(tr -d '[:space:]' < VERSION)"
+          if [ "$GITHUB_REF_NAME" != "$expected_tag" ]; then
+            echo "::error::Release tag does not match VERSION"
+            exit 1
+          fi
+          ./script/release.sh --publish-cask-only

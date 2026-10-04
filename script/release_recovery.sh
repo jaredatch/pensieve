@@ -18,6 +18,22 @@ verify_update_archive() {
   fi
 }
 
+verify_cask_artifact() {
+  ! is_prerelease || return 0
+  # This job has no signing authority. Read the live feed, never an artifact's
+  # accompanying XML, and verify the artifact before reading or writing the tap.
+  release_preflight || return 1
+  local publication length signature public_key
+  publication="$(state_tool appcast "$APPCAST_BASE" "$VERSION" "$DOWNLOAD_PREFIX")" || return 1
+  read -r length signature <<< "$publication"
+  [ "$length" != absent ] || { echo "release: cask requires a live appcast item for $VERSION" >&2; return 1; }
+  public_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$REPO/Pensieve/Info.plist")" || return 1
+  if ! verify_update_archive "$DMG_PATH" "$length" "$signature" "$public_key"; then
+    echo "release: cask artifact length or EdDSA signature does not match live appcast" >&2
+    return 1
+  fi
+}
+
 read_release_state() {
   local response="$DIST_DIR/release-response.txt" status mode=unpublished
   [ "$APPCAST_ITEM" = absent ] || mode=live

@@ -105,11 +105,24 @@ end
 
 class WorkflowTests < Minitest::Test
   ROOT = File.expand_path('..', __dir__)
+  CASK_INPUTS = %w[/VERSION /Pensieve/Info.plist /release/homebrew/pensieve.rb
+                   /script/release.sh /script/release_recovery.sh /script/release_state.py
+                   /script/verify_update.swift].freeze
+  CASK_RUN = <<~'SH'.freeze
+    set -euo pipefail
+    expected_tag="v$(tr -d '[:space:]' < VERSION)"
+    if [ "$GITHUB_REF_NAME" != "$expected_tag" ]; then
+      echo "::error::Release tag does not match VERSION"
+      exit 1
+    fi
+    ./script/release.sh --publish-cask-only
+  SH
 
   def setup
     @paths = Dir[File.join(ROOT, '.github/workflows/*.{yml,yaml}')].sort
     @workflows = @paths.to_h { |path| [File.basename(path), YAML.load_file(path)] }
     @release = @workflows.fetch('release.yml').fetch('jobs').fetch('release')
+    @cask = @workflows.fetch('release.yml').fetch('jobs').fetch('cask')
   end
 
   def strings(value)
@@ -131,22 +144,34 @@ class WorkflowTests < Minitest::Test
                  @workflows.fetch('release.yml')['concurrency'])
   end
 
-  def test_secrets_are_confined_to_release
+  def assert_secret_confinement(workflows)
     # Whole-context access and reusable-job inheritance must be refused too.
     [{ 'secrets' => 'inherit' },
      { 'env' => { 'LEAK' => '${{ toJSON(secrets) }}' } }].each do |fixture|
       refute_empty secret_references(fixture)
     end
-    @workflows.each do |name, workflow|
+    workflows.each do |name, workflow|
       refute_includes strings(triggers(workflow)), 'pull_request_target'
       outside_release = Marshal.load(Marshal.dump(workflow))
-      outside_release.fetch('jobs').delete('release') if name == 'release.yml'
+      if name == 'release.yml'
+        %w[release cask].each { |job| outside_release.fetch('jobs').delete(job) }
+      end
       assert_empty secret_references(outside_release), name
     end
-    expected = %w[DEVELOPER_ID_P12 DEVELOPER_ID_P12_PASSWORD NOTARY_API_KEY_P8
-                  NOTARY_ISSUER_ID NOTARY_KEY_ID RELEASE_REPO_TOKEN SPARKLE_PRIVATE_KEY]
-    actual = strings(@release).join("\n").scan(/secrets\.([A-Z_0-9]+)/).flatten.uniq
-    assert_equal expected.sort, actual.sort
+    expected = {
+      'release' => %w[DEVELOPER_ID_P12 DEVELOPER_ID_P12_PASSWORD NOTARY_API_KEY_P8
+                      NOTARY_ISSUER_ID NOTARY_KEY_ID SPARKLE_PRIVATE_KEY],
+      'cask' => %w[RELEASE_REPO_TOKEN]
+    }
+    expected.each do |job_name, secrets|
+      job = workflows.fetch('release.yml').fetch('jobs').fetch(job_name)
+      actual = strings(job).join("\n").scan(/secrets\.([A-Z_0-9]+)/).flatten.uniq
+      assert_equal secrets.sort, actual.sort, job_name + ': secret inventory'
+    end
+  end
+
+  def test_secrets_are_confined_to_release_jobs
+    assert_secret_confinement(@workflows)
   end
 
   def secret_references(value)
@@ -195,21 +220,26 @@ class WorkflowTests < Minitest::Test
     end
   end
 
-  def test_only_named_secrets_in_approved_steps
+  def assert_approved_secret_bindings(workflows)
     allowed = {
-      'Sign, notarize, and publish' => %w[DEVELOPER_ID_P12 DEVELOPER_ID_P12_PASSWORD
-        NOTARY_API_KEY_P8 NOTARY_ISSUER_ID NOTARY_KEY_ID SPARKLE_PRIVATE_KEY],
-      'Publish Homebrew cask' => %w[RELEASE_REPO_TOKEN]
+      'release' => { 'Sign, notarize, and publish' => %w[DEVELOPER_ID_P12 DEVELOPER_ID_P12_PASSWORD
+        NOTARY_API_KEY_P8 NOTARY_ISSUER_ID NOTARY_KEY_ID SPARKLE_PRIVATE_KEY] },
+      'cask' => { 'Publish Homebrew cask' => %w[RELEASE_REPO_TOKEN] }
     }
-    @workflows.each do |name, workflow|
+    workflows.each do |name, workflow|
       outside = Marshal.load(Marshal.dump(workflow))
       if name == 'release.yml'
-        outside.fetch('jobs').fetch('release').fetch('steps').each do |step|
-          allowed.fetch(step['name'], []).each do |secret|
-            key = secret == 'RELEASE_REPO_TOKEN' ? 'GH_TOKEN' : secret
-            expected = '${{ secrets.' + secret + ' }}'
-            assert_equal expected, step.fetch('env').fetch(key)
-            step['env'].delete(key)
+        allowed.each do |job_name, bindings|
+          steps = outside.fetch('jobs').fetch(job_name).fetch('steps')
+          bindings.each do |step_name, secrets|
+            holders = steps.select { |step| step['name'] == step_name }
+            assert_equal 1, holders.length, job_name + ': exactly one secret step'
+            secrets.each do |secret|
+              key = secret == 'RELEASE_REPO_TOKEN' ? 'GH_TOKEN' : secret
+              expected = '${{ secrets.' + secret + ' }}'
+              assert_equal expected, holders.first.fetch('env').fetch(key)
+              holders.first['env'].delete(key)
+            end
           end
         end
       end
@@ -217,26 +247,28 @@ class WorkflowTests < Minitest::Test
     end
   end
 
-  def test_tap_token_and_checkout_scope
-    steps = @release.fetch('steps')
+  def test_only_named_secrets_in_approved_steps
+    assert_approved_secret_bindings(@workflows)
+  end
+
+  def assert_tap_token_scope(workflows)
+    cask = workflows.fetch('release.yml').fetch('jobs').fetch('cask')
+    steps = cask.fetch('steps')
     holders = steps.select { |step| strings(step).any? { |value| value.match?(/RELEASE_REPO_TOKEN/i) } }
     assert_equal ['Publish Homebrew cask'], holders.map { |step| step.fetch('name') }
     assert_equal({ 'GH_TOKEN' => '${{ secrets.RELEASE_REPO_TOKEN }}' }, holders.first.fetch('env'))
-    assert_equal './script/release.sh --publish-cask-only', holders.first.fetch('run')
-    @workflows.each do |name, workflow|
+    assert_equal CASK_RUN, holders.first.fetch('run')
+    workflows.each do |name, workflow|
       outside = Marshal.load(Marshal.dump(workflow))
       if name == 'release.yml'
-        outside.fetch('jobs').fetch('release').fetch('steps').reject! { |step| step['name'] == 'Publish Homebrew cask' }
+        outside.fetch('jobs').fetch('cask').fetch('steps').reject! { |step| step['name'] == 'Publish Homebrew cask' }
       end
       assert_empty strings(outside).grep(/RELEASE_REPO_TOKEN/i), name + ': tap token outside cask step'
     end
-    cask_budget = holders.first.fetch('timeout-minutes')
-    assert_operator cask_budget, :>, 0
-    before_upload = steps.take_while { |step| step['name'] != 'Preserve DMG artifact' }
-    budgets = before_upload.map { |step| step.fetch('timeout-minutes') }
-    budgets.each { |minutes| assert_operator minutes, :>, 0 }
-    assert_operator @release.fetch('timeout-minutes') - budgets.sum, :>=, 10
-    @workflows.each_value do |workflow|
+  end
+
+  def assert_checkout_credentials(workflows)
+    workflows.each_value do |workflow|
       workflow.fetch('jobs').each_value do |job|
         job.fetch('steps').each do |step|
           next unless step.fetch('uses', '').start_with?('actions/checkout@')
@@ -246,12 +278,130 @@ class WorkflowTests < Minitest::Test
     end
   end
 
+  def test_tap_token_and_checkout_scope
+    assert_tap_token_scope(@workflows)
+    assert_checkout_credentials(@workflows)
+  end
+
+  def assert_cask_job_shape(workflows)
+    jobs = workflows.fetch('release.yml').fetch('jobs')
+    assert_equal %w[cask release], jobs.keys.sort
+    cask = jobs.fetch('cask')
+    assert_equal %w[environment if name needs permissions runs-on steps timeout-minutes], cask.keys.sort
+    assert_equal 'release', cask.fetch('needs')
+    assert_equal jobs.fetch('release').fetch('if'), cask.fetch('if')
+    assert_equal 'release', cask.fetch('environment')
+    assert_equal({ 'contents' => 'read' }, cask.fetch('permissions'))
+    assert_equal 'macos-26', cask.fetch('runs-on')
+    steps = cask.fetch('steps')
+    assert_equal ['Checkout cask inputs', 'Download DMG artifact', 'Publish Homebrew cask'],
+                 steps.map { |step| step.fetch('name') }
+    steps.take(2).each { |step| assert_equal %w[name timeout-minutes uses with], step.keys.sort }
+    assert_equal %w[env name run timeout-minutes], steps.last.keys.sort
+    assert_match(%r{\Aactions/checkout@}, steps.first.fetch('uses'))
+    assert_equal({ 'fetch-depth' => 1, 'persist-credentials' => false,
+                   'sparse-checkout-cone-mode' => false,
+                   'sparse-checkout' => CASK_INPUTS.join("\n") + "\n" }, steps.first.fetch('with'))
+    assert_match(%r{\Aactions/download-artifact@}, steps[1].fetch('uses'))
+    assert_equal({ 'name' => 'dmg', 'path' => 'build/dist' }, steps[1].fetch('with'))
+    assert_equal CASK_RUN, steps.last.fetch('run')
+    assert_equal({ 'GH_TOKEN' => '${{ secrets.RELEASE_REPO_TOKEN }}' }, steps.last.fetch('env'))
+
+    release_steps = jobs.fetch('release').fetch('steps')
+    uploads = release_steps.select { |step| step.fetch('uses', '').start_with?('actions/upload-artifact@') }
+    assert_equal 1, uploads.length
+    upload = uploads.first
+    assert_equal 'always()', upload.fetch('if')
+    assert_equal({ 'name' => 'dmg', 'path' => 'build/dist/*.dmg',
+                   'if-no-files-found' => 'ignore', 'retention-days' => 14 }, upload.fetch('with'))
+    signer = release_steps.find { |step| step['name'] == 'Sign, notarize, and publish' }
+    assert_operator release_steps.index(upload), :>, release_steps.index(signer)
+  end
+
+  def test_cask_job_is_isolated_and_consumes_release_artifact
+    assert_cask_job_shape(@workflows)
+  end
+
+  def test_cask_job_rejects_extra_execution_secrets_and_checkout_files
+    fixtures = {
+      'build step' => ->(job) { job['steps'].insert(1, { 'name' => 'Build', 'run' => 'xcodebuild build' }) },
+      'install step' => ->(job) { job['steps'].insert(1, { 'name' => 'Install', 'run' => 'brew install xcodegen' }) },
+      'build in approved step' => ->(job) { job['steps'].last['run'] += "xcodebuild build\n" },
+      'second secret' => ->(job) { job['steps'].last['env']['LEAK'] = '${{ secrets.SPARKLE_PRIVATE_KEY }}' },
+      'persisted credentials' => ->(job) { job['steps'].first['with']['persist-credentials'] = true },
+      'full checkout' => ->(job) { job['steps'].first['with'].delete('sparse-checkout') },
+      'cone checkout' => ->(job) { job['steps'].first['with']['sparse-checkout-cone-mode'] = true },
+      'extra checkout file' => ->(job) { job['steps'].first['with']['sparse-checkout'] += "/project.yml\n" },
+      'filter overriding sparse checkout' => ->(job) { job['steps'].first['with']['filter'] = 'blob:none' },
+      'foreign artifact run' => ->(job) { job['steps'][1]['with']['run-id'] = 1234 },
+      'failure admission' => ->(job) { job['if'] = 'always()' },
+      'no dependency' => ->(job) { job['needs'] = [] },
+      'no environment' => ->(job) { job['environment'] = 'other' },
+      'write permission' => ->(job) { job['permissions']['contents'] = 'write' }
+    }
+    fixtures.each do |label, mutate|
+      workflows = Marshal.load(Marshal.dump(@workflows))
+      mutate.call(workflows.fetch('release.yml').fetch('jobs').fetch('cask'))
+      assert_raises(Minitest::Assertion, label) { assert_cask_job_shape(workflows) }
+    end
+  end
+
+  def test_secret_context_abuse_is_rejected_in_other_scopes
+    leaks = [{ 'env' => { 'LEAK' => '${{ secrets.SPARKLE_PRIVATE_KEY }}' } },
+             { 'env' => { 'LEAK' => "${{ secrets['RELEASE_REPO_TOKEN'] }}" } },
+             { 'secrets' => 'inherit' }, { 'env' => { 'LEAK' => '${{ toJSON(secrets) }}' } }]
+    leaks.each do |leak|
+      %w[workflow other_job release_job cask_job other_release_step other_cask_step].each do |scope|
+        workflows = Marshal.load(Marshal.dump(@workflows))
+        workflow = workflows.fetch('release.yml')
+        jobs = workflow.fetch('jobs')
+        case scope
+        when 'workflow' then workflow.merge!(leak)
+        when 'other_job' then jobs['unapproved'] = leak
+        when 'release_job' then jobs.fetch('release').merge!(leak)
+        when 'cask_job' then jobs.fetch('cask').merge!(leak)
+        when 'other_release_step' then jobs.fetch('release')['steps'].first.merge!(leak)
+        when 'other_cask_step' then jobs.fetch('cask')['steps'].first.merge!(leak)
+        end
+        assert_raises(Minitest::Assertion, scope + ': ' + leak.inspect) { assert_approved_secret_bindings(workflows) }
+      end
+    end
+  end
+
+  def assert_release_timeout_budgets(workflow)
+    workflow.fetch('jobs').each do |job_name, job|
+      budgets = job.fetch('steps').map { |step| step.fetch('timeout-minutes', 0) }
+      budgets.each { |minutes| assert_operator minutes, :>, 0, job_name }
+      assert_operator job.fetch('timeout-minutes') - budgets.sum, :>=, 10, job_name + ': timeout headroom'
+    end
+    signer = workflow.fetch('jobs').fetch('release').fetch('steps').find { |step| step['name'] == 'Sign, notarize, and publish' }
+    assert_operator signer.fetch('timeout-minutes'), :>=, 60
+  end
+
+  def test_release_timeout_budgets_count_every_step
+    workflow = @workflows.fetch('release.yml')
+    assert_release_timeout_budgets(workflow)
+    %w[release cask].each do |job_name|
+      fixture = Marshal.load(Marshal.dump(workflow))
+      job = fixture.fetch('jobs').fetch(job_name)
+      job['timeout-minutes'] = job['steps'].sum { |step| step.fetch('timeout-minutes') } + 9
+      assert_raises(Minitest::Assertion, job_name) { assert_release_timeout_budgets(fixture) }
+      fixture = Marshal.load(Marshal.dump(workflow))
+      fixture.fetch('jobs').fetch(job_name)['steps'].last.delete('timeout-minutes')
+      assert_raises(Minitest::Assertion, job_name + ': missing timeout') { assert_release_timeout_budgets(fixture) }
+    end
+    fixture = Marshal.load(Marshal.dump(workflow))
+    fixture.fetch('jobs').fetch('release')['steps'].find { |step| step['name'] == 'Sign, notarize, and publish' }['timeout-minutes'] = 59
+    assert_raises(Minitest::Assertion, 'short notarization bound') { assert_release_timeout_budgets(fixture) }
+  end
+
   def test_release_event_matrix
     condition = @release.fetch('if')
     # PLAN-45 changes this expectation and the workflow together at cutover.
     canonical = 'jaredatch/pensieve'
     assert_match(%r{\A[^/]+/[^/]+\z}, canonical, 'canonical repository must have non-empty owner/name parts')
     assert_release_admission(condition, canonical, 'live workflow')
+    assert_release_admission(@cask.fetch('if'), canonical, 'live cask workflow')
     equality = "github.repository == '#{canonical}'"
     event_guard = "github.event_name == 'push' && github.ref_type == 'tag' && " \
                   "startsWith(github.ref, 'refs/tags/v')"
@@ -282,7 +432,7 @@ class WorkflowTests < Minitest::Test
              "#{label}: failing fixture must produce an over-admission (expected false, actual true)"
     end
     whole_name = /(?<![a-z0-9_.\/-])#{Regexp.escape(canonical)}(?![a-z0-9_.\/-])/i
-    assert_equal 1, @paths.sum { |path| File.read(path).scan(whole_name).length }
+    assert_equal 2, @paths.sum { |path| File.read(path).scan(whole_name).length }
   end
 
   def assert_release_admission(condition, canonical, label)
