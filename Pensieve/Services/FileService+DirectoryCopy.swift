@@ -185,15 +185,15 @@ enum DescriptorFileCopy {
 
     /// The source descriptor and metadata must come from FileService.openRegularFile.
     static func copy(from descriptor: Int32, status: stat, sourcePath: String, to destination: String,
+                     renameFile: (String, String) -> Int32 = { Darwin.rename($0, $1) },
                      copiedChunk: (Int) throws -> Void = { _ in }) throws {
         let parent = URL(fileURLWithPath: destination).deletingLastPathComponent().path
         let temporary = parent + "/.pensieve-copy-" + UUID().uuidString + ".tmp"
-        let (output, _) = try FileService.openRegularFile(
-            at: temporary, creatingWithPermissions: status.st_mode & 0o777
-        )
+        let output = try createTemporary(at: temporary, for: destination, permissions: status.st_mode & 0o777)
+        var renamed = false
         defer {
             close(output)
-            unlink(temporary)
+            if !renamed { unlink(temporary) }
         }
         guard fchmod(output, status.st_mode & 0o777) == 0 else { throw error("fchmod", path: destination, code: errno) }
         var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
@@ -207,8 +207,23 @@ enum DescriptorFileCopy {
             try writeChunk(buffer, count: count, output: output, destination: destination)
             try copiedChunk(count)
         }
-        guard rename(temporary, destination) == 0 else { throw error("rename", path: destination, code: errno) }
+        guard renameFile(temporary, destination) == 0 else { throw error("rename", path: destination, code: errno) }
+        renamed = true
     }
+
+    private static func createTemporary(at temporary: String, for destination: String, permissions: mode_t) throws -> Int32 {
+        do {
+            return try FileService.openRegularFile(at: temporary, creatingWithPermissions: permissions).descriptor
+        } catch {
+            let failure = error as NSError
+            throw NSError(domain: failure.domain, code: failure.code, userInfo: [
+                NSFilePathErrorKey: temporary,
+                NSLocalizedDescriptionKey:
+                    "open(\(temporary)) for \(destination): " + String(cString: strerror(Int32(failure.code)))
+            ])
+        }
+    }
+
     private static func writeChunk(_ buffer: [UInt8], count: Int, output: Int32, destination: String) throws {
         try buffer.withUnsafeBytes { bytes in
             var offset = 0

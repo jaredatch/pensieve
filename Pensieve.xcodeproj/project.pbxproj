@@ -319,6 +319,7 @@
 		7EF2E4452391A36EC9173643 /* AdapterConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECB2CFCA75644C73EC77EB2E /* AdapterConfig.swift */; };
 		7EFE0F079ADE3CDAD0FCA71B /* StoreRebuildServiceTests+InstalledOrigin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B87DB942BBB483C2848CA7FF /* StoreRebuildServiceTests+InstalledOrigin.swift */; };
 		7F4CC77E1DC13A864D6B3691 /* ImportScanRevisionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 776BF250F31C5A20EAC3367B /* ImportScanRevisionTests.swift */; };
+		7FA804748F139AABBAE2526B /* FileServiceErrorAssertions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BFFA7C467B8538292148BCA /* FileServiceErrorAssertions.swift */; };
 		8034995D0C19061BCDF01C7F /* SyncScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84A04480BA5796CA201D60DE /* SyncScheduler.swift */; };
 		8061B3BD0C103F319CAF8BB8 /* ImportResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 978296D90BAD244ADD184F22 /* ImportResultsView.swift */; };
 		81486547689C6E5F959143BB /* GitHubCredentialSettingsModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E46144398A54A6DE1E2417C8 /* GitHubCredentialSettingsModelTests.swift */; };
@@ -840,6 +841,7 @@
 		2B00504E1EDA89F3FF04FA73 /* DetailTabTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailTabTests.swift; sourceTree = "<group>"; };
 		2B3FDC1E61D6E53F8D92E8CB /* ImportScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportScannerTests.swift; sourceTree = "<group>"; };
 		2B40F27061EA7F63AFD35A34 /* LinkService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkService.swift; sourceTree = "<group>"; };
+		2BFFA7C467B8538292148BCA /* FileServiceErrorAssertions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileServiceErrorAssertions.swift; sourceTree = "<group>"; };
 		2C9B56F5F744D2DE7A648942 /* UpstreamHistoryService+Sanitization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UpstreamHistoryService+Sanitization.swift"; sourceTree = "<group>"; };
 		2D6D9BBF32983DA4316CADAA /* SkillScope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillScope.swift; sourceTree = "<group>"; };
 		2DA05F79E344C0F1C1E52817 /* DeployIntentModelTests+Review.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DeployIntentModelTests+Review.swift"; sourceTree = "<group>"; };
@@ -2062,6 +2064,7 @@
 				9BC4D59576E413BEE96867D2 /* DeletionTestSupport.swift */,
 				9452AAA6ED59100837ADF22E /* DeployReconcilerTestSupport.swift */,
 				146D0C1EF98314DF72E4F319 /* FileService+DirectoryCopyDouble.swift */,
+				2BFFA7C467B8538292148BCA /* FileServiceErrorAssertions.swift */,
 				B92D87A42D70E89E91F04933 /* FrontmatterRewriteFixture.swift */,
 				6B88DABB4634017DF744895B /* GitFailureFixture.swift */,
 				CAEEE3F84D0F473D3321B9D6 /* GitProcessProbeRunner.swift */,
@@ -2528,6 +2531,7 @@
 				D0C9B60504DE0EDE68C21089 /* ExternalChangeTests.swift in Sources */,
 				D8563D23A6E1BEE3B153473A /* FileService+DirectoryCopyDouble.swift in Sources */,
 				DD4B80FF3750D75EDB04172A /* FileServiceAdmissionTests.swift in Sources */,
+				7FA804748F139AABBAE2526B /* FileServiceErrorAssertions.swift in Sources */,
 				0C8F6C8AAD9820437E876015 /* FileServiceTests.swift in Sources */,
 				6D30615E4B91B2514B839BFB /* FileWatchServiceTests.swift in Sources */,
 				204F61012ACABA244C206E6E /* FrontmatterRewriteFixture.swift in Sources */,

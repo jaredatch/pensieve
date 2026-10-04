@@ -26,7 +26,6 @@ final class FileServiceTests: XCTestCase {
         let identity = fileService.fileIdentity(at: destination, followingLinks: false)
         let entries = try fileService.listDirectory(at: tempDir).sorted()
         let (descriptor, status) = try FileService.openRegularFile(at: source)
-        XCTAssertGreaterThanOrEqual(descriptor, 0)
         defer { close(descriptor) }
         var chunks = 0
         // Inject failure in the descriptor helper that the public copyFile entry uses.
@@ -39,6 +38,33 @@ final class FileServiceTests: XCTestCase {
         XCTAssertTrue(try fileService.readData(at: destination) == Data("original".utf8))
         XCTAssertEqual(fileService.fileIdentity(at: destination, followingLinks: false), identity)
         XCTAssertEqual(try fileService.listDirectory(at: tempDir).sorted(), entries)
+    }
+
+    func testSuccessfulCopyDoesNotUnlinkAReusedTemporaryNameAfterRename() throws {
+        let source = tempDir + "/source"
+        let destination = tempDir + "/destination"
+        try fileService.writeFile(at: source, content: "copied bytes")
+        try fileService.writeFile(at: destination, content: "previous bytes")
+        let (descriptor, status) = try FileService.openRegularFile(at: source)
+        defer { close(descriptor) }
+        var reused: String?
+        var identity: FileIdentity?
+        try DescriptorFileCopy.copy(from: descriptor, status: status, sourcePath: source, to: destination,
+                                    renameFile: { temporary, target in
+            let result = Darwin.rename(temporary, target)
+            guard result == 0 else { return result }
+            reused = temporary
+            do { try self.fileService.writeFile(at: temporary, content: "new owner's bytes") } catch {
+                XCTFail("Fixture setup: \(error)")
+            }
+            identity = self.fileService.fileIdentity(at: temporary, followingLinks: false)
+            return result
+        })
+        let temporary = try XCTUnwrap(reused, "The successful rename must run")
+        XCTAssertEqual(try fileService.readFile(at: destination), "copied bytes")
+        XCTAssertTrue(fileService.fileExists(at: temporary), "Success must not unlink a name reused after rename")
+        XCTAssertEqual(fileService.fileIdentity(at: temporary, followingLinks: false), try XCTUnwrap(identity))
+        XCTAssertEqual(try fileService.readFile(at: temporary), "new owner's bytes")
     }
 
     func testCopyFileReplacesSymlinkWithoutChangingItsTarget() throws {

@@ -171,19 +171,11 @@ extension ManifestScenarioCarryTests {
         try files.writeFile(at: source, content: "keep")
         let missing = root + "/missing/legacy.yaml"
         XCTAssertThrowsError(try files.copyFile(at: source, to: missing)) { error in
-            let temporary = (error as NSError).userInfo[NSFilePathErrorKey] as? String ?? ""
-            XCTAssertTrue(temporary.hasPrefix(self.root + "/missing/.pensieve-copy-"), temporary)
-            XCTAssertTrue(temporary.hasSuffix(".tmp"), temporary)
-            XCTAssertEqual(error.localizedDescription, "open(\(temporary)): " + String(cString: strerror(ENOENT)))
-            XCTAssertTrue(error.localizedDescription.contains(String(cString: strerror(ENOENT))))
+            FileServiceErrorAssertions.hiddenCopyTemporary(error, destination: missing, code: ENOENT)
         }
         XCTAssertThrowsError(try files.copyRegularFiles(fromDirectory: root + "/manifest/scenarios",
                                                        toDirectory: root + "/missing")) { error in
-            let temporary = (error as NSError).userInfo[NSFilePathErrorKey] as? String ?? ""
-            XCTAssertTrue(temporary.hasPrefix(self.root + "/missing/.pensieve-copy-"), temporary)
-            XCTAssertTrue(temporary.hasSuffix(".tmp"), temporary)
-            XCTAssertEqual(error.localizedDescription, "open(\(temporary)): " + String(cString: strerror(ENOENT)))
-            XCTAssertTrue(error.localizedDescription.contains(String(cString: strerror(ENOENT))))
+            FileServiceErrorAssertions.hiddenCopyTemporary(error, destination: missing, code: ENOENT)
         }
     }
 
