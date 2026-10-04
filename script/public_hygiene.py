@@ -33,6 +33,8 @@ KIT_CONFIG = frozenset(('script/ratchet.conf', 'script/herdr.conf'))
 FIXTURE_USERS = frozenset(('test', 'x', 'k', 'kk', 'fixture', 'other', 'me', 'user', 'Shared'))
 EMAIL_DOMAINS = frozenset(('example.com', 'example.org', 'example.net',
                            'pensieve.local', 'github.com'))
+FIXTURE_DOMAINS = EMAIL_DOMAINS | frozenset(('host.example',))
+JS_TS_SUFFIXES = frozenset(('.js', '.mjs', '.cjs', '.ts'))
 ASSET_FOLDERS = ('Pensieve/Resources/Assets.xcassets/',)
 IMAGE_SUFFIXES = frozenset(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
                             '.heic', '.heif', '.tif', '.tiff', '.bmp', '.ico', '.icns', '.avif',
@@ -53,9 +55,12 @@ PUBLIC_BRIEFING_SHA256 = {
 EMAIL_FILENAME_SUFFIXES = IMAGE_SUFFIXES - {'.ai', '.mov'}
 MARKUP_SUFFIXES = frozenset(('.md', '.markdown', '.html', '.htm'))
 DECISION = re.compile(r'\bDEC-\d+\b')
-HOME_PATH = re.compile(r'/Users' r'/(\w[^/\s"\'`<>\\),;:\]}]*)')
-NAMED_HOME = re.compile(r'(?<![^\s"\'`(\[<])~([A-Za-z_][A-Za-z0-9._-]*)/')
-PROJECT_HOME = re.compile(r'(?<![\w-])-Users' r'-([^-/\s"\'`)<>\\\],;:]+)')
+# Project-cache paths also delimit components with '-'. Both spellings otherwise
+# terminate names on the same punctuation and ignore final sentence periods.
+HOME_NAME_TERMINATORS = r'\s' + re.escape("/\"'`<>\\),;:]}")
+HOME_PATH = re.compile(r'/Users' r'/(\w[^' + HOME_NAME_TERMINATORS + r']*)')
+NAMED_HOME = re.compile(r"(?<![^\s\"'`(\[<])~([A-Za-z_][A-Za-z0-9._-]*)/")
+PROJECT_HOME = re.compile(r'(?<![\w-])-Users' r'-([^-' + HOME_NAME_TERMINATORS + r']+)')
 EMAIL = re.compile(r'(?<![\w.+-])[\w.!#$%&\'*+/=?^`{|}~-]+@([a-z0-9-]+(?:\.[a-z0-9-]+)+)', re.I)
 HOSTNAME = re.compile(r'(?<![\w-])(?:[a-z0-9-]+\.)+ts\.net\b', re.I)
 
@@ -211,8 +216,9 @@ def link_targets(line):
             yield next(value for value in match.groups() if value is not None)
 
 
-def private_link(line, paths, citing_path):
-    if Path(citing_path).suffix.lower() not in MARKUP_SUFFIXES:
+def private_link(line, paths, citing_path, suffix=None):
+    suffix = Path(citing_path).suffix.lower() if suffix is None else suffix
+    if suffix not in MARKUP_SUFFIXES:
         return False
     for target in link_targets(line):
         if re.match(r'^(?:[A-Za-z][A-Za-z0-9+.-]*://|//|mailto:|tel:|data:|javascript:)', target, re.I):
@@ -229,8 +235,8 @@ def private_link(line, paths, citing_path):
     return False
 
 
-def private_cite(line, paths, citing_path=''):
-    if private_link(line, paths, citing_path):
+def private_cite(line, paths, citing_path='', suffix=None):
+    if private_link(line, paths, citing_path, suffix):
         return True
     shell_root = r'\$(?!(?:HOME|\{[!#]?HOME)(?!\w))(?:[A-Za-z_]\w*|\{[^{}\n]+\}|\([^\n]*?\))["\']?/'
     repository_url = (r'(?i:(?:https?://)?(?:(?:www\.)?github\.com/jaredatch/pensieve(?:-app)?/(?:blob|tree|raw|blame|edit|commits|history)/'
@@ -362,19 +368,20 @@ def image_file(path, data):
     return svg_document(data)
 
 
-def line_rules(path, line, paths, terms, public=False):
+def line_rules(path, line, paths, terms, public=False, suffix=None):
+    suffix = Path(path).suffix.lower() if suffix is None else suffix
     rules = []
     if path not in KIT and DECISION.search(line):
         rules.append('decision-cite')
     home_line = line.replace(r'\/', '/')
     home_patterns = (HOME_PATH, PROJECT_HOME)
-    if Path(path).suffix.lower() not in ('.js', '.mjs', '.cjs', '.ts'):
+    if suffix not in JS_TS_SUFFIXES:
         home_patterns += (NAMED_HOME,)
-    if any((match.group(1).rstrip('.') if pattern is HOME_PATH else match.group(1)) not in FIXTURE_USERS
+    if any((match.group(1).rstrip('.') if pattern in (HOME_PATH, PROJECT_HOME) else match.group(1)) not in FIXTURE_USERS
            for pattern in home_patterns
            for match in pattern.finditer(home_line)):
         rules.append('home-path')
-    if Path(path).suffix.lower() in MARKUP_SUFFIXES and re.search(
+    if suffix in MARKUP_SUFFIXES and re.search(
             r'data:image/', line, re.I):
         rules.append('image-location')
     for match in EMAIL.finditer(line):
@@ -410,7 +417,7 @@ def line_rules(path, line, paths, terms, public=False):
     exempt = KIT if public else KIT | KIT_CONFIG
     old_repo = public and re.search(r'(?i)(?<![\w.-])jaredatch/' r'pensieve-app(?![\w-])', line)
     if path not in exempt and not declaration and not config_declaration and (
-            private_cite(line, paths, path) or old_repo):
+            private_cite(line, paths, path, suffix) or old_repo):
         rules.append('private-path-cite')
     return rules
 
@@ -535,6 +542,7 @@ def scan(current, previous, terms_path, tree=False, floor=None, require_terms=Fa
         for name in PUBLIC_BRIEFING_SHA256:
             if name not in current.entries and any(p and name in p.entries for p in (previous, floor)):
                 findings.add((name, 1, 'briefing-pin'))
+    suffixes = {path: Path(path).suffix.lower() for path in current.entries}
     for paths, public in policies:
         for path in sorted(current.entries):
             old = previous and path in previous.entries
@@ -571,7 +579,7 @@ def scan(current, previous, terms_path, tree=False, floor=None, require_terms=Fa
                     used = bool(count)
                 if lines is not None and number not in lines:
                     continue
-                for rule in line_rules(path, line, paths, terms, public):
+                for rule in line_rules(path, line, paths, terms, public, suffixes[path]):
                     findings.add((path, number, rule))
     return sorted(findings)
 
@@ -669,9 +677,12 @@ def scan_project_diff(data, terms_path):
     paths = private_paths(policy)
     terms = personal_terms(terms_path, paths)
     findings = []
+    suffixes = {}
     for path, number, raw in diff_additions(data):
         if not is_private(path, paths):
-            for rule in line_rules(path, raw.decode('utf-8', 'surrogateescape'), paths, terms):
+            if path not in suffixes:
+                suffixes[path] = Path(path).suffix.lower()
+            for rule in line_rules(path, raw.decode('utf-8', 'surrogateescape'), paths, terms, suffix=suffixes[path]):
                 findings.append((path, number, rule))
     return findings
 

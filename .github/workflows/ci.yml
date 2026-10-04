@@ -23,15 +23,18 @@ jobs:
     permissions:
       contents: read
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 95 # 85 minutes of step bounds plus 10 minutes of headroom.
+    # Worst times: Actions runs 37074075055 and 37063706683, except recovery below.
     steps:
       - name: Checkout
+        timeout-minutes: 2 # Worst measured: 2 s; bound >= 3x.
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Select Xcode 26
+        timeout-minutes: 1 # Worst measured: 1 s; bound >= 3x.
         run: |
           xcode_path="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' -print | sort | tail -n 1)"
           if [ -z "$xcode_path" ]; then
@@ -42,14 +45,17 @@ jobs:
           xcodebuild -version
 
       - name: Install tools
+        timeout-minutes: 5 # Worst measured: 3 s; bound >= 3x.
         run: |
           brew install xcodegen
 
       - name: Generate Xcode project
+        timeout-minutes: 1 # Worst measured: 1 s; bound >= 3x.
         run: |
           xcodegen generate
 
       - name: Compute replay range
+        timeout-minutes: 1 # Worst measured: 0 s; bound >= 3x.
         id: replay-range
         run: |
           set -euo pipefail
@@ -83,35 +89,41 @@ jobs:
           fi
 
       - name: Test public hygiene guard
+        timeout-minutes: 8 # Worst measured: 156 s; bound >= 3x.
         run: ./script/public-hygiene.sh --self-test
 
       - name: Test workflow contracts
+        timeout-minutes: 1 # Worst measured: 3 s; bound >= 3x.
         run: ruby script/workflow_self_test.rb
 
       - name: Test release recovery
-        timeout-minutes: 5
+        timeout-minutes: 10 # Worst measured: 197.7 s local rehearsal; not yet present in the API runs; bound >= 3x.
         run: python3 -B script/release_self_test.py
 
       - name: Test development build host selection
+        timeout-minutes: 1 # Worst measured: 0 s; bound >= 3x.
         run: python3 -B script/pull_dev_build_self_test.py
 
       - name: Check public hygiene in pushed commits
+        timeout-minutes: 2 # Worst measured: 22 s; bound >= 3x.
         if: steps.replay-range.outputs.skip != 'true'
         env:
           HYGIENE_RANGE: ${{ steps.replay-range.outputs.range }}
         run: ./script/public-hygiene.sh --range "$HYGIENE_RANGE"
 
       - name: Replay commit guards
+        timeout-minutes: 2 # Worst measured: 35 s; bound >= 3x.
         if: steps.replay-range.outputs.skip != 'true'
         run: |
           RATCHET_CI_SKIP_DEFAULT_MERGE_HEAD="${{ steps.replay-range.outputs.skip_default_merge_head }}" \
             ./script/ci-replay.sh "${{ steps.replay-range.outputs.range }}"
 
       - name: Test
+        timeout-minutes: 45 # Worst measured: 867 s; bound >= 3x.
         id: tests
-        timeout-minutes: 25
         run: |
           set -o pipefail
+          ./script/test.sh --self-test
           ./script/test.sh | tee /tmp/ci-test.out
           count="$(grep -oE 'PENSIEVE_TEST_COUNT=[0-9]+' /tmp/ci-test.out | tail -1 | cut -d= -f2)"
           floor="$(cat .test-count)"
@@ -121,7 +133,7 @@ jobs:
           fi
 
       - name: Upload failed test evidence
-        timeout-minutes: 5
+        timeout-minutes: 5 # Worst measured: 7 s; bound >= 3x.
         if: failure() && steps.tests.outcome == 'failure'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -133,5 +145,6 @@ jobs:
           if-no-files-found: warn
 
       - name: Headless smoke
+        timeout-minutes: 1 # Worst measured: 14 s; bound >= 3x.
         run: |
           ./script/build_and_run.sh --headless

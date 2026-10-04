@@ -22,7 +22,6 @@ import zipfile
 from unittest.mock import patch
 
 import public_hygiene as guard
-from public_hygiene import FIXTURE_USERS
 
 HERE = Path(__file__).resolve().parent
 ACCEPTANCES = 'script/public-hygiene-acceptances.json'
@@ -32,7 +31,6 @@ KIT_COPIES = tuple('script/' + name for name in (
     'hooks/pre-commit', 'hooks/commit-msg', 'hooks/pre-push',
 ))
 ASSETS = 'Pensieve/Resources/Assets.xcassets/'
-FIXTURE_DOMAINS = ('example.com', 'example.org', 'example.net', 'pensieve.local', 'github.com', 'host.example')
 
 
 @contextlib.contextmanager
@@ -762,6 +760,42 @@ class HygieneTests(unittest.TestCase):
         self.assert_scan(expected)
         self.assert_scan(committed + expected, '--tree')
 
+    def test_home_spellings_share_name_endings(self):
+        endings = ['.', '..', '/', ' ', '\t', '\n', '"', "'", '`', '<', '>', '\\', ')', ',', ';', ':', ']', '}']
+        for name, expected in [('test', False), ('realperson', True)]:
+            for ending in endings:
+                with self.subTest(name=name, ending=ending):
+                    ordinary = '/'.join(('', 'Users', name)) + ending
+                    projected = '-Users' + '-' + name + ending
+                    for value in (ordinary, projected):
+                        self.assertEqual('home-path' in guard.line_rules('endings.txt', value, [], []), expected)
+
+    def test_fixture_failure_line_numbers_are_stable(self):
+        # Run the real fixture test under independent hash seeds and inject one
+        # unexpected finding. Its failing output must name the same fixture lines.
+        probe = r"""
+import re, unittest
+import hygiene_self_test as suite
+original = suite.Repository.stage
+def poison(self, path, data):
+    if path == 'safe.txt' and isinstance(data, str):
+        data = data.replace(suite.SAFE['home-path'], suite.HOME_HIT)
+    return original(self, path, data)
+suite.Repository.stage = poison
+unittest.TextTestRunner().run(unittest.TestSuite([suite.HygieneTests('test_private_and_kit_scope_and_fixtures')]))
+"""
+        results = []
+        for seed in ('1', '2', '3'):
+            run = subprocess.run([sys.executable, '-B', '-c', probe], cwd=HERE,
+                                 env=dict(os.environ, PYTHONHASHSEED=seed), capture_output=True, timeout=30)
+            self.assertEqual(run.returncode, 0, run.stderr.decode())
+            self.assertIn(b'FAILED (failures=1)', run.stderr)
+            lines = sorted(set(re.findall(rb'safe\.txt:(\d+): home-path', run.stderr)))
+            self.assertTrue(lines, run.stderr.decode())
+            results.append(lines)
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[0], results[2])
+
     def test_private_and_kit_scope_and_fixtures(self):
         self.repo.terms()
         notices = 'THIRD-PARTY-NOTICES.md'
@@ -798,10 +832,10 @@ class HygieneTests(unittest.TestCase):
         payload = '\n'.join(HITS.values())
         self.repo.stage('/'.join(('docs', 'plans', 'fixture.txt')), payload)
         self.repo.stage('script/ratchet.sh', DEC + '\n' + RECORD)
-        safe = '\n'.join('/'.join(('', 'Users', user, 'data')) for user in FIXTURE_USERS)
-        safe += '\n' + '\n'.join('test@' + domain for domain in FIXTURE_DOMAINS)
+        safe = '\n'.join('/'.join(('', 'Users', user, 'data')) for user in sorted(guard.FIXTURE_USERS))
+        safe += '\n' + '\n'.join('test@' + domain for domain in sorted(guard.FIXTURE_DOMAINS))
         safe += '\n~/.claude/' + 'CLAUDE.md\na project’s AGENTS.md\nimg@2x.png'
-        for user in FIXTURE_USERS:
+        for user in sorted(guard.FIXTURE_USERS):
             home = '/'.join(('', 'Users', user, 'data'))
             safe += '\n' + '\n'.join((home.lower(), home.replace('Users', 'USERS'),
                                        home.replace('/', r'\/'), '~' + user + '/data',
@@ -838,8 +872,8 @@ class HygieneTests(unittest.TestCase):
                 '"' + system_path + '"', 'src="' + build_path + '"',
                 '[x](' + system_path + ')', '[x]: <' + system_path + '>',
                 'href="' + build_path + '"')))
-        for extension in ('js', 'mjs', 'cjs', 'ts'):
-            self.repo.stage('x.' + extension, 'x=~t/2\nx = ~' + 't/2\nconst w = (~' + 'width/2)|0')
+        for suffix in sorted(guard.JS_TS_SUFFIXES):
+            self.repo.stage('x' + suffix, 'x=~t/2\nx = ~' + 't/2\nconst w = (~' + 'width/2)|0')
         self.repo.stage('Pensieve/Resources/EditorAssets/editor.bundle.js',
                         'const image = "data:image/png;base64,AAAA";')
         self.assert_scan([])

@@ -7,6 +7,8 @@ require 'strscan'
 # Evaluate only the boolean/string subset used by the release job condition.
 # Unknown syntax fails closed. This is a local policy probe, not a runner:
 # actionlint validates GitHub syntax; the post-merge release proves execution.
+# String comparisons support ASCII only. Both boolean operands are evaluated;
+# short-circuit semantics remain outside this policy probe.
 class WorkflowCondition
   attr_reader :tree
 
@@ -27,6 +29,11 @@ class WorkflowCondition
     node.drop(1).select { |child| child.is_a?(Array) }.flat_map { |child| string_literals(child) }
   end
 
+  def self.fold(value)
+    raise ArgumentError, 'workflow probe supports ASCII strings only' unless value.ascii_only?
+    value.tr('A-Z', 'a-z')
+  end
+
   private
 
   def evaluate_node(node, context)
@@ -37,9 +44,9 @@ class WorkflowCondition
     case kind
     when :or then left || right
     when :and then left && right
-    when :starts_with then left.downcase.start_with?(right.downcase)
+    when :starts_with then self.class.fold(left).start_with?(self.class.fold(right))
     when :==, :!=
-      equal = left.is_a?(String) && right.is_a?(String) ? left.casecmp(right).zero? : left == right
+      equal = left.is_a?(String) && right.is_a?(String) ? self.class.fold(left) == self.class.fold(right) : left == right
       kind == :== ? equal : !equal
     else raise 'unsupported node: ' + kind.inspect
     end
@@ -92,7 +99,9 @@ class WorkflowCondition
       expect(/\)/)
       [:starts_with, value, prefix]
     elsif (string = take(/'(?:[^']|'')*'/))
-      [:literal, string[1...-1].gsub("''", "'")]
+      literal = string[1...-1].gsub("''", "'")
+      self.class.fold(literal) # Reject unsupported literals before admission is evaluated.
+      [:literal, literal]
     elsif (property = take(/github\.[a-z_]+/))
       [:property, property]
     elsif (boolean = take(/true\b|false\b/))
@@ -399,7 +408,6 @@ class WorkflowTests < Minitest::Test
     condition = @release.fetch('if')
     # PLAN-45 changes this expectation and the workflow together at cutover.
     canonical = 'jaredatch/pensieve'
-    assert_match(%r{\A[^/]+/[^/]+\z}, canonical, 'canonical repository must have non-empty owner/name parts')
     assert_release_admission(condition, canonical, 'live workflow')
     assert_release_admission(@cask.fetch('if'), canonical, 'live cask workflow')
     equality = "github.repository == '#{canonical}'"
@@ -424,58 +432,114 @@ class WorkflowTests < Minitest::Test
     passing.each do |label, clause|
       assert_release_admission("(#{clause}) && #{event_guard}", canonical, label)
     end
-    assert_release_admission("#{equality} && #{event_guard.sub('refs/tags/v', 'REFS/TAGS/V')}",
+    assert_release_admission("#{equality} && github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref, 'REFS/TAGS/V')",
                              canonical, 'upper-case tag prefix')
     failing.each do |label, clause|
-      mismatches = release_event_mismatches("(#{clause}) && #{event_guard}", canonical)
-      assert mismatches.any? { |context| context['expected'] == false && context['actual'] == true },
-             "#{label}: failing fixture must produce an over-admission (expected false, actual true)"
+      assert_over_admission("(#{clause}) && #{event_guard}", canonical, label)
     end
     whole_name = /(?<![a-z0-9_.\/-])#{Regexp.escape(canonical)}(?![a-z0-9_.\/-])/i
     assert_equal 2, @paths.sum { |path| File.read(path).scan(whole_name).length }
   end
 
   def assert_release_admission(condition, canonical, label)
-    mismatches = release_event_mismatches(condition, canonical)
-    assert mismatches.empty?, "#{label}: release matrix mismatch: #{mismatches.first.inspect} " \
-                              "(#{mismatches.length} mismatched contexts)"
+    mismatch = release_event_mismatches(condition, canonical).first
+    assert mismatch.nil?, -> { "#{label}: release matrix mismatch: #{mismatch.inspect}" }
+  end
+
+  def assert_over_admission(condition, canonical, label)
+    mismatch = release_event_mismatches(condition, canonical).find do |context|
+      context['expected'] == false && context['actual'] == true
+    end
+    assert mismatch, -> { "#{label}: failing fixture must produce an over-admission; example mismatch: " \
+                          "#{release_event_mismatches(condition, canonical).first.inspect}" }
+  end
+
+  def repository_parts(canonical)
+    WorkflowCondition.fold(canonical)
+    unless canonical.match?(%r{\A[^/\s\x00-\x1f\x7f]+/[^/\s\x00-\x1f\x7f]+\z})
+      raise ArgumentError, 'canonical repository requires owner/name without whitespace or controls'
+    end
+    canonical.split('/')
   end
 
   def repository_witnesses(strings)
-    folded = strings.map(&:downcase).uniq
-    fresh_codepoint = 33
-    fresh_codepoint += 1 while folded.any? { |string| string.include?(fresh_codepoint.chr(Encoding::UTF_8).downcase) }
-    fresh = fresh_codepoint.chr(Encoding::UTF_8).downcase
-    assert_equal 1, fresh.length
-    refute folded.any? { |string| string.include?(fresh) }, 'witness character must be absent from every string'
-    # Equality and startsWith (in either direction) depend only on the shared
-    # prefix. Every unseen continuation has the relations of prefix + fresh.
+    folded = strings.map { |string| WorkflowCondition.fold(string) }.uniq
+    # All literal prefixes, plus one unseen outgoing ASCII edge per prefix,
+    # witness equality and startsWith in either direction. A full 128-edge node
+    # needs no extra edge: its existing child prefixes already cover them all.
     prefixes = folded.flat_map { |string| (0..string.length).map { |length| string[0, length] } }.uniq
-    (prefixes + prefixes.map { |prefix| prefix + fresh }).uniq
+    fresh = prefixes.map do |prefix|
+      following = folded.select { |string| string.start_with?(prefix) }.map { |string| string[prefix.length] }
+      character = (0..127).map(&:chr).find { |candidate| !following.include?(candidate) }
+      prefix + character if character
+    end.compact
+    (prefixes + fresh).uniq
   end
 
   def release_event_mismatches(condition, canonical)
     parsed = WorkflowCondition.new(condition)
     literals = parsed.string_literals
-    owner, name = canonical.split('/')
+    owner, name = repository_parts(canonical)
     repositories = [canonical, "octocat/#{name}", "#{owner}/fork", "#{canonical}-fork", '',
                     'jaredatch/pensieve', 'JaredAtch/Pensieve', 'alice/pensieve-app', 'evil/x', 'mallory/x']
     events = %w[push pull_request pull_request_target workflow_dispatch schedule release workflow_run]
     types = %w[tag branch]
-    refs = ['refs/tags/v1.2.3', 'refs/tags/v1.2.3-beta.1', 'refs/tags/v',
-            'refs/tags/other', 'refs/heads/v1.2.3', 'refs/heads/master', 'refs/pull/1/merge', '']
-    # Exercise ref disjuncts even when their literal was absent from the samples.
+    refs = ['refs/tags/v1.2.3', 'REFS/TAGS/V1.2.3', 'ReFs/TaGs/V1.2.3-beta.1',
+            'refs/tags/v1.2.3-beta.1', 'refs/tags/v', 'refs/tags/other', 'REFS/TAGS/OTHER',
+            'refs/heads/v1.2.3', 'refs/heads/master', 'refs/pull/1/merge', '']
     refs = (refs + literals.grep(%r{\Arefs/}i)).uniq
     witnesses = repository_witnesses(literals + events + types + refs + repositories)
-    repositories = (witnesses + repositories).uniq # Retain the mixed-case sample.
-    mismatches = []
-    repositories.product(events, types, refs) do |repo, event, type, ref|
-      context = { 'repository' => repo, 'event_name' => event, 'ref_type' => type, 'ref' => ref }
-      expected = repo.casecmp(canonical).zero? && event == 'push' && type == 'tag' && ref.downcase.start_with?('refs/tags/v')
-      actual = parsed.evaluate(context)
-      mismatches << context.merge('expected' => expected, 'actual' => actual) unless expected == actual
+    repositories = (witnesses + repositories).uniq
+    Enumerator.new do |mismatches|
+      repositories.product(events, types, refs) do |repo, event, type, ref|
+        context = { 'repository' => repo, 'event_name' => event, 'ref_type' => type, 'ref' => ref }
+        # casecmp is the independent ASCII-domain oracle; don't reuse the evaluator's fold.
+        expected = repo.casecmp(canonical).zero? && event == 'push' && type == 'tag' &&
+                   ref[0, 'refs/tags/v'.length].casecmp('refs/tags/v').zero?
+        actual = parsed.evaluate(context)
+        mismatches << context.merge('expected' => expected, 'actual' => actual) unless expected == actual
+      end
     end
-    mismatches
+  end
+
+  def test_non_ascii_condition_literals_are_refused
+    ["é", "İ", "K", "ß"].each do |literal|
+      error = assert_raises(ArgumentError) { WorkflowCondition.new("github.repository == '#{literal}/repo'") }
+      assert_includes error.message, 'ASCII'
+    end
+  end
+
+  def test_ascii_comparisons_match_ignore_case
+    values = ['AbC', 'aBc', 'ABC', '', 'x-Y_9', "O'NEIL"]
+    values.product(values).each do |left, right|
+      literal = right.gsub("'", "''")
+      context = { 'ref' => left }
+      assert_equal left.casecmp(right).zero?, WorkflowCondition.new("github.ref == '#{literal}'").evaluate(context)
+      assert_equal !left.casecmp(right).zero?, WorkflowCondition.new("github.ref != '#{literal}'").evaluate(context)
+      expected = left[0, right.length].casecmp(right).zero?
+      assert_equal expected, WorkflowCondition.new("startsWith(github.ref, '#{literal}')").evaluate(context)
+    end
+  end
+
+  def test_repository_samples_reject_whitespace_and_controls
+    characters = (0..32).map(&:chr) + [127.chr]
+    characters.each do |character|
+      ["owner#{character}/repo", "owner/repo#{character}"].each do |repository|
+        assert_raises(ArgumentError) { release_event_mismatches('true', repository).first }
+      end
+    end
+    ['owner', '/repo', 'owner/', 'owner/repo/extra'].each do |repository|
+      assert_raises(ArgumentError) { release_event_mismatches('true', repository).first }
+    end
+    assert_equal ['Owner', 'RePo'], repository_parts('Owner/RePo')
+  end
+
+  def test_admission_failure_reports_an_example
+    error = assert_raises(Minitest::Assertion) { assert_release_admission('true', 'owner/repo', 'over-admits') }
+    assert_includes error.message, 'release matrix mismatch:'
+    assert_includes error.message, '"expected"=>false'
+    assert_includes error.message, '"actual"=>true'
+    assert_includes error.message, '"ref"=>'
   end
 
   def test_explicit_read_only_permissions
@@ -515,14 +579,53 @@ class WorkflowTests < Minitest::Test
     assert_operator count, :>, 0
   end
 
+  # Worst seconds from Actions runs 37074075055 and 37063706683.
+  # Release recovery was added afterward: its 197.7 s baseline is the local rehearsal.
+  CI_WORST_SECONDS = {
+    'Checkout' => 2, 'Select Xcode 26' => 1, 'Install tools' => 3,
+    'Generate Xcode project' => 1, 'Compute replay range' => 0,
+    'Test public hygiene guard' => 156, 'Test workflow contracts' => 3,
+    'Test release recovery' => 197.7, 'Test development build host selection' => 0,
+    'Check public hygiene in pushed commits' => 22, 'Replay commit guards' => 35,
+    'Test' => 867, 'Upload failed test evidence' => 7, 'Headless smoke' => 14
+  }.freeze
+
+  def assert_ci_timeout_budget(job)
+    steps = job.fetch('steps')
+    budgets = steps.map do |step|
+      minutes = step.fetch('timeout-minutes', 0)
+      assert_operator minutes, :>, 0, step.fetch('name') + ': missing timeout'
+      assert_operator minutes * 60, :>=, CI_WORST_SECONDS.fetch(step.fetch('name')) * 3,
+                      step.fetch('name') + ': measured timeout floor'
+      minutes
+    end
+    assert_operator job.fetch('timeout-minutes'), :>=, budgets.sum + 10, 'CI: timeout headroom'
+  end
+
+  def test_ci_budget_rejects_missing_short_and_unsummed_bounds
+    job = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')
+    job.fetch('steps').each_with_index do |step, index|
+      fixture = Marshal.load(Marshal.dump(job))
+      fixture['steps'][index].delete('timeout-minutes')
+      assert_raises(Minitest::Assertion, step.fetch('name')) { assert_ci_timeout_budget(fixture) }
+      worst = CI_WORST_SECONDS.fetch(step.fetch('name'))
+      next if worst.zero?
+      fixture = Marshal.load(Marshal.dump(job))
+      fixture['steps'][index]['timeout-minutes'] = (worst * 3 / 60).ceil - 1
+      assert_raises(Minitest::Assertion, step.fetch('name')) { assert_ci_timeout_budget(fixture) }
+    end
+    fixture = Marshal.load(Marshal.dump(job))
+    fixture['timeout-minutes'] = fixture['steps'].sum { |step| step.fetch('timeout-minutes') } + 9
+    error = assert_raises(Minitest::Assertion) { assert_ci_timeout_budget(fixture) }
+    assert_includes error.message, 'timeout headroom'
+  end
+
   def test_ci_timeout_budget_preserves_failure_upload
     job = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')
     steps = job.fetch('steps')
     test = steps.find { |step| step['id'] == 'tests' }
     upload = steps.find { |step| step.fetch('uses', '').start_with?('actions/upload-artifact@') }
-    assert_operator test.fetch('timeout-minutes'), :>, 10
-    assert_operator job.fetch('timeout-minutes'), :>=,
-                    test.fetch('timeout-minutes') + upload.fetch('timeout-minutes') + 10
+    assert_ci_timeout_budget(job)
     # Runner StepsRunner.RunStepAsync maps a step timeout (not job cancellation) to Failed.
     # Thus failure() is true and steps.tests.outcome is 'failure'; no success() implicit guard.
     assert_equal "failure() && steps.tests.outcome == 'failure'", upload.fetch('if')

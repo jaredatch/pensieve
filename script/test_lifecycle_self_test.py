@@ -5,10 +5,15 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import select
 import subprocess
 import tempfile
 import time
 import unittest
+import uuid
+from unittest.mock import patch
+
+import test_diagnostics as diagnostics
 
 SCRIPTS = Path(__file__).resolve().parent
 
@@ -29,11 +34,26 @@ class TestLifecycleTests(unittest.TestCase):
         self.stub("xcodegen", "#!/bin/sh\nexit 0\n")
         self.stub("xcrun", '#!/bin/sh\necho \'{"totalTestCount":1,"testFailures":[]}\'\n')
         self.stub("xcodebuild", """#!/usr/bin/env python3
-import json, os, pathlib, sys, time
+import json, os, pathlib, sys, time, uuid
 bundle = pathlib.Path(sys.argv[sys.argv.index('-resultBundlePath') + 1])
 bundle.mkdir()
 (bundle / 'marker').write_text('preserved evidence')
 pathlib.Path(os.environ['TEST_LIFECYCLE_READY']).write_text(json.dumps({'pid': os.getpid(), 'directory': str(bundle.parent)}))
+if os.environ.get('TEST_LIFECYCLE_MODE') == 'diagnostics':
+    directory = pathlib.Path(os.environ['TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR'])
+    directory.mkdir(parents=True, exist_ok=True)
+    identifier = str(os.getpid()) + '-' + str(uuid.uuid4())
+    for kind in ('state', 'threads'):
+        destination = directory / (identifier + '-' + kind + '.txt')
+        temporary = directory / (identifier + '-' + kind + '.tmp')
+        temporary.write_text('live timeout ' + kind)
+        temporary.rename(destination)
+    deadline = time.monotonic() + 30
+    while not pathlib.Path(os.environ['TEST_LIFECYCLE_RELEASE']).exists():
+        if time.monotonic() > deadline:
+            sys.exit(72)
+        time.sleep(0.02)
+    print('Xcode flushed host output after release', flush=True)
 if os.environ.get('TEST_LIFECYCLE_MODE') == 'hang':
     while True:
         time.sleep(0.1)
@@ -59,7 +79,8 @@ sys.exit(65)
 
     def launch(self, mode="fail", label="run"):
         ready = self.root / (label + ".json")
-        env = dict(self.env, TEST_LIFECYCLE_MODE=mode, TEST_LIFECYCLE_READY=str(ready))
+        env = dict(self.env, TEST_LIFECYCLE_MODE=mode, TEST_LIFECYCLE_READY=str(ready),
+                   TEST_LIFECYCLE_RELEASE=str(self.root / (label + ".release")))
         process = subprocess.Popen(["/bin/bash", str(self.root / "script/test.sh")],
                                    env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         self.children.append(process.pid)
@@ -167,6 +188,93 @@ sys.exit(65)
         self.addCleanup(process.kill)
         self.failed_run()
         self.assertEqual(set(self.runs.iterdir()), {active, *abandoned[-5:]})
+
+    def report_pair(self, directory, index, pid=99999999):
+        directory.mkdir(parents=True, exist_ok=True)
+        identifier = f"{pid}-{uuid.UUID(int=index)}"
+        paths = set()
+        for kind in ('state', 'threads'):
+            path = directory / (identifier + '-' + kind + '.txt')
+            path.write_text(kind + ' retained evidence')
+            os.utime(path, (100 + index, 100 + index))
+            paths.add(path)
+        return paths
+
+    def test_diagnostics_prune_keeps_newest_complete_inactive_pairs(self):
+        directory = self.root / 'DerivedData/TestDiagnostics'
+        pairs = [self.report_pair(directory, index) for index in range(8)]
+        live = self.report_pair(directory, 10, os.getpid())
+        for path in live:
+            os.utime(path, (1, 1))
+        unrelated = directory / 'notes.txt'
+        unrelated.write_text('not a report')
+        invalid = directory / '99999999-not-a-uuid-state.txt'
+        invalid.write_text('not a report name')
+        orphan = directory / f'99999999-{uuid.UUID(int=20)}-state.txt'
+        orphan.write_text('incomplete pair')
+        target = self.root / 'outside.txt'
+        target.write_text('do not delete')
+        linked = directory / f'99999999-{uuid.UUID(int=21)}-state.txt'
+        linked.symlink_to(target)
+        half = directory / f'99999999-{uuid.UUID(int=21)}-threads.txt'
+        half.write_text('symlink pair is not eligible')
+        self.failed_run()
+        expected = set().union(*pairs[-5:], live, {unrelated, invalid, orphan, linked, half})
+        self.assertEqual(set(directory.iterdir()), expected)
+        self.assertEqual(target.read_text(), 'do not delete')
+        self.failed_run(label='prune-repeat')
+        self.assertEqual(set(directory.iterdir()), expected)
+
+    def test_diagnostics_prune_preserves_unknown_liveness(self):
+        directory = self.root / 'reports'
+        pairs = [self.report_pair(directory, index) for index in range(8)]
+        with patch.object(diagnostics.os, 'kill', side_effect=PermissionError('unknown')):
+            diagnostics.prune(directory)
+        self.assertEqual(set(directory.iterdir()), set().union(*pairs))
+
+    def test_live_diagnostics_are_delivered_once_before_xcode_flush(self):
+        process, ready = self.launch(mode='diagnostics', label='live-reports')
+        self.wait_ready(ready)
+        observed = b''
+        deadline = time.monotonic() + 10
+        while observed.count(b'END TIMEOUT DIAGNOSTIC') < 2 and time.monotonic() < deadline:
+            if select.select([process.stdout], [], [], 0.1)[0]:
+                chunk = os.read(process.stdout.fileno(), 8192)
+                if not chunk:
+                    break
+                observed += chunk
+        self.assertEqual(observed.count(b'END TIMEOUT DIAGNOSTIC'), 2, observed.decode())
+        self.assertIsNone(process.poll(), 'reports were buffered until Xcode exited')
+        self.assertNotIn(b'Xcode flushed', observed)
+        (self.root / 'live-reports.release').touch()
+        observed += process.communicate(timeout=10)[0]
+        self.assertEqual(process.returncode, 65, observed.decode())
+        self.assertIn(b'Xcode flushed host output', observed)
+        self.assertEqual(observed.count(b'BEGIN TIMEOUT DIAGNOSTIC'), 2, observed.decode())
+        self.assertEqual(observed.count(b'END TIMEOUT DIAGNOSTIC'), 2, observed.decode())
+        self.assertEqual(observed.count(b'live timeout state'), 1)
+        self.assertEqual(observed.count(b'live timeout threads'), 1)
+
+    def test_relay_closed_reader_exits_without_traceback(self):
+        directory = self.root / 'reports'
+        directory.mkdir()
+        ready = self.root / 'relay-ready'
+        process = subprocess.Popen(['python3', '-u', str(SCRIPTS / 'test_diagnostics.py'),
+                                    str(directory), str(os.getpid()), '--ready', str(ready)],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.children.append(process.pid)
+        self.addCleanup(process.stdout.close)
+        self.addCleanup(process.stderr.close)
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertTrue(ready.exists(), 'relay startup did not finish')
+        process.stdout.close()
+        self.report_pair(directory, 1)
+        process.wait(timeout=5)
+        error = process.stderr.read()
+        self.assertEqual(process.returncode, 0, error.decode())
+        self.assertEqual(error, b'', 'relay printed a traceback or shutdown exception')
 
     def test_sigkilled_wrapper_does_not_leave_relay_holding_stdout(self):
         process, ready = self.launch(mode="hang")

@@ -9,7 +9,8 @@ func installTimeoutDiagnostics() {
 
 /// Bundle-load registration happens once on the main thread. Timeout paths save state and can
 /// supply a thread sample taken before releasing gates. An unexpected issue publishes reports
-/// to stdout, attachments, and files. Passing/expected-failure cases discard their snapshots.
+/// to attachments and files, with stdout supplied by the wrapper relay or standalone host.
+/// Passing/expected-failure cases discard their snapshots.
 /// The deliberate History timeout tests inject a sampler double; real harnesses sample
 /// at timeout, before abort. Shared waits sample during failure reporting, before caller cleanup.
 final class TestTimeoutDiagnostics: NSObject, XCTestObservation {
@@ -28,6 +29,18 @@ final class TestTimeoutDiagnostics: NSObject, XCTestObservation {
     private var snapshots: [String] = []
     private var samples: [String] = []
     private var publicationCount = 0
+    private let environment: [String: String]
+    private let fallbackDirectory: String
+    private let output: (String) -> Void
+
+    init(environment: [String: String] = ProcessInfo.processInfo.environment,
+         fallbackDirectory: String = NSTemporaryDirectory() + "PensieveTestDiagnostics",
+         output: @escaping (String) -> Void = { print($0); fflush(stdout) }) {
+        self.environment = environment
+        self.fallbackDirectory = fallbackDirectory
+        self.output = output
+        super.init()
+    }
 
     static var publishedReportCount: Int {
         shared.lock.lock()
@@ -36,12 +49,15 @@ final class TestTimeoutDiagnostics: NSObject, XCTestObservation {
     }
 
     static func note(_ state: String, threadSample: String? = nil) {
-        let observer = shared
-        observer.lock.lock()
-        if let threadSample { observer.samples.append(threadSample) }
-        observer.snapshots.append("time=\(Date())\n\(state)")
-        if observer.snapshots.count > 16 { observer.snapshots.removeFirst() }
-        observer.lock.unlock()
+        shared.recordSnapshot(state, threadSample: threadSample)
+    }
+
+    func recordSnapshot(_ state: String, threadSample: String? = nil) {
+        lock.lock()
+        if let threadSample { samples.append(threadSample) }
+        snapshots.append("time=\(Date())\n\(state)")
+        if snapshots.count > 16 { snapshots.removeFirst() }
+        lock.unlock()
     }
 
     func testCaseWillStart(_ testCase: XCTestCase) { reset() }
@@ -70,8 +86,7 @@ final class TestTimeoutDiagnostics: NSObject, XCTestObservation {
         let sample = savedSamples.isEmpty ? TestThreadSample.capture() : savedSamples.joined(separator: "\n\n")
         let identifier = "\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString)"
         let reports = [("\(identifier)-state.txt", state), ("\(identifier)-threads.txt", sample)]
-        let directory = ProcessInfo.processInfo.environment["PENSIEVE_TEST_DIAGNOSTICS_DIR"] ??
-            NSTemporaryDirectory() + "PensieveTestDiagnostics"
+        let directory = environment["PENSIEVE_TEST_DIAGNOSTICS_DIR"] ?? fallbackDirectory
         let files = FileService()
         for (name, content) in reports {
             do {
@@ -79,13 +94,15 @@ final class TestTimeoutDiagnostics: NSObject, XCTestObservation {
                 try files.writeFile(at: directory + "/" + name, content: content)
             } catch {
                 // Attachments remain available even when the upload directory cannot be written.
-                print("Timeout diagnostics could not write \(name): \(error)")
+                output("Timeout diagnostics could not write \(name): \(error)")
             }
         }
         // Publish both files before interacting with XCTest's stdout/attachment transport.
         for (name, content) in reports {
-            print("BEGIN TIMEOUT DIAGNOSTIC \(name)\n\(content)\nEND TIMEOUT DIAGNOSTIC \(name)")
-            fflush(stdout)
+            // The live wrapper relay owns stdout; standalone Xcode still prints.
+            if environment["PENSIEVE_TEST_DIAGNOSTICS_DIR"] == nil {
+                output("BEGIN TIMEOUT DIAGNOSTIC \(name)\n\(content)\nEND TIMEOUT DIAGNOSTIC \(name)")
+            }
             let attachment = XCTAttachment(string: content)
             attachment.name = name
             attachment.lifetime = .deleteOnSuccess
