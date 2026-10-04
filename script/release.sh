@@ -159,33 +159,29 @@ notes_for() {
 }
 
 build_release_args() {
-  local version="$1"
-  local changelog="${2:-$REPO/CHANGELOG.md}"
-  local notes_file channel
-  channel="$(state_tool channel "$version")" || return 1
+  local changelog="${1:-$REPO/CHANGELOG.md}"
+  local notes_file
   notes_file="$(mktemp "${TMPDIR:-/tmp}/pensieve-release-notes.XXXXXX")" || return 1
-  if ! notes_for "$version" "$changelog" > "$notes_file"; then
+  if ! notes_for "$VERSION" "$changelog" > "$notes_file"; then
     rm -f "$notes_file"
     return 1
   fi
 
   RELEASE_NOTES_FILE="$notes_file"
   RELEASE_ARGS=(
-    release create "v$version"
+    release create "v$VERSION"
     --repo "$PUBLIC_REPO"
-    "$DIST_DIR/Pensieve-$version.dmg"
-    --title "Pensieve $version"
+    "$DIST_DIR/Pensieve-$VERSION.dmg"
+    --title "Pensieve $VERSION"
     --notes-file "$notes_file"
   )
-  if [ -n "$channel" ]; then
+  if [ -n "$VERSION_CHANNEL" ]; then
     RELEASE_ARGS+=(--prerelease)
   fi
 }
 
 cask_action_for() {
-  local channel
-  channel="$(state_tool channel "$1")" || return 1
-  if [ -n "$channel" ]; then printf 'skip\n'; else printf 'bump\n'; fi
+  if [ -n "$VERSION_CHANNEL" ]; then printf 'skip\n'; else printf 'bump\n'; fi
 }
 
 run_command_seam() {
@@ -384,10 +380,8 @@ generate_appcast() {
     --ed-key-file "$SPARKLE_PRIVATE_KEY_FILE"
     --download-url-prefix "$DOWNLOAD_PREFIX/$tag/"
   )
-  local channel
-  channel="$(state_tool channel "$VERSION")" || return 1
-  if [ -n "$channel" ]; then
-    appcast_args+=(--channel "$channel")
+  if [ -n "$VERSION_CHANNEL" ]; then
+    appcast_args+=(--channel "$VERSION_CHANNEL")
   fi
   appcast_args+=("$APPCAST_INPUT_DIR")
 
@@ -555,9 +549,7 @@ dry_run_local() {
 
 cask_publication_status() {
   CASK_STATUS=skip
-  local action
-  action="$(cask_action_for "$VERSION")" || return 1
-  [ "$action" = "bump" ] || { echo "release: cask skipped for prerelease $VERSION"; return 0; }
+  [ -z "$VERSION_CHANNEL" ] || { echo "release: cask skipped for prerelease $VERSION"; return 0; }
   [ "$CASK_PREFLIGHT" -eq 1 ] || cask_preflight || return 1
   local digest comparison=0
   CASK_OUTPUT="$DIST_DIR/homebrew/pensieve.rb"
@@ -578,6 +570,13 @@ cask_publication_status() {
     return 0
   fi
   CASK_STATUS=pending
+}
+
+report_cask_publication() {
+  cask_publication_status || return 1
+  if [ "$CASK_STATUS" = pending ]; then
+    echo "release: cask pending; run --publish-cask-only with the verified artifact"
+  fi
 }
 
 bump_cask() {
@@ -605,9 +604,23 @@ notarize_and_publish() {
   publish_release_asset
 
   publish_appcast
+  report_cask_publication
 }
 
 source "$REPO/script/release_recovery.sh"
+
+case "$INSPECT_MODE" in
+  notes|release-args|cask-action)
+    VERSION="$INSPECT_VERSION"
+    ;;
+  *)
+    [ -f "$VERSION_FILE" ] || { echo "release: VERSION file missing" >&2; exit 3; }
+    VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+    ;;
+esac
+[ -n "$VERSION" ] || { echo "release: VERSION must not be empty" >&2; exit 3; }
+VERSION_CHANNEL="$(state_tool channel "$VERSION")"
+DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"
 
 case "$INSPECT_MODE" in
   functions)
@@ -618,12 +631,12 @@ case "$INSPECT_MODE" in
     exit
     ;;
   release-args)
-    build_release_args "$INSPECT_VERSION" "$CHANGELOG_PATH"
+    build_release_args "$CHANGELOG_PATH"
     printf '%s\n' "${RELEASE_ARGS[@]+"${RELEASE_ARGS[@]}"}"
     exit
     ;;
   cask-action)
-    cask_action_for "$INSPECT_VERSION"
+    cask_action_for
     exit
     ;;
   verify-appcast)
@@ -633,10 +646,6 @@ case "$INSPECT_MODE" in
     ;;
 esac
 
-[ -f "$VERSION_FILE" ] || { echo "release: VERSION file missing" >&2; exit 3; }
-VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
-[ -n "$VERSION" ] || { echo "release: VERSION must not be empty" >&2; exit 3; }
-DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"
 if [ "${CASK_ONLY:-0}" -eq 1 ]; then
   bump_cask
   exit 0

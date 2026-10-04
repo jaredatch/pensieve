@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 
 SPARKLE = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
 VERSION = r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?"
+APPCAST_CHANNELS = ("", "alpha", "beta")
 
 
 def require(condition, message):
@@ -48,7 +49,7 @@ def contents(path, output):
 
 
 def version_parts(version):
-    require(re.fullmatch(VERSION, version), "invalid publication version")
+    require(re.fullmatch(VERSION, version), f"invalid publication version: {version}")
     core, separator, suffix = version.partition("-")
     numbers = core.split(".")
     identifiers = suffix.split(".") if separator else []
@@ -145,6 +146,7 @@ def appcast_publication_state(text, version, download_prefix):
         channels = item.findall(SPARKLE + "channel")
         require(len(channels) <= 1, "duplicated appcast channel")
         current_channel = (channels[0].text or "") if channels else ""
+        require(current_channel in APPCAST_CHANNELS, "unknown or malformed appcast channel")
         if current_channel in ("", channel) and compare_version_parts(current_parts, newest_parts) > 0:
             newest, newest_parts = current, current_parts
         if current != version:
