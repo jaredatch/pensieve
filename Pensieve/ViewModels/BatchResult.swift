@@ -77,12 +77,14 @@ struct BatchReadFailure: Identifiable {
 struct BatchResult {
     var outcomes: [BatchPairOutcome] = []
     var readFailures: [BatchReadFailure] = []
+    /// Save and manifest failures can follow physical cleanup; they never claim no deploy changed.
+    var operationFailures: [String] = []
     var retiredPairs: Set<BatchPairKey> = []
 
     var successes: [BatchPairOutcome] { outcomes.filter { $0.isSuccess } }
     var failures: [BatchPairOutcome] { outcomes.filter { !$0.isSuccess && !$0.isSkipped } }
     var skipped: [BatchPairOutcome] { outcomes.filter(\.isSkipped) }
-    var failureCount: Int { failures.count + readFailures.count }
+    var failureCount: Int { failures.count + readFailures.count + operationFailures.count }
     var hasFailures: Bool { failureCount > 0 }
 
     /// Both silent retirement and successful removal complete a ledger pair.
@@ -145,6 +147,7 @@ struct BatchResult {
     mutating func append(_ other: BatchResult) {
         outcomes.append(contentsOf: other.outcomes)
         readFailures.append(contentsOf: other.readFailures)
+        operationFailures.append(contentsOf: other.operationFailures)
         retiredPairs.formUnion(other.retiredPairs)
     }
 }

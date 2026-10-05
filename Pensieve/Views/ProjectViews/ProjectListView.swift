@@ -5,9 +5,11 @@ struct ProjectListView: View {
     @Binding var entitySelection: EntitySelection?
     @Binding var searchText: String
     let platformVM: PlatformViewModel
+    let localMachineID: String?
     @Environment(\.modelContext) private var context
     @Query(sort: \Project.name) private var projects: [Project]
-    @State private var removalError: String?
+    @State private var removal = ProjectRemovalModel()
+    @State private var confirmingRemoval = false
     @AppStorage(ListPreferenceKeys.showsLine2(.projects)) private var showsLine2 = true
     @AppStorage(ListPreferenceKeys.showsLine3(.projects)) private var showsLine3 = true
     private let categoryStore: CategoryStoreProtocol
@@ -16,11 +18,13 @@ struct ProjectListView: View {
     let addsFenced: Bool
 
     init(entitySelection: Binding<EntitySelection?>, searchText: Binding<String>,
-         platformVM: PlatformViewModel, notifier: @escaping SyncStateNotifying, onAdd: @escaping () -> Void,
+         platformVM: PlatformViewModel, localMachineID: String?, notifier: @escaping SyncStateNotifying,
+         onAdd: @escaping () -> Void,
          addsFenced: Bool) {
         _entitySelection = entitySelection
         _searchText = searchText
         self.platformVM = platformVM
+        self.localMachineID = localMachineID
         self.notifier = notifier
         self.categoryStore = CategoryStore(manifestService: ManifestService(), notifier: notifier)
         self.onAdd = onAdd
@@ -34,23 +38,21 @@ struct ProjectListView: View {
     }
 
     static func removalFailureMessage(projectName: String, result: BatchResult) -> String {
+        let details = (result.failures.compactMap(\.error) + result.readFailures.map(\.message)
+                       + result.operationFailures).joined(separator: " ")
         if !result.readFailures.isEmpty {
-            return """
-            Removal stopped because Pensieve couldn't read its deploy records. \
-            “\(projectName)” stays registered so you can retry.
-            """
+            return "Removal stopped because Pensieve couldn't read its deploy records. "
+                + "“\(projectName)” stays registered so you can retry. " + details
         }
-        return """
-        Couldn't fully remove “\(projectName)” — \(result.failures.count) skill removal(s) failed. \
-        It stays registered so you can retry.
-        """
+        return "Couldn't remove “\(projectName)”: " + details + " It stays registered so you can retry."
     }
 
     @discardableResult
     static func removeProject(_ project: Project, removalError: inout String?, perform: () -> BatchResult) -> BatchResult {
+        let name = project.name
         let result = perform()
         if result.hasFailures {
-            removalError = removalFailureMessage(projectName: project.name, result: result)
+            removalError = removalFailureMessage(projectName: name, result: result)
         }
         return result
     }
@@ -64,16 +66,8 @@ struct ProjectListView: View {
                 .tag(EntitySelection.project(project.id))
                 .contextMenu {
                     Button("Remove", role: .destructive) {
-                        Self.removeProject(project, removalError: &removalError) {
-                            removeRegisteredProject(
-                                project,
-                                categoryStore: categoryStore,
-                                reconciler: CategoryReconciler(platformVM: platformVM),
-                                manifestService: ManifestService(),
-                                context: context,
-                                notifier: notifier
-                            )
-                        }
+                        removal.request(project, platformVM: platformVM, context: context)
+                        confirmingRemoval = removal.project != nil
                     }
                 }
             }
@@ -102,16 +96,30 @@ struct ProjectListView: View {
                 ListViewOptionsMenu(section: .projects, showsLine2: $showsLine2, showsLine3: $showsLine3)
             }
         }
+        .confirmationDialog(removal.preview?.title ?? "Remove project?",
+            isPresented: $confirmingRemoval,
+            titleVisibility: .visible) {
+                Button("Remove Project", role: .destructive) {
+                    removal.confirm { project in
+                        removeRegisteredProject(project, categoryStore: categoryStore,
+                            reconciler: CategoryReconciler(platformVM: platformVM), manifestService: ManifestService(),
+                            platformVM: platformVM, localMachineID: localMachineID, context: context, notifier: notifier)
+                    }
+                }
+                Button("Cancel", role: .cancel) { removal.cancel() }
+            } message: {
+                Text(removal.preview?.message ?? "")
+            }
         .alert(
             "Removal incomplete",
             isPresented: Binding(
-                get: { removalError != nil },
-                set: { if !$0 { removalError = nil } }
+                get: { removal.error != nil },
+                set: { if !$0 { removal.error = nil } }
             )
         ) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(removalError ?? "")
+            Text(removal.error ?? "")
         }
     }
 }

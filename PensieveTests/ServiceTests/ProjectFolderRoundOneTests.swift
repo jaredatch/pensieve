@@ -9,13 +9,16 @@ final class ProjectFolderRoundOneTests: XCTestCase {
         let h = try ProjectFolderCallerHarness(installed: [.codex])
         defer { h.cleanup() }
         try h.files.createDirectory(at: h.project.path)
-        h.otherProject.identityKey = h.project.identityKey
-        _ = try h.addCategory()
+        let category = try h.addCategory()
+        category.projectKeys.append(h.otherProject.identityKey!)
         let links = SiblingFailureLinkService(files: h.mapped)
         let vm = PlatformViewModel(fileService: h.mapped, linkService: links,
             agentDetection: DeployStubDetection(installed: [.codex]), deployStateStore: h.deployState)
         let reconciler = CategoryReconciler(platformVM: vm)
         XCTAssertEqual(reconciler.reconcile(context: h.context).successes.count, 2)
+        // The other project already has a pending category unlink; removal must log its failure.
+        category.projectKeys.removeAll { $0 == h.project.identityKey }
+        try h.context.save()
         links.failedPath = h.project.path
         var logs: [String] = []
         var alert: String?
@@ -23,7 +26,8 @@ final class ProjectFolderRoundOneTests: XCTestCase {
             removeRegisteredProject(h.otherProject,
                 categoryStore: CategoryStore(manifestService: ManifestService(fileService: h.files),
                     manifestRoot: h.root + "/store"),
-                reconciler: reconciler, context: h.context, logFailure: { logs.append($0) })
+                reconciler: reconciler, platformVM: vm, localMachineID: ProjectIntentHarness.localID,
+            context: h.context, logFailure: { logs.append($0) })
         }
         XCTAssertNil(alert)
         XCTAssertFalse(result.hasFailures)

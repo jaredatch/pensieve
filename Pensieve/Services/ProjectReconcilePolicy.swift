@@ -13,6 +13,10 @@ struct ProjectReconcilePolicy {
 
     init(fileService: FileServiceProtocol) { self.fileService = fileService }
 
+    func requireDirectory(_ project: Project) throws {
+        try fileService.requireProjectDirectory(at: project.path)
+    }
+
     struct Work<Triple: ProjectReconcileTriple> {
         let deploy: Set<Triple>
         let remove: Set<Triple>

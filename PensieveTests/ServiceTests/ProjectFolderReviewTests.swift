@@ -48,7 +48,8 @@ final class ProjectFolderReviewTests: XCTestCase {
         let result = ProjectListView.removeProject(h.otherProject, removalError: &removalError) {
             removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
                 manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
-                reconciler: h.category, context: h.context)
+                reconciler: h.category, platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
+            context: h.context)
         }
         XCTAssertNil(removalError, "Removing B shows no alert when only another project's work fails")
         XCTAssertTrue(result.outcomes.isEmpty, "The caller receives only B's outcomes and unscoped ones")
@@ -69,7 +70,8 @@ final class ProjectFolderReviewTests: XCTestCase {
             let result = ProjectListView.removeProject(h.otherProject, removalError: &removalError) {
                 removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
                     manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
-                    reconciler: reconciler, context: h.context)
+                    reconciler: reconciler, platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
+            context: h.context)
             }
             XCTAssertTrue(removalError?.contains("stays registered") == true,
                           "B's failure or an unscoped failure sets the caller's alert state")
@@ -162,7 +164,8 @@ final class ProjectFolderReviewTests: XCTestCase {
         }
         let result = removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
             manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
-            reconciler: h.category, context: h.context)
+            reconciler: h.category, platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
+            context: h.context)
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.project.id])
     }

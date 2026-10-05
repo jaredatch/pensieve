@@ -129,6 +129,7 @@ final class ReconcilerReadFailureTests: XCTestCase {
             project,
             categoryStore: CategoryStore(),
             reconciler: CategoryReconciler(platformVM: harness.platformVM, stateFetcher: fetcher),
+            platformVM: harness.platformVM, localMachineID: ProjectIntentHarness.localID,
             context: harness.context
         )
 
@@ -165,6 +166,7 @@ final class ReconcilerReadFailureTests: XCTestCase {
             categoryStore: CategoryStore(),
             reconciler: reconciler,
             stateFetcher: fetcher,
+            platformVM: harness.platformVM, localMachineID: ProjectIntentHarness.localID,
             context: harness.context
         )
 

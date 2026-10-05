@@ -193,6 +193,9 @@ final class SyncNudgeTests: XCTestCase {
 
         _ = removeRegisteredProject(
             project, categoryStore: store, reconciler: ResultReconciler(),
+            platformVM: PlatformViewModel(fileService: FileService(),
+                agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked),
+            localMachineID: ProjectIntentHarness.localID,
             context: context, notifier: counter.notify
         )
         XCTAssertEqual(counter.value, 1)
@@ -234,6 +237,9 @@ final class SyncNudgeTests: XCTestCase {
 
         let result = removeRegisteredProject(
             project, categoryStore: store, reconciler: ResultReconciler(fails: true),
+            platformVM: PlatformViewModel(fileService: FileService(),
+                agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked),
+            localMachineID: ProjectIntentHarness.localID,
             context: context, notifier: counter.notify
         )
         XCTAssertTrue(result.hasFailures)

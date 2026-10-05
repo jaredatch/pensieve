@@ -103,7 +103,8 @@ final class ProjectFolderCallerTests: XCTestCase {
             harness.project,
             categoryStore: CategoryStore(manifestService: ManifestService(fileService: harness.files),
                                          manifestRoot: harness.root + "/store"),
-            reconciler: harness.category, context: harness.context
+            reconciler: harness.category, platformVM: harness.platformVM, localMachineID: ProjectIntentHarness.localID,
+            context: harness.context
         )
         XCTAssertFalse(unregister.hasFailures)
         XCTAssertEqual(try harness.context.fetch(FetchDescriptor<Project>()).map(\.id), [harness.otherProject.id])

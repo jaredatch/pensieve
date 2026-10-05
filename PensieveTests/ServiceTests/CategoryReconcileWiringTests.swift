@@ -243,6 +243,7 @@ final class CategoryReconcileWiringTests: XCTestCase {
             seed.project,
             categoryStore: CategoryStore(),
             reconciler: reconciler,
+            platformVM: reconciler.platformVM, localMachineID: ProjectIntentHarness.localID,
             context: context
         )
 
@@ -268,6 +269,7 @@ final class CategoryReconcileWiringTests: XCTestCase {
             seed.project,
             categoryStore: CategoryStore(),
             reconciler: reconciler,
+            platformVM: reconciler.platformVM, localMachineID: ProjectIntentHarness.localID,
             context: context
         )
 

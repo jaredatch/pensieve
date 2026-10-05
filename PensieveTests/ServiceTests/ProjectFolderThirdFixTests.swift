@@ -147,7 +147,8 @@ final class ProjectFolderThirdFixTests: XCTestCase {
             var logs: [String] = []
             let result = removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(),
                 reconciler: ThirdFixReconciler(result: BatchResult(outcomes: [outcome])),
-                context: h.context, logFailure: { logs.append($0) })
+                platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
+            context: h.context, logFailure: { logs.append($0) })
             XCTAssertFalse(result.hasFailures)
             XCTAssertEqual(logs, [h.project.id.uuidString + ": " + message])
         }

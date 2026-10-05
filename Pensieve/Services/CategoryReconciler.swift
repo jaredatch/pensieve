@@ -5,6 +5,13 @@ import SwiftData
 protocol CategoryReconcilerProtocol {
     @discardableResult
     func reconcile(context: ModelContext) -> BatchResult
+    func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult
+}
+
+extension CategoryReconcilerProtocol {
+    func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult {
+        reconcile(context: context)
+    }
 }
 
 /// The heart of categories: diff the desired (skill, project, agent) triples declared by the
@@ -47,6 +54,14 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
 
     @discardableResult
     func reconcile(context: ModelContext) -> BatchResult {
+        reconcile(context: context, removingProjectID: nil)
+    }
+
+    func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult {
+        reconcile(context: context, removingProjectID: projectID)
+    }
+
+    private func reconcile(context: ModelContext, removingProjectID: UUID?) -> BatchResult {
         var aggregate = BatchResult()
         let intentLedger: [IntentAssignment]
         do {
@@ -56,7 +71,7 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
         }
         let state = fetchState(context: context, intentLedger: intentLedger)
         let platforms = platformVM.deployablePlatforms(forProject: true)
-        let desired = desiredTriples(from: state, platforms: platforms)
+        let desired = desiredTriples(from: state, platforms: platforms, excludingProjectID: removingProjectID)
         let current = Set(state.ledger.map {
             Triple(skillID: $0.skillID, projectID: $0.projectID, platform: $0.platform)
         })
@@ -100,14 +115,14 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
         )
     }
 
-    private func desiredTriples(from state: State, platforms: [PlatformTarget]) -> Set<Triple> {
+    private func desiredTriples(from state: State, platforms: [PlatformTarget], excludingProjectID: UUID?) -> Set<Triple> {
         var desired: Set<Triple> = []
         for category in state.categories {
             for slug in category.skillSlugs {
                 guard let skill = state.skillBySlug[slug] else { continue }
                 for key in category.projectKeys {
                     guard let members = state.projectsByKey[key] else { continue }
-                    for project in members {
+                    for project in members where project.id != excludingProjectID {
                         for platform in platforms {
                             desired.insert(Triple(skillID: skill.id, projectID: project.id, platform: platform))
                         }

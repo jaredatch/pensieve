@@ -221,6 +221,9 @@ final class ManifestMaintenanceTests: XCTestCase {
             reconciler: NoopReconciler(),
             manifestService: manifest,
             manifestRoot: tempDir,
+            platformVM: PlatformViewModel(fileService: fileService,
+                agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked),
+            localMachineID: ProjectIntentHarness.localID,
             context: context
         )
         XCTAssertEqual(try fileService.readFile(at: tempDir + "/manifest/projects.yaml"), "projects:\n")

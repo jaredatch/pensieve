@@ -131,11 +131,13 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     /// Checkpoints act on translated sandbox paths immediately before their real FileService operation.
     var beforeDirectoryCreation: ((String) throws -> Void)?
     var beforeArtifactCreation: ((String) throws -> Void)?
+    var beforeArtifactDeletion: ((String) throws -> Void)?
     var beforeProjectProbe: ((String) throws -> Void)?
     var beforeRuleRead: ((String) throws -> Void)?
     var beforeEntryTypeProbe: ((String) throws -> Void)?
     var beforeDeployStateRead: ((String) throws -> Void)?
     var beforeDeployStateWrite: ((String) throws -> Void)?
+    var beforeFileWrite: ((String) throws -> Void)?
     var beforeSymlinkRead: ((String) throws -> Void)?
     /// Physical-path consumers compare physical literals; containment still applies to every lookup.
     var translatesSymlinkTargets = true
@@ -232,6 +234,7 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     func writeFile(at path: String, content: String) throws {
         let physical = resolved(path)
         if physical.hasSuffix("/deploy-state.json") { try beforeDeployStateWrite?(physical) }
+        try beforeFileWrite?(physical)
         try wrapped.writeFile(at: physical, content: content)
     }
     func writeExecutableFile(at path: String, content: String) throws {
@@ -241,7 +244,9 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         try wrapped.copyFile(at: resolved(sourcePath), to: resolved(destinationPath))
     }
     func deleteFile(at path: String) throws {
-        try wrapped.deleteFile(at: resolved(path))
+        let physical = resolved(path)
+        try beforeArtifactDeletion?(physical)
+        try wrapped.deleteFile(at: physical)
     }
     func fileExists(at path: String) -> Bool {
         wrapped.fileExists(at: resolved(path))

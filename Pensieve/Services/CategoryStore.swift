@@ -195,14 +195,31 @@ struct CategoryStore: CategoryStoreProtocol {
     func reconcileAfterRemovingProject(_ project: Project,
                                        reconciler: CategoryReconcilerProtocol, context: ModelContext,
                                        notifier: SyncStateNotifying) -> BatchResult {
-        if let key = project.identityKey {
-            for category in categories(containingProjectKey: key, context: context) {
-                setProject(project, inCategory: category, member: false, context: context,
-                           notifier: SyncStateNotifier.suppressed)
+        defer { notifier() }
+        do {
+            let projects = try context.fetch(FetchDescriptor<Project>())
+            if let key = project.identityKey,
+               !projects.contains(where: { $0.id != project.id && $0.identityKey == key }) {
+                let categories = try context.fetch(FetchDescriptor<Category>())
+                for category in categories { category.projectKeys.removeAll { $0 == key } }
+                try context.save()
+                if let manifestService {
+                    try manifestService.write(manifestService.snapshot(from: context), toRoot: manifestRoot)
+                }
             }
+        } catch {
+            context.rollback()
+            var result = BatchResult()
+            result.operationFailures.append("Couldn't prepare project category removal: " + error.localizedDescription)
+            return result
         }
-        let result = reconciler.reconcile(context: context)
-        notifier()
+        var result = reconciler.reconcileRemovingProject(project.id, context: context)
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            result.operationFailures.append("Couldn't save project category removal: " + error.localizedDescription)
+        }
         return result
     }
 
