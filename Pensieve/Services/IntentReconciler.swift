@@ -184,10 +184,7 @@ struct IntentReconciler: IntentReconcilerProtocol {
         guard !removals.isEmpty else { return }
         let result = platformVM.removeOwnedBatch(pairs: removals, target: .userWide)
         aggregate.append(result)
-        let completed = result.retiredPairs.union(result.successes.map {
-            BatchPairKey(skillID: $0.skillID, platform: $0.platform, target: .userWide)
-        })
-        for key in completed {
+        for key in result.completedPairs {
             deleteUserRows(matching: UserPair(skillID: key.skillID, platformRaw: key.platform.rawValue),
                            state: state, context: context)
         }

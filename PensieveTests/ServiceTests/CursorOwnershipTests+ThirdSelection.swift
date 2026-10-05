@@ -6,43 +6,73 @@ extension CursorOwnershipTests {
     @MainActor
     func testBulkUnselectBatchesProjectAdmissionAndRefresh() throws {
         for route in ["direct", "unledgered", "ledgered", "category"] {
-            let harness = try contextAndVM()
-            let project = reviewProject(harness.context)
-            if route == "direct" { project.identityKey = nil }
-            let slug = try store.createSkill(name: "Second", description: "Description", body: "# Second")
-            let other = Skill(name: "Second", skillDescription: "Description", directoryName: slug)
-            harness.context.insert(other)
-            let skills = [skill!, other]
-            let platforms: Set<PlatformTarget> = [.cursor, .claudeCode]
-            let deploy = harness.vm.deployBatch(skills: skills, platforms: Array(platforms),
-                target: .project(project), context: harness.context)
-            XCTAssertEqual(deploy.successes.count, 4)
-            try seedRemovalLedger(route: route, skills: skills, platforms: platforms,
-                                  project: project, context: harness.context)
-            var probes = 0
-            mapped.beforeProjectProbe = { path in if path == project.path { probes += 1 } }
-            let refresh = harness.vm.refreshCounter
-            let result: BatchResult
-            if route == "category" {
-                result = CategoryReconciler(platformVM: harness.vm).reconcile(context: harness.context)
-            } else {
-                let outcome = try secondReviewModel(harness).setProjectSelection(false, skills: skills,
-                    platforms: platforms, project: project, context: harness.context)
-                guard case let .localDeploy(batch) = outcome else { return XCTFail("Expected local removal") }
-                result = batch
-            }
-            XCTAssertEqual(result.successes.count, 4, route)
-            XCTAssertEqual(probes, 1, route)
-            XCTAssertEqual(harness.vm.refreshCounter, refresh + 1, route)
-            XCTAssertTrue(try harness.state.read().records.isEmpty)
-            XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
-            XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0)
-            for item in skills {
-                XCTAssertFalse(try harness.vm.artifactIsOwned(skill: item, platform: .cursor, target: .project(project)))
-                XCTAssertFalse(try harness.vm.artifactIsOwned(skill: item, platform: .claudeCode, target: .project(project)))
-            }
-            mapped.beforeProjectProbe = nil
+            do { try verifyBulkUnselect(route: route) } catch { XCTFail("\(route): \(error)") }
         }
+    }
+
+    @MainActor
+    private func verifyBulkUnselect(route: String) throws {
+        let harness = try contextAndVM()
+        let project = reviewProject(harness.context)
+        if route == "direct" { project.identityKey = nil }
+        let slug = try store.createSkill(name: "Second", description: "Description", body: "# Second")
+        let other = Skill(name: "Second", skillDescription: "Description", directoryName: slug)
+        harness.context.insert(other)
+        let skills = [skill!, other]
+        let platforms: Set<PlatformTarget> = [.cursor, .claudeCode]
+        let deploy = harness.vm.deployBatch(skills: skills, platforms: Array(platforms),
+            target: .project(project), context: harness.context)
+        XCTAssertEqual(deploy.successes.count, 4)
+        try seedRemovalState(skills: skills, platforms: platforms, project: project, harness: harness, route: route)
+        try seedRemovalLedger(route: route, skills: skills, platforms: platforms,
+                              project: project, context: harness.context)
+        var probes = 0
+        mapped.beforeProjectProbe = { path in if path == project.path { probes += 1 } }
+        defer { mapped.beforeProjectProbe = nil }
+        let refresh = harness.vm.refreshCounter
+        let result: BatchResult
+        if route == "category" {
+            result = CategoryReconciler(platformVM: harness.vm).reconcile(context: harness.context)
+        } else {
+            let outcome = try secondReviewModel(harness).setProjectSelection(false, skills: skills,
+                platforms: platforms, project: project, context: harness.context)
+            guard case let .localDeploy(batch) = outcome else {
+                XCTFail("Expected local removal for \(route)")
+                return
+            }
+            result = batch
+        }
+        XCTAssertEqual(result.successes.count, 4, route)
+        XCTAssertEqual(probes, 1, route)
+        XCTAssertEqual(harness.vm.refreshCounter, refresh + 1, route)
+        XCTAssertTrue(try harness.state.read().records.isEmpty, route)
+        if route == "ledgered" {
+            XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0, route)
+        } else if route == "category" {
+            XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0, route)
+        }
+        for item in skills {
+            XCTAssertFalse(try harness.vm.artifactIsOwned(skill: item, platform: .cursor, target: .project(project)))
+            XCTAssertFalse(try harness.vm.artifactIsOwned(skill: item, platform: .claudeCode, target: .project(project)))
+        }
+    }
+
+    @MainActor
+    private func seedRemovalState(skills: [Skill], platforms: Set<PlatformTarget>, project: Project,
+                                  harness: OwnershipRouteHarness, route: String) throws {
+        let paths = Set(skills.flatMap { item in
+            platforms.map { harness.vm.artifactPath(skill: item, platform: $0, target: .project(project)) }
+        })
+        // Direct keyless deploys have history but no state write; seed the state-retirement contract explicitly.
+        try harness.state.replaceAll(skills.flatMap { item in
+            platforms.map { platform in
+                DeployStateRecord(slug: item.directoryName, platform: platform.rawValue,
+                    scope: "project", projectIdentityKey: "github.com/owner/project",
+                    artifactPath: harness.vm.artifactPath(skill: item, platform: platform, target: .project(project)),
+                    recordedAt: "2026-10-05T00:00:00Z")
+            }
+        })
+        XCTAssertEqual(try harness.state.recordedArtifactPaths(), paths, route)
     }
 
     @MainActor
@@ -60,6 +90,11 @@ extension CursorOwnershipTests {
             }
         }
         try context.save()
+        if route == "ledgered" {
+            XCTAssertEqual(try context.fetchCount(FetchDescriptor<IntentAssignment>()), 4, route)
+        } else if route == "category" {
+            XCTAssertEqual(try context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 4, route)
+        }
     }
 
 }

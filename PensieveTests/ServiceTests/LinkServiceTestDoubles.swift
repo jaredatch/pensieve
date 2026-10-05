@@ -133,6 +133,7 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     var beforeArtifactCreation: ((String) throws -> Void)?
     var beforeProjectProbe: ((String) throws -> Void)?
     var beforeRuleRead: ((String) throws -> Void)?
+    var beforeDeployStateRead: ((String) throws -> Void)?
     var beforeSymlinkRead: ((String) throws -> Void)?
     /// Physical-path consumers compare physical literals; containment still applies to every lookup.
     var translatesSymlinkTargets = true
@@ -209,7 +210,9 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     }
 
     func readFile(at path: String) throws -> String {
-        try wrapped.readFile(at: resolved(path))
+        let physical = resolved(path)
+        if physical.hasSuffix("/deploy-state.json") { try beforeDeployStateRead?(physical) }
+        return try wrapped.readFile(at: physical)
     }
     func readData(at path: String) throws -> Data {
         try wrapped.readData(at: resolved(path))

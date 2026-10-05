@@ -32,24 +32,12 @@ extension PlatformViewModel {
         return result
     }
 
-    /// History evidence is needed only for project Cursor occupants without a state record.
-    func projectCursorPathsNeedingHistory(skill: Skill, projects: [Project]) -> Set<String> {
-        guard installedPlatforms().contains(.cursor),
-              let recorded = try? deployStateStore.recordedArtifactPaths() else { return [] }
-        return Set(projects.compactMap { project in
-            let target = DeployTarget.project(project)
-            let path = artifactPath(skill: skill, platform: .cursor, target: target)
-            guard !recorded.contains(path),
-                  (try? artifactIsOwned(skill: skill, platform: .cursor, target: target)) != false else { return nil }
-            return path
-        })
-    }
-
-    /// Remove owned deploys user-wide and in registered projects; stale records are dropped
-    /// without removing foreign occupants. An unreadable state file fences existing owned artifacts.
-    func removeAllDeploys(skill: Skill, projects: [Project], locallyDeployedPaths: Set<String>) -> BatchResult {
+    /// Remove owned deploys using one state snapshot and history only for unrecorded project rules.
+    /// An unreadable snapshot fences owned artifacts; absent and foreign occupants remain no-ops.
+    func removeAllDeploys(
+        skill: Skill, projects: [Project], localDeployHistory: (Set<String>) throws -> Set<String>
+    ) -> BatchResult {
         var result = BatchResult()
-        let targets: [DeployTarget] = [.userWide] + projects.map { .project($0) }
         let recorded: Set<String>?
         let stateProblem: String
         do {
@@ -62,42 +50,72 @@ extension PlatformViewModel {
             recorded = nil
             stateProblem = "deploy state unreadable"
         }
-        for target in targets {
+        var candidates: [SkillCleanupCandidate] = []
+        for target in [DeployTarget.userWide] + projects.map({ .project($0) }) {
             for platform in deployablePlatforms(forProject: target.project != nil) {
-                if let outcome = removeAllDeployPair(skill: skill, platform: platform, target: target,
-                    recorded: recorded, locallyDeployedPaths: locallyDeployedPaths, stateProblem: stateProblem) {
-                    result.outcomes.append(outcome)
+                if let candidate = skillCleanupCandidate(skill: skill, platform: platform, target: target,
+                    recorded: recorded, stateProblem: stateProblem, result: &result) {
+                    candidates.append(candidate)
                 }
             }
+        }
+        // A project rule's mark can arrive through git from another Mac.
+        let historyPaths = Set(candidates.filter {
+            $0.platform == .cursor && $0.target.project != nil && recorded?.contains($0.path) == false
+        }.map(\.path))
+        let locallyDeployed: Set<String>
+        do {
+            locallyDeployed = historyPaths.isEmpty ? [] : try localDeployHistory(historyPaths)
+        } catch {
+            result.recordReadFailure("local deploy history for “\(skill.name)”", error: error)
+            return result
+        }
+        for candidate in candidates where !historyPaths.contains(candidate.path) || locallyDeployed.contains(candidate.path) {
+            result.outcomes.append(removeAllDeployPair(skill: skill, candidate: candidate))
         }
         if !result.outcomes.isEmpty { noteDeployStateChanged() }
         return result
     }
 
-    private func removeAllDeployPair(
+    private func skillCleanupCandidate(
         skill: Skill, platform: PlatformTarget, target: DeployTarget,
-        recorded: Set<String>?, locallyDeployedPaths: Set<String>, stateProblem: String
-    ) -> BatchPairOutcome? {
+        recorded: Set<String>?, stateProblem: String, result: inout BatchResult
+    ) -> SkillCleanupCandidate? {
         let path = artifactPath(skill: skill, platform: platform, target: target)
-        // A project rule's mark can arrive through git from another Mac.
-        if platform == .cursor, target.project != nil, let recorded,
-           !recorded.contains(path), !locallyDeployedPaths.contains(path) { return nil }
-        let problem: String?
         do {
             let ours = try artifactIsOwned(skill: skill, platform: platform, target: target)
             guard let recorded else {
                 guard ours else { return nil }
-                return BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: platform,
-                                        target: BatchPairTarget(target), error: "\(stateProblem); nothing removed at \(path)")
+                result.outcomes.append(BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: platform,
+                    target: BatchPairTarget(target), error: "\(stateProblem); nothing removed at \(path)"))
+                return nil
             }
             guard ours || recorded.contains(path) else { return nil }
-            if ours { try removeArtifact(skill: skill, platform: platform, target: target) }
-            try deployStateStore.remove(artifactPath: path)
+            return SkillCleanupCandidate(platform: platform, target: target, path: path, isOwned: ours)
+        } catch {
+            result.outcomes.append(BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: platform,
+                target: BatchPairTarget(target), error: error.localizedDescription))
+            return nil
+        }
+    }
+
+    private func removeAllDeployPair(skill: Skill, candidate: SkillCleanupCandidate) -> BatchPairOutcome {
+        let problem: String?
+        do {
+            if candidate.isOwned { try removeArtifact(skill: skill, platform: candidate.platform, target: candidate.target) }
+            try deployStateStore.remove(artifactPath: candidate.path)
             problem = nil
         } catch {
             problem = error.localizedDescription
         }
-        return BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: platform,
-                                target: BatchPairTarget(target), error: problem)
+        return BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: candidate.platform,
+                                target: BatchPairTarget(candidate.target), error: problem)
+    }
+
+    private struct SkillCleanupCandidate {
+        let platform: PlatformTarget
+        let target: DeployTarget
+        let path: String
+        let isOwned: Bool
     }
 }

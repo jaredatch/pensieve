@@ -292,9 +292,7 @@ final class PlatformViewModel {
         platforms: [PlatformTarget],
         target: DeployTarget = .userWide
     ) -> BatchResult {
-        removeBatch(pairs: skills.flatMap { skill in
-            platforms.map { DeployRemovalPair(skill: skill, platform: $0) }
-        }, target: target)
+        removeBatch(pairs: DeployRemovalPair.expand(skills: skills, platforms: platforms), target: target)
     }
 
     func removeBatch(pairs: [DeployRemovalPair], target: DeployTarget) -> BatchResult {
@@ -346,9 +344,7 @@ extension PlatformViewModel {
 
     /// Direct unselection waits quietly for a missing project, before reading or retiring its artifacts.
     func removeSelection(skills: [Skill], platforms: [PlatformTarget], target: DeployTarget) -> BatchResult {
-        removeSelection(pairs: skills.flatMap { skill in
-            platforms.map { DeployRemovalPair(skill: skill, platform: $0) }
-        }, target: target)
+        removeSelection(pairs: DeployRemovalPair.expand(skills: skills, platforms: platforms), target: target)
     }
 
     func removeSelection(pairs: [DeployRemovalPair], target: DeployTarget) -> BatchResult {

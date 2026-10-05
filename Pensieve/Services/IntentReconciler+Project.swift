@@ -103,10 +103,7 @@ extension IntentReconciler {
             guard let project = state.projectByID[projectID], let pairs = removals[projectID] else { continue }
             let result = platformVM.removeOwnedBatch(pairs: pairs, target: .project(project))
             aggregate.append(result)
-            let completed = result.retiredPairs.union(result.successes.map {
-                BatchPairKey(skillID: $0.skillID, platform: $0.platform, target: .project(projectID))
-            })
-            for key in completed {
+            for key in result.completedPairs {
                 deleteProjectRows(matching: ProjectTriple(skillID: key.skillID, projectID: projectID,
                     platformRaw: key.platform.rawValue), state: state, context: context)
             }

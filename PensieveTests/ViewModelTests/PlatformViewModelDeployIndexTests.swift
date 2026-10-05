@@ -22,7 +22,7 @@ final class PlatformViewModelDeployIndexTests: XCTestCase {
         XCTAssertTrue(vm.deployIndex.isDeployed(slug: "alpha"))
         XCTAssertEqual(vm.deployIndex.summary(for: "alpha"), "Claude Code · This Mac")
 
-        XCTAssertEqual(vm.removeAllDeploys(skill: skill, projects: [], locallyDeployedPaths: []).successes.count, 1)
+        XCTAssertEqual(vm.removeAllDeploys(skill: skill, projects: [], localDeployHistory: { _ in [] }).successes.count, 1)
         XCTAssertTrue(vm.deployIndex.available)
         XCTAssertFalse(vm.deployIndex.isDeployed(slug: "alpha"))
     }

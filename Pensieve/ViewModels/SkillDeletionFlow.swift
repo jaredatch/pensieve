@@ -16,16 +16,9 @@ enum SkillDeletionFlow {
             return false
         }
 
-        let locallyDeployedPaths: Set<String>
-        do {
-            locallyDeployedPaths = try localCursorDeployPaths(skill: skill, projects: projects,
-                                                              platformVM: platformVM, context: context)
-        } catch {
-            library.deletionNotice = .failed("Couldn't read local deploy history for “\(skill.name)”: "
-                + "\(error.localizedDescription). The skill was kept so you can retry.")
-            return false
-        }
-        let cleanup = platformVM.removeAllDeploys(skill: skill, projects: projects, locallyDeployedPaths: locallyDeployedPaths)
+        let cleanup = platformVM.removeAllDeploys(skill: skill, projects: projects, localDeployHistory: { paths in
+            try localCursorDeployPaths(skill: skill, paths: paths, context: context)
+        })
         if cleanup.hasFailures {
             var messages = cleanup.readFailures.map(\.message)
             if !cleanup.failures.isEmpty {
@@ -67,10 +60,9 @@ enum SkillDeletionFlow {
     }
 
     private static func localCursorDeployPaths(
-        skill: Skill, projects: [Project], platformVM: PlatformViewModel, context: ModelContext
+        skill: Skill, paths: Set<String>, context: ModelContext
     ) throws -> Set<String> {
-        let paths = Array(platformVM.projectCursorPathsNeedingHistory(skill: skill, projects: projects))
-        guard !paths.isEmpty else { return [] }
+        let paths = Array(paths)
         let skillID = skill.id
         let predicate = #Predicate<DeployRecord> {
             $0.skillID == skillID && $0.projectID != nil && paths.contains($0.targetPath)
