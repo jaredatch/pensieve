@@ -30,7 +30,7 @@ Beside the layers: `AppRuntime` (`Pensieve/AppRuntime.swift`, process-scoped; §
 - **Skill export** uses `NSSavePanel` in `SkillExportPanel` for the filename, folder creation, and replacement confirmation. `SkillExportModel` reads bytes through the library’s `SkillStore` and writes through `FileService`. The save panel and errors attach to the main window.
 - **Directory picking** uses `NSOpenPanel` in `AddProjectSheet` and in `ContentView.importFromFolder` (Import from Folder…).
 - **Process lifecycle** is `PensieveAppDelegate` (`NSApplicationDelegate` via `@NSApplicationDelegateAdaptor`): it keeps the process alive after the last window closes and reopens the main window. (`SyncScheduler`, a service, also imports AppKit for `NSWorkspace.didWakeNotification`.)
-- **The window's close veto** is `WindowCloseGuard` (`Views/MainWindow/WindowCloseGuard.swift`): a delegate proxy on the main window that answers `windowShouldClose` for an unsaved draft and forwards every other delegate call to SwiftUI's own delegate — SwiftUI has no close hook on macOS 14.
+- **The window's close veto** is `WindowCloseGuard` (`Views/MainWindow/WindowCloseGuard.swift`): a delegate proxy on the main window that answers `windowShouldClose` for an unsaved draft and forwards every other delegate call to SwiftUI's own delegate.
 
 The `pensieve-conventions` project skill (`.claude/skills/`) encodes this as "three-layer pattern, no exceptions." Treat it as binding.
 

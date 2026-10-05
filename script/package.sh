@@ -67,6 +67,8 @@ build_app() {
   local build_number
   build_number="$("$REPO/script/build-number.sh")"
   xcodegen generate
+  # Xcode's incremental copy phases do not remove resources retired by the project.
+  rm -rf "$DERIVED_DATA/Build/Products/Release/$APP_NAME"
   # xcodebuild always signs ad-hoc here, even when --sign carries a real identity:
   # a command-line CODE_SIGN_IDENTITY override applies to every target including SPM
   # packages, which have no development team and fail the build with a Developer ID

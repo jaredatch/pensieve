@@ -23,15 +23,22 @@ jobs:
     permissions:
       contents: read
     runs-on: macos-26
-    timeout-minutes: 45
+    # Recovery/workflow: worst of three serial samples, rounded up to milliseconds, 2026-10-05;
+    # Mac16,11 / Apple M4 Pro, macOS 26.6.2 (25G83): 481.623/8.951 s, 2x runner and 3x margin.
+    timeout-minutes: 162 # 152 step minutes + 10 headroom; no job-cap limit.
+    env:
+      CI_LARGEST_PUSH: 200 # Covers plan merges; larger pushes must resize the measured bounds.
+    # Worst times: Actions runs 37074075055 and 37063706683, with local additions scaled by 2x below.
     steps:
       - name: Checkout
+        timeout-minutes: 2 # Worst measured: 2 s; bound >= 3x.
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Select Xcode 26
+        timeout-minutes: 1 # Worst measured: 1 s; bound >= 3x.
         run: |
           xcode_path="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' -print | sort | tail -n 1)"
           if [ -z "$xcode_path" ]; then
@@ -42,14 +49,17 @@ jobs:
           xcodebuild -version
 
       - name: Install tools
+        timeout-minutes: 5 # Worst measured: 3 s; bound >= 3x.
         run: |
           brew install xcodegen
 
       - name: Generate Xcode project
+        timeout-minutes: 1 # Worst measured: 1 s; bound >= 3x.
         run: |
           xcodegen generate
 
       - name: Compute replay range
+        timeout-minutes: 1 # Worst measured: 0 s; bound >= 3x.
         id: replay-range
         run: |
           set -euo pipefail
@@ -73,6 +83,10 @@ jobs:
             cat /tmp/ci-replay-range.err
             exit 1
           fi
+          if [ "$count" -gt "$CI_LARGEST_PUSH" ]; then
+            echo "::error::Push of $count commits exceeds limit $CI_LARGEST_PUSH; resize the measured CI bounds before replay."
+            exit 1
+          fi
           if [ "$count" = "0" ]; then
             echo "No commits in $range; skipping per-commit replay."
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -83,31 +97,45 @@ jobs:
           fi
 
       - name: Test public hygiene guard
+        timeout-minutes: 8 # Worst estimate: 158 s = 156 s runner + ceil(2 x 0.731 s local added checks); bound >= 3x.
         run: ./script/public-hygiene.sh --self-test
 
       - name: Test workflow contracts
+        # Worst of three serial samples, rounded up to milliseconds, 2026-10-05;
+        # Mac16,11 / Apple M4 Pro, macOS 26.6.2 (25G83): 8.951 s.
+        timeout-minutes: 1 # Estimate 18 s = max(3 s runner, ceil(2 x 8.951)); bound >= 3x.
         run: ruby script/workflow_self_test.rb
 
+      - name: Test release recovery
+        # Worst of three serial samples, rounded up to milliseconds, 2026-10-05;
+        # Mac16,11 / Apple M4 Pro, macOS 26.6.2 (25G83): 481.623 s.
+        timeout-minutes: 49 # Estimate 964 s = ceil(2 x 481.623); absent from API runs; bound >= 3x.
+        run: python3 -B script/release_self_test.py
+
       - name: Test development build host selection
+        timeout-minutes: 1 # Worst measured: 0 s; bound >= 3x.
         run: python3 -B script/pull_dev_build_self_test.py
 
       - name: Check public hygiene in pushed commits
+        timeout-minutes: 13 # Run 37063706683 (1 commit): 22 s fixed + run 37218019371: 20 s / 17 commits x CI_LARGEST_PUSH; bound >= 3x.
         if: steps.replay-range.outputs.skip != 'true'
         env:
           HYGIENE_RANGE: ${{ steps.replay-range.outputs.range }}
         run: ./script/public-hygiene.sh --range "$HYGIENE_RANGE"
 
       - name: Replay commit guards
+        timeout-minutes: 19 # Run 37063706683 (1 commit): 35 s fixed + run 37218019371: 28 s / 17 commits x CI_LARGEST_PUSH; bound >= 3x.
         if: steps.replay-range.outputs.skip != 'true'
         run: |
           RATCHET_CI_SKIP_DEFAULT_MERGE_HEAD="${{ steps.replay-range.outputs.skip_default_merge_head }}" \
             ./script/ci-replay.sh "${{ steps.replay-range.outputs.range }}"
 
       - name: Test
+        timeout-minutes: 45 # Worst estimate: 887 s = 867 s runner + ceil(2 x 9.826 s local wrapper self-test); bound >= 3x.
         id: tests
-        timeout-minutes: 25
         run: |
           set -o pipefail
+          ./script/test.sh --self-test
           ./script/test.sh | tee /tmp/ci-test.out
           count="$(grep -oE 'PENSIEVE_TEST_COUNT=[0-9]+' /tmp/ci-test.out | tail -1 | cut -d= -f2)"
           floor="$(cat .test-count)"
@@ -117,7 +145,7 @@ jobs:
           fi
 
       - name: Upload failed test evidence
-        timeout-minutes: 5
+        timeout-minutes: 5 # Worst measured: 7 s; bound >= 3x.
         if: failure() && steps.tests.outcome == 'failure'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -129,5 +157,6 @@ jobs:
           if-no-files-found: warn
 
       - name: Headless smoke
+        timeout-minutes: 1 # Worst measured: 14 s; bound >= 3x.
         run: |
           ./script/build_and_run.sh --headless

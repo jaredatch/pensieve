@@ -24,7 +24,7 @@ Homebrew may ask you to trust the `jaredatch/homebrew-tap` tap the first time. T
 
 Or download the dmg from [Releases](https://github.com/jaredatch/pensieve/releases), open it and drag Pensieve to Applications.
 
-Pensieve needs macOS 14 or later and runs on Apple silicon and Intel. Every release is signed with a Developer ID and notarized by Apple, and updates arrive through Sparkle.
+Pensieve needs macOS 26 or later and runs on Apple silicon and Intel. Every release is signed with a Developer ID and notarized by Apple, and updates arrive through Sparkle.
 
 Pensieve isn't sandboxed, and that's on purpose. It writes symlinks and files into folders like `~/.claude` and `~/.cursor`, which the App Store sandbox doesn't allow. It's also beta software that writes to real agent folders, so keep a backup of any skills you care about. If you sync more than one Mac, update them all together: a new version can move the library to a format older versions won't open.
 

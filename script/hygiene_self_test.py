@@ -22,7 +22,6 @@ import zipfile
 from unittest.mock import patch
 
 import public_hygiene as guard
-from public_hygiene import FIXTURE_USERS
 
 HERE = Path(__file__).resolve().parent
 ACCEPTANCES = 'script/public-hygiene-acceptances.json'
@@ -33,7 +32,6 @@ KIT_COPIES = tuple('script/' + name for name in (
 ))
 ASSETS = 'Pensieve/Resources/Assets.xcassets/'
 ICON_ASSETS = 'Pensieve/Resources/Pensieve.icon/Assets/'
-FIXTURE_DOMAINS = ('example.com', 'example.org', 'example.net', 'pensieve.local', 'github.com', 'host.example')
 
 
 @contextlib.contextmanager
@@ -150,6 +148,34 @@ class Repository:
 
     def terms(self):
         self.write('/'.join(('private', 'hygiene-personal-terms')), TERM + '\n')
+
+
+def safe_fixture_payload():
+    safe = '\n'.join('/'.join(('', 'Users', user, 'data')) for user in sorted(guard.FIXTURE_USERS))
+    safe += '\n' + '\n'.join('test@' + domain for domain in sorted(guard.FIXTURE_DOMAINS))
+    safe += '\n~/.claude/' + 'CLAUDE.md\na project’s AGENTS.md\nimg@2x.png'
+    for user in sorted(guard.FIXTURE_USERS):
+        home = '/'.join(('', 'Users', user, 'data'))
+        safe += '\n' + '\n'.join((home.lower(), home.replace('Users', 'USERS'),
+                                   home.replace('/', r'\/'), '~' + user + '/data',
+                                   '-Users' + '-' + user + '-Projects-app/'))
+    safe += '\n~/\n<project>/' + 'AGENTS.md'
+    safe += '\n~]/\n~9name/\na~someone/\n~~someone/'
+    safe += '\n' + '\n'.join((
+        'icon@2x.png', 'api.github.com/users/octocat/repos',
+        '/'.join(('', 'users', 'x')), '/'.join(('', 'Users', 'Shared', 'Pensieve')),
+        HOME_HIT.replace('Users', 'users'), HOME_HIT.replace('Users', 'USERS'),
+        '.sidebar-users-list-item', 'X-Users-Count-Header', 'a-Users-b-c', '-Users' + '-test-Projects',
+        'https://www.cs.stanford.edu/' + '~' + 'knuth/'))
+    safe += '\n' + '\n'.join('/'.join(('', 'Users', name, ending)) for name, ending in (
+        ('$USER', 'Library'), ('${USER}', ''), ('*', 'Library'), ('{name}', ''),
+        ('...', 'Library'), ('…', 'Library'), ('Shared', '')))
+    safe += '\n"' + '/'.join(('', 'Users', '%@', 'Library')) + '"'
+    safe += '\n^' + '/'.join(('', 'Users', '[^/]+'))
+    safe += '\ne.g. ' + '/'.join(('', 'Users', 'test')) + ', ' + '/'.join(('', 'Users', 'me'))
+    safe += '\n' + '/'.join(('', 'Users', 'test')) + '.'
+    safe += '\n' + '\n'.join('frame@2x.' + suffix for suffix in ('sketch', 'fig', 'psd', 'webm'))
+    return safe
 
 
 class HygieneTests(unittest.TestCase):
@@ -786,7 +812,71 @@ class HygieneTests(unittest.TestCase):
         self.assert_scan(expected)
         self.assert_scan(committed + expected, '--tree')
 
+    def test_home_spellings_share_name_endings(self):
+        endings = ['.', '..', '/', ' ', '\t', '\n', '"', "'", '`', '<', '>', '\\', ')', ',', ';', ':', ']', '}']
+        for name, expected in [('test', False), ('realperson', True)]:
+            for ending in endings:
+                with self.subTest(name=name, ending=ending):
+                    ordinary = '/'.join(('', 'Users', name)) + ending
+                    projected = '-Users' + '-' + name + ending
+                    for value in (ordinary, projected):
+                        self.assertEqual('home-path' in guard.line_rules('endings.txt', value, [], []), expected)
+
+    def test_fixture_failure_line_numbers_are_stable(self):
+        # Compare the exact payload used by the Git-backed fixture once, including
+        # every line number. Hash-seed probes never open repositories or scan Git.
+        probe = """
+import json
+import hygiene_self_test as suite
+payload = suite.safe_fixture_payload()
+print(json.dumps({'payload': payload, 'lines': list(enumerate(payload.splitlines(), 1))}))
+"""
+        results = []
+        for seed in ('1', '2', '3'):
+            run = subprocess.run([sys.executable, '-B', '-c', probe], cwd=HERE,
+                                 env=dict(os.environ, PYTHONHASHSEED=seed), capture_output=True, timeout=30)
+            self.assertEqual(run.returncode, 0, run.stderr.decode())
+            value = json.loads(run.stdout)
+            self.assertIn(SAFE['home-path'], value['payload'])
+            self.assertTrue(value['lines'])
+            results.append(value)
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[0], results[2])
+
+    def assert_fixture_sets_match_snapshot(self):
+        # The guard owns shared definitions. These independent literals freeze
+        # their reviewed policy so changing both guard and generated fixtures fails.
+        snapshots = {
+            'JS_TS_SUFFIXES': {'.js', '.mjs', '.cjs', '.ts'},
+            'FIXTURE_DOMAINS': {'example.com', 'example.org', 'example.net', 'pensieve.local', 'github.com', 'host.example'},
+            'FIXTURE_USERS': {'test', 'x', 'k', 'kk', 'fixture', 'other', 'me', 'user', 'Shared'},
+        }
+        for name, expected in snapshots.items():
+            self.assertEqual(getattr(guard, name), expected, 'snapshot ' + name)
+
+    def test_shared_fixture_sets_cannot_hide_guard_drift(self):
+        for name, extra in [('JS_TS_SUFFIXES', '.jsx'), ('FIXTURE_DOMAINS', 'extra.example'), ('FIXTURE_USERS', 'new-fixture')]:
+            original = getattr(guard, name)
+            for changed in (original - {sorted(original)[0]}, original | {extra}):
+                with patch.object(guard, name, changed):
+                    with self.assertRaisesRegex(AssertionError, 'snapshot ' + name):
+                        self.test_private_and_kit_scope_and_fixtures()
+
+    def test_stability_probe_never_constructs_a_git_repository(self):
+        run = subprocess.run
+
+        def forbid_repository(command, *args, **kwargs):
+            command = list(command)
+            if '-c' in command:
+                index = command.index('-c') + 1
+                command[index] = "import hygiene_self_test as suite\ndef forbidden(*args, **kwargs):\n    raise AssertionError('stability probe opened a Git fixture')\nsuite.Repository.__init__ = forbidden\n" + command[index]
+            return run(command, *args, **kwargs)
+
+        with patch.object(subprocess, 'run', side_effect=forbid_repository):
+            self.test_fixture_failure_line_numbers_are_stable()
+
     def test_private_and_kit_scope_and_fixtures(self):
+        self.assert_fixture_sets_match_snapshot()
         self.repo.terms()
         notices = 'THIRD-PARTY-NOTICES.md'
         self.repo.stage(notices, MAIL)
@@ -822,31 +912,7 @@ class HygieneTests(unittest.TestCase):
         payload = '\n'.join(HITS.values())
         self.repo.stage('/'.join(('docs', 'plans', 'fixture.txt')), payload)
         self.repo.stage('script/ratchet.sh', DEC + '\n' + RECORD)
-        safe = '\n'.join('/'.join(('', 'Users', user, 'data')) for user in FIXTURE_USERS)
-        safe += '\n' + '\n'.join('test@' + domain for domain in FIXTURE_DOMAINS)
-        safe += '\n~/.claude/' + 'CLAUDE.md\na project’s AGENTS.md\nimg@2x.png'
-        for user in FIXTURE_USERS:
-            home = '/'.join(('', 'Users', user, 'data'))
-            safe += '\n' + '\n'.join((home.lower(), home.replace('Users', 'USERS'),
-                                       home.replace('/', r'\/'), '~' + user + '/data',
-                                       '-Users' + '-' + user + '-Projects-app/'))
-        safe += '\n~/\n<project>/' + 'AGENTS.md'
-        safe += '\n~]/\n~9name/\na~someone/\n~~someone/'
-        safe += '\n' + '\n'.join((
-            'icon@2x.png', 'api.github.com/users/octocat/repos',
-            '/'.join(('', 'users', 'x')), '/'.join(('', 'Users', 'Shared', 'Pensieve')),
-            HOME_HIT.replace('Users', 'users'), HOME_HIT.replace('Users', 'USERS'),
-            '.sidebar-users-list-item', 'X-Users-Count-Header', 'a-Users-b-c', '-Users' + '-test-Projects',
-            'https://www.cs.stanford.edu/' + '~' + 'knuth/'))
-        safe += '\n' + '\n'.join('/'.join(('', 'Users', name, ending)) for name, ending in (
-            ('$USER', 'Library'), ('${USER}', ''), ('*', 'Library'), ('{name}', ''),
-            ('...', 'Library'), ('…', 'Library'), ('Shared', '')))
-        safe += '\n"' + '/'.join(('', 'Users', '%@', 'Library')) + '"'
-        safe += '\n^' + '/'.join(('', 'Users', '[^/]+'))
-        safe += '\ne.g. ' + '/'.join(('', 'Users', 'test')) + ', ' + '/'.join(('', 'Users', 'me'))
-        safe += '\n' + '/'.join(('', 'Users', 'test')) + '.'
-        safe += '\n' + '\n'.join('frame@2x.' + suffix for suffix in ('sketch', 'fig', 'psd', 'webm'))
-        self.repo.stage('safe.txt', safe)
+        self.repo.stage('safe.txt', safe_fixture_payload())
         self.repo.stage('docs/SPEC.md', '\n'.join((
             '[a](ARCHITECTURE.md)', '[a](<./ARCHITECTURE.md#section>)',
             '[a]: /docs//ARCHITECTURE.md?plain=1', '<a href="../README.md">',
@@ -862,8 +928,8 @@ class HygieneTests(unittest.TestCase):
                 '"' + system_path + '"', 'src="' + build_path + '"',
                 '[x](' + system_path + ')', '[x]: <' + system_path + '>',
                 'href="' + build_path + '"')))
-        for extension in ('js', 'mjs', 'cjs', 'ts'):
-            self.repo.stage('x.' + extension, 'x=~t/2\nx = ~' + 't/2\nconst w = (~' + 'width/2)|0')
+        for suffix in sorted(guard.JS_TS_SUFFIXES):
+            self.repo.stage('x' + suffix, 'x=~t/2\nx = ~' + 't/2\nconst w = (~' + 'width/2)|0')
         self.repo.stage('Pensieve/Resources/EditorAssets/editor.bundle.js',
                         'const image = "data:image/png;base64,AAAA";')
         self.assert_scan([])

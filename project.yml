@@ -2,8 +2,8 @@ name: Pensieve
 options:
   bundleIdPrefix: com.jaredatch
   deploymentTarget:
-    macOS: "14.0"
-  xcodeVersion: "16.0"
+    macOS: "26.0"
+  xcodeVersion: "26.0"
   minimumXcodeGenVersion: "2.40"
   groupSortPosition: top
 
@@ -31,6 +31,18 @@ targets:
         SUPublicEDKey: HibOcVcc/1MTA9UQHp4cIb7qMewKaA0elSCSQ0DY8Ns=
     sources:
       - path: Pensieve
+    postBuildScripts:
+      - name: Generate About credits
+        script: |
+          set -euo pipefail
+          /usr/bin/python3 "$SRCROOT/script/credits.py" \
+            "$SRCROOT/THIRD-PARTY-NOTICES.md" \
+            "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Credits.rtf"
+        inputFiles:
+          - $(SRCROOT)/script/credits.py
+          - $(SRCROOT)/THIRD-PARTY-NOTICES.md
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Credits.rtf
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jaredatch.Pensieve$(PENSIEVE_BUNDLE_ID_SUFFIX)
@@ -39,7 +51,7 @@ targets:
         MARKETING_VERSION: "0.14.0"
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: "5.10"
-        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.developer-tools"
         INFOPLIST_KEY_CFBundleDisplayName: Pensieve
         ASSETCATALOG_COMPILER_APPICON_NAME: Pensieve
@@ -153,7 +165,7 @@ targets:
         PRODUCT_NAME: pensieve-daemon
         MARKETING_VERSION: "0.14.0"
         SWIFT_VERSION: "5.10"
-        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGNING_REQUIRED: NO
         ENABLE_HARDENED_RUNTIME: YES

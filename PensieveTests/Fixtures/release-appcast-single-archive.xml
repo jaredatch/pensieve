@@ -1,0 +1,15 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Pensieve</title>
+        <item>
+            <title>1.0.0</title>
+            <pubDate>Sun, 04 Oct 2026 08:14:11 -0500</pubDate>
+            <sparkle:channel>beta</sparkle:channel>
+            <sparkle:version>999</sparkle:version>
+            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://example.org/v1.0.0/Pensieve-1.0.0.zip" length="10814953" type="application/octet-stream"/>
+        </item>
+    </channel>
+</rss>

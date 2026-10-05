@@ -1,0 +1,74 @@
+{
+  "0.9.0": [
+    "",
+    false
+  ],
+  "1.0.0": [
+    "",
+    false
+  ],
+  "1.0.1": [
+    "",
+    false
+  ],
+  "1.1.0": [
+    "",
+    false
+  ],
+  "1.9.0": [
+    "",
+    false
+  ],
+  "1.10.0": [
+    "",
+    false
+  ],
+  "2.0.0": [
+    "",
+    false
+  ],
+  "10.0.0": [
+    "",
+    false
+  ],
+  "1.0.0-alpha": [
+    "beta",
+    true
+  ],
+  "1.0.0-alpha.1": [
+    "beta",
+    true
+  ],
+  "1.0.0-alpha.beta": [
+    "beta",
+    true
+  ],
+  "1.0.0-beta": [
+    "beta",
+    true
+  ],
+  "1.0.0-beta.1": [
+    "beta",
+    true
+  ],
+  "1.0.0-beta.2": [
+    "beta",
+    true
+  ],
+  "1.0.0-beta.11": [
+    "beta",
+    true
+  ],
+  "1.0.0-rc.1": [
+    "beta",
+    true
+  ],
+  "1.1.0-alpha.1": [
+    "beta",
+    true
+  ],
+  "1.1.0-beta.1": [
+    "beta",
+    true
+  ]
+}

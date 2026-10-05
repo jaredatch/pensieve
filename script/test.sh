@@ -104,12 +104,25 @@ mkdir -p "$HOME" "$CLANG_MODULE_CACHE_PATH" "$XDG_CACHE_HOME"
 # Keep in-progress bundles where CI can upload them even if the step kills this wrapper.
 mkdir -p "$DERIVED_DATA/TestRuns"
 python3 "$REPO/script/test_runs.py" "$DERIVED_DATA/TestRuns"
+# Prune only older evidence. Every report written by this run survives for CI upload.
+if ! python3 "$REPO/script/test_diagnostics.py" --prune "$TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR"; then
+  echo "test.sh: warning: timeout diagnostics pruning failed; continuing the test run" >&2
+fi
 rdir="$(mktemp -d "$DERIVED_DATA/TestRuns/run.XXXXXX")"
 # Xcode buffers parallel hosts' stdout. Relay completed reports while tests are still running.
-python3 -u "$REPO/script/test_diagnostics.py" "$TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR" "$$" &
+python3 -u "$REPO/script/test_diagnostics.py" "$TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR" "$$" --ready "$rdir/.diagnostics-ready" &
 relay_pid=$!
 finish_relay() { kill -TERM "$relay_pid" 2>/dev/null || true; wait "$relay_pid" 2>/dev/null || true; }
 trap finish_relay EXIT
+relay_start=$SECONDS
+until [ -f "$rdir/.diagnostics-ready" ]; do
+  if ! kill -0 "$relay_pid" 2>/dev/null || [ "$((SECONDS - relay_start))" -ge 30 ]; then
+    echo "test.sh: timeout diagnostic relay did not become ready" >&2
+    exit 1
+  fi
+  sleep 0.05
+done
+rm -f "$rdir/.diagnostics-ready"
 bundle="$rdir/run.xcresult"
 status=0
 set +e
