@@ -34,7 +34,7 @@ struct DeployArtifactOwnership: DeployArtifactOwnershipChecking {
 
     func link(at path: String, skillsDirectory: String, linksFile: Bool) throws -> DeployArtifactOccupant {
         try checked(at: path) {
-            guard let type = try fileService.entryTypeWithoutFollowingLinks(at: path) else { return .absent }
+            guard let type = try leafType(at: path) else { return .absent }
             guard type == .symlink else { return .foreign }
             let target = try fileService.symlinkTarget(at: path)
             return Self.ownsLinkTarget(target, skillsDirectory: skillsDirectory, linksFile: linksFile) ? .owned : .foreignLink
@@ -52,7 +52,7 @@ struct DeployArtifactOwnership: DeployArtifactOwnershipChecking {
 
     func cursor(at path: String, legacyContent: (() throws -> String)?) throws -> DeployArtifactOccupant {
         try checked(at: path) {
-            guard let type = try fileService.entryTypeWithoutFollowingLinks(at: path) else { return .absent }
+            guard let type = try leafType(at: path) else { return .absent }
             guard type == .regular else { return .foreign }
             let header = try fileService.readRegularFileHeader(at: path, maximumBytes: Self.maximumHeaderBytes)
             if CursorMDC.hasOwnershipMark(in: header) { return .owned }
@@ -68,11 +68,15 @@ struct DeployArtifactOwnership: DeployArtifactOwnershipChecking {
         }
     }
 
-    private func checked(at path: String, _ operation: () throws -> DeployArtifactOccupant) throws -> DeployArtifactOccupant {
-        do { return try operation() } catch let error as NSError
+    private func leafType(at path: String) throws -> FileEntryType? {
+        do { return try fileService.entryTypeWithoutFollowingLinks(at: path) } catch let error as NSError
             where error.domain == NSPOSIXErrorDomain && error.code == Int(ENOTDIR) {
-            return .absent
-        } catch {
+            return nil
+        }
+    }
+
+    private func checked(at path: String, _ operation: () throws -> DeployArtifactOccupant) throws -> DeployArtifactOccupant {
+        do { return try operation() } catch {
             throw ArtifactOwnershipError.couldNotCheck(path: path, reason: error.localizedDescription)
         }
     }

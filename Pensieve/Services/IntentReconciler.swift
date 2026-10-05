@@ -116,9 +116,7 @@ struct IntentReconciler: IntentReconcilerProtocol {
         let realized = current.intersection(desired).filter { pair in
             guard let skill = state.skillByID[pair.skillID],
                   let platform = PlatformTarget(rawValue: pair.platformRaw) else { return true }
-            return platform.usesSymlinks
-                ? platformVM.isDeployed(skill: skill, platform: platform)
-                : (try? platformVM.cursorCompiler.hasOwnershipMark(skill: skill, projectPath: nil)) ?? false
+            return platformVM.isRealized(skill: skill, platform: platform)
         }
         deployUserWide(desired.subtracting(realized), state: state, context: context, aggregate: &aggregate)
         removeUserWide(current.subtracting(desired), state: state, context: context, aggregate: &aggregate)
@@ -180,6 +178,8 @@ struct IntentReconciler: IntentReconcilerProtocol {
                             platforms.append(platform)
                         } else {
                             deleteUserRows(matching: pair, state: state, context: context)
+                            aggregate.retiredPairs.insert(BatchPairKey(
+                                skillID: skill.id, platform: platform, target: .userWide))
                         }
                     } catch {
                         aggregate.outcomes.append(BatchPairOutcome(

@@ -76,6 +76,7 @@ extension DeployIntentModelTests {
         let harness = try makeHarness()
         let skill = try insertSkill(context: harness.context)
         let project = try insertCriteriaProject("category", context: harness.context)
+        harness.linkService.fileService.directories.insert(project.path)
         harness.platformVM.deploy(
             skill: skill, platform: .codex, target: .project(project), context: harness.context
         )

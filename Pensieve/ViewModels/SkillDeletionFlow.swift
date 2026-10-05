@@ -15,7 +15,16 @@ enum SkillDeletionFlow {
             return false
         }
 
-        let cleanup = platformVM.removeAllDeploys(skill: skill, projects: projects)
+        let locallyDeployedPaths: Set<String>
+        do {
+            locallyDeployedPaths = Set(try context.fetch(FetchDescriptor<DeployRecord>())
+                .filter { $0.skillID == skill.id }.map(\.targetPath))
+        } catch {
+            library.deletionNotice = .failed("Couldn't read local deploy history for “\(skill.name)”: "
+                + "\(error.localizedDescription). The skill was kept so you can retry.")
+            return false
+        }
+        let cleanup = platformVM.removeAllDeploys(skill: skill, projects: projects, locallyDeployedPaths: locallyDeployedPaths)
         if cleanup.hasFailures {
             var messages = cleanup.readFailures.map(\.message)
             if !cleanup.failures.isEmpty {

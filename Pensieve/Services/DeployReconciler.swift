@@ -179,7 +179,7 @@ final class DeployReconciler: DeployReconciling {
             // the status file PLAN-14 reads).
             do {
                 try fileService.deleteFile(at: link)
-                try? deployState.remove(artifactPath: link)
+                _ = try? deployState.remove(artifactPath: link)
                 removed.append(link)
             } catch {
                 continue

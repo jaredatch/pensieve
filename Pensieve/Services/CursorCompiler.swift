@@ -40,7 +40,7 @@ final class CursorCompiler: CursorCompilerProtocol {
         let occupant = try ownership.cursor(at: path) {
             self.generateLegacyMDC(skill: skill, body: body)
         }
-        guard occupant != .foreign else { throw ArtifactOwnershipError.occupiedPath(path) }
+        guard occupant == .absent || occupant.isOwned else { throw ArtifactOwnershipError.occupiedPath(path) }
         if let projectDirectory {
             try fileService.writeFileInProject(at: path, content: mdc, project: projectDirectory)
         } else {

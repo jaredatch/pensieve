@@ -167,9 +167,9 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
             guard !groupPlatforms.isEmpty else { continue }
             if let skill = state.skillByID[pair.skillID], let project = state.projectByID[pair.projectID] {
                 let sortedPlatforms = groupPlatforms.sorted { $0.rawValue < $1.rawValue }
-                let result = platformVM.removeBatch(skills: [skill], platforms: sortedPlatforms, target: .project(project))
-                aggregate.outcomes.append(contentsOf: result.outcomes)
-                let succeeded = Set(result.outcomes.filter { $0.error == nil }.map(\.platform))
+                let result = platformVM.removeOwnedBatch(skills: [skill], platforms: sortedPlatforms, target: .project(project))
+                aggregate.append(result)
+                let succeeded = Set(result.successes.map(\.platform) + result.retiredPairs.map(\.platform))
                 for row in state.ledger
                     where row.skillID == pair.skillID
                         && row.projectID == pair.projectID

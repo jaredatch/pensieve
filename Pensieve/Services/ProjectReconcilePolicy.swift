@@ -41,11 +41,7 @@ struct ProjectReconcilePolicy {
             guard problems[triple.projectID] == nil,
                   let project = projects[triple.projectID], let skill = skills[triple.skillID],
                   let platform = triple.platformTarget else { return true }
-            if platform.usesSymlinks {
-                return platformVM.isDeployed(skill: skill, platform: platform, target: .project(project))
-            }
-            // Unknown ownership stays pending and is reported by the throwing deploy path.
-            return (try? platformVM.cursorCompiler.hasOwnershipMark(skill: skill, projectPath: project.path)) ?? false
+            return platformVM.isRealized(skill: skill, platform: platform, target: .project(project))
         }
         let deploy = desired.subtracting(realized)
         var unavailable: Set<Triple> = []

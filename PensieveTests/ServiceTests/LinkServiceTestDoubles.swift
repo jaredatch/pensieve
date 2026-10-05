@@ -133,6 +133,7 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     var beforeArtifactCreation: ((String) throws -> Void)?
     var beforeProjectProbe: ((String) throws -> Void)?
     var beforeRuleRead: ((String) throws -> Void)?
+    var beforeSymlinkRead: ((String) throws -> Void)?
     /// Physical-path consumers compare physical literals; containment still applies to every lookup.
     var translatesSymlinkTargets = true
 
@@ -287,7 +288,9 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
             pointingTo: resolved(targetPath))
     }
     func symlinkTarget(at path: String) throws -> String {
-        let target = try wrapped.symlinkTarget(at: resolved(path))
+        let physical = resolved(path)
+        try beforeSymlinkRead?(physical)
+        let target = try wrapped.symlinkTarget(at: physical)
         return translatesSymlinkTargets ? logicalPath(for: target) : target
     }
     func isSymlink(at path: String) -> Bool {

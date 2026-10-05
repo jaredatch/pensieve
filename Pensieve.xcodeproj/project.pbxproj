@@ -112,6 +112,7 @@
 		315450409E61ADADD9458C13 /* SkillDetailTabResetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E4A3890EA648513D5D3C460 /* SkillDetailTabResetTests.swift */; };
 		318D8362BD85B23A5E300654 /* SkillInstallViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01CFDD258E411599E861AAE5 /* SkillInstallViewModel.swift */; };
 		318FCBB12122C6D08CB119DA /* SyncFooterPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C228F564CC4F45097339E523 /* SyncFooterPresentationTests.swift */; };
+		32B2487B1334E235028BE228 /* CursorOwnershipTests+SecondRetirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93CEA0ACB1B507090876A3D3 /* CursorOwnershipTests+SecondRetirement.swift */; };
 		330008FDA54D8B6C256BB540 /* TagTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F062FEB99E265A3CE94F630 /* TagTokens.swift */; };
 		3404A4B30DE73B1C62E26508 /* ScenarioHandoverTests+RoundFour.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EF5DE9D24FA08E1307A2091 /* ScenarioHandoverTests+RoundFour.swift */; };
 		3407CE3AEFDE8BCCE931BAF6 /* CategoryDetailModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DA6897904B8FB4C9C9E2E9B /* CategoryDetailModelTests.swift */; };
@@ -392,6 +393,7 @@
 		8D87751963DADC31157BA407 /* SyncEngineRemoteValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 274127EE336CEE48EDFD89A2 /* SyncEngineRemoteValidationTests.swift */; };
 		8E0D8F5CD3BDF65EE1CDF6C2 /* AdapterConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECB2CFCA75644C73EC77EB2E /* AdapterConfig.swift */; };
 		8E25423E60948D1AC8CD0319 /* SkillLibraryViewModel+Draft.swift in Sources */ = {isa = PBXBuildFile; fileRef = A28DCAE650677292E246BAC3 /* SkillLibraryViewModel+Draft.swift */; };
+		8E415EA4BA7C2CF57FEE9071 /* CursorOwnershipTests+SecondSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6FC3493F21BDF783A96FE13 /* CursorOwnershipTests+SecondSelection.swift */; };
 		8E615EEC1870BFA66D20A2E7 /* ManifestServiceTests+YAMLSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83387E8D0C30A3C13EAB7401 /* ManifestServiceTests+YAMLSafety.swift */; };
 		8EB8D77B636170CB9A3A030C /* DeployStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7FBF0F44A46C882E56F3BC6 /* DeployStateStore.swift */; };
 		8EBF3A0D29BDDB613B971EF4 /* InstalledSkillHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9FBCEBA62DB3033B6EA185C /* InstalledSkillHistoryView.swift */; };
@@ -1179,6 +1181,7 @@
 		9318C45AA595DC64D971298A /* ListRowsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListRowsTests.swift; sourceTree = "<group>"; };
 		932C7BFE4318A9C239DF4CB1 /* UpstreamHistoryGitIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpstreamHistoryGitIntegrationTests.swift; sourceTree = "<group>"; };
 		9371AD41852D05C988A5A1C8 /* IngestPreflightIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IngestPreflightIntegrationTests.swift; sourceTree = "<group>"; };
+		93CEA0ACB1B507090876A3D3 /* CursorOwnershipTests+SecondRetirement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CursorOwnershipTests+SecondRetirement.swift"; sourceTree = "<group>"; };
 		93E895C11BE5A51CFB7BC446 /* SkillDetailHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDetailHeader.swift; sourceTree = "<group>"; };
 		9452AAA6ED59100837ADF22E /* DeployReconcilerTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeployReconcilerTestSupport.swift; sourceTree = "<group>"; };
 		955E4E6BF40B8FAC7CA3523B /* SkillDetailScrollLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDetailScrollLayoutTests.swift; sourceTree = "<group>"; };
@@ -1335,6 +1338,7 @@
 		D4F98CA86E03A170CA64FFC2 /* GitReviewRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitReviewRegressionTests.swift; sourceTree = "<group>"; };
 		D513DD8A69389B9DE4984022 /* sample-claude-skill.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "sample-claude-skill.md"; sourceTree = "<group>"; };
 		D5FD9805722802DD7022586E /* WindowCloseGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowCloseGuard.swift; sourceTree = "<group>"; };
+		D6FC3493F21BDF783A96FE13 /* CursorOwnershipTests+SecondSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CursorOwnershipTests+SecondSelection.swift"; sourceTree = "<group>"; };
 		D79786775DF7CBB4414BCB6E /* CategoryReconcileWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryReconcileWiringTests.swift; sourceTree = "<group>"; };
 		D7A9256836689052B0650EA2 /* UpdateCheckReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCheckReport.swift; sourceTree = "<group>"; };
 		D81C4327CA74F8F447E1D3EE /* MachineDetailModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachineDetailModel.swift; sourceTree = "<group>"; };
@@ -2234,6 +2238,8 @@
 				E9E186DFABC73E60C900CFC8 /* CursorOwnershipTests+ReviewConvergence.swift */,
 				830119F8AA285AE4D2FEEB31 /* CursorOwnershipTests+ReviewDeletion.swift */,
 				CF13118CFE46D741A5E9F351 /* CursorOwnershipTests+Routes.swift */,
+				93CEA0ACB1B507090876A3D3 /* CursorOwnershipTests+SecondRetirement.swift */,
+				D6FC3493F21BDF783A96FE13 /* CursorOwnershipTests+SecondSelection.swift */,
 				90FD449A6A0D59DFF9F61A27 /* DaemonBundleTests.swift */,
 				CF72DE609CD6757916FA412B /* DaemonCLIParseTests.swift */,
 				FCF62A306C41E95F3AE70418 /* DaemonDeployedCommandTests.swift */,
@@ -2660,6 +2666,8 @@
 				3BD64062AEC8383B32763516 /* CursorOwnershipTests+ReviewConvergence.swift in Sources */,
 				660AC026E620912224EB2DED /* CursorOwnershipTests+ReviewDeletion.swift in Sources */,
 				F307DE69126F513C138C04E3 /* CursorOwnershipTests+Routes.swift in Sources */,
+				32B2487B1334E235028BE228 /* CursorOwnershipTests+SecondRetirement.swift in Sources */,
+				8E415EA4BA7C2CF57FEE9071 /* CursorOwnershipTests+SecondSelection.swift in Sources */,
 				C66618C1498973C0386111D5 /* CursorOwnershipTests.swift in Sources */,
 				282BEA0D23DEDD669C958B19 /* DaemonBundleTests.swift in Sources */,
 				3781D96DF8D50C62F1715906 /* DaemonCLIParseTests.swift in Sources */,

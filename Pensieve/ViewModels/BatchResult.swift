@@ -6,13 +6,20 @@ struct DeployOutcome {
 }
 
 /// One (skill, platform) pair's target inside a batch.
-enum BatchPairTarget: Equatable {
+enum BatchPairTarget: Hashable {
     case userWide
     case project(UUID)
 
     init(_ target: DeployTarget) {
         self = target.project.map { .project($0.id) } ?? .userWide
     }
+}
+
+/// A silently retired pair is completed work, without a reported removal action.
+struct BatchPairKey: Hashable {
+    let skillID: UUID
+    let platform: PlatformTarget
+    let target: BatchPairTarget
 }
 
 struct BatchPairOutcome: Identifiable {
@@ -60,6 +67,7 @@ struct BatchReadFailure: Identifiable {
 struct BatchResult {
     var outcomes: [BatchPairOutcome] = []
     var readFailures: [BatchReadFailure] = []
+    var retiredPairs: Set<BatchPairKey> = []
 
     var successes: [BatchPairOutcome] { outcomes.filter { $0.isSuccess } }
     var failures: [BatchPairOutcome] { outcomes.filter { !$0.isSuccess && !$0.isSkipped } }
@@ -103,5 +111,6 @@ struct BatchResult {
     mutating func append(_ other: BatchResult) {
         outcomes.append(contentsOf: other.outcomes)
         readFailures.append(contentsOf: other.readFailures)
+        retiredPairs.formUnion(other.retiredPairs)
     }
 }

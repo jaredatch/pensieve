@@ -103,6 +103,13 @@ extension DeployIntentModel {
                     result.outcomes.append(targetFailure)
                 } else if let targetSuccess {
                     result.outcomes.append(targetSuccess)
+                } else if !selected, reconciliation.retiredPairs.contains(BatchPairKey(
+                    skillID: skill.id, platform: platform, target: expectedTarget)) {
+                    continue
+                } else if !selected, let skipped = reconciliation.skipped.first(where: {
+                    $0.skillID == skill.id && $0.platform == platform && $0.target == expectedTarget
+                }) {
+                    result.outcomes.append(skipped)
                 } else if selected {
                     if !platformVM.isDeployed(skill: skill, platform: platform, target: target) {
                         result.append(platformVM.deployBatch(
@@ -110,19 +117,7 @@ extension DeployIntentModel {
                         ))
                     }
                 } else {
-                    do {
-                        if try platformVM.prepareArtifactRemoval(skill: skill, platform: platform, target: target) {
-                            result.append(platformVM.removeBatch(
-                                skills: [skill], platforms: [platform], target: target
-                            ))
-                        }
-                    } catch {
-                        result.outcomes.append(BatchPairOutcome(
-                            skillID: skill.id, skillName: skill.name, platform: platform, target: expectedTarget,
-                            error: BatchPairOutcome.failureMessage(error, target: target),
-                            projectFolderError: error as? ProjectFolderError
-                        ))
-                    }
+                    result.append(platformVM.removeSelection(skills: [skill], platforms: [platform], target: target))
                 }
             }
         }

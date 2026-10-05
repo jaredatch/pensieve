@@ -47,6 +47,23 @@ extension CursorOwnershipTests {
             }
         }
     }
+    func testRealizationKeepsCompilerBehindPlatformViewModel() throws {
+        let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().path
+        let products = checkout + "/DerivedData/Build/Products/Debug"
+        for bypass in [false, true] {
+            let source = root + "/realization-probe.swift"
+            let expression = bypass ? "vm.cursorCompiler" : "vm.isRealized(skill: skill, platform: .cursor)"
+            try files.writeFile(at: source, content: "@testable import Pensieve\n"
+                + "func probe(_ vm: PlatformViewModel, _ skill: Skill) { _ = \(expression) }\n")
+            let (status, diagnostics) = try typecheckOwnershipProbe(source, products: products, checkout: checkout)
+            if bypass {
+                XCTAssertNotEqual(status, 0, "Reconciliation must use the view model's realization policy")
+                XCTAssertTrue(diagnostics.contains("inaccessible"), diagnostics)
+            } else { XCTAssertEqual(status, 0, diagnostics) }
+        }
+    }
+
     private func typecheckOwnershipProbe(_ source: String, products: String, checkout: String) throws -> (Int32, String) {
         let process = Process()
         let output = Pipe()

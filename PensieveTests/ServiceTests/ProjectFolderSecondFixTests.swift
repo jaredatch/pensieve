@@ -64,7 +64,7 @@ final class ProjectFolderSecondFixTests: XCTestCase {
                 try h.context.save()
                 let result = run()
                 XCTAssertFalse(result.hasFailures)
-                XCTAssertEqual(result.successes.count, categoryOwned ? 1 : 0)
+                XCTAssertEqual(result.successes.count, 0)
                 XCTAssertEqual(try h.files.symlinkTarget(at: path), h.otherProject.path)
                 XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
                 XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0)

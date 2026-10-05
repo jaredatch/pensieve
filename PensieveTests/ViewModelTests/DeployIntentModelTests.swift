@@ -130,9 +130,9 @@ final class DeployIntentModelTests: XCTestCase {
         )
 
         guard case let .localDeploy(batch) = outcome else { return XCTFail("expected project batch removal") }
-        XCTAssertEqual(batch.successes.count, 1)
+        XCTAssertEqual(batch.successes.count, 0)
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 1)
-        XCTAssertEqual(harness.linkService.unlinkCalls.map(\.projectPath), [project.path])
+        XCTAssertTrue(harness.linkService.unlinkCalls.isEmpty)
     }
 
     func testPerformDeployUserWideRemoteOnlyRoutesToIntent() throws {

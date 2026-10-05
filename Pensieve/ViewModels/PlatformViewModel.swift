@@ -5,7 +5,7 @@ import SwiftUI
 @Observable
 final class PlatformViewModel {
     let linkService: LinkServiceProtocol
-    let cursorCompiler: CursorCompilerProtocol
+    private let cursorCompiler: CursorCompilerProtocol
     private let fileService: FileServiceProtocol
     let projectReconcilePolicy: ProjectReconcilePolicy
     let deployStateStore: DeployStateStore
@@ -150,10 +150,17 @@ final class PlatformViewModel {
     private func removeOne(skill: Skill, platform: PlatformTarget, target: DeployTarget) throws {
         let path = artifactPath(skill: skill, platform: platform, target: target)
         try removeArtifact(skill: skill, platform: platform, target: target)
+        retireDeployState(artifactPath: path)
+    }
+
+    /// State retirement is best effort after ownership is known, just as it is after an unlink.
+    @discardableResult
+    func retireDeployState(artifactPath: String) -> Bool {
         do {
-            try deployStateStore.remove(artifactPath: path)
+            return try deployStateStore.remove(artifactPath: artifactPath)
         } catch {
-            NSLog("Pensieve deploy-state remove failed for \(path): \(error)")
+            NSLog("Pensieve deploy-state remove failed for \(artifactPath): \(error)")
+            return false
         }
     }
 
@@ -315,6 +322,43 @@ final class PlatformViewModel {
 }
 
 extension PlatformViewModel {
+    /// Convergence upgrades legacy Cursor output; unknown ownership stays pending for the throwing deploy.
+    func isRealized(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) -> Bool {
+        platform.usesSymlinks
+            ? isDeployed(skill: skill, platform: platform, target: target)
+            : (try? cursorCompiler.hasOwnershipMark(skill: skill, projectPath: target.project?.path)) ?? false
+    }
+
+    /// Throwing ownership for consumers that retain their ledger when an occupant cannot be checked.
+    func artifactIsOwned(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) throws -> Bool {
+        guard target.project == nil || platform.supportsProjectScope else { return false }
+        guard ProjectDirectory.canAccess(target.project?.path) else { return false }
+        if platform.usesSymlinks {
+            return try linkService.ownsArtifact(skill: skill, platform: platform, projectPath: target.project?.path)
+        }
+        return try cursorCompiler.ownsArtifact(skill: skill, projectPath: target.project?.path)
+    }
+
+    /// Direct unselection waits quietly for a missing project, before reading or retiring its artifacts.
+    func removeSelection(skills: [Skill], platforms: [PlatformTarget], target: DeployTarget) -> BatchResult {
+        do {
+            if let project = target.project { try fileService.requireProjectDirectory(at: project.path) }
+            return removeOwnedBatch(skills: skills, platforms: platforms, target: target)
+        } catch {
+            var result = BatchResult()
+            for skill in skills {
+                for platform in platforms {
+                    result.outcomes.append(BatchPairOutcome(
+                        skillID: skill.id, skillName: skill.name, platform: platform, target: BatchPairTarget(target),
+                        error: BatchPairOutcome.failureMessage(error, target: target),
+                        projectFolderError: error as? ProjectFolderError
+                    ))
+                }
+            }
+            return result.skippingMissingProjects()
+        }
+    }
+
     /// Classifies user-wide legacy ownership before convergence. LinkService supplies the same
     /// literal-target judgment used by broken-link validation; every regular Cursor file stays owned.
     func scenarioHandoverDeployState(skill: Skill, platform: PlatformTarget) throws -> ScenarioHandoverDeployState {

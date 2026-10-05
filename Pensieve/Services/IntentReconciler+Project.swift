@@ -96,6 +96,8 @@ extension IntentReconciler {
                             platforms.append(platform)
                         } else {
                             deleteProjectRows(matching: triple, state: state, context: context)
+                            aggregate.retiredPairs.insert(BatchPairKey(
+                                skillID: skill.id, platform: platform, target: .project(project.id)))
                         }
                     } catch {
                         aggregate.outcomes.append(BatchPairOutcome(

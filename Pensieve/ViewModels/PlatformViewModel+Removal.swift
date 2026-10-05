@@ -3,27 +3,39 @@ import Foundation
 extension PlatformViewModel {
     /// A foreign or absent occupant retires only our record; it is not a removal action.
     func prepareArtifactRemoval(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) throws -> Bool {
-        guard target.project == nil || platform.supportsProjectScope,
-              ProjectDirectory.canAccess(target.project?.path) else { return false }
         if try artifactIsOwned(skill: skill, platform: platform, target: target) { return true }
-        try deployStateStore.remove(artifactPath: artifactPath(skill: skill, platform: platform, target: target))
-        noteDeployStateChanged()
+        if retireDeployState(artifactPath: artifactPath(skill: skill, platform: platform, target: target)) {
+            noteDeployStateChanged()
+        }
         return false
     }
 
-    /// Throwing ownership for consumers that retain their ledger when an occupant cannot be checked.
-    func artifactIsOwned(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) throws -> Bool {
-        guard target.project == nil || platform.supportsProjectScope else { return false }
-        guard ProjectDirectory.canAccess(target.project?.path) else { return false }
-        if platform.usesSymlinks {
-            return try linkService.ownsArtifact(skill: skill, platform: platform, projectPath: target.project?.path)
+    /// Only owned artifacts are removal actions. Foreign and absent pairs retire silently.
+    func removeOwnedBatch(skills: [Skill], platforms: [PlatformTarget], target: DeployTarget) -> BatchResult {
+        var result = BatchResult()
+        for skill in skills {
+            for platform in platforms {
+                do {
+                    if try prepareArtifactRemoval(skill: skill, platform: platform, target: target) {
+                        result.append(removeBatch(skills: [skill], platforms: [platform], target: target))
+                    } else {
+                        result.retiredPairs.insert(BatchPairKey(
+                            skillID: skill.id, platform: platform, target: BatchPairTarget(target)))
+                    }
+                } catch {
+                    result.outcomes.append(BatchPairOutcome(
+                        skillID: skill.id, skillName: skill.name, platform: platform, target: BatchPairTarget(target),
+                        error: BatchPairOutcome.failureMessage(error, target: target)
+                    ))
+                }
+            }
         }
-        return try cursorCompiler.ownsArtifact(skill: skill, projectPath: target.project?.path)
+        return result
     }
 
     /// Remove owned deploys user-wide and in registered projects; stale records are dropped
     /// without removing foreign occupants. An unreadable state file fences existing owned artifacts.
-    func removeAllDeploys(skill: Skill, projects: [Project]) -> BatchResult {
+    func removeAllDeploys(skill: Skill, projects: [Project], locallyDeployedPaths: Set<String> = []) -> BatchResult {
         var result = BatchResult()
         let targets: [DeployTarget] = [.userWide] + projects.map { .project($0) }
         let recorded: Set<String>?
@@ -41,7 +53,7 @@ extension PlatformViewModel {
         for target in targets {
             for platform in deployablePlatforms(forProject: target.project != nil) {
                 if let outcome = removeAllDeployPair(skill: skill, platform: platform, target: target,
-                                                     recorded: recorded, stateProblem: stateProblem) {
+                    recorded: recorded, locallyDeployedPaths: locallyDeployedPaths, stateProblem: stateProblem) {
                     result.outcomes.append(outcome)
                 }
             }
@@ -50,11 +62,14 @@ extension PlatformViewModel {
         return result
     }
 
-    private func removeAllDeployPair(skill: Skill, platform: PlatformTarget, target: DeployTarget,
-                                     recorded: Set<String>?, stateProblem: String) -> BatchPairOutcome? {
+    private func removeAllDeployPair(
+        skill: Skill, platform: PlatformTarget, target: DeployTarget,
+        recorded: Set<String>?, locallyDeployedPaths: Set<String>, stateProblem: String
+    ) -> BatchPairOutcome? {
         let path = artifactPath(skill: skill, platform: platform, target: target)
         // A project rule's mark can arrive through git from another Mac.
-        if platform == .cursor, target.project != nil, let recorded, !recorded.contains(path) { return nil }
+        if platform == .cursor, target.project != nil, let recorded,
+           !recorded.contains(path), !locallyDeployedPaths.contains(path) { return nil }
         let problem: String?
         do {
             let ours = try artifactIsOwned(skill: skill, platform: platform, target: target)
