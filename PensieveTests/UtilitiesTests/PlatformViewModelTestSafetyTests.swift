@@ -3,7 +3,7 @@ import XCTest
 @testable import Pensieve
 
 /// Audits direct constructors throughout the test target without constructing a view model.
-/// PlatformViewModel must name detection and deploy state; DeployStateStore must name its root.
+/// PlatformViewModel must name non-nil detection and deploy state; DeployStateStore must name its root.
 /// Comments and strings are ignored. This is an argument guard, not a runtime filesystem sandbox:
 /// dependency implementations and paths supplied through variables still need fixture review.
 final class PlatformViewModelTestSafetyTests: XCTestCase {
@@ -24,6 +24,19 @@ final class PlatformViewModelTestSafetyTests: XCTestCase {
             + "deployStateStore: DeployStateStore(fileService: files, appSupportDir: root))"), [])
         XCTAssertEqual(try missingArguments(in:
             "PlatformViewModel(fileService: nested(agentDetection: stub), deployStateStore: store)"), ["agentDetection"])
+    }
+
+    func testGuardRejectsExplicitNilDependencies() throws {
+        for value in ["nil", " nil ", "(nil)"] {
+            XCTAssertEqual(try missingArguments(in:
+                "PlatformViewModel(agentDetection: \(value), deployStateStore: store)"), ["agentDetection"])
+            XCTAssertEqual(try missingArguments(in:
+                "PlatformViewModel(agentDetection: stub, deployStateStore: \(value))"), ["deployStateStore"])
+        }
+        XCTAssertEqual(try missingArguments(in:
+            "PlatformViewModel(agentDetection: nil, deployStateStore: nil)"), ["agentDetection", "deployStateStore"])
+        XCTAssertEqual(try missingArguments(in:
+            "PlatformViewModel(agentDetection: Stub(options: nil), deployStateStore: .memoryBacked)"), [])
     }
 
     private func swiftFiles(in root: String, using files: FileServiceProtocol) throws -> [String] {
@@ -48,17 +61,39 @@ final class PlatformViewModelTestSafetyTests: XCTestCase {
         return constructors.matches(in: stripped, range: NSRange(location: 0, length: text.length)).flatMap { match in
             let type = text.substring(with: match.range(at: 1))
             let required = type == "PlatformViewModel" ? ["agentDetection", "deployStateStore"] : ["appSupportDir"]
-            var depth = 1
-            var labels = ""
-            var position = NSMaxRange(match.range)
-            while position < text.length, depth > 0 {
-                let character = text.substring(with: NSRange(location: position, length: 1))
-                if character == "(" { depth += 1 }
-                if character == ")" { depth -= 1 }
-                if depth == 1 { labels += character }
-                position += 1
+            let arguments = topLevelArguments(in: text, startingAt: NSMaxRange(match.range))
+            return required.filter { label in
+                guard let value = arguments[label] else { return true }
+                let literal = value.trimmingCharacters(in: .whitespacesAndNewlines
+                    .union(CharacterSet(charactersIn: "()")))
+                return literal == "nil"
             }
-            return required.filter { !labels.contains($0 + ":") }
         }
+    }
+
+    private func topLevelArguments(in text: NSString, startingAt start: Int) -> [String: String] {
+        var depth = 1
+        var position = start
+        var argument = ""
+        var parts: [String] = []
+        while position < text.length, depth > 0 {
+            let character = text.substring(with: NSRange(location: position, length: 1))
+            if ["(", "[", "{"].contains(character) { depth += 1 }
+            if [")", "]", "}"].contains(character) { depth -= 1 }
+            if depth == 0 || (depth == 1 && character == ",") {
+                parts.append(argument)
+                argument = ""
+            } else {
+                argument += character
+            }
+            position += 1
+        }
+        var arguments: [String: String] = [:]
+        for part in parts {
+            guard let colon = part.firstIndex(of: ":") else { continue }
+            let label = part[..<colon].trimmingCharacters(in: .whitespacesAndNewlines)
+            arguments[label] = String(part[part.index(after: colon)...])
+        }
+        return arguments
     }
 }

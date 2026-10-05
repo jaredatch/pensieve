@@ -77,6 +77,7 @@ final class LinkService: LinkServiceProtocol {
     }
 
     func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
+        guard projectPath == nil || platform.supportsProjectScope else { return }
         // Path-component safety invariant at the remove boundary too (mirrors link()):
         // a malicious directoryName must not let a delete escape the intended deploy root.
         try Self.validatePathComponent(skill.directoryName)
@@ -91,6 +92,7 @@ final class LinkService: LinkServiceProtocol {
     }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
+        guard projectPath == nil || platform.supportsProjectScope else { return false }
         guard ProjectDirectory.canAccess(projectPath) else { return false }
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
         guard platform.usesSymlinks, fileService.isSymlink(at: link) else { return false }

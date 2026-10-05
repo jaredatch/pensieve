@@ -26,6 +26,7 @@ struct ProjectIntentHarness {
     let reconciler: IntentReconciler
     let fileService: DeployRecordingFileService
     let linkService: DeployRecordingLinkService
+    let deployStateStore = DeployStateStore.memoryBacked
 
     init(
         installed: [PlatformTarget],
@@ -43,7 +44,7 @@ struct ProjectIntentHarness {
             linkService: linkService,
             cursorCompiler: DeployRecordingCursorCompiler(fileService: fileService),
             agentDetection: DeployStubDetection(installed: installed),
-            deployStateStore: DeployStateStore.memoryBacked,
+            deployStateStore: deployStateStore,
             persist: persist
         )
         reconciler = IntentReconciler(
@@ -94,6 +95,16 @@ struct ProjectIntentHarness {
 
     func assignments() throws -> [IntentAssignment] {
         try context.fetch(FetchDescriptor<IntentAssignment>())
+    }
+
+    func makePlatformVM(installed: [PlatformTarget]) -> PlatformViewModel {
+        PlatformViewModel(
+            fileService: fileService,
+            linkService: linkService,
+            cursorCompiler: DeployRecordingCursorCompiler(fileService: fileService),
+            agentDetection: DeployStubDetection(installed: installed),
+            deployStateStore: deployStateStore
+        )
     }
 
     func intents() throws -> [MachineDeployIntent] {

@@ -89,6 +89,7 @@ final class PlatformViewModel {
     }
 
     func artifactExists(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) -> Bool {
+        guard target.project == nil || platform.supportsProjectScope else { return false }
         guard ProjectDirectory.canAccess(target.project?.path) else { return false }
         let path = artifactPath(skill: skill, platform: platform, target: target)
         guard !path.isEmpty else { return false }
