@@ -211,9 +211,13 @@ elif cmd == "hdiutil":
             import signal
             os.kill(os.getppid(), getattr(signal, s["attach_signal"]))
     elif args[0] == "detach":
+        mount = str(pathlib.Path(args[1]).resolve())
+        if mount not in s.get("mounts", []):
+            print("hdiutil: detach failed - No such file or directory", file=sys.stderr)
+            sys.exit(1)
         if s.get("detach_failure"): fail("fixture DMG detach failed")
         import shutil; shutil.rmtree(pathlib.Path(args[1]) / "Pensieve.app")
-        s["mounts"].remove(str(pathlib.Path(args[1]).resolve())); save()
+        s["mounts"].remove(mount); save()
     else: fail("unexpected hdiutil")
     sys.exit(0)
 elif cmd == "mount":
@@ -817,6 +821,25 @@ sys.exit(result.returncode)
                 self.assertEqual(sum(c[:2] == ["hdiutil", "attach"] for c in self.state["calls"]), 1)
                 self.assertEqual(sum(c[:2] == ["hdiutil", "detach"] for c in self.state["calls"]), 1)
                 self.assertEqual(self.state["writes"], [])
+
+    def test_detach_stub_refuses_never_mounted_path_without_touching_volume(self):
+        volume = self.root / "mounted-volume"
+        app = volume / "Pensieve.app"
+        app.mkdir(parents=True)
+        marker = app / "mounted-content"
+        marker.write_text("keep mounted")
+        unmounted = volume / "never-mounted"
+        unmounted.mkdir()
+        self.state["mounts"] = [str(volume.resolve())]
+        self.state_path.write_text(json.dumps(self.state))
+        result = subprocess.run([str(self.root / "bin/hdiutil"), "detach", str(unmounted), "-force"],
+                                env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "hdiutil: detach failed - No such file or directory\n")
+        self.assertEqual(json.loads(self.state_path.read_text())["mounts"], [str(volume.resolve())])
+        self.assertEqual(marker.read_text(), "keep mounted")
+        self.assertTrue(unmounted.is_dir())
 
     def test_fixed_gh_paths_require_an_executable_before_work(self):
         primary, fallback = self.root / "primary-gh", self.root / "fallback-gh"

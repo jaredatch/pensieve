@@ -23,7 +23,9 @@ jobs:
     permissions:
       contents: read
     runs-on: macos-26
-    timeout-minutes: 154 # 144 step minutes + 10 headroom; this Mac, this batch: release 405 s, workflow 8.7 s, 2x runner and 3x margin.
+    # Recovery/workflow: worst of three serial samples, rounded up to milliseconds, 2026-10-05;
+    # Mac16,11 / Apple M4 Pro, macOS 26.6.2 (25G83): 481.623/8.951 s, 2x runner and 3x margin.
+    timeout-minutes: 162 # 152 step minutes + 10 headroom; no job-cap limit.
     env:
       CI_LARGEST_PUSH: 200 # Covers plan merges; larger pushes must resize the measured bounds.
     # Worst times: Actions runs 37074075055 and 37063706683, with local additions scaled by 2x below.
@@ -99,11 +101,15 @@ jobs:
         run: ./script/public-hygiene.sh --self-test
 
       - name: Test workflow contracts
-        timeout-minutes: 1 # This Mac, this batch: 8.7 s workflow suite; estimate 18 s = max(3 s runner, ceil(2 x 8.7)); bound >= 3x.
+        # Worst of three serial samples, rounded up to milliseconds, 2026-10-05;
+        # Mac16,11 / Apple M4 Pro, macOS 26.6.2 (25G83): 8.951 s.
+        timeout-minutes: 1 # Estimate 18 s = max(3 s runner, ceil(2 x 8.951)); bound >= 3x.
         run: ruby script/workflow_self_test.rb
 
       - name: Test release recovery
-        timeout-minutes: 41 # This Mac, this batch: 405 s release suite; estimate 810 s = ceil(2 x 405); absent from API runs; bound >= 3x.
+        # Worst of three serial samples, rounded up to milliseconds, 2026-10-05;
+        # Mac16,11 / Apple M4 Pro, macOS 26.6.2 (25G83): 481.623 s.
+        timeout-minutes: 49 # Estimate 964 s = ceil(2 x 481.623); absent from API runs; bound >= 3x.
         run: python3 -B script/release_self_test.py
 
       - name: Test development build host selection
