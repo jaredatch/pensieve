@@ -19,31 +19,37 @@ verify_update_archive() {
 }
 
 # One read-only mount owns metadata validation and cleanup for built and published DMGs.
+dmg_mount_is_attached() { /sbin/mount | grep -F " on $1 (" >/dev/null; }
+
 mounted_dmg_minimum() (
-  local dmg="$1" context="$2" version="${3:-}" check_tickets="${4:-0}" mount_point attached=0
+  local dmg="$1" context="$2" version="${3:-}" check_tickets="${4:-0}"
   local minimum_args
-  mount_point="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-dmg-verify.XXXXXX")" || return 1
-  trap 'cleanup_rc=$?; if [ "$attached" -eq 1 ] && ! hdiutil detach "$mount_point" -force >/dev/null 2>&1; then
-          echo "release: $context: local DMG detach failed" >&2; cleanup_rc=1;
+  # A signal trap's exit unwinds function locals before EXIT on Bash 3.2.
+  # This subshell owns cleanup state that must survive that unwind.
+  dmg_mount_context="$context"
+  dmg_attach_in_progress=1
+  dmg_mount_point="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-dmg-verify.XXXXXX")" || return 1
+  trap 'cleanup_rc=$?; if dmg_mount_is_attached "$dmg_mount_point" && ! hdiutil detach "$dmg_mount_point" -force >/dev/null 2>&1; then
+          echo "release: $dmg_mount_context: local DMG detach failed" >&2; cleanup_rc=1;
         fi;
-        if ! rmdir "$mount_point"; then
-          echo "release: $context: local mount cleanup failed" >&2; cleanup_rc=1;
+        if ! rmdir "$dmg_mount_point"; then
+          echo "release: $dmg_mount_context: local mount cleanup failed" >&2; cleanup_rc=1;
         fi; exit "$cleanup_rc"' EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-  hdiutil attach "$dmg" -mountpoint "$mount_point" -nobrowse -readonly -quiet >&2 || {
+  trap 'if [ "$dmg_attach_in_progress" -eq 1 ]; then echo "release: $dmg_mount_context: local DMG attach interrupted" >&2; fi; exit 130' INT
+  trap 'if [ "$dmg_attach_in_progress" -eq 1 ]; then echo "release: $dmg_mount_context: local DMG attach interrupted" >&2; fi; exit 143' TERM
+  hdiutil attach "$dmg" -mountpoint "$dmg_mount_point" -nobrowse -readonly -quiet >&2 || {
     echo "release: $context: local DMG attach failed" >&2; return 1;
   }
-  attached=1
-  test -d "$mount_point/Pensieve.app" || {
+  dmg_attach_in_progress=0
+  test -d "$dmg_mount_point/Pensieve.app" || {
     echo "release: $context: no Pensieve.app inside $dmg" >&2; return 1;
   }
   # Only the fresh publish path checks the app's ticket and Gatekeeper assessment.
   if [ "$check_tickets" -eq 1 ]; then
-    run_command_seam "$STAPLER_CMD" validate "$mount_point/Pensieve.app" >&2 || return 1
-    spctl --assess --type exec -vv "$mount_point/Pensieve.app" >&2 || return 1
+    run_command_seam "$STAPLER_CMD" validate "$dmg_mount_point/Pensieve.app" >&2 || return 1
+    spctl --assess --type exec -vv "$dmg_mount_point/Pensieve.app" >&2 || return 1
   fi
-  minimum_args=(--app "$mount_point/Pensieve.app")
+  minimum_args=(--app "$dmg_mount_point/Pensieve.app" --context "$context")
   [ -z "$version" ] || minimum_args+=(--version "$version")
   python3 -B "$REPO/script/minimum_system.py" "${minimum_args[@]}" || return 1
 )
@@ -78,7 +84,7 @@ verify_cask_artifact() (
 read_release_state() {
   local response="$DIST_DIR/release-response.txt" status mode=unpublished
   [ "$APPCAST_ITEM" = absent ] || mode=live
-  if run_command_seam "$GH_CMD" api --include "repos/$PUBLIC_REPO/releases/tags/v$VERSION" > "$response"; then
+  if run_gh api --include "repos/$PUBLIC_REPO/releases/tags/v$VERSION" > "$response"; then
     RELEASE_STATE="$(state_tool release "$response" "$VERSION" "$mode")" || return 1
   else
     status="$(http_status "$response")"
@@ -91,7 +97,7 @@ verify_tag_target() {
   local response="$DIST_DIR/tag-response.txt" target kind sha depth=0
   local endpoint="repos/$PUBLIC_REPO/git/ref/tags/v$VERSION"
   while :; do
-    run_command_seam "$GH_CMD" api --include "$endpoint" > "$response" || {
+    run_gh api --include "$endpoint" > "$response" || {
       echo "release: tag target read failed" >&2; return 1;
     }
     target="$(state_tool tag "$response")" || return 1
@@ -155,7 +161,7 @@ recover_live_release() (
   download_dir="$(mktemp -d "$DIST_DIR/recovery.XXXXXX")" || return 1
   trap 'rm -rf "$download_dir"' EXIT
   # Downloaded bytes stay outside appcast-input and never reach generate_appcast.
-  if ! run_command_seam "$GH_CMD" release download "v$VERSION" --repo "$PUBLIC_REPO" \
+  if ! run_gh release download "v$VERSION" --repo "$PUBLIC_REPO" \
       --pattern "Pensieve-$VERSION.dmg" --dir "$download_dir"; then
     echo "release: published DMG download failed or asset missing" >&2; return 1
   fi
@@ -174,10 +180,10 @@ publish_release_asset() {
   [ "$RELEASE_STATE" = "$expected" ] || { echo "release: release changed since preflight; stopping" >&2; return 1; }
   if [ "$RELEASE_STATE" = absent ]; then
     build_release_args "$CHANGELOG_PATH"
-    run_command_seam "$GH_CMD" "${RELEASE_ARGS[@]+"${RELEASE_ARGS[@]}"}"
+    run_gh "${RELEASE_ARGS[@]+"${RELEASE_ARGS[@]}"}"
     rm -f "$RELEASE_NOTES_FILE"
   else
     echo "release: replacing unpublished DMG asset in existing release"
-    run_command_seam "$GH_CMD" release upload "v$VERSION" "$DMG_PATH" --repo "$PUBLIC_REPO" --clobber
+    run_gh release upload "v$VERSION" "$DMG_PATH" --repo "$PUBLIC_REPO" --clobber
   fi
 }

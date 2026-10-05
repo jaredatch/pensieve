@@ -23,9 +23,9 @@ jobs:
     permissions:
       contents: read
     runs-on: macos-26
-    timeout-minutes: 108 # 98 minutes of step bounds plus 10 minutes of headroom.
+    timeout-minutes: 134 # 124 minutes of step bounds plus 10 minutes of headroom.
     env:
-      CI_LARGEST_PUSH: 36 # PLAN-46's expected integration push, including its fix and close.
+      CI_LARGEST_PUSH: 200 # Covers plan merges; larger pushes must resize the measured bounds.
     # Worst times: Actions runs 37074075055 and 37063706683, with local additions scaled by 2x below.
     steps:
       - name: Checkout
@@ -111,14 +111,14 @@ jobs:
         run: python3 -B script/pull_dev_build_self_test.py
 
       - name: Check public hygiene in pushed commits
-        timeout-minutes: 3 # Run 37218019371: 20 s / 17 commits x CI_LARGEST_PUSH; bound >= 3x.
+        timeout-minutes: 13 # Run 37063706683 (1 commit): 22 s fixed + run 37218019371: 20 s / 17 commits x CI_LARGEST_PUSH; bound >= 3x.
         if: steps.replay-range.outputs.skip != 'true'
         env:
           HYGIENE_RANGE: ${{ steps.replay-range.outputs.range }}
         run: ./script/public-hygiene.sh --range "$HYGIENE_RANGE"
 
       - name: Replay commit guards
-        timeout-minutes: 3 # Run 37218019371: 28 s / 17 commits x CI_LARGEST_PUSH; bound >= 3x.
+        timeout-minutes: 19 # Run 37063706683 (1 commit): 35 s fixed + run 37218019371: 28 s / 17 commits x CI_LARGEST_PUSH; bound >= 3x.
         if: steps.replay-range.outputs.skip != 'true'
         run: |
           RATCHET_CI_SKIP_DEFAULT_MERGE_HEAD="${{ steps.replay-range.outputs.skip_default_merge_head }}" \

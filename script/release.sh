@@ -7,12 +7,6 @@ CASK_TAP_TOKEN="${TAP_GH_TOKEN:-}"
 export -n CASK_TAP_TOKEN
 unset TAP_GH_TOKEN
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION_FILE="$REPO/VERSION"
-DIST_DIR="$REPO/build/dist"
-APPCAST_INPUT_DIR="$DIST_DIR/appcast-input"
-DMG_ROOT="$DIST_DIR/dmg-root"
-APP_PATH="$DMG_ROOT/Pensieve.app"
 DMG_PATH=""
 DMG_MINIMUM=""
 SIGN_IDENTITY="-"
@@ -31,7 +25,7 @@ INSPECT_MODE=""
 VERSION=""
 VERSION_CHANNEL=""
 VERSION_SOURCE="VERSION file"
-CHANGELOG_PATH="$REPO/CHANGELOG.md"
+CHANGELOG_PATH=""
 INSPECT_APPCAST=""
 INSPECT_BUILT_DMG=""
 INSPECT_BASE_APPCAST=""
@@ -44,14 +38,23 @@ NOTARY_ISSUER=""
 # Fixed release tools. Tests substitute these constants only in their owned copy.
 NOTARY_CMD="/usr/bin/xcrun notarytool"
 STAPLER_CMD="/usr/bin/xcrun stapler"
-GH_CMD="/opt/homebrew/bin/gh"
-if [ ! -x "$GH_CMD" ]; then
-  GH_CMD="/usr/local/bin/gh"
-  [ -x "$GH_CMD" ] || {
-    echo "release: executable gh required at /opt/homebrew/bin/gh or /usr/local/bin/gh" >&2
-    exit 1
-  }
-fi
+GH_PATHS=(/opt/homebrew/bin/gh /usr/local/bin/gh)
+GH_CMD=""
+require_gh() {
+  local candidate
+  for candidate in "${GH_PATHS[@]}"; do
+    if [ -x "$candidate" ]; then
+      GH_CMD="$candidate"
+      return 0
+    fi
+  done
+  echo "release: executable gh required at ${GH_PATHS[0]} or ${GH_PATHS[1]}" >&2
+  return 1
+}
+run_gh() {
+  require_gh || return 1
+  "$GH_CMD" "$@"
+}
 GENERATE_APPCAST_CMD=""
 VERIFY_UPDATE_CMD=""
 PUBLIC_REPO="jaredatch/pensieve"
@@ -219,6 +222,18 @@ if [ "$((INSPECT_COUNT + CHECK_TAG_ONLY + RELEASE_OPTIONS))" -gt 1 ]; then
   usage
   exit 64
 fi
+
+# Remote modes admit the fixed tool before any checkout, version or build child.
+if [ "$PUBLISH" -eq 1 ] || [ "$CASK_ONLY" -eq 1 ]; then
+  require_gh || exit 1
+fi
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VERSION_FILE="$REPO/VERSION"
+DIST_DIR="$REPO/build/dist"
+APPCAST_INPUT_DIR="$DIST_DIR/appcast-input"
+DMG_ROOT="$DIST_DIR/dmg-root"
+APP_PATH="$DMG_ROOT/Pensieve.app"
+[ -n "$CHANGELOG_PATH" ] || CHANGELOG_PATH="$REPO/CHANGELOG.md"
 
 notes_for() {
   local v="$1" f="$2" out
@@ -454,9 +469,9 @@ http_status() {
 
 tap_api() {
   if [ "$CASK_ONLY" -eq 1 ]; then
-    GH_TOKEN="$CASK_TAP_TOKEN" run_command_seam "$GH_CMD" api "$@"
+    GH_TOKEN="$CASK_TAP_TOKEN" run_gh api "$@"
   else
-    run_command_seam "$GH_CMD" api "$@"
+    run_gh api "$@"
   fi
 }
 
@@ -466,7 +481,7 @@ contents_api() {
   if [ "$repo" = "$TAP_REPO" ]; then
     tap_api "$@"
   else
-    run_command_seam "$GH_CMD" api "$@"
+    run_gh api "$@"
   fi
 }
 
@@ -512,7 +527,7 @@ publish_contents_file() (
 
 resolve_public_branch() {
   local branch
-  branch="$(run_command_seam "$GH_CMD" api "repos/$PUBLIC_REPO" --jq .default_branch)" || return 1
+  branch="$(run_gh api "repos/$PUBLIC_REPO" --jq .default_branch)" || return 1
   case "$branch" in
     main|master) printf '%s\n' "$branch" ;;
     *) echo "release: invalid public default branch: $(log_text "$branch")" >&2; return 1 ;;
@@ -537,7 +552,7 @@ read_live_appcast() {
   response="$(mktemp "${TMPDIR:-/tmp}/pensieve-appcast-response.XXXXXX")" || {
     echo "release: $failure: local response creation failed" >&2; return 1;
   }
-  if run_command_seam "$GH_CMD" api -X GET "repos/$PUBLIC_REPO/contents/appcast.xml" \
+  if run_gh api -X GET "repos/$PUBLIC_REPO/contents/appcast.xml" \
       -f "ref=$branch" --include > "$response"; then
     if [ -n "$output" ]; then
       if ! LIVE_APPCAST_SHA="$(state_tool contents "$response" "$output")"; then

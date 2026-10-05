@@ -119,12 +119,18 @@ final class TestTimeoutDiagnosticsTests: XCTestCase {
 
     func testStandardErrorSinkFlushesEveryWriteBeforeTeardown() throws {
         try captureStandardError { readDescriptor in
-            var expected = ""
-            for message in ["first report", "second report"] {
+            let messages = ["first report " + UUID().uuidString, "second report " + UUID().uuidString]
+            for (index, message) in messages.enumerated() {
+                fputs("unrelated host stderr\n", stderr)
+                _ = fflush(stderr)
                 TestTimeoutDiagnostics.writeToStandardError(message)
-                expected += message + "\n"
-                XCTAssertEqual(try readDescriptor(), expected,
-                               "Each write must reach stderr before another write or teardown flushes it")
+                let captured = try readDescriptor()
+                var remaining = captured[...]
+                for expected in messages.prefix(index + 1) {
+                    let range = try XCTUnwrap(remaining.range(of: expected + "\n"),
+                        "Each write must reach stderr in order before another write or teardown flushes it")
+                    remaining = remaining[range.upperBound...]
+                }
             }
         }
     }

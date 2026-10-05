@@ -231,11 +231,11 @@ def appcast_provenance(text, base_text, built_dmg, download_prefix, version, bui
     base_items = base.find("channel").findall("item")
     items = root.find("channel").findall("item")
     current = next(item for item in items if item.findtext(SPARKLE + "shortVersionString") == version)
-    minimums = current.findall(SPARKLE + "minimumSystemVersion")
     check_generated_item(current, f"{download_prefix}/v{version}/{built_dmg}")
-    require(bool(minimums[0].text), "generated appcast minimum system version is empty")
-    require(minimums[0].text == built_minimum,
-            f"generated appcast minimum {minimums[0].text} differs from built app minimum {built_minimum}")
+    minimum = current.findtext(SPARKLE + "minimumSystemVersion")
+    require(bool(minimum), "generated appcast minimum system version is empty")
+    require(minimum == built_minimum,
+            f"generated appcast minimum {minimum} differs from built app minimum {built_minimum}")
     require(canonical_xml(root, items) == canonical_xml(base, base_items),
             "generated appcast changes channel or feed metadata")
     require(not any(item.findtext(SPARKLE + "shortVersionString") == version for item in base_items),

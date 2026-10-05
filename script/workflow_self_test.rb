@@ -750,6 +750,12 @@ class WorkflowTests < Minitest::Test
     'Check public hygiene in pushed commits' => 20.0 / 17,
     'Replay commit guards' => 28.0 / 17
   }.freeze
+  # Run 37063706683 replayed one commit: retain its entire step duration as
+  # fixed overhead, then add the multi-commit average conservatively.
+  CI_REPLAY_FIXED_SECONDS = {
+    'Check public hygiene in pushed commits' => 22,
+    'Replay commit guards' => 35
+  }.freeze
   CI_LOCAL_WORST_SECONDS = {
     'Wrapper self-test' => 9.826, 'Hygiene added checks' => 0.731, 'Workflow suite' => 7.273,
     'Release recovery' => 204.182
@@ -765,7 +771,9 @@ class WorkflowTests < Minitest::Test
   def ci_worst_seconds(job)
     limit = Integer(job.fetch('env').fetch('CI_LARGEST_PUSH'))
     assert_operator limit, :>, 0, 'CI: positive replay count limit'
-    CI_WORST_SECONDS.merge(CI_PER_COMMIT_SECONDS.transform_values { |seconds| seconds * limit })
+    CI_WORST_SECONDS.merge(CI_PER_COMMIT_SECONDS.to_h do |name, seconds|
+      [name, CI_REPLAY_FIXED_SECONDS.fetch(name) + seconds * limit]
+    end)
   end
 
   def assert_ci_timeout_budget(job)
@@ -778,10 +786,12 @@ class WorkflowTests < Minitest::Test
       assert_operator minutes, :>, 0, step.fetch('name') + ': missing timeout'
       minutes
     end
-    assert_operator job.fetch('timeout-minutes'), :>=, budgets.sum + 10, 'CI: timeout headroom'
+    assert_equal budgets.sum + 10, job.fetch('timeout-minutes'), 'CI: timeout headroom'
+    assert_operator job.fetch('timeout-minutes'), :<=, 140, 'CI: maximum job cap'
   end
 
   def test_ci_budget_rejects_missing_short_and_unsummed_bounds
+    test_ci_replay_budget_requires_fixed_cost
     test_ci_test_baseline_includes_wrapper_self_test
     test_ci_hygiene_baseline_includes_stability_probe
     job = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')
@@ -806,13 +816,28 @@ class WorkflowTests < Minitest::Test
     assert_includes error.message, 'timeout headroom'
   end
 
+  def test_ci_replay_budget_requires_fixed_cost
+    job = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')
+    limit = Integer(job.fetch('env').fetch('CI_LARGEST_PUSH'))
+    CI_PER_COMMIT_SECONDS.each do |name, seconds|
+      fixture = Marshal.load(Marshal.dump(job))
+      step = fixture.fetch('steps').find { |entry| entry.fetch('name') == name }
+      step['timeout-minutes'] = (seconds * limit * 3 / 60.0).ceil
+      fixture['timeout-minutes'] = fixture.fetch('steps').sum { |entry| entry.fetch('timeout-minutes') } + 10
+      error = assert_raises(Minitest::Assertion, name + ': variable-only bound must fail') do
+        assert_ci_timeout_budget(fixture)
+      end
+      assert_includes error.message, name + ': measured timeout floor'
+    end
+  end
+
   def test_ci_timeout_budget_preserves_failure_upload
     job = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')
     steps = job.fetch('steps')
     test = steps.find { |step| step['id'] == 'tests' }
     upload = steps.find { |step| step.fetch('uses', '').start_with?('actions/upload-artifact@') }
     assert_ci_timeout_budget(job)
-    assert_ci_replay_count_limit(job)
+    test_ci_replay_count_limit
     # Runner StepsRunner.RunStepAsync maps a step timeout (not job cancellation) to Failed.
     # Thus failure() is true and steps.tests.outcome is 'failure'; no success() implicit guard.
     assert_equal "failure() && steps.tests.outcome == 'failure'", upload.fetch('if')
@@ -823,30 +848,53 @@ class WorkflowTests < Minitest::Test
     end
   end
 
-  def assert_ci_replay_count_limit(job)
+  def test_ci_replay_count_limit
+    job = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')
     step = job.fetch('steps').find { |entry| entry['id'] == 'replay-range' }
     limit = Integer(job.fetch('env').fetch('CI_LARGEST_PUSH'))
-    script = step.fetch('run').gsub('${{ github.event_name }}', 'push')
-                 .gsub('${{ github.event.before }}', 'before').gsub('${{ github.sha }}', 'after')
     Dir.mktmpdir('pensieve-ci-range-') do |directory|
       git = File.join(directory, 'git')
-      File.write(git, "#!/bin/sh\nprintf '%s\\n' \"$FIXTURE_COMMIT_COUNT\"\n")
+      File.write(git, <<~'SH')
+        #!/bin/sh
+        printf '%s\n' "$*" >> "$FIXTURE_GIT_CALLS"
+        case "$1" in
+          fetch) exit 0 ;;
+          rev-list) printf '%s\n' "$FIXTURE_COMMIT_COUNT" ;;
+          *) exit 92 ;;
+        esac
+      SH
       File.chmod(0755, git)
-      [limit, limit + 1].each do |count|
+      [[limit, 'before'], [limit + 1, 'before'], [0, 'before'],
+       [1, '0' * 40], [0, '0' * 40]].each do |count, before|
+        script = step.fetch('run').gsub('${{ github.event_name }}', 'push')
+                     .gsub('${{ github.event.before }}', before).gsub('${{ github.sha }}', 'after')
         output = File.join(directory, 'output')
+        calls = File.join(directory, 'calls')
         File.write(output, '')
+        File.write(calls, '')
         stdout, stderr, status = Open3.capture3({ 'PATH' => directory + ':/usr/bin:/bin',
           'GITHUB_OUTPUT' => output, 'CI_LARGEST_PUSH' => limit.to_s,
+          'FIXTURE_GIT_CALLS' => calls,
           'FIXTURE_COMMIT_COUNT' => count.to_s }, '/bin/bash', '-c', script)
+        range = before == '0' * 40 ? 'origin/master..after' : 'before..after'
+        expected_calls = before == '0' * 40 ? ['fetch origin master:refs/remotes/origin/master'] : []
+        assert_equal expected_calls + ["rev-list --count #{range}"], File.readlines(calls, chomp: true)
         if count > limit
           refute status.success?, 'oversized push must fail before replay'
           assert_includes stdout + stderr, "#{count} commits exceeds limit #{limit}"
           refute_includes File.read(output), 'range='
           refute_includes File.read(output), 'skip=false'
+        elsif count.zero?
+          assert status.success?, stderr
+          assert_includes stdout, "No commits in #{range}"
+          assert_includes File.read(output), "skip=true\n"
+          refute_includes File.read(output), 'range='
+          refute_includes File.read(output), 'skip=false'
         else
           assert status.success?, stderr
           assert_includes stdout, "Replaying #{count} commit(s)"
-          assert_includes File.read(output), "range=before..after\n"
+          assert_includes File.read(output), "range=#{range}\n"
+          assert_includes File.read(output), "skip=false\n"
         end
       end
     end

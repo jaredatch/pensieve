@@ -77,10 +77,10 @@ def check_binary_minimum(binary, expected):
     require(len(minimums) == len(architectures), f"{binary.name}: minimum count differs from architecture count")
 
 
-def check_app_binary_minimum(app, version=None):
+def check_app_binary_minimum(app, version=None, context="built DMG"):
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     if version is not None:
-        require(info.get("CFBundleShortVersionString") == version, "published DMG app version differs from VERSION")
+        require(info.get("CFBundleShortVersionString") == version, f"{context} app version differs from VERSION")
     minimum = info.get("LSMinimumSystemVersion")
     require(isinstance(minimum, str) and re.fullmatch(r"\d+(?:\.\d+){1,2}", minimum),
             "built app has no minimum system version or it is malformed")
@@ -93,8 +93,8 @@ def check_app_binary_minimum(app, version=None):
     return minimum
 
 
-def check_app_minimum(app, version=None):
-    minimum = check_app_binary_minimum(app, version)
+def check_app_minimum(app, version=None, context="built DMG"):
+    minimum = check_app_binary_minimum(app, version, context)
     check_binary_minimum(app / "Contents/MacOS/pensieve-daemon", minimum)
     return minimum
 
@@ -105,11 +105,12 @@ if __name__ == "__main__":
     target.add_argument("--app", type=Path)
     target.add_argument("--cask", type=Path)
     parser.add_argument("--version")
+    parser.add_argument("--context", default="built DMG")
     args = parser.parse_args()
     try:
         if args.cask:
             check_cask_minimum(args.cask)
         else:
-            print(check_app_minimum(args.app, args.version))
+            print(check_app_minimum(args.app, args.version, args.context))
     except MINIMUM_ERRORS as error:
         sys.exit("release: invalid built minimum: " + ascii(str(error))[1:-1])
