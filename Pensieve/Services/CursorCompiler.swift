@@ -11,6 +11,8 @@ protocol CursorCompilerProtocol {
     /// Check if .mdc is up to date (content hash comparison)
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool
+    /// Metadata only, using the compiler's filesystem after validating the skill slug.
+    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool
     /// Convergence upgrades owned legacy output before its source can change.
     func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool
     /// Get the output path for a compiled .mdc file
@@ -70,6 +72,12 @@ final class CursorCompiler: CursorCompilerProtocol {
         guard ProjectDirectory.canAccess(projectPath) else { return false }
         try LinkService.validatePathComponent(skill.directoryName)
         return try ownership.cursor(at: outputPath(skill: skill, projectPath: projectPath), legacyContent: nil) == .owned
+    }
+
+    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
+        guard ProjectDirectory.canAccess(projectPath) else { return false }
+        try LinkService.validatePathComponent(skill.directoryName)
+        return try ownership.cursorRuleMayExist(at: outputPath(skill: skill, projectPath: projectPath))
     }
 
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool {

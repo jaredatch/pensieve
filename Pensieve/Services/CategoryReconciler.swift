@@ -156,18 +156,20 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
         aggregate: inout BatchResult
     ) {
         var removals: [UUID: (project: Project, pairs: [DeployRemovalPair])] = [:]
+        var retired: Set<Triple> = []
         for (pair, triples) in grouped(triplesToRemove) {
             for triple in triples.sorted(by: { $0.platform.rawValue < $1.platform.rawValue }) {
                 if state.intentTriples.contains(triple) {
-                    deleteLedgerRows(matching: [triple], state: state, context: context)
+                    retired.insert(triple)
                 } else if let skill = state.skillByID[pair.skillID], let project = state.projectByID[pair.projectID] {
                     removals[project.id, default: (project, [])].pairs.append(
                         DeployRemovalPair(skill: skill, platform: triple.platform))
                 } else {
-                    deleteLedgerRows(matching: [triple], state: state, context: context)
+                    retired.insert(triple)
                 }
             }
         }
+        deleteLedgerRows(matching: retired, state: state, context: context)
         for group in removals.values.sorted(by: { $0.project.id.uuidString < $1.project.id.uuidString }) {
             let result = platformVM.removeOwnedBatch(pairs: group.pairs, target: .project(group.project))
             aggregate.append(result)
@@ -179,6 +181,7 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
     }
 
     private func deleteLedgerRows(matching triples: Set<Triple>, state: State, context: ModelContext) {
+        guard !triples.isEmpty else { return }
         for row in state.ledger where triples.contains(Triple(
             skillID: row.skillID, projectID: row.projectID, platform: row.platform)) {
             context.delete(row)

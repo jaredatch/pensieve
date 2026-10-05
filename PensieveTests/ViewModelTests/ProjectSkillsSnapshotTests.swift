@@ -50,6 +50,10 @@ private final class ProjectSnapshotCursorCompiler: CursorCompilerProtocol {
 
     func compile(skill: Skill, projectPath: String?) throws {}
     func remove(skill: Skill, projectPath: String?) throws {}
+    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
+        try LinkService.validatePathComponent(skill.directoryName)
+        return deployedSlugs.contains(skill.directoryName)
+    }
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {
         return deployedSlugs.contains(skill.directoryName)
     }

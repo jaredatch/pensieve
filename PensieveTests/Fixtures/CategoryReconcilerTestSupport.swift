@@ -90,6 +90,10 @@ final class CategoryFixtureRecordingCursorCompiler: CursorCompilerProtocol {
         if throwOnRemove { throw CategoryFixtureStubFailure() }
         fileService?.files.remove(outputPath(skill: skill, projectPath: projectPath))
     }
+    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
+        try LinkService.validatePathComponent(skill.directoryName)
+        return fileService?.files.contains(outputPath(skill: skill, projectPath: projectPath)) == true
+    }
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {
         fileService?.files.contains(outputPath(skill: skill, projectPath: projectPath)) == true
     }

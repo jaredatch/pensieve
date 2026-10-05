@@ -131,6 +131,10 @@ final class DeployRecordingCursorCompiler: CursorCompilerProtocol {
         if throwOnRemove { throw DeployStubFailure() }
         try fileService.deleteFile(at: outputPath(skill: skill, projectPath: projectPath))
     }
+    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
+        try LinkService.validatePathComponent(skill.directoryName)
+        return fileService.files.contains(outputPath(skill: skill, projectPath: projectPath))
+    }
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {
         fileService.files.contains(outputPath(skill: skill, projectPath: projectPath))
     }

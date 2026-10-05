@@ -85,6 +85,10 @@ private struct SnapshotCursorCompiler: CursorCompilerProtocol {
 
     func compile(skill: Skill, projectPath: String?) throws {}
     func remove(skill: Skill, projectPath: String?) throws {}
+    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
+        try LinkService.validatePathComponent(skill.directoryName)
+        return upToDate
+    }
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { upToDate }
     func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { upToDate }
 

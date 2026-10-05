@@ -47,6 +47,10 @@ final class DeployStateRecordingTests: XCTestCase {
         let root: String
         func compile(skill: Skill, projectPath: String?) throws {}
         func remove(skill: Skill, projectPath: String?) throws {}
+        func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
+            try LinkService.validatePathComponent(skill.directoryName)
+            return false
+        }
         func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { false }
         func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { false }
 

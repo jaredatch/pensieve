@@ -133,6 +133,7 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     var beforeArtifactCreation: ((String) throws -> Void)?
     var beforeProjectProbe: ((String) throws -> Void)?
     var beforeRuleRead: ((String) throws -> Void)?
+    var beforeEntryTypeProbe: ((String) throws -> Void)?
     var beforeDeployStateRead: ((String) throws -> Void)?
     var beforeSymlinkRead: ((String) throws -> Void)?
     /// Physical-path consumers compare physical literals; containment still applies to every lookup.
@@ -246,7 +247,9 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         try wrapped.entryExistsWithoutFollowingLinks(at: resolved(path))
     }
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
-        try wrapped.entryTypeWithoutFollowingLinks(at: resolved(path))
+        let physical = resolved(path)
+        try beforeEntryTypeProbe?(physical)
+        return try wrapped.entryTypeWithoutFollowingLinks(at: physical)
     }
     func isExecutableFile(at path: String) -> Bool {
         wrapped.isExecutableFile(at: resolved(path))

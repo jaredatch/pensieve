@@ -23,6 +23,7 @@ extension CursorOwnershipTests {
                 func compile(skill: Skill, projectPath: String?) throws {}
                 func remove(skill: Skill, projectPath: String?) throws {}
                 func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
+                func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool { false }
                 func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { false }
                 func outputPath(skill: Skill, projectPath: String?) -> String { "" }
                 OWNERSHIP

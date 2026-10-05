@@ -16,9 +16,10 @@ enum SkillDeletionFlow {
             return false
         }
 
-        let cleanup = platformVM.removeAllDeploys(skill: skill, projects: projects, localDeployHistory: { paths in
+        let cleanupResult = platformVM.removeAllDeploys(skill: skill, projects: projects, localDeployHistory: { paths in
             try localCursorDeployPaths(skill: skill, paths: paths, context: context)
         })
+        let cleanup = cleanupResult.batch
         if cleanup.hasFailures {
             var messages = cleanup.readFailures.map(\.message)
             if !cleanup.failures.isEmpty {
@@ -26,12 +27,13 @@ enum SkillDeletionFlow {
                     .map { "\($0.platform.displayName): \($0.error ?? "unknown error")" }
                     .joined(separator: "; ")
                 messages.insert(
-                    "Couldn't finish cleaning up “\(skill.name)” on \(cleanup.failures.count) agent artifact(s) — "
+                    "Couldn't finish cleaning up “\(skill.name)”'s agent links and rules "
+                        + "on \(cleanup.failures.count) artifact(s) — "
                         + "\(details).",
                     at: 0
                 )
             }
-            messages.append(cleanup.readFailures.isEmpty
+            messages.append(cleanupResult.didChangeDeploys
                 ? "Agent links and rules already removed stay removed; the skill was kept so you can retry."
                 : "The skill was kept so you can retry.")
             library.deletionNotice = .failed(messages.joined(separator: " "))

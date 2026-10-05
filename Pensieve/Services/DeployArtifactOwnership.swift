@@ -23,6 +23,7 @@ enum ArtifactOwnershipError: LocalizedError {
 protocol DeployArtifactOwnershipChecking {
     func link(at path: String, skillsDirectory: String, linksFile: Bool) throws -> DeployArtifactOccupant
     func cursor(at path: String, legacyContent: (() throws -> String)?) throws -> DeployArtifactOccupant
+    func cursorRuleMayExist(at path: String) throws -> Bool
 }
 
 /// Classifies the leaf before any deploy mutation. Stored deployment history supplies no authority.

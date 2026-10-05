@@ -258,6 +258,10 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
         removeCalls += 1
         try files.deleteFile(at: outputPath(skill: skill, projectPath: projectPath))
     }
+    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
+        try LinkService.validatePathComponent(skill.directoryName)
+        return try files.entryTypeWithoutFollowingLinks(at: outputPath(skill: skill, projectPath: projectPath)) == .regular
+    }
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {
         guard let text = try? files.readFile(at: outputPath(skill: skill, projectPath: projectPath)) else { return false }
         return text == "compiled bytes" || text == "repaired"

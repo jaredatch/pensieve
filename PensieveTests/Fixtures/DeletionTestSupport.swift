@@ -61,6 +61,10 @@ final class DeletionTestCursorCompiler: CursorCompilerProtocol {
     func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { ownedProjectPaths.contains(projectPath) }
 
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
+    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
+        try LinkService.validatePathComponent(skill.directoryName)
+        return ownedProjectPaths.contains(projectPath)
+    }
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { ownedProjectPaths.contains(projectPath) }
     func outputPath(skill: Skill, projectPath: String?) -> String {
         "/cursor/\(projectPath ?? "user")/\(skill.directoryName).mdc"
