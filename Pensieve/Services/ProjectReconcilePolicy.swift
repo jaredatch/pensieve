@@ -41,6 +41,9 @@ struct ProjectReconcilePolicy {
             guard problems[triple.projectID] == nil,
                   let project = projects[triple.projectID], let skill = skills[triple.skillID],
                   let platform = triple.platformTarget else { return true }
+            if platform.usesSymlinks {
+                return platformVM.isDeployed(skill: skill, platform: platform, target: .project(project))
+            }
             return platformVM.artifactExists(skill: skill, platform: platform, target: .project(project))
         }
         let deploy = desired.subtracting(realized)

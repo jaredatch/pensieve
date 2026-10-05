@@ -89,12 +89,9 @@ final class PlatformViewModel {
     }
 
     func artifactExists(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) -> Bool {
-        let projectPath = target.project?.path
-        if platform.usesSymlinks {
-            return linkService.isLinked(skill: skill, platform: platform, projectPath: projectPath)
-        } else {
-            return fileService.fileExists(at: cursorCompiler.outputPath(skill: skill, projectPath: projectPath))
-        }
+        let path = artifactPath(skill: skill, platform: platform, target: target)
+        guard !path.isEmpty else { return false }
+        return (platform.usesSymlinks && fileService.isSymlink(at: path)) || fileService.fileExists(at: path)
     }
 
     // MARK: - Throwing core (one pair)

@@ -39,13 +39,13 @@ final class CursorCompiler: CursorCompilerProtocol {
 
     func remove(skill: Skill, projectPath: String?) throws {
         let path = outputPath(skill: skill, projectPath: projectPath)
-        guard fileService.fileExists(at: path) else { return }
+        guard !path.isEmpty, fileService.fileExists(at: path) else { return }
         try fileService.deleteFile(at: path)
     }
 
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool {
         let path = outputPath(skill: skill, projectPath: projectPath)
-        guard fileService.fileExists(at: path) else { return false }
+        guard !path.isEmpty, fileService.fileExists(at: path) else { return false }
         guard let raw = try? skillStore.readBody(directoryName: skill.directoryName) else { return false }
         let body = SkillParser.stripFrontmatter(raw)
         let expected = generateMDC(skill: skill, body: body)
@@ -55,6 +55,7 @@ final class CursorCompiler: CursorCompilerProtocol {
 
     func outputPath(skill: Skill, projectPath: String?) -> String {
         if let projectPath {
+            guard projectPath.hasPrefix("/") else { return "" }
             // Project-level: {projectPath}/.cursor/rules/{name}.mdc
             return projectPath + "/.cursor/rules/" + skill.directoryName + ".mdc"
         } else {

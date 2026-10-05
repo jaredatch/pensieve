@@ -43,14 +43,14 @@ final class LinkService: LinkServiceProtocol {
             throw LinkError.projectScopeUnsupported(platform)
         }
 
-        if let projectPath, !projectPath.hasPrefix("/") { throw ProjectFolderError.missing(projectPath) }
-
         // Path-component safety invariant, enforced at the deploy boundary before any symlink.
         try Self.validatePathComponent(skill.directoryName)
         // Hermes nests under a category path component; validate it too (PLAN-05 makes it user-influenced).
         if platform == .hermes {
             try Self.validatePathComponent(Constants.hermesDefaultCategory)
         }
+
+        if let projectPath { try fileService.requireProjectDirectory(at: projectPath) }
 
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
         let target = targetPath(skill: skill, platform: platform, projectPath: projectPath)
@@ -85,13 +85,13 @@ final class LinkService: LinkServiceProtocol {
         }
 
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
-        guard fileService.isSymlink(at: link) else { return }
+        guard !link.isEmpty, fileService.isSymlink(at: link) else { return }
         try fileService.deleteFile(at: link)
     }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
-        guard fileService.isSymlink(at: link) else { return false }
+        guard !link.isEmpty, fileService.isSymlink(at: link) else { return false }
         let expected = targetPath(skill: skill, platform: platform, projectPath: projectPath)
         guard let actual = try? fileService.symlinkTarget(at: link) else { return false }
         return actual == expected

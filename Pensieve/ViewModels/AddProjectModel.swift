@@ -62,7 +62,7 @@ final class AddProjectModel {
         guard expanded.hasPrefix("/") else {
             isCheckingIdentity = false
             hasIdentityError = true
-            identityMessage = "Enter a full path, starting with / or ~"
+            identityMessage = "Enter a full path, starting with / or ~/"
             return
         }
         identityMessage = "Checking project folder…"
@@ -139,7 +139,6 @@ final class AddProjectModel {
         isCheckingIdentity = false
         do {
             let expanded = submissionPath
-            try fileService.requireProjectDirectory(at: expanded)
             return try ProjectRegistration.makeProject(
                 name: name.trimmingCharacters(in: .whitespacesAndNewlines), path: expanded, using: identityService
             )

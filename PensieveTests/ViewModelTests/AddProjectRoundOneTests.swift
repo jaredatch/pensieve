@@ -30,7 +30,13 @@ final class AddProjectRoundOneTests: XCTestCase {
         model.name = "App"
         model.path = "code/app"
         await TestWait.until(timeout: .seconds(3), failureMessage: "Relative refusal") { !model.isCheckingIdentity }
-        XCTAssertEqual(model.identityMessage, "Enter a full path, starting with / or ~")
+        XCTAssertEqual(model.identityMessage, "Enter a full path, starting with / or ~/")
+        XCTAssertFalse(model.canSubmit)
+        XCTAssertNil(model.makeProject())
+        XCTAssertTrue(identities.previewPaths.isEmpty)
+        XCTAssertTrue(identities.addPaths.isEmpty)
+        model.path = "~fixture/code"
+        XCTAssertEqual(model.identityMessage, "Enter a full path, starting with / or ~/")
         XCTAssertFalse(model.canSubmit)
         XCTAssertNil(model.makeProject())
         XCTAssertTrue(identities.previewPaths.isEmpty)

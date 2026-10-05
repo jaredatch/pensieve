@@ -59,7 +59,7 @@ func removeRegisteredProject(_ project: Project, categoryStore: CategoryStorePro
                              stateFetcher: ReconcilerStateFetching = ReconcilerStateFetcher(),
                              context: ModelContext,
                              notifier: SyncStateNotifying = SyncStateNotifier.suppressed,
-                             logFailure: (String, String) -> Void = logProjectRemovalFailure) -> BatchResult {
+                             logFailure: (String) -> Void = logProjectRemovalFailure) -> BatchResult {
     defer { notifier() }
     let intentRows: [IntentAssignment]
     do {
@@ -73,7 +73,7 @@ func removeRegisteredProject(_ project: Project, categoryStore: CategoryStorePro
         context: context,
         notifier: SyncStateNotifier.suppressed
     )
-    logUnrelatedProjectFailures(result, removing: project, context: context, logFailure: logFailure)
+    logUnrelatedProjectFailures(result, removing: project, logFailure: logFailure)
     result.outcomes.removeAll { outcome in
         guard case .project(let id)? = outcome.target else { return false }
         return id != project.id
@@ -96,28 +96,19 @@ func removeRegisteredProject(_ project: Project, categoryStore: CategoryStorePro
     return result
 }
 
-private func logProjectRemovalFailure(project: String, error: String) {
+private func logProjectRemovalFailure(_ message: String) {
     Logger(subsystem: "com.jaredatch.pensieve", category: "projects")
-        .warning("Project removal reconciliation failed for \(project, privacy: .public): \(error, privacy: .public)")
+        .warning("Project removal reconciliation failed: \(message, privacy: .public)")
 }
 
-private func logUnrelatedProjectFailures(_ result: BatchResult, removing project: Project, context: ModelContext,
-                                         logFailure: (String, String) -> Void) {
+private func logUnrelatedProjectFailures(_ result: BatchResult, removing project: Project,
+                                         logFailure: (String) -> Void) {
     let failures = result.failures.filter { outcome in
         guard case .project(let id)? = outcome.target else { return false }
         return id != project.id
     }
-    guard !failures.isEmpty else { return }
-    var names: [UUID: String] = [:]
-    do {
-        for row in try context.fetch(FetchDescriptor<Project>()) { names[row.id] = row.name }
-    } catch {
-        let reason = error.localizedDescription
-        Logger(subsystem: "com.jaredatch.pensieve", category: "projects")
-            .warning("Project names for reconciliation failures couldn't be read: \(reason, privacy: .public)")
-    }
     for failure in failures {
-        guard case .project(let id)? = failure.target, let error = failure.error else { continue }
-        logFailure(names[id] ?? id.uuidString, error)
+        guard let error = failure.error else { continue }
+        logFailure(error)
     }
 }

@@ -22,6 +22,7 @@ enum DeployPaths {
     }
 
     static func linkPath(directoryName: String, platform: PlatformTarget, projectPath: String?) -> String {
+        if let projectPath, !projectPath.hasPrefix("/") { return "" }
         switch platform {
         case .claudeCode:
             if let projectPath {

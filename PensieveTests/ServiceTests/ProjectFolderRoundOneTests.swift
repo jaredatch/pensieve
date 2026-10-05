@@ -17,19 +17,18 @@ final class ProjectFolderRoundOneTests: XCTestCase {
         let reconciler = CategoryReconciler(platformVM: vm)
         XCTAssertEqual(reconciler.reconcile(context: h.context).successes.count, 2)
         links.failedPath = h.project.path
-        var logs: [(String, String)] = []
+        var logs: [String] = []
         var alert: String?
         let result = ProjectListView.removeProject(h.otherProject, removalError: &alert) {
             removeRegisteredProject(h.otherProject,
                 categoryStore: CategoryStore(manifestService: ManifestService(fileService: h.files),
                     manifestRoot: h.root + "/store"),
-                reconciler: reconciler, context: h.context, logFailure: { logs.append(($0, $1)) })
+                reconciler: reconciler, context: h.context, logFailure: { logs.append($0) })
         }
         XCTAssertNil(alert)
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(logs.count, 1, "A sibling failure must leave a log trace")
-        XCTAssertEqual(logs.first?.0, h.project.name)
-        XCTAssertTrue(logs.first?.1.contains("Sibling unlink refused") == true)
+        XCTAssertEqual(logs.first, h.project.name + ": Sibling unlink refused")
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.project.id])
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<SkillProjectAssignment>()).map(\.projectID), [h.project.id])
         XCTAssertTrue(h.files.isSymlink(at: h.artifact(.codex)))
@@ -69,8 +68,11 @@ final class ProjectFolderRoundOneTests: XCTestCase {
                     case "directory": try h.files.createDirectory(at: path)
                     default: try h.files.createSymlink(at: path, pointingTo: h.otherProject.path)
                     }
-                    XCTAssertFalse(h.platformVM.artifactExists(skill: h.skill, platform: platform, target: .project(h.project)),
+                    XCTAssertFalse(h.platformVM.isDeployed(skill: h.skill, platform: platform, target: .project(h.project)),
                                    "\(platform) / \(occupant) is not a link to the store")
+                    XCTAssertEqual(h.platformVM.artifactExists(
+                        skill: h.skill, platform: platform, target: .project(h.project)), occupant != "directory",
+                        "Removal preserves master's file/link presence check")
                     let result = run()
                     if occupant == "foreign-link" {
                         XCTAssertFalse(result.hasFailures, "Convergence heals the foreign link")

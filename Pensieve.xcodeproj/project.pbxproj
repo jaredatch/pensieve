@@ -30,6 +30,7 @@
 		0B1E37C1CC01D5F25E00D61B /* DeployIntentModelProjectIntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 579F8D6027103EC16BC5658D /* DeployIntentModelProjectIntentTests.swift */; };
 		0B88478A7CF978C57E562899 /* ListRowsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9318C45AA595DC64D971298A /* ListRowsTests.swift */; };
 		0C8F6C8AAD9820437E876015 /* FileServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52DCD49B7E167D6577255FC2 /* FileServiceTests.swift */; };
+		0E5D7EE49CFF7285611A7D75 /* ProjectFolderSecondFixTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBE185B3FC9F84FDC7D6CDAF /* ProjectFolderSecondFixTests.swift */; };
 		0E658AC77CC79C6CD51B8E9D /* ListRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D089F1A6BE56EDBDA67D3E /* ListRowView.swift */; };
 		0FBAEF3F2B41F80E88E4A36B /* IntentReconcilerProjectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3931B2C3E14E2EBEFB446451 /* IntentReconcilerProjectTests.swift */; };
 		0FC9DC80F98CB1C73B17A8E2 /* UpstreamHistoryCacheCapacityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E19C8FB70E52061B2CF22C60 /* UpstreamHistoryCacheCapacityTests.swift */; };
@@ -190,6 +191,7 @@
 		4DC20C17AF551579F0E80183 /* LineDiffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F256EFD959067B0D46AA7028 /* LineDiffTests.swift */; };
 		4E2B132D134234B43C8D2627 /* SkillContentPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DEAAA2E1B03B8EB3986DE19 /* SkillContentPresentation.swift */; };
 		4E67E7E140D3B628BEA97698 /* SkillLibraryLeaveLoopTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CC3FF3DB6818B24B049A73E /* SkillLibraryLeaveLoopTests.swift */; };
+		4E72CEC67C4E2F355A83955F /* ProjectDirectoryConcurrencyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C865730C5207869E6328902C /* ProjectDirectoryConcurrencyTests.swift */; };
 		4E7F3269F5F40BFB6781EFC5 /* CursorMDC.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4FDDEF8E213C4516C569260 /* CursorMDC.swift */; };
 		4EE95F2A7DAB058B9A68F2C8 /* ProjectFolderDeployTests+Replacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = D003C0C7033F521BEB867E16 /* ProjectFolderDeployTests+Replacement.swift */; };
 		4F01F2B34C5BCEB0DA0A8F8F /* PublishedStringSanitizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D4A1C79D9A3BB44A757B00F /* PublishedStringSanitizerTests.swift */; };
@@ -1253,6 +1255,7 @@
 		C6466486E8CCB88077D6B11A /* GitServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitServiceTests.swift; sourceTree = "<group>"; };
 		C6798CCD9744E35660346064 /* ManifestDeployIntentConcurrencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestDeployIntentConcurrencyTests.swift; sourceTree = "<group>"; };
 		C81B7C307CF3AA4E0DA2749B /* InstalledSkillHistoryPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledSkillHistoryPresentation.swift; sourceTree = "<group>"; };
+		C865730C5207869E6328902C /* ProjectDirectoryConcurrencyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDirectoryConcurrencyTests.swift; sourceTree = "<group>"; };
 		C8751727AAECCB197D8CE366 /* SkillStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillStore.swift; sourceTree = "<group>"; };
 		C8A76CF083F2DEFD100063E8 /* SkillBundleInventory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillBundleInventory.swift; sourceTree = "<group>"; };
 		C8E956BDFB6F49E5EBBEA38F /* SkillPreviewImageTests+Rendering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillPreviewImageTests+Rendering.swift"; sourceTree = "<group>"; };
@@ -1395,6 +1398,7 @@
 		FAC05BEA3A98D1DAB337E630 /* EditorTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTransportTests.swift; sourceTree = "<group>"; };
 		FB34D09EBCFE77942E6D0E43 /* AppRuntimeMachineDisplayNameTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeMachineDisplayNameTests.swift; sourceTree = "<group>"; };
 		FBAF5388454F1EFB7FC9DE51 /* SkillInstallServiceTests+StableHash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillInstallServiceTests+StableHash.swift"; sourceTree = "<group>"; };
+		FBE185B3FC9F84FDC7D6CDAF /* ProjectFolderSecondFixTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFolderSecondFixTests.swift; sourceTree = "<group>"; };
 		FCF62A306C41E95F3AE70418 /* DaemonDeployedCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonDeployedCommandTests.swift; sourceTree = "<group>"; };
 		FD71B8EB314D69D43F1F0F93 /* AppRuntimePathsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimePathsTests.swift; sourceTree = "<group>"; };
 		FDB1328C92290A5E203B1100 /* SidebarOutlineControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarOutlineControllerTests.swift; sourceTree = "<group>"; };
@@ -2254,6 +2258,7 @@
 				91DA995D41B5C7C3B79F89E7 /* PreviewImageBudgetTests.swift */,
 				EADB85267DA4EA714FA51E9A /* PreviewImageLoaderTests.swift */,
 				ADC2BA77351D40FD59766770 /* PreviewImagePolicyTests.swift */,
+				C865730C5207869E6328902C /* ProjectDirectoryConcurrencyTests.swift */,
 				599AB564841CAD341B7D6F8E /* ProjectFolderCallerTests.swift */,
 				E4A6158E5EF016F67F6FB21B /* ProjectFolderCallerTestSupport.swift */,
 				83ADCED3BC385EA4DFAED81B /* ProjectFolderConvergenceTests.swift */,
@@ -2264,6 +2269,7 @@
 				61AC279A2AFFDC1ADA2640F8 /* ProjectFolderProbeBoundTests.swift */,
 				DBAC5F6A464142514A8DA8AF /* ProjectFolderReviewTests.swift */,
 				E7D1B6CEB8F41C16731AB856 /* ProjectFolderRoundOneTests.swift */,
+				FBE185B3FC9F84FDC7D6CDAF /* ProjectFolderSecondFixTests.swift */,
 				656E6B947C6F0CB8F84C5AE3 /* ProjectIdentityServiceTests.swift */,
 				19FD6FB4B896C94A6B86F9EE /* ProjectIdentityServiceTests+MissingFolder.swift */,
 				861D3ECA4134038C8178BAAE /* ProjectIdentityTests.swift */,
@@ -2715,6 +2721,7 @@
 				2127C040582BF8F36C19A543 /* PreviewImagePolicyTests.swift in Sources */,
 				69429CFFDC7781D1F2DDBBD3 /* PreviewImageTestSupport.swift in Sources */,
 				8F07D04F24DBA0B7479AE728 /* ProjectDeployTests.swift in Sources */,
+				4E72CEC67C4E2F355A83955F /* ProjectDirectoryConcurrencyTests.swift in Sources */,
 				0629F35A5D7C102A2C6D99EE /* ProjectFolderBlockingProbe.swift in Sources */,
 				6A3A34E7C2E360DA03FD3CDF /* ProjectFolderCallerTestSupport.swift in Sources */,
 				3D2CF588B5EFB5CBE4BC7F0D /* ProjectFolderCallerTests.swift in Sources */,
@@ -2727,6 +2734,7 @@
 				6564C1A5483B9A31E20F893E /* ProjectFolderProbeBoundTests.swift in Sources */,
 				907D6222EABAF1717E200815 /* ProjectFolderReviewTests.swift in Sources */,
 				771D1AAB59D30481241A0A4B /* ProjectFolderRoundOneTests.swift in Sources */,
+				0E5D7EE49CFF7285611A7D75 /* ProjectFolderSecondFixTests.swift in Sources */,
 				AA73CA89A0276DA61ADFBEB0 /* ProjectIdentityServiceTests+MissingFolder.swift in Sources */,
 				8FEDDB5E7307E6C7F2D25E88 /* ProjectIdentityServiceTests.swift in Sources */,
 				7DB44450CC647BA1526A2A58 /* ProjectIdentityTests.swift in Sources */,

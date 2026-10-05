@@ -89,7 +89,7 @@ extension FileService {
             try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: false)
         } catch {
             // A concurrent creator may have won. Accept only a directory, including a link to one.
-            guard try directoryExistsFollowingLinks(at: path) else { throw error }
+            guard (try? directoryExistsFollowingLinks(at: path)) == true else { throw error }
         }
     }
 
@@ -132,35 +132,50 @@ enum SymlinkCreationError: LocalizedError {
     }
 }
 
-/// The synchronous FileService caller waits at most two seconds. The lock protects the flight
-/// map and each answer; a timed-out worker stays registered until its raw probe actually returns.
+/// Concurrent callers share one answer and wait within a two-second bound. The lock protects
+/// the flight map and answers; timed-out workers stay registered until the raw probe returns.
 private final class ProjectDirectoryProbes: @unchecked Sendable {
     private final class Flight {
-        let ready = DispatchSemaphore(value: 0)
+        let ready = DispatchGroup()
+        let deadline = DispatchTime.now() + 2
         var answer: Result<Bool, Error>?
+
+        init() { ready.enter() }
     }
     private let lock = NSLock()
     private var flights: [String: Flight] = [:]
 
     func check(at path: String, probe: @escaping (String) throws -> Bool) throws -> Bool {
         let key = path.split(separator: "/").joined(separator: "/")
-        let flight = Flight()
+        let callerDeadline = DispatchTime.now() + 2
         lock.lock()
-        guard flights[key] == nil else {
-            lock.unlock()
-            throw timeout(at: path, reason: "An earlier folder check is still running.")
-        }
-        flights[key] = flight
-        lock.unlock()
-        DispatchQueue.global(qos: .utility).async {
-            let answer = Result { try probe(path) }
-            self.lock.withLock {
-                flight.answer = answer
-                self.flights[key] = nil
+        let flight: Flight
+        let startsProbe: Bool
+        if let existing = flights[key] {
+            guard DispatchTime.now() < existing.deadline else {
+                lock.unlock()
+                throw timeout(at: path, reason: "An earlier folder check is still running.")
             }
-            flight.ready.signal()
+            flight = existing
+            startsProbe = false
+        } else {
+            flight = Flight()
+            flights[key] = flight
+            startsProbe = true
         }
-        guard flight.ready.wait(timeout: .now() + 2) == .success else {
+        lock.unlock()
+        if startsProbe {
+            // Semaphore/group waits do not donate priority to the raw filesystem lookup.
+            DispatchQueue.global(qos: .userInitiated).async {
+                let answer = Result { try probe(path) }
+                self.lock.withLock {
+                    flight.answer = answer
+                    self.flights[key] = nil
+                }
+                flight.ready.leave()
+            }
+        }
+        guard flight.ready.wait(timeout: min(callerDeadline, flight.deadline)) == .success else {
             throw timeout(at: path, reason: "Folder check timed out after 2 seconds.")
         }
         return try lock.withLock {
