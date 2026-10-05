@@ -292,22 +292,27 @@ final class PlatformViewModel {
         platforms: [PlatformTarget],
         target: DeployTarget = .userWide
     ) -> BatchResult {
+        removeBatch(pairs: skills.flatMap { skill in
+            platforms.map { DeployRemovalPair(skill: skill, platform: $0) }
+        }, target: target)
+    }
+
+    func removeBatch(pairs: [DeployRemovalPair], target: DeployTarget) -> BatchResult {
         var result = BatchResult()
-        for skill in skills {
-            for platform in platforms {
-                do {
-                    try removeOne(skill: skill, platform: platform, target: target)
-                    result.outcomes.append(BatchPairOutcome(
-                        skillID: skill.id, skillName: skill.name, platform: platform,
-                        target: BatchPairTarget(target), error: nil
-                    ))
-                } catch {
-                    result.outcomes.append(BatchPairOutcome(
-                        skillID: skill.id, skillName: skill.name, platform: platform,
-                        target: BatchPairTarget(target), error: BatchPairOutcome.failureMessage(error, target: target),
-                        projectFolderError: error as? ProjectFolderError
-                    ))
-                }
+        for pair in pairs {
+            let skill = pair.skill, platform = pair.platform
+            do {
+                try removeOne(skill: skill, platform: platform, target: target)
+                result.outcomes.append(BatchPairOutcome(
+                    skillID: skill.id, skillName: skill.name, platform: platform,
+                    target: BatchPairTarget(target), error: nil
+                ))
+            } catch {
+                result.outcomes.append(BatchPairOutcome(
+                    skillID: skill.id, skillName: skill.name, platform: platform,
+                    target: BatchPairTarget(target), error: BatchPairOutcome.failureMessage(error, target: target),
+                    projectFolderError: error as? ProjectFolderError
+                ))
             }
         }
         noteDeployStateChanged()
@@ -341,19 +346,23 @@ extension PlatformViewModel {
 
     /// Direct unselection waits quietly for a missing project, before reading or retiring its artifacts.
     func removeSelection(skills: [Skill], platforms: [PlatformTarget], target: DeployTarget) -> BatchResult {
+        removeSelection(pairs: skills.flatMap { skill in
+            platforms.map { DeployRemovalPair(skill: skill, platform: $0) }
+        }, target: target)
+    }
+
+    func removeSelection(pairs: [DeployRemovalPair], target: DeployTarget) -> BatchResult {
         do {
             if let project = target.project { try fileService.requireProjectDirectory(at: project.path) }
-            return removeOwnedBatch(skills: skills, platforms: platforms, target: target)
+            return removeOwnedBatch(pairs: pairs, target: target)
         } catch {
             var result = BatchResult()
-            for skill in skills {
-                for platform in platforms {
-                    result.outcomes.append(BatchPairOutcome(
-                        skillID: skill.id, skillName: skill.name, platform: platform, target: BatchPairTarget(target),
-                        error: BatchPairOutcome.failureMessage(error, target: target),
-                        projectFolderError: error as? ProjectFolderError
-                    ))
-                }
+            for pair in pairs {
+                result.outcomes.append(BatchPairOutcome(
+                    skillID: pair.skill.id, skillName: pair.skill.name, platform: pair.platform, target: BatchPairTarget(target),
+                    error: BatchPairOutcome.failureMessage(error, target: target),
+                    projectFolderError: error as? ProjectFolderError
+                ))
             }
             return result.skippingMissingProjects()
         }

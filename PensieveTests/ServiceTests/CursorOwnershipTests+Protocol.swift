@@ -64,6 +64,24 @@ extension CursorOwnershipTests {
         }
     }
 
+    func testSkillCleanupRequiresExplicitLocalDeployEvidence() throws {
+        let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().path
+        let products = checkout + "/DerivedData/Build/Products/Debug"
+        for explicit in [true, false] {
+            let source = root + "/cleanup-probe.swift"
+            let evidence = explicit ? ", locallyDeployedPaths: []" : ""
+            try files.writeFile(at: source, content: "@testable import Pensieve\n"
+                + "func probe(_ vm: PlatformViewModel, _ skill: Skill) { "
+                + "_ = vm.removeAllDeploys(skill: skill, projects: []\(evidence)) }\n")
+            let (status, diagnostics) = try typecheckOwnershipProbe(source, products: products, checkout: checkout)
+            if explicit { XCTAssertEqual(status, 0, diagnostics) } else {
+                XCTAssertNotEqual(status, 0, "A caller omitted local deploy evidence and still compiled")
+                XCTAssertTrue(diagnostics.contains("locallyDeployedPaths"), diagnostics)
+            }
+        }
+    }
+
     private func typecheckOwnershipProbe(_ source: String, products: String, checkout: String) throws -> (Int32, String) {
         let process = Process()
         let output = Pipe()

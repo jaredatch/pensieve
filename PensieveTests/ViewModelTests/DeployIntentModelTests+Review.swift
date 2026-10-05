@@ -18,6 +18,38 @@ struct DeployIntentStateStub: MachineStateServicing {
 
 @MainActor
 extension DeployIntentModelTests {
+    func testPerformRemoveProjectRoutesToBatch() throws {
+        let harness = try makeHarness()
+        let skill = try insertSkill(context: harness.context)
+        let project = Project(name: "Project", path: "/tmp/project")
+        harness.context.insert(project)
+        harness.linkService.fileService.directories.insert(project.path)
+        try harness.linkService.link(skill: skill, platform: .codex, projectPath: project.path)
+        harness.context.insert(MachineDeployIntent(
+            machineID: remoteID, skillSlug: skill.directoryName, platformRaw: PlatformTarget.codex.rawValue
+        ))
+        try harness.context.save()
+
+        let outcome = try BulkDeploySheet.perform(
+            .remove, forProject: true, platformVM: harness.platformVM, intentModel: harness.model,
+            skills: [skill], platforms: [.codex], target: .project(project),
+            machineIDs: [remoteID], context: harness.context
+        )
+
+        guard case let .localDeploy(batch) = outcome else { return XCTFail("expected project batch removal") }
+        XCTAssertEqual(batch.successes.count, 1)
+        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 1)
+        XCTAssertEqual(harness.linkService.unlinkCalls.map(\.projectPath), [project.path])
+        let noOp = try BulkDeploySheet.perform(
+            .remove, forProject: true, platformVM: harness.platformVM, intentModel: harness.model,
+            skills: [skill], platforms: [.codex], target: .project(project),
+            machineIDs: [remoteID], context: harness.context
+        )
+        guard case let .localDeploy(empty) = noOp else { return XCTFail("expected project batch removal") }
+        XCTAssertTrue(empty.outcomes.isEmpty)
+        XCTAssertEqual(harness.linkService.unlinkCalls.count, 1)
+    }
+
     func testSheetReadFailureDoesNotDeleteAnyMachineIntent() throws {
         let harness = try makeHarness(fetchIntents: { _ in throw DeployStubFailure() })
         let skill = try insertSkill(context: harness.context)

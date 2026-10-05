@@ -89,6 +89,7 @@ extension DeployIntentModel {
         var result = BatchResult()
         result.readFailures = reconciliation.readFailures
         let expectedTarget = BatchPairTarget(target)
+        var removals: [DeployRemovalPair] = []
         for skill in skills {
             for platform in platforms {
                 let targetFailure = reconciliation.failures.first {
@@ -117,10 +118,11 @@ extension DeployIntentModel {
                         ))
                     }
                 } else {
-                    result.append(platformVM.removeSelection(skills: [skill], platforms: [platform], target: target))
+                    removals.append(DeployRemovalPair(skill: skill, platform: platform))
                 }
             }
         }
+        if !removals.isEmpty { result.append(platformVM.removeSelection(pairs: removals, target: target)) }
         return result
     }
 }

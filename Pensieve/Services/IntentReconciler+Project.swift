@@ -80,51 +80,35 @@ extension IntentReconciler {
         context: ModelContext,
         aggregate: inout BatchResult
     ) {
+        var removals: [UUID: [DeployRemovalPair]] = [:]
         for (pair, group) in groupedProjectTriples(triples) {
             guard let skill = state.skillByID[pair.skillID],
                   let project = state.projectByID[pair.projectID] else {
                 for triple in group { deleteProjectRows(matching: triple, state: state, context: context) }
                 continue
             }
-            var platforms: [PlatformTarget] = []
-            for triple in group {
+            for triple in group.sorted(by: { $0.platformRaw < $1.platformRaw }) {
+                guard let platform = PlatformTarget(rawValue: triple.platformRaw) else {
+                    deleteProjectRows(matching: triple, state: state, context: context)
+                    continue
+                }
                 if state.categoryTriples.contains(triple) {
                     deleteProjectRows(matching: triple, state: state, context: context)
-                } else if let platform = PlatformTarget(rawValue: triple.platformRaw) {
-                    do {
-                        if try platformVM.prepareArtifactRemoval(skill: skill, platform: platform, target: .project(project)) {
-                            platforms.append(platform)
-                        } else {
-                            deleteProjectRows(matching: triple, state: state, context: context)
-                            aggregate.retiredPairs.insert(BatchPairKey(
-                                skillID: skill.id, platform: platform, target: .project(project.id)))
-                        }
-                    } catch {
-                        aggregate.outcomes.append(BatchPairOutcome(
-                            skillID: skill.id, skillName: skill.name, platform: platform, target: .project(project.id),
-                            error: BatchPairOutcome.failureMessage(error, target: .project(project))
-                        ))
-                    }
                 } else {
-                    deleteProjectRows(matching: triple, state: state, context: context)
+                    removals[project.id, default: []].append(DeployRemovalPair(skill: skill, platform: platform))
                 }
             }
-            let sorted = Set(platforms).sorted { $0.rawValue < $1.rawValue }
-            guard !sorted.isEmpty else { continue }
-            let result = platformVM.removeBatch(
-                skills: [skill], platforms: sorted, target: .project(project)
-            )
-            aggregate.outcomes.append(contentsOf: result.outcomes)
-            for outcome in result.outcomes where outcome.error == nil {
-                deleteProjectRows(
-                    matching: ProjectTriple(
-                        skillID: outcome.skillID,
-                        projectID: project.id,
-                        platformRaw: outcome.platform.rawValue
-                    ),
-                    state: state,
-                    context: context
-                )
+        }
+        for projectID in removals.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
+            guard let project = state.projectByID[projectID], let pairs = removals[projectID] else { continue }
+            let result = platformVM.removeOwnedBatch(pairs: pairs, target: .project(project))
+            aggregate.append(result)
+            let completed = result.retiredPairs.union(result.successes.map {
+                BatchPairKey(skillID: $0.skillID, platform: $0.platform, target: .project(projectID))
+            })
+            for key in completed {
+                deleteProjectRows(matching: ProjectTriple(skillID: key.skillID, projectID: projectID,
+                    platformRaw: key.platform.rawValue), state: state, context: context)
             }
         }
     }

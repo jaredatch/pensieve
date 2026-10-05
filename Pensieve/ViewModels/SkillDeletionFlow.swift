@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 
 enum SkillDeletionFlow {
@@ -17,8 +18,8 @@ enum SkillDeletionFlow {
 
         let locallyDeployedPaths: Set<String>
         do {
-            locallyDeployedPaths = Set(try context.fetch(FetchDescriptor<DeployRecord>())
-                .filter { $0.skillID == skill.id }.map(\.targetPath))
+            locallyDeployedPaths = try localCursorDeployPaths(skill: skill, projects: projects,
+                                                              platformVM: platformVM, context: context)
         } catch {
             library.deletionNotice = .failed("Couldn't read local deploy history for “\(skill.name)”: "
                 + "\(error.localizedDescription). The skill was kept so you can retry.")
@@ -63,6 +64,20 @@ enum SkillDeletionFlow {
         }
 
         return present(outcome, skill: skill, manifestNote: manifestNote, library: library)
+    }
+
+    private static func localCursorDeployPaths(
+        skill: Skill, projects: [Project], platformVM: PlatformViewModel, context: ModelContext
+    ) throws -> Set<String> {
+        let paths = Array(platformVM.projectCursorPathsNeedingHistory(skill: skill, projects: projects))
+        guard !paths.isEmpty else { return [] }
+        let skillID = skill.id
+        let predicate = #Predicate<DeployRecord> {
+            $0.skillID == skillID && $0.projectID != nil && paths.contains($0.targetPath)
+        }
+        // SwiftData cannot compare captured Codable enums; the predicate bounds Cursor paths first.
+        return Set(try context.fetch(FetchDescriptor(predicate: predicate))
+            .filter { $0.platform == .cursor }.map(\.targetPath))
     }
 
     private static func retire(skill: Skill, context: ModelContext) throws {

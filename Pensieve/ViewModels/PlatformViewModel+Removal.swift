@@ -1,41 +1,53 @@
 import Foundation
 
 extension PlatformViewModel {
-    /// A foreign or absent occupant retires only our record; it is not a removal action.
-    func prepareArtifactRemoval(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) throws -> Bool {
-        if try artifactIsOwned(skill: skill, platform: platform, target: target) { return true }
-        if retireDeployState(artifactPath: artifactPath(skill: skill, platform: platform, target: target)) {
-            noteDeployStateChanged()
-        }
-        return false
-    }
-
     /// Only owned artifacts are removal actions. Foreign and absent pairs retire silently.
-    func removeOwnedBatch(skills: [Skill], platforms: [PlatformTarget], target: DeployTarget) -> BatchResult {
+    func removeOwnedBatch(pairs: [DeployRemovalPair], target: DeployTarget) -> BatchResult {
         var result = BatchResult()
-        for skill in skills {
-            for platform in platforms {
-                do {
-                    if try prepareArtifactRemoval(skill: skill, platform: platform, target: target) {
-                        result.append(removeBatch(skills: [skill], platforms: [platform], target: target))
-                    } else {
-                        result.retiredPairs.insert(BatchPairKey(
-                            skillID: skill.id, platform: platform, target: BatchPairTarget(target)))
-                    }
-                } catch {
-                    result.outcomes.append(BatchPairOutcome(
-                        skillID: skill.id, skillName: skill.name, platform: platform, target: BatchPairTarget(target),
-                        error: BatchPairOutcome.failureMessage(error, target: target)
-                    ))
+        var owned: [DeployRemovalPair] = []
+        var stateChanged = false
+        for pair in pairs {
+            let skill = pair.skill, platform = pair.platform
+            do {
+                if try artifactIsOwned(skill: skill, platform: platform, target: target) {
+                    owned.append(pair)
+                } else {
+                    let changed = retireDeployState(artifactPath: artifactPath(skill: skill, platform: platform, target: target))
+                    stateChanged = changed || stateChanged
+                    result.retiredPairs.insert(BatchPairKey(
+                        skillID: skill.id, platform: platform, target: BatchPairTarget(target)))
                 }
+            } catch {
+                result.outcomes.append(BatchPairOutcome(
+                    skillID: skill.id, skillName: skill.name, platform: platform, target: BatchPairTarget(target),
+                    error: BatchPairOutcome.failureMessage(error, target: target)
+                ))
             }
+        }
+        if !owned.isEmpty {
+            result.append(removeBatch(pairs: owned, target: target))
+        } else if stateChanged {
+            noteDeployStateChanged()
         }
         return result
     }
 
+    /// History evidence is needed only for project Cursor occupants without a state record.
+    func projectCursorPathsNeedingHistory(skill: Skill, projects: [Project]) -> Set<String> {
+        guard installedPlatforms().contains(.cursor),
+              let recorded = try? deployStateStore.recordedArtifactPaths() else { return [] }
+        return Set(projects.compactMap { project in
+            let target = DeployTarget.project(project)
+            let path = artifactPath(skill: skill, platform: .cursor, target: target)
+            guard !recorded.contains(path),
+                  (try? artifactIsOwned(skill: skill, platform: .cursor, target: target)) != false else { return nil }
+            return path
+        })
+    }
+
     /// Remove owned deploys user-wide and in registered projects; stale records are dropped
     /// without removing foreign occupants. An unreadable state file fences existing owned artifacts.
-    func removeAllDeploys(skill: Skill, projects: [Project], locallyDeployedPaths: Set<String> = []) -> BatchResult {
+    func removeAllDeploys(skill: Skill, projects: [Project], locallyDeployedPaths: Set<String>) -> BatchResult {
         var result = BatchResult()
         let targets: [DeployTarget] = [.userWide] + projects.map { .project($0) }
         let recorded: Set<String>?

@@ -163,44 +163,33 @@ struct IntentReconciler: IntentReconcilerProtocol {
     private func removeUserWide(
         _ pairs: Set<UserPair>, state: State, context: ModelContext, aggregate: inout BatchResult
     ) {
+        var removals: [DeployRemovalPair] = []
         for (skillID, group) in groupedUserPairs(pairs) {
             guard let skill = state.skillByID[skillID] else {
                 for pair in group { deleteUserRows(matching: pair, state: state, context: context) }
                 continue
             }
-            var platforms: [PlatformTarget] = []
-            for pair in group {
+            for pair in group.sorted(by: { $0.platformRaw < $1.platformRaw }) {
+                guard let platform = PlatformTarget(rawValue: pair.platformRaw) else {
+                    deleteUserRows(matching: pair, state: state, context: context)
+                    continue
+                }
                 if state.scenarioPairs.contains(pair) {
                     deleteUserRows(matching: pair, state: state, context: context)
-                } else if let platform = PlatformTarget(rawValue: pair.platformRaw) {
-                    do {
-                        if try platformVM.prepareArtifactRemoval(skill: skill, platform: platform) {
-                            platforms.append(platform)
-                        } else {
-                            deleteUserRows(matching: pair, state: state, context: context)
-                            aggregate.retiredPairs.insert(BatchPairKey(
-                                skillID: skill.id, platform: platform, target: .userWide))
-                        }
-                    } catch {
-                        aggregate.outcomes.append(BatchPairOutcome(
-                            skillID: skill.id, skillName: skill.name, platform: platform, target: .userWide,
-                            error: BatchPairOutcome.failureMessage(error, target: .userWide)
-                        ))
-                    }
                 } else {
-                    deleteUserRows(matching: pair, state: state, context: context)
+                    removals.append(DeployRemovalPair(skill: skill, platform: platform))
                 }
             }
-            let sorted = Set(platforms).sorted { $0.rawValue < $1.rawValue }
-            guard !sorted.isEmpty else { continue }
-            let result = platformVM.removeBatch(skills: [skill], platforms: sorted, target: .userWide)
-            aggregate.outcomes.append(contentsOf: result.outcomes)
-            for outcome in result.outcomes where outcome.error == nil {
-                deleteUserRows(
-                    matching: UserPair(skillID: outcome.skillID, platformRaw: outcome.platform.rawValue),
-                    state: state, context: context
-                )
-            }
+        }
+        guard !removals.isEmpty else { return }
+        let result = platformVM.removeOwnedBatch(pairs: removals, target: .userWide)
+        aggregate.append(result)
+        let completed = result.retiredPairs.union(result.successes.map {
+            BatchPairKey(skillID: $0.skillID, platform: $0.platform, target: .userWide)
+        })
+        for key in completed {
+            deleteUserRows(matching: UserPair(skillID: key.skillID, platformRaw: key.platform.rawValue),
+                           state: state, context: context)
         }
     }
 

@@ -113,28 +113,6 @@ final class DeployIntentModelTests: XCTestCase {
         XCTAssertEqual(harness.linkService.unlinkCalls.count, 0)
     }
 
-    func testPerformRemoveProjectRoutesToBatch() throws {
-        let harness = try makeHarness()
-        let skill = try insertSkill(context: harness.context)
-        let project = Project(name: "Project", path: "/tmp/project")
-        harness.context.insert(project)
-        harness.context.insert(MachineDeployIntent(
-            machineID: remoteID, skillSlug: skill.directoryName, platformRaw: PlatformTarget.codex.rawValue
-        ))
-        try harness.context.save()
-
-        let outcome = try BulkDeploySheet.perform(
-            .remove, forProject: true, platformVM: harness.platformVM, intentModel: harness.model,
-            skills: [skill], platforms: [.codex], target: .project(project),
-            machineIDs: [remoteID], context: harness.context
-        )
-
-        guard case let .localDeploy(batch) = outcome else { return XCTFail("expected project batch removal") }
-        XCTAssertEqual(batch.successes.count, 0)
-        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 1)
-        XCTAssertTrue(harness.linkService.unlinkCalls.isEmpty)
-    }
-
     func testPerformDeployUserWideRemoteOnlyRoutesToIntent() throws {
         let harness = try makeHarness()
         let skill = try insertSkill(context: harness.context)

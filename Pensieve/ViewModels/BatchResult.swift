@@ -15,6 +15,12 @@ enum BatchPairTarget: Hashable {
     }
 }
 
+/// A sparse batch carries exactly the admitted skill and platform pairs.
+struct DeployRemovalPair {
+    let skill: Skill
+    let platform: PlatformTarget
+}
+
 /// A silently retired pair is completed work, without a reported removal action.
 struct BatchPairKey: Hashable {
     let skillID: UUID

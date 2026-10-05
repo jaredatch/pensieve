@@ -155,34 +155,28 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
         context: ModelContext,
         aggregate: inout BatchResult
     ) {
+        var removals: [UUID: [DeployRemovalPair]] = [:]
         for (pair, triples) in grouped(triplesToRemove) {
-            var groupPlatforms: Set<PlatformTarget> = []
-            for triple in triples {
+            for triple in triples.sorted(by: { $0.platform.rawValue < $1.platform.rawValue }) {
                 if state.intentTriples.contains(triple) {
                     deleteLedgerRow(matching: triple, state: state, context: context)
+                } else if let skill = state.skillByID[pair.skillID], state.projectByID[pair.projectID] != nil {
+                    removals[pair.projectID, default: []].append(DeployRemovalPair(skill: skill, platform: triple.platform))
                 } else {
-                    groupPlatforms.insert(triple.platform)
+                    deleteLedgerRow(matching: triple, state: state, context: context)
                 }
             }
-            guard !groupPlatforms.isEmpty else { continue }
-            if let skill = state.skillByID[pair.skillID], let project = state.projectByID[pair.projectID] {
-                let sortedPlatforms = groupPlatforms.sorted { $0.rawValue < $1.rawValue }
-                let result = platformVM.removeOwnedBatch(skills: [skill], platforms: sortedPlatforms, target: .project(project))
-                aggregate.append(result)
-                let succeeded = Set(result.successes.map(\.platform) + result.retiredPairs.map(\.platform))
-                for row in state.ledger
-                    where row.skillID == pair.skillID
-                        && row.projectID == pair.projectID
-                        && succeeded.contains(row.platform) {
-                    context.delete(row)
-                }
-            } else {
-                for row in state.ledger
-                    where row.skillID == pair.skillID
-                        && row.projectID == pair.projectID
-                        && groupPlatforms.contains(row.platform) {
-                    context.delete(row)
-                }
+        }
+        for projectID in removals.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
+            guard let project = state.projectByID[projectID], let pairs = removals[projectID] else { continue }
+            let result = platformVM.removeOwnedBatch(pairs: pairs, target: .project(project))
+            aggregate.append(result)
+            let completed = result.retiredPairs.union(result.successes.map {
+                BatchPairKey(skillID: $0.skillID, platform: $0.platform, target: .project(projectID))
+            })
+            for key in completed {
+                deleteLedgerRow(matching: Triple(skillID: key.skillID, projectID: projectID, platform: key.platform),
+                                state: state, context: context)
             }
         }
     }
