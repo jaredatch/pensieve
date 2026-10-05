@@ -108,7 +108,7 @@ private func logUnrelatedProjectFailures(_ result: BatchResult, removing project
         return id != project.id
     }
     for failure in failures {
-        guard let error = failure.error else { continue }
-        logFailure(error)
+        guard case .project(let id)? = failure.target, let error = failure.error else { continue }
+        logFailure("\(id.uuidString): \(error)")
     }
 }

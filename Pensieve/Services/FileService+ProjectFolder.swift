@@ -1,6 +1,18 @@
 import Darwin
 import Foundation
 
+/// Proof of a successful root check. Construction stays at the FileService admission boundary;
+/// writers still create without parents and reclassify a vanished root after failed creation.
+struct ProjectDirectory {
+    let path: String
+    fileprivate init(path: String) { self.path = path }
+
+    /// User-wide operations are admitted; saved project paths must be absolute before disk access.
+    static func canAccess(_ projectPath: String?) -> Bool {
+        projectPath?.hasPrefix("/") ?? true
+    }
+}
+
 extension FileServiceProtocol {
     /// Unmodeled probes and nonrecursive writes fail without accessing the host filesystem.
     func directoryExistsFollowingLinks(at path: String) throws -> Bool { throw CocoaError(.fileReadUnknown) }
@@ -10,8 +22,9 @@ extension FileServiceProtocol {
         throw CocoaError(.featureUnsupported)
     }
 
-    func requireProjectDirectory(at path: String) throws {
-        guard path.hasPrefix("/") else { throw ProjectFolderError.missing(path) }
+    @discardableResult
+    func requireProjectDirectory(at path: String) throws -> ProjectDirectory {
+        guard ProjectDirectory.canAccess(path) else { throw ProjectFolderError.missing(path) }
         let exists: Bool
         do {
             exists = try directoryExistsFollowingLinks(at: path)
@@ -19,29 +32,38 @@ extension FileServiceProtocol {
             throw ProjectFolderError.couldNotCheck(path: path, reason: error.localizedDescription)
         }
         guard exists else { throw ProjectFolderError.missing(path) }
+        return ProjectDirectory(path: path)
     }
 
     func writeFileInProject(at path: String, content: String, projectPath: String) throws {
-        try writeInProject(at: path, projectPath: projectPath) {
+        try writeFileInProject(at: path, content: content, project: requireProjectDirectory(at: projectPath))
+    }
+
+    func writeFileInProject(at path: String, content: String, project: ProjectDirectory) throws {
+        try writeInProject(at: path, project: project) {
             try writeFileWithoutParents(at: path, content: content)
         }
     }
 
     func createSymlinkInProject(at path: String, pointingTo target: String, projectPath: String) throws {
-        try writeInProject(at: path, projectPath: projectPath) {
+        try createSymlinkInProject(at: path, pointingTo: target, project: requireProjectDirectory(at: projectPath))
+    }
+
+    func createSymlinkInProject(at path: String, pointingTo target: String, project: ProjectDirectory) throws {
+        try writeInProject(at: path, project: project) {
             try createSymlinkWithoutParents(at: path, pointingTo: target)
         }
     }
 
     /// The supplied writer stays private; callers pass content or a target to the bounded methods.
-    private func writeInProject(at artifactPath: String, projectPath: String, write: () throws -> Void) throws {
+    private func writeInProject(at artifactPath: String, project: ProjectDirectory, write: () throws -> Void) throws {
+        let projectPath = project.path
         let prefix = projectPath.hasSuffix("/") ? projectPath : projectPath + "/"
         guard artifactPath.hasPrefix(prefix) else { throw CocoaError(.fileWriteInvalidFileName) }
         let components = artifactPath.dropFirst(prefix.count).split(separator: "/")
         guard !components.isEmpty, components.allSatisfy({ $0 != "." && $0 != ".." }) else {
             throw CocoaError(.fileWriteInvalidFileName)
         }
-        try requireProjectDirectory(at: projectPath)
         do {
             var directory = projectPath
             for component in components.dropLast() {
@@ -147,7 +169,6 @@ private final class ProjectDirectoryProbes: @unchecked Sendable {
 
     func check(at path: String, probe: @escaping (String) throws -> Bool) throws -> Bool {
         let key = path.split(separator: "/").joined(separator: "/")
-        let callerDeadline = DispatchTime.now() + 2
         lock.lock()
         let flight: Flight
         let startsProbe: Bool
@@ -175,8 +196,8 @@ private final class ProjectDirectoryProbes: @unchecked Sendable {
                 flight.ready.leave()
             }
         }
-        guard flight.ready.wait(timeout: min(callerDeadline, flight.deadline)) == .success else {
-            throw timeout(at: path, reason: "Folder check timed out after 2 seconds.")
+        guard flight.ready.wait(timeout: flight.deadline) == .success else {
+            throw timeout(at: path, reason: "The folder didn't answer in time.")
         }
         return try lock.withLock {
             guard let answer = flight.answer else { throw CocoaError(.fileReadUnknown) }

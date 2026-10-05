@@ -28,7 +28,7 @@ final class ProjectFolderRoundOneTests: XCTestCase {
         XCTAssertNil(alert)
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(logs.count, 1, "A sibling failure must leave a log trace")
-        XCTAssertEqual(logs.first, h.project.name + ": Sibling unlink refused")
+        XCTAssertEqual(logs.first, h.project.id.uuidString + ": " + h.project.name + ": Sibling unlink refused")
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.project.id])
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<SkillProjectAssignment>()).map(\.projectID), [h.project.id])
         XCTAssertTrue(h.files.isSymlink(at: h.artifact(.codex)))

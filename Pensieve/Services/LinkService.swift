@@ -50,7 +50,7 @@ final class LinkService: LinkServiceProtocol {
             try Self.validatePathComponent(Constants.hermesDefaultCategory)
         }
 
-        if let projectPath { try fileService.requireProjectDirectory(at: projectPath) }
+        let projectDirectory = try projectPath.map { try fileService.requireProjectDirectory(at: $0) }
 
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
         let target = targetPath(skill: skill, platform: platform, projectPath: projectPath)
@@ -66,8 +66,8 @@ final class LinkService: LinkServiceProtocol {
         }
 
         do {
-            if let projectPath {
-                try fileService.createSymlinkInProject(at: link, pointingTo: target, projectPath: projectPath)
+            if let projectDirectory {
+                try fileService.createSymlinkInProject(at: link, pointingTo: target, project: projectDirectory)
             } else {
                 try fileService.createSymlink(at: link, pointingTo: target)
             }
@@ -84,12 +84,14 @@ final class LinkService: LinkServiceProtocol {
             try Self.validatePathComponent(Constants.hermesDefaultCategory)
         }
 
+        guard ProjectDirectory.canAccess(projectPath) else { return }
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
         guard !link.isEmpty, fileService.isSymlink(at: link) else { return }
         try fileService.deleteFile(at: link)
     }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
+        guard ProjectDirectory.canAccess(projectPath) else { return false }
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
         guard !link.isEmpty, fileService.isSymlink(at: link) else { return false }
         let expected = targetPath(skill: skill, platform: platform, projectPath: projectPath)

@@ -88,14 +88,15 @@ final class ProjectFolderSecondFixTests: XCTestCase {
         let links = LinkService(fileService: files)
         let cursor = CursorCompiler(fileService: files, skillStore: SkillStore(fileService: files, baseDir: "/fixture"))
         for path in ["code/app", "~/code/app", "", "~fixture/code"] {
-            for platform in [PlatformTarget.claudeCode, .grok, .codex] {
+            for (platform, suffix) in [(PlatformTarget.claudeCode, "/.claude/skills/skill"),
+                                      (.grok, "/.grok/skills/skill"), (.codex, "/agents/skill.md")] {
                 try links.unlink(skill: skill, platform: platform, projectPath: path)
                 XCTAssertFalse(links.isLinked(skill: skill, platform: platform, projectPath: path))
-                XCTAssertEqual(links.linkPath(skill: skill, platform: platform, projectPath: path), "")
+                XCTAssertEqual(links.linkPath(skill: skill, platform: platform, projectPath: path), path + suffix)
             }
             try cursor.remove(skill: skill, projectPath: path)
             XCTAssertFalse(cursor.isUpToDate(skill: skill, projectPath: path))
-            XCTAssertEqual(cursor.outputPath(skill: skill, projectPath: path), "")
+            XCTAssertEqual(cursor.outputPath(skill: skill, projectPath: path), path + "/.cursor/rules/skill.mdc")
         }
         XCTAssertEqual(files.paths, [], "Relative project operations must make no file-service calls")
     }
@@ -139,9 +140,10 @@ final class ProjectFolderSecondFixTests: XCTestCase {
 
 /// Records all required file operations without host I/O. Positive occupants expose accidental
 /// relative-path lookups/removals; an injected admission error fences every later lookup.
-private final class SecondFixPathFiles: FileServiceProtocol {
+final class SecondFixPathFiles: FileServiceProtocol {
     var paths: [String] = []
     var probeError: Error?
+    var symlinkTargets: [String: String] = [:]
     func readFile(at path: String) throws -> String { paths.append(path); return "" }
     func writeFile(at path: String, content: String) throws { paths.append(path) }
     func deleteFile(at path: String) throws { paths.append(path) }
@@ -156,7 +158,7 @@ private final class SecondFixPathFiles: FileServiceProtocol {
     func createDirectory(at path: String) throws { paths.append(path) }
     func deleteDirectory(at path: String) throws { paths.append(path) }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws { paths.append(linkPath) }
-    func symlinkTarget(at path: String) throws -> String { paths.append(path); return "/fixture" }
+    func symlinkTarget(at path: String) throws -> String { paths.append(path); return symlinkTargets[path] ?? "/fixture" }
     func isSymlink(at path: String) -> Bool { paths.append(path); return true }
     func listDirectory(at path: String) throws -> [String] { paths.append(path); return [] }
     func contentsHash(at path: String) throws -> String { paths.append(path); return "" }

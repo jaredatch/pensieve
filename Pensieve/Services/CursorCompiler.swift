@@ -26,24 +26,27 @@ final class CursorCompiler: CursorCompilerProtocol {
     }
 
     func compile(skill: Skill, projectPath: String?) throws {
+        let projectDirectory = try projectPath.map { try fileService.requireProjectDirectory(at: $0) }
         let raw = try skillStore.readBody(directoryName: skill.directoryName)
         let body = SkillParser.stripFrontmatter(raw)
         let mdc = generateMDC(skill: skill, body: body)
         let path = outputPath(skill: skill, projectPath: projectPath)
-        if let projectPath {
-            try fileService.writeFileInProject(at: path, content: mdc, projectPath: projectPath)
+        if let projectDirectory {
+            try fileService.writeFileInProject(at: path, content: mdc, project: projectDirectory)
         } else {
             try fileService.writeFile(at: path, content: mdc)
         }
     }
 
     func remove(skill: Skill, projectPath: String?) throws {
+        guard ProjectDirectory.canAccess(projectPath) else { return }
         let path = outputPath(skill: skill, projectPath: projectPath)
         guard !path.isEmpty, fileService.fileExists(at: path) else { return }
         try fileService.deleteFile(at: path)
     }
 
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool {
+        guard ProjectDirectory.canAccess(projectPath) else { return false }
         let path = outputPath(skill: skill, projectPath: projectPath)
         guard !path.isEmpty, fileService.fileExists(at: path) else { return false }
         guard let raw = try? skillStore.readBody(directoryName: skill.directoryName) else { return false }
@@ -54,14 +57,7 @@ final class CursorCompiler: CursorCompilerProtocol {
     }
 
     func outputPath(skill: Skill, projectPath: String?) -> String {
-        if let projectPath {
-            guard projectPath.hasPrefix("/") else { return "" }
-            // Project-level: {projectPath}/.cursor/rules/{name}.mdc
-            return projectPath + "/.cursor/rules/" + skill.directoryName + ".mdc"
-        } else {
-            // User-wide: ~/.cursor/rules/{name}.mdc
-            return Constants.cursorUserRulesDir + "/" + skill.directoryName + ".mdc"
-        }
+        DeployPaths.cursorPath(directoryName: skill.directoryName, projectPath: projectPath)
     }
 
     // MARK: - MDC Generation
