@@ -118,7 +118,7 @@ final class ProjectFolderSecondFixTests: XCTestCase {
         XCTAssertEqual(lock.withLock { probes }, 2)
     }
 
-    func testAddUsesOnlyIdentityAndMarkerAdmissionAndStillRefusesMissingRoot() async throws {
+    func testAddReusesIdentityAdmissionAndStillRefusesMissingRoot() async throws {
         let h = try ProjectFolderCallerHarness()
         defer { h.cleanup() }
         var mainProbes = 0
@@ -128,7 +128,7 @@ final class ProjectFolderSecondFixTests: XCTestCase {
         model.path = h.otherProject.path
         await TestWait.until(timeout: .seconds(3), failureMessage: "Preview finishes") { !model.isCheckingIdentity }
         XCTAssertNotNil(model.makeProject())
-        XCTAssertEqual(mainProbes, 2, "Identity admission and bounded marker write suffice")
+        XCTAssertEqual(mainProbes, 1, "The bounded marker writer reuses identity admission")
         try h.files.deleteDirectory(at: h.otherProject.path)
         mainProbes = 0
         XCTAssertNil(model.makeProject())

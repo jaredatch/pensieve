@@ -43,7 +43,7 @@ struct ProjectIntentHarness {
             linkService: linkService,
             cursorCompiler: DeployRecordingCursorCompiler(fileService: fileService),
             agentDetection: DeployStubDetection(installed: installed),
-            deployStateStore: DeployStateStore(fileService: fileService),
+            deployStateStore: DeployStateStore.memoryBacked,
             persist: persist
         )
         reconciler = IntentReconciler(

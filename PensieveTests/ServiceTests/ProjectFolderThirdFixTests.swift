@@ -52,7 +52,8 @@ final class ProjectFolderThirdFixTests: XCTestCase {
         let h = try ProjectFolderCallerHarness()
         defer { h.cleanup() }
         let files = SecondFixPathFiles()
-        let vm = PlatformViewModel(fileService: files, deployStateStore: h.deployState)
+        let vm = PlatformViewModel(fileService: files,
+                                   agentDetection: DeployStubDetection(installed: []), deployStateStore: h.deployState)
         for path in relativePaths {
             h.project.path = path
             for platform in platforms {
@@ -66,7 +67,8 @@ final class ProjectFolderThirdFixTests: XCTestCase {
         let h = try ProjectFolderCallerHarness()
         defer { h.cleanup() }
         let files = SecondFixPathFiles()
-        let vm = PlatformViewModel(fileService: files, deployStateStore: h.deployState)
+        let vm = PlatformViewModel(fileService: files,
+                                   agentDetection: DeployStubDetection(installed: []), deployStateStore: h.deployState)
         for path in relativePaths {
             h.project.path = path
             try h.deployState.replaceAll(platforms.map { record(h, platform: $0) })

@@ -156,16 +156,26 @@ enum SymlinkCreationError: LocalizedError {
 
 /// Concurrent callers share one answer and wait within a two-second bound. The lock protects
 /// the flight map and answers; timed-out workers stay registered until the raw probe returns.
-private final class ProjectDirectoryProbes: @unchecked Sendable {
+final class ProjectDirectoryProbes: @unchecked Sendable {
     private final class Flight {
         let ready = DispatchGroup()
-        let deadline = DispatchTime.now() + 2
+        let deadline: DispatchTime
         var answer: Result<Bool, Error>?
 
-        init() { ready.enter() }
+        init(deadline: DispatchTime) { self.deadline = deadline; ready.enter() }
     }
     private let lock = NSLock()
     private var flights: [String: Flight] = [:]
+    private let now: () -> DispatchTime
+    private let wait: (DispatchGroup, DispatchTime) -> DispatchTimeoutResult
+
+    /// Tests control clock advancement and observe waits on an isolated registry. Production uses
+    /// the monotonic clock and the real broadcast wait; the raw probe always runs on its worker.
+    init(now: @escaping () -> DispatchTime = DispatchTime.now,
+         wait: @escaping (DispatchGroup, DispatchTime) -> DispatchTimeoutResult = { $0.wait(timeout: $1) }) {
+        self.now = now
+        self.wait = wait
+    }
 
     func check(at path: String, probe: @escaping (String) throws -> Bool) throws -> Bool {
         let key = path.split(separator: "/").joined(separator: "/")
@@ -173,14 +183,14 @@ private final class ProjectDirectoryProbes: @unchecked Sendable {
         let flight: Flight
         let startsProbe: Bool
         if let existing = flights[key] {
-            guard DispatchTime.now() < existing.deadline else {
+            guard now() < existing.deadline else {
                 lock.unlock()
                 throw timeout(at: path, reason: "An earlier folder check is still running.")
             }
             flight = existing
             startsProbe = false
         } else {
-            flight = Flight()
+            flight = Flight(deadline: now() + 2)
             flights[key] = flight
             startsProbe = true
         }
@@ -196,7 +206,7 @@ private final class ProjectDirectoryProbes: @unchecked Sendable {
                 flight.ready.leave()
             }
         }
-        guard flight.ready.wait(timeout: flight.deadline) == .success else {
+        guard wait(flight.ready, flight.deadline) == .success else {
             throw timeout(at: path, reason: "The folder didn't answer in time.")
         }
         return try lock.withLock {

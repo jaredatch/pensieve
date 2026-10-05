@@ -114,7 +114,7 @@ final class DetailContentSnapshotTests: XCTestCase {
             fileService: fileService,
             linkService: linkService,
             cursorCompiler: SnapshotCursorCompiler(upToDate: cursorUpToDate),
-            agentDetection: SnapshotDetection(installed: installed)
+            agentDetection: SnapshotDetection(installed: installed), deployStateStore: .memoryBacked
         )
         return (platformVM, linkService)
     }

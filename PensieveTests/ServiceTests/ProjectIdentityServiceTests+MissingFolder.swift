@@ -2,6 +2,21 @@ import XCTest
 @testable import Pensieve
 
 extension ProjectIdentityServiceTests {
+    func testMarkerWriteReusesTheFirstRootAdmission() throws {
+        let root = NSTemporaryDirectory() + "IdentityAdmission-\(UUID().uuidString)"
+        let files = FileService()
+        try files.createDirectory(at: root)
+        defer { try? files.deleteDirectory(at: root) }
+        let mapped = LinkServiceCanonicalDirectoryFileService(wrapped: files, pathMappings: [], physicalSandbox: root)
+        var probes: [String] = []
+        mapped.beforeProjectProbe = { probes.append($0) }
+        let identity = try ProjectIdentityService(fileService: mapped).identity(forProjectAt: root)
+        XCTAssertEqual(identity.kind, .marker)
+        XCTAssertEqual(probes, [root], "Marker creation must reuse its root admission")
+        let marker = try files.readFile(at: root + "/.pensieve-project")
+        XCTAssertEqual(ProjectIdentityService.parseMarkerID(from: marker), identity.key)
+    }
+
     func testMissingIdentityPathThrowsAndCreatesNoAncestors() throws {
         let root = NSTemporaryDirectory() + "MissingIdentity-\(UUID().uuidString)"
         let files = FileService()

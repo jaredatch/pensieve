@@ -86,14 +86,14 @@ final class LinkService: LinkServiceProtocol {
 
         guard ProjectDirectory.canAccess(projectPath) else { return }
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
-        guard !link.isEmpty, fileService.isSymlink(at: link) else { return }
+        guard platform.usesSymlinks, fileService.isSymlink(at: link) else { return }
         try fileService.deleteFile(at: link)
     }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
         guard ProjectDirectory.canAccess(projectPath) else { return false }
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
-        guard !link.isEmpty, fileService.isSymlink(at: link) else { return false }
+        guard platform.usesSymlinks, fileService.isSymlink(at: link) else { return false }
         let expected = targetPath(skill: skill, platform: platform, projectPath: projectPath)
         guard let actual = try? fileService.symlinkTarget(at: link) else { return false }
         return actual == expected

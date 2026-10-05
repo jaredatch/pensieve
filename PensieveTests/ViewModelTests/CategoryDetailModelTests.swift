@@ -80,7 +80,7 @@ final class CategoryDetailModelTests: XCTestCase {
         let platformVM = PlatformViewModel(
             fileService: StubFileService(),
             linkService: linkService,
-            agentDetection: StubDetection(installed: [.claudeCode, .codex])
+            agentDetection: StubDetection(installed: [.claudeCode, .codex]), deployStateStore: .memoryBacked
         )
         return CategoryDetailModel(reconciler: CategoryReconciler(platformVM: platformVM))
     }

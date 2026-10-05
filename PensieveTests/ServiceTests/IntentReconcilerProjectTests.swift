@@ -166,7 +166,7 @@ final class IntentReconcilerProjectTests: XCTestCase {
             linkService: harness.linkService,
             cursorCompiler: DeployRecordingCursorCompiler(fileService: harness.fileService),
             agentDetection: DeployStubDetection(installed: [.codex]),
-            deployStateStore: DeployStateStore(fileService: harness.fileService)
+            deployStateStore: DeployStateStore.memoryBacked
         )
         let launchReconciler = IntentReconciler(
             platformVM: installedVM,

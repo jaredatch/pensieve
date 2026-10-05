@@ -44,48 +44,70 @@ final class ProjectDirectoryConcurrencyTests: XCTestCase {
         }
     }
 
-    func testLateJoinerUsesFlightDeadlineWithoutClaimingTwoSecondWait() async throws {
+    func testLateJoinerUsesFlightDeadlineWithoutClaimingTwoSecondWait() async {
         let started = expectation(description: "Raw lookup starts")
-        let firstFinished = expectation(description: "First caller times out")
+        let finished = expectation(description: "Raw lookup finishes")
         let release = DispatchSemaphore(value: 0)
         defer { release.signal() }
-        let lock = NSLock()
-        var probes = 0
+        let origin = DispatchTime(uptimeNanoseconds: 1_000_000_000)
+        var clock = origin
+        var deadlines: [UInt64] = []
+        let probes = ProjectDirectoryProbes(now: { clock }, wait: { _, deadline in
+            deadlines.append(deadline.uptimeNanoseconds)
+            return .timedOut
+        })
         let path = "/fixture/\(UUID().uuidString)"
-        let files = FileService(directoryProbe: { _ in
-            lock.withLock { probes += 1 }
+        let lookup: (String) -> Bool = { _ in
             started.fulfill()
             _ = release.wait(timeout: .now() + 5)
+            finished.fulfill()
             return true
-        })
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                _ = try files.directoryExistsFollowingLinks(at: path)
-                XCTFail("The blocked first caller must time out")
-            } catch { XCTAssertEqual((error as NSError).code, Int(ETIMEDOUT)) }
-            firstFinished.fulfill()
         }
-        await fulfillment(of: [started], timeout: 1)
-        try await Task.sleep(for: .milliseconds(1500))
-        let joinedAt = Date()
-        XCTAssertThrowsError(try files.directoryExistsFollowingLinks(at: path)) { error in
+        XCTAssertThrowsError(try probes.check(at: path, probe: lookup))
+        await fulfillment(of: [started], timeout: 2)
+        clock = origin + .milliseconds(1500)
+        XCTAssertThrowsError(try probes.check(at: path, probe: lookup)) { error in
             XCTAssertEqual((error as NSError).code, Int(ETIMEDOUT))
-            XCTAssertFalse(error.localizedDescription.contains("2 seconds"),
-                           "A late joiner's brief wait must not claim two seconds")
+            XCTAssertEqual(error.localizedDescription, "The folder didn't answer in time.",
+                           "The joiner must reach the wait branch, not refuse an expired flight")
+            XCTAssertFalse(error.localizedDescription.contains("2 seconds"))
         }
-        XCTAssertLessThan(Date().timeIntervalSince(joinedAt), 1,
-                          "A joiner waits only until the original flight's deadline")
-        await fulfillment(of: [firstFinished], timeout: 1)
-        XCTAssertEqual(lock.withLock { probes }, 1)
+        XCTAssertEqual(deadlines, [origin.uptimeNanoseconds + 2_000_000_000,
+                                   origin.uptimeNanoseconds + 2_000_000_000],
+                       "Both callers must wait using the same flight deadline")
+        release.signal()
+        await fulfillment(of: [finished], timeout: 2)
     }
 
-    func testWaitUsesOnlyFlightDeadline() throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let source = try FileService().readFile(at: root.appendingPathComponent(
-            "Pensieve/Services/FileService+ProjectFolder.swift").path)
-        XCTAssertFalse(source.contains("callerDeadline"), "A joiner's deadline is always the flight deadline")
-        XCTAssertTrue(source.contains("flight.ready.wait(timeout: flight.deadline)"))
+    func testExpiredFlightFailsBeforeWaitingAgain() async {
+        let started = expectation(description: "Raw lookup starts")
+        let finished = expectation(description: "Raw lookup finishes")
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        let origin = DispatchTime(uptimeNanoseconds: 1_000_000_000)
+        var clock = origin
+        var waits = 0
+        let probes = ProjectDirectoryProbes(now: { clock }, wait: { _, _ in
+            waits += 1
+            return .timedOut
+        })
+        let path = "/fixture/\(UUID().uuidString)"
+        let lookup: (String) -> Bool = { _ in
+            started.fulfill()
+            _ = release.wait(timeout: .now() + 5)
+            finished.fulfill()
+            return true
+        }
+        XCTAssertThrowsError(try probes.check(at: path, probe: lookup))
+        await fulfillment(of: [started], timeout: 2)
+        clock = origin + 3
+        XCTAssertThrowsError(try probes.check(at: path, probe: lookup)) { error in
+            XCTAssertEqual((error as NSError).code, Int(ETIMEDOUT))
+            XCTAssertEqual(error.localizedDescription, "An earlier folder check is still running.")
+        }
+        XCTAssertEqual(waits, 1, "An expired flight must refuse without another wait or worker")
+        release.signal()
+        await fulfillment(of: [finished], timeout: 2)
     }
 
     func testProbeRunsAtUserInitiatedPriorityOrHigher() throws {

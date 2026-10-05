@@ -4,9 +4,8 @@ import Foundation
 /// `LinkService.linkPath`/`targetPath` so the GUI deploy path and the daemon's reconcile share one
 /// implementation. Takes a plain `directoryName` instead of a `@Model` `Skill`.
 enum DeployPaths {
-    static func cursorPath(directoryName: String, projectPath: String?,
-                           userRulesDir: String = PathConstants.cursorUserRulesDir) -> String {
-        let root = projectPath.map { $0 + "/.cursor/rules" } ?? userRulesDir
+    static func cursorPath(directoryName: String, projectPath: String?) -> String {
+        let root = projectPath.map { $0 + "/.cursor/rules" } ?? PathConstants.cursorUserRulesDir
         return root + "/" + directoryName + ".mdc"
     }
 

@@ -103,12 +103,9 @@ private func logProjectRemovalFailure(_ message: String) {
 
 private func logUnrelatedProjectFailures(_ result: BatchResult, removing project: Project,
                                          logFailure: (String) -> Void) {
-    let failures = result.failures.filter { outcome in
-        guard case .project(let id)? = outcome.target else { return false }
-        return id != project.id
-    }
-    for failure in failures {
-        guard case .project(let id)? = failure.target, let error = failure.error else { continue }
+    for failure in result.failures {
+        guard case .project(let id)? = failure.target, id != project.id,
+              let error = failure.error else { continue }
         logFailure("\(id.uuidString): \(error)")
     }
 }
