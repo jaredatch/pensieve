@@ -26,6 +26,7 @@ VERSION=""
 VERSION_CHANNEL=""
 VERSION_SOURCE="VERSION file"
 CHANGELOG_PATH=""
+CHANGELOG_SUPPLIED=0
 INSPECT_APPCAST=""
 INSPECT_BUILT_DMG=""
 INSPECT_BASE_APPCAST=""
@@ -41,6 +42,7 @@ STAPLER_CMD="/usr/bin/xcrun stapler"
 GH_PATHS=(/opt/homebrew/bin/gh /usr/local/bin/gh)
 GH_CMD=""
 require_gh() {
+  [ -z "$GH_CMD" ] || return 0
   local candidate
   for candidate in "${GH_PATHS[@]}"; do
     if [ -x "$candidate" ]; then
@@ -178,7 +180,7 @@ while [ "$#" -gt 0 ]; do
       INSPECT_MODE="notes"
       VERSION="$2"
       VERSION_SOURCE="$1 version argument"
-      [ "$#" -eq 2 ] || CHANGELOG_PATH="$3"
+      if [ "$#" -eq 3 ]; then CHANGELOG_PATH="$3"; CHANGELOG_SUPPLIED=1; fi
       shift "$#"
       ;;
     --print-release-args)
@@ -188,7 +190,7 @@ while [ "$#" -gt 0 ]; do
       INSPECT_MODE="release-args"
       VERSION="$2"
       VERSION_SOURCE="$1 version argument"
-      [ "$#" -eq 2 ] || CHANGELOG_PATH="$3"
+      if [ "$#" -eq 3 ]; then CHANGELOG_PATH="$3"; CHANGELOG_SUPPLIED=1; fi
       shift "$#"
       ;;
     --print-cask-action)
@@ -233,7 +235,7 @@ DIST_DIR="$REPO/build/dist"
 APPCAST_INPUT_DIR="$DIST_DIR/appcast-input"
 DMG_ROOT="$DIST_DIR/dmg-root"
 APP_PATH="$DMG_ROOT/Pensieve.app"
-[ -n "$CHANGELOG_PATH" ] || CHANGELOG_PATH="$REPO/CHANGELOG.md"
+[ "$CHANGELOG_SUPPLIED" -eq 1 ] || CHANGELOG_PATH="$REPO/CHANGELOG.md"
 
 notes_for() {
   local v="$1" f="$2" out
@@ -250,7 +252,7 @@ notes_for() {
 }
 
 build_release_args() {
-  local changelog="${1:-$REPO/CHANGELOG.md}"
+  local changelog="${1-$REPO/CHANGELOG.md}"
   local notes_file
   notes_file="$(mktemp "${TMPDIR:-/tmp}/pensieve-release-notes.XXXXXX")" || return 1
   if ! notes_for "$VERSION" "$changelog" > "$notes_file"; then

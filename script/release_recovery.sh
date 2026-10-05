@@ -19,7 +19,11 @@ verify_update_archive() {
 }
 
 # One read-only mount owns metadata validation and cleanup for built and published DMGs.
-dmg_mount_is_attached() { /sbin/mount | grep -F " on $1 (" >/dev/null; }
+dmg_mount_is_attached() {
+  local mount_point
+  mount_point="$(cd "$1" && pwd -P)" || return 1
+  /sbin/mount | grep -F " on $mount_point (" >/dev/null
+}
 
 mounted_dmg_minimum() (
   local dmg="$1" context="$2" version="${3:-}" check_tickets="${4:-0}"
@@ -29,8 +33,14 @@ mounted_dmg_minimum() (
   dmg_mount_context="$context"
   dmg_attach_in_progress=1
   dmg_mount_point="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-dmg-verify.XXXXXX")" || return 1
-  trap 'cleanup_rc=$?; if dmg_mount_is_attached "$dmg_mount_point" && ! hdiutil detach "$dmg_mount_point" -force >/dev/null 2>&1; then
-          echo "release: $dmg_mount_context: local DMG detach failed" >&2; cleanup_rc=1;
+  # Always attempt detach once attach has started, even if it failed or the
+  # mount probe missed it. An unmounted image is not a detach failure.
+  trap 'cleanup_rc=$?; dmg_was_attached=0;
+        if dmg_mount_is_attached "$dmg_mount_point"; then dmg_was_attached=1; fi;
+        if ! hdiutil detach "$dmg_mount_point" -force >/dev/null 2>&1; then
+          if [ "$dmg_was_attached" -eq 1 ] || dmg_mount_is_attached "$dmg_mount_point"; then
+            echo "release: $dmg_mount_context: local DMG detach failed" >&2; cleanup_rc=1;
+          fi;
         fi;
         if ! rmdir "$dmg_mount_point"; then
           echo "release: $dmg_mount_context: local mount cleanup failed" >&2; cleanup_rc=1;

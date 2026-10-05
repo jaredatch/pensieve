@@ -83,12 +83,12 @@ def check_app_binary_minimum(app, version=None, context="built DMG"):
         require(info.get("CFBundleShortVersionString") == version, f"{context} app version differs from VERSION")
     minimum = info.get("LSMinimumSystemVersion")
     require(isinstance(minimum, str) and re.fullmatch(r"\d+(?:\.\d+){1,2}", minimum),
-            "built app has no minimum system version or it is malformed")
+            f"{context} app has no minimum system version or it is malformed")
     expected = required_minimum()
     require(normalize_version(minimum) == normalize_version(expected), f"release policy requires macOS {expected}; found {minimum}")
     executable = info.get("CFBundleExecutable")
     require(isinstance(executable, str) and executable and Path(executable).name == executable,
-            "built app has no valid executable name")
+            f"{context} app has no valid executable name")
     check_binary_minimum(app / "Contents/MacOS" / executable, minimum)
     return minimum
 
@@ -113,4 +113,5 @@ if __name__ == "__main__":
         else:
             print(check_app_minimum(args.app, args.version, args.context))
     except MINIMUM_ERRORS as error:
-        sys.exit("release: invalid built minimum: " + ascii(str(error))[1:-1])
+        context = "cask" if args.cask else args.context
+        sys.exit(f"release: invalid {context} minimum: " + ascii(str(error))[1:-1])

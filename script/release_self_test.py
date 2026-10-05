@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise release.sh with stubbed publication commands and check its minimum policy."""
+import ast
 import base64
 import importlib.util
 import itertools
@@ -100,6 +101,10 @@ s.setdefault("child_credentials", []).append([cmd, os.environ.get("TAP_GH_TOKEN"
     os.environ.get("CASK_TAP_TOKEN"), os.environ.get("GH_TOKEN")])
 save()
 if cmd == "gh":
+    if s.get("activate_gh_primary"):
+        primary = pathlib.Path(s["activate_gh_primary"])
+        primary.write_text("#!/bin/sh\necho changed-gh-binary >&2\nexit 93\n")
+        primary.chmod(0o755)
     if args[0] == "api":
         path = next(a for a in args if a.startswith("repos/"))
         s.setdefault("credential_calls", []).append([path, os.environ.get("GH_TOKEN", "")])
@@ -200,6 +205,7 @@ elif cmd == "hdiutil":
             if s["dmg_minimum"] is None: info.pop("LSMinimumSystemVersion", None)
             else: info["LSMinimumSystemVersion"] = s["dmg_minimum"]
         info_path.write_bytes(plistlib.dumps(info))
+        s.setdefault("mounts", []).append(str(mounted.parent.resolve())); save()
         if s.get("attach_mounted_failure"): fail("fixture mounted then attach failed")
         if s.get("attach_signal"):
             import signal
@@ -207,7 +213,12 @@ elif cmd == "hdiutil":
     elif args[0] == "detach":
         if s.get("detach_failure"): fail("fixture DMG detach failed")
         import shutil; shutil.rmtree(pathlib.Path(args[1]) / "Pensieve.app")
+        s["mounts"].remove(str(pathlib.Path(args[1]).resolve())); save()
     else: fail("unexpected hdiutil")
+    sys.exit(0)
+elif cmd == "mount":
+    if not s.get("hide_mounts"):
+        for mount in s.get("mounts", []): print("/dev/fixture on " + mount + " (hfs, local, read-only)")
     sys.exit(0)
 elif cmd in ["lipo", "otool"]:
     import plistlib
@@ -347,13 +358,13 @@ class MinimumParserTests(unittest.TestCase):
             result = subprocess.run([sys.executable, "-B", str(ROOT / "script/minimum_system.py"), "--app", str(app)],
                                     capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 1)
-            self.assertIn("release: invalid built minimum:", result.stderr)
+            self.assertIn("release: invalid built DMG minimum:", result.stderr)
             self.assertNotIn("Traceback", result.stderr)
             with mock.patch.object(sys, "argv", ["minimum_system.py", "--app", str(app)]), \
                     mock.patch.object(plistlib, "loads", side_effect=ExpatError("fixture\x1b\nraw diagnostic")), \
                     self.assertRaises(SystemExit) as refusal:
                 runpy.run_path(str(ROOT / "script/minimum_system.py"), run_name="__main__")
-            self.assertEqual(str(refusal.exception), "release: invalid built minimum: fixture\\x1b\\nraw diagnostic")
+            self.assertEqual(str(refusal.exception), "release: invalid built DMG minimum: fixture\\x1b\\nraw diagnostic")
 
     def test_unittest_module_loads_from_repo_root(self):
         spec = importlib.util.spec_from_file_location("root_import_probe", ROOT / "script/release_self_test.py")
@@ -365,7 +376,20 @@ class MinimumParserTests(unittest.TestCase):
 
 
 class MinimumPolicyTests(unittest.TestCase):
+    def test_suites_do_not_call_other_tests(self):
+        tree = ast.parse((ROOT / "script/release_self_test.py").read_text())
+        calls = [node.func.attr for node in ast.walk(tree) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)
+                 and node.func.value.id == "self" and node.func.attr.startswith("test_")]
+        self.assertEqual(calls, [], "shared assertions must be helpers, not test methods")
+        ruby = (ROOT / "script/workflow_self_test.rb").read_text()
+        self.assertEqual(re.findall(r"(?m)^\s+(test_\w+)\s*$", ruby), [],
+                         "Ruby shared assertions must be helpers, not test methods")
+
     def test_project_deployment_settings_match_pinned_minimum(self):
+        self.assert_project_deployment_settings_match_pinned_minimum()
+
+    def assert_project_deployment_settings_match_pinned_minimum(self):
         expected = MINIMUM_TOOL.required_minimum()
         result = subprocess.run(["ruby", "-ryaml", "-rjson", "-e",
                                  "puts JSON.generate(YAML.safe_load(File.read(ARGV.fetch(0))))", str(ROOT / "project.yml")],
@@ -418,6 +442,9 @@ class MinimumPolicyTests(unittest.TestCase):
         check_settings(project, "project")
 
     def test_cask_requirement_matches_pinned_minimum(self):
+        self.assert_cask_requirement_matches_pinned_minimum()
+
+    def assert_cask_requirement_matches_pinned_minimum(self):
         expected = MINIMUM_TOOL.required_minimum()
         text = (ROOT / "release/homebrew/pensieve.rb").read_text()
         requirements = re.findall(r"(?m)^\s*depends_on\s+macos:\s*:(\w+)\s*$", text)
@@ -445,11 +472,11 @@ class MinimumPolicyTests(unittest.TestCase):
         project = {"options": {"deploymentTarget": {"macOS": "27.2"}}}
         with mock.patch.object(MINIMUM_TOOL, "required_minimum", return_value="27.2"), \
                 mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(project), "")):
-            self.test_project_deployment_settings_match_pinned_minimum()
+            self.assert_project_deployment_settings_match_pinned_minimum()
         with mock.patch.object(MINIMUM_TOOL, "required_minimum", return_value="27.2"), \
                 mock.patch.object(shutil, "which", return_value="brew"), \
                 mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "27.2\n", "")):
-            self.test_cask_requirement_matches_pinned_minimum()
+            self.assert_cask_requirement_matches_pinned_minimum()
 
     def test_project_policy_covers_lists_platform_lists_and_xcconfig(self):
         expected = MINIMUM_TOOL.required_minimum()
@@ -468,13 +495,13 @@ class MinimumPolicyTests(unittest.TestCase):
                     project = dict(base, targets={"Fault": fault})
                     result = subprocess.CompletedProcess([], 0, json.dumps(project), "")
                     with mock.patch.object(subprocess, "run", return_value=result), self.assertRaisesRegex(AssertionError, "differs from policy"):
-                        self.test_project_deployment_settings_match_pinned_minimum()
+                        self.assert_project_deployment_settings_match_pinned_minimum()
 
     def test_project_policy_normalizes_trailing_zeroes(self):
         project = {"options": {"deploymentTarget": {"macOS": "26.0.0"}},
                    "targets": {"App": {"platform": ["macOS"], "deploymentTarget": "26.0.0"}}}
         with mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(project), "")):
-            self.test_project_deployment_settings_match_pinned_minimum()
+            self.assert_project_deployment_settings_match_pinned_minimum()
 
     def test_xcconfig_optional_missing_include_and_spelled_cycle(self):
         with tempfile.TemporaryDirectory(prefix="pensieve-xcconfig-cycle-") as directory:
@@ -483,15 +510,15 @@ class MinimumPolicyTests(unittest.TestCase):
             project = {"options": {"deploymentTarget": {"macOS": "26.0"}},
                        "configFiles": {"Release": str(config)}}
             with mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(project), "")):
-                self.test_project_deployment_settings_match_pinned_minimum()
+                self.assert_project_deployment_settings_match_pinned_minimum()
             config.write_text('#include "absent.xcconfig"\n')
             with mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(project), "")), \
                     self.assertRaisesRegex(AssertionError, "cannot read xcconfig"):
-                self.test_project_deployment_settings_match_pinned_minimum()
+                self.assert_project_deployment_settings_match_pinned_minimum()
 
     def test_cask_policy_without_homebrew_uses_literal_symbol(self):
         with mock.patch.object(shutil, "which", return_value=None), mock.patch.object(subprocess, "run", side_effect=FileNotFoundError("no brew")):
-            self.test_cask_requirement_matches_pinned_minimum()
+            self.assert_cask_requirement_matches_pinned_minimum()
 
     def test_cask_policy_without_homebrew_names_unknown_symbols(self):
         original = Path.read_text
@@ -500,17 +527,196 @@ class MinimumPolicyTests(unittest.TestCase):
             return text.replace(":tahoe", ":unknown_os") if path.name == "pensieve.rb" else text
         with mock.patch.object(shutil, "which", return_value=None), mock.patch.object(Path, "read_text", read), \
                 self.assertRaisesRegex(AssertionError, "unknown macOS requirement :unknown_os"):
-            self.test_cask_requirement_matches_pinned_minimum()
+            self.assert_cask_requirement_matches_pinned_minimum()
 
     def test_cask_policy_normalizes_homebrew_versions(self):
         for minimum in ("26", "26.0", "26.0.0"):
             with self.subTest(minimum=minimum), mock.patch.object(shutil, "which", return_value="brew"), \
                     mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, minimum + "\n", "")):
-                self.test_cask_requirement_matches_pinned_minimum()
+                self.assert_cask_requirement_matches_pinned_minimum()
 
 
 class ReleaseSequenceTests(unittest.TestCase):
     tool = STATE_TOOL
+
+    def test_real_dmg_cleanup_through_symlinked_temporary_path(self):
+        with tempfile.TemporaryDirectory(prefix="pensieve-real-dmg-") as directory:
+            scratch = Path(directory)
+            target = scratch / "temporary"; target.mkdir()
+            alias = scratch / "alias"; alias.symlink_to(target, target_is_directory=True)
+            app = scratch / "payload/Pensieve.app"
+            binaries = app / "Contents/MacOS"; binaries.mkdir(parents=True)
+            (app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleExecutable": "Pensieve",
+                "CFBundleShortVersionString": VERSION, "LSMinimumSystemVersion": "26.0"}))
+            for name in ("Pensieve", "pensieve-daemon"):
+                (binaries / name).write_bytes(struct.pack("<8I", 0xfeedfacf, 0x100000c, 0, 2, 1, 24, 0, 0) +
+                    struct.pack("<6I", 0x32, 24, 1, 26 << 16, 26 << 16, 0))
+            image = scratch / "fixture.dmg"
+            created = subprocess.run(["/usr/bin/hdiutil", "create", "-srcfolder", str(app.parent),
+                "-fs", "HFS+", "-format", "UDRO", "-volname", "Pensieve fixture", str(image)],
+                text=True, capture_output=True, timeout=60)
+            self.assertEqual(created.returncode, 0, created.stdout + created.stderr)
+            bin_dir = scratch / "bin"; bin_dir.mkdir()
+            calls = scratch / "calls.jsonl"
+            wrapper = bin_dir / "hdiutil"
+            wrapper.write_text('''#!/usr/bin/env python3
+import json, os, signal, subprocess, sys
+with open(os.environ["REAL_DMG_CALLS"], "a") as log: log.write(json.dumps(sys.argv[1:]) + "\\n")
+result = subprocess.run(["/usr/bin/hdiutil"] + sys.argv[1:])
+if sys.argv[1] == "attach" and result.returncode == 0:
+    mount = sys.argv[sys.argv.index("-mountpoint") + 1]
+    probe = subprocess.run(["/bin/bash", "-c", 'source "$1" --inspect-functions; dmg_mount_is_attached "$2"',
+        "real-mount-probe", os.environ["REAL_DMG_RELEASE"], mount])
+    with open(os.environ["REAL_DMG_CALLS"], "a") as log: log.write(json.dumps(["detected", probe.returncode]) + "\\n")
+    fault = os.environ.get("REAL_DMG_FAULT", "")
+    if fault == "failed": sys.exit(1)
+    if fault: os.kill(os.getppid(), getattr(signal, fault))
+sys.exit(result.returncode)
+''')
+            wrapper.chmod(0o755)
+            env = dict(os.environ, PATH=str(bin_dir) + ":/usr/bin:/bin:/usr/sbin:/sbin",
+                TMPDIR=str(alias) + "/", REAL_DMG_CALLS=str(calls), REAL_DMG_IMAGE=str(image),
+                REAL_DMG_RELEASE=str(ROOT / "script/release.sh"))
+            for fault, version, expected in (("", VERSION, 0), ("", "0.9.0", 1),
+                                             ("failed", VERSION, 1), ("SIGINT", VERSION, 130),
+                                             ("SIGTERM", VERSION, 143)):
+                with self.subTest(fault=fault, version=version):
+                    calls.write_text("")
+                    result = subprocess.run(["/bin/bash", "-c",
+                        'source "$1" --inspect-functions\nmounted_dmg_minimum "$REAL_DMG_IMAGE" "published DMG" "$2"',
+                        "real-dmg-test", str(ROOT / "script/release.sh"), version],
+                        env=dict(env, REAL_DMG_FAULT=fault), capture_output=True, text=True, timeout=60)
+                    recorded = [json.loads(line) for line in calls.read_text().splitlines()]
+                    attach = next(call for call in recorded if call[0] == "attach")
+                    mount = Path(attach[attach.index("-mountpoint") + 1])
+                    resolved = str(mount.resolve())
+                    try:
+                        self.assertIn(str(alias), str(mount), "the mount must use the symlinked TMPDIR")
+                        self.assertIn(["detected", 0], recorded, "production detection must see the real mount")
+                        self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                        if fault: self.assertIn("local DMG attach", result.stderr)
+                        if version != VERSION: self.assertIn("published DMG app version differs", result.stderr)
+                        self.assertEqual(sum(call[0] == "detach" for call in recorded), 1)
+                        mounts = subprocess.check_output(["/sbin/mount"], text=True)
+                        self.assertNotIn(" on " + resolved + " (", mounts)
+                        self.assertFalse(mount.exists(), "the detached mount point must be removed")
+                        images = plistlib.loads(subprocess.check_output(["/usr/bin/hdiutil", "info", "-plist"]))
+                        self.assertFalse(any(Path(item["image-path"]).resolve() == image.resolve()
+                            for item in images.get("images", [])), "the fixture image must be detached")
+                    finally:
+                        # A deliberately red baseline must not leak real mounts.
+                        subprocess.run(["/usr/bin/hdiutil", "detach", resolved, "-force"], capture_output=True, timeout=30)
+                        if mount.exists(): mount.rmdir()
+
+    def test_explicit_empty_changelog_is_rejected_and_omission_defaults(self):
+        for mode in ("--notes-for", "--print-release-args"):
+            for explicit in (False, True):
+                with self.subTest(mode=mode, explicit=explicit):
+                    result = subprocess.run(["/bin/bash", str(self.root / "script/release.sh"), mode,
+                        VERSION, *([""] if explicit else [])], env=self.env,
+                        text=True, capture_output=True, timeout=30)
+                    if explicit:
+                        self.assertNotEqual(result.returncode, 0, "an empty path must not read the default changelog")
+                        self.assertEqual(result.stdout, "")
+                    else:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertTrue(result.stdout.strip())
+
+    def test_remote_run_keeps_the_first_resolved_gh_binary(self):
+        original = json.loads(json.dumps(self.state))
+        primary, fallback = self.root / "primary-gh", self.root / "bin/gh"
+        self.set_fixture_gh_paths(primary, fallback)
+        for recovery in (False, True):
+            with self.subTest(recovery=recovery):
+                primary.unlink(missing_ok=True)
+                self.state = dict(json.loads(json.dumps(original)), activate_gh_primary=str(primary))
+                if recovery: self.state.update(release=self.state["expected_release"], appcast=feed())
+                output = self.run_release()
+                self.assertTrue(primary.exists(), "the primary must become executable after the first gh call")
+                self.assertNotIn("changed-gh-binary", output)
+                self.assertGreater(sum(call[0] == "gh" for call in self.state["calls"]), 1)
+                self.assertEqual(self.state["builds"], 0 if recovery else 1)
+                if recovery:
+                    self.assertTrue(any(call[:2] == ["gh", "release"] and "download" in call
+                                        for call in self.state["calls"]), "this subtest must reach live recovery")
+
+    def test_minimum_diagnostics_name_built_and_published_callers(self):
+        original = json.loads(json.dumps(self.state))
+        for context in ("built DMG", "published DMG"):
+            for minimum in (None, "malformed", "14.0"):
+                with self.subTest(context=context, minimum=minimum):
+                    self.state = dict(json.loads(json.dumps(original)), dmg_minimum=minimum)
+                    self.cask_artifact()
+                    result = self.run_function('mounted_dmg_minimum "$DIST_DIR/Pensieve-1.0.0.dmg" "' + context + '" "1.0.0"')
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn("release: invalid " + context + " minimum:", result.stderr)
+                    if minimum != "14.0": self.assertIn(context + " app has no minimum system version", result.stderr)
+                    self.assertNotIn("invalid built", result.stderr if context == "published DMG" else "")
+                    self.assertEqual(self.state["writes"], [])
+
+    def test_cleanup_detaches_when_the_external_mount_probe_misses(self):
+        original = json.loads(json.dumps(self.state))
+        for fault, expected in (({}, 0), ({"attach_mounted_failure": True}, 1),
+                                ({"attach_signal": "SIGTERM"}, 143)):
+            with self.subTest(fault=fault):
+                self.state = dict(json.loads(json.dumps(original)), hide_mounts=True, **fault)
+                self.cask_artifact()
+                result = self.run_function('mounted_dmg_minimum "$DIST_DIR/Pensieve-1.0.0.dmg" "built DMG" "1.0.0"')
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                attach = next(call for call in self.state["calls"] if call[:2] == ["hdiutil", "attach"])
+                mount = Path(attach[attach.index("-mountpoint") + 1])
+                self.assertFalse(mount.exists(), "cleanup cannot depend on the external mount probe")
+                self.assertEqual(self.state["mounts"], [])
+                self.assertNotIn("detach failed", result.stderr)
+
+    def test_production_logging_and_api_helpers_without_replacements(self):
+        response = self.root / "response.txt"
+        response.write_text("HTTP/1.1 503 Fixture\r\n\r\n::error::fixture\x1b\n")
+        for body, expected in (("log_text $'fixture\\x1b\\n::error::value'", None),
+                               ('log_response "$REPO/response.txt"', None),
+                               ('http_status "$REPO/response.txt"', "503\n")):
+            with self.subTest(body=body):
+                result = self.run_function(body)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                if expected is not None: self.assertEqual(result.stdout, expected)
+                else:
+                    assert_safe_diagnostic(self, result.stdout)
+                    self.assertIn("\\x1b", result.stdout)
+        for repo, path in (("$PUBLIC_REPO", "appcast.xml"), ("$TAP_REPO", "Casks/pensieve.rb")):
+            with self.subTest(repo=repo):
+                result = self.run_function('contents_api "' + repo + '" --include "repos/' + repo + '/contents/' + path + '"')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("HTTP/2.0 200", result.stdout)
+                self.assertIn('"content"', result.stdout)
+        self.assertEqual(self.state["writes"], [])
+
+    def test_production_feed_read_helper_without_replacements(self):
+        self.state["fail_read"] = "appcast"
+        for context in ("appcast base read failed", "appcast recheck failed", "cask appcast read failed"):
+            with self.subTest(context=context):
+                result = self.run_function('read_live_appcast master "" "' + context + '" "invalid fixture"')
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn('release: ' + context + " (HTTP '503')", result.stderr)
+                self.assertEqual(self.state["writes"], [])
+
+    def test_production_cask_helpers_without_replacements(self):
+        original = json.loads(json.dumps(self.state))
+        for prerelease in (False, True):
+            with self.subTest(prerelease=prerelease):
+                self.state = json.loads(json.dumps(original))
+                version = "1.0.0-beta.1" if prerelease else VERSION
+                if prerelease: self.set_version(version)
+                self.cask_artifact(); self.state["appcast"] = feed(version, minimum="26.0")
+                result = self.run_function('VERSION="' + version + '"; VERSION_CHANNEL="' + ("beta" if prerelease else "") +
+                    '"; DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"; cask_action_for; report_cask_publication; verify_cask_artifact; bump_cask')
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("skip\n" if prerelease else "bump\n", result.stdout)
+                self.assertIn("cask skipped for prerelease" if prerelease else "cask step runs next", result.stdout)
+                self.assertEqual(self.state["writes"], [] if prerelease else ["cask"])
+                if prerelease: self.assertEqual(self.state["calls"], [])
+                else:
+                    self.assertTrue(any(call[0] == "verify" for call in self.state["calls"]))
+                    self.assertEqual(self.state["mounts"], [])
 
     @classmethod
     def setUpClass(cls):
@@ -552,7 +758,7 @@ class ReleaseSequenceTests(unittest.TestCase):
         (self.root / "CHANGELOG.md").write_text("## [1.0.0]\nRelease fixture.\n")
         (self.root / "fixture-key").write_text("not a signing key")
         bin_dir = self.root / "bin"; bin_dir.mkdir()
-        for name in ("gh", "git", "xcodegen", "xcodebuild", "codesign", "ditto", "hdiutil", "spctl", "notary", "stapler", "generate", "verify", "lipo", "otool"):
+        for name in ("gh", "git", "xcodegen", "xcodebuild", "codesign", "ditto", "hdiutil", "mount", "spctl", "notary", "stapler", "generate", "verify", "lipo", "otool"):
             f = bin_dir / name; f.write_text(STUB); f.chmod(0o755)
         self.state_path = self.root / "state.json"
         release = {"id": 1, "tag_name": "v" + VERSION, "draft": False, "prerelease": PUBLICATION_CASES[VERSION][1],
@@ -579,8 +785,7 @@ class ReleaseSequenceTests(unittest.TestCase):
             'MACHO_TOOLS = ("/usr/bin/lipo", "/usr/bin/otool")',
             "MACHO_TOOLS = " + repr((str(bin_dir / "lipo"), str(bin_dir / "otool"))))
         self.substitute_fixture_source(self.root / "script/release_recovery.sh",
-            'dmg_mount_is_attached() { /sbin/mount | grep -F " on $1 (" >/dev/null; }',
-            'dmg_mount_is_attached() { test -d "$1/Pensieve.app"; }')
+            '/sbin/mount', json.dumps(str(bin_dir / "mount")))
         payload = self.root / "dmg-payload/Contents"
         (payload / "MacOS").mkdir(parents=True)
         (payload / "Info.plist").write_bytes(plistlib.dumps({"CFBundleExecutable": "Pensieve",
@@ -599,7 +804,7 @@ class ReleaseSequenceTests(unittest.TestCase):
             "VERIFY_UPDATE_CMD=" + json.dumps(self.fixture_verifier), "VERIFY_UPDATE_CMD=" + json.dumps(command))
         self.fixture_verifier = command
 
-    def test_failed_dmg_attach_never_attempts_detach(self):
+    def test_failed_dmg_attach_has_no_false_detach_failure(self):
         original = json.loads(json.dumps(self.state))
         for published in (False, True):
             with self.subTest(published=published):
@@ -610,7 +815,7 @@ class ReleaseSequenceTests(unittest.TestCase):
                 self.assertIn("local DMG attach failed", output)
                 self.assertNotIn("detach failed", output)
                 self.assertEqual(sum(c[:2] == ["hdiutil", "attach"] for c in self.state["calls"]), 1)
-                self.assertEqual(sum(c[:2] == ["hdiutil", "detach"] for c in self.state["calls"]), 0)
+                self.assertEqual(sum(c[:2] == ["hdiutil", "detach"] for c in self.state["calls"]), 1)
                 self.assertEqual(self.state["writes"], [])
 
     def test_fixed_gh_paths_require_an_executable_before_work(self):
@@ -664,10 +869,9 @@ class ReleaseSequenceTests(unittest.TestCase):
         # Even checkout-path resolution must wait for remote-tool admission.
         dirname = self.root / "bin/dirname"
         dirname.write_text('#!/bin/sh\necho premature-child >&2\nexit 93\n'); dirname.chmod(0o755)
-        for mode in ("publish", "cask", "recovery"):
+        for mode in ("publish", "cask"):
             with self.subTest(mode=mode):
                 self.state["calls"] = []
-                if mode == "recovery": self.state.update(release=self.state["expected_release"], appcast=feed())
                 output = self.run_release(cask_only=mode == "cask", expected=1)
                 self.assertIn(str(primary), output)
                 self.assertIn(str(fallback), output)
@@ -1857,7 +2061,7 @@ verify_appcast_unchanged''')
             self.assertIn("release policy requires macOS 26.0; found " + mounted, output)
             self.assertEqual(self.state["writes"], [])
         self.state = dict(json.loads(json.dumps(original)), dmg_minimum=None)
-        self.assertIn("built app has no minimum system version", self.run_release(expected=1))
+        self.assertIn("built DMG app has no minimum system version", self.run_release(expected=1))
         self.assertEqual(self.state["writes"], [])
 
     def test_appcast_verification_requires_a_minimum(self):
@@ -1911,7 +2115,7 @@ verify_appcast_unchanged''')
                 self.assertEqual(self.state["writes"], [], "a minimum mismatch must stop before release or feed publication")
 
     def test_generated_appcast_minimum_requires_one_value(self):
-        self.test_appcast_provenance_requires_one_minimum_value()
+        self.assert_appcast_provenance_requires_one_minimum_value()
         original = json.loads(json.dumps(self.state))
         for minimum in (None, "", "duplicate"):
             with self.subTest(minimum=minimum):
@@ -1925,6 +2129,9 @@ verify_appcast_unchanged''')
                 self.assertEqual(self.state["writes"], [])
 
     def test_appcast_provenance_requires_one_minimum_value(self):
+        self.assert_appcast_provenance_requires_one_minimum_value()
+
+    def assert_appcast_provenance_requires_one_minimum_value(self):
         message = "generated appcast item has wrong element count: " + self.tool.SPARKLE + "minimumSystemVersion"
         for count in (0, 2):
             with self.subTest(count=count):
@@ -1941,7 +2148,7 @@ verify_appcast_unchanged''')
     def test_generated_appcast_requires_built_app_minimum(self):
         self.state["built_minimum"] = None
         output = self.run_release(expected=1)
-        self.assertIn("built app has no minimum system version", output)
+        self.assertIn("built DMG app has no minimum system version", output)
         self.assertEqual(self.state["writes"], [])
 
     def test_cask_declares_macos_26_and_rendering_preserves_it(self):

@@ -674,10 +674,18 @@ class WorkflowTests < Minitest::Test
   end
 
   def test_ci_test_baseline_includes_wrapper_self_test
+    assert_ci_test_baseline_includes_wrapper_self_test
+  end
+
+  def assert_ci_test_baseline_includes_wrapper_self_test
     assert_operator CI_WORST_SECONDS.fetch('Test'), :>, 867, 'Test includes measured wrapper self-test work'
   end
 
   def test_ci_hygiene_baseline_includes_stability_probe
+    assert_ci_hygiene_baseline_includes_stability_probe
+  end
+
+  def assert_ci_hygiene_baseline_includes_stability_probe
     assert_operator CI_WORST_SECONDS.fetch('Test public hygiene guard'), :>, 156, 'Hygiene includes measured stability work'
   end
 
@@ -693,7 +701,7 @@ class WorkflowTests < Minitest::Test
       end
       original.call(job)
     end
-    test_ci_budget_rejects_missing_short_and_unsummed_bounds
+    assert_ci_budget_rejects_missing_short_and_unsummed_bounds
     ci_worst_seconds(baseline).each do |name, worst|
       next if worst.zero?
       assert_equal((worst * 3 / 60.0).ceil - 1, observed.fetch(name), name + ': tight short-bound mutation')
@@ -742,7 +750,7 @@ class WorkflowTests < Minitest::Test
   # Worst seconds from Actions runs 37074075055 and 37063706683.
   # Added work: worst of three local wall-time samples, rounded upward to milliseconds.
   # Apply 2x for a slower runner before adding it to each historical runner baseline.
-  # Recovery uses the complete 46.3-c3 local rehearsal, also scaled by 2x.
+  # This Mac, this batch: release 405 s and workflow 8.7 s; both scaled by 2x.
   CI_RUNNER_FACTOR = 2
   # Largest per-commit averages among multi-commit runs 37143791867 (2),
   # 37192623397 (17), and 37218019371 (17): the last took 20 s and 28 s.
@@ -757,8 +765,9 @@ class WorkflowTests < Minitest::Test
     'Replay commit guards' => 35
   }.freeze
   CI_LOCAL_WORST_SECONDS = {
-    'Wrapper self-test' => 9.826, 'Hygiene added checks' => 0.731, 'Workflow suite' => 7.273,
-    'Release recovery' => 204.182
+    'Wrapper self-test' => 9.826, 'Hygiene added checks' => 0.731,
+    'Workflow suite' => 8.7, # This Mac, this batch: 8.7 s workflow measurement.
+    'Release recovery' => 405 # This Mac, this batch: 405 s release measurement.
   }.freeze
   CI_WORST_SECONDS = {
     'Checkout' => 2, 'Select Xcode 26' => 1, 'Install tools' => 3,
@@ -787,13 +796,18 @@ class WorkflowTests < Minitest::Test
       minutes
     end
     assert_equal budgets.sum + 10, job.fetch('timeout-minutes'), 'CI: timeout headroom'
-    assert_operator job.fetch('timeout-minutes'), :<=, 140, 'CI: maximum job cap'
+    # This Mac, this batch: release 405 s/workflow 8.7 s require cap 154, below the approved 160-minute limit.
+    assert_operator job.fetch('timeout-minutes'), :<=, 160, 'CI: maximum job cap'
   end
 
   def test_ci_budget_rejects_missing_short_and_unsummed_bounds
-    test_ci_replay_budget_requires_fixed_cost
-    test_ci_test_baseline_includes_wrapper_self_test
-    test_ci_hygiene_baseline_includes_stability_probe
+    assert_ci_budget_rejects_missing_short_and_unsummed_bounds
+  end
+
+  def assert_ci_budget_rejects_missing_short_and_unsummed_bounds
+    assert_ci_replay_budget_requires_fixed_cost
+    assert_ci_test_baseline_includes_wrapper_self_test
+    assert_ci_hygiene_baseline_includes_stability_probe
     job = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')
     job.fetch('steps').each_with_index do |step, index|
       fixture = Marshal.load(Marshal.dump(job))
@@ -817,6 +831,10 @@ class WorkflowTests < Minitest::Test
   end
 
   def test_ci_replay_budget_requires_fixed_cost
+    assert_ci_replay_budget_requires_fixed_cost
+  end
+
+  def assert_ci_replay_budget_requires_fixed_cost
     job = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')
     limit = Integer(job.fetch('env').fetch('CI_LARGEST_PUSH'))
     CI_PER_COMMIT_SECONDS.each do |name, seconds|
@@ -837,7 +855,7 @@ class WorkflowTests < Minitest::Test
     test = steps.find { |step| step['id'] == 'tests' }
     upload = steps.find { |step| step.fetch('uses', '').start_with?('actions/upload-artifact@') }
     assert_ci_timeout_budget(job)
-    test_ci_replay_count_limit
+    assert_ci_replay_count_limit
     # Runner StepsRunner.RunStepAsync maps a step timeout (not job cancellation) to Failed.
     # Thus failure() is true and steps.tests.outcome is 'failure'; no success() implicit guard.
     assert_equal "failure() && steps.tests.outcome == 'failure'", upload.fetch('if')
@@ -849,6 +867,10 @@ class WorkflowTests < Minitest::Test
   end
 
   def test_ci_replay_count_limit
+    assert_ci_replay_count_limit
+  end
+
+  def assert_ci_replay_count_limit
     job = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test')
     step = job.fetch('steps').find { |entry| entry['id'] == 'replay-range' }
     limit = Integer(job.fetch('env').fetch('CI_LARGEST_PUSH'))
