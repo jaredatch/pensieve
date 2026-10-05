@@ -1,8 +1,14 @@
 import Foundation
 
 extension PlatformViewModel {
-    func artifactExists(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) -> Bool {
-        (try? artifactIsOwned(skill: skill, platform: platform, target: target)) ?? false
+    /// A foreign or absent occupant retires only our record; it is not a removal action.
+    func prepareArtifactRemoval(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) throws -> Bool {
+        guard target.project == nil || platform.supportsProjectScope,
+              ProjectDirectory.canAccess(target.project?.path) else { return false }
+        if try artifactIsOwned(skill: skill, platform: platform, target: target) { return true }
+        try deployStateStore.remove(artifactPath: artifactPath(skill: skill, platform: platform, target: target))
+        noteDeployStateChanged()
+        return false
     }
 
     /// Throwing ownership for consumers that retain their ledger when an occupant cannot be checked.
@@ -47,6 +53,8 @@ extension PlatformViewModel {
     private func removeAllDeployPair(skill: Skill, platform: PlatformTarget, target: DeployTarget,
                                      recorded: Set<String>?, stateProblem: String) -> BatchPairOutcome? {
         let path = artifactPath(skill: skill, platform: platform, target: target)
+        // A project rule's mark can arrive through git from another Mac.
+        if platform == .cursor, target.project != nil, let recorded, !recorded.contains(path) { return nil }
         let problem: String?
         do {
             let ours = try artifactIsOwned(skill: skill, platform: platform, target: target)

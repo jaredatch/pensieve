@@ -1,6 +1,9 @@
 import Foundation
 
-enum DeployArtifactOccupant { case absent, owned, foreign }
+enum DeployArtifactOccupant {
+    case absent, owned, legacy, foreign, foreignLink
+    var isOwned: Bool { self == .owned || self == .legacy }
+}
 
 enum ArtifactOwnershipError: LocalizedError {
     case occupiedPath(String)
@@ -19,7 +22,7 @@ enum ArtifactOwnershipError: LocalizedError {
 
 protocol DeployArtifactOwnershipChecking {
     func link(at path: String, skillsDirectory: String, linksFile: Bool) throws -> DeployArtifactOccupant
-    func cursor(at path: String, legacyContent: () throws -> String) throws -> DeployArtifactOccupant
+    func cursor(at path: String, legacyContent: (() throws -> String)?) throws -> DeployArtifactOccupant
 }
 
 /// Classifies the leaf before any deploy mutation. Stored deployment history supplies no authority.
@@ -34,7 +37,7 @@ struct DeployArtifactOwnership: DeployArtifactOwnershipChecking {
             guard let type = try fileService.entryTypeWithoutFollowingLinks(at: path) else { return .absent }
             guard type == .symlink else { return .foreign }
             let target = try fileService.symlinkTarget(at: path)
-            return Self.ownsLinkTarget(target, skillsDirectory: skillsDirectory, linksFile: linksFile) ? .owned : .foreign
+            return Self.ownsLinkTarget(target, skillsDirectory: skillsDirectory, linksFile: linksFile) ? .owned : .foreignLink
         }
     }
 
@@ -47,16 +50,18 @@ struct DeployArtifactOwnership: DeployArtifactOwnershipChecking {
         return !linksFile || components.last == "SKILL.md"
     }
 
-    func cursor(at path: String, legacyContent: () throws -> String) throws -> DeployArtifactOccupant {
+    func cursor(at path: String, legacyContent: (() throws -> String)?) throws -> DeployArtifactOccupant {
         try checked(at: path) {
             guard let type = try fileService.entryTypeWithoutFollowingLinks(at: path) else { return .absent }
             guard type == .regular else { return .foreign }
             let header = try fileService.readRegularFileHeader(at: path, maximumBytes: Self.maximumHeaderBytes)
             if CursorMDC.hasOwnershipMark(in: header) { return .owned }
-            let expected = Data(try legacyContent().utf8)
+            // Missing source is not evidence of ownership. A mark never needs the source.
+            guard let legacyContent, let legacy = try? legacyContent() else { return .foreign }
+            let expected = Data(legacy.utf8)
             do {
                 let current = try fileService.readRegularFileData(at: path, maximumBytes: expected.count)
-                return current == expected ? .owned : .foreign
+                return current == expected ? .legacy : .foreign
             } catch let error as CocoaError where error.code == .fileReadTooLarge {
                 return .foreign
             }
@@ -64,7 +69,10 @@ struct DeployArtifactOwnership: DeployArtifactOwnershipChecking {
     }
 
     private func checked(at path: String, _ operation: () throws -> DeployArtifactOccupant) throws -> DeployArtifactOccupant {
-        do { return try operation() } catch {
+        do { return try operation() } catch let error as NSError
+            where error.domain == NSPOSIXErrorDomain && error.code == Int(ENOTDIR) {
+            return .absent
+        } catch {
             throw ArtifactOwnershipError.couldNotCheck(path: path, reason: error.localizedDescription)
         }
     }

@@ -92,7 +92,7 @@ extension IntentReconciler {
                     deleteProjectRows(matching: triple, state: state, context: context)
                 } else if let platform = PlatformTarget(rawValue: triple.platformRaw) {
                     do {
-                        if try platformVM.artifactIsOwned(skill: skill, platform: platform, target: .project(project)) {
+                        if try platformVM.prepareArtifactRemoval(skill: skill, platform: platform, target: .project(project)) {
                             platforms.append(platform)
                         } else {
                             deleteProjectRows(matching: triple, state: state, context: context)

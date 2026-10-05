@@ -39,6 +39,8 @@ final class LinkServiceScriptedFileService: FileServiceProtocol {
     private(set) var createSymlinkCalled = false
     private(set) var deleteFileCalled = false
     private(set) var directoryProbePaths: [String] = []
+    private(set) var entryTypeProbeCount = 0
+    var failRepeatedEntryProbe = false
 
     init(
         linkPath: String,
@@ -68,6 +70,8 @@ final class LinkServiceScriptedFileService: FileServiceProtocol {
     func fileExists(at path: String) -> Bool { path == linkPath && state.fileExists }
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
         guard path == linkPath else { return path == canonicalDirectory ? .directory : nil }
+        entryTypeProbeCount += 1
+        if failRepeatedEntryProbe && entryTypeProbeCount > 1 { throw CocoaError(.fileReadUnknown) }
         if state.isSymlink { return .symlink }
         if state.directoryExists { return .directory }
         return state.fileExists ? .regular : nil

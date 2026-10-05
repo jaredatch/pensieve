@@ -61,6 +61,7 @@ extension CursorOwnershipTests {
                 XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: vm,
                                                        projects: [project], context: context))
                 XCTAssertTrue(library.deletionNotice?.message.contains(path) == true)
+                XCTAssertTrue(library.deletionNotice?.message.contains("links and rules") == true)
             }
             mapped.beforeRuleRead = nil
             XCTAssertEqual(try mapped.readFile(at: path), text)

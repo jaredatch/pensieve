@@ -34,6 +34,9 @@ final class DeletionTestLinkService: LinkServiceProtocol {
         if failingUnlinkPaths.contains(value) { throw DeletionTestError() }
         linkedPaths.remove(value)
     }
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        linkedPaths.contains(path(skill, platform, projectPath))
+    }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
         linkedPaths.contains(path(skill, platform, projectPath))
@@ -55,6 +58,8 @@ final class DeletionTestCursorCompiler: CursorCompilerProtocol {
     private(set) var removeProjectPaths: [String?] = []
     func compile(skill: Skill, projectPath: String?) throws {}
     func remove(skill: Skill, projectPath: String?) throws { removeProjectPaths.append(projectPath) }
+    func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { ownedProjectPaths.contains(projectPath) }
+
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { ownedProjectPaths.contains(projectPath) }
     func outputPath(skill: Skill, projectPath: String?) -> String {

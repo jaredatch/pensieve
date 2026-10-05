@@ -110,7 +110,7 @@ extension DeployIntentModelTests {
         )
 
         XCTAssertTrue(result.failures.isEmpty)
-        XCTAssertFalse(harness.platformVM.artifactExists(skill: alpha, platform: .codex))
+        XCTAssertFalse(try harness.platformVM.artifactIsOwned(skill: alpha, platform: .codex))
         XCTAssertEqual(harness.linkService.unlinkCalls.map(\.directoryName), ["alpha"])
         XCTAssertNil(harness.model.error)
     }
@@ -136,7 +136,7 @@ extension DeployIntentModelTests {
         )
 
         XCTAssertTrue(result.failures.isEmpty)
-        XCTAssertFalse(harness.platformVM.artifactExists(skill: skill, platform: .codex))
+        XCTAssertFalse(try harness.platformVM.artifactIsOwned(skill: skill, platform: .codex))
         XCTAssertNil(harness.model.error)
     }
 
@@ -169,7 +169,7 @@ extension DeployIntentModelTests {
         _ = try harness.model.set(
             false, skill: alpha, platform: .codex, target: .userWide, context: harness.context
         )
-        XCTAssertFalse(harness.platformVM.artifactExists(skill: alpha, platform: .codex))
+        XCTAssertFalse(try harness.platformVM.artifactIsOwned(skill: alpha, platform: .codex))
         XCTAssertNil(harness.model.error)
     }
 
@@ -265,7 +265,7 @@ extension DeployIntentModelTests {
         try failedOn.context.save()
         XCTAssertEqual(try failedOn.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
         XCTAssertFalse(failedOn.manifestFileService.fileExists(at: onPath))
-        XCTAssertFalse(failedOn.platformVM.artifactExists(skill: onSkill, platform: .codex))
+        XCTAssertFalse(try failedOn.platformVM.artifactIsOwned(skill: onSkill, platform: .codex))
 
         var offSaveAttempts = 0
         let failedOff = try makeHarness(saveContext: { context in

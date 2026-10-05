@@ -21,6 +21,7 @@ private final class RecordingLinkService: LinkServiceProtocol {
     func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
         unlinkCalls.append(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
     }
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
 

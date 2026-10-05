@@ -51,6 +51,8 @@ final class Batch: XCTestCase {
             if failingUnlink.contains(key(skill, platform)) { throw StubError() }
             unlinked.append(key(skill, platform))
         }
+        func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
+
         func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
         func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
             "/tmp/stub-link/\(skill.directoryName)"

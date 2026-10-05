@@ -60,7 +60,8 @@ final class ProjectFolderRoundOneTests: XCTestCase {
                         categoryOwned ? h.category.reconcile(context: h.context) : h.intent.reconcile(context: h.context)
                     }
                     XCTAssertEqual(run().successes.count, 1)
-                    XCTAssertTrue(h.platformVM.artifactExists(skill: h.skill, platform: platform, target: .project(h.project)))
+                    XCTAssertTrue(try h.platformVM.artifactIsOwned(
+                        skill: h.skill, platform: platform, target: .project(h.project)))
                     let path = h.artifact(platform)
                     try h.files.deleteFile(at: path)
                     switch occupant {
@@ -70,7 +71,7 @@ final class ProjectFolderRoundOneTests: XCTestCase {
                     }
                     XCTAssertFalse(h.platformVM.isDeployed(skill: h.skill, platform: platform, target: .project(h.project)),
                                    "\(platform) / \(occupant) is not a link to the store")
-                    XCTAssertFalse(h.platformVM.artifactExists(
+                    XCTAssertFalse(try h.platformVM.artifactIsOwned(
                         skill: h.skill, platform: platform, target: .project(h.project)))
                     let result = run()
                     XCTAssertEqual(result.failureCount, 1, "Convergence must report the occupant")
@@ -100,7 +101,7 @@ final class ProjectFolderRoundOneTests: XCTestCase {
             baseDir: h.root + "/store/skills"))
         let path = compiler.outputPath(skill: h.skill, projectPath: h.project.path)
         try h.files.writeFile(at: path, content: "Edited Cursor rule")
-        XCTAssertFalse(h.platformVM.artifactExists(skill: h.skill, platform: .cursor, target: .project(h.project)))
+        XCTAssertFalse(try h.platformVM.artifactIsOwned(skill: h.skill, platform: .cursor, target: .project(h.project)))
         XCTAssertEqual(h.intent.reconcile(context: h.context).failureCount, 1)
         XCTAssertEqual(try h.files.readFile(at: path), "Edited Cursor rule")
     }
@@ -117,6 +118,10 @@ private final class SiblingFailureLinkService: LinkServiceProtocol {
         if projectPath == failedPath { throw SiblingUnlinkError() }
         try wrapped.unlink(skill: skill, platform: platform, projectPath: projectPath)
     }
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        try wrapped.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
+    }
+
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
         wrapped.isLinked(skill: skill, platform: platform, projectPath: projectPath)
     }

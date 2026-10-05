@@ -19,6 +19,9 @@ private final class ProjectSnapshotLinkService: LinkServiceProtocol {
 
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
     func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        return deployedSlugs.contains(skill.directoryName)
+    }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
         checkedPlatforms.append(platform)
@@ -47,6 +50,12 @@ private final class ProjectSnapshotCursorCompiler: CursorCompilerProtocol {
 
     func compile(skill: Skill, projectPath: String?) throws {}
     func remove(skill: Skill, projectPath: String?) throws {}
+    func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {
+        return deployedSlugs.contains(skill.directoryName)
+    }
+    func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool {
+        return deployedSlugs.contains(skill.directoryName)
+    }
 
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool {
         checkedProjectPaths.append(projectPath)

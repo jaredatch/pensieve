@@ -226,6 +226,10 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
         removeCalls += 1
         try files.deleteFile(at: linkPath(skill: skill, platform: platform, projectPath: projectPath))
     }
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        try literalLinks.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
+    }
+
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
         literalLinks.isLinked(skill: skill, platform: platform, projectPath: projectPath)
     }
@@ -254,6 +258,15 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
         removeCalls += 1
         try files.deleteFile(at: outputPath(skill: skill, projectPath: projectPath))
     }
+    func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {
+        guard let text = try? files.readFile(at: outputPath(skill: skill, projectPath: projectPath)) else { return false }
+        return text == "compiled bytes" || text == "repaired"
+    }
+    func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool {
+        guard let text = try? files.readFile(at: outputPath(skill: skill, projectPath: projectPath)) else { return false }
+        return text == "compiled bytes" || text == "repaired"
+    }
+
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool {
         (try? files.readFile(at: outputPath(skill: skill, projectPath: projectPath))) == "compiled bytes"
     }

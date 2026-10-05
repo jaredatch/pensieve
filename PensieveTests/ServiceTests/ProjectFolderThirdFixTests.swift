@@ -57,7 +57,7 @@ final class ProjectFolderThirdFixTests: XCTestCase {
         for path in relativePaths {
             h.project.path = path
             for platform in platforms {
-                XCTAssertFalse(vm.artifactExists(skill: h.skill, platform: platform, target: .project(h.project)))
+                XCTAssertFalse(try vm.artifactIsOwned(skill: h.skill, platform: platform, target: .project(h.project)))
             }
         }
         XCTAssertEqual(files.paths, [])

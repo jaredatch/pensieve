@@ -111,7 +111,7 @@ final class DeployReconciler: DeployReconciling {
                 CursorMDC.generateLegacy(directoryName: slug, description: cursor?.description ?? parsed.description ?? "",
                                          cursorConfig: cursor, body: SkillParser.stripFrontmatter(raw))
             }
-            guard occupant == .owned else { continue }
+            guard occupant?.isOwned == true else { continue }
             let current = try? fileService.readRegularFileData(at: mdcPath, maximumBytes: expected.utf8.count)
             if current != Data(expected.utf8), (try? fileService.writeFile(at: mdcPath, content: expected)) != nil {
                 result.recompiled.append(mdcPath)

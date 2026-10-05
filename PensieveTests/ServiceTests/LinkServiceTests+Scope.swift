@@ -20,9 +20,9 @@ extension LinkServiceTests {
                                        agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked)
             try links.link(skill: skill, platform: platform, projectPath: nil)
             XCTAssertTrue(links.isLinked(skill: skill, platform: platform, projectPath: nil))
-            XCTAssertTrue(vm.artifactExists(skill: skill, platform: platform))
+            XCTAssertTrue(try vm.artifactIsOwned(skill: skill, platform: platform))
             XCTAssertFalse(links.isLinked(skill: skill, platform: platform, projectPath: project.path))
-            XCTAssertFalse(vm.artifactExists(skill: skill, platform: platform, target: .project(project)))
+            XCTAssertFalse(try vm.artifactIsOwned(skill: skill, platform: platform, target: .project(project)))
             XCTAssertNoThrow(try links.unlink(skill: skill, platform: platform, projectPath: project.path))
             XCTAssertTrue(fileService.isSymlink(at: physicalLink), "A stale project row cannot delete the user-wide link")
             XCTAssertTrue(links.isLinked(skill: skill, platform: platform, projectPath: nil))
@@ -30,7 +30,7 @@ extension LinkServiceTests {
             try links.unlink(skill: skill, platform: platform, projectPath: nil)
             XCTAssertFalse(fileService.isSymlink(at: physicalLink))
             XCTAssertFalse(links.isLinked(skill: skill, platform: platform, projectPath: nil))
-            XCTAssertFalse(vm.artifactExists(skill: skill, platform: platform))
+            XCTAssertFalse(try vm.artifactIsOwned(skill: skill, platform: platform))
         }
     }
 }

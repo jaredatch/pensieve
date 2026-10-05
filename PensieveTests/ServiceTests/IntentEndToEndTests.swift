@@ -87,7 +87,7 @@ final class IntentEndToEndTests: XCTestCase {
         )
         try syncIntentToTarget(harness)
         let targetSkill = try skill("managed", context: ModelContext(harness.containerB))
-        XCTAssertTrue(harness.platformVMB.artifactExists(skill: targetSkill, platform: .codex))
+        XCTAssertTrue(try harness.platformVMB.artifactIsOwned(skill: targetSkill, platform: .codex))
 
         _ = try harness.modelA.retract(
             skills: [managed], platforms: [.codex], machineIDs: [machineB], context: harness.contextA
@@ -106,7 +106,7 @@ final class IntentEndToEndTests: XCTestCase {
         ))
 
         XCTAssertEqual(harness.platformVMB.refreshCounter, refreshBefore + 2)
-        XCTAssertFalse(harness.platformVMB.artifactExists(skill: targetSkill, platform: .codex))
+        XCTAssertFalse(try harness.platformVMB.artifactIsOwned(skill: targetSkill, platform: .codex))
     }
 
     func testManualDeploySurvivesEndToEnd() throws {

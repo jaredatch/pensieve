@@ -118,7 +118,7 @@ struct IntentReconciler: IntentReconcilerProtocol {
                   let platform = PlatformTarget(rawValue: pair.platformRaw) else { return true }
             return platform.usesSymlinks
                 ? platformVM.isDeployed(skill: skill, platform: platform)
-                : platformVM.artifactExists(skill: skill, platform: platform)
+                : (try? platformVM.cursorCompiler.hasOwnershipMark(skill: skill, projectPath: nil)) ?? false
         }
         deployUserWide(desired.subtracting(realized), state: state, context: context, aggregate: &aggregate)
         removeUserWide(current.subtracting(desired), state: state, context: context, aggregate: &aggregate)
@@ -176,7 +176,7 @@ struct IntentReconciler: IntentReconcilerProtocol {
                     deleteUserRows(matching: pair, state: state, context: context)
                 } else if let platform = PlatformTarget(rawValue: pair.platformRaw) {
                     do {
-                        if try platformVM.artifactIsOwned(skill: skill, platform: platform) {
+                        if try platformVM.prepareArtifactRemoval(skill: skill, platform: platform) {
                             platforms.append(platform)
                         } else {
                             deleteUserRows(matching: pair, state: state, context: context)
@@ -184,7 +184,7 @@ struct IntentReconciler: IntentReconcilerProtocol {
                     } catch {
                         aggregate.outcomes.append(BatchPairOutcome(
                             skillID: skill.id, skillName: skill.name, platform: platform, target: .userWide,
-                            error: error.localizedDescription
+                            error: BatchPairOutcome.failureMessage(error, target: .userWide)
                         ))
                     }
                 } else {

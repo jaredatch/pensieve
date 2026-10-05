@@ -35,7 +35,10 @@ extension CursorOwnershipTests {
                             let target: DeployTarget = projectPath == nil ? .userWide : .project(project)
                             let path = artifactPath(platform, project: projectPath)
                             try plant(owned: owned, legacy: legacy, platform: platform, path: path, project: projectPath)
-                            XCTAssertEqual(vm.artifactExists(skill: skill, platform: platform, target: target), owned)
+                            if route == "skill", platform == .cursor, projectPath != nil, owned {
+                                try reviewRecord(harness.state, path: path, target: target)
+                            }
+                            XCTAssertEqual(try vm.artifactIsOwned(skill: skill, platform: platform, target: target), owned)
                             try removeByRoute(route, harness: harness, platform: platform, project: project, target: target)
                             try verifyRemoval(owned: owned, platform: platform, path: path)
                             cases += 1
@@ -193,13 +196,13 @@ extension CursorOwnershipTests {
         XCTAssertTrue(try state.read().records.isEmpty)
     }
 
-    private func artifactPath(_ platform: PlatformTarget, project: String?) -> String {
+    func artifactPath(_ platform: PlatformTarget, project: String?) -> String {
         platform.usesSymlinks
             ? DeployPaths.linkPath(directoryName: skill.directoryName, platform: platform, projectPath: project)
             : compiler.outputPath(skill: skill, projectPath: project)
     }
 
-    private func plant(owned: Bool, legacy: Bool, platform: PlatformTarget, path: String, project: String?) throws {
+    func plant(owned: Bool, legacy: Bool, platform: PlatformTarget, path: String, project: String?) throws {
         if try mapped.entryExistsWithoutFollowingLinks(at: path) { try mapped.deleteFile(at: path) }
         if platform.usesSymlinks {
             let target = owned

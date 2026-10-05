@@ -90,6 +90,9 @@ final class DeployRecordingLinkService: LinkServiceProtocol {
         if throwOnUnlink.contains(platform) || throwOnUnlinkPaths.contains(path) { throw DeployStubFailure() }
         try fileService.deleteFile(at: path)
     }
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        fileService.symlinks.contains(linkPath(skill: skill, platform: platform, projectPath: projectPath))
+    }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
         fileService.symlinks.contains(linkPath(skill: skill, platform: platform, projectPath: projectPath))
@@ -127,6 +130,12 @@ final class DeployRecordingCursorCompiler: CursorCompilerProtocol {
         removeCalls.append(DeployRecordedCursorCall(directoryName: skill.directoryName, projectPath: projectPath))
         if throwOnRemove { throw DeployStubFailure() }
         try fileService.deleteFile(at: outputPath(skill: skill, projectPath: projectPath))
+    }
+    func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {
+        fileService.files.contains(outputPath(skill: skill, projectPath: projectPath))
+    }
+    func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool {
+        fileService.files.contains(outputPath(skill: skill, projectPath: projectPath))
     }
 
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }

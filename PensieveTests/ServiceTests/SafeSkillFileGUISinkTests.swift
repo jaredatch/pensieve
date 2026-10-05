@@ -201,6 +201,8 @@ private final class SpyLinkService: LinkServiceProtocol {
         )
     }
     func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
+
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
     func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
         linkRoot + "/" + skill.directoryName
@@ -214,6 +216,9 @@ private final class SpyLinkService: LinkServiceProtocol {
 private struct NoopCursorCompiler: CursorCompilerProtocol {
     func compile(skill: Skill, projectPath: String?) throws {}
     func remove(skill: Skill, projectPath: String?) throws {}
+    func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { false }
+    func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { false }
+
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
     func outputPath(skill: Skill, projectPath: String?) -> String { "/tmp/cursor/" + skill.directoryName + ".mdc" }
 }

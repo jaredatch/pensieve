@@ -38,6 +38,9 @@ private final class RecordingLinkService: LinkServiceProtocol {
         if throwOnUnlink.contains(platform) { throw StubFailure() }
         linked.remove(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
     }
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        linked.contains(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
+    }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
         linked.contains(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))

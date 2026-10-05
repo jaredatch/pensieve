@@ -44,7 +44,8 @@ struct ProjectReconcilePolicy {
             if platform.usesSymlinks {
                 return platformVM.isDeployed(skill: skill, platform: platform, target: .project(project))
             }
-            return platformVM.artifactExists(skill: skill, platform: platform, target: .project(project))
+            // Unknown ownership stays pending and is reported by the throwing deploy path.
+            return (try? platformVM.cursorCompiler.hasOwnershipMark(skill: skill, projectPath: project.path)) ?? false
         }
         let deploy = desired.subtracting(realized)
         var unavailable: Set<Triple> = []

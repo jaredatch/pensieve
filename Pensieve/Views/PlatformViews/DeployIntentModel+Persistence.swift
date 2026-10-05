@@ -99,20 +99,30 @@ extension DeployIntentModel {
                     $0.skillID == skill.id && $0.platform == platform
                         && $0.target == expectedTarget
                 }
-                let isDeployed = platformVM.isDeployed(skill: skill, platform: platform, target: target)
-                let artifactExists = platformVM.artifactExists(skill: skill, platform: platform, target: target)
                 if let targetFailure {
                     result.outcomes.append(targetFailure)
-                } else if (selected && isDeployed) || (!selected && !artifactExists) {
-                    if let targetSuccess { result.outcomes.append(targetSuccess) }
+                } else if let targetSuccess {
+                    result.outcomes.append(targetSuccess)
                 } else if selected {
-                    result.append(platformVM.deployBatch(
-                        skills: [skill], platforms: [platform], target: target, context: context
-                    ))
+                    if !platformVM.isDeployed(skill: skill, platform: platform, target: target) {
+                        result.append(platformVM.deployBatch(
+                            skills: [skill], platforms: [platform], target: target, context: context
+                        ))
+                    }
                 } else {
-                    result.append(platformVM.removeBatch(
-                        skills: [skill], platforms: [platform], target: target
-                    ))
+                    do {
+                        if try platformVM.prepareArtifactRemoval(skill: skill, platform: platform, target: target) {
+                            result.append(platformVM.removeBatch(
+                                skills: [skill], platforms: [platform], target: target
+                            ))
+                        }
+                    } catch {
+                        result.outcomes.append(BatchPairOutcome(
+                            skillID: skill.id, skillName: skill.name, platform: platform, target: expectedTarget,
+                            error: BatchPairOutcome.failureMessage(error, target: target),
+                            projectFolderError: error as? ProjectFolderError
+                        ))
+                    }
                 }
             }
         }

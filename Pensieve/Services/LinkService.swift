@@ -26,12 +26,6 @@ protocol LinkServiceProtocol {
     func validateAll(skills: [Skill]) -> [BrokenLink]
 }
 
-extension LinkServiceProtocol {
-    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
-        isLinked(skill: skill, platform: platform, projectPath: projectPath)
-    }
-}
-
 // MARK: - Implementation
 
 final class LinkService: LinkServiceProtocol {
@@ -72,12 +66,8 @@ final class LinkService: LinkServiceProtocol {
         let occupant = try ownership.link(
             at: link, skillsDirectory: Constants.pensieveSkillsDir, linksFile: platform == .codex && projectPath != nil
         )
-        if occupant == .foreign {
-            if try fileService.entryTypeWithoutFollowingLinks(at: link) == .symlink {
-                throw ArtifactOwnershipError.occupiedPath(link)
-            }
-            throw LinkError.occupiedByRealPath(link)
-        }
+        if occupant == .foreignLink { throw ArtifactOwnershipError.occupiedPath(link) }
+        if occupant == .foreign { throw LinkError.occupiedByRealPath(link) }
 
         do {
             if let projectDirectory {

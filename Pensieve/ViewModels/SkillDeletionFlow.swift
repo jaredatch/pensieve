@@ -23,12 +23,12 @@ enum SkillDeletionFlow {
                     .map { "\($0.platform.displayName): \($0.error ?? "unknown error")" }
                     .joined(separator: "; ")
                 messages.insert(
-                    "Couldn't finish cleaning up “\(skill.name)” on \(cleanup.failures.count) agent link(s) — "
+                    "Couldn't finish cleaning up “\(skill.name)” on \(cleanup.failures.count) agent artifact(s) — "
                         + "\(details).",
                     at: 0
                 )
             }
-            messages.append("Links already removed stay removed; the skill was kept so you can retry.")
+            messages.append("Agent links and rules already removed stay removed; the skill was kept so you can retry.")
             library.deletionNotice = .failed(messages.joined(separator: " "))
             return false
         }
@@ -39,7 +39,7 @@ enum SkillDeletionFlow {
         } catch {
             context.rollback()
             library.deletionNotice = .failed(
-                "Unlinked “\(skill.name)” from your agents, but couldn't retire its deploy records: "
+                "Removed agent links and rules for “\(skill.name)”, but couldn't retire its deploy records: "
                     + "\(error.localizedDescription). The skill was kept so you can retry.")
             return false
         }

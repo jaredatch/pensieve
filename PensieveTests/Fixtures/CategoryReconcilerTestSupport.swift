@@ -53,6 +53,9 @@ final class CategoryFixtureRecordingLinkService: LinkServiceProtocol {
         if throwOnUnlink.contains(platform) { throw CategoryFixtureStubFailure() }
         fileService?.links.remove(linkPath(skill: skill, platform: platform, projectPath: projectPath))
     }
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        fileService?.isSymlink(at: linkPath(skill: skill, platform: platform, projectPath: projectPath)) == true
+    }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
         fileService?.isSymlink(at: linkPath(skill: skill, platform: platform, projectPath: projectPath)) == true
@@ -86,6 +89,12 @@ final class CategoryFixtureRecordingCursorCompiler: CursorCompilerProtocol {
         removeCalls.append(CategoryFixtureRecordedCursorCall(directoryName: skill.directoryName, projectPath: projectPath))
         if throwOnRemove { throw CategoryFixtureStubFailure() }
         fileService?.files.remove(outputPath(skill: skill, projectPath: projectPath))
+    }
+    func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {
+        fileService?.files.contains(outputPath(skill: skill, projectPath: projectPath)) == true
+    }
+    func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool {
+        fileService?.files.contains(outputPath(skill: skill, projectPath: projectPath)) == true
     }
 
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
