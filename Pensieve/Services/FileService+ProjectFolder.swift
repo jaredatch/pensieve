@@ -11,6 +11,7 @@ extension FileServiceProtocol {
     }
 
     func requireProjectDirectory(at path: String) throws {
+        guard path.hasPrefix("/") else { throw ProjectFolderError.missing(path) }
         let exists: Bool
         do {
             exists = try directoryExistsFollowingLinks(at: path)
@@ -60,7 +61,13 @@ extension FileServiceProtocol {
 }
 
 extension FileService {
+    private static let directoryProbes = ProjectDirectoryProbes()
+
     func directoryExistsFollowingLinks(at path: String) throws -> Bool {
+        try Self.directoryProbes.check(at: path, probe: directoryProbe)
+    }
+
+    static func probeDirectory(_ path: String) throws -> Bool {
         var status = stat()
         guard stat(path, &status) == 0 else {
             let code = errno
@@ -122,5 +129,48 @@ enum SymlinkCreationError: LocalizedError {
         case .occupiedPath(let path):
             "Something already exists at \(path)."
         }
+    }
+}
+
+/// The synchronous FileService caller waits at most two seconds. The lock protects the flight
+/// map and each answer; a timed-out worker stays registered until its raw probe actually returns.
+private final class ProjectDirectoryProbes: @unchecked Sendable {
+    private final class Flight {
+        let ready = DispatchSemaphore(value: 0)
+        var answer: Result<Bool, Error>?
+    }
+    private let lock = NSLock()
+    private var flights: [String: Flight] = [:]
+
+    func check(at path: String, probe: @escaping (String) throws -> Bool) throws -> Bool {
+        let key = path.split(separator: "/").joined(separator: "/")
+        let flight = Flight()
+        lock.lock()
+        guard flights[key] == nil else {
+            lock.unlock()
+            throw timeout(at: path, reason: "An earlier folder check is still running.")
+        }
+        flights[key] = flight
+        lock.unlock()
+        DispatchQueue.global(qos: .utility).async {
+            let answer = Result { try probe(path) }
+            self.lock.withLock {
+                flight.answer = answer
+                self.flights[key] = nil
+            }
+            flight.ready.signal()
+        }
+        guard flight.ready.wait(timeout: .now() + 2) == .success else {
+            throw timeout(at: path, reason: "Folder check timed out after 2 seconds.")
+        }
+        return try lock.withLock {
+            guard let answer = flight.answer else { throw CocoaError(.fileReadUnknown) }
+            return try answer.get()
+        }
+    }
+
+    private func timeout(at path: String, reason: String) -> NSError {
+        NSError(domain: NSPOSIXErrorDomain, code: Int(ETIMEDOUT),
+                userInfo: [NSFilePathErrorKey: path, NSLocalizedDescriptionKey: reason])
     }
 }

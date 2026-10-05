@@ -63,10 +63,16 @@ struct AddProjectSheet: View {
         .padding(Spacing.xl)
         .frame(width: 450)
         .onAppear { nameFocused = true }
+        .onDisappear { model.cancelSubmission() }
     }
 
     private func submit() {
-        guard !didSubmit, let project = model.makeProject() else { return }
+        guard !didSubmit else { return }
+        model.submit(onCreated: registerAndDismiss)
+    }
+
+    private func registerAndDismiss(_ project: Project) {
+        guard !didSubmit else { return }
         didSubmit = true
         let created = registerProject(
             project,

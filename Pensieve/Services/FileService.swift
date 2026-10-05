@@ -196,6 +196,11 @@ extension FileServiceProtocol {
 
 final class FileService: FileServiceProtocol {
     private let fm = FileManager.default
+    let directoryProbe: (String) throws -> Bool
+
+    init(directoryProbe: @escaping (String) throws -> Bool = FileService.probeDirectory) {
+        self.directoryProbe = directoryProbe
+    }
 
     func readFile(at path: String) throws -> String {
         let url = URL(fileURLWithPath: path)

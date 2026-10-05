@@ -122,6 +122,49 @@ final class AddProjectSheetHostTests: XCTestCase {
         await TestWait.until(timeout: .seconds(3), failureMessage: "Completed preview permits Add") { created.count == 1 }
     }
 
+    func testReturnFromEitherFieldDuringDebounceRegistersOnceAndDismissesSheet() async throws {
+        for inPath in [false, true] {
+            let h = try ProjectFolderCallerHarness()
+            defer { h.cleanup() }
+            let delay = ProjectPreviewDelay()
+            defer { delay.advance() }
+            let model = AddProjectModel(fileService: h.mapped, previewDelay: { await delay.wait() })
+            model.name = "Queued"
+            model.path = h.otherProject.path
+            let presentation = QueuedProjectSheetPresentation()
+            var created: [Project] = []
+            let host = NSHostingView(rootView: QueuedProjectSheetHost(presentation: presentation,
+                sheet: AddProjectSheet(model: model,
+                    manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store",
+                    onCreated: { created.append($0) }).modelContainer(h.context.container)))
+            let window = mount(host)
+            defer { window.close() }
+            await TestWait.until(timeout: .seconds(3), failureMessage: "Native sheet presents") {
+                window.attachedSheet?.contentView != nil
+            }
+            let sheet = try XCTUnwrap(window.attachedSheet)
+            let content = try XCTUnwrap(sheet.contentView)
+            let value = inPath ? model.path : model.name
+            let field = try XCTUnwrap(textFields(in: content).first { $0.stringValue == value })
+            sheet.makeFirstResponder(field)
+            let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: sheet.windowNumber, context: nil, characters: "\r", charactersIgnoringModifiers: "\r",
+                isARepeat: false, keyCode: 36))
+            sheet.sendEvent(event)
+            XCTAssertTrue(created.isEmpty)
+            await TestWait.until(timeout: .seconds(1), failureMessage: "Injected debounce scheduled") { delay.scheduled == 1 }
+            delay.advance()
+            await TestWait.until(timeout: .seconds(3), failureMessage: "Return creates exactly one project") {
+                created.count == 1
+            }
+            await TestWait.until(timeout: .seconds(3), failureMessage: "Successful queued Return dismisses") {
+                !presentation.presented && window.attachedSheet == nil
+            }
+            XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 3)
+            XCTAssertEqual(created.count, 1)
+        }
+    }
+
     private func mount(_ host: NSView) -> NSWindow {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 450, height: 350),
                               styleMask: [.titled], backing: .buffered, defer: false)
@@ -177,5 +220,18 @@ final class AddProjectSheetHostTests: XCTestCase {
 
     private func textFields(in root: NSView) -> [NSTextField] {
         [root].compactMap { $0 as? NSTextField } + root.subviews.flatMap(textFields(in:))
+    }
+}
+
+@Observable
+private final class QueuedProjectSheetPresentation {
+    var presented = true
+}
+
+private struct QueuedProjectSheetHost<Content: View>: View {
+    @Bindable var presentation: QueuedProjectSheetPresentation
+    let sheet: Content
+    var body: some View {
+        Text("Projects").sheet(isPresented: $presentation.presented) { sheet }
     }
 }

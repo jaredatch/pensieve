@@ -13,7 +13,7 @@ final class AddProjectModelTests: XCTestCase {
         try h.files.writeFile(at: h.otherProject.path + "/.git/config",
                              content: "[remote \"origin\"]\nurl = https://github.com/owner/previous.git\n")
         try h.files.createDirectory(at: h.root + "/latest")
-        let model = AddProjectModel(fileService: h.mapped)
+        let model = AddProjectModel(fileService: h.mapped, previewDelay: {})
         model.name = "Project"
         model.path = h.otherProject.path
         await TestWait.until(timeout: .seconds(3), failureMessage: "Initial preview") { model.isValid }
@@ -50,15 +50,21 @@ final class AddProjectModelTests: XCTestCase {
         let h = try ProjectFolderCallerHarness()
         defer { h.cleanup() }
         let probes = ProjectPreviewProbeRecorder()
+        let delay = ProjectPreviewDelay()
+        defer { delay.advance() }
         h.mapped.beforeProjectProbe = { probes.record($0) }
-        let model = AddProjectModel(fileService: h.mapped)
+        let model = AddProjectModel(fileService: h.mapped, previewDelay: { await delay.wait() })
         model.name = "Project"
-        for suffix in ["p", "pr", "pro", "proj"] {
+        for (index, suffix) in ["p", "pr", "pro", "proj"].enumerated() {
             model.path = h.root + "/" + suffix
-            try await Task.sleep(for: .milliseconds(20))
+            await TestWait.until(timeout: .seconds(1), failureMessage: "Injected debounce scheduled") {
+                delay.scheduled == index + 1
+            }
         }
         model.path = h.otherProject.path
+        await TestWait.until(timeout: .seconds(1), failureMessage: "Final debounce scheduled") { delay.scheduled == 5 }
         XCTAssertEqual(probes.paths, [], "Typing starts no probe until a short pause")
+        delay.advance()
         await TestWait.until(timeout: .seconds(3), failureMessage: "Debounced preview") { model.isValid }
         XCTAssertEqual(probes.paths, [h.otherProject.path], "A burst starts only the latest path's probe")
     }
@@ -67,7 +73,7 @@ final class AddProjectModelTests: XCTestCase {
         let h = try ProjectFolderCallerHarness()
         defer { h.cleanup() }
         try h.files.createDirectory(at: h.project.path)
-        let model = AddProjectModel(fileService: h.mapped)
+        let model = AddProjectModel(fileService: h.mapped, previewDelay: {})
         model.name = "Project"
         let started = expectation(description: "Current probe started")
         let release = DispatchSemaphore(value: 0)
@@ -98,17 +104,27 @@ final class AddProjectModelTests: XCTestCase {
     func testTypingDoesNotWaitForDiskAndLatestPreviewWins() async throws {
         let h = try ProjectFolderCallerHarness()
         defer { h.cleanup() }
+        let started = expectation(description: "Old disk probe started")
+        let finished = expectation(description: "Old disk probe released")
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
         h.mapped.beforeProjectProbe = { path in
-            if path == h.project.path { Thread.sleep(forTimeInterval: 0.2) }
+            if path == h.project.path {
+                started.fulfill()
+                _ = release.wait(timeout: .now() + 3)
+                finished.fulfill()
+            }
         }
-        let model = AddProjectModel(fileService: h.mapped)
+        let model = AddProjectModel(fileService: h.mapped, previewDelay: {})
         model.name = "Project"
         let start = Date()
         model.path = h.project.path
         XCTAssertLessThan(Date().timeIntervalSince(start), 0.1, "Typing must not wait for a slow mount")
+        await fulfillment(of: [started], timeout: 3)
         model.path = h.otherProject.path
         await TestWait.until(timeout: .seconds(3), failureMessage: "Latest preview must be accepted") { model.isValid }
-        try await Task.sleep(for: .milliseconds(300))
+        release.signal()
+        await fulfillment(of: [finished], timeout: 3)
         XCTAssertTrue(model.isValid, "An old missing result must not replace the latest preview")
         XCTAssertEqual(model.identityMessage, "Marker will be created on Add")
     }
@@ -131,7 +147,7 @@ final class AddProjectModelTests: XCTestCase {
         try files.createSymlink(at: root + "/dangling", pointingTo: root + "/missing-target")
         try files.createSymlink(at: root + "/file-link", pointingTo: root + "/file")
         let context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
-        let model = AddProjectModel(fileService: files)
+        let model = AddProjectModel(fileService: files, previewDelay: {})
         model.name = "Project"
         let before = try files.listDirectory(at: root).sorted()
         for suffix in ["missing/parent/project", "file", "dangling", "file-link"] {
@@ -168,7 +184,7 @@ final class AddProjectModelTests: XCTestCase {
         try files.createSymlink(at: root + "/linked", pointingTo: root + "/directory")
         let mapped = LinkServiceCanonicalDirectoryFileService(wrapped: files, pathMappings: [], physicalSandbox: root)
         mapped.beforeProjectProbe = { _ in throw NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES)) }
-        let model = AddProjectModel(fileService: mapped)
+        let model = AddProjectModel(fileService: mapped, previewDelay: {})
         model.name = "Linked"
         model.path = root + "/linked"
         await TestWait.until(timeout: .seconds(3), failureMessage: "Lookup preview") { !model.isCheckingIdentity }
@@ -189,7 +205,7 @@ final class AddProjectModelTests: XCTestCase {
         let files = FileService()
         defer { try? files.deleteDirectory(at: root) }
         try files.createDirectory(at: root + "/project")
-        let model = AddProjectModel(fileService: files)
+        let model = AddProjectModel(fileService: files, previewDelay: {})
         model.name = "Deleted"
         model.path = root + "/project"
         await TestWait.until(timeout: .seconds(3), failureMessage: "Initial preview") { !model.isCheckingIdentity }

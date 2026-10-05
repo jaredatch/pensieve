@@ -43,6 +43,8 @@ final class LinkService: LinkServiceProtocol {
             throw LinkError.projectScopeUnsupported(platform)
         }
 
+        if let projectPath, !projectPath.hasPrefix("/") { throw ProjectFolderError.missing(projectPath) }
+
         // Path-component safety invariant, enforced at the deploy boundary before any symlink.
         try Self.validatePathComponent(skill.directoryName)
         // Hermes nests under a category path component; validate it too (PLAN-05 makes it user-influenced).

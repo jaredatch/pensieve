@@ -8,7 +8,7 @@ import SwiftData
 @MainActor
 struct ProjectFolderCallerHarness {
     let root: String
-    let files = FileService()
+    let files: FileService
     let mapped: LinkServiceCanonicalDirectoryFileService
     let context: ModelContext
     let platformVM: PlatformViewModel
@@ -19,7 +19,8 @@ struct ProjectFolderCallerHarness {
     let project: Project
     let otherProject: Project
 
-    init(installed: [PlatformTarget] = [.claudeCode, .grok, .codex, .cursor]) throws {
+    init(installed: [PlatformTarget] = [.claudeCode, .grok, .codex, .cursor], files: FileService = FileService()) throws {
+        self.files = files
         root = NSTemporaryDirectory() + "ProjectFolderCallers-\(UUID().uuidString)"
         let store = SkillStore(fileService: files, baseDir: root + "/store/skills")
         let slug = try store.createSkill(name: "Caller Skill", description: "Caller", body: "# Body")
