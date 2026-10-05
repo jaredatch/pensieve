@@ -11,7 +11,7 @@ final class SyncEngineTests: XCTestCase {
     var tempDir: String!; var lockPath: String { tempDir + "-sync.lock" }
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveSyncEngineTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveSyncEngineTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
     }
 

@@ -750,6 +750,8 @@ sys.exit(result.returncode)
         self.temp = tempfile.TemporaryDirectory(prefix="pensieve-release test-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        temporary = self.root / "tmp"
+        temporary.mkdir()
         (self.root / "script").mkdir()
         for name in ("release.sh", "release_recovery.sh", "package.sh", "build-number.sh", "release_state.py", "verify_update.swift", "minimum_system.py", "minimum_system_self_test.py"):
             if (ROOT / "script" / name).exists(): shutil.copy2(ROOT / "script" / name, self.root / "script" / name)
@@ -771,6 +773,7 @@ sys.exit(result.returncode)
                           appcast=feed("0.9.0"), cask=cask(), appcast_sha=SHA, cask_sha=SHA,
                           calls=[], writes=[], builds=0, signing_inputs=[], new_feed=feed(), signature=SIGNATURE)
         self.env = dict(os.environ, PATH=str(bin_dir) + ":/usr/bin:/bin:/usr/sbin:/sbin",
+                        TMPDIR=str(temporary) + "/",
                         RELEASE_TEST_STATE=str(self.state_path), GH_CMD="gh",
                         NOTARY_CMD="notary", STAPLER_CMD="stapler",
                         GENERATE_APPCAST_CMD=str(bin_dir / "generate"), VERIFY_UPDATE_CMD="verify",

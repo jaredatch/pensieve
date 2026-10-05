@@ -147,7 +147,7 @@ final class IntentReconcilerProjectTests: XCTestCase {
         let project = try harness.insertProject(
             name: "Launch Project", path: "/projects/launch", key: "launch-key"
         )
-        let root = NSTemporaryDirectory() + "PensieveLaunchProjectApply-" + UUID().uuidString
+        let root = TestTemporaryDirectory.path + "PensieveLaunchProjectApply-" + UUID().uuidString
         let fileService = FileService()
         defer { try? fileService.deleteDirectory(at: root) }
         let slug = "launch-apply"

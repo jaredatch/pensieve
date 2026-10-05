@@ -14,7 +14,7 @@ final class CanonicalSkillDirTests: XCTestCase {
     private let fileService = FileService()
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveCanonicalSkillDirTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveCanonicalSkillDirTests-\(UUID().uuidString)"
         baseDir = tempDir + "/skills"
         try FileManager.default.createDirectory(atPath: baseDir, withIntermediateDirectories: true)
     }

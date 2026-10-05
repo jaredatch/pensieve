@@ -8,7 +8,7 @@ final class CursorCompilerTests: XCTestCase {
     private var tempDir: String!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveCursorTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveCursorTests-\(UUID().uuidString)"
         let skillsDir = tempDir + "/skills"
         try FileManager.default.createDirectory(atPath: skillsDir, withIntermediateDirectories: true)
 

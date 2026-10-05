@@ -8,7 +8,7 @@ import XCTest
 final class SkillPreviewContextTests: XCTestCase {
     func testBundlePreviewUsesDocumentFolderAndLibraryFileServiceWithinSkillRoot() async throws {
         let files = PreviewImageFileSpy()
-        let base = files.files.realPath(at: NSTemporaryDirectory()) + "/PreviewContext-" + UUID().uuidString
+        let base = files.files.realPath(at: TestTemporaryDirectory.path) + "/PreviewContext-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: base) }
         let root = base + "/skill"
         try files.files.writeData(at: root + "/references/diagram.png", data: PreviewImageFixture.png())
@@ -28,7 +28,7 @@ final class SkillPreviewContextTests: XCTestCase {
 
     func testHistoryPreviewRefusesCurrentLocalImagesButLoadsEmbeddedData() async throws {
         let files = PreviewImageFileSpy()
-        let base = files.files.realPath(at: NSTemporaryDirectory()) + "/HistoryPreview-" + UUID().uuidString
+        let base = files.files.realPath(at: TestTemporaryDirectory.path) + "/HistoryPreview-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: base) }
         try files.files.writeData(at: base + "/skills/skill/diagram.png", data: PreviewImageFixture.png())
         let skill = Skill(name: "Skill", directoryName: "skill")
@@ -49,7 +49,7 @@ final class SkillPreviewContextTests: XCTestCase {
 
     func testWatcherEventReloadsMountedLocalImagesWithoutReselectingSkill() async throws {
         let files = PreviewImageFileSpy()
-        let base = files.files.realPath(at: NSTemporaryDirectory()) + "/ImageRefresh-" + UUID().uuidString
+        let base = files.files.realPath(at: TestTemporaryDirectory.path) + "/ImageRefresh-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: base) }
         let store = SkillStore(fileService: files, baseDir: base)
         let slug = try store.createSkill(name: "Skill", description: "D", body: "Body")

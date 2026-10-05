@@ -36,7 +36,7 @@ final class SkillDeletionFlowTests: XCTestCase {
         let watcher = RecordingWatcher()
         let counter = DeletionCounter()
         let stateFS = MemoryDeployFileService()
-        let stateRoot = NSTemporaryDirectory() + "PensieveDeletionState-\(UUID().uuidString)"
+        let stateRoot = TestTemporaryDirectory.path + "PensieveDeletionState-\(UUID().uuidString)"
         let state = DeployStateStore(fileService: stateFS, appSupportDir: stateRoot)
         let library = SkillLibraryViewModel(
             skillStore: store, fileService: stateFS,

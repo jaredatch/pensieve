@@ -9,7 +9,7 @@ final class IntentAssignmentMigrationTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("Fixtures/PreProjectIntent.store")
-        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+        let directory = URL(fileURLWithPath: TestTemporaryDirectory.path)
             .appendingPathComponent("PensieveProjectIntentMigration-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -30,7 +30,7 @@ final class IntentAssignmentMigrationTests: XCTestCase {
     }
 
     func testExistingStoreOpensUnderIntentAssignmentSchema() throws {
-        let directory = NSTemporaryDirectory() + "PensieveIntentAssignmentMigration-" + UUID().uuidString
+        let directory = TestTemporaryDirectory.path + "PensieveIntentAssignmentMigration-" + UUID().uuidString
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: directory) }
         let url = URL(fileURLWithPath: directory + "/default.store")

@@ -73,7 +73,7 @@ final class Batch: XCTestCase {
     private func makeDeployStateStore() -> DeployStateStore {
         DeployStateStore(
             fileService: FileService(),
-            appSupportDir: NSTemporaryDirectory() + "PensieveBatchTests-\(UUID().uuidString)"
+            appSupportDir: TestTemporaryDirectory.path + "PensieveBatchTests-\(UUID().uuidString)"
         )
     }
 

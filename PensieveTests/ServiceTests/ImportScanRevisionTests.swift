@@ -75,7 +75,7 @@ final class ImportScanRevisionTests: XCTestCase {
 
     func testDescriptorErrorsDecideEachLeafWithoutAdmissionProbes() throws {
         let spy = ImportBoundedReadSpy()
-        let root = NSTemporaryDirectory() + "ImportScanRevision-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "ImportScanRevision-\(UUID().uuidString)"
         defer { try? spy.files.deleteDirectory(at: root) }
         let directory = root + "/claude"
         let failures: [DescriptorFailure] = [
@@ -116,7 +116,7 @@ final class ImportScanRevisionTests: XCTestCase {
 
     func testDirectoryNamedSkillMarkdownStillScansChildSkills() throws {
         let spy = ImportBoundedReadSpy()
-        let root = NSTemporaryDirectory() + "ImportScanDirectory-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "ImportScanDirectory-\(UUID().uuidString)"
         defer { try? spy.files.deleteDirectory(at: root) }
         let folder = root + "/chosen"
         try spy.files.createDirectory(at: folder + "/SKILL.md")
@@ -133,9 +133,10 @@ final class ImportScanRevisionTests: XCTestCase {
 
     func testSocketLeafIsReportedAsSpecialWithoutReading() throws {
         let spy = ImportBoundedReadSpy()
-        let root = NSTemporaryDirectory() + "IS-\(UUID().uuidString.prefix(8))"
+        // Keep the UNIX socket path below sun_path's limit with the nested runner root.
+        let root = TestTemporaryDirectory.path + "IS-\(UUID().uuidString.prefix(6))"
         defer { try? spy.files.deleteDirectory(at: root) }
-        let path = root + "/cursor/socket.mdc"
+        let path = root + "/cursor/s.mdc"
         let good = root + "/cursor/good.mdc"
         try spy.files.writeFile(at: good, content: "Good rule")
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)

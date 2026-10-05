@@ -134,7 +134,7 @@ final class SkillDetailScrollLayoutTests: XCTestCase {
     }
 
     private func deploymentsTab() throws -> AnyView {
-        let base = NSTemporaryDirectory() + "SkillDetailScrollLayoutTests-\(UUID().uuidString)"
+        let base = TestTemporaryDirectory.path + "SkillDetailScrollLayoutTests-\(UUID().uuidString)"
         let fileService = DeployRecordingFileService()
         let platformVM = PlatformViewModel(
             fileService: fileService,
@@ -168,7 +168,7 @@ final class SkillDetailScrollLayoutTests: XCTestCase {
     }
 
     private func historyTabs() throws -> [(String, AnyView)] {
-        let base = NSTemporaryDirectory() + "SkillDetailScrollLayoutTests-\(UUID().uuidString)"
+        let base = TestTemporaryDirectory.path + "SkillDetailScrollLayoutTests-\(UUID().uuidString)"
         let skill = Skill(name: "Example", directoryName: "example")
         let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: FileService(), baseDir: base))
         let history = UpstreamHistoryViewModel(

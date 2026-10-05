@@ -4,7 +4,7 @@ import Foundation
 /// Stand-in subprocesses run only in this temporary tree. The trace and switch live outside the store,
 /// so byte snapshots include all store files (including `.git`) without counting test instrumentation.
 struct GitFailureFixture {
-    let base = NSTemporaryDirectory() + "PensieveGitFailure-" + UUID().uuidString
+    let base = TestTemporaryDirectory.path + "PensieveGitFailure-" + UUID().uuidString
     let files = FileService()
     var root: String { base + "/store" }
     var support: String { base + "/support" }

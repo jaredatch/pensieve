@@ -7,7 +7,7 @@ final class GrokDeployTests: XCTestCase {
 
     override func setUpWithError() throws {
         fileService = FileService()
-        tempDir = NSTemporaryDirectory() + "PensieveGrokDeployTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveGrokDeployTests-\(UUID().uuidString)"
         try fileService.createDirectory(at: tempDir)
     }
 

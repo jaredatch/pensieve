@@ -66,7 +66,7 @@ extension DeployStateStore {
     /// the file service — lands under a unique temporary root, never under the real Application Support.
     static var memoryBacked: DeployStateStore {
         DeployStateStore(fileService: MemoryDeployFileService(),
-                         appSupportDir: NSTemporaryDirectory() + "PensieveMemoryDeployState-" + UUID().uuidString)
+                         appSupportDir: TestTemporaryDirectory.path + "PensieveMemoryDeployState-" + UUID().uuidString)
     }
 }
 

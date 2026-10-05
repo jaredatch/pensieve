@@ -14,7 +14,7 @@ final class UpstreamHistoryServiceTests: XCTestCase {
     var fileService: FileService!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveUpstreamHistoryTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveUpstreamHistoryTests-\(UUID().uuidString)"
         scratchRoot = tempDir + "/scratch"
         localDirectory = tempDir + "/local"
         try FileManager.default.createDirectory(atPath: localDirectory, withIntermediateDirectories: true)

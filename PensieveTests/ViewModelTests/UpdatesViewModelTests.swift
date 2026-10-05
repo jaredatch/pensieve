@@ -11,7 +11,7 @@ final class UpdatesViewModelTests: XCTestCase {
 
     override func setUpWithError() throws {
         fileService = FileService()
-        tempDir = NSTemporaryDirectory() + "PensieveUpdatesViewModelTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveUpdatesViewModelTests-\(UUID().uuidString)"
         try fileService.createDirectory(at: tempDir)
         container = try ModelContainer(
             for: Skill.self, RepoUpdateCursor.self,

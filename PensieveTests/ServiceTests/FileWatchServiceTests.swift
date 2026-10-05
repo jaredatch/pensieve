@@ -6,7 +6,7 @@ final class FileWatchServiceTests: XCTestCase {
     private var tempRoot: String!
 
     override func setUpWithError() throws {
-        tempRoot = NSTemporaryDirectory() + "PensieveFileWatchTests-\(UUID().uuidString)"
+        tempRoot = TestTemporaryDirectory.path + "PensieveFileWatchTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempRoot, withIntermediateDirectories: true)
     }
 

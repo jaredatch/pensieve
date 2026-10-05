@@ -164,7 +164,7 @@ extension DeployIntentModelTests {
     }
 
     func testRemoteSwitchRefusesWhileSyncLockIsHeldBeforeMutation() throws {
-        let lockPath = NSTemporaryDirectory() + "PensieveRemoteSwitchLock-" + UUID().uuidString + ".lock"
+        let lockPath = TestTemporaryDirectory.path + "PensieveRemoteSwitchLock-" + UUID().uuidString + ".lock"
         let holds = RemoteRetractionStore()
         let harness = try makeHarness(lockPath: lockPath, remoteRetractions: holds)
         let skill = try insertSkill(context: harness.context)

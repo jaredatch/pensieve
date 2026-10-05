@@ -9,7 +9,7 @@ final class DeployStateBackfillTests: XCTestCase {
     private var paths: DeployStateBackfillPaths!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveDeployStateBackfillTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveDeployStateBackfillTests-\(UUID().uuidString)"
         fileService = FileService()
         store = DeployStateStore(fileService: fileService, appSupportDir: tempDir + "/app-support")
         let userSkillsRoots: [PlatformTarget: String] = [

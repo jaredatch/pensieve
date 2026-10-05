@@ -8,7 +8,7 @@ final class SkillPreservingWriteTests: XCTestCase {
     private var store: SkillStore!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensievePreservingWriteTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensievePreservingWriteTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         store = SkillStore(fileService: fileService, baseDir: tempDir)

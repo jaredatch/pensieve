@@ -13,7 +13,7 @@ final class SkillContentTabLayoutTests: XCTestCase {
         var snapshot = DetailContentSnapshot()
         snapshot.inventory.files = [SkillBundleInventory.File(relativePath: "SKILL.md", bytes: 10, tokens: 3),
                                     SkillBundleInventory.File(relativePath: long, bytes: 10, tokens: 3)]
-        let base = NSTemporaryDirectory() + "SkillContentTabLayoutTests-\(UUID().uuidString)"
+        let base = TestTemporaryDirectory.path + "SkillContentTabLayoutTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: FileService(), baseDir: base))
         let presentation = SkillContentPresentation.resolve(
             selectedFile: "SKILL.md", requestedMode: .rendered, inventory: snapshot.inventory
@@ -40,7 +40,7 @@ final class SkillContentTabLayoutTests: XCTestCase {
     }
 
     func testThePulldownWidensWhenTheListArrives() throws {
-        let base = NSTemporaryDirectory() + "SkillContentTabLayoutTests-\(UUID().uuidString)"
+        let base = TestTemporaryDirectory.path + "SkillContentTabLayoutTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: FileService(), baseDir: base))
         let skill = Skill(name: "Example", directoryName: "example")
         func tab(_ paths: [String]) -> AnyView {
@@ -100,7 +100,7 @@ final class SkillContentTabLayoutTests: XCTestCase {
         let skill = Skill(name: "Example", directoryName: "example")
         let fileService = DeployRecordingFileService()
         fileService.contents[Constants.pensieveSkillsDir + "/example/scripts/x.sh"] = "echo hi"
-        let base = NSTemporaryDirectory() + "SkillContentTabLayoutTests-\(UUID().uuidString)"
+        let base = TestTemporaryDirectory.path + "SkillContentTabLayoutTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(
             skillStore: SkillStore(fileService: fileService, baseDir: base),
             fileService: fileService

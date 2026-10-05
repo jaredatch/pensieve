@@ -10,7 +10,7 @@ final class GitServiceFastForwardTests: XCTestCase {
     private var git: GitService!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveGitServiceFastForwardTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveGitServiceFastForwardTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         git = GitService()
     }

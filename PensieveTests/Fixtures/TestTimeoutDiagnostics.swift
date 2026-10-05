@@ -35,7 +35,7 @@ final class TestTimeoutDiagnostics: NSObject, XCTestObservation {
     private let writeReport: (String, String) throws -> Void
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment,
-         fallbackDirectory: String = NSTemporaryDirectory() + "PensieveTestDiagnostics",
+         fallbackDirectory: String = TestTemporaryDirectory.path + "PensieveTestDiagnostics",
          output: ((String) -> Void)? = nil,
          writeReport: @escaping (String, String) throws -> Void = { try FileService().writeFile(at: $0, content: $1) }) {
         self.environment = environment

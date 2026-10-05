@@ -220,7 +220,7 @@ extension DeployIntentModelTests {
     }
 
     func testSwitchRefusesWhileSyncLockIsHeldBeforeChangingAnything() throws {
-        let lockPath = NSTemporaryDirectory() + "PensieveSwitchLock-" + UUID().uuidString + ".lock"
+        let lockPath = TestTemporaryDirectory.path + "PensieveSwitchLock-" + UUID().uuidString + ".lock"
         let harness = try makeHarness(lockPath: lockPath)
         let skill = try insertSkill(context: harness.context)
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))

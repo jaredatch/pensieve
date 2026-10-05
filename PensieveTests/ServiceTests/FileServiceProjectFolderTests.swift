@@ -7,7 +7,7 @@ final class FileServiceProjectFolderTests: XCTestCase {
     private var root = ""
 
     override func setUpWithError() throws {
-        root = NSTemporaryDirectory() + "FileServiceProjectFolderTests-\(UUID().uuidString)"
+        root = TestTemporaryDirectory.path + "FileServiceProjectFolderTests-\(UUID().uuidString)"
         try files.createDirectory(at: root)
     }
 

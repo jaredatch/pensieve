@@ -5,7 +5,9 @@ import XCTest
 final class PreviewContextRevisionTests: XCTestCase {
     func testExistingAndMissingRelativeImagesReachContainedReadUnderPrivateAliasedRoot() async throws {
         let files = PreviewImageFileSpy()
-        let root = files.files.realPath(at: NSTemporaryDirectory()) + "/AliasedImages-" + UUID().uuidString + "/skill"
+        // Route through macOS's /var alias explicitly, independent of the runner root's location.
+        let base = "/private/var/../.." + files.files.realPath(at: TestTemporaryDirectory.path)
+        let root = base + "/AliasedImages-" + UUID().uuidString + "/skill"
         defer { try? files.files.deleteDirectory(at: URL(fileURLWithPath: root).deletingLastPathComponent().path) }
         try files.files.writeData(at: root + "/existing.png", data: PreviewImageFixture.png())
         XCTAssertTrue(root.hasPrefix("/private/"), "Exercise macOS's aliased temporary root")
@@ -30,7 +32,7 @@ final class PreviewContextRevisionTests: XCTestCase {
 
     func testPreviewRevisionIgnoresOtherSkillsAndSyncButTracksItsOwnFolder() throws {
         let files = FileService()
-        let base = NSTemporaryDirectory() + "ScopedImages-" + UUID().uuidString
+        let base = TestTemporaryDirectory.path + "ScopedImages-" + UUID().uuidString
         defer { try? files.deleteDirectory(at: base) }
         let store = SkillStore(fileService: files, baseDir: base)
         let slug = try store.createSkill(name: "Skill", description: "D", body: "Body")

@@ -9,7 +9,7 @@ final class SafeSkillFileGUISinkTests: XCTestCase {
     private var fileService: FileService!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveSafeSkillFileGUISinkTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveSafeSkillFileGUISinkTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
     }

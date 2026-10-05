@@ -27,7 +27,7 @@ class TestLifecycleTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         scripts = self.root / "script"
         scripts.mkdir()
-        for name in ("test.sh", "test_diagnostics.py", "test_runs.py"):
+        for name in ("test.sh", "test_diagnostics.py", "test_runs.py", "test_temp_cleanup.py"):
             source = SCRIPTS / name
             if source.exists():
                 shutil.copy2(source, scripts / name)
@@ -35,12 +35,19 @@ class TestLifecycleTests(unittest.TestCase):
         self.bin.mkdir()
         self.stub("xcodegen", "#!/bin/sh\nexit 0\n")
         self.stub("xcrun", '#!/bin/sh\necho \'{"totalTestCount":1,"testFailures":[]}\'\n')
+        self.stub("getconf", '#!/bin/sh\nprintf "%s\\n" "$TEST_LIFECYCLE_SYSTEM_TEMP"\n')
         self.stub("xcodebuild", """#!/usr/bin/env python3
 import json, os, pathlib, sys, time, uuid
 bundle = pathlib.Path(sys.argv[sys.argv.index('-resultBundlePath') + 1])
 bundle.mkdir()
 (bundle / 'marker').write_text('preserved evidence')
-pathlib.Path(os.environ['TEST_LIFECYCLE_READY']).write_text(json.dumps({'pid': os.getpid(), 'directory': str(bundle.parent)}))
+root = os.environ.get('TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT')
+exists = bool(root and pathlib.Path(root).is_dir())
+if exists:
+    (pathlib.Path(root) / 'leftover-sync.lock').touch()
+pathlib.Path(os.environ['TEST_LIFECYCLE_READY']).write_text(json.dumps({
+    'pid': os.getpid(), 'directory': str(bundle.parent), 'fixture_root': root, 'fixture_root_exists': exists,
+    'git_ceiling': os.environ.get('TEST_RUNNER_GIT_CEILING_DIRECTORIES')}))
 if os.environ.get('TEST_LIFECYCLE_MODE') == 'cascade':
     directory = pathlib.Path(os.environ['TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR'])
     directory.mkdir(parents=True, exist_ok=True)
@@ -68,10 +75,14 @@ if os.environ.get('TEST_LIFECYCLE_MODE') == 'diagnostics':
 if os.environ.get('TEST_LIFECYCLE_MODE') == 'hang':
     while True:
         time.sleep(0.1)
-sys.exit(65)
+sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
 """)
         self.env = dict(os.environ, PATH=str(self.bin) + ":" + os.environ["PATH"], XP_TEST_LOCK_HELD="1")
         self.env.pop("TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR", None)
+        self.env.pop("TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT", None)
+        self.system_temp = self.root / "system-temp"
+        self.system_temp.mkdir()
+        self.env["TEST_LIFECYCLE_SYSTEM_TEMP"] = str(self.system_temp)
         self.runs = self.root / "DerivedData/TestRuns"
         self.children = []
         self.addCleanup(self.stop_children)
@@ -137,6 +148,44 @@ sys.exit(65)
         self.assertEqual((bundles[0] / "marker").read_text(), "preserved evidence")
         self.assertEqual(list(self.runs.iterdir()), [], "failed run left an empty TestRuns directory")
 
+    def test_pass_creates_forwards_and_removes_fixture_root(self):
+        roots = []
+        for index in range(2):
+            process, ready = self.launch(mode="pass", label=f"pass-{index}")
+            output = process.communicate(timeout=10)[0].decode()
+            self.assertEqual(process.returncode, 0, output)
+            self.assertIn("PENSIEVE_TEST_COUNT=1", output)
+            observed = json.loads(ready.read_text())
+            self.assertTrue(observed["fixture_root_exists"], "builder did not receive an existing fixture root")
+            root = Path(observed["fixture_root"])
+            self.assertEqual(observed["git_ceiling"], str(root), "Git discovery can escape into the checkout")
+            self.assertEqual(root.parent, Path(observed["directory"]))
+            self.assertFalse(root.exists(), "passing run kept its fixtures and sibling lock files")
+            self.assertEqual(list(self.runs.iterdir()), [])
+            roots.append(root)
+        self.assertNotEqual(*roots, "two runs reused a fixture root")
+
+    def test_sweep_removes_only_old_empty_uppercase_uuid_directories(self):
+        old_empty, nonempty, young = [self.system_temp / str(uuid.UUID(int=index)).upper() for index in (10, 11, 12)]
+        unrelated = self.system_temp / "ordinary-folder"
+        lowercase = self.system_temp / "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        target = self.root / "outside-sweep"
+        target.mkdir()
+        linked = self.system_temp / str(uuid.UUID(int=13)).upper()
+        linked.symlink_to(target, target_is_directory=True)
+        regular = self.system_temp / str(uuid.UUID(int=14)).upper()
+        regular.touch()
+        for path in (old_empty, nonempty, young, unrelated, lowercase):
+            path.mkdir()
+        (nonempty / "marker").write_text("keep data")
+        for path in (old_empty, nonempty, unrelated, lowercase, regular):
+            os.utime(path, (1, 1))
+        self.failed_run()
+        self.assertFalse(old_empty.exists())
+        self.assertEqual(set(self.system_temp.iterdir()), {nonempty, young, unrelated, lowercase, linked, regular})
+        self.assertEqual((nonempty / "marker").read_text(), "keep data")
+        self.assertTrue(target.is_dir())
+
     def abandoned_runs(self):
         self.runs.mkdir(parents=True, exist_ok=True)
         paths = []
@@ -144,6 +193,8 @@ sys.exit(65)
             path = self.runs / f"run.abandoned-{index}"
             (path / "run.xcresult").mkdir(parents=True)
             (path / "run.xcresult/marker").write_text("interrupted evidence")
+            (path / "tmp").mkdir()
+            (path / "tmp" / "leftover-sync.lock").touch()
             os.utime(path, (100 + index, 100 + index))
             paths.append(path)
         return paths
@@ -176,6 +227,8 @@ sys.exit(65)
         child = self.wait_ready(ready)
         self.relay_pid(process.pid)
         active = Path(child["directory"])
+        fixture_root = Path(child["fixture_root"])
+        self.assertTrue((fixture_root / "leftover-sync.lock").exists())
         process.kill()
         process.wait(timeout=3)
         held = subprocess.run(["/usr/bin/lockf", "-k", "-t", "0", str(active / ".active.lock"),
@@ -185,10 +238,12 @@ sys.exit(65)
         abandoned = self.abandoned_runs()
         self.failed_run(label="during-live-builder")
         self.assertEqual(set(self.runs.iterdir()), {active, *abandoned[-5:]})
+        self.assertTrue(fixture_root.exists(), "pruning deleted a live builder's fixtures")
         os.kill(child["pid"], signal.SIGTERM)
         process.communicate(timeout=3)
         self.failed_run(label="after-builder-exits")
         self.assertEqual(set(self.runs.iterdir()), set(abandoned[-5:]))
+        self.assertFalse(fixture_root.exists(), "interrupted fixtures escaped TestRuns pruning")
 
     def test_legacy_live_run_without_lock_is_preserved(self):
         abandoned = self.abandoned_runs()

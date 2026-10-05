@@ -24,7 +24,7 @@ final class DeployReconcilerCursorTests: XCTestCase {
     }
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveDeployReconcilerCursorTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveDeployReconcilerCursorTests-\(UUID().uuidString)"
         storeSkillsDir = tempDir + "/store/skills"
         cursorRulesDir = tempDir + "/cursor/rules"
         deployStateStore = DeployStateStore(fileService: fileService, appSupportDir: tempDir + "/app-support")

@@ -11,7 +11,7 @@ class UpstreamHistoryCacheTestCase: XCTestCase {
     let fileService = FileService()
 
     override func setUpWithError() throws {
-        tempRoot = NSTemporaryDirectory() + "PensieveHistoryCacheTests-" + UUID().uuidString
+        tempRoot = TestTemporaryDirectory.path + "PensieveHistoryCacheTests-" + UUID().uuidString
         appSupport = tempRoot + "/app-support"
         storeRoot = tempRoot + "/store"
         scratchRoot = appSupport + "/upstream-history-scratch"

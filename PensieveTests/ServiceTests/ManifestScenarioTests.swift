@@ -7,7 +7,7 @@ final class ManifestScenarioTests: XCTestCase {
     private var service: ManifestService!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveManifestScenarios-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveManifestScenarios-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         service = ManifestService(fileService: fileService)

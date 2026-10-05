@@ -40,7 +40,7 @@ final class SkillStoreTests: XCTestCase {
     }
 
     private func tempRoot() throws -> String {
-        let root = NSTemporaryDirectory() + "SkillStoreDelete-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "SkillStoreDelete-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(atPath: root) }
         return root
@@ -67,7 +67,7 @@ final class SkillStoreTests: XCTestCase {
 
     func testSymlinkedSlugDirRejectedForWriteAndReadWithoutTouchingTarget() throws {
         let fileService = FileService()
-        let tempDir = NSTemporaryDirectory() + "PensieveSkillStoreTests-\(UUID().uuidString)"
+        let tempDir = TestTemporaryDirectory.path + "PensieveSkillStoreTests-\(UUID().uuidString)"
         let baseDir = tempDir + "/skills"
         let outside = tempDir + "/outside"
         try FileManager.default.createDirectory(atPath: baseDir, withIntermediateDirectories: true)
@@ -104,7 +104,7 @@ final class SkillStoreTests: XCTestCase {
 
     func testRealSlugDirRoundTripsThroughGuard() throws {
         let fileService = FileService()
-        let tempDir = NSTemporaryDirectory() + "PensieveSkillStoreTests-\(UUID().uuidString)"
+        let tempDir = TestTemporaryDirectory.path + "PensieveSkillStoreTests-\(UUID().uuidString)"
         let baseDir = tempDir + "/skills"
         try FileManager.default.createDirectory(atPath: baseDir + "/ok", withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: tempDir) }

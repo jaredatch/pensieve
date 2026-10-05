@@ -8,7 +8,7 @@ final class TestTimeoutDiagnosticsTests: XCTestCase {
     private var directory = ""
 
     override func setUpWithError() throws {
-        directory = NSTemporaryDirectory() + "timeout-diagnostics-" + UUID().uuidString
+        directory = TestTemporaryDirectory.path + "timeout-diagnostics-" + UUID().uuidString
         try files.createDirectory(at: directory)
     }
 

@@ -37,7 +37,7 @@ enum TestThreadSample {
         executable: String, timeout: TimeInterval, beforeDeadline: (pid_t, String) -> Void
     ) -> String {
         let files = FileService()
-        let directory = NSTemporaryDirectory() + "PensieveThreadSample-" + UUID().uuidString
+        let directory = TestTemporaryDirectory.path + "PensieveThreadSample-" + UUID().uuidString
         do { try files.createDirectory(at: directory) } catch { return "Sampler directory failed: \(error)" }
         defer { try? files.deleteDirectory(at: directory) }
         let path = directory + "/threads.txt"

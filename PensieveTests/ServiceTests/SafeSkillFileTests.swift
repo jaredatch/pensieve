@@ -12,7 +12,7 @@ final class SafeSkillFileTests: XCTestCase {
     private let fileService = FileService()
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveSafeSkillFileTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveSafeSkillFileTests-\(UUID().uuidString)"
         baseDir = tempDir + "/skills"
         try FileManager.default.createDirectory(atPath: baseDir, withIntermediateDirectories: true)
     }

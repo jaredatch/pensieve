@@ -4,7 +4,7 @@ import XCTest
 
 extension UpdateCheckServiceTests {
     func testRemoteHeadPrefersBranchThenPeeledThenPlainTag() throws {
-        let root = NSTemporaryDirectory() + "PensieveRemoteHeadTests-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "PensieveRemoteHeadTests-\(UUID().uuidString)"
         defer { try? FileManager.default.removeItem(atPath: root) }
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
         try runGit(["init", "--initial-branch=main", root])

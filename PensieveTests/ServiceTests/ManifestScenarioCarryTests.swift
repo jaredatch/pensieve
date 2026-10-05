@@ -11,7 +11,7 @@ final class ManifestScenarioCarryTests: XCTestCase {
     }
 
     override func setUpWithError() throws {
-        root = NSTemporaryDirectory() + "ManifestScenarioCarry-" + UUID().uuidString
+        root = TestTemporaryDirectory.path + "ManifestScenarioCarry-" + UUID().uuidString
         try files.createDirectory(at: root)
         try manifest.write(empty, toRoot: root)
     }

@@ -127,7 +127,7 @@ final class ThirdPartyNoticesTests: XCTestCase {
     }
 
     func withFixture(_ operation: (String) throws -> Void) throws {
-        let root = NSTemporaryDirectory() + "notices-" + UUID().uuidString
+        let root = TestTemporaryDirectory.path + "notices-" + UUID().uuidString
         try fileService.createDirectory(at: root)
         defer { try? fileService.deleteDirectory(at: root) }
         try operation(root)

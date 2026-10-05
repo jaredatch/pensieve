@@ -9,7 +9,7 @@ final class ManifestProjectsRetiredTests: XCTestCase {
     private let fileService = FileService()
 
     override func setUpWithError() throws {
-        tempRoot = NSTemporaryDirectory() + "PensieveProjectsRetired-" + UUID().uuidString
+        tempRoot = TestTemporaryDirectory.path + "PensieveProjectsRetired-" + UUID().uuidString
         try fileService.createDirectory(at: tempRoot)
     }
 

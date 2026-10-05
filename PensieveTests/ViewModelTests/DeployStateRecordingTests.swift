@@ -56,7 +56,7 @@ final class DeployStateRecordingTests: XCTestCase {
     private var store: DeployStateStore!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveDeployStateRecordingTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveDeployStateRecordingTests-\(UUID().uuidString)"
         fileService = FileService()
         store = DeployStateStore(fileService: fileService, appSupportDir: tempDir + "/app-support")
     }

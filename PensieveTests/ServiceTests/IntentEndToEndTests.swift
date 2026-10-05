@@ -23,7 +23,7 @@ final class IntentEndToEndTests: XCTestCase {
     private var tempDir = ""
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveIntentEndToEnd-" + UUID().uuidString
+        tempDir = TestTemporaryDirectory.path + "PensieveIntentEndToEnd-" + UUID().uuidString
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
     }
 

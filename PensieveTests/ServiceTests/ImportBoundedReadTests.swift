@@ -8,7 +8,7 @@ final class ImportBoundedReadTests: XCTestCase {
     private var spy: ImportBoundedReadSpy!
 
     override func setUpWithError() throws {
-        root = NSTemporaryDirectory() + "ImportBoundedReadTests-\(UUID().uuidString)"
+        root = TestTemporaryDirectory.path + "ImportBoundedReadTests-\(UUID().uuidString)"
         spy = ImportBoundedReadSpy()
         try spy.files.createDirectory(at: root)
         // Keep the fixture's store spelling physical when macOS returns a /var temp alias.

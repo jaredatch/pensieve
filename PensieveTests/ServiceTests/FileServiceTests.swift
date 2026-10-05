@@ -7,7 +7,7 @@ final class FileServiceTests: XCTestCase {
     private var tempDir: String!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveFileServiceTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveFileServiceTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
     }

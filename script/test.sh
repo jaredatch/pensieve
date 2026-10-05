@@ -109,6 +109,11 @@ if ! python3 "$REPO/script/test_diagnostics.py" --prune "$TEST_RUNNER_PENSIEVE_T
   echo "test.sh: warning: timeout diagnostics pruning failed; continuing the test run" >&2
 fi
 rdir="$(mktemp -d "$DERIVED_DATA/TestRuns/run.XXXXXX")"
+# Foundation ignores TMPDIR on macOS. The fixture helper reads this forwarded variable instead.
+export TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT="$rdir/tmp"
+mkdir "$TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT"
+# A missing or damaged fixture repo must not discover this checkout above TestRuns.
+export TEST_RUNNER_GIT_CEILING_DIRECTORIES="$TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT"
 # Xcode buffers parallel hosts' stdout. Relay completed reports while tests are still running.
 python3 -u "$REPO/script/test_diagnostics.py" "$TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR" "$$" --ready "$rdir/.diagnostics-ready" &
 relay_pid=$!
@@ -146,6 +151,12 @@ count=""
 if [ -d "$bundle" ]; then
   count="$(xcrun xcresulttool get test-results summary --path "$bundle" --compact | jq -r '.totalTestCount // empty')" || count=""
 fi
+# Apple tools leave empty UUID directories outside TMPDIR. This shallow sweep is bounded and best-effort.
+if system_temp="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" && [ -d "$system_temp" ]; then
+  python3 "$REPO/script/test_temp_cleanup.py" "$system_temp" >/dev/null 2>&1 || true
+fi
+# Completed runs need no fixture leftovers. Interrupted runs keep theirs under TestRuns' existing pruning.
+rm -rf "$TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT"
 unread=0
 case "$count" in
   ''|*[!0-9]*)

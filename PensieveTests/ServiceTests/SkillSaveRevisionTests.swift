@@ -6,7 +6,7 @@ import XCTest
 final class SkillSaveRevisionTests: XCTestCase {
     func testUnchangedDescriptionSaveLeavesModelContextClean() throws {
         let files = FileService()
-        let root = NSTemporaryDirectory() + "DescriptionGuard-" + UUID().uuidString
+        let root = TestTemporaryDirectory.path + "DescriptionGuard-" + UUID().uuidString
         defer { try? files.deleteDirectory(at: root) }
         let store = SkillStore(fileService: files, baseDir: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Body")
@@ -28,7 +28,7 @@ final class SkillSaveRevisionTests: XCTestCase {
 
     func testSavedCRLFDraftAndLFEditorEchoStayCleanAndLeaveWithoutPrompt() throws {
         let files = FileService()
-        let root = NSTemporaryDirectory() + "CleanCRLF-" + UUID().uuidString
+        let root = TestTemporaryDirectory.path + "CleanCRLF-" + UUID().uuidString
         defer { try? files.deleteDirectory(at: root) }
         let store = SkillStore(fileService: files, baseDir: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Old")
@@ -58,7 +58,7 @@ final class SkillSaveRevisionTests: XCTestCase {
 
     func testByteIdenticalSaveKeepsFileAndSkillTimestampsAndWritesNothing() throws {
         let files = PreviewImageFileSpy()
-        let root = NSTemporaryDirectory() + "NoOpSave-" + UUID().uuidString
+        let root = TestTemporaryDirectory.path + "NoOpSave-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: root) }
         let store = SkillStore(fileService: files, baseDir: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Body")
@@ -93,7 +93,7 @@ final class SkillSaveRevisionTests: XCTestCase {
 
     func testDraftAlreadyOnDiskClearsWithoutWriteTimestampOrSyncNudge() throws {
         let files = PreviewImageFileSpy()
-        let root = NSTemporaryDirectory() + "CaughtUpSave-" + UUID().uuidString
+        let root = TestTemporaryDirectory.path + "CaughtUpSave-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: root) }
         let store = SkillStore(fileService: files, baseDir: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Old")
@@ -120,7 +120,7 @@ final class SkillSaveRevisionTests: XCTestCase {
         for description in ["", " \t\n"] {
             for fromDraft in [false, true] {
                 let files = PreviewImageFileSpy()
-                let root = NSTemporaryDirectory() + "NoOpDescription-" + UUID().uuidString
+                let root = TestTemporaryDirectory.path + "NoOpDescription-" + UUID().uuidString
                 defer { try? files.files.deleteDirectory(at: root) }
                 let store = SkillStore(fileService: files, baseDir: root)
                 let slug = try store.createSkill(name: "Fallback", description: "D", body: "Old")
@@ -153,7 +153,7 @@ final class SkillSaveRevisionTests: XCTestCase {
 
     func testStoreUsesTheSerializersUnchangedReportWithoutRederivingIt() throws {
         let files = PreviewImageFileSpy()
-        let root = NSTemporaryDirectory() + "RewriteReport-" + UUID().uuidString
+        let root = TestTemporaryDirectory.path + "RewriteReport-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: root) }
         let store = SkillStore(fileService: files, baseDir: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Body")
@@ -190,7 +190,7 @@ final class SkillSaveRevisionTests: XCTestCase {
 
     func testBodyUpdateReturnsItsOutcomeWithoutANotifierTypedCallback() throws {
         let files = FileService()
-        let root = NSTemporaryDirectory() + "WriteOutcome-" + UUID().uuidString
+        let root = TestTemporaryDirectory.path + "WriteOutcome-" + UUID().uuidString
         defer { try? files.deleteDirectory(at: root) }
         let store = SkillStore(fileService: files, baseDir: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Body")

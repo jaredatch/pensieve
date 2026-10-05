@@ -23,7 +23,7 @@ final class DaemonEndToEndTests: XCTestCase {
     private let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveDaemonEndToEndTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveDaemonEndToEndTests-\(UUID().uuidString)"
         appSupport = tempDir + "/app-support"
         agentDir = tempDir + "/agents/claude/skills"
         cursorRulesDir = tempDir + "/cursor/rules"

@@ -62,6 +62,6 @@ final class MachineStateDeploymentsAdmissionTests: XCTestCase {
     }
 
     private func makeRoot() -> String {
-        NSTemporaryDirectory() + "PensieveMachineAdmission-" + UUID().uuidString
+        TestTemporaryDirectory.path + "PensieveMachineAdmission-" + UUID().uuidString
     }
 }

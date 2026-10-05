@@ -11,7 +11,7 @@ final class MachineStateDisplayPathTests: XCTestCase {
     private var tempDir = ""
 
     override func setUpWithError() throws {
-        tempDir = FileManager.default.temporaryDirectory
+        tempDir = TestTemporaryDirectory.url
             .appendingPathComponent("MachineStateDisplayPathTests-\(UUID().uuidString)").path
         try fileService.createDirectory(at: tempDir)
     }

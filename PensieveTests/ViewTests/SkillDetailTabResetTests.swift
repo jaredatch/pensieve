@@ -15,7 +15,7 @@ final class SkillDetailTabResetTests: XCTestCase {
             sha: "third", author: "Third Author", date: Date(), subject: "Third version"
         )
         let git = SkillDetailTabResetGit(thirdCommit: thirdCommit)
-        let base = NSTemporaryDirectory() + "SkillDetailTabResetTests-\(UUID().uuidString)"
+        let base = TestTemporaryDirectory.path + "SkillDetailTabResetTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(
             skillStore: SkillStore(fileService: FileService(), baseDir: base)
         )
@@ -60,7 +60,7 @@ final class SkillDetailTabResetTests: XCTestCase {
     }
 
     func testChangingSkillsCollapsesProjectsAndClearsDeploymentAlert() throws {
-        let base = NSTemporaryDirectory() + "SkillDetailTabResetTests-\(UUID().uuidString)"
+        let base = TestTemporaryDirectory.path + "SkillDetailTabResetTests-\(UUID().uuidString)"
         let fileService = DeployRecordingFileService()
         let platformVM = PlatformViewModel(
             fileService: fileService,

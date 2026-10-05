@@ -9,7 +9,7 @@ final class SkillExportModelTests: XCTestCase {
     private var destination: String { root + "/exports/export-skill.md" }
 
     override func setUpWithError() throws {
-        root = NSTemporaryDirectory() + "SkillExportModelTests-" + UUID().uuidString
+        root = TestTemporaryDirectory.path + "SkillExportModelTests-" + UUID().uuidString
         try fileService.createDirectory(at: skillsBase + "/export-skill")
         try fileService.createDirectory(at: root + "/exports")
         // BOM, CRLF, a preserved frontmatter key, decomposed Unicode, and no final newline.

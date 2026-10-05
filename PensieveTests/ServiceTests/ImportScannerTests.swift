@@ -7,7 +7,7 @@ final class ImportScannerTests: XCTestCase {
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        tempDir = (NSTemporaryDirectory() as NSString)
+        tempDir = (TestTemporaryDirectory.path as NSString)
             .appendingPathComponent("PensieveImportScannerTests-" + UUID().uuidString)
         fileService = FileService()
         try fileService.createDirectory(at: tempDir)
