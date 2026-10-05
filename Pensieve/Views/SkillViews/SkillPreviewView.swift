@@ -90,6 +90,7 @@ private struct RenderedSkillMarkdown: View {
                 configuration.label.environment(\.previewImageAlt, configuration.content.renderPlainText())
             }
             .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(Spacing.lg)
             .id(ObjectIdentifier(budget))
             .onAppear {

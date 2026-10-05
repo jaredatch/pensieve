@@ -28,6 +28,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Short rendered skills now line up with the file row in Content and stay aligned to the left in History.
 - Links in rendered skills now open web pages, jump to headings or select another skill file without showing a system error.
 - History rows keep the same spacing when you make the window taller.
 - History's line counts for your local edits now match what `git diff` reports.
