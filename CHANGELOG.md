@@ -22,6 +22,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - Empty lists, searches that find nothing, and a detail pane with nothing selected now look the way Mail does it: a large, quiet title ("No Skill Selected") in place of the big icon.
 - The skill preview stays offline. An image a skill links from the web shows its alt text instead of loading, so opening a skill never pings someone else's server. Images in the skill's own folder, and images embedded in the file, still show.
 - Import from Folder skips linked files, pipes and anything over 4 MiB, and tells you how many it skipped and why. The "kept as text" notice now lists each skill on its own line.
+- A skill's Content tab drops the line under the file picker, and the picker now has the same space above and below it.
 - Frontmatter has to start on a skill's first line, the way your agents read it. If there are blank lines above the opening `---`, Pensieve reads the whole file as text. Skills already in your library stay put either way.
 
 ### Fixed

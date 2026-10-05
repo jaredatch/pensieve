@@ -30,12 +30,12 @@ struct SkillContentTab: View {
     }
 
     var body: some View {
+        // The header scrolls with the page, so no rule sets the file row off: the gap below it matches the
+        // gap above. The rendered preview pads its own top by the same 16, the source editor takes it here.
         VStack(spacing: 0) {
             fileRow
                 .padding(.horizontal, Spacing.lg)
                 .padding(.top, DesignTokens.contentRowTop)
-                .padding(.bottom, Spacing.sm)
-            Divider()
             content
         }
         // A bundle file's change reaches the app only as a watcher event (the library reads SKILL.md's body as
@@ -109,6 +109,7 @@ struct SkillContentTab: View {
                     // contentDidChange from the old skill can never reach the new skill's draft (PLAN-03 / 03.4).
                     .id(skill.id)
                     .frame(minHeight: Self.sourceEditorMinimumHeight, maxHeight: .infinity)
+                    .padding(.top, DesignTokens.contentRowTop)
             }
         } else if shownMode == .rendered {
             preview(markdownBody: otherFileText ?? "", skillsBase: Constants.pensieveSkillsDir)
@@ -117,9 +118,11 @@ struct SkillContentTab: View {
                 .id(file)
                 .frame(minHeight: Self.sourceEditorMinimumHeight, maxHeight: .infinity)
                 .background(Color(.textBackgroundColor))
+                .padding(.top, DesignTokens.contentRowTop)
         } else {
             Color(.textBackgroundColor)
                 .frame(minHeight: Self.sourceEditorMinimumHeight, maxHeight: .infinity)
+                .padding(.top, DesignTokens.contentRowTop)
         }
     }
 }

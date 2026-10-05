@@ -73,6 +73,21 @@ final class SkillContentTabLayoutTests: XCTestCase {
         _ = (grownWindow, freshWindow)
     }
 
+    /// The file row sits in equal gaps: the tab strip above it, the file's content below it, and no rule
+    /// between the row and the content (the header scrolls, so nothing needs setting off).
+    func testTheFileRowGapBelowMatchesTheGapAbove() throws {
+        let fixture = sourceFixture(selectedFile: "SKILL.md", description: nil, height: 600)
+        defer { fixture.window.close() }
+        let editor = try XCTUnwrap(waitForEditor(in: fixture.host, timeout: 3))
+        let popUp = try XCTUnwrap(Self.controls(in: fixture.host).compactMap { $0 as? NSPopUpButton }.first)
+        let column = try XCTUnwrap(Self.nearestScrollView(to: popUp)?.documentView)
+        let rowFrame = Self.flipped(popUp, in: column)
+        let editorFrame = Self.flipped(editor, in: column)
+
+        XCTAssertEqual(rowFrame.minY, DesignTokens.contentRowTop, accuracy: 1)
+        XCTAssertEqual(editorFrame.minY - rowFrame.maxY, rowFrame.minY, accuracy: 1)
+    }
+
     func testSourceOverflowKeepsTheProductionEditorUsable() throws {
         try assertSourceOverflowKeepsEditorUsable(selectedFile: "SKILL.md")
         try assertSourceOverflowKeepsEditorUsable(selectedFile: "scripts/x.sh")
@@ -96,7 +111,11 @@ final class SkillContentTabLayoutTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(editor.frame.height, SkillContentTab.sourceEditorMinimumHeight, selectedFile)
     }
 
-    private func sourceFixture(selectedFile: String) -> (host: NSHostingView<AnyView>, window: NSWindow) {
+    private func sourceFixture(
+        selectedFile: String,
+        description: String? = SkillContentTabLayoutTests.longDescription,
+        height: CGFloat = 480
+    ) -> (host: NSHostingView<AnyView>, window: NSWindow) {
         let skill = Skill(name: "Example", directoryName: "example")
         let fileService = DeployRecordingFileService()
         fileService.contents[Constants.pensieveSkillsDir + "/example/scripts/x.sh"] = "echo hi"
@@ -125,14 +144,16 @@ final class SkillContentTabLayoutTests: XCTestCase {
             onSelectMode: { _ in }
         )
         let layout = SkillDetailScrollLayout(skillID: skill.id, contentOwnsScroller: contentOwnsScroller) {
-            SkillDescriptionText(text: Self.longDescription, expanded: true)
-                .padding(.horizontal, Spacing.lg)
+            if let description {
+                SkillDescriptionText(text: description, expanded: true)
+                    .padding(.horizontal, Spacing.lg)
+            }
         } tabContent: {
             tab
         }
-        let host = NSHostingView(rootView: AnyView(layout.frame(width: 640, height: 480)))
+        let host = NSHostingView(rootView: AnyView(layout.frame(width: 640, height: height)))
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: height),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -206,6 +227,13 @@ final class SkillContentTabLayoutTests: XCTestCase {
         let origin = scrollView.contentView.bounds.origin
         scrollView.contentView.scroll(to: NSPoint(x: origin.x, y: scrollRange(of: scrollView)))
         scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    /// A view's frame in a container's coordinates, measured from the container's top.
+    private static func flipped(_ view: NSView, in container: NSView) -> CGRect {
+        let frame = view.convert(view.bounds, to: container)
+        guard !container.isFlipped else { return frame }
+        return CGRect(x: frame.minX, y: container.bounds.height - frame.maxY, width: frame.width, height: frame.height)
     }
 
     private static func isVisible(_ view: NSView, in scrollView: NSScrollView) -> Bool {
