@@ -23,7 +23,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - Deploying to a project whose folder is gone now reports the missing folder instead of recreating it. Your deployment choices stay saved and apply after the folder returns, on the next launch or sync that brings changes. Add Project also refuses missing folders.
 - Folder checks when deploying, restoring saved deployments or adding a project stop waiting after about two seconds on an unresponsive network share. Saved deployments remain, and other projects continue.
 - Add Project accepts `~` paths and explains why relative paths cannot be used. Pressing Return while a folder is checking adds it when the check succeeds; editing either field cancels that request.
-- A deployed skill link that points elsewhere is repaired on the next launch or sync that brings changes. A real file or folder at that path reports an occupied-path error and stays untouched.
+- A skill link in a project that now points somewhere else gets repaired on the next launch or sync that brings changes. If a real file or folder sits at that path instead, Pensieve reports the path as occupied and leaves it alone.
 - Pensieve could freeze while running git on Macs with only a few cores. Several git commands at once could wait on each other forever. They don't anymore.
 - A crafted `SKILL.md` could trick Pensieve into rewriting the wrong line of its frontmatter on import or upgrade. Pensieve now only rewrites a key when it and the YAML parser agree on exactly where that key starts, and it double-checks the result. If anything looks off, the file stays as it was.
 - Saving a skill with Windows line endings no longer shows up as a change made outside the app.
