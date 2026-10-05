@@ -7,9 +7,12 @@ final class UnifiedDiffWorkTests: XCTestCase {
         let old = String(repeating: "aaaa\n", count: maximumLines)
         let changed = "bbbb\n" + old.dropFirst(5)
         let references = try referenceTimings(old: old, new: changed)
-        let baseline = references.sorted()[references.count / 2]
-        var receipts = ["DIFF_REFERENCE bytes=\(old.utf8.count) work=209721 seconds=\(baseline)"]
-        receipts += references.enumerated().map { "DIFF_REFERENCE_SAMPLE index=\($0.offset) seconds=\($0.element)" }
+        let reference = references.sorted { $0.seconds < $1.seconds }[references.count / 2]
+        let baseline = reference.seconds
+        var receipts = ["DIFF_REFERENCE bytes=\(old.utf8.count) work=\(reference.work) seconds=\(baseline)"]
+        receipts += references.enumerated().map {
+            "DIFF_REFERENCE_SAMPLE index=\($0.offset) work=\($0.element.work) seconds=\($0.element.seconds)"
+        }
         var worst = 0.0
         var samples: [Int: Bool] = [:]
         func measure(_ count: Int) throws -> Bool {
@@ -46,9 +49,6 @@ final class UnifiedDiffWorkTests: XCTestCase {
         XCTAssertLessThanOrEqual(worst, baseline * 5, "The sweep worst must fit five times the median reference")
         receipts.append("DIFF_WORST seconds=\(worst) medianReference=\(baseline) ratio=\(worst / baseline)")
         try recordSweep(receipts)
-        try assertSharedPreviewWorkBound()
-        try testMiddleSnakeNeverCrossesAWorkLimitBetweenCheckpoints()
-        testFinishedDiffDoesNotCallATrailingWorkCheckpoint()
     }
 
     func testCancellingPreviewStopsAtAMidDiffCheckpoint() async throws {
@@ -83,15 +83,57 @@ final class UnifiedDiffWorkTests: XCTestCase {
         try PreviewResourceTestEvidence.record("cancellation", message: receipt)
     }
 
+    func testSharedDiffBudgetExhaustionHasItsOwnReasonAndKeepsPathsKindsWithoutCounts() throws {
+        let changes: [FileTreeChange] = [
+            FileTreeChange(path: "added", kind: .added, content: .text(old: "", new: "new\n")),
+            FileTreeChange(path: "modified", kind: .modified, content: .text(old: "old\n", new: "new\n")),
+            FileTreeChange(path: "removed", kind: .removed, content: .text(old: "old\n", new: "")),
+            FileTreeChange(path: "size", kind: .modified, content: .tooLarge),
+            FileTreeChange(path: "binary", kind: .added, content: .binary)
+        ]
+        let budget = BoundedLineDifference.WorkBudget(maximumWork: 0)
+        let result = try PinnedSkillDiff.build(comparison: FileTreeComparison(
+            changes: changes, unreadFileCount: 0, bytesRead: 23), budget: budget)
+        XCTAssertEqual(result.files.map(\.path), changes.map(\.path))
+        XCTAssertEqual(result.files.map(\.kind), changes.map(\.kind))
+        for file in result.files.prefix(3) {
+            XCTAssertEqual(file.content, .diffBudgetExhausted, "Budget exhaustion must differ from the size bound")
+            XCTAssertNil(file.diff)
+            XCTAssertNil(file.linesAdded)
+            XCTAssertNil(file.linesRemoved)
+        }
+        XCTAssertEqual(result.files[3].content, .tooLarge)
+        XCTAssertEqual(result.files[4].content, .binary)
+        // A search that spends the last shared units uses that reason too.
+        let limited = try PinnedSkillDiff.build(comparison: FileTreeComparison(
+            changes: [changes[1]], unreadFileCount: 0, bytesRead: 8),
+            budget: .init(maximumWork: 2))
+        XCTAssertEqual(limited.files.first?.content, .diffBudgetExhausted)
+        XCTAssertNil(limited.files.first?.linesAdded)
+    }
+
+    func testSharedBudgetExhaustionSkipsLinePreparationAndKeyHashing() throws {
+        let change = FileTreeChange(path: "later", kind: .modified,
+                                    content: .text(old: "old\n", new: "new\n"))
+        var preparations = 0
+        let file = PinnedSkillFileDiff(change: change, budget: .init(maximumWork: 0)) { old, new in
+            preparations += 1
+            return UnifiedDiff(old: old, new: new)
+        }
+        XCTAssertEqual(preparations, 0, "An exhausted preview must skip the entire text preparation")
+        XCTAssertEqual(file.content, .diffBudgetExhausted)
+        XCTAssertNil(file.linesAdded)
+        XCTAssertNil(file.linesRemoved)
+    }
+
     func testPreviewSharesWorkBudgetAndOrdinaryMultiFileDiffsRemainComplete() throws {
         try assertSharedPreviewWorkBound()
     }
 
     private func assertSharedPreviewWorkBound() throws {
-        let start = Date()
-        _ = try measuredPreview(old: String(repeating: "aaaa\n", count: 4_100),
-                                new: String(repeating: "bbbb\n", count: 4_100))
-        let oneBudgetTime = Date().timeIntervalSince(start)
+        let references = try referenceTimings(old: String(repeating: "aaaa\n", count: 4_100),
+                                             new: String(repeating: "bbbb\n", count: 4_100), expectedCount: nil)
+        let oneBudgetTime = references.map(\.seconds).sorted()[references.count / 2]
         let hard = comparison(count: 1_000, lines: 3_200)
         var finishedWork = 0
         var currentWork = 0
@@ -112,7 +154,7 @@ final class UnifiedDiffWorkTests: XCTestCase {
         XCTAssertEqual(preview.files.count, 1_000)
         XCTAssertEqual(preview.files.first?.linesAdded, 3_200)
         for file in preview.files.suffix(990) {
-            XCTAssertEqual(file.content, .tooLarge)
+            XCTAssertEqual(file.content, .diffBudgetExhausted)
             XCTAssertNil(file.diff)
             XCTAssertNil(file.linesAdded)
             XCTAssertNil(file.linesRemoved)
@@ -124,15 +166,19 @@ final class UnifiedDiffWorkTests: XCTestCase {
         XCTAssertTrue(ordinary.files.allSatisfy { $0.linesAdded == 2_500 && $0.linesRemoved == 2_500 })
         let receipt = "PREVIEW_WORK files=1000 budget=\(PinnedSkillDiff.maximumDiffWork) seconds=\(elapsed) "
             + "singleBudgetSeconds=\(oneBudgetTime) ordinaryFiles=9 ordinaryWork=\(ordinaryBudget.consumed)"
-        print(receipt)
-        try PreviewResourceTestEvidence.record("preview", message: receipt)
+        let samples = references.enumerated().map {
+            "PREVIEW_REFERENCE_SAMPLE index=\($0.offset) work=\($0.element.work) seconds=\($0.element.seconds)"
+        }
+        let evidence = ([receipt] + samples).joined(separator: "\n")
+        print(evidence)
+        try PreviewResourceTestEvidence.record("preview", message: evidence)
     }
 
     func testMiddleSnakeNeverCrossesAWorkLimitBetweenCheckpoints() throws {
         for limit in 1...24 {
             let budget = BoundedLineDifference.WorkBudget(maximumWork: limit)
             let edits = try BoundedLineDifference.compute(before: ["old\n"], after: ["new\n"],
-                                                        workLimit: limit, budget: budget) { _ in }
+                                                        budget: budget) { _ in }
             XCTAssertLessThanOrEqual(budget.consumed, limit, "Every charge must respect the exact remaining budget")
             if limit < 7 { XCTAssertNil(edits, "A middle-snake search starting at the cap must refuse") }
             if limit == 7 { XCTAssertEqual(edits?.added.count, 1, "Finishing exactly at the cap is allowed") }
@@ -156,14 +202,15 @@ final class UnifiedDiffWorkTests: XCTestCase {
         }, unreadFileCount: 0, bytesRead: count * lines * 10)
     }
 
-    private func referenceTimings(old: String, new: String) throws -> [TimeInterval] {
+    private func referenceTimings(old: String, new: String,
+                                  expectedCount: Int? = 1) throws -> [(seconds: TimeInterval, work: Int)] {
         try (0..<5).map { _ in
             let start = Date()
             let ordinary = try measuredPreview(old: old, new: new)
             let elapsed = Date().timeIntervalSince(start)
-            XCTAssertEqual(ordinary.preview.files.first?.linesAdded, 1)
-            XCTAssertEqual(ordinary.preview.files.first?.linesRemoved, 1)
-            return elapsed
+            XCTAssertEqual(ordinary.preview.files.first?.linesAdded, expectedCount)
+            XCTAssertEqual(ordinary.preview.files.first?.linesRemoved, expectedCount)
+            return (elapsed, ordinary.work)
         }
     }
 

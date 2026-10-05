@@ -9,22 +9,30 @@ struct PinnedSkillFileDiff: Equatable {
     var linesRemoved: Int? { if case .modeOnly = content { return 0 }; return diff?.linesRemoved }
 
     init(change: FileTreeChange) {
-        self.init(change: change) { UnifiedDiff(old: $0, new: $1) }
+        let budget = BoundedLineDifference.WorkBudget(maximumWork: PinnedSkillDiff.maximumDiffWork)
+        self.init(change: change, budget: budget) { UnifiedDiff(old: $0, new: $1, budget: budget) }
     }
 
-    init(change: FileTreeChange, makeDiff: (String, String) throws -> UnifiedDiff) rethrows {
+    init(change: FileTreeChange,
+         budget: BoundedLineDifference.WorkBudget = .init(maximumWork: PinnedSkillDiff.maximumDiffWork),
+         makeDiff: (String, String) throws -> UnifiedDiff) rethrows {
         let result: UnifiedDiff?
         if case let .text(old, new) = change.content {
+            guard !budget.isExhausted else {
+                self.init(change: change, result: nil, diffBudgetExhausted: true)
+                return
+            }
             result = try makeDiff(old, new)
         } else { result = nil }
-        self.init(change: change, result: result)
+        self.init(change: change, result: result,
+                  diffBudgetExhausted: result?.isTooLarge == true && budget.isExhausted)
     }
 
-    init(change: FileTreeChange, result: UnifiedDiff?) {
+    init(change: FileTreeChange, result: UnifiedDiff?, diffBudgetExhausted: Bool = false) {
         path = change.path
         kind = change.kind
-        content = result?.isTooLarge == true ? .tooLarge : change.content
-        diff = result?.isTooLarge == true ? nil : result
+        content = diffBudgetExhausted ? .diffBudgetExhausted : (result?.isTooLarge == true ? .tooLarge : change.content)
+        diff = diffBudgetExhausted || result?.isTooLarge == true ? nil : result
     }
 
 }
@@ -40,7 +48,7 @@ struct PinnedSkillDiff: Equatable {
     init(comparison: FileTreeComparison) {
         let budget = BoundedLineDifference.WorkBudget(maximumWork: Self.maximumDiffWork)
         self.init(comparison: comparison) { change in
-            PinnedSkillFileDiff(change: change) { UnifiedDiff(old: $0, new: $1, budget: budget) }
+            PinnedSkillFileDiff(change: change, budget: budget) { UnifiedDiff(old: $0, new: $1, budget: budget) }
         }
     }
 
@@ -51,7 +59,7 @@ struct PinnedSkillDiff: Equatable {
         try Task.checkCancellation()
         return try PinnedSkillDiff(comparison: comparison) { change in
             try Task.checkCancellation()
-            let file = try PinnedSkillFileDiff(change: change) { old, new in
+            let file = try PinnedSkillFileDiff(change: change, budget: budget) { old, new in
                 try UnifiedDiff(old: old, new: new, budget: budget) { work in
                     try Task.checkCancellation()
                     try checkpoint(work)

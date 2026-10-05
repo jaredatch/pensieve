@@ -60,7 +60,7 @@ extension FileService {
         }
     }
 
-    /// Prefix admission uses the same regular-leaf helper and one bounded retained buffer.
+    /// Prefix admission uses the regular-leaf helper, growing its buffer until EOF or maximumBytes + 1.
     /// It does not infer equality or completeness for bytes beyond the requested prefix.
     func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data {
         try readRegularFilePrefix(at: path, maximumBytes: maximumBytes, allocation: { _ in })

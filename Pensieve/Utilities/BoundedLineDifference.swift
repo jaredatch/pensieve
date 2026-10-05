@@ -24,7 +24,7 @@ enum BoundedLineDifference {
         var added: Set<Int> = []
     }
 
-    static func compute(before: [String], after: [String], workLimit: Int = maximumWork,
+    static func compute(before: [String], after: [String],
                         budget: WorkBudget = WorkBudget(), checkpoint: (Int) throws -> Void) throws -> Edits? {
         guard !budget.isExhausted else { return nil }
         // Data equality preserves exact UTF-8 bytes, including Unicode spelling and line endings.
@@ -42,7 +42,7 @@ enum BoundedLineDifference {
         let old = try keys(before)
         let new = try keys(after)
         return try withoutActuallyEscaping(checkpoint) { callback in
-            let search = Search(old: old, new: new, workLimit: min(workLimit, budget.remaining), checkpoint: callback)
+            let search = Search(old: old, new: new, workLimit: min(maximumWork, budget.remaining), checkpoint: callback)
             defer { budget.spend(search.work) }
             do {
                 try search.match(old.indices, new.indices)
@@ -110,7 +110,7 @@ enum BoundedLineDifference {
                         try reverse.withUnsafeMutableBufferPointer { reverse in
                             guard let oldBase = old.baseAddress, let newBase = new.baseAddress,
                                   let forwardBase = forward.baseAddress, let reverseBase = reverse.baseAddress else {
-                                throw Failure.workExceeded
+                                preconditionFailure("Nonempty Myers inputs and allocated frontiers must have base addresses")
                             }
                             var search = MiddleSnake(old: oldBase, new: newBase,
                                                      forward: forwardBase, backward: reverseBase,
@@ -147,10 +147,6 @@ enum BoundedLineDifference {
             preconditionFailure("Myers frontiers must meet")
         }
 
-        func check(_ spent: Int) throws {
-            try checkpoint(spent)
-        }
-
         mutating func scan(depth: Int, reversed: Bool) throws -> (Int, Int)? {
             let vector = reversed ? backward : forward
             let other = reversed ? forward : backward
@@ -167,7 +163,7 @@ enum BoundedLineDifference {
                 defer { diagonal += 2 }
                 guard spent < workLimit else { throw Failure.workExceeded }
                 spent += 1
-                if spent % checkpointInterval == 0 { try check(spent) }
+                if spent % checkpointInterval == 0 { try checkpoint(spent) }
                 let index = offset + diagonal
                 var x = diagonal == -depth || (diagonal != depth && vector[index - 1] < vector[index + 1])
                     ? vector[index + 1] : vector[index - 1] + 1
@@ -176,7 +172,7 @@ enum BoundedLineDifference {
                     == new[reversed ? after.upperBound - y - 1 : after.lowerBound + y] {
                     guard spent < workLimit else { throw Failure.workExceeded }
                     spent += 1
-                    if spent % checkpointInterval == 0 { try check(spent) }
+                    if spent % checkpointInterval == 0 { try checkpoint(spent) }
                     x += 1
                     y += 1
                 }

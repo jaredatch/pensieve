@@ -25,7 +25,7 @@ final class ImportBoundedReadTests: XCTestCase {
         let path = root + "/small"
         try spy.files.writeFile(at: path, content: "abc")
         var allocated = 0
-        let data = try spy.files.readRegularFilePrefix(at: path, maximumBytes: 64 * 1_024 * 1_024 + 1) {
+        let data = try spy.files.readRegularFilePrefix(at: path, maximumBytes: 64 * 1_024 * 1_024) {
             allocated = $0
         }
         XCTAssertEqual(String(data: data, encoding: .utf8), "abc")

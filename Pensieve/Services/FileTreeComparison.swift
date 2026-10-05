@@ -32,6 +32,7 @@ struct FileTreeChange: Equatable {
         case modeOnly(old: UInt32, new: UInt32)
         case binary
         case tooLarge
+        case diffBudgetExhausted
     }
     let path: String
     let kind: Kind
