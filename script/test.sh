@@ -31,10 +31,22 @@ fi
 
 # One test run per machine (the playbook's modules/macos-swift.md § Wrapper scripts): take the machine's test lock
 # before anything else, so a second run from any checkout waits in line. The kernel drops it when the holder exits.
+# Two lanes: a full suite first queues behind any other full suite on test-full.lock, and a --filter run skips that
+# line, so a focused proof never waits behind every queued suite. The holder line and the wait go to stderr.
 if [ -z "${XP_TEST_LOCK_HELD:-}" ]; then
-  lock="$HOME/.local/state/execplan/test.lock"; mkdir -p "${lock%/*}" || exit 2
-  /usr/bin/lockf -k -s -t 0 "$lock" true || echo "test.sh: waiting for this machine's test lock" >&2
-  XP_TEST_LOCK_HELD=1 exec /usr/bin/lockf -k "$lock" "$0" "$@"
+  dir="$HOME/.local/state/execplan"; mkdir -p "$dir" || exit 2
+  : "${XP_TEST_T0:=$(date +%s)}"; export XP_TEST_T0
+  case " $* " in *" --filter "*) ;; *)   # a full suite queues in its own lane first
+    if [ -z "${XP_TEST_FULL_HELD:-}" ]; then
+      /usr/bin/lockf -k -s -t 0 "$dir/test-full.lock" true || echo "test.sh: waiting behind another full suite" >&2
+      XP_TEST_FULL_HELD=1 exec /usr/bin/lockf -k "$dir/test-full.lock" "$0" "$@"
+    fi ;; esac
+  /usr/bin/lockf -k -s -t 0 "$dir/test.lock" true || echo "test.sh: waiting for this machine's test lock, held by: $(cat "$dir/test.lock.holder" 2>/dev/null)" >&2
+  XP_TEST_LOCK_HELD=1 exec /usr/bin/lockf -k "$dir/test.lock" "$0" "$@"
+fi
+if [ -n "${XP_TEST_T0:-}" ]; then   # this run took the lock itself (a caller holding it, like the self-test, skips this)
+  printf 'pid %s in %s: test.sh %s\n' "$$" "$PWD" "$*" > "$HOME/.local/state/execplan/test.lock.holder"   # before HOME moves below
+  echo "test.sh: waited $(( $(date +%s) - XP_TEST_T0 )) s for the test lock" >&2
 fi
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
