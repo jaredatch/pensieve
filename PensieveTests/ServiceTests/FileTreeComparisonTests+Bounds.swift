@@ -33,6 +33,16 @@ extension FileTreeComparisonTests {
         XCTAssertEqual(complete.changes.map(\.path), ["SKILL.md", "small0", "small1", "small2"])
     }
 
+    func testOversizedSkillMarkdownDoesNotPreemptSmallerChanges() throws {
+        let huge = Data(repeating: 65, count: 20 * 1_024 * 1_024)
+        for side in [old, new] { try files.writeData(at: side + "/SKILL.md", data: huge) }
+        try files.writeFile(at: new + "/small", content: "changed\n")
+        let result = try compare()
+        XCTAssertEqual(result.changes.map(\.path), ["small"])
+        XCTAssertEqual(result.unreadFileCount, 1)
+        XCTAssertEqual(result.bytesRead, 32 * 1_024 * 1_024)
+    }
+
     func testFileCountStopsAtThousandWithExactUnreadCount() throws {
         for index in 0..<1_003 {
             try files.writeFile(at: new + String(format: "/file%04d", index), content: "line\n")

@@ -153,7 +153,9 @@ extension UpdatesViewModelTests {
         let spy = ImportBoundedReadSpy()
         XCTAssertThrowsError(try makePreviewService(fixture: fixture, spy: spy)
             .previewUpdate(PinnedSkillUpdate(skill: fixture.skill)))
-        XCTAssertTrue(spy.comparisonThreads.isEmpty, "Invalid frontmatter must refuse before inventory or content comparison")
+        XCTAssertEqual(spy.comparisonThreads.count, 1, "Both inventories precede frontmatter admission")
+        XCTAssertEqual(spy.comparisonReadBytes, 0, "Invalid frontmatter must refuse before any compared content read")
+        XCTAssertEqual(spy.readAttempts.count, 1)
     }
 
     func testPreviewInstallabilityReadsSkillMarkdownOnceWithinBoundPlusOne() throws {
@@ -182,6 +184,25 @@ extension UpdatesViewModelTests {
                 XCTAssertTrue(error.localizedDescription.contains("Unsafe upstream directory: \(relative)"))
                 XCTAssertFalse(error.localizedDescription.contains("install-scratch"))
             }
+        }
+    }
+
+    func testBothInventoriesRefuseLinksBeforeFrontmatterRead() throws {
+        let fixture = try prepareRealPinnedUpdate()
+        try fileService.writeFile(at: fixture.repository + "/skills/vendor/SKILL.md",
+                                  content: "---\nname: Broken\ndescription: ''\n---\nbody\n")
+        for upstreamSide in [false, true] {
+            let directory = upstreamSide ? fixture.repository + "/skills/vendor" : fixture.storeRoot + "/skills/vendor"
+            try fileService.createSymlink(at: directory + "/unsafe", pointingTo: "/etc")
+            fixture.skill.upstreamCommit = try commit(fixture.repository, message: "link before frontmatter \(upstreamSide)")
+            fixture.skill.upstreamTree = try GitService().treeHash(at: fixture.repository, path: "skills/vendor")
+            let spy = ImportBoundedReadSpy()
+            XCTAssertThrowsError(try makePreviewService(fixture: fixture, spy: spy)
+                .previewUpdate(PinnedSkillUpdate(skill: fixture.skill))) { error in
+                XCTAssertTrue(error.localizedDescription.contains("unsafe"), "Tree admission must precede frontmatter: \(error)")
+            }
+            XCTAssertTrue(spy.readAttempts.isEmpty, "Neither unsafe tree permits a content read")
+            try fileService.deleteFile(at: directory + "/unsafe")
         }
     }
 

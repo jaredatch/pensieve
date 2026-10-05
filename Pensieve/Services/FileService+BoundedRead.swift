@@ -63,11 +63,20 @@ extension FileService {
     /// Prefix admission uses the same regular-leaf helper and one bounded retained buffer.
     /// It does not infer equality or completeness for bytes beyond the requested prefix.
     func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data {
+        try readRegularFilePrefix(at: path, maximumBytes: maximumBytes, allocation: { _ in })
+    }
+
+    /// Reports the retained buffer size at allocation for resource regression tests.
+    func readRegularFilePrefix(at path: String, maximumBytes: Int, allocation: (Int) -> Void) throws -> Data {
         guard maximumBytes >= 0 else { throw CocoaError(.fileReadTooLarge) }
         let (descriptor, status) = try Self.openRegularFile(at: path)
         defer { close(descriptor) }
         guard status.st_size >= 0 else { throw CocoaError(.fileReadUnknown) }
-        var result = Data(count: maximumBytes)
+        // maximumBytes includes the caller's one lookahead byte. Never reserve the whole
+        // text bound for a small file; retain only min(bound, admitted size) + 1.
+        let capacity = maximumBytes == 0 ? 0 : min(maximumBytes - 1, Int(status.st_size)) + 1
+        var result = Data(count: capacity)
+        allocation(result.count)
         var offset = 0
         while offset < result.count {
             try Task.checkCancellation()

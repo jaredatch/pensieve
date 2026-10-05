@@ -12,6 +12,9 @@ protocol FileServiceProtocol {
     /// Inventories both no-follow trees before reading, then compares their regular files under shared limits.
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
                           limits: FileTreeComparisonLimits) throws -> FileTreeComparison
+    /// Runs admission after both inventories, before any compared file content is read.
+    func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
+                          limits: FileTreeComparisonLimits, beforeReading: () throws -> Void) throws -> FileTreeComparison
     /// Reads only a bounded prefix even when the regular file is larger, for frontmatter admission.
     func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data
     func writeFile(at path: String, content: String) throws
@@ -76,6 +79,11 @@ extension FileServiceProtocol {
     /// Inert default: tree comparisons must be modeled explicitly by filesystem doubles.
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
                           limits: FileTreeComparisonLimits) throws -> FileTreeComparison {
+        throw CocoaError(.featureUnsupported)
+    }
+    /// Inert default: unmodeled admission ordering must never read content on the host.
+    func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
+                          limits: FileTreeComparisonLimits, beforeReading: () throws -> Void) throws -> FileTreeComparison {
         throw CocoaError(.featureUnsupported)
     }
     /// Inert default: an unmodeled directory probe is unknown and never accesses the host.

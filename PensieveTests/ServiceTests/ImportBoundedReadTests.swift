@@ -21,6 +21,19 @@ final class ImportBoundedReadTests: XCTestCase {
         root = nil
     }
 
+    func testSmallPrefixReadAllocatesOnlyFileSizePlusOne() throws {
+        let path = root + "/small"
+        try spy.files.writeFile(at: path, content: "abc")
+        var allocated = 0
+        let data = try spy.files.readRegularFilePrefix(at: path, maximumBytes: 64 * 1_024 * 1_024 + 1) {
+            allocated = $0
+        }
+        XCTAssertEqual(String(data: data, encoding: .utf8), "abc")
+        XCTAssertEqual(allocated, 4, "The retained prefix allocation is min(bound, file size) + 1")
+        let prefix = try spy.files.readRegularFilePrefix(at: path, maximumBytes: 2)
+        XCTAssertEqual(String(data: prefix, encoding: .utf8), "ab")
+    }
+
     func testCursorSpecialLeavesAreNotReadAndOtherRulesRemain() throws {
         let rules = root + "/cursor"
         try spy.files.writeFile(at: rules + "/good.mdc", content: "# Good rule")

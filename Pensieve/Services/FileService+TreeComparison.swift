@@ -14,10 +14,16 @@ extension FileService {
                              limits: limits, checkpoint: { _ in })
     }
 
+    func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
+                          limits: FileTreeComparisonLimits, beforeReading: () throws -> Void) throws -> FileTreeComparison {
+        try compareFileTrees(local: local, upstream: upstream, excludingUpstreamGit: excludingUpstreamGit,
+                             limits: limits, beforeReading: beforeReading, checkpoint: { _ in })
+    }
+
     /// Checkpoints exercise races after directory/leaf admission and report actual bytes and retained content.
     /// No content is read until both inventories have refused every link and special entry.
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
-                          limits: FileTreeComparisonLimits,
+                          limits: FileTreeComparisonLimits, beforeReading: () throws -> Void = {},
                           checkpoint: @escaping (ComparisonCheckpoint) throws -> Void) throws -> FileTreeComparison {
         guard limits.maximumFileBytes >= 0, limits.maximumFiles >= 0, limits.maximumTotalBytes >= 0,
               limits.maximumEntries >= 0, limits.maximumDepth >= 0 else {
@@ -28,10 +34,13 @@ extension FileService {
         let after = try comparisonInventory(at: upstream, excludingGit: excludingUpstreamGit, budget: budget) {
             try checkpoint(.directory($0))
         }
+        try beforeReading()
         let paths = Set(before.keys).union(after.keys).sorted {
-            if $0 == "SKILL.md" || $1 == "SKILL.md" { return $0 == "SKILL.md" && $1 != "SKILL.md" }
             let left = max(before[$0]?.status.st_size ?? 0, after[$0]?.status.st_size ?? 0)
             let right = max(before[$1]?.status.st_size ?? 0, after[$1]?.status.st_size ?? 0)
+            let leftSkill = $0 == "SKILL.md" && left <= limits.maximumFileBytes
+            let rightSkill = $1 == "SKILL.md" && right <= limits.maximumFileBytes
+            if leftSkill != rightSkill { return leftSkill }
             return left == right ? $0.utf8.lexicographicallyPrecedes($1.utf8) : left < right
         }
         var changes: [FileTreeChange] = []

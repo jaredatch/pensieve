@@ -73,6 +73,27 @@ final class UnifiedDiffTests: XCTestCase {
         for index in stride(from: 0, to: 2_000, by: 7) { scattered[index] = "changed \(index)\n" }
         let pairs = [(old, new), ("", String(repeating: "added\n", count: 300)),
                      (baseline.joined(), scattered.joined())]
+        try assertFullDiffsMatchingGit(pairs)
+    }
+
+    func testLargeSparseEditsGetFullHunksMatchingGitNumstat() throws {
+        var pairs: [(String, String)] = []
+        for (count, indices) in [(5_000, [0, 4_999]),
+                                 (209_715, (0..<10).map { $0 * 20_971 })] {
+            let before = Array(repeating: "aaaa\n", count: count)
+            var after = before
+            for index in indices { after[index] = "bbbb\n" }
+            let diff = UnifiedDiff(old: before.joined(), new: after.joined())
+            XCTAssertFalse(diff.isTooLarge, "Sparse edits need full diffs at \(count) lines")
+            XCTAssertEqual(diff.hunks.count, indices.count)
+            XCTAssertEqual(diff.linesAdded, indices.count)
+            XCTAssertEqual(diff.linesRemoved, indices.count)
+            pairs.append((before.joined(), after.joined()))
+        }
+        try assertFullDiffsMatchingGit(pairs)
+    }
+
+    private func assertFullDiffsMatchingGit(_ pairs: [(String, String)]) throws {
         let root = NSTemporaryDirectory() + "LargeDiffOracle-\(UUID().uuidString)"
         let files = FileService()
         try files.createDirectory(at: root)

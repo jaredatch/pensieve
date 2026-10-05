@@ -25,6 +25,7 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
     var directoryProbes: [String] = []
     var readFailures: [String: Int32] = [:]
     var comparisonThreads: [Bool] = []
+    var comparisonReadBytes = 0
     var comparisonFailure: ((String, String) throws -> Void)?
 
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
@@ -37,6 +38,16 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
         try comparisonFailure?(local, upstream)
         return try files.compareFileTrees(local: local, upstream: upstream, excludingUpstreamGit: excludingUpstreamGit,
                                           limits: limits)
+    }
+
+    func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
+                          limits: FileTreeComparisonLimits, beforeReading: () throws -> Void) throws -> FileTreeComparison {
+        comparisonThreads.append(Thread.isMainThread)
+        try comparisonFailure?(local, upstream)
+        return try files.compareFileTrees(local: local, upstream: upstream, excludingUpstreamGit: excludingUpstreamGit,
+                                          limits: limits, beforeReading: beforeReading) { event in
+            if case let .read(_, count, _) = event { self.comparisonReadBytes += count }
+        }
     }
 
     func readFile(at path: String) throws -> String {

@@ -108,10 +108,10 @@ extension SkillInstallService {
                     throw SkillInstallError.unavailableCandidate("Unsafe upstream file: SKILL.md")
                 }
                 do {
-                    try requirePreviewInstallable(update.candidate, at: upstreamDirectory + "/SKILL.md")
                     let comparison = try fileService.compareFileTrees(
                         local: localDirectory, upstream: upstreamDirectory,
-                        excludingUpstreamGit: update.candidate.path.isEmpty, limits: .updatePreview
+                        excludingUpstreamGit: update.candidate.path.isEmpty, limits: .updatePreview,
+                        beforeReading: { try requirePreviewInstallable(update.candidate, at: upstreamDirectory + "/SKILL.md") }
                     )
                     return try PinnedSkillDiff.build(comparison: comparison)
                 } catch {
@@ -136,24 +136,19 @@ extension SkillInstallService {
     }
 
     private func previewReadReason(_ failure: NSError) -> String {
-        guard failure.domain == NSPOSIXErrorDomain else { return cocoaPreviewReadReason(failure) }
-        guard let code = Int32(exactly: failure.code) else { return "the file or folder could not be read" }
-        switch code {
-        case ELOOP, EFTYPE: return "symbolic links and special files cannot be previewed"
-        case EACCES, EPERM: return "permission denied"
-        case ENOENT, ENOTDIR: return "the file or folder is no longer available"
-        case ESTALE: return "the folder changed while being read"
-        default: return "the file or folder could not be read"
-        }
-    }
-
-    private func cocoaPreviewReadReason(_ failure: NSError) -> String {
-        guard failure.domain == NSCocoaErrorDomain else { return "the file or folder could not be read" }
-        switch CocoaError.Code(rawValue: failure.code) {
-        case .fileReadNoPermission: return "permission denied"
-        case .fileNoSuchFile, .fileReadNoSuchFile: return "the file or folder is no longer available"
-        case .fileReadCorruptFile: return "the file is damaged"
-        case .fileReadTooLarge: return "the file is too large to read"
+        switch (failure.domain, failure.code) {
+        case (NSPOSIXErrorDomain, Int(ELOOP)), (NSPOSIXErrorDomain, Int(EFTYPE)):
+            return "symbolic links and special files cannot be previewed"
+        case (NSPOSIXErrorDomain, Int(EACCES)), (NSPOSIXErrorDomain, Int(EPERM)),
+             (NSCocoaErrorDomain, CocoaError.Code.fileReadNoPermission.rawValue):
+            return "permission denied"
+        case (NSPOSIXErrorDomain, Int(ENOENT)), (NSPOSIXErrorDomain, Int(ENOTDIR)),
+             (NSCocoaErrorDomain, CocoaError.Code.fileNoSuchFile.rawValue),
+             (NSCocoaErrorDomain, CocoaError.Code.fileReadNoSuchFile.rawValue):
+            return "the file or folder is no longer available"
+        case (NSPOSIXErrorDomain, Int(ESTALE)): return "the folder changed while being read"
+        case (NSCocoaErrorDomain, CocoaError.Code.fileReadCorruptFile.rawValue): return "the file is damaged"
+        case (NSCocoaErrorDomain, CocoaError.Code.fileReadTooLarge.rawValue): return "the file is too large to read"
         default: return "the file or folder could not be read"
         }
     }
