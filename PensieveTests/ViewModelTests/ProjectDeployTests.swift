@@ -76,7 +76,7 @@ final class ProjectDeployTests: XCTestCase {
             fileService: StubFileService(),
             linkService: linkService,
             cursorCompiler: StubCursorCompiler(),
-            agentDetection: StubDetection(installed: [])
+            agentDetection: StubDetection(installed: []), deployStateStore: .memoryBacked
         )
     }
 

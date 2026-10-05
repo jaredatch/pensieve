@@ -46,6 +46,15 @@ struct ProjectListView: View {
         """
     }
 
+    @discardableResult
+    static func removeProject(_ project: Project, removalError: inout String?, perform: () -> BatchResult) -> BatchResult {
+        let result = perform()
+        if result.hasFailures {
+            removalError = removalFailureMessage(projectName: project.name, result: result)
+        }
+        return result
+    }
+
     var body: some View {
         List(selection: $entitySelection) {
             ForEach(filteredProjects) { project in
@@ -55,16 +64,15 @@ struct ProjectListView: View {
                 .tag(EntitySelection.project(project.id))
                 .contextMenu {
                     Button("Remove", role: .destructive) {
-                        let result = removeRegisteredProject(
-                            project,
-                            categoryStore: categoryStore,
-                            reconciler: CategoryReconciler(platformVM: platformVM),
-                            manifestService: ManifestService(),
-                            context: context,
-                            notifier: notifier
-                        )
-                        if result.hasFailures {
-                            removalError = Self.removalFailureMessage(projectName: project.name, result: result)
+                        Self.removeProject(project, removalError: &removalError) {
+                            removeRegisteredProject(
+                                project,
+                                categoryStore: categoryStore,
+                                reconciler: CategoryReconciler(platformVM: platformVM),
+                                manifestService: ManifestService(),
+                                context: context,
+                                notifier: notifier
+                            )
                         }
                     }
                 }

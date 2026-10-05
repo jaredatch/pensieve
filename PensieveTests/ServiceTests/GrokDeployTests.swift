@@ -54,6 +54,7 @@ final class GrokDeployTests: XCTestCase {
     func testRedeployIsIdempotent() throws {
         let skill = makeSkill()
         let projectPath = tempDir + "/redeploy-project"
+        try fileService.createDirectory(at: projectPath)
         let service = try makeProjectService(skill: skill)
 
         try service.link(skill: skill, platform: .grok, projectPath: projectPath)
@@ -95,18 +96,21 @@ final class GrokDeployTests: XCTestCase {
         XCTAssertTrue(fileService.directoryExists(at: foreignTarget))
     }
 
-    func testStaleProjectRootCreatesShadowTree() throws {
+    func testStaleProjectRootDoesNotCreateShadowTree() throws {
         let skill = makeSkill()
         let staleProject = tempDir + "/writable-parent/missing/project"
         let service = try makeProjectService(skill: skill)
         XCTAssertFalse(fileService.directoryExists(at: staleProject))
 
-        try service.link(skill: skill, platform: .grok, projectPath: staleProject)
-
-        let link = staleProject + "/.grok/skills/" + skill.directoryName
-        XCTAssertTrue(fileService.directoryExists(at: staleProject))
-        XCTAssertTrue(fileService.isSymlink(at: link))
-        XCTAssertTrue(service.isLinked(skill: skill, platform: .grok, projectPath: staleProject))
+        XCTAssertThrowsError(try service.link(skill: skill, platform: .grok, projectPath: staleProject)) { error in
+            guard case ProjectFolderError.missing(let path) = error else {
+                return XCTFail("Expected missing project folder, got \(error)")
+            }
+            XCTAssertEqual(path, staleProject)
+        }
+        XCTAssertFalse(fileService.directoryExists(at: tempDir + "/writable-parent"))
+        XCTAssertFalse(fileService.directoryExists(at: staleProject))
+        XCTAssertFalse(service.isLinked(skill: skill, platform: .grok, projectPath: staleProject))
     }
 
     func testInvalidPathComponentRejected() {

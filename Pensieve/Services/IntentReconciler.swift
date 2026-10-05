@@ -18,10 +18,11 @@ struct IntentReconciler: IntentReconcilerProtocol {
         let platformRaw: String
     }
 
-    struct ProjectTriple: Hashable {
+    struct ProjectTriple: ProjectReconcileTriple {
         let skillID: UUID
         let projectID: UUID
         let platformRaw: String
+        var platformTarget: PlatformTarget? { PlatformTarget(rawValue: platformRaw) }
     }
 
     struct State {

@@ -5,12 +5,11 @@ enum ProjectRegistration {
         name: String,
         path: String,
         using identityService: ProjectIdentityServiceProtocol = ProjectIdentityService()
-    ) -> Project {
+    ) throws -> Project {
+        let identity = try identityService.identity(forProjectAt: path)
         let project = Project(name: name, path: path)
-        if let identity = try? identityService.identity(forProjectAt: path) {
-            project.identityKey = identity.key
-            project.identityKind = identity.kind.rawValue
-        }
+        project.identityKey = identity.key
+        project.identityKind = identity.kind.rawValue
         return project
     }
 }

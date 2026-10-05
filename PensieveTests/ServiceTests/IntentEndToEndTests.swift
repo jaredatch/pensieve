@@ -269,7 +269,7 @@ private extension IntentEndToEndTests {
             linkService: resolvedLink,
             cursorCompiler: DeployRecordingCursorCompiler(fileService: fileService),
             agentDetection: DeployStubDetection(installed: installed),
-            deployStateStore: DeployStateStore(fileService: fileService)
+            deployStateStore: DeployStateStore.memoryBacked
         )
     }
 

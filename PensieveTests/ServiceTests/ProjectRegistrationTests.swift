@@ -2,8 +2,8 @@ import XCTest
 @testable import Pensieve
 
 final class ProjectRegistrationTests: XCTestCase {
-    func testMakeProjectStoresRemoteIdentity() {
-        let project = ProjectRegistration.makeProject(
+    func testMakeProjectStoresRemoteIdentity() throws {
+        let project = try ProjectRegistration.makeProject(
             name: "Pensieve",
             path: "/tmp/pensieve",
             using: StubProjectIdentityService(result: .success(ProjectIdentity(kind: .remote, key: "github.com/owner/repo")))
@@ -13,10 +13,10 @@ final class ProjectRegistrationTests: XCTestCase {
         XCTAssertEqual(project.identityKind, "remote")
     }
 
-    func testMakeProjectStoresMarkerIdentity() {
+    func testMakeProjectStoresMarkerIdentity() throws {
         let uuid = "11111111-2222-3333-4444-555555555555"
 
-        let project = ProjectRegistration.makeProject(
+        let project = try ProjectRegistration.makeProject(
             name: "Local Project",
             path: "/tmp/local-project",
             using: StubProjectIdentityService(result: .success(ProjectIdentity(kind: .marker, key: uuid)))
@@ -26,15 +26,14 @@ final class ProjectRegistrationTests: XCTestCase {
         XCTAssertEqual(project.identityKind, "marker")
     }
 
-    func testMakeProjectLeavesIdentityPendingWhenServiceThrows() {
-        let project = ProjectRegistration.makeProject(
+    func testMakeProjectPropagatesIdentityFailure() {
+        XCTAssertThrowsError(try ProjectRegistration.makeProject(
             name: "Pending Project",
             path: "/tmp/pending-project",
             using: StubProjectIdentityService(result: .failure(StubError.identityUnavailable))
-        )
-
-        XCTAssertNil(project.identityKey)
-        XCTAssertNil(project.identityKind)
+        )) { error in
+            XCTAssertTrue(error is StubError)
+        }
     }
 }
 

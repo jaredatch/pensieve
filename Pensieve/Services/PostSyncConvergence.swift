@@ -68,6 +68,6 @@ final class PostSyncConvergence: PostSyncConverging {
     }
 
     private func record(_ result: BatchResult, name: String) {
-        auditLog("convergence", "\(name):\(result.successes.count):\(result.failureCount)")
+        auditLog("convergence", "\(name):\(result.successes.count):\(result.failureCount):skipped:\(result.skipped.count)")
     }
 }
