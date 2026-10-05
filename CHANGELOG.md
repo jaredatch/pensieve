@@ -17,6 +17,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- An installed skill's History now shows its latest 10 commits before "Show older commits".
 - Pensieve now needs macOS 26 or later.
 - Running `pensieve-daemon` with no command now shows its help instead of syncing; `pensieve-daemon run` still syncs.
 - Empty lists, searches that find nothing, and a detail pane with nothing selected now look the way Mail does it: a large, quiet title ("No Skill Selected") in place of the big icon.
@@ -27,6 +28,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- History rows keep the same spacing when you make the window taller.
 - History's line counts for your local edits now match what `git diff` reports.
 - Deploying to a project whose folder is gone now reports the missing folder instead of recreating it. Your deployment choices stay saved and apply after the folder returns, on the next launch or sync that brings changes. Add Project also refuses missing folders.
 - Folder checks when deploying, restoring saved deployments or adding a project stop waiting after about two seconds on an unresponsive network share. Saved deployments remain, and other projects continue.

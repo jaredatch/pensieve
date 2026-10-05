@@ -43,7 +43,7 @@ final class SkillHistoryTimelineTests: XCTestCase {
     }
 
     func testSnapshotReadsTheSkillFilePath() {
-        let git = RecordingGit()
+        let git = SkillHistoryRecordingGit()
         git.commits = [GitCommit(sha: "abc", author: "A", date: Date(), subject: "Update")]
         let skill = Skill(name: "Example", directoryName: "example-skill")
 
@@ -71,7 +71,7 @@ final class SkillHistoryTimelineTests: XCTestCase {
     func testAnEmptyLogIsAnEmptySnapshot() {
         let snapshot = SkillHistorySnapshot.load(
             skill: Skill(name: "Example", directoryName: "example"),
-            git: RecordingGit(),
+            git: SkillHistoryRecordingGit(),
             workingDir: "/repo"
         )
 
@@ -113,7 +113,7 @@ final class SkillHistoryTimelineTests: XCTestCase {
     }
 }
 
-private final class RecordingGit: GitServiceProtocol {
+final class SkillHistoryRecordingGit: GitServiceProtocol {
     struct LogCall: Equatable {
         let path: String
         let workingDir: String

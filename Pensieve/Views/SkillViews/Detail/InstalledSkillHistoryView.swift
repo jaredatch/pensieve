@@ -383,6 +383,8 @@ private struct InstalledHistoryTimelineRow<Content: View>: View {
             content
                 .padding(.bottom, Spacing.xxl)
         }
+        // The flexible connector fills the content height without absorbing spare viewport height.
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .contain)
     }
 }

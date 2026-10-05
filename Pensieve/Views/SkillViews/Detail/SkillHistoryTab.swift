@@ -250,6 +250,8 @@ private struct SkillHistoryRowView: View {
             }
             .padding(.bottom, Spacing.xxl)
         }
+        // The flexible connector fills the content height without absorbing spare viewport height.
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .contain)
     }
 }
