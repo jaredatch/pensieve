@@ -167,7 +167,7 @@ struct PensieveApp: App {
         }
         .modelContainer(runtime.container)
 
-        MenuBarExtra("Pensieve", systemImage: "brain.head.profile") {
+        MenuBarExtra("Pensieve", image: "MenuBarGlyph") {
             PensieveMenuBarView()
                 .environment(runtime)
         }

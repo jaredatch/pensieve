@@ -39,7 +39,7 @@ final class SkillOverviewPresentationTests: XCTestCase {
         snapshot.inventory = inventory((0..<12).map { file("f\($0).md", 214_000 / 12 + ($0 == 0 ? 214_000 % 12 : 0), 10) })
         snapshot.macStatus = [.claudeCode: false, .codex: false, .cursor: false, .grok: false]
 
-        let stats = SkillOverviewPresentation.stats(snapshot: snapshot, installedCount: 4, locale: locale)
+        let stats = SkillOverviewPresentation.stats(snapshot: snapshot, installedCount: 4, budgets: [:], locale: locale)
 
         XCTAssertEqual(stats.map(\.label), ["Context cost", "Bundle", "Deployed"])
         XCTAssertEqual(stats[0].value, "18,857")
@@ -54,7 +54,7 @@ final class SkillOverviewPresentationTests: XCTestCase {
         var snapshot = DetailContentSnapshot()
         snapshot.inventory = inventory([file("SKILL.md", 3_000, 750)])
 
-        let stats = SkillOverviewPresentation.stats(snapshot: snapshot, installedCount: 4)
+        let stats = SkillOverviewPresentation.stats(snapshot: snapshot, installedCount: 4, budgets: [:])
 
         XCTAssertEqual(stats[1].value, "1")
         XCTAssertEqual(stats[1].detail, "file · 3 KB")
@@ -67,7 +67,7 @@ final class SkillOverviewPresentationTests: XCTestCase {
         snapshot.inventory = inventory([file("SKILL.md", 1000, 250), file("a.md", 1000, 250)])
         snapshot.inventory.truncated = true
 
-        let bundle = SkillOverviewPresentation.stats(snapshot: snapshot, installedCount: 4)[1]
+        let bundle = SkillOverviewPresentation.stats(snapshot: snapshot, installedCount: 4, budgets: [:])[1]
 
         XCTAssertEqual(bundle.value, "2+")
         XCTAssertEqual(bundle.detail, "files · 2 KB+")

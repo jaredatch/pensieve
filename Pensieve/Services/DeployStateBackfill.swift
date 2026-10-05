@@ -169,7 +169,8 @@ struct DeployStateBackfill: DeployStateBackfilling {
             guard let projectID = record.projectID,
                   let skill = skillsByID[record.skillID],
                   let project = projectsByID[projectID],
-                  let identityKey = project.identityKey else { continue }
+                  let identityKey = project.identityKey,
+                  ProjectDirectory.canAccess(project.path) else { continue }
 
             if record.platform.usesSymlinks {
                 let expectedLink = DeployPaths.linkPath(
@@ -186,7 +187,7 @@ struct DeployStateBackfill: DeployStateBackfilling {
                       fileService.isSymlink(at: record.targetPath),
                       (try? fileService.symlinkTarget(at: record.targetPath)) == expectedTarget else { continue }
             } else {
-                let expectedPath = project.path + "/.cursor/rules/" + skill.directoryName + ".mdc"
+                let expectedPath = DeployPaths.cursorPath(directoryName: skill.directoryName, projectPath: project.path)
                 guard record.targetPath == expectedPath,
                       fileService.fileExists(at: record.targetPath) else { continue }
             }

@@ -119,6 +119,7 @@ extension DeployIntentModelTests {
         let harness = try makeHarness()
         let skill = try insertSkill(context: harness.context)
         let project = try insertReviewProject(context: harness.context)
+        harness.linkService.fileService.directories.insert(project.path)
         harness.platformVM.deploy(skill: skill, platform: .codex, context: harness.context)
         harness.context.insert(MachineDeployIntent(
             machineID: localID, skillSlug: skill.directoryName,
@@ -176,6 +177,7 @@ extension DeployIntentModelTests {
         let harness = try makeHarness()
         let skill = try insertSkill(context: harness.context)
         let project = try insertReviewProject(context: harness.context)
+        harness.linkService.fileService.directories.insert(project.path)
         harness.context.insert(MachineDeployIntent(
             machineID: localID, skillSlug: skill.directoryName,
             platformRaw: PlatformTarget.codex.rawValue, projectKey: project.identityKey
@@ -200,6 +202,7 @@ extension DeployIntentModelTests {
         let projectHarness = try makeHarness()
         let projectSkill = try insertSkill(context: projectHarness.context)
         let project = try insertReviewProject(context: projectHarness.context)
+        projectHarness.linkService.fileService.directories.insert(project.path)
         projectHarness.context.insert(MachineDeployIntent(
             machineID: localID, skillSlug: projectSkill.directoryName,
             platformRaw: PlatformTarget.codex.rawValue

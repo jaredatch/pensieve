@@ -2,105 +2,18 @@ import XCTest
 import SwiftData
 @testable import Pensieve
 
-private typealias PensieveCategory = Pensieve.Category
-
-private struct RecordedLink: Hashable {
-    let directoryName: String
-    let platform: PlatformTarget
-    let projectPath: String?
-}
-
-private struct RecordedCursorCall: Hashable {
-    let directoryName: String
-    let projectPath: String?
-}
-
-private struct SeededCategory {
-    let skill: Skill
-    let firstProject: Project
-    let secondProject: Project
-    let category: PensieveCategory
-}
-
-private struct StubFailure: LocalizedError { let errorDescription: String? = "stub failure" }
-
-private struct StubDetection: AgentDetectionServiceProtocol {
-    let installed: [PlatformTarget]
-
-    func isInstalled(_ platform: PlatformTarget) -> Bool { installed.contains(platform) }
-    func installedPlatforms() -> [PlatformTarget] { installed }
-}
-
-private final class RecordingLinkService: LinkServiceProtocol {
-    var linkCalls: [RecordedLink] = []
-    var unlinkCalls: [RecordedLink] = []
-    var throwOnLink: Set<PlatformTarget> = []
-    var throwOnUnlink: Set<PlatformTarget> = []
-
-    func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
-        linkCalls.append(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
-        if throwOnLink.contains(platform) { throw StubFailure() }
-    }
-
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
-        unlinkCalls.append(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
-        if throwOnUnlink.contains(platform) { throw StubFailure() }
-    }
-
-    func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
-
-    func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
-        (projectPath ?? "/tmp/user-wide") + "/links/" + skill.directoryName
-    }
-
-    func targetPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
-        (projectPath ?? "/tmp/user-wide") + "/targets/" + skill.directoryName
-    }
-
-    func validateAll(skills: [Skill]) -> [BrokenLink] { [] }
-}
-
-private final class RecordingCursorCompiler: CursorCompilerProtocol {
-    var compileCalls: [RecordedCursorCall] = []
-    var removeCalls: [RecordedCursorCall] = []
-    var throwOnCompile = false
-    var throwOnRemove = false
-
-    func compile(skill: Skill, projectPath: String?) throws {
-        compileCalls.append(RecordedCursorCall(directoryName: skill.directoryName, projectPath: projectPath))
-        if throwOnCompile { throw StubFailure() }
-    }
-
-    func remove(skill: Skill, projectPath: String?) throws {
-        removeCalls.append(RecordedCursorCall(directoryName: skill.directoryName, projectPath: projectPath))
-        if throwOnRemove { throw StubFailure() }
-    }
-
-    func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
-
-    func outputPath(skill: Skill, projectPath: String?) -> String {
-        (projectPath ?? "/tmp/user-wide") + "/cursor/" + skill.directoryName + ".mdc"
-    }
-}
-
-private struct StubFileService: FileServiceProtocol {
-    func readFile(at path: String) throws -> String { "" }
-    func writeFile(at path: String, content: String) throws {}
-    func deleteFile(at path: String) throws {}
-    func fileExists(at path: String) -> Bool { false }
-    func isExecutableFile(at path: String) -> Bool { false }
-    func directoryExists(at path: String) -> Bool { false }
-    func createDirectory(at path: String) throws {}
-    func deleteDirectory(at path: String) throws {}
-    func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {}
-    func symlinkTarget(at path: String) throws -> String { "" }
-    func isSymlink(at path: String) -> Bool { false }
-    func isRegularFile(at path: String) -> Bool { true }
-    func listDirectory(at path: String) throws -> [String] { [] }
-    func contentsHash(at path: String) throws -> String { "hash" }
-}
+private typealias PensieveCategory = CategoryFixturePensieveCategory
+private typealias RecordedLink = CategoryFixtureRecordedLink
+private typealias RecordedCursorCall = CategoryFixtureRecordedCursorCall
+private typealias SeededCategory = CategoryFixtureSeededCategory
+private typealias StubFailure = CategoryFixtureStubFailure
+private typealias StubDetection = CategoryFixtureStubDetection
+private typealias RecordingLinkService = CategoryFixtureRecordingLinkService
+private typealias RecordingCursorCompiler = CategoryFixtureRecordingCursorCompiler
+private typealias StubFileService = CategoryFixtureStubFileService
 
 final class CategoryReconcilerTests: XCTestCase {
+    private let files = StubFileService()
 
     @MainActor
     private func makeContext() throws -> ModelContext {
@@ -110,20 +23,6 @@ final class CategoryReconcilerTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         return ModelContext(container)
-    }
-
-    private func makeReconciler(
-        installed: [PlatformTarget],
-        linkService: RecordingLinkService = RecordingLinkService(),
-        cursorCompiler: RecordingCursorCompiler = RecordingCursorCompiler()
-    ) -> CategoryReconciler {
-        let vm = PlatformViewModel(
-            fileService: StubFileService(),
-            linkService: linkService,
-            cursorCompiler: cursorCompiler,
-            agentDetection: StubDetection(installed: installed)
-        )
-        return CategoryReconciler(platformVM: vm)
     }
 
     @MainActor
@@ -389,5 +288,23 @@ final class CategoryReconcilerTests: XCTestCase {
         XCTAssertTrue(result.outcomes.isEmpty)
         XCTAssertTrue(linkService.linkCalls.isEmpty)
         XCTAssertTrue(cursorCompiler.compileCalls.isEmpty)
+    }
+}
+
+extension CategoryReconcilerTests {
+    private func makeReconciler(
+        installed: [PlatformTarget],
+        linkService: RecordingLinkService = RecordingLinkService(),
+        cursorCompiler: RecordingCursorCompiler = RecordingCursorCompiler()
+    ) -> CategoryReconciler {
+        linkService.fileService = files
+        cursorCompiler.fileService = files
+        let vm = PlatformViewModel(
+            fileService: files,
+            linkService: linkService,
+            cursorCompiler: cursorCompiler,
+            agentDetection: StubDetection(installed: installed), deployStateStore: .memoryBacked
+        )
+        return CategoryReconciler(platformVM: vm)
     }
 }

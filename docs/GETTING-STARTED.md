@@ -147,6 +147,7 @@ pensieve-daemon deployed   # what this machine has deployed where
 ```
 
 The binary lives inside the app bundle at `Pensieve.app/Contents/MacOS/pensieve-daemon`.
+Running it with no command shows usage and exits 64. Use `pensieve-daemon run` to sync.
 
 ## Multi-machine notes
 

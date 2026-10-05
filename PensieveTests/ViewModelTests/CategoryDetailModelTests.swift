@@ -53,6 +53,7 @@ private struct StubFileService: FileServiceProtocol {
     func fileExists(at path: String) -> Bool { false }
     func isExecutableFile(at path: String) -> Bool { false }
     func directoryExists(at path: String) -> Bool { false }
+    func directoryExistsFollowingLinks(at path: String) throws -> Bool { path.hasPrefix("/tmp/") }
     func createDirectory(at path: String) throws {}
     func deleteDirectory(at path: String) throws {}
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {}
@@ -79,7 +80,7 @@ final class CategoryDetailModelTests: XCTestCase {
         let platformVM = PlatformViewModel(
             fileService: StubFileService(),
             linkService: linkService,
-            agentDetection: StubDetection(installed: [.claudeCode, .codex])
+            agentDetection: StubDetection(installed: [.claudeCode, .codex]), deployStateStore: .memoryBacked
         )
         return CategoryDetailModel(reconciler: CategoryReconciler(platformVM: platformVM))
     }

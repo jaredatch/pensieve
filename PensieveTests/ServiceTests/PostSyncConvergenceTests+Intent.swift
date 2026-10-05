@@ -35,7 +35,7 @@ extension PostSyncConvergenceTests {
             DeployRecordedLink(directoryName: "intent", platform: .codex, projectPath: project.path)
         ])
         XCTAssertEqual(try harness.assignments().count, 2)
-        XCTAssertEqual(recorder.events, ["deploy", "deploy:0:0", "category:0:0", "intent:2:0"])
+        XCTAssertEqual(recorder.events, ["deploy", "deploy:0:0", "category:0:0:skipped:0", "intent:2:0:skipped:0"])
 
         harness.context.delete(userIntent)
         try harness.context.save()
@@ -50,7 +50,7 @@ extension PostSyncConvergenceTests {
         XCTAssertEqual(harness.fileService.symlinks, [
             harness.artifactPath(skill: skill, platform: .codex, project: project)
         ])
-        XCTAssertEqual(recorder.events, ["deploy", "deploy:0:0", "category:0:0", "intent:1:0"])
+        XCTAssertEqual(recorder.events, ["deploy", "deploy:0:0", "category:0:0:skipped:0", "intent:1:0:skipped:0"])
         XCTAssertEqual(legacy.skillSlugs, [legacyOnly.directoryName])
     }
 }

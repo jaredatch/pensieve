@@ -42,4 +42,39 @@ final class TokenCounterTests: XCTestCase {
             XCTFail("Expected .exceeded")
         }
     }
+
+    func testTokenAndTextBudgetChecksAgreeAtBoundaries() {
+        for tokens in [799, 800, 801, 1_000, 1_001] {
+            let text = String(repeating: "a", count: tokens * Constants.charsPerToken)
+
+            XCTAssertEqual(TokenCounter.budgetStatus(tokens: tokens, budget: 1_000),
+                           TokenCounter.budgetStatus(text: text, budget: 1_000))
+        }
+    }
+
+    func testBudgetStatusHandlesIntegerLimitsWithoutOverflow() {
+        let budget = Int.max
+        let threshold = 7_378_697_629_483_820_645
+
+        XCTAssertEqual(TokenCounter.budgetStatus(tokens: 100, budget: budget), .ok(tokens: 100, budget: budget))
+        XCTAssertEqual(TokenCounter.budgetStatus(tokens: threshold, budget: budget), .ok(tokens: threshold, budget: budget))
+        XCTAssertEqual(TokenCounter.budgetStatus(tokens: threshold + 1, budget: budget),
+                       .warning(tokens: threshold + 1, budget: budget))
+        XCTAssertEqual(TokenCounter.budgetStatus(tokens: budget, budget: budget), .warning(tokens: budget, budget: budget))
+        XCTAssertEqual(TokenCounter.budgetStatus(tokens: Int.max, budget: Int.max - 1),
+                       .exceeded(tokens: Int.max, budget: Int.max - 1))
+        XCTAssertEqual(TokenCounter.budgetStatus(tokens: Int.min, budget: Int.min), .ok(tokens: Int.min, budget: Int.min))
+        XCTAssertEqual(TokenCounter.budgetStatus(tokens: 0, budget: Int.min), .exceeded(tokens: 0, budget: Int.min))
+    }
+
+    func testOrdinaryBudgetKeepsStrictFlooredBoundaries() {
+        let budget = 2_503
+
+        XCTAssertEqual(TokenCounter.budgetStatus(tokens: 2_001, budget: budget), .ok(tokens: 2_001, budget: budget))
+        XCTAssertEqual(TokenCounter.budgetStatus(tokens: 2_002, budget: budget), .ok(tokens: 2_002, budget: budget))
+        XCTAssertEqual(TokenCounter.budgetStatus(tokens: 2_003, budget: budget), .warning(tokens: 2_003, budget: budget))
+        XCTAssertEqual(TokenCounter.budgetStatus(tokens: budget, budget: budget), .warning(tokens: budget, budget: budget))
+        XCTAssertEqual(TokenCounter.budgetStatus(tokens: budget + 1, budget: budget),
+                       .exceeded(tokens: budget + 1, budget: budget))
+    }
 }

@@ -46,6 +46,15 @@ struct ProjectListView: View {
         """
     }
 
+    @discardableResult
+    static func removeProject(_ project: Project, removalError: inout String?, perform: () -> BatchResult) -> BatchResult {
+        let result = perform()
+        if result.hasFailures {
+            removalError = removalFailureMessage(projectName: project.name, result: result)
+        }
+        return result
+    }
+
     var body: some View {
         List(selection: $entitySelection) {
             ForEach(filteredProjects) { project in
@@ -55,16 +64,15 @@ struct ProjectListView: View {
                 .tag(EntitySelection.project(project.id))
                 .contextMenu {
                     Button("Remove", role: .destructive) {
-                        let result = removeRegisteredProject(
-                            project,
-                            categoryStore: categoryStore,
-                            reconciler: CategoryReconciler(platformVM: platformVM),
-                            manifestService: ManifestService(),
-                            context: context,
-                            notifier: notifier
-                        )
-                        if result.hasFailures {
-                            removalError = Self.removalFailureMessage(projectName: project.name, result: result)
+                        Self.removeProject(project, removalError: &removalError) {
+                            removeRegisteredProject(
+                                project,
+                                categoryStore: categoryStore,
+                                reconciler: CategoryReconciler(platformVM: platformVM),
+                                manifestService: ManifestService(),
+                                context: context,
+                                notifier: notifier
+                            )
                         }
                     }
                 }
@@ -78,17 +86,14 @@ struct ProjectListView: View {
         .overlay {
             if filteredProjects.isEmpty {
                 if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-                    ContentUnavailableView {
-                        Label("No Projects", systemImage: "folder")
-                    } description: {
-                        Text("Add a project to organize and deploy skills by workspace.")
-                    } actions: {
+                    EmptyStateView("No Projects",
+                                   description: "Add a project to organize and deploy skills by workspace.") {
                         Button("Add Project") { onAdd() }
                             .buttonStyle(.borderedProminent)
                             .disabled(addsFenced)
                     }
                 } else {
-                    ContentUnavailableView.search(text: searchText)
+                    EmptyStateView.search(text: searchText)
                 }
             }
         }

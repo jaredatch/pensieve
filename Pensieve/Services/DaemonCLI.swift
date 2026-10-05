@@ -17,7 +17,7 @@ struct CLIOutcome: Equatable {
 }
 
 enum DaemonCLI {
-    static let daemonVersion = "0.3.0"
+    static let daemonVersion = "0.4.0"
     static let defaultLogLines = 20
 
     static func parse(_ args: [String]) -> DaemonCommand {
@@ -25,7 +25,7 @@ enum DaemonCLI {
             return .version
         }
         guard let command = args.first else {
-            return .runCycle
+            return .usageError("no command given; use `run` to sync")
         }
 
         switch command {
@@ -57,7 +57,6 @@ enum DaemonCLI {
         The Pensieve app is the primary sync actor. Use `run` only as a degraded SSH path.
 
         USAGE:
-          pensieve-daemon                          run one degraded SSH sync cycle
           pensieve-daemon run                      run one degraded SSH sync cycle
           pensieve-daemon status [--json] [--app-support <dir>]
                                                    show the last cycle's result

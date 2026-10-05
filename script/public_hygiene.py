@@ -35,7 +35,9 @@ EMAIL_DOMAINS = frozenset(('example.com', 'example.org', 'example.net',
                            'pensieve.local', 'github.com'))
 FIXTURE_DOMAINS = EMAIL_DOMAINS | frozenset(('host.example',))
 JS_TS_SUFFIXES = frozenset(('.js', '.mjs', '.cjs', '.ts'))
-ASSET_FOLDERS = ('Pensieve/Resources/Assets.xcassets/',)
+# The asset catalog, and the app icon's Icon Composer layers: Xcode won't take an .icon bundle inside
+# an asset catalog, so its layer images sit beside it. That one bundle's Assets/ folder only.
+ASSET_FOLDERS = ('Pensieve/Resources/Assets.xcassets/', 'Pensieve/Resources/Pensieve.icon/Assets/')
 IMAGE_SUFFIXES = frozenset(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
                             '.heic', '.heif', '.tif', '.tiff', '.bmp', '.ico', '.icns', '.avif',
                             '.sketch', '.fig', '.psd', '.ai', '.svgz', '.jxl', '.mov', '.mp4', '.webm'))

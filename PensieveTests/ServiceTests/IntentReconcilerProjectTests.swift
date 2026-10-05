@@ -130,6 +130,7 @@ final class IntentReconcilerProjectTests: XCTestCase {
         XCTAssertTrue(harness.reconciler.reconcile(context: harness.context).outcomes.isEmpty)
 
         let project = Project(name: "Registered", path: "/projects/registered")
+        harness.fileService.directories.insert(project.path)
         project.identityKey = "register-key"
         registerProject(
             project,
@@ -160,13 +161,7 @@ final class IntentReconcilerProjectTests: XCTestCase {
         XCTAssertTrue(harness.linkService.linkCalls.isEmpty)
         XCTAssertTrue(try harness.assignments().isEmpty)
 
-        let installedVM = PlatformViewModel(
-            fileService: harness.fileService,
-            linkService: harness.linkService,
-            cursorCompiler: DeployRecordingCursorCompiler(fileService: harness.fileService),
-            agentDetection: DeployStubDetection(installed: [.codex]),
-            deployStateStore: DeployStateStore(fileService: harness.fileService)
-        )
+        let installedVM = harness.makePlatformVM(installed: [.codex])
         let launchReconciler = IntentReconciler(
             platformVM: installedVM,
             machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID), handoverIsComplete: { false }
@@ -179,6 +174,24 @@ final class IntentReconcilerProjectTests: XCTestCase {
             DeployRecordedLink(directoryName: slug, platform: .codex, projectPath: project.path)
         ])
         XCTAssertEqual(try harness.assignments().map(\.projectID), [project.id])
+    }
+
+    func testSecondViewModelSeesAndRemovesFirstPassDeployState() throws {
+        let harness = try ProjectIntentHarness(installed: [.codex])
+        let skill = try harness.insertSkill("shared-state")
+        let project = try harness.insertProject(name: "Shared", path: "/projects/shared", key: "shared-key")
+        _ = try harness.insertIntent(skill: skill, platformRaw: "codex", projectKey: "shared-key")
+        XCTAssertEqual(harness.reconciler.reconcile(context: harness.context).successes.count, 1)
+        let records = harness.platformVM.deployIndex.records(for: skill.directoryName)
+        XCTAssertEqual(records.map(\.artifactPath), [harness.artifactPath(skill: skill, platform: .codex, project: project)])
+
+        let installedVM = harness.makePlatformVM(installed: [.codex])
+        XCTAssertEqual(installedVM.deployIndex.records(for: skill.directoryName), records,
+                       "The later view model reads the first pass's isolated deploy state")
+        XCTAssertFalse(installedVM.removeBatch(skills: [skill], platforms: [.codex], target: .project(project)).hasFailures)
+        harness.platformVM.refreshDeployIndex()
+        XCTAssertTrue(harness.platformVM.deployIndex.records(for: skill.directoryName).isEmpty,
+                      "A removal by the later view model updates the same store")
     }
 
     func testProjectRetractionTouchesOnlyItsExactTuple() throws {

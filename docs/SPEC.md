@@ -211,13 +211,15 @@ Token counting uses **char/4 heuristic** (1 token ≈ 4 characters). Advisory, n
 
 | Status | Condition | UI |
 |--------|-----------|-----|
-| OK | < 80% of budget | No indicator |
-| Warning | 80-100% of budget | Yellow |
-| Exceeded | > 100% of budget | Red |
+| OK | ≤ 80% of budget | No indicator |
+| Warning | > 80% through 100% of budget | Yellow triangle |
+| Exceeded | > 100% of budget | Red triangle and text |
 
 Default budgets: Claude Code 2,500, Grok 2,500, Cursor 5,000, Codex unlimited. User-configurable in Settings.
 
-Settings stores the budgets, but nothing reads them yet. `TokenCounter.budgetStatus` has no caller, so no skill shows the Warning or Exceeded state (#52).
+The Overview tab's Context cost card shows a warning beside the raw-file token estimate. It compares the estimate with each platform's budget when the skill is deployed user-wide or in a registered project on this Mac. Undeployed skills and unlimited budgets show no warning.
+
+The card names the worst platform: Exceeded before Warning, then the smaller budget, then Settings order if budgets tie.
 
 ---
 
@@ -231,6 +233,18 @@ Settings stores the budgets, but nothing reads them yet. `TokenCounter.budgetSta
 Project assignment is app state (SwiftData), not file state. The canonical SKILL.md doesn't know which projects it's assigned to. This is intentional — project paths differ across machines.
 
 **Project targeting.** A user registers project directories from the Projects list in the middle column; the Deployments tab has a section per scope — This Mac, then each registered project — and the bulk sheet a target picker: This Mac or any registered project. **Claude Code, Grok, Codex, and Cursor support project-scoped deploy** (they have a project-level skill path); OpenClaw and Hermes are user-wide-only and are filtered out of the agent list while a project is the target. Each registered project also gets a stable cross-machine identity, either a normalized git remote or a committed `.pensieve-project` UUID marker when there is no remote, so the same project is recognized across machines even though its absolute path differs. Selecting a project in the Projects list opens its detail in the third column: path, identity status, category membership, and a snapshot of the skills that reach it — both deployed and assigned-but-not-yet-deployed.
+
+A project folder is present when its saved path resolves to an existing directory, including through a link. The saved path must be absolute; a relative path is treated as missing. A missing path, a file, or a link to a missing target or a file is treated as missing. Project deploys create their agent folders only inside that directory. They never create the project folder or its ancestors, even if it disappears before the final write. User-wide deploys still create missing agent folders.
+
+A direct deploy from the Deployments tab, bulk sheet or category reports the missing folder with the project's name. Other pairs continue, and the saved intent or category rule remains. The failed pair gets no new deploy record. Convergence retains ledger rows while a folder is missing and counts only pending deploys or removals as skipped. A folder that cannot be checked also keeps its rows; its pending work counts as failed. In-sync pairs produce no outcome. When a folder is present but a recorded artifact is absent, convergence deploys it again. For Claude Code, Grok and Codex, the artifact must be a link to the skill in the store. A broken link or a link elsewhere triggers a deploy attempt that replaces it with the store link. A real file or folder reports the occupied path and remains untouched. Cursor continues to count an existing rule file as deployed. Missing and uncheckable project folders receive no filesystem writes.
+
+A restored folder receives its pending deploys on the next converging run: launch, a sync that brings changes, or a user change that reconciles. Restoring a folder alone does not start a run. Removal of a deploy or project still works when its folder is missing.
+
+Each folder admission check for convergence, direct project deploys and Add Project waits at most about two seconds. The bound applies per folder check, not per operation. A direct project deploy checks its root once before looking up or writing its artifact. Concurrent callers share the original check's deadline and answer; a check already past that deadline returns immediately with a cannot-check reason. Other projects continue through reconciliation.
+
+Removal and status reads probe absolute artifact paths directly. A relative project path causes no removal, status or backfill file operations and reports not deployed. Path builders return the actual artifact path, so removal can still retire a legacy deploy-state record at its recorded relative path.
+
+Add Project requires an existing directory. A path starting with `~/` expands to the home folder before checking and saving; input that remains relative is refused without a check and asks for `/` or `~/`. While checking the current path, its status line shows neutral checking text and Add is disabled. Return during that wait queues one Add: an admitted path adds the project and closes the sheet. Editing either field cancels the queued Add. The latest result replaces the checking text, and a refused path shows its reason on the same line. Correcting the path in the same sheet enables Add. Registration propagates identity errors and writes a new `.pensieve-project` marker without creating parents, so a folder deleted before the marker write stays absent and no project row is added.
 
 **Machine targeting.** With This Mac as the target, the bulk deploy sheet adds a machine picker. It lists This Mac, machines with published state, and intent-only machines marked `unseen`. Selecting This Mac records synced intent and applies it locally for locally installed agents (intent for an agent this Mac lacks is recorded but not realized); selecting only remote machines records intent without creating a local artifact. Remove retracts intent for the selected machines and only removes locally when This Mac is selected. Project mode hides the machine picker, writes project-scoped intent addressed to This Mac, and immediately reconciles it into every registered checkout with that project identity. The manifest and local intent rows carry the direct project×machine intent, so another Mac can apply it when that project is registered there.
 

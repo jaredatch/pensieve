@@ -31,6 +31,7 @@ KIT_COPIES = tuple('script/' + name for name in (
     'hooks/pre-commit', 'hooks/commit-msg', 'hooks/pre-push',
 ))
 ASSETS = 'Pensieve/Resources/Assets.xcassets/'
+ICON_ASSETS = 'Pensieve/Resources/Pensieve.icon/Assets/'
 
 
 @contextlib.contextmanager
@@ -567,6 +568,29 @@ class HygieneTests(unittest.TestCase):
                 self.repo.git('rm', '-qf', '--', 'vector.' + suffix)
         self.repo.stage(ASSETS + 'unreviewed.zip', b'PK\x03\x04binary')
         self.assert_scan([(ASSETS + 'unreviewed.zip', 1, 'opaque-container')])
+
+    def test_app_icon_layers_share_the_image_allowance(self):
+        self.repo.terms()
+        self.repo.stage(guard.SETTINGS, '{"public_repo": true}')
+        png = (b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00'
+               b'\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe\xa7\x35\x81\x84'
+               b'\x00\x00\x00\x00IEND\xaeB`\x82')
+        # A real PNG among the icon's layers passes, as it does in the asset catalog.
+        self.repo.stage(ICON_ASSETS + 'basin.png', png)
+        self.assert_scan([])
+        self.assert_scan([], '--tree')
+        # The magic check still applies there: archive bytes behind a .png name, or an archive, are refused.
+        self.repo.stage(ICON_ASSETS + 'disguised.png', b'PK\x03\x04binary')
+        self.repo.stage(ICON_ASSETS + 'layers.zip', b'PK\x03\x04binary')
+        self.assert_scan([(ICON_ASSETS + 'disguised.png', 1, 'opaque-container'),
+                          (ICON_ASSETS + 'layers.zip', 1, 'opaque-container')])
+        self.repo.git('rm', '-qf', '--', ICON_ASSETS + 'disguised.png', ICON_ASSETS + 'layers.zip')
+        # Only that one bundle's Assets/ folder: the bundle root and any other .icon bundle stay refused.
+        outside = ('Pensieve/Resources/Pensieve.icon/x.png', 'Pensieve/Resources/Other.icon/Assets/x.png',
+                   'Pensieve/Resources/Pensieve.icon/AssetsExtra/x.png')
+        for name in outside:
+            self.repo.stage(name, png)
+        self.assert_scan([(name, 1, 'image-location') for name in outside])
 
     def test_public_destination_requires_tip_adoption(self):
         tip = self.repo.git('rev-parse', 'HEAD').stdout.decode().strip()

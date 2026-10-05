@@ -54,6 +54,7 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "26.0"
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.developer-tools"
         INFOPLIST_KEY_CFBundleDisplayName: Pensieve
+        ASSETCATALOG_COMPILER_APPICON_NAME: Pensieve
         GENERATE_INFOPLIST_FILE: YES
         ENABLE_DEBUG_DYLIB: NO
         CODE_SIGN_IDENTITY: "-"
@@ -103,6 +104,8 @@ targets:
       - path: Pensieve/Services/GitService+Usability.swift
       - path: Pensieve/Services/GitServiceConflict.swift
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+ProjectFolder.swift
+      - path: Pensieve/Services/ProjectFolderError.swift
       - path: Pensieve/Services/FileService+BoundedRead.swift
       - path: Pensieve/Services/FileService+DirectoryCopy.swift
       - path: Pensieve/Services/FileService+DirectoryProbe.swift
@@ -122,6 +125,8 @@ targets:
     sources:
       - path: PensieveDaemon
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+ProjectFolder.swift
+      - path: Pensieve/Services/ProjectFolderError.swift
       - path: Pensieve/Services/FileService+BoundedRead.swift
       - path: Pensieve/Services/FileService+DirectoryCopy.swift
       - path: Pensieve/Services/FileService+DirectoryProbe.swift

@@ -19,13 +19,29 @@ final class CategoryDetailModel {
     }
 
     func setSkill(_ skill: Skill, inCategory category: Category, assigned: Bool, context: ModelContext) {
+        let added = assigned && !category.skillSlugs.contains(skill.directoryName)
+        let projectIDs: Set<UUID> = added ? Set(((try? context.fetch(FetchDescriptor<Project>())) ?? [])
+            .filter { category.projectKeys.contains($0.identityKey ?? "") }.map(\.id)) : []
         lastActionVerb = assigned ? "deployed" : "removed"
-        lastResult = store.setSkill(skill, inCategory: category, assigned: assigned, reconciler: reconciler, context: context)
+        let result = store.setSkill(skill, inCategory: category, assigned: assigned, reconciler: reconciler, context: context)
+        lastResult = result.reportingSkippedProjects { outcome in
+            guard added, outcome.skillID == skill.id, case .project(let id)? = outcome.target else { return false }
+            return projectIDs.contains(id)
+        }
     }
 
     func setProject(_ project: Project, inCategory category: Category, member: Bool, context: ModelContext) {
+        let added = member && !category.projectKeys.contains(project.identityKey ?? "")
+        let projectIDs: Set<UUID> = added ? Set(((try? context.fetch(FetchDescriptor<Project>())) ?? [])
+            .filter { $0.identityKey == project.identityKey }.map(\.id)) : []
+        let skillIDs: Set<UUID> = added ? Set(((try? context.fetch(FetchDescriptor<Skill>())) ?? [])
+            .filter { category.skillSlugs.contains($0.directoryName) }.map(\.id)) : []
         lastActionVerb = member ? "deployed" : "removed"
-        lastResult = store.setProject(project, inCategory: category, member: member, reconciler: reconciler, context: context)
+        let result = store.setProject(project, inCategory: category, member: member, reconciler: reconciler, context: context)
+        lastResult = result.reportingSkippedProjects { outcome in
+            guard added, skillIDs.contains(outcome.skillID), case .project(let id)? = outcome.target else { return false }
+            return projectIDs.contains(id)
+        }
     }
 
     func rename(_ category: Category, to name: String, context: ModelContext) {

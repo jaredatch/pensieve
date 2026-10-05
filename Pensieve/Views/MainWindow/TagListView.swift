@@ -35,13 +35,9 @@ struct TagListView: View {
         .overlay {
             if filteredTags.isEmpty {
                 if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-                    ContentUnavailableView(
-                        "No Tags",
-                        systemImage: "tag",
-                        description: Text("Tags you add to a skill appear here.")
-                    )
+                    EmptyStateView("No Tags", description: "Tags you add to a skill appear here.")
                 } else {
-                    ContentUnavailableView.search(text: searchText)
+                    EmptyStateView.search(text: searchText)
                 }
             }
         }

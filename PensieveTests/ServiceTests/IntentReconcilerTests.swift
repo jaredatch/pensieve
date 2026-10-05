@@ -244,7 +244,7 @@ private extension IntentReconcilerTests {
             linkService: linkService,
             cursorCompiler: DeployRecordingCursorCompiler(fileService: fileService),
             agentDetection: DeployStubDetection(installed: installed),
-            deployStateStore: DeployStateStore(fileService: fileService)
+            deployStateStore: DeployStateStore.memoryBacked
         )
         return Harness(
             context: context,
