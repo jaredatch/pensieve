@@ -23,7 +23,8 @@ final class AddProjectSheetHostTests: XCTestCase {
         ).modelContainer(container).background(Color(nsColor: .windowBackgroundColor)))
         let window = mount(host)
         defer { window.close() }
-        await TestWait.until(timeout: .seconds(3), failureMessage: "The sheet must render the missing-folder reason") {
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                            failureMessage: "The sheet must render the missing-folder reason") {
             (try? self.renderedText(in: host).contains { $0.text.contains("Project folder is missing") }) == true
         }
         try clickAdd(in: host, window: window)
@@ -66,7 +67,8 @@ final class AddProjectSheetHostTests: XCTestCase {
             .background(Color(nsColor: .windowBackgroundColor)))
         let window = mount(host)
         defer { window.close() }
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Initial folder preview") { model.isValid }
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                            failureMessage: "Initial folder preview") { model.isValid }
         try files.deleteDirectory(at: model.path)
         try clickAdd(in: host, window: window)
         await TestWait.until(timeout: .seconds(3), failureMessage: "Failed Add reason") { model.hasIdentityError }
@@ -92,7 +94,8 @@ final class AddProjectSheetHostTests: XCTestCase {
             .background(Color(nsColor: .windowBackgroundColor)))
         let window = mount(host)
         defer { window.close() }
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Initial caption") {
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                            failureMessage: "Initial caption") {
             (try? self.renderedText(in: host).contains { $0.text.contains("Marker will be created") }) == true
         }
         let initialHeight = host.fittingSize.height
@@ -139,7 +142,8 @@ final class AddProjectSheetHostTests: XCTestCase {
                     onCreated: { created.append($0) }).modelContainer(h.context.container)))
             let window = mount(host)
             defer { window.close() }
-            await TestWait.until(timeout: .seconds(3), failureMessage: "Native sheet presents") {
+            await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                                failureMessage: "Native sheet presents") {
                 window.attachedSheet?.contentView != nil
             }
             let sheet = try XCTUnwrap(window.attachedSheet)

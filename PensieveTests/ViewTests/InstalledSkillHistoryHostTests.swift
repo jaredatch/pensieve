@@ -29,7 +29,7 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
         let window = makeWindow(model: model, history: owner, session: session)
         defer { window.close() }
 
-        let loadedFirst = await eventually {
+        let loadedFirst = await eventually(timeout: TestWait.firstRenderTimeoutSeconds) {
             readProbe.contains(commit: first.installedOrigin?.installedCommit)
         }
         XCTAssertTrue(loadedFirst)
@@ -114,8 +114,13 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
         XCTAssertTrue(sheetPresented)
     }
 
-    private func eventually(_ condition: @escaping @MainActor () -> Bool) async -> Bool {
-        for _ in 0 ..< 150 {
+    private func eventually(
+        timeout: TimeInterval = 3,
+        _ condition: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(timeout))
+        while clock.now < deadline {
             if condition() { return true }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
@@ -207,7 +212,7 @@ extension InstalledSkillHistoryHostTests {
         let fixture = makeFixture(model: model, history: owner, session: InstalledSkillHistorySession())
         defer { fixture.window.close() }
 
-        let failedInitially = await eventually {
+        let failedInitially = await eventually(timeout: TestWait.firstRenderTimeoutSeconds) {
             reads.count == 1 && owner.state == .failed("The repository couldn't be reached.")
         }
         XCTAssertTrue(failedInitially)
@@ -240,7 +245,7 @@ extension InstalledSkillHistoryHostTests {
         let fixture = makeFixture(model: model, history: owner, session: InstalledSkillHistorySession())
         defer { fixture.window.close() }
 
-        let failedInitially = await eventually {
+        let failedInitially = await eventually(timeout: TestWait.firstRenderTimeoutSeconds) {
             reads.count == 1 && owner.state == .failed("The repository couldn't be reached.")
         }
         XCTAssertTrue(failedInitially)
@@ -273,7 +278,7 @@ extension InstalledSkillHistoryHostTests {
         let fixture = makeFixture(model: model, history: owner, session: InstalledSkillHistorySession())
         defer { fixture.window.close() }
 
-        let failedInitially = await eventually {
+        let failedInitially = await eventually(timeout: TestWait.firstRenderTimeoutSeconds) {
             reads.count == 1 && owner.state == .failed("The repository couldn't be reached.")
         }
         XCTAssertTrue(failedInitially)
