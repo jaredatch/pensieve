@@ -73,11 +73,20 @@ final class ViewChangesSceneTests: XCTestCase {
             XCTAssertLessThanOrEqual(window.minSize.height, 660, "The window must resize to the frame's height")
             XCTAssertEqual(window.frame.height, 660, accuracy: 1, "Default size includes all window chrome")
             XCTAssertEqual(window.titlebarSeparatorStyle, .none, "Full-height chrome has no title-bar strip")
-            let heading = try XCTUnwrap(window.toolbar?.items.first {
-                $0.itemIdentifier.rawValue.contains("changes-heading")
-            }?.view, "The heading belongs in the native toolbar, level with window controls")
+            XCTAssertEqual(window.title, "Changes to Geometry", "Use the native plain-text window title")
+            XCTAssertEqual(window.subtitle, "example/repository · 1111111 → 2222222 · 3 days newer")
+            let update = try XCTUnwrap(window.toolbar?.items.first {
+                $0.itemIdentifier.rawValue.contains("changes-update")
+            }?.view)
+            XCTAssertGreaterThanOrEqual(update.convert(update.bounds, to: nil).maxX, window.frame.width - 30,
+                                        "Review actions belong at the toolbar's trailing edge")
+            let github = try XCTUnwrap(window.toolbar?.items.first {
+                $0.itemIdentifier.rawValue.contains("changes-github")
+            }?.view)
+            XCTAssertLessThan(github.convert(github.bounds, to: nil).maxX, update.convert(update.bounds, to: nil).minX,
+                              "View on GitHub precedes Update at the trailing edge")
             let close = try XCTUnwrap(window.standardWindowButton(.closeButton))
-            XCTAssertEqual(heading.convert(heading.bounds, to: nil).midY,
+            XCTAssertEqual(update.convert(update.bounds, to: nil).midY,
                            close.convert(close.bounds, to: nil).midY, accuracy: 8,
                            "Toolbar and traffic lights share the same row")
         }

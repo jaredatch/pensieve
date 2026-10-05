@@ -18,6 +18,10 @@ final class ViewChangesViewModelTests: XCTestCase {
         XCTAssertEqual(model.state, .loading)
         XCTAssertFalse(model.canUpdate)
         await loaded(model)
+        XCTAssertEqual(ViewChangesPresentation.accessibilityLabel(preview.files[0]),
+                       "SKILL.md, 2 additions, 1 deletion")
+        XCTAssertEqual(ViewChangesPresentation.accessibilityLabel(preview.files[1]),
+                       "setup.sh, scripts, 1 addition, 0 deletions")
         XCTAssertEqual(model.files, preview.files)
         XCTAssertEqual(model.selectedFile, preview.files[0])
         XCTAssertEqual(model.selectedFile?.linesAdded, 2)
@@ -84,22 +88,25 @@ final class ViewChangesViewModelTests: XCTestCase {
     }
 
     func testDeletedUpdatedAndNoUpdateStatesRetirePreviewAndDisableApply() async throws {
-        let skill = try fixture.skill("stale")
-        let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
-        let model = ViewChangesViewModel(operations: fixture.operations(rows: [row]))
         for mutation in 0..<4 {
+            let skill = try fixture.skill("stale-\(mutation)")
+            let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
+            let model = ViewChangesViewModel(operations: fixture.operations(rows: [row]))
             skill.updateAvailable = true
             model.open(skillID: skill.id, context: fixture.context)
             await loaded(model)
             var skills = [skill]
             var revisions: [String: UInt64] = [:]
             switch mutation {
-            case 0: skills = []
+            case 0:
+                fixture.context.delete(skill)
+                try fixture.context.save()
+                skills = []
             case 1: skill.updatedAt = skill.updatedAt.addingTimeInterval(1)
             case 2: skill.updateAvailable = false
             default: revisions[skill.directoryName] = 1
             }
-            model.validate(skills: skills, folderRevisions: revisions)
+            model.validate(skills: skills, folderRevisions: revisions, context: fixture.context)
             guard case let .stale(message) = model.state else { return XCTFail("Expected stale state for \(mutation)") }
             XCTAssertFalse(message.isEmpty)
             XCTAssertNil(model.selectedFile)

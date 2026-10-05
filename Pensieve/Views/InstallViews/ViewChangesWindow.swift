@@ -51,6 +51,7 @@ struct ViewChangesWindow: View {
 private struct ViewChangesWindowContent: View {
     @Bindable var model: ViewChangesViewModel
     @Bindable var library: SkillLibraryViewModel
+    @Environment(\.modelContext) private var context
     @Query private var skills: [Skill]
     let onClose: () -> Void
 
@@ -66,7 +67,7 @@ private struct ViewChangesWindowContent: View {
     }
 
     private var identities: [ViewChangesIdentity] {
-        skills.map {
+        skills.filter { $0.modelContext != nil && !$0.isDeleted }.map {
             ViewChangesIdentity(skill: $0, folderRevision: library.folderChangeRevisions[$0.directoryName, default: 0])
         }
     }
@@ -75,11 +76,10 @@ private struct ViewChangesWindowContent: View {
         ViewChangesView(model: model, library: library, onClose: onClose)
             .onAppear { validate() }
             .onChange(of: identities) { _, _ in validate() }
-            .onChange(of: model.isApplying) { _, applying in if !applying { validate() } }
     }
 
     private func validate() {
-        model.validate(skills: skills, folderRevisions: library.folderChangeRevisions)
+        model.validate(skills: skills, folderRevisions: library.folderChangeRevisions, context: context)
     }
 }
 

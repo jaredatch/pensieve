@@ -81,7 +81,7 @@ struct PensieveApp: App {
             notifier: runtime.syncStateNotifier,
             echoRegistrar: runtime.syncWriteEchoRegistrar,
             bodyWriteRegistration: runtime.syncBodyWriteRegistration,
-            applyGate: runtime.updateApplyGate
+            applyCoordinator: runtime.updateApplyCoordinator
         )
     }
 

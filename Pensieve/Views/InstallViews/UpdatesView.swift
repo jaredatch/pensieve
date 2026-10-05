@@ -172,7 +172,8 @@ private struct UpdatesRowView: View {
         case .updating:
             HStack(spacing: Spacing.sm) {
                 ProgressView().controlSize(.small)
-                Text("Updating…").font(.caption).foregroundStyle(.secondary)
+                Text(model.isUpdatingElsewhere(row) ? "Updating in View Changes…" : "Updating…")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         case .updated:
             Label("Updated", systemImage: "checkmark.circle.fill")

@@ -95,7 +95,7 @@ extension ViewChangesViewModelTests {
             let didStart = await TestWait.forSemaphore(started)
             XCTAssertTrue(didStart)
             skill.updatedAt = skill.updatedAt.addingTimeInterval(1)
-            model.validate(skills: [skill], folderRevisions: [skill.directoryName: 1])
+            model.validate(skills: [skill], folderRevisions: [skill.directoryName: 1], context: fixture.context)
             gate.open()
             await TestWait.until(failureMessage: "apply did not settle") { !model.isApplying }
             guard case .stale = model.state else {
@@ -118,7 +118,7 @@ extension ViewChangesViewModelTests {
         guard case .failed = model.state else { return XCTFail("First fetch must fail") }
         model.retry(context: fixture.context, folderRevisions: [skill.directoryName: 7])
         await settled(model)
-        model.validate(skills: [skill], folderRevisions: [skill.directoryName: 7])
+        model.validate(skills: [skill], folderRevisions: [skill.directoryName: 7], context: fixture.context)
         XCTAssertTrue(model.canUpdate, "Retry captures the current folder revision after its first fetch failed")
         XCTAssertEqual(fetches, 2)
         XCTAssertNotNil(model.selectedFile, "Retry must remember the requested skill before its first fetch succeeds")
@@ -135,8 +135,8 @@ extension ViewChangesViewModelTests {
         model.open(skillID: skill.id, context: fixture.context)
         await settled(model)
         model.requestUpdate(library: fixture.library, context: fixture.context, onSuccess: {})
+        XCTAssertEqual(fetches, 1, "Opening and requesting Update share one lookup before the settlement phase")
         await TestWait.until(failureMessage: "apply did not settle") { !model.isApplying }
-        XCTAssertEqual(fetches, 1, "Opening and Update share one skill lookup")
     }
 
     func testMovedOrMissingPinsOfferRecheckForPreviewAndApply() async throws {

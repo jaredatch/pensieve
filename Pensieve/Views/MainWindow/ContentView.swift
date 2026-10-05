@@ -43,7 +43,7 @@ struct ContentView: View {
         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
         echoRegistrar: @escaping SyncWriteEchoRegistering = SyncWriteEchoRegistrar.suppressed,
         bodyWriteRegistration: SyncBodyWriteRegistration = .suppressed,
-        applyGate: SkillUpdateApplyGate? = nil,
+        applyCoordinator: SkillUpdateApplyCoordinator? = nil,
         machineDependencies: MachineObservabilityDependencies = .live
     ) {
         self.notifier = notifier
@@ -59,7 +59,8 @@ struct ContentView: View {
             applyOperation: updatesOperations.applyOperation,
             diffOperation: updatesOperations.diffOperation,
             recheckOperation: updatesOperations.recheckOperation,
-            notifier: notifier, echoRegistrar: echoRegistrar, bodyWriteRegistration: bodyWriteRegistration, applyGate: applyGate))
+            notifier: notifier, echoRegistrar: echoRegistrar, bodyWriteRegistration: bodyWriteRegistration,
+            applyCoordinator: applyCoordinator))
     }
     @Query private var skills: [Skill]
     @Query(sort: \Project.name) private var projects: [Project]

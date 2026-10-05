@@ -10,7 +10,7 @@ extension AppRuntime {
             recheckOperation: updatesViewModelOperations.recheckOperation,
             notifier: syncStateNotifier, echoRegistrar: syncWriteEchoRegistrar,
             bodyWriteRegistration: syncBodyWriteRegistration
-        ), applyGate: updateApplyGate)
+        ), applyCoordinator: updateApplyCoordinator)
     }
 
     func mainWindowAppeared() async {

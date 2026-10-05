@@ -12,14 +12,24 @@ final class UpdatesViewModel {
     typealias DiffOperation = (UUID, String, String, ModelContainer) throws -> PinnedSkillDiff
     typealias RecheckOperation = (UUID, ModelContainer) throws -> SkillUpdateRecheckCompletion
 
-    var rows: [UpdatesRow] = []
+    var rows: [UpdatesRow] = [] {
+        didSet {
+            rowIDs = Set(rows.map(\.id))
+            applyReservationsChanged()
+        }
+    }
+    var rowIDs: Set<UUID> = []
+    var hasReservedRows = false
+    var invalidateEditorBody: () -> Void = {}
+    var currentFolderRevisions: () -> [String: UInt64] = { [:] }
     var selectedSkillIDs: Set<UUID> = []
     var confirmedDriftSkillIDs: Set<UUID> = []
     var statuses: [UUID: UpdatesRowStatus] = [:]
     var isLoading = false
     var isApplyingBatch = false
-    let applyGate: SkillUpdateApplyGate
-    var isApplying: Bool { isApplyingBatch || rows.contains { applyGate.isApplying($0.id) } }
+    let applyCoordinator: SkillUpdateApplyCoordinator
+    var applyGate: SkillUpdateApplyGate { applyCoordinator.gate }
+    var isApplying: Bool { isApplyingBatch || hasReservedRows }
     var recheckingSkillID: UUID?
     var loadError: String?
     var isPresented = false
@@ -44,9 +54,9 @@ final class UpdatesViewModel {
         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
         echoRegistrar: @escaping SyncWriteEchoRegistering = SyncWriteEchoRegistrar.suppressed,
         bodyWriteRegistration: SyncBodyWriteRegistration = .suppressed,
-        applyGate: SkillUpdateApplyGate? = nil
+        applyCoordinator: SkillUpdateApplyCoordinator? = nil
     ) {
-        self.applyGate = applyGate ?? SkillUpdateApplyGate()
+        self.applyCoordinator = applyCoordinator ?? SkillUpdateApplyCoordinator()
         self.rowLoader = rowLoader
         self.applyOperation = applyOperation
         self.diffOperation = diffOperation
@@ -54,6 +64,7 @@ final class UpdatesViewModel {
         self.notifier = notifier
         self.echoRegistrar = echoRegistrar
         self.bodyWriteRegistration = bodyWriteRegistration
+        self.applyCoordinator.observe(self)
     }
 
     var selectedCount: Int { selectedSkillIDs.count }
@@ -66,7 +77,7 @@ final class UpdatesViewModel {
     }
 
     func toggleSelection(_ row: UpdatesRow) {
-        guard !isApplying else { return }
+        guard !isApplying, canSelect(row) else { return }
         if selectedSkillIDs.contains(row.id) {
             selectedSkillIDs.remove(row.id)
         } else {
@@ -76,7 +87,7 @@ final class UpdatesViewModel {
 
     func selectAll() {
         guard !isApplying else { return }
-        selectedSkillIDs = Set(rows.map(\.id))
+        selectedSkillIDs = Set(rows.filter(canSelect).map(\.id))
     }
 
     func selectNone() {
@@ -173,7 +184,8 @@ final class UpdatesViewModel {
 
     func present(selecting skillID: UUID? = nil, library: SkillLibraryViewModel) {
         guard !library.libraryUnavailable else { return }
-        applyGate.bind(library: library)
+        invalidateEditorBody = { [weak library] in library?.noteEditorBodyInvalidated() }
+        currentFolderRevisions = { [weak library] in library?.folderChangeRevisions ?? [:] }
         library.confirmLeavingAnyDraft { [weak self] proceed in
             guard let self, proceed else { return }
             self.reset()

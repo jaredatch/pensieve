@@ -49,7 +49,7 @@ extension UpdatesViewModelTests {
         try await assertWindowRefusal(window, fixture: fixture, library: library,
                                       message: SkillUpdateFlowError.repositoryChangedMessage)
         XCTAssertTrue(window.canRecheck)
-        window.recheck(context: context)
+        window.recheck(context: context, library: library)
         await windowLoaded(window)
         XCTAssertEqual(window.row?.upstreamCommit, moved, "Re-check loads the newly pinned revision")
         XCTAssertTrue(window.canUpdate)
@@ -99,12 +99,19 @@ extension UpdatesViewModelTests {
         guard case let .stale(message) = window.state else { return XCTFail("Expected explicit post-write state") }
         XCTAssertTrue(message.contains("files were replaced"))
         XCTAssertTrue(message.contains(CrashManifest.InjectedFailure().localizedDescription))
+        fixture.skill.updatedAt = fixture.skill.updatedAt.addingTimeInterval(1)
+        window.validate(skills: [fixture.skill], folderRevisions: library.folderChangeRevisions, context: context)
+        XCTAssertEqual(window.state, .stale(message), "A later metadata notification must preserve the post-write failure")
         XCTAssertFalse(window.canUpdate)
         XCTAssertNil(window.selectedFile)
         XCTAssertTrue(library.readBody(fixture.skill).contains("fresh body"))
         XCTAssertGreaterThan(library.reloadToken, revision, "Detail reloads after a post-write failure")
         XCTAssertTrue(library.wasLastWrittenByApp(directoryName: fixture.skill.directoryName,
                                                 currentBody: library.readBody(fixture.skill)))
+        context.delete(fixture.skill)
+        try context.save()
+        window.validate(skills: [], folderRevisions: library.folderChangeRevisions, context: context)
+        XCTAssertEqual(window.state, .stale("This skill was deleted."))
     }
 
     func makeRealWindow(fixture: RealFixture, service: SkillInstallService? = nil)

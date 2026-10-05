@@ -25,9 +25,11 @@ final class ViewChangesViewModel {
     private(set) var applyMessage: String?
 
     private let operations: UpdateReviewOperations
-    private let applyGate: SkillUpdateApplyGate
+    private let applyCoordinator: SkillUpdateApplyCoordinator
+    private var applyGate: SkillUpdateApplyGate { applyCoordinator.gate }
     private var currentSkill: Skill?
     private var deferredValidationMessage: String?
+    private var recheckFailureIdentity: ViewChangesIdentity?
     private var offersRecheck = false
     private let skillLookup: (UUID, ModelContext) throws -> Skill?
     private var identity: ViewChangesIdentity?
@@ -36,11 +38,12 @@ final class ViewChangesViewModel {
     @ObservationIgnored private var previewTask: Task<Void, Never>?
     @ObservationIgnored private var cancelWorker: (() -> Void)?
 
-    init(operations: UpdateReviewOperations, applyGate: SkillUpdateApplyGate? = nil,
+    init(operations: UpdateReviewOperations, applyCoordinator: SkillUpdateApplyCoordinator? = nil,
          skillLookup: @escaping (UUID, ModelContext) throws -> Skill? = UpdatesViewModel.findSkill) {
         self.operations = operations
-        self.applyGate = applyGate ?? SkillUpdateApplyGate()
+        self.applyCoordinator = applyCoordinator ?? SkillUpdateApplyCoordinator()
         self.skillLookup = skillLookup
+        self.applyCoordinator.observe(self)
     }
 
     var canRecheck: Bool { offersRecheck && requestedSkillID != nil && !isApplying && !isRechecking }
@@ -95,15 +98,26 @@ final class ViewChangesViewModel {
         open(skillID: requestedSkillID, context: context, folderRevision: folderRevision, folderRevisions: folderRevisions)
     }
 
-    func validate(skills: [Skill], folderRevisions: [String: UInt64]) {
+    func validate(skills: [Skill], folderRevisions: [String: UInt64], context: ModelContext) {
         guard let identity else { return }
+        let skill: Skill?
+        do {
+            // A filtered Query can still contain the prior skill while SwiftUI switches its filter.
+            skill = try skills.first(where: { $0.modelContext != nil && !$0.isDeleted && $0.id == identity.skillID })
+                ?? skillLookup(identity.skillID, context)
+        } catch {
+            markStale("Couldn't verify whether this preview is current: " + UpdatesViewModel.readable(error))
+            return
+        }
         let message: String?
-        if let skill = skills.first(where: { $0.id == identity.skillID }) {
+        if let skill, skill.modelContext != nil, !skill.isDeleted {
+            // A retired preview keeps its failure reason until reopened; deletion still takes precedence below.
+            if case .stale = state { return }
+            let current = ViewChangesIdentity(skill: skill, folderRevision: folderRevisions[skill.directoryName, default: 0])
+            if current == recheckFailureIdentity { return }
             if !UpdatesViewModel.isEligibleForUpdates(skill) {
                 message = "This skill no longer has an update."
-            } else if ViewChangesIdentity(
-                skill: skill, folderRevision: folderRevisions[skill.directoryName, default: 0]
-            ) != identity {
+            } else if current != identity {
                 message = "This skill changed since you opened its preview. Open View Changes again to review the current update."
             } else { message = nil }
         } else { message = "This skill was deleted." }
@@ -131,6 +145,7 @@ final class ViewChangesViewModel {
         currentSkill = nil
         deferredValidationMessage = nil
         offersRecheck = false
+        recheckFailureIdentity = nil
         isRechecking = false
         row = nil
         selectedFilePath = nil
@@ -227,8 +242,7 @@ extension ViewChangesViewModel {
 
     private func apply(row: UpdatesRow, overwrite: Bool, library: SkillLibraryViewModel,
                        context: ModelContext, onSuccess: @escaping () -> Void) {
-        guard applyGate.begin(row.id) else { return }
-        applyGate.bind(library: library)
+        guard applyCoordinator.begin(row.id) else { return }
         applyMessage = nil
         offersRecheck = false
         let session = sessionID
@@ -242,29 +256,15 @@ extension ViewChangesViewModel {
         }
         // Apply is process work: closing or switching retires only preview work, never this reservation.
         Task {
-            let status: UpdatesRowStatus
-            do {
-                let completion = try await worker.value
-                operations.echoRegistrar([row.slug])
-                UpdatesViewModel.applyCompletion(completion, context: context)
-                operations.notifier()
-                status = .updated
-            } catch {
-                if error is SyncedStateMutationError {
-                    operations.echoRegistrar([row.slug])
-                    self.applyGate.invalidateEditorBody()
-                    operations.notifier()
-                    status = .failedAfterReplacement(message: UpdatesViewModel.readable(error))
-                } else if error as? SkillUpdateFlowError == .localEditsRequireConfirmation {
-                    status = .confirmationRequired
-                } else {
-                    status = .failed(message: UpdatesViewModel.readable(error),
-                                     offersRecheck: UpdatesViewModel.offersRecheck(error))
-                }
-            }
+            let status = UpdateReviewResult.apply(await worker.result).resolve(
+                row: row, context: context, effects: UpdateReviewEffects(
+                    echo: operations.echoRegistrar, notify: operations.notifier,
+                    invalidateEditorBody: { library.noteEditorBodyInvalidated() }
+                )
+            )
             if self.sessionID == session { self.acceptApply(status, row: row, onSuccess: onSuccess) }
-            self.applyGate.end(row.id)
-            self.validateAfterApply(library: library)
+            self.applyCoordinator.finish(row: row, status: status, context: context,
+                                         folderRevisions: library.folderChangeRevisions)
         }
     }
 
@@ -286,19 +286,8 @@ extension ViewChangesViewModel {
         }
     }
 
-    func validateAfterApply(library: SkillLibraryViewModel) {
-        guard !isApplying, case .loaded = state else { return }
-        if let deferredValidationMessage {
-            markStale(deferredValidationMessage)
-        } else if let skill = currentSkill, let identity {
-            let revision = library.folderChangeRevisions[skill.directoryName] ?? identity.folderRevision
-            validate(skills: skill.modelContext == nil ? [] : [skill], folderRevisions: [skill.directoryName: revision])
-        }
-    }
-
-    func recheck(context: ModelContext) {
-        guard canRecheck, let requestedSkillID else { return }
-        let revision = identity?.folderRevision ?? 0
+    func recheck(context: ModelContext, library: SkillLibraryViewModel) {
+        guard canRecheck, let requestedSkillID, let row else { return }
         retirePreview()
         state = .loading
         isRechecking = true
@@ -312,25 +301,61 @@ extension ViewChangesViewModel {
                 try UpdatesViewModel.performUnlessCancelled { try operation(requestedSkillID, container) }
             }
             self.cancelWorker = { worker.cancel() }
-            do {
-                let completion = try await withTaskCancellationHandler {
-                    try await worker.value
-                } onCancel: { worker.cancel() }
-                guard self.sessionID == session, !Task.isCancelled else { return }
-                UpdatesViewModel.applyRecheckCompletion(completion, context: context)
-                if let error = completion.checkError { throw RecheckFailure(message: error) }
-                self.open(skillID: requestedSkillID, context: context, folderRevision: revision)
-            } catch {
-                guard self.sessionID == session, !Task.isCancelled else { return }
-                self.state = .failed(UpdatesViewModel.readable(error))
+            let result = await withTaskCancellationHandler {
+                await worker.result
+            } onCancel: { worker.cancel() }
+            guard self.sessionID == session, !Task.isCancelled else { return }
+            let status = UpdateReviewResult.recheck(result).resolve(
+                row: row, context: context, effects: UpdateReviewEffects(
+                    echo: self.operations.echoRegistrar, notify: self.operations.notifier,
+                    invalidateEditorBody: { library.noteEditorBodyInvalidated() }
+                )
+            )
+            if case .idle = status {
+                self.open(skillID: requestedSkillID, context: context, folderRevisions: library.folderChangeRevisions)
+            } else {
+                // The check's own metadata write must not replace its error with an ineligibility message.
+                if let skill = try? self.skillLookup(requestedSkillID, context), skill.modelContext != nil {
+                    self.recheckFailureIdentity = ViewChangesIdentity(
+                        skill: skill, folderRevision: library.folderChangeRevisions[skill.directoryName, default: 0]
+                    )
+                }
                 self.isRechecking = false
-                self.offersRecheck = true
+                self.acceptRecheckFailure(status)
                 self.previewTask = nil
                 self.cancelWorker = nil
             }
         }
     }
 
+    private func acceptRecheckFailure(_ status: UpdatesRowStatus) {
+        switch status {
+        case let .failed(message, recheck):
+            state = .failed(message)
+            offersRecheck = recheck
+        case .confirmationRequired:
+            state = .failed("Local edits require confirmation before updating.")
+            offersRecheck = true
+        case let .failedAfterReplacement(message):
+            markStale("The skill's files were replaced, but the check couldn't finish: " + message)
+        case .idle, .updating, .updated: break
+        }
+    }
+
+}
+
+extension ViewChangesViewModel: SkillUpdateApplyObserving {
+    func applyReservationsChanged() {}
+
+    func applyFinished(row: UpdatesRow, status: UpdatesRowStatus, context: ModelContext, folderRevisions: [String: UInt64]) {
+        guard !isApplying, case .loaded = state else { return }
+        if let deferredValidationMessage {
+            markStale(deferredValidationMessage)
+        } else {
+            // Fetch before touching any property of a retained model that an apply may have deleted.
+            validate(skills: [], folderRevisions: folderRevisions, context: context)
+        }
+    }
 }
 
 struct ViewChangesIdentity: Equatable {
@@ -353,9 +378,4 @@ struct ViewChangesIdentity: Equatable {
         updatedAt = skill.updatedAt
         self.folderRevision = folderRevision
     }
-}
-
-private struct RecheckFailure: LocalizedError {
-    let message: String
-    var errorDescription: String? { message }
 }

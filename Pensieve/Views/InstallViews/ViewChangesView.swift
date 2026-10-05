@@ -22,12 +22,14 @@ struct ViewChangesView: View {
                         .padding(Spacing.sm)
                 }
                 if model.canRecheck && model.applyMessage != nil {
-                    Button("Re-check") { model.recheck(context: context) }
+                    Button("Re-check") { model.recheck(context: context, library: library) }
                         .accessibilityIdentifier("changes-recheck")
                         .padding(Spacing.sm)
                 }
                 content
             }
+            .navigationTitle(model.row.map { "Changes to \($0.skillName)" } ?? "View Changes")
+            .navigationSubtitle(model.row.map(ViewChangesPresentation.subtitle) ?? "")
             .toolbar { changesToolbar }
         }
         .navigationSplitViewStyle(.balanced)
@@ -59,11 +61,9 @@ struct ViewChangesView: View {
             ScrollView {
                 LazyVStack(spacing: DesignTokens.changesFileRowSpacing) {
                     ForEach(model.files, id: \.path) { file in
-                        Button { model.selectFile(path: file.path) } label: {
-                            ViewChangesFileRow(file: file, selected: file.path == model.selectedFilePath)
+                        ViewChangesFileButton(file: file, selected: file.path == model.selectedFilePath) {
+                            model.selectFile(path: file.path)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("changes-file-" + file.path)
                     }
                 }
             }
@@ -72,23 +72,9 @@ struct ViewChangesView: View {
         .accessibilityIdentifier("changes-files")
     }
 
-    private var heading: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.changesTitleGap) {
-            Text(verbatim: model.row.map { "Changes to \($0.skillName)" } ?? "View Changes")
-                .font(DesignTokens.changesTitle)
-                .lineLimit(1)
-            if let row = model.row {
-                Text(verbatim: ViewChangesPresentation.subtitle(row))
-                    .font(DesignTokens.changesSubtitle)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-    }
-
     @ToolbarContentBuilder private var changesToolbar: some ToolbarContent {
-        ToolbarItem(id: "changes-heading", placement: .navigation) { heading }
-        ToolbarItemGroup(placement: .primaryAction) {
+        if #available(macOS 26, *) { ToolbarSpacer(.flexible, placement: .automatic) }
+        ToolbarItem(id: "changes-github", placement: .primaryAction) {
             Button("View on GitHub") {
                 if let url = model.row?.compareURL { openURL(url) }
             }
@@ -97,7 +83,11 @@ struct ViewChangesView: View {
             .frame(width: DesignTokens.changesGitHubButtonWidth, height: DesignTokens.changesButtonHeight)
             .disabled(model.row?.compareURL == nil)
             .accessibilityIdentifier("changes-github")
-            if model.isApplying { ProgressView().controlSize(.small) }
+        }
+        if model.isApplying {
+            ToolbarItem(id: "changes-progress", placement: .primaryAction) { ProgressView().controlSize(.small) }
+        }
+        ToolbarItem(id: "changes-update", placement: .primaryAction) {
             Button("Update") { model.requestUpdate(library: library, context: context, onSuccess: onClose) }
                 .controlSize(.large)
                 .font(DesignTokens.changesButton)
@@ -122,7 +112,8 @@ struct ViewChangesView: View {
         case let .failed(message):
             EmptyStateView("Couldn't Load Changes", description: message) {
                 if model.canRecheck {
-                    Button("Re-check") { model.recheck(context: context) }.accessibilityIdentifier("changes-recheck")
+                    Button("Re-check") { model.recheck(context: context, library: library) }
+                        .accessibilityIdentifier("changes-recheck")
                 } else {
                     Button("Retry") { retry() }.accessibilityIdentifier("changes-retry")
                 }
@@ -164,48 +155,5 @@ struct ViewChangesView: View {
 
     private func replaceLocalEdits(_ replace: Bool) {
         model.confirmReplacement(replace, library: library, context: context, onSuccess: onClose)
-    }
-}
-
-private struct ViewChangesFileRow: View {
-    let file: PinnedSkillFileDiff
-    let selected: Bool
-
-    var body: some View {
-        let parent = (file.path as NSString).deletingLastPathComponent
-        HStack(spacing: DesignTokens.changesFileRowGap) {
-            Image(systemName: "doc.text")
-                .foregroundStyle(.secondary)
-                .frame(width: DesignTokens.changesFileGlyphWidth, height: DesignTokens.changesFileGlyphHeight)
-            VStack(alignment: .leading, spacing: DesignTokens.changesFileFolderGap) {
-                Text(verbatim: (file.path as NSString).lastPathComponent).font(DesignTokens.changesFileName).lineLimit(1)
-                if !parent.isEmpty {
-                    Text(verbatim: parent).font(DesignTokens.changesFileFolder).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            Spacer(minLength: 0)
-            HStack(spacing: DesignTokens.changesCountGap) {
-                if let counts = ViewChangesPresentation.sidebarCounts(file) {
-                    let added = counts.added
-                    let removed = counts.removed
-                    if added > 0 || removed == 0 { Text("+\(added)").foregroundStyle(Color(nsColor: .systemGreen)) }
-                    if removed > 0 { Text("−\(removed)").foregroundStyle(Color(nsColor: .systemRed)) }
-                } else {
-                    if case .modeOnly = file.content {
-                        Text("Mode").foregroundStyle(.secondary)
-                    } else {
-                        Text(verbatim: ViewChangesPresentation.summary(file)).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
-            }
-            .font(DesignTokens.changesCount)
-        }
-        .padding(.horizontal, DesignTokens.changesFileRowHorizontalPadding)
-        .frame(height: parent.isEmpty ? DesignTokens.changesFileRowHeight : DesignTokens.changesNestedFileRowHeight)
-        .background(selected ? DesignTokens.changesFileRowSelectedFill : .clear,
-                    in: RoundedRectangle(cornerRadius: DesignTokens.changesFileRowCornerRadius))
-        .contentShape(Rectangle())
-        .accessibilityLabel(file.path + ", " + ViewChangesPresentation.summary(file))
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

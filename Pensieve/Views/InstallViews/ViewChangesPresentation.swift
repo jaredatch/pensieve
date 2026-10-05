@@ -2,6 +2,13 @@ import Foundation
 
 /// Presentation of precomputed hunks only. This mapping never runs a diff or reads file contents.
 enum ViewChangesPresentation {
+    static func accessibilityLabel(_ file: PinnedSkillFileDiff) -> String {
+        let path = file.path as NSString
+        let parent = path.deletingLastPathComponent
+        return [path.lastPathComponent, parent.isEmpty ? nil : parent, summary(file)]
+            .compactMap { $0 }.joined(separator: ", ")
+    }
+
     static func sidebarHeader(_ state: ViewChangesViewModel.State) -> String? {
         guard case let .loaded(preview) = state else { return nil }
         let count = preview.files.count
