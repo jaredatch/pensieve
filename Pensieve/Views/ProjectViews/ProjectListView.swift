@@ -78,17 +78,14 @@ struct ProjectListView: View {
         .overlay {
             if filteredProjects.isEmpty {
                 if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-                    ContentUnavailableView {
-                        Label("No Projects", systemImage: "folder")
-                    } description: {
-                        Text("Add a project to organize and deploy skills by workspace.")
-                    } actions: {
+                    EmptyStateView("No Projects",
+                                   description: "Add a project to organize and deploy skills by workspace.") {
                         Button("Add Project") { onAdd() }
                             .buttonStyle(.borderedProminent)
                             .disabled(addsFenced)
                     }
                 } else {
-                    ContentUnavailableView.search(text: searchText)
+                    EmptyStateView.search(text: searchText)
                 }
             }
         }

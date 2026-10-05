@@ -42,6 +42,7 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.developer-tools"
         INFOPLIST_KEY_CFBundleDisplayName: Pensieve
+        ASSETCATALOG_COMPILER_APPICON_NAME: Pensieve
         GENERATE_INFOPLIST_FILE: YES
         ENABLE_DEBUG_DYLIB: NO
         CODE_SIGN_IDENTITY: "-"

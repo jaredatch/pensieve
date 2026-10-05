@@ -1,7 +1,7 @@
 import Foundation
 
 // PensieveDaemon — the background sync daemon executable (PLAN-12) + minimal CLI (PLAN-15).
-// Bare invocation (launchd's BundleProgram carries no arguments) runs one sync cycle.
+// Subcommands only: `run` syncs; a bare invocation prints usage.
 // All parse/dispatch logic lives in DaemonCLI (shared, SwiftData-free, tested from PensieveTests).
 
 let arguments = Array(CommandLine.arguments.dropFirst())

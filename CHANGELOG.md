@@ -7,6 +7,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 ### Added
 
 - Pensieve is open source. The code lives at [github.com/jaredatch/pensieve](https://github.com/jaredatch/pensieve), and that's the place to report a bug or ask for something.
+- Pensieve has its own app icon at last, and its own glyph in the menu bar in place of the stock brain symbol.
+- A skill that's close to or over a platform's token budget now says so on its Overview tab.
 
 ### Removed
 
@@ -14,12 +16,15 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- Running `pensieve-daemon` with no command now shows its help instead of syncing; `pensieve-daemon run` still syncs.
+- Empty lists, searches that find nothing, and a detail pane with nothing selected now look the way Mail does it: a large, quiet title ("No Skill Selected") in place of the big icon.
 - The skill preview stays offline. An image a skill links from the web shows its alt text instead of loading, so opening a skill never pings someone else's server. Images in the skill's own folder, and images embedded in the file, still show.
 - Import from Folder skips linked files, pipes and anything over 4 MiB, and tells you how many it skipped and why. The "kept as text" notice now lists each skill on its own line.
 - Frontmatter has to start on a skill's first line, the way your agents read it. If there are blank lines above the opening `---`, Pensieve reads the whole file as text. Skills already in your library stay put either way.
 
 ### Fixed
 
+- History's line counts for your local edits now match what `git diff` reports.
 - Pensieve could freeze while running git on Macs with only a few cores. Several git commands at once could wait on each other forever. They don't anymore.
 - A crafted `SKILL.md` could trick Pensieve into rewriting the wrong line of its frontmatter on import or upgrade. Pensieve now only rewrites a key when it and the YAML parser agree on exactly where that key starts, and it double-checks the result. If anything looks off, the file stays as it was.
 - Saving a skill with Windows line endings no longer shows up as a change made outside the app.

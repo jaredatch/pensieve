@@ -74,17 +74,14 @@ struct CategoryListView: View {
         .overlay {
             if filteredCategories.isEmpty {
                 if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-                    ContentUnavailableView {
-                        Label("No Categories", systemImage: "square.stack")
-                    } description: {
-                        Text("Add a category to assign skills across projects.")
-                    } actions: {
+                    EmptyStateView("No Categories",
+                                   description: "Add a category to assign skills across projects.") {
                         Button("Add Category") { onAdd() }
                             .buttonStyle(.borderedProminent)
                             .disabled(addsFenced)
                     }
                 } else {
-                    ContentUnavailableView.search(text: searchText)
+                    EmptyStateView.search(text: searchText)
                 }
             }
         }

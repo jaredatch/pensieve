@@ -2,8 +2,8 @@ import XCTest
 @testable import Pensieve
 
 final class DaemonCLIParseTests: XCTestCase {
-    func testParseBareRunsCycle() {
-        XCTAssertEqual(DaemonCLI.parse([]), .runCycle)
+    func testParseBareIsUsageError() {
+        XCTAssertEqual(DaemonCLI.parse([]), .usageError("no command given; use `run` to sync"))
     }
 
     func testParseRunRunsCycle() {
@@ -77,6 +77,30 @@ final class DaemonCLIParseTests: XCTestCase {
         assertRunOutcome(.failed(.authentication), stdout: "pensieve-daemon failed authentication\n", exitCode: 1)
     }
 
+    func testExecuteBareWritesUsageAndDoesNotRunCycle() {
+        var calls = 0
+
+        let outcome = DaemonCLI.execute(
+            [],
+            appSupport: "/unused",
+            readFile: { _ in nil },
+            runCycle: {
+                calls += 1
+                return .synced(changed: false)
+            },
+            now: Date.init
+        )
+
+        XCTAssertEqual(calls, 0, "a bare invocation must not run a sync cycle")
+        XCTAssertEqual(outcome.exitCode, 64)
+        XCTAssertEqual(outcome.stdout, "")
+        XCTAssertTrue(
+            outcome.stderr.hasPrefix("no command given; use `run` to sync\n\n"),
+            "stderr must start with the no-command message"
+        )
+        XCTAssertTrue(outcome.stderr.contains(DaemonCLI.usage()), "stderr must include the usage text")
+    }
+
     func testExecuteUsageErrorWritesStderrAndDoesNotRunCycle() {
         var calls = 0
 
@@ -139,16 +163,28 @@ final class DaemonCLIParseTests: XCTestCase {
         XCTAssertTrue(help.contains("degraded SSH"))
     }
 
+    func testUsageListsRunAndOmitsBareInvocation() {
+        let help = DaemonCLI.usage()
+
+        XCTAssertTrue(help.contains("  pensieve-daemon run "))
+        XCTAssertNil(help.range(of: #"(?m)^ +pensieve-daemon {2,}"#, options: .regularExpression))
+    }
+
     private func assertRunOutcome(_ result: DaemonCycleResult, stdout: String, exitCode: Int32) {
+        var calls = 0
         let outcome = DaemonCLI.execute(
-            [],
+            ["run"],
             appSupport: "/unused",
             readFile: { _ in nil },
-            runCycle: { result },
+            runCycle: {
+                calls += 1
+                return result
+            },
             now: Date.init
         )
 
         XCTAssertEqual(outcome, CLIOutcome(stdout: stdout, stderr: "", exitCode: exitCode))
+        XCTAssertEqual(calls, 1, "run must invoke exactly one sync cycle")
     }
 
     private func assertUsageError(

@@ -1,0 +1,46 @@
+{
+  "fill" : {
+    "solid" : "srgb:0.01961,0.04314,0.12941,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "glass" : false,
+          "hidden" : false,
+          "image-name" : "wisp.png",
+          "name" : "wisp"
+        }
+      ],
+      "shadow" : { "kind" : "none", "opacity" : 0.5 },
+      "translucency" : { "enabled" : false, "value" : 0.5 }
+    },
+    {
+      "layers" : [
+        {
+          "glass" : false,
+          "hidden" : false,
+          "image-name" : "basin.png",
+          "name" : "basin"
+        }
+      ],
+      "shadow" : { "kind" : "none", "opacity" : 0.5 },
+      "translucency" : { "enabled" : false, "value" : 0.5 }
+    },
+    {
+      "layers" : [
+        {
+          "glass" : false,
+          "hidden" : false,
+          "image-name" : "sky.png",
+          "name" : "sky"
+        }
+      ],
+      "shadow" : { "kind" : "none", "opacity" : 0.5 },
+      "translucency" : { "enabled" : false, "value" : 0.5 }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : "shared"
+  }
+}

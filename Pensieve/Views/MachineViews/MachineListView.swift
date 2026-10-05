@@ -34,13 +34,9 @@ struct MachineListView: View {
         .overlay {
             if filteredMachineStates.isEmpty {
                 if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-                    ContentUnavailableView(
-                        "No Machines Seen Yet",
-                        systemImage: "display",
-                        description: Text("Machines appear after they report sync state.")
-                    )
+                    EmptyStateView("No Machines Seen Yet", description: "Machines appear after they report sync state.")
                 } else {
-                    ContentUnavailableView.search(text: searchText)
+                    EmptyStateView.search(text: searchText)
                 }
             }
         }

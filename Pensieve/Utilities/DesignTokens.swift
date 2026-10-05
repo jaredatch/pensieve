@@ -224,6 +224,27 @@ enum DesignTokens {
     static let footerDividerHeight: CGFloat = 14
     static let footerLabelLeading: CGFloat = 32
 
+    // MARK: - Empty states
+
+    /// Measured from `Empty state / list (280)` and the `Skills / List — No Selection`,
+    /// `Skills / Search - No Results` and `Projects / Empty` frames on 2026-10-04: the title inks 24 pt light.
+    static let emptyStateTitleSize: CGFloat = 24
+    static let emptyStateTitleWeight: Font.Weight = .light
+    static let emptyStateTitle = Font.system(size: emptyStateTitleSize, weight: emptyStateTitleWeight)
+
+    /// Measured from the same frames: the description inks 13 pt regular on a 16 pt line.
+    static let emptyStateDescriptionSize: CGFloat = 13
+    static let emptyStateDescriptionWeight: Font.Weight = .regular
+    static let emptyStateDescription = Font.system(
+        size: emptyStateDescriptionSize,
+        weight: emptyStateDescriptionWeight
+    )
+
+    /// Measured from `Empty state / list (280)`: a 10 pt stack gap between title, description and action,
+    /// and 16 pt side padding, so a 240 pt description wraps the way the frame does in a 280 pt column.
+    static let emptyStateGap: CGFloat = 10
+    static let emptyStateSidePadding: CGFloat = 16
+
     // MARK: - History
 
     /// Corrected from `Skills / Details — History` on 2026-09-22: hairline y 295 → row top y 315.

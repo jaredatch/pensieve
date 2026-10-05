@@ -11,7 +11,8 @@ struct SkillOverviewTab: View {
     @State private var showsAllFiles = false
 
     var body: some View {
-        let stats = SkillOverviewPresentation.stats(snapshot: snapshot, installedCount: installedCount)
+        let stats = SkillOverviewPresentation.stats(snapshot: snapshot, installedCount: installedCount,
+                                                    budgets: PlatformTokenBudgetSetting.values())
         let source = SkillOverviewPresentation.sourceRows(
             skill: skill, provenance: provenance, origin: skill.installedOrigin,
             homeDirectory: Constants.homeDirectory, now: now)
@@ -69,9 +70,20 @@ private struct StatCard: View {
                 .font(DesignTokens.statValue)
                 .foregroundStyle(.primary)
                 .monospacedDigit()
-            Text(stat.detail)
+            if let warning = stat.budgetWarning {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(warning == .exceeded ? Color.red : Color.yellow)
+                        .accessibilityHidden(true)
+                    Text(stat.detail)
+                        .foregroundStyle(warning == .exceeded ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
+                }
                 .font(DesignTokens.statSub)
-                .foregroundStyle(.secondary)
+            } else {
+                Text(stat.detail)
+                    .font(DesignTokens.statSub)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(DesignTokens.cardPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -80,6 +92,7 @@ private struct StatCard: View {
             in: RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius, style: .continuous)
         )
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(stat.accessibilityLabel)
     }
 }
 

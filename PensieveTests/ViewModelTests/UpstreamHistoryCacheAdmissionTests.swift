@@ -3,6 +3,32 @@ import XCTest
 
 @MainActor
 final class UpstreamHistoryCacheAdmissionTests: UpstreamHistoryCacheTestCase {
+    func testVersionTwoBOMStrippedBaselineIsReadAgain() async throws {
+        let skill = installedHistorySkill()
+        let text = "\u{feff}a\n"
+        let fingerprint = UpstreamHistoryService.gitBlobFingerprint(Data(text.utf8))
+        let old = result(baseline: .files([UpstreamHistoryBaselineFile(
+            path: "SKILL.md", content: .text("a\n"), fingerprint: fingerprint, isExecutable: false
+        )]))
+        try writeEnvelope(envelope(skill: skill, result: old, schemaVersion: 2), skillID: skill.id)
+        let replacement = result(baseline: .files([UpstreamHistoryBaselineFile(
+            path: "SKILL.md", content: .text(text), fingerprint: fingerprint, isExecutable: false
+        )]))
+        let probe = LockedHistoryProbe()
+        let model = owner(cache: cache()) { _, _, _ in probe.recordCall(); return replacement }
+
+        await model.request(skill: skill)
+
+        XCTAssertEqual(probe.calls, 1)
+        XCTAssertEqual(model.state, .loaded(replacement))
+        let saved = try storedEnvelope(skill.id)
+        XCTAssertEqual(saved.schemaVersion, UpstreamHistoryCache.schemaVersion)
+        guard case let .text(savedText)? = saved.result.installedBaseline?.files?.first?.content else {
+            return XCTFail("expected a freshly decoded baseline")
+        }
+        XCTAssertEqual(Data(savedText.utf8), Data(text.utf8))
+    }
+
     /// Protects 39.1-c: the retired version-1 envelope is a clean miss after the schema bump.
     func testVersionOneEnvelopeIsACleanMiss() throws {
         let skill = installedHistorySkill()
