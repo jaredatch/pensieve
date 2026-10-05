@@ -19,17 +19,22 @@ final class SkillHistoryTimelineTests: XCTestCase {
         XCTAssertFalse(rows[2].connectsDown)
     }
 
-    func testThreeRowsShowUntilOlderIsAsked() {
-        let versions = makeVersions(count: 5)
+    func testTenRowsShowUntilOlderIsAsked() {
+        let versions = makeVersions(count: 12)
         let firstPage = SkillHistoryTimeline.rows(versions, showAll: false)
 
-        XCTAssertEqual(firstPage.count, 3)
+        XCTAssertEqual(firstPage.count, 10)
         XCTAssertEqual(SkillHistoryTimeline.olderLabel(total: versions.count, shown: firstPage.count),
                        "Show older versions")
 
         let allRows = SkillHistoryTimeline.rows(versions, showAll: true)
-        XCTAssertEqual(allRows.count, 5)
+        XCTAssertEqual(allRows.count, 12)
         XCTAssertNil(SkillHistoryTimeline.olderLabel(total: versions.count, shown: allRows.count))
+
+        let shorterHistory = makeVersions(count: 4)
+        let shorterRows = SkillHistoryTimeline.rows(shorterHistory, showAll: false)
+        XCTAssertEqual(shorterRows.count, 4)
+        XCTAssertNil(SkillHistoryTimeline.olderLabel(total: shorterHistory.count, shown: shorterRows.count))
     }
 
     func testMetaJoinsDateAndAuthor() throws {

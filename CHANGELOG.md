@@ -17,7 +17,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
-- An installed skill's History now shows its latest 10 commits before "Show older commits".
+- History now shows the latest 10 commits for an installed skill and 10 saved versions for a skill you wrote before offering to show older ones.
 - Pensieve now needs macOS 26 or later.
 - Running `pensieve-daemon` with no command now shows its help instead of syncing; `pensieve-daemon run` still syncs.
 - Empty lists, searches that find nothing, and a detail pane with nothing selected now look the way Mail does it: a large, quiet title ("No Skill Selected") in place of the big icon.

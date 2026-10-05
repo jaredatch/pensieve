@@ -158,10 +158,14 @@ final class SkillHistoryLayoutTests: XCTestCase {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(3))
         var last: HistoryAccessibility.Node?
+        var previous: HistoryAccessibility.Node?
         repeat {
             window.contentView?.layoutSubtreeIfNeeded()
             last = await HistoryAccessibility.snapshot(windowTitle: window.title)
-            if let last, last.descendants.contains(where: { $0.label == expected }) { return last }
+            // SwiftUI can expose the labels before their screen positions have settled.
+            if let last, last == previous,
+               last.descendants.contains(where: { $0.label == expected }) { return last }
+            previous = last
             try await Task.sleep(for: .milliseconds(10))
         } while clock.now < deadline
         XCTFail("History rows did not load: \(last?.descendants.map(\.label) ?? [])")
@@ -198,7 +202,7 @@ final class SkillHistoryLayoutTests: XCTestCase {
 /// actor so AppKit can answer them; direct NSView queries omit SwiftUI's exported text nodes.
 /// Presses stay on the main actor because an action in our own process invokes its callback directly.
 private enum HistoryAccessibility {
-    struct Node {
+    struct Node: Equatable {
         let role: String
         let label: String
         let frame: CGRect
