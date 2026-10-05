@@ -43,6 +43,12 @@ extension PlatformViewModel {
         skill: Skill, projects: [Project], localDeployHistory: (Set<String>) throws -> Set<String>
     ) -> SkillCleanupResult {
         var result = SkillCleanupResult()
+        do {
+            try LinkService.validatePathComponent(skill.directoryName)
+        } catch {
+            result.batch.recordReadFailure("deploys for “\(skill.name)”", error: error)
+            return result
+        }
         let recorded: Set<String>?
         let stateProblem: String
         do {
@@ -56,7 +62,6 @@ extension PlatformViewModel {
             stateProblem = "deploy state unreadable"
         }
         let evidence = skillCleanupEvidence(skill: skill, projects: projects, recorded: recorded)
-        result.batch.outcomes.append(contentsOf: evidence.validationFailures)
         let locallyDeployed: Set<String>
         do {
             locallyDeployed = evidence.historyPaths.isEmpty ? [] : try localDeployHistory(evidence.historyPaths)
@@ -76,12 +81,14 @@ extension PlatformViewModel {
                 candidates.append(candidate)
             }
         }
+        var stateChanged = false
         for candidate in candidates {
             let pair = removeAllDeployPair(skill: skill, candidate: candidate)
             result.batch.outcomes.append(pair.outcome)
             result.didChangeDeploys = pair.didChangeDeploys || result.didChangeDeploys
+            stateChanged = pair.didChangeRecords || stateChanged
         }
-        if !result.batch.outcomes.isEmpty { noteDeployStateChanged() }
+        if result.didChangeDeploys || stateChanged { noteDeployStateChanged() }
         return result
     }
 
@@ -97,11 +104,6 @@ extension PlatformViewModel {
                 if platform == .cursor, let project = target.project, let recorded, !recorded.contains(path) {
                     do {
                         guard try projectCursorRuleMayExist(skill: skill, project: project) else { continue }
-                    } catch LinkError.invalidPathComponent(let component) {
-                        evidence.validationFailures.append(BatchPairOutcome(
-                            skillID: skill.id, skillName: skill.name, platform: platform, target: BatchPairTarget(target),
-                            error: LinkError.invalidPathComponent(component).localizedDescription))
-                        continue
                     } catch {
                         // A failed metadata probe matters only if local history admits this path.
                         evidence.probeFailures[path] = error
@@ -138,23 +140,30 @@ extension PlatformViewModel {
 
     private func removeAllDeployPair(
         skill: Skill, candidate: SkillCleanupCandidate
-    ) -> (outcome: BatchPairOutcome, didChangeDeploys: Bool) {
+    ) -> SkillCleanupPairResult {
         let location = candidate.location
         let problem: String?
         var didChangeDeploys = false
+        var didChangeRecords = false
         do {
             if candidate.isOwned {
-                try removeArtifact(skill: skill, platform: location.platform, target: location.target)
-                didChangeDeploys = true
+                didChangeDeploys = try removeArtifact(skill: skill, platform: location.platform, target: location.target)
             }
-            let retired = try deployStateStore.remove(artifactPath: location.path)
-            didChangeDeploys = retired || didChangeDeploys
+            didChangeRecords = try deployStateStore.remove(artifactPath: location.path)
             problem = nil
         } catch {
             problem = error.localizedDescription
         }
-        return (BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: location.platform,
-                                 target: BatchPairTarget(location.target), error: problem), didChangeDeploys)
+        return SkillCleanupPairResult(outcome: BatchPairOutcome(
+            skillID: skill.id, skillName: skill.name, platform: location.platform,
+            target: BatchPairTarget(location.target), error: problem),
+            didChangeDeploys: didChangeDeploys, didChangeRecords: didChangeRecords)
+    }
+
+    private struct SkillCleanupPairResult {
+        let outcome: BatchPairOutcome
+        let didChangeDeploys: Bool
+        let didChangeRecords: Bool
     }
 
     private struct SkillCleanupCandidate {
@@ -172,6 +181,5 @@ extension PlatformViewModel {
         var locations: [SkillCleanupLocation] = []
         var historyPaths: Set<String> = []
         var probeFailures: [String: Error] = [:]
-        var validationFailures: [BatchPairOutcome] = []
     }
 }

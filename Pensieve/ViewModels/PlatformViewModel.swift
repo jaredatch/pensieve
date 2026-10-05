@@ -164,12 +164,13 @@ final class PlatformViewModel {
         }
     }
 
-    func removeArtifact(skill: Skill, platform: PlatformTarget, target: DeployTarget) throws {
+    @discardableResult
+    func removeArtifact(skill: Skill, platform: PlatformTarget, target: DeployTarget) throws -> Bool {
         let projectPath = target.project?.path
         if platform.usesSymlinks {
-            try linkService.unlink(skill: skill, platform: platform, projectPath: projectPath)
+            return try linkService.unlink(skill: skill, platform: platform, projectPath: projectPath)
         } else {
-            try cursorCompiler.remove(skill: skill, projectPath: projectPath)
+            return try cursorCompiler.remove(skill: skill, projectPath: projectPath)
         }
     }
 

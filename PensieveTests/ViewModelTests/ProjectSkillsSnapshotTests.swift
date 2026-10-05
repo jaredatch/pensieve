@@ -18,7 +18,7 @@ private final class ProjectSnapshotLinkService: LinkServiceProtocol {
     }
 
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
     func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
         return deployedSlugs.contains(skill.directoryName)
     }
@@ -49,9 +49,8 @@ private final class ProjectSnapshotCursorCompiler: CursorCompilerProtocol {
     }
 
     func compile(skill: Skill, projectPath: String?) throws {}
-    func remove(skill: Skill, projectPath: String?) throws {}
-    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
-        try LinkService.validatePathComponent(skill.directoryName)
+    func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
+    func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
         return deployedSlugs.contains(skill.directoryName)
     }
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {

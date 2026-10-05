@@ -236,6 +236,7 @@
 		58C31E087A256621C938A094 /* WindowCloseGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A75484323D306FD5638971 /* WindowCloseGuardTests.swift */; };
 		597610A7F89A4E3A2701F70F /* MachineDisplayName.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54CC2ACA742330CA1489C7DE /* MachineDisplayName.swift */; };
 		5A480812E768CEC7D0066DC7 /* DaemonCLI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05B708BC2AAFF95AE6FE4E76 /* DaemonCLI.swift */; };
+		5B0DB1489D3794D3C0315B0B /* CursorOwnershipTests+CleanupReporting.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB411F50D3D025D61BF46F5A /* CursorOwnershipTests+CleanupReporting.swift */; };
 		5B7F6D082A44877E146AF611 /* FileService+ProjectFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C6D929775D207F3C4218359 /* FileService+ProjectFolder.swift */; };
 		5B8B919991A292035FB906E5 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 359492315E952B2C9EF5A2AE /* CredentialStore.swift */; };
 		5C22676865266599E94465AE /* SyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39A6881788BC4629D6FEF6BB /* SyncSettingsView.swift */; };
@@ -1313,6 +1314,7 @@
 		CAEEE3F84D0F473D3321B9D6 /* GitProcessProbeRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitProcessProbeRunner.swift; sourceTree = "<group>"; };
 		CAFE3F11ADAC5AEAD435DE16 /* AppRuntimeGitPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeGitPresentationTests.swift; sourceTree = "<group>"; };
 		CB3281070809C96F81F1BE3F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		CB411F50D3D025D61BF46F5A /* CursorOwnershipTests+CleanupReporting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CursorOwnershipTests+CleanupReporting.swift"; sourceTree = "<group>"; };
 		CC068A43A1A259B0D4CDB257 /* SkillInstallViewModel+Adoption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillInstallViewModel+Adoption.swift"; sourceTree = "<group>"; };
 		CC3C7AD1304AC25CFBE8B9EC /* DogfoodModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DogfoodModeTests.swift; sourceTree = "<group>"; };
 		CC95B8D8C8CACAFAD7B5E189 /* IntentReconcilerRetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentReconcilerRetryTests.swift; sourceTree = "<group>"; };
@@ -2237,6 +2239,7 @@
 				08BEDD4D7235E25DAFC38E8D /* CursorCompilerTests.swift */,
 				C9364061F136E94B1388AE40 /* CursorMDCTests.swift */,
 				5967E800DA27E6F1E6BF6CAF /* CursorOwnershipTests.swift */,
+				CB411F50D3D025D61BF46F5A /* CursorOwnershipTests+CleanupReporting.swift */,
 				0002DA3F0D3B1DDF764E7B5B /* CursorOwnershipTests+Failures.swift */,
 				539C3C44C22E8F5CCC36628D /* CursorOwnershipTests+FinalDeletion.swift */,
 				111F856F993F51181D057807 /* CursorOwnershipTests+MarkSweep.swift */,
@@ -2668,6 +2671,7 @@
 				38617EC9132EF166B8E9EC18 /* CredentialStoreTests.swift in Sources */,
 				11D54698FB1334EB0F4DC43B /* CursorCompilerTests.swift in Sources */,
 				F83D41E2EA6354847E2AAC27 /* CursorMDCTests.swift in Sources */,
+				5B0DB1489D3794D3C0315B0B /* CursorOwnershipTests+CleanupReporting.swift in Sources */,
 				5CB9177436155612BD4170D2 /* CursorOwnershipTests+Failures.swift in Sources */,
 				F4F24BF55D06F964A052340B /* CursorOwnershipTests+FinalDeletion.swift in Sources */,
 				EC11785CFD47DBD3886A372C /* CursorOwnershipTests+MarkSweep.swift in Sources */,

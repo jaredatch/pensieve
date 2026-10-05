@@ -27,15 +27,11 @@ enum SkillDeletionFlow {
                     .map { "\($0.platform.displayName): \($0.error ?? "unknown error")" }
                     .joined(separator: "; ")
                 messages.insert(
-                    "Couldn't finish cleaning up “\(skill.name)”'s agent links and rules "
-                        + "on \(cleanup.failures.count) artifact(s) — "
-                        + "\(details).",
+                    "Couldn't remove agent links and rules for “\(skill.name)”: \(details).",
                     at: 0
                 )
             }
-            messages.append(cleanupResult.didChangeDeploys
-                ? "Agent links and rules already removed stay removed; the skill was kept so you can retry."
-                : "The skill was kept so you can retry.")
+            messages.append(retainedSkillMessage(didChangeDeploys: cleanupResult.didChangeDeploys))
             library.deletionNotice = .failed(messages.joined(separator: " "))
             return false
         }
@@ -46,8 +42,8 @@ enum SkillDeletionFlow {
         } catch {
             context.rollback()
             library.deletionNotice = .failed(
-                "Removed agent links and rules for “\(skill.name)”, but couldn't retire its deploy records: "
-                    + "\(error.localizedDescription). The skill was kept so you can retry.")
+                "Couldn't retire deploy records for “\(skill.name)”: \(error.localizedDescription). "
+                    + retainedSkillMessage(didChangeDeploys: cleanupResult.didChangeDeploys))
             return false
         }
 
@@ -61,6 +57,12 @@ enum SkillDeletionFlow {
         }
 
         return present(outcome, skill: skill, manifestNote: manifestNote, library: library)
+    }
+
+    private static func retainedSkillMessage(didChangeDeploys: Bool) -> String {
+        didChangeDeploys
+            ? "Agent links and rules already removed stay removed; the skill was kept so you can retry."
+            : "The skill was kept so you can retry."
     }
 
     private static func localCursorDeployPaths(

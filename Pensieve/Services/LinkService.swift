@@ -13,8 +13,9 @@ struct BrokenLink: Equatable {
 protocol LinkServiceProtocol {
     /// Create symlink: platform path → ~/.pensieve/skills/{name}/
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws
-    /// Remove symlink
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws
+    /// Remove an owned link; true only after deleting it from disk.
+    @discardableResult
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool
     /// Check if symlink exists and points to correct target
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool
     func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool
@@ -80,8 +81,9 @@ final class LinkService: LinkServiceProtocol {
         }
     }
 
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
-        guard projectPath == nil || platform.supportsProjectScope else { return }
+    @discardableResult
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        guard projectPath == nil || platform.supportsProjectScope else { return false }
         // Path-component safety invariant at the remove boundary too (mirrors link()):
         // a malicious directoryName must not let a delete escape the intended deploy root.
         try Self.validatePathComponent(skill.directoryName)
@@ -89,10 +91,11 @@ final class LinkService: LinkServiceProtocol {
             try Self.validatePathComponent(Constants.hermesDefaultCategory)
         }
 
-        guard ProjectDirectory.canAccess(projectPath) else { return }
+        guard ProjectDirectory.canAccess(projectPath) else { return false }
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
-        guard try ownsArtifact(skill: skill, platform: platform, projectPath: projectPath) else { return }
+        guard try ownsArtifact(skill: skill, platform: platform, projectPath: projectPath) else { return false }
         try fileService.deleteFile(at: link)
+        return true
     }
 
     func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {

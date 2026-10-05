@@ -8,11 +8,19 @@ extension CursorOwnershipTests {
     func testInvalidSlugDeletionValidatesBeforeAnyArtifactProbe() throws {
         let harness = try contextAndVM()
         let project = reviewProject(harness.context)
+        let sibling = Project(name: "Second", path: root + "/second")
         skill.directoryName = "~invalid"
         try harness.context.save()
         var probes: [String] = []
         mapped.beforeEntryTypeProbe = { probes.append($0) }
-        defer { mapped.beforeEntryTypeProbe = nil }
+        mapped.beforeDeployStateRead = { probes.append($0) }
+        defer { mapped.beforeEntryTypeProbe = nil; mapped.beforeDeployStateRead = nil }
+        let cleanup = harness.vm.removeAllDeploys(skill: skill, projects: [project, sibling], localDeployHistory: { _ in
+            XCTFail("Invalid slugs must not query history")
+            return []
+        })
+        XCTAssertEqual(cleanup.batch.failureCount, 1, "Validate once before fan-out")
+        XCTAssertTrue(probes.isEmpty, "Validation must precede state and artifact reads")
         let library = deletionLibrary()
         XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project], context: harness.context))
@@ -27,6 +35,8 @@ extension CursorOwnershipTests {
         XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: injectedLibrary, platformVM: vm,
             projects: [project], context: harness.context))
         XCTAssertTrue(injectedLibrary.deletionNotice?.message.contains("Invalid skill path component: ~invalid") == true)
+        XCTAssertFalse(injectedLibrary.deletionNotice?.message.contains("artifact(s)") == true)
+        XCTAssertFalse(injectedLibrary.deletionNotice?.message.contains("Couldn't finish") == true)
         XCTAssertTrue(probes.isEmpty)
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<Skill>()), 1)
     }
@@ -113,11 +123,8 @@ extension CursorOwnershipTests {
                 try harness.state.upsert(DeployStateRecord(slug: skill.directoryName, platform: "cursor", scope: "user",
                     projectIdentityKey: nil, artifactPath: userPath, recordedAt: "2026-10-05T00:00:00Z"))
             }
-            var stateReads = 0
-            mapped.beforeDeployStateRead = { _ in
-                stateReads += 1
-                // The snapshot succeeds; retirement then fails after the owned artifact was removed.
-                if removeArtifact && stateReads > 1 { throw NSError(domain: NSPOSIXErrorDomain, code: Int(EIO)) }
+            mapped.beforeDeployStateWrite = { _ in
+                if removeArtifact { throw NSError(domain: NSPOSIXErrorDomain, code: Int(EIO)) }
             }
             mapped.beforeRuleRead = { candidate in
                 if candidate == path { throw NSError(domain: NSPOSIXErrorDomain, code: Int(EIO)) }
@@ -125,9 +132,11 @@ extension CursorOwnershipTests {
             let library = deletionLibrary()
             XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
                 projects: [project], context: harness.context))
-            mapped.beforeDeployStateRead = nil
+            mapped.beforeDeployStateWrite = nil
             mapped.beforeRuleRead = nil
             XCTAssertEqual(library.deletionNotice?.message.contains("already removed"), removeArtifact)
+            XCTAssertTrue(library.deletionNotice?.message.contains("Couldn't remove agent links and rules") == true)
+            XCTAssertFalse(library.deletionNotice?.message.contains("artifact(s)") == true)
             XCTAssertTrue(library.deletionNotice?.message.contains("skill was kept") == true)
             XCTAssertEqual(try mapped.readFile(at: path), bytes)
             XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: userPath))
@@ -147,10 +156,9 @@ extension CursorOwnershipTests {
 private struct AbsentCleanupCompiler: CursorCompilerProtocol {
     let path: String
     func compile(skill: Skill, projectPath: String?) throws {}
-    func remove(skill: Skill, projectPath: String?) throws {}
+    func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { false }
-    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
-        try LinkService.validatePathComponent(skill.directoryName)
+    func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
         return false
     }
     func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { false }

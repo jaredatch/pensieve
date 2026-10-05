@@ -28,11 +28,11 @@ final class DeletionTestLinkService: LinkServiceProtocol {
         linkedPaths.insert(path(skill, platform, projectPath))
     }
 
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
         let value = path(skill, platform, projectPath)
         unlinkCalls.append((platform, projectPath))
         if failingUnlinkPaths.contains(value) { throw DeletionTestError() }
-        linkedPaths.remove(value)
+        return linkedPaths.remove(value) != nil
     }
     func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
         linkedPaths.contains(path(skill, platform, projectPath))
@@ -57,12 +57,14 @@ final class DeletionTestCursorCompiler: CursorCompilerProtocol {
     var ownedProjectPaths: Set<String?> = []
     private(set) var removeProjectPaths: [String?] = []
     func compile(skill: Skill, projectPath: String?) throws {}
-    func remove(skill: Skill, projectPath: String?) throws { removeProjectPaths.append(projectPath) }
+    func remove(skill: Skill, projectPath: String?) throws -> Bool {
+        removeProjectPaths.append(projectPath)
+        return ownedProjectPaths.remove(projectPath) != nil
+    }
     func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { ownedProjectPaths.contains(projectPath) }
 
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
-    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
-        try LinkService.validatePathComponent(skill.directoryName)
+    func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
         return ownedProjectPaths.contains(projectPath)
     }
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { ownedProjectPaths.contains(projectPath) }

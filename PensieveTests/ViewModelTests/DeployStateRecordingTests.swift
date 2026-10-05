@@ -30,7 +30,7 @@ final class DeployStateRecordingTests: XCTestCase {
         init(root: String) { self.root = root }
 
         func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
-        func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
+        func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
         func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
 
         func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
@@ -46,9 +46,8 @@ final class DeployStateRecordingTests: XCTestCase {
     private struct RecordingCursorCompiler: CursorCompilerProtocol {
         let root: String
         func compile(skill: Skill, projectPath: String?) throws {}
-        func remove(skill: Skill, projectPath: String?) throws {}
-        func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
-            try LinkService.validatePathComponent(skill.directoryName)
+        func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
+        func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
             return false
         }
         func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { false }

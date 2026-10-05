@@ -222,9 +222,12 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
         try files.createSymlink(at: linkPath(skill: skill, platform: platform, projectPath: projectPath),
                                 pointingTo: targetPath(skill: skill, platform: platform, projectPath: projectPath))
     }
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
         removeCalls += 1
+        let path = linkPath(skill: skill, platform: platform, projectPath: projectPath)
+        let removed = try files.entryExistsWithoutFollowingLinks(at: path)
         try files.deleteFile(at: linkPath(skill: skill, platform: platform, projectPath: projectPath))
+        return removed
     }
     func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
         try literalLinks.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
@@ -254,12 +257,13 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
         guard allowCreation else { throw DeployStubFailure() }
         try files.writeFile(at: outputPath(skill: skill, projectPath: projectPath), content: "repaired")
     }
-    func remove(skill: Skill, projectPath: String?) throws {
+    func remove(skill: Skill, projectPath: String?) throws -> Bool {
         removeCalls += 1
+        let removed = try files.entryExistsWithoutFollowingLinks(at: outputPath(skill: skill, projectPath: projectPath))
         try files.deleteFile(at: outputPath(skill: skill, projectPath: projectPath))
+        return removed
     }
-    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
-        try LinkService.validatePathComponent(skill.directoryName)
+    func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
         return try files.entryTypeWithoutFollowingLinks(at: outputPath(skill: skill, projectPath: projectPath)) == .regular
     }
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {

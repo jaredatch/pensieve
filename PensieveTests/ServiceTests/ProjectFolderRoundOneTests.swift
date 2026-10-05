@@ -114,9 +114,9 @@ private final class SiblingFailureLinkService: LinkServiceProtocol {
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
         try wrapped.link(skill: skill, platform: platform, projectPath: projectPath)
     }
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
         if projectPath == failedPath { throw SiblingUnlinkError() }
-        try wrapped.unlink(skill: skill, platform: platform, projectPath: projectPath)
+        return try wrapped.unlink(skill: skill, platform: platform, projectPath: projectPath)
     }
     func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
         try wrapped.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)

@@ -47,9 +47,10 @@ final class Batch: XCTestCase {
             if failingLink.contains(key(skill, platform)) { throw StubError() }
             linked.append(key(skill, platform))
         }
-        func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
+        func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
             if failingUnlink.contains(key(skill, platform)) { throw StubError() }
             unlinked.append(key(skill, platform))
+            return false
         }
         func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
 

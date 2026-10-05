@@ -33,10 +33,11 @@ private final class RecordingLinkService: LinkServiceProtocol {
         linked.insert(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
     }
 
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
-        unlinkCalls.append(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        let artifact = RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath)
+        unlinkCalls.append(artifact)
         if throwOnUnlink.contains(platform) { throw StubFailure() }
-        linked.remove(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
+        return linked.remove(artifact) != nil
     }
     func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
         linked.contains(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))

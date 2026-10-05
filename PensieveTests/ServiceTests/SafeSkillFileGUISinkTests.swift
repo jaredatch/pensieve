@@ -200,7 +200,7 @@ private final class SpyLinkService: LinkServiceProtocol {
             withDestinationPath: "/tmp/should-not-be-linked"
         )
     }
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
     func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
@@ -215,9 +215,8 @@ private final class SpyLinkService: LinkServiceProtocol {
 
 private struct NoopCursorCompiler: CursorCompilerProtocol {
     func compile(skill: Skill, projectPath: String?) throws {}
-    func remove(skill: Skill, projectPath: String?) throws {}
-    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
-        try LinkService.validatePathComponent(skill.directoryName)
+    func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
+    func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
         return false
     }
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { false }

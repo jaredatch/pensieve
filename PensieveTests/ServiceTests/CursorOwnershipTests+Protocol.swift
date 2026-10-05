@@ -10,7 +10,7 @@ extension CursorOwnershipTests {
             """
             struct Probe: LinkServiceProtocol {
                 func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
-                func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
+                func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
                 func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
                 func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String { "" }
                 func targetPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String { "" }
@@ -21,9 +21,9 @@ extension CursorOwnershipTests {
             """
             struct Probe: CursorCompilerProtocol {
                 func compile(skill: Skill, projectPath: String?) throws {}
-                func remove(skill: Skill, projectPath: String?) throws {}
+                func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
                 func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
-                func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool { false }
+                func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool { false }
                 func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { false }
                 func outputPath(skill: Skill, projectPath: String?) -> String { "" }
                 OWNERSHIP

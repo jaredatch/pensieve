@@ -21,10 +21,10 @@ private final class RecordingLinkService: LinkServiceProtocol {
         artifacts.insert(artifact)
     }
 
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
         let artifact = RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath)
         unlinkCalls.append(artifact)
-        artifacts.remove(artifact)
+        return artifacts.remove(artifact) != nil
     }
     func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
         artifacts.contains(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))

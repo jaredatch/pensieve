@@ -6,17 +6,27 @@ import CryptoKit
 protocol CursorCompilerProtocol {
     /// Generate and write .mdc file from skill + Cursor config
     func compile(skill: Skill, projectPath: String?) throws
-    /// Remove compiled .mdc file
-    func remove(skill: Skill, projectPath: String?) throws
+    /// Remove an owned rule; true only after deleting it from disk.
+    @discardableResult
+    func remove(skill: Skill, projectPath: String?) throws -> Bool
     /// Check if .mdc is up to date (content hash comparison)
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool
-    /// Metadata only, using the compiler's filesystem after validating the skill slug.
-    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool
+    /// Metadata only. Call ruleMayExist for shared slug and scope admission.
+    func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool
     /// Convergence upgrades owned legacy output before its source can change.
     func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool
     /// Get the output path for a compiled .mdc file
     func outputPath(skill: Skill, projectPath: String?) -> String
+}
+
+extension CursorCompilerProtocol {
+    /// Validate before scope admission or filesystem access, for every compiler implementation.
+    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
+        try LinkService.validatePathComponent(skill.directoryName)
+        guard ProjectDirectory.canAccess(projectPath) else { return false }
+        return try probeRulePresence(skill: skill, projectPath: projectPath)
+    }
 }
 
 // MARK: - Implementation
@@ -50,11 +60,13 @@ final class CursorCompiler: CursorCompilerProtocol {
         }
     }
 
-    func remove(skill: Skill, projectPath: String?) throws {
-        guard ProjectDirectory.canAccess(projectPath) else { return }
+    @discardableResult
+    func remove(skill: Skill, projectPath: String?) throws -> Bool {
+        guard ProjectDirectory.canAccess(projectPath) else { return false }
         let path = outputPath(skill: skill, projectPath: projectPath)
-        guard try ownsArtifact(skill: skill, projectPath: projectPath) else { return }
+        guard try ownsArtifact(skill: skill, projectPath: projectPath) else { return false }
         try fileService.deleteFile(at: path)
+        return true
     }
 
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {
@@ -74,9 +86,7 @@ final class CursorCompiler: CursorCompilerProtocol {
         return try ownership.cursor(at: outputPath(skill: skill, projectPath: projectPath), legacyContent: nil) == .owned
     }
 
-    func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
-        guard ProjectDirectory.canAccess(projectPath) else { return false }
-        try LinkService.validatePathComponent(skill.directoryName)
+    func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
         return try ownership.cursorRuleMayExist(at: outputPath(skill: skill, projectPath: projectPath))
     }
 
