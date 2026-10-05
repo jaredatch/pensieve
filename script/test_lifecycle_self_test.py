@@ -45,6 +45,12 @@ root = os.environ.get('TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT')
 exists = bool(root and pathlib.Path(root).is_dir())
 if exists:
     (pathlib.Path(root) / 'leftover-sync.lock').touch()
+    if os.environ.get('TEST_LIFECYCLE_UNREADABLE_FIXTURE') == '1':
+        blocked = pathlib.Path(root) / 'unreadable' / 'nested'
+        blocked.mkdir(parents=True)
+        (blocked / 'marker').write_text('left by a crashed test host')
+        blocked.chmod(0)
+        blocked.parent.chmod(0)
 pathlib.Path(os.environ['TEST_LIFECYCLE_READY']).write_text(json.dumps({
     'pid': os.getpid(), 'directory': str(bundle.parent), 'fixture_root': root, 'fixture_root_exists': exists,
     'git_ceiling': os.environ.get('TEST_RUNNER_GIT_CEILING_DIRECTORIES')}))
@@ -142,7 +148,10 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
         return output
 
     def test_failed_run_removes_emptied_directory(self):
-        self.failed_run()
+        self.env['TEST_LIFECYCLE_UNREADABLE_FIXTURE'] = '1'
+        self.stub('xcrun', '#!/bin/sh\necho \'{"totalTestCount":1,"testFailures":[{"testName":"FixtureCrash","failureText":"host crashed"}]}\'\n')
+        output = self.failed_run()
+        self.assertIn('test.sh: failed FixtureCrash: host crashed', output)
         bundles = list((self.root / "DerivedData/FailedRuns").glob("*.xcresult"))
         self.assertEqual(len(bundles), 1)
         self.assertEqual((bundles[0] / "marker").read_text(), "preserved evidence")
@@ -151,6 +160,7 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
     def test_pass_creates_forwards_and_removes_fixture_root(self):
         roots = []
         for index in range(2):
+            self.env['TEST_LIFECYCLE_UNREADABLE_FIXTURE'] = str(index)
             process, ready = self.launch(mode="pass", label=f"pass-{index}")
             output = process.communicate(timeout=10)[0].decode()
             self.assertEqual(process.returncode, 0, output)
@@ -164,6 +174,23 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
             self.assertEqual(list(self.runs.iterdir()), [])
             roots.append(root)
         self.assertNotEqual(*roots, "two runs reused a fixture root")
+
+    def test_fixture_cleanup_errors_preserve_count_bundle_and_exit_status(self):
+        self.stub('chmod', '#!/bin/sh\nexit 23\n')
+        self.stub('rm', '#!/bin/sh\ncase "$2" in */.diagnostics-ready) exec /bin/rm "$@";; esac\nexit 23\n')
+        for mode, status in (('fail', 65), ('pass', 0)):
+            with self.subTest(mode=mode):
+                process, ready = self.launch(mode=mode, label='cleanup-error-' + mode)
+                output = process.communicate(timeout=10)[0].decode()
+                self.assertEqual(process.returncode, status, output)
+                self.assertIn('PENSIEVE_TEST_COUNT=1', output)
+                root = Path(json.loads(ready.read_text())['fixture_root'])
+                self.assertTrue(root.is_dir(), 'failed cleanup must leave its fixtures for later pruning')
+                if mode == 'fail':
+                    self.assertIn('the failed run\'s result bundle is kept at', output)
+                    bundles = list((self.root / 'DerivedData/FailedRuns').glob('*.xcresult'))
+                    self.assertEqual(len(bundles), 1)
+                    self.assertEqual((bundles[0] / 'marker').read_text(), 'preserved evidence')
 
     def test_sweep_removes_only_old_empty_uppercase_uuid_directories(self):
         old_empty, nonempty, young = [self.system_temp / str(uuid.UUID(int=index)).upper() for index in (10, 11, 12)]
@@ -253,6 +280,12 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
 
     def test_prunes_to_five_newest_interrupted_runs(self):
         abandoned = self.abandoned_runs()
+        for path in abandoned:
+            blocked = path / 'tmp' / 'unreadable' / 'nested'
+            blocked.mkdir(parents=True)
+            (blocked / 'marker').write_text('interrupted fixture')
+            blocked.chmod(0)
+            blocked.parent.chmod(0)
         empty = self.runs / "run.old-empty"
         empty.mkdir()
         self.failed_run()
@@ -268,11 +301,16 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
         outside = self.root / "outside"
         outside.mkdir()
         (outside / "marker").write_text("do not delete")
+        outside.chmod(0o500)
+        (outside / "marker").chmod(0o400)
+        (abandoned[1] / 'tmp' / 'linked-outside').symlink_to(outside, target_is_directory=True)
         link = self.runs / "run.link"
         link.symlink_to(outside, target_is_directory=True)
         self.failed_run()
         self.assertEqual(set(self.runs.iterdir()), {protected, link, *abandoned[-5:]})
         self.assertEqual((outside / "marker").read_text(), "do not delete")
+        self.assertEqual(outside.stat().st_mode & 0o777, 0o500, 'pruning changed a linked target directory mode')
+        self.assertEqual((outside / 'marker').stat().st_mode & 0o777, 0o400, 'pruning changed a linked target file mode')
 
     def test_builder_lock_survives_wrapper_death_and_then_becomes_prunable(self):
         process, ready = self.launch(mode="hang", label="active")

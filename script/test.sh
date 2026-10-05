@@ -156,7 +156,9 @@ if system_temp="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" && [ -d "$system_te
   python3 "$REPO/script/test_temp_cleanup.py" "$system_temp" >/dev/null 2>&1 || true
 fi
 # Completed runs need no fixture leftovers. Interrupted runs keep theirs under TestRuns' existing pruning.
-rm -rf "$TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT"
+# A crashed host can leave mode-0 fixtures. Restore owner access without following symlinks.
+chmod -R -P u+rwx "$TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT" 2>/dev/null || true
+rm -rf "$TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT" 2>/dev/null || true
 unread=0
 case "$count" in
   ''|*[!0-9]*)
@@ -170,7 +172,7 @@ esac
 # Messages go to stderr: the count line must stay stdout's last line.
 if [ "$status" -ne 0 ] && [ -d "$bundle" ]; then
   if kept="$(keep_failed_bundle "$bundle" "$DERIVED_DATA/FailedRuns")"; then
-    rm -f "$rdir/.active.lock"
+    rm -f "$rdir/.active.lock" 2>/dev/null || true
     rmdir "$rdir" 2>/dev/null || true
     echo "test.sh: the failed run's result bundle is kept at $kept" >&2
     xcrun xcresulttool get test-results summary --path "$kept" --compact 2>/dev/null \
@@ -182,7 +184,7 @@ fi
 # the in-progress bundle stays in TestRuns instead of being deleted.
 finish_relay
 trap - EXIT
-if [ "$status" -eq 0 ]; then rm -rf "$rdir"; fi
+if [ "$status" -eq 0 ]; then rm -rf "$rdir" 2>/dev/null || true; fi
 printf 'PENSIEVE_TEST_COUNT=%s\n' "$count"
 
 # A passing run whose count can't be read is refused, never reported as 0 tests passing.

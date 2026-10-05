@@ -133,10 +133,10 @@ final class ImportScanRevisionTests: XCTestCase {
 
     func testSocketLeafIsReportedAsSpecialWithoutReading() throws {
         let spy = ImportBoundedReadSpy()
-        // Keep the UNIX socket path below sun_path's limit with the nested runner root.
-        let root = TestTemporaryDirectory.path + "IS-\(UUID().uuidString.prefix(6))"
+        // The system temp path keeps the UNIX socket below sun_path's limit regardless of checkout length.
+        let root = TestTemporaryDirectory.systemPath + "IS-\(UUID().uuidString.prefix(8))"
         defer { try? spy.files.deleteDirectory(at: root) }
-        let path = root + "/cursor/s.mdc"
+        let path = root + "/cursor/socket.mdc"
         let good = root + "/cursor/good.mdc"
         try spy.files.writeFile(at: good, content: "Good rule")
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
