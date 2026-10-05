@@ -3,15 +3,13 @@ import SwiftData
 
 @MainActor
 protocol SkillUpdateApplyObserving: AnyObject {
-    func applyReservationsChanged()
-    func applyFinished(row: UpdatesRow, status: UpdatesRowStatus, context: ModelContext, folderRevisions: [String: UInt64])
+    func applyFinished(row: UpdatesRow, status: UpdatesRowStatus?, context: ModelContext)
 }
 
-/// Shares process outcomes with open review surfaces; the gate itself owns reservations only.
+/// Delivers completion to currently open surfaces; no outcome survives in this process-owned object.
 @MainActor
 final class SkillUpdateApplyCoordinator {
     let gate = SkillUpdateApplyGate()
-    private var outcomes: [UUID: (row: UpdatesRow, status: UpdatesRowStatus)] = [:]
     private var observers: [Observer] = []
 
     private final class Observer {
@@ -25,22 +23,13 @@ final class SkillUpdateApplyCoordinator {
     }
 
     func begin(_ id: UUID) -> Bool {
-        guard gate.begin(id) else { return false }
-        observers.forEach { $0.value?.applyReservationsChanged() }
-        return true
+        gate.begin(id)
     }
 
-    func finish(row: UpdatesRow, status: UpdatesRowStatus, context: ModelContext, folderRevisions: [String: UInt64]) {
-        outcomes[row.id] = (row, status)
+    func finish(row: UpdatesRow, status: UpdatesRowStatus?, context: ModelContext) {
         gate.end(row.id)
         observers.forEach { $0.value?.applyFinished(row: row, status: status,
-                                                   context: context, folderRevisions: folderRevisions) }
-        observers.forEach { $0.value?.applyReservationsChanged() }
-    }
-
-    func outcome(for row: UpdatesRow) -> UpdatesRowStatus? {
-        guard let outcome = outcomes[row.id], outcome.row.hasSameInstalledCommit(as: row) else { return nil }
-        return outcome.status
+                                                   context: context) }
     }
 }
 

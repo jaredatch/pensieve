@@ -66,7 +66,8 @@ extension ViewChangesViewModelTests {
         let second = try fixture.skill("current")
         let rows = try [first, second].map { try UpdatesViewModel.makeRow(skill: $0, driftedLocally: false) }
         let calls = UpdateReviewRecorder<UUID>()
-        let model = ViewChangesViewModel(operations: fixture.operations(rows: rows, diff: { id, _, _, _ in
+        let model = ViewChangesViewModel(library: fixture.library,
+            operations: fixture.operations(rows: rows, diff: { id, _, _, _ in
             calls.append(id)
             return UpdateReviewFixture.preview()
         }))
@@ -84,7 +85,8 @@ extension ViewChangesViewModelTests {
             let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
             let started = DispatchSemaphore(value: 0)
             let gate = TestWait.Gate(owner: self)
-            let model = ViewChangesViewModel(operations: fixture.operations(rows: [row], apply: { _, _, _, _, _, _ in
+            let model = ViewChangesViewModel(library: fixture.library,
+                operations: fixture.operations(rows: [row], apply: { _, _, _, _, _, _ in
                 started.signal()
                 try gate.wait()
                 throw confirmation ? SkillUpdateFlowError.localEditsRequireConfirmation : .repositoryChanged
@@ -109,7 +111,8 @@ extension ViewChangesViewModelTests {
         let skill = try fixture.skill("first-fetch")
         let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
         var fetches = 0
-        let model = ViewChangesViewModel(operations: fixture.operations(rows: [row]), skillLookup: { _, _ in
+        let model = ViewChangesViewModel(library: fixture.library,
+            operations: fixture.operations(rows: [row]), skillLookup: { _, _ in
             fetches += 1
             if fetches == 1 { throw SkillUpdateFlowError.skillNotFound }
             return skill
@@ -128,7 +131,8 @@ extension ViewChangesViewModelTests {
         let skill = try fixture.skill("lookup-once")
         let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
         var fetches = 0
-        let model = ViewChangesViewModel(operations: fixture.operations(rows: [row]), skillLookup: { _, _ in
+        let model = ViewChangesViewModel(library: fixture.library,
+            operations: fixture.operations(rows: [row]), skillLookup: { _, _ in
             fetches += 1
             return skill
         })
@@ -143,11 +147,12 @@ extension ViewChangesViewModelTests {
         let skill = try fixture.skill("recheck")
         let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
         for error in [SkillUpdateFlowError.repositoryChanged, .missingPinnedUpdate] {
-            let model = ViewChangesViewModel(operations: fixture.operations(rows: [row], diff: { _, _, _, _ in throw error }))
+            let model = ViewChangesViewModel(library: fixture.library,
+                operations: fixture.operations(rows: [row], diff: { _, _, _, _ in throw error }))
             model.open(skillID: skill.id, context: fixture.context)
             await settled(model)
             XCTAssertTrue(model.canRecheck, "Moved and missing pins need a fresh check")
-            let applying = ViewChangesViewModel(operations: fixture.operations(rows: [row],
+            let applying = ViewChangesViewModel(library: fixture.library, operations: fixture.operations(rows: [row],
                 apply: { _, _, _, _, _, _ in throw error }))
             applying.open(skillID: skill.id, context: fixture.context)
             await settled(applying)

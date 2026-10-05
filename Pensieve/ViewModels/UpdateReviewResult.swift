@@ -7,12 +7,12 @@ enum UpdateReviewResult {
 
     /// Both surfaces use the same error mapping and canonical-write effects, even after presentation retirement.
     @MainActor
-    func resolve(row: UpdatesRow, context: ModelContext, effects: UpdateReviewEffects) -> UpdatesRowStatus {
+    func resolve(row: UpdatesRow?, context: ModelContext, effects: UpdateReviewEffects) -> UpdatesRowStatus {
         do {
             switch self {
             case let .apply(result):
                 let completion = try result.get()
-                effects.echo([row.slug])
+                effects.echo(row.map { [$0.slug] } ?? [])
                 UpdatesViewModel.applyCompletion(completion, context: context)
                 effects.notify()
                 return .updated
@@ -24,12 +24,15 @@ enum UpdateReviewResult {
             }
         } catch {
             if error is SyncedStateMutationError {
-                effects.echo([row.slug])
+                effects.echo(row.map { [$0.slug] } ?? [])
                 effects.invalidateEditorBody()
                 effects.notify()
                 return .failedAfterReplacement(message: UpdatesViewModel.readable(error))
             }
-            if error as? SkillUpdateFlowError == .localEditsRequireConfirmation { return .confirmationRequired }
+            if error is CancellationError { return .idle }
+            if case .apply = self, error as? SkillUpdateFlowError == .localEditsRequireConfirmation {
+                return .confirmationRequired
+            }
             let recheck: Bool
             if case .recheck = self { recheck = true } else { recheck = UpdatesViewModel.offersRecheck(error) }
             return .failed(message: UpdatesViewModel.readable(error), offersRecheck: recheck)

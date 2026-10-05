@@ -61,9 +61,12 @@ struct ViewChangesView: View {
             ScrollView {
                 LazyVStack(spacing: DesignTokens.changesFileRowSpacing) {
                     ForEach(model.files, id: \.path) { file in
-                        ViewChangesFileButton(file: file, selected: file.path == model.selectedFilePath) {
-                            model.selectFile(path: file.path)
-                        }
+                        ViewChangesFileButton(file: file, selected: file.path == model.selectedFilePath,
+                                              action: { model.selectFile(path: file.path) },
+                                              moveSelection: model.moveFileSelection)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: (file.path as NSString).deletingLastPathComponent.isEmpty
+                                ? DesignTokens.changesFileRowHeight : DesignTokens.changesNestedFileRowHeight)
                     }
                 }
             }
@@ -73,7 +76,10 @@ struct ViewChangesView: View {
     }
 
     @ToolbarContentBuilder private var changesToolbar: some ToolbarContent {
-        if #available(macOS 26, *) { ToolbarSpacer(.flexible, placement: .automatic) }
+        if #available(macOS 26, *) {
+            heading.sharedBackgroundVisibility(.hidden)
+            ToolbarSpacer(.flexible, placement: .automatic)
+        } else { heading }
         ToolbarItem(id: "changes-github", placement: .primaryAction) {
             Button("View on GitHub") {
                 if let url = model.row?.compareURL { openURL(url) }
@@ -96,6 +102,20 @@ struct ViewChangesView: View {
                 .frame(width: DesignTokens.changesUpdateButtonWidth, height: DesignTokens.changesButtonHeight)
                 .disabled(!model.canUpdate || library.libraryUnavailable)
                 .accessibilityIdentifier("changes-update")
+        }
+    }
+
+    private var heading: some ToolbarContent {
+        ToolbarItem(id: "changes-heading", placement: .navigation) {
+            VStack(alignment: .leading, spacing: DesignTokens.changesTitleGap) {
+                Text(model.row.map { "Changes to \($0.skillName)" } ?? "View Changes")
+                    .font(DesignTokens.changesTitle)
+                if let row = model.row {
+                    Text(verbatim: ViewChangesPresentation.subtitle(row))
+                        .font(DesignTokens.changesSubtitle).foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityIdentifier("changes-heading")
         }
     }
 

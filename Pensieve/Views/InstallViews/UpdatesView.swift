@@ -18,6 +18,7 @@ struct UpdatesView: View {
         }
         .frame(width: 760, height: 540)
         .task { model.load(context: context) }
+        .onDisappear { model.reset() }
     }
 
     private var header: some View {
@@ -85,7 +86,7 @@ struct UpdatesView: View {
     }
 
     private func close() {
-        model.cancel()
+        model.reset()
         dismiss()
     }
 }
@@ -172,7 +173,7 @@ private struct UpdatesRowView: View {
         case .updating:
             HStack(spacing: Spacing.sm) {
                 ProgressView().controlSize(.small)
-                Text(model.isUpdatingElsewhere(row) ? "Updating in View Changes…" : "Updating…")
+                Text(model.updatingLabel)
                     .font(.caption).foregroundStyle(.secondary)
             }
         case .updated:

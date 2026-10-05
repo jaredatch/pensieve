@@ -9,7 +9,8 @@ extension ViewChangesViewModelTests {
         let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
         let started = DispatchSemaphore(value: 0)
         let release = TestWait.Gate(owner: self)
-        let model = ViewChangesViewModel(operations: fixture.operations(rows: [row], apply: { _, _, _, _, _, _ in
+        let model = ViewChangesViewModel(library: fixture.library,
+            operations: fixture.operations(rows: [row], apply: { _, _, _, _, _, _ in
             started.signal()
             try release.wait()
             throw SkillUpdateFlowError.repositoryChanged
@@ -36,7 +37,7 @@ extension ViewChangesViewModelTests {
         let second = try fixture.skill("query-second")
         let id = second.id
         let rows = try [first, second].map { try UpdatesViewModel.makeRow(skill: $0, driftedLocally: false) }
-        let model = ViewChangesViewModel(operations: fixture.operations(rows: rows))
+        let model = ViewChangesViewModel(library: fixture.library, operations: fixture.operations(rows: rows))
         model.open(skillID: first.id, context: fixture.context)
         await c4Settled(model)
         model.open(skillID: id, context: fixture.context)
@@ -54,7 +55,8 @@ extension ViewChangesViewModelTests {
     func testRecheckErrorSurvivesItsOwnIdentityChangeAndStillAllowsRecheck() async throws {
         let skill = try fixture.skill("recheck-error")
         let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
-        let model = ViewChangesViewModel(operations: fixture.operations(rows: [row], diff: { _, _, _, _ in
+        let model = ViewChangesViewModel(library: fixture.library,
+            operations: fixture.operations(rows: [row], diff: { _, _, _, _ in
             throw SkillUpdateFlowError.repositoryChanged
         }, recheck: { id, _ in
             SkillUpdateRecheckCompletion(row: nil, skillID: id, updateAvailable: false,
@@ -82,7 +84,8 @@ extension ViewChangesViewModelTests {
         let started = DispatchSemaphore(value: 0)
         let release = TestWait.Gate(owner: self)
         let diffs = UpdateReviewRecorder<UUID>()
-        let model = ViewChangesViewModel(operations: fixture.operations(rows: [row], diff: { id, _, _, _ in
+        let model = ViewChangesViewModel(library: fixture.library,
+            operations: fixture.operations(rows: [row], diff: { id, _, _, _ in
             diffs.append(id)
             if diffs.values.count == 1 { throw SkillUpdateFlowError.repositoryChanged }
             return UpdateReviewFixture.preview()
@@ -125,7 +128,8 @@ extension ViewChangesViewModelTests {
             return completion
         }
         let sheet = fixture.sheet(rows: [row], apply: apply)
-        let window = ViewChangesViewModel(operations: fixture.operations(rows: [refreshed], apply: apply),
+        let window = ViewChangesViewModel(library: fixture.library,
+            operations: fixture.operations(rows: [refreshed], apply: apply),
                                          applyCoordinator: sheet.applyCoordinator)
         sheet.rows = [row]
         sheet.selectedSkillIDs = [row.id]
@@ -183,7 +187,7 @@ extension ViewChangesViewModelTests {
         XCTAssertTrue(didStartExternal)
         await settleExternalBatchOutcome(finishesBeforeBatch: finishesBeforeBatch, sheet: sheet, window: window,
                                          externalRow: rows[1], firstRelease: firstRelease, externalRelease: externalRelease)
-        XCTAssertFalse(sheet.isUpdatingElsewhere(rows[1]))
+        XCTAssertFalse(sheet.applyGate.isApplying(rows[1].id))
         XCTAssertEqual(calls.values, rows.map(\.id))
     }
 
@@ -201,7 +205,7 @@ extension ViewChangesViewModelTests {
             firstRelease.open()
             await TestWait.until(failureMessage: "sheet batch did not settle") { !sheet.isApplyingBatch }
             XCTAssertEqual(sheet.status(for: externalRow), .updating)
-            XCTAssertTrue(sheet.isUpdatingElsewhere(externalRow))
+            XCTAssertEqual(sheet.updatingLabel, "Updating…")
             XCTAssertFalse(sheet.canApply)
             externalRelease.open()
             await TestWait.until(failureMessage: "external apply did not settle") { !window.isApplying }

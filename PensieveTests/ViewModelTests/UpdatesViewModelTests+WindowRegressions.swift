@@ -34,7 +34,8 @@ extension UpdatesViewModelTests {
                                     diffOperation: operations.diffOperation, recheckOperation: operations.recheckOperation,
                                     bodyWriteRegistration: operations.bodyWriteRegistration)
         let routing = UpdateReviewRouting(
-            preview: ViewChangesViewModel(operations: operations, applyCoordinator: sheet.applyCoordinator), updates: sheet,
+            preview: ViewChangesViewModel(library: library,
+                operations: operations, applyCoordinator: sheet.applyCoordinator), updates: sheet,
                                           library: library, context: context, openWindow: { _ in })
         routing.presentUpdates(skillID: fixture.skill.id)
         await sheet.loadAndReport(context: context)

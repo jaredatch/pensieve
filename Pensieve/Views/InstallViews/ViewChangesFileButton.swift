@@ -1,17 +1,83 @@
+import AppKit
 import SwiftUI
 
-struct ViewChangesFileButton: View {
+/// A native button preserves the press action and keyboard focus while hosting the measured row artwork.
+struct ViewChangesFileButton: NSViewRepresentable {
     let file: PinnedSkillFileDiff
     let selected: Bool
     let action: () -> Void
+    let moveSelection: (Int) -> Void
 
-    var body: some View {
-        Button(action: action) { ViewChangesFileRow(file: file, selected: selected) }
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text(verbatim: ViewChangesPresentation.accessibilityLabel(file)))
-            .accessibilityAddTraits(selected ? .isSelected : [])
-            .accessibilityIdentifier("changes-file-" + file.path)
+    func makeNSView(context: Context) -> ChangesFileRowButton {
+        let button = ChangesFileRowButton(frame: .zero)
+        updateNSView(button, context: context)
+        return button
+    }
+
+    func updateNSView(_ button: ChangesFileRowButton, context: Context) {
+        button.configure(file: file, selected: selected, action: action, move: moveSelection)
+    }
+}
+
+final class ChangesFileRowButton: NSButton {
+    private var labelHost: NSHostingView<ViewChangesFileRow>?
+    private var selected = false
+    private var selectFile: (() -> Void)?
+    private var moveSelection: ((Int) -> Void)?
+
+    override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { true }
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityPerformPress() -> Bool {
+        guard isEnabled else { return false }
+        performClick(nil)
+        return true
+    }
+    override func isAccessibilitySelected() -> Bool { selected }
+    override func accessibilityChildren() -> [Any]? { [] }
+    override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
+
+    func configure(file: PinnedSkillFileDiff, selected: Bool, action: @escaping () -> Void, move: @escaping (Int) -> Void) {
+        self.selected = selected
+        selectFile = action
+        moveSelection = move
+        title = ""
+        isBordered = false
+        setButtonType(.momentaryChange)
+        target = self
+        self.action = #selector(chooseFile)
+        setAccessibilityLabel(ViewChangesPresentation.accessibilityLabel(file))
+        setAccessibilityIdentifier("changes-file-" + file.path)
+        let artwork = ViewChangesFileRow(file: file, selected: selected)
+        if let labelHost {
+            labelHost.rootView = artwork
+        } else {
+            let host = NSHostingView(rootView: artwork)
+            host.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(host)
+            NSLayoutConstraint.activate([
+                host.leadingAnchor.constraint(equalTo: leadingAnchor), host.trailingAnchor.constraint(equalTo: trailingAnchor),
+                host.topAnchor.constraint(equalTo: topAnchor), host.bottomAnchor.constraint(equalTo: bottomAnchor)
+            ])
+            labelHost = host
+        }
+        if selected, window?.firstResponder is ChangesFileRowButton { window?.makeFirstResponder(self) }
+    }
+
+    @objc private func chooseFile() {
+        window?.makeFirstResponder(self)
+        selectFile?()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 125: moveSelection?(1)
+        case 126: moveSelection?(-1)
+        default: super.keyDown(with: event)
+        }
     }
 }
 

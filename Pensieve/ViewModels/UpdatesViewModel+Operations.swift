@@ -2,8 +2,9 @@ import Foundation
 import SwiftData
 
 extension UpdatesViewModel {
-    func performLoad(container: ModelContainer, operationID id: UUID) async {
+    func performLoad(context: ModelContext, operationID id: UUID) async {
         guard operationID == id, !Task.isCancelled else { return }
+        let container = context.container
         let loader = rowLoader
         let task = Task.detached(priority: .userInitiated) {
             try Self.performUnlessCancelled { try loader(container) }
@@ -14,12 +15,11 @@ extension UpdatesViewModel {
             guard operationID == id, !Task.isCancelled else { return }
             rows = loaded
             let available = Set(loaded.map(\.id))
+            let skills = try context.fetch(FetchDescriptor<Skill>()).filter { available.contains($0.id) }
+            presentationSkills = Dictionary(uniqueKeysWithValues: skills.map { ($0.id, $0) })
             selectedSkillIDs = initialSelection.map { $0.intersection(available) } ?? available
             confirmedDriftSkillIDs.formIntersection(Set(loaded.map(\.id)))
             statuses = Dictionary(uniqueKeysWithValues: loaded.map { ($0.id, .idle) })
-            for row in loaded {
-                if let status = applyCoordinator.outcome(for: row) { acceptApplyOutcome(row: row, status: status) }
-            }
             loadError = nil
         } catch {
             guard operationID == id, !Task.isCancelled else { return }
@@ -44,7 +44,7 @@ extension UpdatesViewModel {
                 continue
             }
             await performApply(row: row, confirmed: confirmed, container: container,
-                               presentationContext: presentationContext, onMutation: { didMutate = true })
+                               presentationContext: presentationContext, operationID: id, onMutation: { didMutate = true })
         }
         guard operationID == id else { return }
         isApplyingBatch = false
@@ -52,7 +52,7 @@ extension UpdatesViewModel {
     }
 
     private func performApply(row: UpdatesRow, confirmed: Bool, container: ModelContainer,
-                              presentationContext: ModelContext, onMutation: @escaping () -> Void) async {
+                              presentationContext: ModelContext, operationID id: UUID, onMutation: @escaping () -> Void) async {
         guard applyCoordinator.begin(row.id) else { return }
         statuses[row.id] = .updating
         let apply = applyOperation
@@ -68,8 +68,11 @@ extension UpdatesViewModel {
             row: row, context: presentationContext,
             effects: UpdateReviewEffects(echo: echoRegistrar, notify: onMutation, invalidateEditorBody: invalidateEditorBody)
         )
-        applyCoordinator.finish(row: row, status: status, context: presentationContext,
-                                folderRevisions: currentFolderRevisions())
+        // Canonical-write effects still run after cancellation, but a retired session cannot publish a failure.
+        let retired = operationID != id || Task.isCancelled
+        let published: UpdatesRowStatus?
+        if case .success = result { published = status } else { published = retired || status == .idle ? nil : status }
+        applyCoordinator.finish(row: row, status: published, context: presentationContext)
     }
 
     func performRecheck(row: UpdatesRow, container: ModelContainer,

@@ -15,7 +15,8 @@ final class ViewChangesSceneTests: XCTestCase {
         let completed = DispatchSemaphore(value: 0)
         let gate = TestWait.Gate(owner: self)
         let cancellation = UpdateReviewRecorder<Bool>()
-        let model = ViewChangesViewModel(operations: fixture.operations(rows: [row], diff: { _, _, _, _ in
+        let model = ViewChangesViewModel(library: fixture.library,
+            operations: fixture.operations(rows: [row], diff: { _, _, _, _ in
             started.signal()
             try gate.wait()
             cancellation.append(Task.isCancelled)
@@ -49,7 +50,7 @@ final class ViewChangesSceneTests: XCTestCase {
             defer { try? fixture.cleanup() }
             let skill = try fixture.skill("geometry")
             let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
-            let model = ViewChangesViewModel(operations: fixture.operations(rows: [row]))
+            let model = ViewChangesViewModel(library: fixture.library, operations: fixture.operations(rows: [row]))
             model.open(skillID: skill.id, context: fixture.context)
             await TestWait.until(failureMessage: "geometry preview did not load") { model.state != .loading }
             let representation = NSHostingSceneRepresentation {
@@ -75,6 +76,7 @@ final class ViewChangesSceneTests: XCTestCase {
             XCTAssertEqual(window.titlebarSeparatorStyle, .none, "Full-height chrome has no title-bar strip")
             XCTAssertEqual(window.title, "Changes to Geometry", "Use the native plain-text window title")
             XCTAssertEqual(window.subtitle, "example/repository · 1111111 → 2222222 · 3 days newer")
+            try assertVisibleHeading(in: window)
             let update = try XCTUnwrap(window.toolbar?.items.first {
                 $0.itemIdentifier.rawValue.contains("changes-update")
             }?.view)
@@ -92,7 +94,7 @@ final class ViewChangesSceneTests: XCTestCase {
         }
     }
 
-    private func makeWindow(id: String) -> NSWindow {
+    func makeWindow(id: String) -> NSWindow {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 700),
                               styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.identifier = NSUserInterfaceItemIdentifier(id)

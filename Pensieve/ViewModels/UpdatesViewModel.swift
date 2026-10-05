@@ -12,16 +12,9 @@ final class UpdatesViewModel {
     typealias DiffOperation = (UUID, String, String, ModelContainer) throws -> PinnedSkillDiff
     typealias RecheckOperation = (UUID, ModelContainer) throws -> SkillUpdateRecheckCompletion
 
-    var rows: [UpdatesRow] = [] {
-        didSet {
-            rowIDs = Set(rows.map(\.id))
-            applyReservationsChanged()
-        }
-    }
-    var rowIDs: Set<UUID> = []
-    var hasReservedRows = false
+    var rows: [UpdatesRow] = []
+    var presentationSkills: [UUID: Skill] = [:]
     var invalidateEditorBody: () -> Void = {}
-    var currentFolderRevisions: () -> [String: UInt64] = { [:] }
     var selectedSkillIDs: Set<UUID> = []
     var confirmedDriftSkillIDs: Set<UUID> = []
     var statuses: [UUID: UpdatesRowStatus] = [:]
@@ -29,7 +22,7 @@ final class UpdatesViewModel {
     var isApplyingBatch = false
     let applyCoordinator: SkillUpdateApplyCoordinator
     var applyGate: SkillUpdateApplyGate { applyCoordinator.gate }
-    var isApplying: Bool { isApplyingBatch || hasReservedRows }
+    var isApplying: Bool { isApplyingBatch || applyGate.hasReservations }
     var recheckingSkillID: UUID?
     var loadError: String?
     var isPresented = false
@@ -67,13 +60,15 @@ final class UpdatesViewModel {
         self.applyCoordinator.observe(self)
     }
 
-    var selectedCount: Int { selectedSkillIDs.count }
+    var updatingLabel: String { "Updating…" }
+
+    var selectedCount: Int { rows.filter(isSelected).count }
     var canApply: Bool {
         !isLoading && !isApplying && recheckingSkillID == nil && selectedCount > 0
     }
 
     func isSelected(_ row: UpdatesRow) -> Bool {
-        selectedSkillIDs.contains(row.id)
+        selectedSkillIDs.contains(row.id) && canSelect(row)
     }
 
     func toggleSelection(_ row: UpdatesRow) {
@@ -106,22 +101,23 @@ final class UpdatesViewModel {
     }
 
     func status(for row: UpdatesRow) -> UpdatesRowStatus {
-        applyGate.isApplying(row.id) ? .updating : statuses[row.id] ?? .idle
+        if applyGate.isApplying(row.id) { return .updating }
+        if let status = statuses[row.id], status != .idle { return status }
+        return canonicalStatus(for: row) ?? .idle
     }
 
     func load(context: ModelContext) {
         guard !isLoading, !isApplyingBatch else { return }
         let id = beginOperation()
         isLoading = true
-        let container = context.container
-        operationTask = Task { await performLoad(container: container, operationID: id) }
+        operationTask = Task { await performLoad(context: context, operationID: id) }
     }
 
     func loadAndReport(context: ModelContext) async {
         guard !isLoading, !isApplyingBatch else { return }
         let id = beginOperation()
         isLoading = true
-        await performLoad(container: context.container, operationID: id)
+        await performLoad(context: context, operationID: id)
     }
 
     func applySelected(context: ModelContext) {
@@ -185,7 +181,6 @@ final class UpdatesViewModel {
     func present(selecting skillID: UUID? = nil, library: SkillLibraryViewModel) {
         guard !library.libraryUnavailable else { return }
         invalidateEditorBody = { [weak library] in library?.noteEditorBodyInvalidated() }
-        currentFolderRevisions = { [weak library] in library?.folderChangeRevisions ?? [:] }
         library.confirmLeavingAnyDraft { [weak self] proceed in
             guard let self, proceed else { return }
             self.reset()
@@ -200,6 +195,7 @@ final class UpdatesViewModel {
         selectedSkillIDs = []
         confirmedDriftSkillIDs = []
         statuses = [:]
+        presentationSkills = [:]
         initialSelection = nil
         isPresented = false
         loadError = nil
@@ -214,6 +210,7 @@ final class UpdatesViewModel {
         isLoading = false
         isApplyingBatch = false
         recheckingSkillID = nil
+        statuses = [:]
     }
 
     nonisolated static func noticeCount(in skills: [Skill]) -> Int {

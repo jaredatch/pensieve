@@ -61,7 +61,7 @@ final class UpdateReviewFixture {
         let operations = operations(rows: rows, diff: diff, apply: apply)
         let coordinator = SkillUpdateApplyCoordinator()
         return (sheet(operations: operations, coordinator: coordinator),
-                ViewChangesViewModel(operations: operations, applyCoordinator: coordinator))
+                ViewChangesViewModel(library: library, operations: operations, applyCoordinator: coordinator))
     }
 
     private func sheet(operations: UpdateReviewOperations, coordinator: SkillUpdateApplyCoordinator) -> UpdatesViewModel {

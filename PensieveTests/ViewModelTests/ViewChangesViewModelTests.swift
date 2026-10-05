@@ -13,7 +13,7 @@ final class ViewChangesViewModelTests: XCTestCase {
         let skill = try fixture.skill("first")
         let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
         let preview = UpdateReviewFixture.preview()
-        let model = ViewChangesViewModel(operations: fixture.operations(rows: [row], preview: preview))
+        let model = ViewChangesViewModel(library: fixture.library, operations: fixture.operations(rows: [row], preview: preview))
         model.open(skillID: skill.id, context: fixture.context)
         XCTAssertEqual(model.state, .loading)
         XCTAssertFalse(model.canUpdate)
@@ -45,7 +45,8 @@ final class ViewChangesViewModelTests: XCTestCase {
         let started = DispatchSemaphore(value: 0)
         let finished = DispatchSemaphore(value: 0)
         let cancelled = UpdateReviewRecorder<Bool>()
-        let model = ViewChangesViewModel(operations: fixture.operations(rows: rows, diff: { id, _, _, _ in
+        let model = ViewChangesViewModel(library: fixture.library,
+            operations: fixture.operations(rows: rows, diff: { id, _, _, _ in
             if id == first.id {
                 started.signal()
                 try gate.wait()
@@ -91,7 +92,7 @@ final class ViewChangesViewModelTests: XCTestCase {
         for mutation in 0..<4 {
             let skill = try fixture.skill("stale-\(mutation)")
             let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
-            let model = ViewChangesViewModel(operations: fixture.operations(rows: [row]))
+            let model = ViewChangesViewModel(library: fixture.library, operations: fixture.operations(rows: [row]))
             skill.updateAvailable = true
             model.open(skillID: skill.id, context: fixture.context)
             await loaded(model)
@@ -120,7 +121,8 @@ final class ViewChangesViewModelTests: XCTestCase {
         let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
         for message in ["Authentication failed", "Network offline", "Repository moved", "Refused scripts/link"] {
             let calls = UpdateReviewRecorder<String>()
-            let model = ViewChangesViewModel(operations: fixture.operations(rows: [row], diff: { _, commit, tree, _ in
+            let model = ViewChangesViewModel(library: fixture.library,
+                operations: fixture.operations(rows: [row], diff: { _, commit, tree, _ in
                 calls.append(commit + ":" + tree)
                 if calls.values.count == 1 { throw PreviewFailure(message: message) }
                 return UpdateReviewFixture.preview()
@@ -160,7 +162,8 @@ final class ViewChangesViewModelTests: XCTestCase {
             let skill = try fixture.skill(drifted ? "draft-drifted" : "draft-clean")
             let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: drifted)
             let calls = UpdateReviewRecorder<UUID>()
-            let model = ViewChangesViewModel(operations: fixture.operations(rows: [row], apply: { id, _, _, _, _, _ in
+            let model = ViewChangesViewModel(library: fixture.library,
+                operations: fixture.operations(rows: [row], apply: { id, _, _, _, _, _ in
                 calls.append(id)
                 throw SkillUpdateFlowError.repositoryChanged
             }))
@@ -191,7 +194,8 @@ final class ViewChangesViewModelTests: XCTestCase {
         let skill = try fixture.skill("drift")
         let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: true)
         let flags = UpdateReviewRecorder<Bool>()
-        let model = ViewChangesViewModel(operations: fixture.operations(rows: [row], apply: { _, _, _, flag, _, _ in
+        let model = ViewChangesViewModel(library: fixture.library,
+            operations: fixture.operations(rows: [row], apply: { _, _, _, flag, _, _ in
             flags.append(flag)
             throw SkillUpdateFlowError.repositoryChanged
         }))

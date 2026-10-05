@@ -42,7 +42,7 @@ extension UpdatesViewModelTests {
         let review = UpdateReviewOperations(rowLoader: model.rowLoader,
             previewRowLoader: { id, _ in rows.first { $0.id == id } }, applyOperation: model.applyOperation,
             diffOperation: model.diffOperation, recheckOperation: model.recheckOperation)
-        let window = ViewChangesViewModel(operations: review, applyCoordinator: model.applyCoordinator)
+        let window = ViewChangesViewModel(library: library, operations: review, applyCoordinator: model.applyCoordinator)
         window.open(skillID: rows[1].id, context: context)
         await TestWait.until(failureMessage: "independent window preview did not finish") { window.state != .loading }
         await model.applySelectedAndReport(context: context)

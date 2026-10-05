@@ -65,7 +65,8 @@ extension UpdatesViewModelTests {
         let review = UpdateReviewOperations(rowLoader: operations.rowLoader, previewRowLoader: operations.previewRowLoader,
             applyOperation: operations.applyOperation, diffOperation: operations.diffOperation,
             recheckOperation: operations.recheckOperation)
-        let window = ViewChangesViewModel(operations: review)
+        let (_, library) = makeRealReviewOperations(fixture: fixture, service: service)
+        let window = ViewChangesViewModel(library: library, operations: review)
         window.open(skillID: row.id, context: context)
         await TestWait.until(failureMessage: "preview did not finish") { window.state != .loading }
         XCTAssertNotNil(window.selectedFile)

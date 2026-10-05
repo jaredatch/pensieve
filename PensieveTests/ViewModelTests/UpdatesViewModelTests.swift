@@ -8,6 +8,7 @@ final class UpdatesViewModelTests: XCTestCase {
     var fileService: FileService!
     var container: ModelContainer!
     var context: ModelContext!
+    var library: SkillLibraryViewModel!
 
     override func setUpWithError() throws {
         fileService = FileService()
@@ -18,6 +19,10 @@ final class UpdatesViewModelTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         context = ModelContext(container)
+        library = SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: fileService, baseDir: tempDir + "/skills"), fileService: fileService,
+            fileWatchService: FileWatchService(rootDir: tempDir + "/skills"), manifestRoot: tempDir
+        )
     }
 
     override func tearDownWithError() throws {

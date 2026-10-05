@@ -2,7 +2,7 @@ import SwiftData
 
 extension AppRuntime {
     func makeViewChangesModel() -> ViewChangesViewModel {
-        ViewChangesViewModel(operations: UpdateReviewOperations(
+        ViewChangesViewModel(library: library, operations: UpdateReviewOperations(
             rowLoader: updatesViewModelOperations.rowLoader,
             previewRowLoader: updatesViewModelOperations.previewRowLoader,
             applyOperation: updatesViewModelOperations.applyOperation,

@@ -117,7 +117,7 @@ extension UpdatesViewModelTests {
     func makeRealWindow(fixture: RealFixture, service: SkillInstallService? = nil)
         -> (ViewChangesViewModel, SkillLibraryViewModel) {
         let (operations, library) = makeRealReviewOperations(fixture: fixture, service: service)
-        return (ViewChangesViewModel(operations: operations), library)
+        return (ViewChangesViewModel(library: library, operations: operations), library)
     }
 
     func makeRealReviewOperations(

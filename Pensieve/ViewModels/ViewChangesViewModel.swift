@@ -24,6 +24,8 @@ final class ViewChangesViewModel {
     var asksToReplaceLocalEdits = false
     private(set) var applyMessage: String?
 
+    private let library: SkillLibraryViewModel
+    private var presentationContext: ModelContext?
     private let operations: UpdateReviewOperations
     private let applyCoordinator: SkillUpdateApplyCoordinator
     private var applyGate: SkillUpdateApplyGate { applyCoordinator.gate }
@@ -38,8 +40,9 @@ final class ViewChangesViewModel {
     @ObservationIgnored private var previewTask: Task<Void, Never>?
     @ObservationIgnored private var cancelWorker: (() -> Void)?
 
-    init(operations: UpdateReviewOperations, applyCoordinator: SkillUpdateApplyCoordinator? = nil,
+    init(library: SkillLibraryViewModel, operations: UpdateReviewOperations, applyCoordinator: SkillUpdateApplyCoordinator? = nil,
          skillLookup: @escaping (UUID, ModelContext) throws -> Skill? = UpdatesViewModel.findSkill) {
+        self.library = library
         self.operations = operations
         self.applyCoordinator = applyCoordinator ?? SkillUpdateApplyCoordinator()
         self.skillLookup = skillLookup
@@ -67,10 +70,17 @@ final class ViewChangesViewModel {
         selectedFilePath = path
     }
 
+    func moveFileSelection(_ delta: Int) {
+        guard let selectedFilePath, let index = files.firstIndex(where: { $0.path == selectedFilePath }),
+              files.indices.contains(index + delta) else { return }
+        selectFile(path: files[index + delta].path)
+    }
+
     func open(skillID: UUID, context: ModelContext, folderRevision: UInt64? = nil,
               folderRevisions: [String: UInt64] = [:]) {
         close()
         requestedSkillID = skillID
+        presentationContext = context
         do {
             guard let skill = try skillLookup(skillID, context) else {
                 state = .stale("This skill was deleted.")
@@ -142,6 +152,7 @@ final class ViewChangesViewModel {
         retirePreview()
         identity = nil
         requestedSkillID = nil
+        presentationContext = nil
         currentSkill = nil
         deferredValidationMessage = nil
         offersRecheck = false
@@ -263,8 +274,7 @@ extension ViewChangesViewModel {
                 )
             )
             if self.sessionID == session { self.acceptApply(status, row: row, onSuccess: onSuccess) }
-            self.applyCoordinator.finish(row: row, status: status, context: context,
-                                         folderRevisions: library.folderChangeRevisions)
+            self.applyCoordinator.finish(row: row, status: status, context: context)
         }
     }
 
@@ -287,7 +297,7 @@ extension ViewChangesViewModel {
     }
 
     func recheck(context: ModelContext, library: SkillLibraryViewModel) {
-        guard canRecheck, let requestedSkillID, let row else { return }
+        guard canRecheck, let requestedSkillID else { return }
         retirePreview()
         state = .loading
         isRechecking = true
@@ -345,15 +355,13 @@ extension ViewChangesViewModel {
 }
 
 extension ViewChangesViewModel: SkillUpdateApplyObserving {
-    func applyReservationsChanged() {}
-
-    func applyFinished(row: UpdatesRow, status: UpdatesRowStatus, context: ModelContext, folderRevisions: [String: UInt64]) {
-        guard !isApplying, case .loaded = state else { return }
+    func applyFinished(row: UpdatesRow, status: UpdatesRowStatus?, context: ModelContext) {
+        guard row.id == requestedSkillID, let context = presentationContext, !isApplying, case .loaded = state else { return }
         if let deferredValidationMessage {
             markStale(deferredValidationMessage)
         } else {
             // Fetch before touching any property of a retained model that an apply may have deleted.
-            validate(skills: [], folderRevisions: folderRevisions, context: context)
+            validate(skills: [], folderRevisions: library.folderChangeRevisions, context: context)
         }
     }
 }

@@ -2,11 +2,8 @@ import Foundation
 import SwiftData
 
 extension UpdatesViewModel: SkillUpdateApplyObserving {
-    func applyReservationsChanged() {
-        hasReservedRows = applyGate.hasReservations(in: rowIDs)
-    }
-
-    func applyFinished(row: UpdatesRow, status: UpdatesRowStatus, context: ModelContext, folderRevisions: [String: UInt64]) {
+    func applyFinished(row: UpdatesRow, status: UpdatesRowStatus?, context: ModelContext) {
+        guard let status else { return }
         acceptApplyOutcome(row: row, status: status)
     }
 
@@ -26,13 +23,20 @@ extension UpdatesViewModel: SkillUpdateApplyObserving {
     }
 
     func canSelect(_ row: UpdatesRow) -> Bool {
+        guard canonicalStatus(for: row) == nil else { return false }
         switch status(for: row) {
         case .updated, .failedAfterReplacement: return false
         default: return true
         }
     }
 
-    func isUpdatingElsewhere(_ row: UpdatesRow) -> Bool {
-        applyGate.isApplying(row.id) && statuses[row.id] != .updating
+    func canonicalStatus(for row: UpdatesRow) -> UpdatesRowStatus? {
+        guard let skill = presentationSkills[row.id] else { return nil }
+        guard skill.modelContext != nil, !skill.isDeleted else { return .updated }
+        guard let origin = skill.installedOrigin,
+              origin.installedCommit == row.upstreamCommit,
+              origin.installedTree == row.upstreamTree else { return nil }
+        return .updated
     }
+
 }
