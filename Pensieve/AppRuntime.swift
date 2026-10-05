@@ -59,6 +59,7 @@ final class AppRuntime {
     private var forceLaunchPreflight = false
     @ObservationIgnored private var launchIngestRetryTask: Task<Void, Never>?
     @ObservationIgnored private var openMainWindowAction: (() -> Void)?
+    @ObservationIgnored private(set) lazy var viewChanges = makeViewChangesModel()
     @ObservationIgnored private(set) lazy var upstreamHistory = paths.makeUpstreamHistoryViewModel()
     @ObservationIgnored
     private(set) lazy var bootstrapTask: Task<Void, Never> = {

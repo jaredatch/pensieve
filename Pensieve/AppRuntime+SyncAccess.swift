@@ -1,6 +1,17 @@
 import SwiftData
 
 extension AppRuntime {
+    func makeViewChangesModel() -> ViewChangesViewModel {
+        ViewChangesViewModel(operations: UpdatesViewModel(
+            rowLoader: updatesViewModelOperations.rowLoader,
+            applyOperation: updatesViewModelOperations.applyOperation,
+            diffOperation: updatesViewModelOperations.diffOperation,
+            recheckOperation: updatesViewModelOperations.recheckOperation,
+            notifier: syncStateNotifier, echoRegistrar: syncWriteEchoRegistrar,
+            bodyWriteRegistration: syncBodyWriteRegistration
+        ))
+    }
+
     func mainWindowAppeared() async {
         await refreshGitConfiguration(probingGit: false)
     }

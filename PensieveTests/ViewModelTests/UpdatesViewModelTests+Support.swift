@@ -64,10 +64,9 @@ extension UpdatesViewModelTests {
 
     func makeModel(
         rows: [UpdatesRow],
-        diff: @escaping UpdatesViewModel.DiffOperation = { _, _, _, _ in PinnedSkillDiff(
-            currentSkillMarkdown: "current",
-            upstreamSkillMarkdown: "upstream"
-        ) },
+        diff: @escaping UpdatesViewModel.DiffOperation = { _, _, _, _ in PinnedSkillDiff(comparison: FileTreeComparison(changes: [
+            FileTreeChange(path: "SKILL.md", kind: .modified, content: .text(old: "current", new: "upstream"))
+        ], unreadFileCount: 0, bytesRead: 0)) },
         recheck: @escaping UpdatesViewModel.RecheckOperation = { id, _ in
             SkillUpdateRecheckCompletion(
                 row: nil,

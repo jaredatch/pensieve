@@ -2,11 +2,12 @@ import SwiftUI
 
 /// "Update available · Sep 10" above the tabs of a linked skill whose checked upstream is newer (the
 /// master `Update banner`, 612 × 40): one line, the group fill, the arrow in green, then two buttons —
-/// both open Skill Updates, where the update is reviewed and applied (PLAN-19's one flow; nothing installs
-/// from here). The date is the pinned upstream commit's.
+/// View Changes opens that skill's preview window and Update opens its selected row in Skill Updates.
+/// The date is the pinned upstream commit's.
 struct SkillUpdateAvailableBanner: View {
     let upstreamDate: Date?
-    let onOpenUpdates: () -> Void
+    let onViewChanges: () -> Void
+    let onUpdate: () -> Void
 
     var body: some View {
         HStack(spacing: 6) {
@@ -18,11 +19,13 @@ struct SkillUpdateAvailableBanner: View {
                 .font(DesignTokens.bannerTitle)
                 .foregroundStyle(.primary)
             Spacer()
-            Button("View Changes", action: onOpenUpdates)
+            Button("View Changes", action: onViewChanges)
+                .accessibilityIdentifier("skill-view-changes")
                 .buttonStyle(.bordered)
                 .tint(.accentColor)
                 .controlSize(.large)
-            Button("Update", action: onOpenUpdates)
+            Button("Update", action: onUpdate)
+                .accessibilityIdentifier("skill-update")
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
         }

@@ -77,4 +77,32 @@ final class WindowPolicyTests: XCTestCase {
 
         XCTAssertEqual(opened, 1)
     }
+
+    func testViewChangesWindowIsNeverPickedOrClosedAsAnExtraMainWindow() {
+        let changes = makeWindow(identifier: WindowPolicy.changesWindowID)
+        let first = makeWindow(identifier: "main-AppWindow-1")
+        let extra = makeWindow(identifier: "main-AppWindow-2")
+        let settings = makeWindow(identifier: "com_apple_SwiftUI_Settings_window")
+        let windows = [changes, first, settings, extra]
+        defer { windows.forEach { $0.close() } }
+        WindowPolicy.configureChangesWindow(changes)
+        windows.forEach { $0.orderFront(nil) }
+
+        XCTAssertEqual(changes.identifier?.rawValue, WindowPolicy.changesWindowID)
+        XCTAssertEqual(changes.accessibilityIdentifier(), WindowPolicy.changesWindowID)
+        XCTAssertFalse(changes.isRestorable)
+        XCTAssertEqual(changes.tabbingMode, .disallowed)
+        XCTAssertTrue(WindowPolicy.mainWindow(among: windows) === first)
+        XCTAssertNil(WindowPolicy.mainWindow(among: [changes, settings]))
+        XCTAssertEqual(WindowPolicy.extraMainWindows(among: windows), [extra])
+        WindowPolicy.extraMainWindows(among: windows).forEach { $0.close() }
+        XCTAssertTrue(changes.isVisible)
+        XCTAssertTrue(first.isVisible)
+        XCTAssertTrue(settings.isVisible)
+        XCTAssertFalse(extra.isVisible)
+        var opened = 0
+        WindowPolicy.showMainWindow(among: [changes, settings]) { opened += 1 }
+        XCTAssertEqual(opened, 1)
+        XCTAssertTrue(changes.isVisible)
+    }
 }

@@ -78,20 +78,4 @@ struct PinnedSkillDiff: Equatable {
         bytesRead = comparison.bytesRead
     }
 
-    /// Compatibility for the sheet's current one-file presentation until it consumes the file list.
-    init(currentSkillMarkdown: String, upstreamSkillMarkdown: String) {
-        self.init(comparison: FileTreeComparison(changes: [FileTreeChange(
-            path: "SKILL.md", kind: .modified, content: .text(old: currentSkillMarkdown, new: upstreamSkillMarkdown)
-        )], unreadFileCount: 0, bytesRead: 0))
-    }
-
-    var currentSkillMarkdown: String {
-        guard let file = files.first(where: { $0.path == "SKILL.md" }), case let .text(old, _) = file.content else { return "" }
-        return old
-    }
-
-    var upstreamSkillMarkdown: String {
-        guard let file = files.first(where: { $0.path == "SKILL.md" }), case let .text(_, new) = file.content else { return "" }
-        return new
-    }
 }

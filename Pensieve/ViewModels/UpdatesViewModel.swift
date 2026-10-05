@@ -18,10 +18,10 @@ final class UpdatesViewModel {
     var statuses: [UUID: UpdatesRowStatus] = [:]
     var isLoading = false
     var isApplying = false
-    var diffLoadingSkillID: UUID?
     var recheckingSkillID: UUID?
-    var presentedDiff: UpdatesDiffPresentation?
     var loadError: String?
+    var isPresented = false
+    var initialSelection: Set<UUID>?
 
     let rowLoader: RowLoader
     let applyOperation: ApplyOperation
@@ -138,18 +138,8 @@ final class UpdatesViewModel {
         )
     }
 
-    func viewChanges(for row: UpdatesRow, context: ModelContext) {
-        guard !isApplying, diffLoadingSkillID == nil, recheckingSkillID == nil else { return }
-        let id = beginOperation()
-        diffLoadingSkillID = row.id
-        let container = context.container
-        operationTask = Task {
-            await performDiff(row: row, container: container, operationID: id)
-        }
-    }
-
     func recheck(_ row: UpdatesRow, context: ModelContext) {
-        guard !isApplying, diffLoadingSkillID == nil, recheckingSkillID == nil else { return }
+        guard !isApplying, recheckingSkillID == nil else { return }
         let id = beginOperation()
         statuses[row.id] = .updating
         recheckingSkillID = row.id
@@ -165,7 +155,7 @@ final class UpdatesViewModel {
     }
 
     func recheckAndReport(_ row: UpdatesRow, context: ModelContext) async {
-        guard !isApplying, diffLoadingSkillID == nil, recheckingSkillID == nil else { return }
+        guard !isApplying, recheckingSkillID == nil else { return }
         let id = beginOperation()
         statuses[row.id] = .updating
         recheckingSkillID = row.id
@@ -177,8 +167,14 @@ final class UpdatesViewModel {
         )
     }
 
-    func dismissDiff() {
-        presentedDiff = nil
+    func present(selecting skillID: UUID? = nil, library: SkillLibraryViewModel) {
+        guard !library.libraryUnavailable else { return }
+        library.confirmLeavingAnyDraft { [weak self] proceed in
+            guard let self, proceed else { return }
+            self.reset()
+            self.initialSelection = skillID.map { [$0] }
+            self.isPresented = true
+        }
     }
 
     func reset() {
@@ -187,7 +183,8 @@ final class UpdatesViewModel {
         selectedSkillIDs = []
         confirmedDriftSkillIDs = []
         statuses = [:]
-        presentedDiff = nil
+        initialSelection = nil
+        isPresented = false
         loadError = nil
     }
 
@@ -199,7 +196,6 @@ final class UpdatesViewModel {
         backgroundCancel = nil
         isLoading = false
         isApplying = false
-        diffLoadingSkillID = nil
         recheckingSkillID = nil
     }
 

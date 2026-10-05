@@ -41,16 +41,7 @@ enum UpdatesRowStatus: Equatable {
     case updating
     case updated
     case failed(message: String, offersRecheck: Bool)
-}
-
-struct UpdatesDiffPresentation: Identifiable, Equatable {
-    let id: UUID
-    let skillName: String
-    let repositoryDisplay: String
-    let repositoryPath: String
-    let currentSkillMarkdown: String
-    let upstreamSkillMarkdown: String
-    let compareURL: URL?
+    case failedAfterReplacement(message: String)
 }
 
 struct SkillUpdateCompletion: Equatable {

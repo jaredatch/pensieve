@@ -5,6 +5,7 @@ struct UpdatesView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Bindable var model: UpdatesViewModel
+    let onViewChanges: (UpdatesRow) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,9 +18,6 @@ struct UpdatesView: View {
         }
         .frame(width: 760, height: 540)
         .task { model.load(context: context) }
-        .sheet(item: $model.presentedDiff) { diff in
-            UpdatesDiffView(diff: diff, onClose: model.dismissDiff)
-        }
     }
 
     private var header: some View {
@@ -60,7 +58,7 @@ struct UpdatesView: View {
             }
         } else {
             List(model.rows) { row in
-                UpdatesRowView(model: model, row: row, context: context)
+                UpdatesRowView(model: model, row: row, context: context, onViewChanges: onViewChanges)
             }
             .listStyle(.inset)
         }
@@ -96,6 +94,7 @@ private struct UpdatesRowView: View {
     @Bindable var model: UpdatesViewModel
     let row: UpdatesRow
     let context: ModelContext
+    let onViewChanges: (UpdatesRow) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -127,10 +126,10 @@ private struct UpdatesRowView: View {
                 .disabled(model.isApplying)
 
                 Spacer()
-                Button("View Changes") { model.viewChanges(for: row, context: context) }
+                Button("View Changes") { onViewChanges(row) }
+                    .accessibilityIdentifier("updates-changes-" + row.id.uuidString)
                     .disabled(
-                        model.isApplying || model.diffLoadingSkillID != nil
-                            || model.recheckingSkillID != nil
+                        model.isApplying || model.recheckingSkillID != nil
                     )
             }
 
@@ -179,6 +178,9 @@ private struct UpdatesRowView: View {
             Label("Updated", systemImage: "checkmark.circle.fill")
                 .font(.caption)
                 .foregroundStyle(.green)
+        case let .failedAfterReplacement(message):
+            Label("Files were replaced, but the update couldn't finish: " + message, systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.red)
         case let .failed(message, offersRecheck):
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 Label(message, systemImage: "xmark.circle")
@@ -191,49 +193,6 @@ private struct UpdatesRowView: View {
                 }
             }
         }
-    }
-}
-
-private struct UpdatesDiffView: View {
-    let diff: UpdatesDiffPresentation
-    let onClose: () -> Void
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    Text("Changes to \(diff.skillName)")
-                        .font(.title2)
-                    UpdateSourceView(
-                        repositoryDisplay: diff.repositoryDisplay,
-                        repositoryPath: diff.repositoryPath
-                    )
-                }
-                Spacer()
-                if let compareURL = diff.compareURL {
-                    Link("View full diff on GitHub", destination: compareURL)
-                }
-            }
-            .padding(Spacing.lg)
-            Divider()
-            ScrollView([.horizontal, .vertical]) {
-                LineDiffView(
-                    this: diff.currentSkillMarkdown,
-                    other: diff.upstreamSkillMarkdown,
-                    thisLabel: "Current",
-                    otherLabel: "Pinned Update"
-                )
-                .padding(Spacing.lg)
-            }
-            Divider()
-            HStack {
-                Spacer()
-                Button("Close", action: onClose)
-                    .keyboardShortcut(.cancelAction)
-            }
-            .padding(Spacing.md)
-        }
-        .frame(width: 860, height: 540)
     }
 }
 

@@ -64,9 +64,10 @@ extension UpdatesViewModelTests {
         let row = try UpdatesViewModel.makeRow(skill: fixture.skill, driftedLocally: false)
         let model = makeModel(rows: [row], diff: operations.diffOperation)
         await model.loadAndReport(context: context)
-        model.viewChanges(for: row, context: context)
-        await TestWait.until(failureMessage: "preview did not finish") { model.diffLoadingSkillID == nil }
-        XCTAssertNotNil(model.presentedDiff)
+        let window = ViewChangesViewModel(operations: model)
+        window.open(skillID: row.id, context: context)
+        await TestWait.until(failureMessage: "preview did not finish") { window.state != .loading }
+        XCTAssertNotNil(window.selectedFile)
         XCTAssertEqual(spy.comparisonThreads, [false])
     }
 

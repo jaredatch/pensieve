@@ -13,7 +13,8 @@ extension UpdatesViewModel {
             let loaded = try await task.value
             guard operationID == id, !Task.isCancelled else { return }
             rows = loaded
-            selectedSkillIDs = Set(loaded.map(\.id))
+            let available = Set(loaded.map(\.id))
+            selectedSkillIDs = initialSelection.map { $0.intersection(available) } ?? available
             confirmedDriftSkillIDs.formIntersection(Set(loaded.map(\.id)))
             statuses = Dictionary(uniqueKeysWithValues: loaded.map { ($0.id, .idle) })
             loadError = nil
@@ -93,47 +94,16 @@ extension UpdatesViewModel {
             }
             statuses[row.id] = .confirmationRequired
         } else {
-            statuses[row.id] = .failed(message: Self.readable(error),
-                                       offersRecheck: Self.offersRecheck(error))
+            if error is SyncedStateMutationError {
+                statuses[row.id] = .failedAfterReplacement(message: Self.readable(error))
+            } else {
+                statuses[row.id] = .failed(message: Self.readable(error), offersRecheck: Self.offersRecheck(error))
+            }
         }
     }
 
     private func notifyAfterApplyIfNeeded(_ didMutate: Bool) {
         if didMutate { notifier() }
-    }
-
-    func performDiff(row: UpdatesRow, container: ModelContainer,
-                     operationID id: UUID) async {
-        guard operationID == id, !Task.isCancelled else { return }
-        let loadDiff = diffOperation
-        let task = Task.detached(priority: .userInitiated) {
-            try Self.performUnlessCancelled {
-                try loadDiff(row.id, row.upstreamCommit, row.upstreamTree, container)
-            }
-        }
-        backgroundCancel = { task.cancel() }
-        do {
-            let diff = try await task.value
-            guard operationID == id, !Task.isCancelled else { return }
-            presentedDiff = UpdatesDiffPresentation(
-                id: row.id,
-                skillName: row.skillName,
-                repositoryDisplay: row.repositoryDisplay,
-                repositoryPath: row.repositoryPath,
-                currentSkillMarkdown: diff.currentSkillMarkdown,
-                upstreamSkillMarkdown: diff.upstreamSkillMarkdown,
-                compareURL: row.compareURL
-            )
-            statuses[row.id] = .idle
-        } catch {
-            guard operationID == id, !Task.isCancelled else { return }
-            statuses[row.id] = .failed(
-                message: Self.readable(error),
-                offersRecheck: Self.offersRecheck(error)
-            )
-        }
-        diffLoadingSkillID = nil
-        finishOperation(id)
     }
 
     func performRecheck(row: UpdatesRow, container: ModelContainer,

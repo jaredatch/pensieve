@@ -21,6 +21,7 @@ struct DetailColumnView: View {
     let onConnectToRepository: (Skill) -> Void
     let onBulkDeploy: () -> Void
     let onOpenUpdates: () -> Void
+    let updateRouting: UpdateReviewRouting
     let onImport: () -> Void
     let onImportFolder: () -> Void
     let onCreate: () -> Void
@@ -148,6 +149,7 @@ struct DetailColumnView: View {
                 onResolve: onResolve,
                 onConnectToRepository: { onConnectToRepository(skill) },
                 onOpenUpdates: onOpenUpdates,
+                updateBanner: updateRouting.banner(for: skill),
                 onAddProject: { onAdd(.projects) },
                 onBulkDeploy: onBulkDeploy,
                 library: library,

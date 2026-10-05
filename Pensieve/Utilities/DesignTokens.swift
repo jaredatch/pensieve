@@ -129,6 +129,61 @@ enum DesignTokens {
     static let bannerTitleWeight: Font.Weight = .semibold
     static let bannerTitle = Font.system(size: bannerTitleSize, weight: bannerTitleWeight)
 
+    // MARK: - View Changes window
+
+    /// Measured from the View Changes frame on 2026-10-05. Title and path use the recorded defaults.
+    static let changesTitle = Font.system(size: 16, weight: .bold)
+    static let changesSubtitle = Font.system(size: 10)
+    static let changesFileName = Font.system(size: 12)
+    static let changesFileFolder = Font.system(size: 10)
+    static let changesCount = Font.system(size: 11, design: .monospaced)
+    static let changesFilePath = Font.system(size: 11, design: .monospaced)
+    static let changesSummary = Font.system(size: 10)
+    static let diffLineNumber = Font.system(size: 11, design: .monospaced)
+    static let diffText = Font.system(size: 12, design: .monospaced)
+    static let diffMarker = Font.system(size: 12, design: .monospaced)
+    static let changesButton = Font.system(size: 13)
+    static let changesWindowWidth: CGFloat = 1040
+    static let changesWindowHeight: CGFloat = 660
+    static let changesSidebarWidth: CGFloat = 240
+    static let changesSidebarInset: CGFloat = 8
+    static let changesSidebarCornerRadius: CGFloat = 17
+    static let changesSidebarHeaderTop: CGFloat = 4
+    static let changesSidebarHeaderBottom: CGFloat = 6
+    static let changesFileRowHeight: CGFloat = 28
+    static let changesNestedFileRowHeight: CGFloat = 42
+    static let changesFileRowCornerRadius: CGFloat = 10
+    static let changesFileRowVerticalPadding: CGFloat = 6
+    static let changesFileRowHorizontalPadding: CGFloat = 10
+    static let changesFileRowGap: CGFloat = 8
+    static let changesFileRowSpacing: CGFloat = 2
+    static let changesFileFolderGap: CGFloat = 1
+    static let changesCountGap: CGFloat = 4
+    static let changesFileGlyphWidth: CGFloat = 13
+    static let changesFileGlyphHeight: CGFloat = 16
+    static let changesToolbarHeight: CGFloat = 59
+    static let changesToolbarInset: CGFloat = 16
+    static let changesToolbarGap: CGFloat = 8
+    static let changesTitleGap: CGFloat = 2
+    static let changesGitHubButtonWidth: CGFloat = 128
+    static let changesUpdateButtonWidth: CGFloat = 78
+    static let changesButtonHeight: CGFloat = 28
+    static let changesDividerHeight: CGFloat = 1
+    static let changesFileHeaderHeight: CGFloat = 29
+    static let diffRowHeight: CGFloat = 20
+    static let diffTextLineHeight: CGFloat = 18
+    static let diffNumberColumnWidth: CGFloat = 36
+    static let diffMarkerColumnWidth: CGFloat = 28
+    static let diffTrailingInset: CGFloat = 16
+    static let diffBodyVerticalPadding: CGFloat = 6
+
+    /// Light frame opacities; dark uses the same opacities on system semantic colors, pending the look gate.
+    static let diffHunkFill = dynamic(light: 0.04, dark: 0.04)
+    static let diffRemovedFill = Color(nsColor: .systemRed).opacity(0.10)
+    static let diffAddedFill = Color(nsColor: .systemGreen).opacity(0.12)
+    static let changesFileRowSelectedFill = dynamic(light: 0.05, dark: 0.05)
+    static let changesDividerFill = dynamic(light: 0.05, dark: 0.05)
+
     // MARK: - Tab content
 
     /// Measured from `Skills / Details — Overview` (installed, update available),

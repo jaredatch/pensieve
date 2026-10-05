@@ -12,6 +12,7 @@ struct DetailView: View {
     let onResolve: () -> Void
     let onConnectToRepository: () -> Void
     let onOpenUpdates: () -> Void
+    let updateBanner: SkillUpdateAvailableBanner
     let onAddProject: () -> Void
     let onBulkDeploy: () -> Void
     @Bindable var library: SkillLibraryViewModel
@@ -140,7 +141,7 @@ struct DetailView: View {
                           isChecking: provenance.isChecking(skillID: skill.id),
                           library: library, onResolve: onResolve, onCommitTags: commitTags)
         if showsUpdateBanner {
-            SkillUpdateAvailableBanner(upstreamDate: skill.upstreamCommitDate, onOpenUpdates: onOpenUpdates)
+            updateBanner
         }
         DetailTabBar(selection: tab, onSelect: { select(tab: $0) })
             .padding(.horizontal, Spacing.lg)

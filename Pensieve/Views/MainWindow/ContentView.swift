@@ -15,7 +15,6 @@ struct ContentView: View {
     @State private var showFolderImport = false
     @State private var folderImportNotice: String?
     @State private var showGitHubInstall = false
-    @State private var showUpdates = false
     @State private var showBulkDeploy = false
     @State private var addSheet: AddSheet?
     @State private var createdEntity: EntitySelection?
@@ -130,6 +129,7 @@ struct ContentView: View {
                 onConnectToRepository: presentRepositoryConnection,
                 onBulkDeploy: { showBulkDeploy = true },
                 onOpenUpdates: presentUpdates,
+                updateRouting: updateRouting,
                 onImport: { showImportWizard = true },
                 onImportFolder: importFromFolder,
                 onCreate: { library.showCreateSheet = true },
@@ -165,8 +165,8 @@ struct ContentView: View {
             onDismiss: finishGitHubInstall,
             content: { AddFromGitHubSheet(model: installVM) }
         )
-        .sheet(isPresented: $showUpdates, onDismiss: updatesVM.reset) {
-            UpdatesView(model: updatesVM)
+        .sheet(isPresented: $updatesVM.isPresented, onDismiss: updatesVM.reset) {
+            updateRouting.sheet
         }
         .sheet(isPresented: $showBulkDeploy) {
             BulkDeploySheet(
@@ -321,12 +321,11 @@ private extension ContentView {
         createdEntity = nil
     }
     func presentUpdates() {
-        guard !library.libraryUnavailable else { return }
-        library.confirmLeavingAnyDraft { proceed in
-            guard proceed else { return }
-            updatesVM.reset()
-            showUpdates = true
-        }
+        updateRouting.presentUpdates()
+    }
+    private var updateRouting: UpdateReviewRouting {
+        UpdateReviewRouting(preview: runtime.viewChanges, updates: updatesVM, library: library,
+                            context: modelContext, openWindow: { openWindow(id: $0) })
     }
     func finishGitHubInstall() {
         for adoption in installVM.completedAdoptions {

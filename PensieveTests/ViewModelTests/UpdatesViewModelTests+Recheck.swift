@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 extension UpdatesViewModelTests {
-    func testActiveRecheckBlocksDiffAndApplyUntilCompletion() async throws {
+    func testActiveRecheckBlocksApplyWhileIndependentWindowCanPreview() async throws {
         let first = insertUpdateSkill(slug: "first-recheck")
         let second = insertUpdateSkill(slug: "second-recheck")
         try context.save()
@@ -19,10 +19,9 @@ extension UpdatesViewModelTests {
             rows: rows,
             diff: { id, _, _, _ in
                 diffCalls.append(id)
-                return PinnedSkillDiff(
-                    currentSkillMarkdown: "current",
-                    upstreamSkillMarkdown: "upstream"
-                )
+                return PinnedSkillDiff(comparison: FileTreeComparison(changes: [
+                    FileTreeChange(path: "SKILL.md", kind: .modified, content: .text(old: "current", new: "upstream"))
+                ], unreadFileCount: 0, bytesRead: 0))
             },
             recheck: { id, _ in
                 started.signal()
@@ -42,12 +41,14 @@ extension UpdatesViewModelTests {
         XCTAssertEqual(model.recheckingSkillID, rows[0].id)
         XCTAssertEqual(model.status(for: rows[0]), .updating)
 
-        model.viewChanges(for: rows[1], context: context)
+        let window = ViewChangesViewModel(operations: model)
+        window.open(skillID: rows[1].id, context: context)
+        await TestWait.until(failureMessage: "independent window preview did not finish") { window.state != .loading }
         await model.applySelectedAndReport(context: context)
 
-        XCTAssertEqual(diffCalls.values, [])
+        XCTAssertEqual(diffCalls.values, [rows[1].id])
+        XCTAssertNotNil(window.selectedFile)
         XCTAssertEqual(applyCalls.values, [])
-        XCTAssertNil(model.diffLoadingSkillID)
         XCTAssertFalse(model.canApply)
         XCTAssertEqual(model.status(for: rows[0]), .updating)
 

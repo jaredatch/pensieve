@@ -158,13 +158,15 @@ final class UpdatesViewModelTests: XCTestCase {
         await model.loadAndReport(context: context)
         let row = try XCTUnwrap(model.rows.first)
 
-        model.viewChanges(for: row, context: context)
-        await TestWait.until(failureMessage: "update diff did not finish") { model.diffLoadingSkillID == nil }
+        let window = ViewChangesViewModel(operations: model)
+        window.open(skillID: row.id, context: context)
+        await TestWait.until(failureMessage: "update diff did not finish") { window.state != .loading }
 
-        let diff = try XCTUnwrap(model.presentedDiff)
-        XCTAssertTrue(diff.currentSkillMarkdown.contains("old body"))
-        XCTAssertTrue(diff.upstreamSkillMarkdown.contains("fresh body"))
-        model.dismissDiff()
+        let file = try XCTUnwrap(window.selectedFile)
+        guard case let .text(old, new) = file.content else { return XCTFail("Expected a text file") }
+        XCTAssertTrue(old.contains("old body"))
+        XCTAssertTrue(new.contains("fresh body"))
+        window.close()
 
         await model.applySelectedAndReport(context: context)
 
