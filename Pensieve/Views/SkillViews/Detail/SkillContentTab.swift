@@ -96,7 +96,8 @@ struct SkillContentTab: View {
                          skillDirectory: SkillStore.skillDirectoryPath(slug: skill.directoryName, base: skillsBase),
                          documentRelativePath: file,
                          imageRevision: folderRevision,
-                         imageLoader: PreviewImageLoader(fileService: library.fileService))
+                         imageLoader: PreviewImageLoader(fileService: library.fileService),
+                         files: presentation.choices.map(\.relativePath), onSelectFile: onSelectFile)
     }
 
     @ViewBuilder private var content: some View {

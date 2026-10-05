@@ -28,6 +28,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Links in rendered skills now open web pages, jump to headings or select another skill file without showing a system error.
 - History rows keep the same spacing when you make the window taller.
 - History's line counts for your local edits now match what `git diff` reports.
 - Deploying to a project whose folder is gone now reports the missing folder instead of recreating it. Your deployment choices stay saved and apply after the folder returns, on the next launch or sync that brings changes. Add Project also refuses missing folders.
