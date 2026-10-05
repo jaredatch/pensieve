@@ -50,6 +50,11 @@ struct DeployArtifactOwnership: DeployArtifactOwnershipChecking {
         return !linksFile || components.last == "SKILL.md"
     }
 
+    /// Metadata only: an absent or non-regular entry cannot need Cursor deployment history.
+    func cursorRuleMayExist(at path: String) throws -> Bool {
+        try checked(at: path) { try leafType(at: path) == .regular }
+    }
+
     func cursor(at path: String, legacyContent: (() throws -> String)?) throws -> DeployArtifactOccupant {
         try checked(at: path) {
             guard let type = try leafType(at: path) else { return .absent }
@@ -75,7 +80,7 @@ struct DeployArtifactOwnership: DeployArtifactOwnershipChecking {
         }
     }
 
-    private func checked(at path: String, _ operation: () throws -> DeployArtifactOccupant) throws -> DeployArtifactOccupant {
+    private func checked<Value>(at path: String, _ operation: () throws -> Value) throws -> Value {
         do { return try operation() } catch {
             throw ArtifactOwnershipError.couldNotCheck(path: path, reason: error.localizedDescription)
         }

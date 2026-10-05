@@ -26,14 +26,54 @@ extension CursorOwnershipTests {
         let deleted = SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project], context: harness.context)
         XCTAssertGreaterThan(reads, 0, "The state read fault must fire")
-        if deleted {
-            XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path), "Deletion must not orphan its rule")
-        } else {
-            XCTAssertEqual(try mapped.readFile(at: path), bytes)
-            XCTAssertTrue(files.fileExists(at: root + "/store/skills/" + skill.directoryName + "/SKILL.md"))
-            XCTAssertNotNil(library.deletionNotice)
+        XCTAssertFalse(deleted)
+        XCTAssertEqual(try mapped.readFile(at: path), bytes)
+        XCTAssertTrue(files.fileExists(at: root + "/store/skills/" + skill.directoryName + "/SKILL.md"))
+        XCTAssertTrue(library.deletionNotice?.message.contains("deploy state unreadable") == true)
+        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<Skill>()), 1)
+    }
+
+    @MainActor
+    func testProjectRuleOwnershipIsReadOnlyAfterLocalDeployEvidence() throws {
+        for evidence in ["none", "state", "history"] {
+            try store.writeBody(directoryName: skill.directoryName, body: "# Body")
+            let harness = try contextAndVM()
+            let project = reviewProject(harness.context)
+            let path = artifactPath(.cursor, project: project.path)
+            let bytes = "---\n# pensieve: managed\n---\nKeep this rule"
+            try mapped.writeFile(at: path, content: bytes)
+            try harness.state.replaceAll([])
+            if evidence == "state" {
+                try harness.state.upsert(DeployStateRecord(slug: skill.directoryName, platform: "cursor",
+                    scope: "project", projectIdentityKey: project.identityKey,
+                    artifactPath: path, recordedAt: "2026-10-05T00:00:00Z"))
+            } else if evidence == "history" {
+                harness.context.insert(DeployRecord(skillID: skill.id, platform: .cursor,
+                    targetPath: path, contentHash: "deployed here", projectID: project.id))
+                try harness.context.save()
+            }
+            var reads = 0
+            mapped.beforeRuleRead = { candidate in
+                if candidate == path {
+                    reads += 1
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))
+                }
+            }
+            let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
+                manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+            let deleted = SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
+                projects: [project], context: harness.context)
+            mapped.beforeRuleRead = nil
+            XCTAssertEqual(deleted, evidence == "none", evidence)
+            XCTAssertEqual(reads, evidence == "none" ? 0 : 1, evidence)
+            XCTAssertEqual(try mapped.readFile(at: path), bytes, evidence)
+            XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<Skill>()), evidence == "none" ? 0 : 1, evidence)
+            XCTAssertEqual(files.fileExists(at: root + "/store/skills/" + skill.directoryName + "/SKILL.md"),
+                           evidence != "none", evidence)
+            if evidence != "none" {
+                XCTAssertTrue(library.deletionNotice?.message.contains("Could not check ownership") == true, evidence)
+            }
         }
-        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<Skill>()), deleted ? 0 : 1)
     }
 
     @MainActor
@@ -55,6 +95,9 @@ extension CursorOwnershipTests {
         XCTAssertTrue(files.fileExists(at: root + "/store/skills/" + skill.directoryName + "/SKILL.md"))
         XCTAssertEqual(try mapped.readFile(at: path), bytes)
         XCTAssertTrue(library.deletionNotice?.message.contains("local deploy history") == true)
+        XCTAssertTrue(library.deletionNotice?.message.contains("stopped before changing any deploys") == true)
+        XCTAssertTrue(library.deletionNotice?.message.contains("skill was kept") == true)
+        XCTAssertFalse(library.deletionNotice?.message.contains("already removed") == true)
     }
 
     @MainActor

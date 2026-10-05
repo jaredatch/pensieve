@@ -31,7 +31,9 @@ enum SkillDeletionFlow {
                     at: 0
                 )
             }
-            messages.append("Agent links and rules already removed stay removed; the skill was kept so you can retry.")
+            messages.append(cleanup.readFailures.isEmpty
+                ? "Agent links and rules already removed stay removed; the skill was kept so you can retry."
+                : "The skill was kept so you can retry.")
             library.deletionNotice = .failed(messages.joined(separator: " "))
             return false
         }

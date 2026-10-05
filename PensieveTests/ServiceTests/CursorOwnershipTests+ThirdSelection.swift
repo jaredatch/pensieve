@@ -46,11 +46,8 @@ extension CursorOwnershipTests {
         XCTAssertEqual(probes, 1, route)
         XCTAssertEqual(harness.vm.refreshCounter, refresh + 1, route)
         XCTAssertTrue(try harness.state.read().records.isEmpty, route)
-        if route == "ledgered" {
-            XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0, route)
-        } else if route == "category" {
-            XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0, route)
-        }
+        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0, route)
+        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0, route)
         for item in skills {
             XCTAssertFalse(try harness.vm.artifactIsOwned(skill: item, platform: .cursor, target: .project(project)))
             XCTAssertFalse(try harness.vm.artifactIsOwned(skill: item, platform: .claudeCode, target: .project(project)))
@@ -63,15 +60,19 @@ extension CursorOwnershipTests {
         let paths = Set(skills.flatMap { item in
             platforms.map { harness.vm.artifactPath(skill: item, platform: $0, target: .project(project)) }
         })
-        // Direct keyless deploys have history but no state write; seed the state-retirement contract explicitly.
-        try harness.state.replaceAll(skills.flatMap { item in
-            platforms.map { platform in
-                DeployStateRecord(slug: item.directoryName, platform: platform.rawValue,
-                    scope: "project", projectIdentityKey: "github.com/owner/project",
-                    artifactPath: harness.vm.artifactPath(skill: item, platform: platform, target: .project(project)),
-                    recordedAt: "2026-10-05T00:00:00Z")
+        if route == "direct" {
+            XCTAssertTrue(try harness.state.recordedArtifactPaths().isEmpty, route)
+            // Keyless deploys cannot write state records. Model records retained from a former identity
+            // only on this route; keyed routes must retire the records their real deploy wrote.
+            for item in skills {
+                for platform in platforms {
+                    try harness.state.upsert(DeployStateRecord(slug: item.directoryName, platform: platform.rawValue,
+                        scope: "project", projectIdentityKey: "github.com/owner/project",
+                        artifactPath: harness.vm.artifactPath(skill: item, platform: platform, target: .project(project)),
+                        recordedAt: "2026-10-05T00:00:00Z"))
+                }
             }
-        })
+        }
         XCTAssertEqual(try harness.state.recordedArtifactPaths(), paths, route)
     }
 

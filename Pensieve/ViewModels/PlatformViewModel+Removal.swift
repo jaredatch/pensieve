@@ -50,38 +50,61 @@ extension PlatformViewModel {
             recorded = nil
             stateProblem = "deploy state unreadable"
         }
-        var candidates: [SkillCleanupCandidate] = []
-        for target in [DeployTarget.userWide] + projects.map({ .project($0) }) {
-            for platform in deployablePlatforms(forProject: target.project != nil) {
-                if let candidate = skillCleanupCandidate(skill: skill, platform: platform, target: target,
-                    recorded: recorded, stateProblem: stateProblem, result: &result) {
-                    candidates.append(candidate)
-                }
-            }
-        }
-        // A project rule's mark can arrive through git from another Mac.
-        let historyPaths = Set(candidates.filter {
-            $0.platform == .cursor && $0.target.project != nil && recorded?.contains($0.path) == false
-        }.map(\.path))
+        let evidence = skillCleanupEvidence(skill: skill, projects: projects, recorded: recorded)
         let locallyDeployed: Set<String>
         do {
-            locallyDeployed = historyPaths.isEmpty ? [] : try localDeployHistory(historyPaths)
+            locallyDeployed = evidence.historyPaths.isEmpty ? [] : try localDeployHistory(evidence.historyPaths)
         } catch {
             result.recordReadFailure("local deploy history for “\(skill.name)”", error: error)
             return result
         }
-        for candidate in candidates where !historyPaths.contains(candidate.path) || locallyDeployed.contains(candidate.path) {
+        var candidates: [SkillCleanupCandidate] = []
+        for location in evidence.locations
+            where !evidence.historyPaths.contains(location.path) || locallyDeployed.contains(location.path) {
+            if let error = evidence.probeFailures[location.path] {
+                result.outcomes.append(BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: location.platform,
+                    target: BatchPairTarget(location.target), error: error.localizedDescription))
+            } else if let candidate = skillCleanupCandidate(skill: skill, location: location,
+                recorded: recorded, stateProblem: stateProblem, result: &result) {
+                candidates.append(candidate)
+            }
+        }
+        for candidate in candidates {
             result.outcomes.append(removeAllDeployPair(skill: skill, candidate: candidate))
         }
         if !result.outcomes.isEmpty { noteDeployStateChanged() }
         return result
     }
 
+    private func skillCleanupEvidence(
+        skill: Skill, projects: [Project], recorded: Set<String>?
+    ) -> SkillCleanupEvidence {
+        var evidence = SkillCleanupEvidence()
+        for target in [DeployTarget.userWide] + projects.map({ .project($0) }) {
+            for platform in deployablePlatforms(forProject: target.project != nil) {
+                let path = artifactPath(skill: skill, platform: platform, target: target)
+                // A rule's mark can arrive through git from another Mac. Check this Mac's evidence
+                // before opening it. Metadata avoids a history fetch for known absent/foreign shapes.
+                if platform == .cursor, let project = target.project, let recorded, !recorded.contains(path) {
+                    do {
+                        guard try projectCursorRuleMayExist(skill: skill, project: project) else { continue }
+                    } catch {
+                        // A failed metadata probe matters only if local history admits this path.
+                        evidence.probeFailures[path] = error
+                    }
+                    evidence.historyPaths.insert(path)
+                }
+                evidence.locations.append(SkillCleanupLocation(platform: platform, target: target, path: path))
+            }
+        }
+        return evidence
+    }
+
     private func skillCleanupCandidate(
-        skill: Skill, platform: PlatformTarget, target: DeployTarget,
+        skill: Skill, location: SkillCleanupLocation,
         recorded: Set<String>?, stateProblem: String, result: inout BatchResult
     ) -> SkillCleanupCandidate? {
-        let path = artifactPath(skill: skill, platform: platform, target: target)
+        let platform = location.platform, target = location.target, path = location.path
         do {
             let ours = try artifactIsOwned(skill: skill, platform: platform, target: target)
             guard let recorded else {
@@ -117,5 +140,17 @@ extension PlatformViewModel {
         let target: DeployTarget
         let path: String
         let isOwned: Bool
+    }
+
+    private struct SkillCleanupLocation {
+        let platform: PlatformTarget
+        let target: DeployTarget
+        let path: String
+    }
+
+    private struct SkillCleanupEvidence {
+        var locations: [SkillCleanupLocation] = []
+        var historyPaths: Set<String> = []
+        var probeFailures: [String: Error] = [:]
     }
 }

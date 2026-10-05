@@ -342,6 +342,12 @@ extension PlatformViewModel {
         return try cursorCompiler.ownsArtifact(skill: skill, projectPath: target.project?.path)
     }
 
+    func projectCursorRuleMayExist(skill: Skill, project: Project) throws -> Bool {
+        guard ProjectDirectory.canAccess(project.path) else { return false }
+        return try DeployArtifactOwnership(fileService: fileService).cursorRuleMayExist(
+            at: cursorCompiler.outputPath(skill: skill, projectPath: project.path))
+    }
+
     /// Direct unselection waits quietly for a missing project, before reading or retiring its artifacts.
     func removeSelection(skills: [Skill], platforms: [PlatformTarget], target: DeployTarget) -> BatchResult {
         removeSelection(pairs: DeployRemovalPair.expand(skills: skills, platforms: platforms), target: target)

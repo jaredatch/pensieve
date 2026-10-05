@@ -159,29 +159,28 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
         for (pair, triples) in grouped(triplesToRemove) {
             for triple in triples.sorted(by: { $0.platform.rawValue < $1.platform.rawValue }) {
                 if state.intentTriples.contains(triple) {
-                    deleteLedgerRow(matching: triple, state: state, context: context)
+                    deleteLedgerRows(matching: [triple], state: state, context: context)
                 } else if let skill = state.skillByID[pair.skillID], let project = state.projectByID[pair.projectID] {
                     removals[project.id, default: (project, [])].pairs.append(
                         DeployRemovalPair(skill: skill, platform: triple.platform))
                 } else {
-                    deleteLedgerRow(matching: triple, state: state, context: context)
+                    deleteLedgerRows(matching: [triple], state: state, context: context)
                 }
             }
         }
         for group in removals.values.sorted(by: { $0.project.id.uuidString < $1.project.id.uuidString }) {
             let result = platformVM.removeOwnedBatch(pairs: group.pairs, target: .project(group.project))
             aggregate.append(result)
-            let completed = result.completedPairs
-            for row in state.ledger where row.projectID == group.project.id && completed.contains(BatchPairKey(
-                skillID: row.skillID, platform: row.platform, target: .project(group.project.id))) {
-                context.delete(row)
-            }
+            let completed = Set(result.completedPairs.map {
+                Triple(skillID: $0.skillID, projectID: group.project.id, platform: $0.platform)
+            })
+            deleteLedgerRows(matching: completed, state: state, context: context)
         }
     }
 
-    private func deleteLedgerRow(matching triple: Triple, state: State, context: ModelContext) {
-        for row in state.ledger where row.skillID == triple.skillID
-            && row.projectID == triple.projectID && row.platform == triple.platform {
+    private func deleteLedgerRows(matching triples: Set<Triple>, state: State, context: ModelContext) {
+        for row in state.ledger where triples.contains(Triple(
+            skillID: row.skillID, projectID: row.projectID, platform: row.platform)) {
             context.delete(row)
         }
     }
