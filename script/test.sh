@@ -151,7 +151,7 @@ count=""
 if [ -d "$bundle" ]; then
   count="$(xcrun xcresulttool get test-results summary --path "$bundle" --compact | jq -r '.totalTestCount // empty')" || count=""
 fi
-# Apple tools leave empty UUID directories outside TMPDIR. This shallow sweep is bounded and best-effort.
+# Xcode and Foundation leave empty temporary directories outside TMPDIR. The shallow sweep is bounded and best-effort.
 if system_temp="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" && [ -d "$system_temp" ]; then
   python3 "$REPO/script/test_temp_cleanup.py" "$system_temp" >/dev/null 2>&1 || true
 fi

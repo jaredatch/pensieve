@@ -180,11 +180,63 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
         (nonempty / "marker").write_text("keep data")
         for path in (old_empty, nonempty, unrelated, lowercase, regular):
             os.utime(path, (1, 1))
+
+        debug_temp = self.system_temp / "com.jaredatch.Pensieve.debug"
+        debug_temp.mkdir()
+        process_uuid = "ABCDEFAB-1234-5678-9ABC-DEF012345678"
+        process_name = process_uuid + "-12345-aBc09F"
+        process_old = debug_temp / process_name
+        process_nonempty = debug_temp / (process_uuid + "-23456-abc123")
+        process_young = debug_temp / (process_uuid + "-34567-ABC123")
+        process_regular = debug_temp / (process_uuid + "-45678-abc123")
+        process_regular.touch()
+        process_linked = debug_temp / (process_uuid + "-56789-abc123")
+        process_linked.symlink_to(target, target_is_directory=True)
+        invalid_process_names = {
+            process_uuid, process_uuid.lower() + "-12345-abc123",
+            process_uuid + "-pid-abc123", process_uuid + "-12345-ghijk",
+            process_uuid + "-12345-", process_uuid + "--abc123",
+            process_name + "-extra", "ordinary-folder",
+        }
+        invalid_process_paths = {debug_temp / name for name in invalid_process_names}
+        misplaced = self.system_temp / process_name
+        other_app = self.system_temp / "com.jaredatch.Pensieve"
+        other_app.mkdir()
+        other_process = other_app / process_name
+        nested_process = debug_temp / "ordinary-folder" / process_name
+        for path in (process_old, process_nonempty, process_young, misplaced, other_process, *invalid_process_paths):
+            path.mkdir()
+        nested_process.mkdir()
+        (process_nonempty / "marker").write_text("keep Foundation data")
+        for path in (process_old, process_nonempty, process_regular, misplaced, other_process,
+                     nested_process, *invalid_process_paths):
+            os.utime(path, (1, 1))
+
         self.failed_run()
         self.assertFalse(old_empty.exists())
-        self.assertEqual(set(self.system_temp.iterdir()), {nonempty, young, unrelated, lowercase, linked, regular})
+        self.assertFalse(process_old.exists(), "old empty Foundation process folder survived")
+        self.assertEqual(set(self.system_temp.iterdir()),
+                         {nonempty, young, unrelated, lowercase, linked, regular, debug_temp, misplaced, other_app})
+        self.assertEqual(set(debug_temp.iterdir()),
+                         {process_nonempty, process_young, process_regular, process_linked, *invalid_process_paths})
         self.assertEqual((nonempty / "marker").read_text(), "keep data")
+        self.assertEqual((process_nonempty / "marker").read_text(), "keep Foundation data")
+        self.assertEqual(set(other_app.iterdir()), {other_process})
+        self.assertTrue(nested_process.is_dir())
         self.assertTrue(target.is_dir())
+
+        # A symlink at the debug folder itself must not send the sweep outside its scope.
+        linked_temp = self.root / "linked-system-temp"
+        linked_temp.mkdir()
+        linked_target = target / "Foundation-items"
+        linked_target.mkdir()
+        linked_old = linked_target / process_name
+        linked_old.mkdir()
+        os.utime(linked_old, (1, 1))
+        (linked_temp / debug_temp.name).symlink_to(linked_target, target_is_directory=True)
+        self.env["TEST_LIFECYCLE_SYSTEM_TEMP"] = str(linked_temp)
+        self.failed_run(label="linked-debug-temp")
+        self.assertTrue(linked_old.is_dir(), "sweep followed the debug folder symlink")
 
     def abandoned_runs(self):
         self.runs.mkdir(parents=True, exist_ok=True)
