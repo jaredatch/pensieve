@@ -16,6 +16,7 @@ struct PinnedSkillFileDiff: Equatable {
     init(change: FileTreeChange,
          budget: BoundedLineDifference.WorkBudget = .init(maximumWork: PinnedSkillDiff.maximumDiffWork),
          makeDiff: (String, String) throws -> UnifiedDiff) rethrows {
+        let sharedBudgetLimitsSearch = budget.remaining < BoundedLineDifference.maximumWork
         let result: UnifiedDiff?
         if case let .text(old, new) = change.content {
             guard !budget.isExhausted else {
@@ -25,7 +26,7 @@ struct PinnedSkillFileDiff: Equatable {
             result = try makeDiff(old, new)
         } else { result = nil }
         self.init(change: change, result: result,
-                  diffBudgetExhausted: result?.isTooLarge == true && budget.isExhausted)
+                  diffBudgetExhausted: result?.isTooLarge == true && sharedBudgetLimitsSearch)
     }
 
     init(change: FileTreeChange, result: UnifiedDiff?, diffBudgetExhausted: Bool = false) {

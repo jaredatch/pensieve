@@ -112,6 +112,20 @@ final class UnifiedDiffWorkTests: XCTestCase {
         XCTAssertNil(limited.files.first?.linesAdded)
     }
 
+    func testFourPerFileWorkRefusalsKeepTooLargeWhenFourthEmptiesSharedBudget() throws {
+        let budget = BoundedLineDifference.WorkBudget(maximumWork: PinnedSkillDiff.maximumDiffWork)
+        let result = try PinnedSkillDiff.build(comparison: comparison(count: 4, lines: 4_100), budget: budget)
+        XCTAssertEqual(budget.consumed, PinnedSkillDiff.maximumDiffWork)
+        XCTAssertEqual(result.files.count, 4)
+        for file in result.files {
+            XCTAssertEqual(file.content, .tooLarge,
+                           "The per-file cap limits each rewrite, including the fourth that empties the shared budget")
+            XCTAssertNil(file.diff)
+            XCTAssertNil(file.linesAdded)
+            XCTAssertNil(file.linesRemoved)
+        }
+    }
+
     func testSharedBudgetExhaustionSkipsLinePreparationAndKeyHashing() throws {
         let change = FileTreeChange(path: "later", kind: .modified,
                                     content: .text(old: "old\n", new: "new\n"))
