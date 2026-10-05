@@ -25,6 +25,7 @@ struct DeployStubDetection: AgentDetectionServiceProtocol {
 }
 
 final class DeployRecordingFileService: FileServiceProtocol {
+    var directories: Set<String> = []
     var files: Set<String> = []
     var symlinks: Set<String> = []
     var contents: [String: String] = [:]
@@ -41,7 +42,8 @@ final class DeployRecordingFileService: FileServiceProtocol {
     }
     func fileExists(at path: String) -> Bool { files.contains(path) || contents[path] != nil }
     func isExecutableFile(at path: String) -> Bool { false }
-    func directoryExists(at path: String) -> Bool { false }
+    func directoryExists(at path: String) -> Bool { directories.contains(path) }
+    func directoryExistsFollowingLinks(at path: String) throws -> Bool { directories.contains(path) }
     func createDirectory(at path: String) throws {}
     func deleteDirectory(at path: String) throws {}
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws { symlinks.insert(linkPath) }

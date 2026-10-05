@@ -103,7 +103,8 @@ final class PlatformViewModelTests: XCTestCase {
         let vm = PlatformViewModel(
             fileService: SymlinkFileService(),   // isSymlink == true
             linkService: NoopLinkService(),
-            cursorCompiler: StubCursorCompiler()
+            cursorCompiler: StubCursorCompiler(),
+            agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked
         )
 
         let refreshBefore = vm.refreshCounter
@@ -124,7 +125,8 @@ final class PlatformViewModelTests: XCTestCase {
         let vm = PlatformViewModel(
             fileService: CleanFileService(),   // isSymlink == false - old guard would have deployed
             linkService: NoopLinkService(),
-            cursorCompiler: StubCursorCompiler()
+            cursorCompiler: StubCursorCompiler(),
+            agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked
         )
 
         vm.deploy(skill: skill, platform: .claudeCode, target: .userWide, context: context)
@@ -142,7 +144,8 @@ final class PlatformViewModelTests: XCTestCase {
         let vm = PlatformViewModel(
             fileService: CleanFileService(),
             linkService: linkService,
-            cursorCompiler: StubCursorCompiler()
+            cursorCompiler: StubCursorCompiler(),
+            agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked
         )
         let refreshBefore = vm.refreshCounter
 
@@ -171,7 +174,8 @@ final class PlatformViewModelTests: XCTestCase {
         let vm = PlatformViewModel(
             fileService: CleanFileService(),
             linkService: linkService,
-            cursorCompiler: StubCursorCompiler()
+            cursorCompiler: StubCursorCompiler(),
+            agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked
         )
         let refreshBefore = vm.refreshCounter
 

@@ -33,4 +33,72 @@ final class PlatformSettingsPresentationTests: XCTestCase {
     func testGrokDefaultBudgetIs2500Tokens() {
         XCTAssertEqual(Constants.defaultGrokTokenBudget, 2_500)
     }
+
+    func testBudgetValuesUseSettingsDefaultsAndOmitUnlimited() throws {
+        let suite = "PlatformSettingsPresentationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertEqual(PlatformTokenBudgetSetting.values(defaults: defaults), [
+            .claudeCode: Constants.defaultClaudeCodeTokenBudget,
+            .grok: Constants.defaultGrokTokenBudget,
+            .cursor: Constants.defaultCursorTokenBudget
+        ])
+    }
+
+    func testBudgetValuesReadSettingsKeysAgainAfterAnEdit() throws {
+        let suite = "PlatformSettingsPresentationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        for setting in PlatformTokenBudgetSetting.rows {
+            guard case let .editable(storageKey, defaultValue) = setting.budget else { continue }
+            defaults.set(defaultValue + 100, forKey: storageKey)
+            XCTAssertEqual(PlatformTokenBudgetSetting.values(defaults: defaults)[setting.platform], defaultValue + 100)
+            defaults.set(defaultValue + 200, forKey: storageKey)
+            XCTAssertEqual(PlatformTokenBudgetSetting.values(defaults: defaults)[setting.platform], defaultValue + 200)
+        }
+    }
+
+    func testZeroBudgetIsOmitted() throws {
+        try assertBudgetIsOmitted(0)
+    }
+
+    func testNegativeBudgetIsOmitted() throws {
+        try assertBudgetIsOmitted(-2_500)
+    }
+
+    func testStringBudgetIsOmitted() throws {
+        try assertBudgetIsOmitted("junk")
+    }
+
+    func testNumericStringAndFractionalBudgetsMatchSettings() throws {
+        let suite = "PlatformSettingsPresentationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let storedValues: [Any] = ["2500", 2_500.5]
+        for setting in PlatformTokenBudgetSetting.rows {
+            guard case let .editable(storageKey, _) = setting.budget else { continue }
+            for value in storedValues {
+                defaults.set(value, forKey: storageKey)
+                XCTAssertEqual(PlatformTokenBudgetSetting.values(defaults: defaults)[setting.platform], 2_500,
+                               "Stored budget \(value) should match Settings for \(setting.platform.displayName)")
+            }
+        }
+    }
+
+    private func assertBudgetIsOmitted(_ value: Any, file: StaticString = #filePath, line: UInt = #line) throws {
+        let suite = "PlatformSettingsPresentationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        for setting in PlatformTokenBudgetSetting.rows {
+            guard case let .editable(storageKey, _) = setting.budget else { continue }
+            defaults.set(value, forKey: storageKey)
+            XCTAssertNil(PlatformTokenBudgetSetting.values(defaults: defaults)[setting.platform],
+                         "Invalid budget must omit \(setting.platform.displayName)", file: file, line: line)
+            defaults.removeObject(forKey: storageKey)
+        }
+    }
 }

@@ -15,10 +15,11 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
     let platformVM: PlatformViewModel
     private let stateFetcher: ReconcilerStateFetching
 
-    private struct Triple: Hashable {
+    private struct Triple: ProjectReconcileTriple {
         let skillID: UUID
         let projectID: UUID
         let platform: PlatformTarget
+        var platformTarget: PlatformTarget? { platform }
     }
 
     private struct Pair: Hashable {
@@ -60,8 +61,13 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
             Triple(skillID: $0.skillID, projectID: $0.projectID, platform: $0.platform)
         })
 
-        deploy(desired.subtracting(current), state: state, context: context, aggregate: &aggregate)
-        remove(current.subtracting(desired), state: state, context: context, aggregate: &aggregate)
+        let work = platformVM.projectReconcilePolicy.pending(
+            desired: desired, current: current, ownedByOtherReconciler: state.intentTriples,
+            skills: state.skillByID, projects: state.projectByID, platformVM: platformVM
+        )
+        aggregate.append(work.result)
+        deploy(work.deploy, ledgerTriples: current, state: state, context: context, aggregate: &aggregate)
+        remove(work.remove, state: state, context: context, aggregate: &aggregate)
         try? context.save()
         return aggregate
     }
@@ -114,10 +120,12 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
 
     private func deploy(
         _ triplesToDeploy: Set<Triple>,
+        ledgerTriples: Set<Triple>,
         state: State,
         context: ModelContext,
         aggregate: inout BatchResult
     ) {
+        var recorded = ledgerTriples
         for (pair, triples) in grouped(triplesToDeploy) {
             guard let skill = state.skillByID[pair.skillID],
                   let project = state.projectByID[pair.projectID] else { continue }
@@ -127,9 +135,11 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
                 platforms: groupPlatforms,
                 target: .project(project),
                 context: context
-            )
-            aggregate.outcomes.append(contentsOf: result.outcomes)
-            for outcome in result.outcomes where outcome.error == nil {
+            ).skippingMissingProjects()
+            aggregate.append(result)
+            for outcome in result.successes {
+                guard recorded.insert(Triple(skillID: skill.id, projectID: project.id,
+                                             platform: outcome.platform)).inserted else { continue }
                 context.insert(SkillProjectAssignment(
                     skillID: skill.id,
                     projectID: project.id,

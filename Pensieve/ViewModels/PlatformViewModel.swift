@@ -7,6 +7,7 @@ final class PlatformViewModel {
     private let linkService: LinkServiceProtocol
     private let cursorCompiler: CursorCompilerProtocol
     private let fileService: FileServiceProtocol
+    let projectReconcilePolicy: ProjectReconcilePolicy
     private let deployStateStore: DeployStateStore
     private let now: () -> Date
     private let persist: (ModelContext) throws -> Void
@@ -33,6 +34,7 @@ final class PlatformViewModel {
     ) {
         let fs = fileService ?? FileService()
         self.fileService = fs
+        self.projectReconcilePolicy = ProjectReconcilePolicy(fileService: fs)
         self.linkService = linkService ?? LinkService(fileService: fs)
         self.cursorCompiler = cursorCompiler ?? CursorCompiler(
             fileService: fs,
@@ -87,13 +89,11 @@ final class PlatformViewModel {
     }
 
     func artifactExists(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) -> Bool {
-        let projectPath = target.project?.path
-        if platform.usesSymlinks {
-            let path = linkService.linkPath(skill: skill, platform: platform, projectPath: projectPath)
-            return fileService.isSymlink(at: path) || fileService.fileExists(at: path)
-        } else {
-            return fileService.fileExists(at: cursorCompiler.outputPath(skill: skill, projectPath: projectPath))
-        }
+        guard target.project == nil || platform.supportsProjectScope else { return false }
+        guard ProjectDirectory.canAccess(target.project?.path) else { return false }
+        let path = artifactPath(skill: skill, platform: platform, target: target)
+        guard !path.isEmpty else { return false }
+        return (platform.usesSymlinks && fileService.isSymlink(at: path)) || fileService.fileExists(at: path)
     }
 
     // MARK: - Throwing core (one pair)
@@ -230,7 +230,7 @@ final class PlatformViewModel {
             _ = try deployOne(skill: skill, platform: platform, target: target, context: context)
             error = nil
         } catch {
-            self.error = "Deploy failed: \(error.localizedDescription)"
+            self.error = "Deploy failed: \(BatchPairOutcome.failureMessage(error, target: target))"
         }
     }
 
@@ -277,7 +277,8 @@ final class PlatformViewModel {
                 } catch {
                     result.outcomes.append(BatchPairOutcome(
                         skillID: skill.id, skillName: skill.name, platform: platform,
-                        target: BatchPairTarget(target), error: error.localizedDescription
+                        target: BatchPairTarget(target), error: BatchPairOutcome.failureMessage(error, target: target),
+                        projectFolderError: error as? ProjectFolderError
                     ))
                 }
             }
@@ -304,7 +305,8 @@ final class PlatformViewModel {
                 } catch {
                     result.outcomes.append(BatchPairOutcome(
                         skillID: skill.id, skillName: skill.name, platform: platform,
-                        target: BatchPairTarget(target), error: error.localizedDescription
+                        target: BatchPairTarget(target), error: BatchPairOutcome.failureMessage(error, target: target),
+                        projectFolderError: error as? ProjectFolderError
                     ))
                 }
             }

@@ -14,8 +14,13 @@ extension IntentReconciler {
             guard let projectID = row.projectID else { return nil }
             return ProjectTriple(skillID: row.skillID, projectID: projectID, platformRaw: row.platformRaw)
         })
-        deployProjects(desired.subtracting(current), state: state, context: context, aggregate: &aggregate)
-        removeProjects(current.subtracting(desired), state: state, context: context, aggregate: &aggregate)
+        let work = platformVM.projectReconcilePolicy.pending(
+            desired: desired, current: current, ownedByOtherReconciler: state.categoryTriples,
+            skills: state.skillByID, projects: state.projectByID, platformVM: platformVM
+        )
+        aggregate.append(work.result)
+        deployProjects(work.deploy, ledgerTriples: current, state: state, context: context, aggregate: &aggregate)
+        removeProjects(work.remove, state: state, context: context, aggregate: &aggregate)
     }
 
     private func desiredProjectTriples(
@@ -41,10 +46,12 @@ extension IntentReconciler {
 
     private func deployProjects(
         _ triples: Set<ProjectTriple>,
+        ledgerTriples: Set<ProjectTriple>,
         state: State,
         context: ModelContext,
         aggregate: inout BatchResult
     ) {
+        var recorded = ledgerTriples
         for (pair, group) in groupedProjectTriples(triples) {
             guard let skill = state.skillByID[pair.skillID],
                   let project = state.projectByID[pair.projectID] else { continue }
@@ -53,9 +60,11 @@ extension IntentReconciler {
             guard !platforms.isEmpty else { continue }
             let result = platformVM.deployBatch(
                 skills: [skill], platforms: platforms, target: .project(project), context: context
-            )
-            aggregate.outcomes.append(contentsOf: result.outcomes)
-            for outcome in result.outcomes where outcome.error == nil {
+            ).skippingMissingProjects()
+            aggregate.append(result)
+            for outcome in result.successes {
+                guard recorded.insert(ProjectTriple(skillID: skill.id, projectID: project.id,
+                                                    platformRaw: outcome.platform.rawValue)).inserted else { continue }
                 context.insert(IntentAssignment(
                     skillID: outcome.skillID,
                     platformRaw: outcome.platform.rawValue,

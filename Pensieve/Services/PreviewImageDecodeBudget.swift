@@ -12,7 +12,8 @@ protocol PreviewImageBudgeting: AnyObject {
 /// Owned by one rendered document and shared by its block and inline providers. Serial dispatch
 /// keeps compressed buffers bounded while awaiting callers suspend outside the cooperative pool.
 /// Charges declared source pixels, including repeats and failed decodes, before ImageIO decodes.
-final class PreviewImageDecodeBudget: PreviewImageBudgeting {
+/// NSLock `lock` protects all mutable state, making shared access safe.
+final class PreviewImageDecodeBudget: PreviewImageBudgeting, @unchecked Sendable {
     static let maximumPixels = 64_000_000
     private let queue = DispatchQueue(label: "com.jaredatch.pensieve.preview-images", qos: .userInitiated)
     private let lock = NSLock()
@@ -54,7 +55,8 @@ final class PreviewImageDecodeBudget: PreviewImageBudgeting {
 
     /// Admission and cancellation meet under a short lock. A request admitted before cancellation
     /// is already running and may finish; a cancelled request never calls the synchronous loader.
-    private final class Request {
+    /// NSLock `lock` protects all mutable state, making shared access safe.
+    private final class Request: @unchecked Sendable {
         private let lock = NSLock()
         private var cancelled = false
 

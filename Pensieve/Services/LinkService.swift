@@ -50,6 +50,8 @@ final class LinkService: LinkServiceProtocol {
             try Self.validatePathComponent(Constants.hermesDefaultCategory)
         }
 
+        let projectDirectory = try projectPath.map { try fileService.requireProjectDirectory(at: $0) }
+
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
         let target = targetPath(skill: skill, platform: platform, projectPath: projectPath)
 
@@ -63,10 +65,19 @@ final class LinkService: LinkServiceProtocol {
             throw LinkError.occupiedByRealPath(link)
         }
 
-        try fileService.createSymlink(at: link, pointingTo: target)
+        do {
+            if let projectDirectory {
+                try fileService.createSymlinkInProject(at: link, pointingTo: target, project: projectDirectory)
+            } else {
+                try fileService.createSymlink(at: link, pointingTo: target)
+            }
+        } catch SymlinkCreationError.occupiedPath(_) {
+            throw LinkError.occupiedByRealPath(link)
+        }
     }
 
     func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
+        guard projectPath == nil || platform.supportsProjectScope else { return }
         // Path-component safety invariant at the remove boundary too (mirrors link()):
         // a malicious directoryName must not let a delete escape the intended deploy root.
         try Self.validatePathComponent(skill.directoryName)
@@ -74,14 +85,17 @@ final class LinkService: LinkServiceProtocol {
             try Self.validatePathComponent(Constants.hermesDefaultCategory)
         }
 
+        guard ProjectDirectory.canAccess(projectPath) else { return }
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
-        guard fileService.isSymlink(at: link) else { return }
+        guard platform.usesSymlinks, fileService.isSymlink(at: link) else { return }
         try fileService.deleteFile(at: link)
     }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
+        guard projectPath == nil || platform.supportsProjectScope else { return false }
+        guard ProjectDirectory.canAccess(projectPath) else { return false }
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
-        guard fileService.isSymlink(at: link) else { return false }
+        guard platform.usesSymlinks, fileService.isSymlink(at: link) else { return false }
         let expected = targetPath(skill: skill, platform: platform, projectPath: projectPath)
         guard let actual = try? fileService.symlinkTarget(at: link) else { return false }
         return actual == expected

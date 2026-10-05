@@ -37,6 +37,15 @@ final class DesignTokensTests: XCTestCase {
         XCTAssertEqual(DesignTokens.statSubWeight, .regular)
     }
 
+    func testEmptyStateTokensMatchTheFrames() {
+        XCTAssertEqual(DesignTokens.emptyStateTitleSize, 24)
+        XCTAssertEqual(DesignTokens.emptyStateTitleWeight, .light)
+        XCTAssertEqual(DesignTokens.emptyStateDescriptionSize, 13)
+        XCTAssertEqual(DesignTokens.emptyStateDescriptionWeight, .regular)
+        XCTAssertEqual(DesignTokens.emptyStateGap, 10)
+        XCTAssertEqual(DesignTokens.emptyStateSidePadding, 16)
+    }
+
     func testCardTokensMatchMeasuredValues() {
         XCTAssertEqual(DesignTokens.cardFillOpacity, 0.03)
         XCTAssertEqual(DesignTokens.cardCornerRadius, 10)

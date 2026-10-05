@@ -74,6 +74,7 @@ final class FileServiceTests: XCTestCase {
         try fileService.writeExecutableFile(at: source, content: "new bytes")
         try fileService.writeFile(at: target, content: "target bytes")
         for dangling in [false, true] {
+            if fileService.fileExists(at: destination) { try fileService.deleteFile(at: destination) }
             try fileService.createSymlink(at: destination, pointingTo: dangling ? tempDir + "/absent" : target)
             XCTAssertNoThrow(try fileService.copyFile(at: source, to: destination))
             XCTAssertTrue(fileService.isRegularFile(at: destination))

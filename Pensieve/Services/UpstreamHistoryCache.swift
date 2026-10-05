@@ -3,7 +3,7 @@ import Foundation
 /// Disposable, versioned storage for parsed History reads. Callers invoke synchronous disk work from
 /// detached tasks. The state lock orders generations; the serial maintenance queue orders filesystem work.
 final class UpstreamHistoryCache: @unchecked Sendable {
-    static let schemaVersion = 2
+    static let schemaVersion = 3
     static let defaultEntryByteLimit = 96 * 1_024 * 1_024
     static let defaultTotalByteLimit = 256 * 1_024 * 1_024
     static let staleTemporaryAge: TimeInterval = 60 * 60

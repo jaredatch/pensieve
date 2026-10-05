@@ -58,7 +58,8 @@ func removeRegisteredProject(_ project: Project, categoryStore: CategoryStorePro
                              manifestRoot: String = Constants.pensieveBaseDir,
                              stateFetcher: ReconcilerStateFetching = ReconcilerStateFetcher(),
                              context: ModelContext,
-                             notifier: SyncStateNotifying = SyncStateNotifier.suppressed) -> BatchResult {
+                             notifier: SyncStateNotifying = SyncStateNotifier.suppressed,
+                             logFailure: (String) -> Void = logProjectRemovalFailure) -> BatchResult {
     defer { notifier() }
     let intentRows: [IntentAssignment]
     do {
@@ -66,13 +67,26 @@ func removeRegisteredProject(_ project: Project, categoryStore: CategoryStorePro
     } catch {
         return BatchResult.readFailure("project intent ownership", error: error)
     }
-    let result = categoryStore.reconcileAfterRemovingProject(
+    var result = categoryStore.reconcileAfterRemovingProject(
         project,
         reconciler: reconciler,
         context: context,
         notifier: SyncStateNotifier.suppressed
     )
+    logUnrelatedProjectFailures(result, removing: project, logFailure: logFailure)
+    result.outcomes.removeAll { outcome in
+        guard case .project(let id)? = outcome.target else { return false }
+        return id != project.id
+    }
     guard !result.hasFailures else { return result }
+    do {
+        for row in try context.fetch(FetchDescriptor<SkillProjectAssignment>()) where row.projectID == project.id {
+            context.delete(row)
+        }
+    } catch {
+        result.append(BatchResult.readFailure("project category ownership", error: error))
+        return result
+    }
     for row in intentRows where row.projectID == project.id {
         context.delete(row)
     }
@@ -80,4 +94,18 @@ func removeRegisteredProject(_ project: Project, categoryStore: CategoryStorePro
     try? context.save()
     regenerateProjectManifest(manifestService: manifestService, manifestRoot: manifestRoot, context: context)
     return result
+}
+
+private func logProjectRemovalFailure(_ message: String) {
+    Logger(subsystem: "com.jaredatch.pensieve", category: "projects")
+        .warning("Project removal reconciliation failed: \(message, privacy: .public)")
+}
+
+private func logUnrelatedProjectFailures(_ result: BatchResult, removing project: Project,
+                                         logFailure: (String) -> Void) {
+    for failure in result.failures {
+        guard case .project(let id)? = failure.target, id != project.id,
+              let error = failure.error else { continue }
+        logFailure("\(id.uuidString): \(error)")
+    }
 }

@@ -66,17 +66,24 @@ private final class StubDetection: AgentDetectionServiceProtocol {
 }
 
 private struct StubFileService: FileServiceProtocol {
+    let linkService: RecordingLinkService
     func readFile(at path: String) throws -> String { "" }
     func writeFile(at path: String, content: String) throws {}
     func deleteFile(at path: String) throws {}
-    func fileExists(at path: String) -> Bool { false }
+    func fileExists(at path: String) -> Bool { isSymlink(at: path) }
     func isExecutableFile(at path: String) -> Bool { false }
     func directoryExists(at path: String) -> Bool { false }
+    func directoryExistsFollowingLinks(at path: String) throws -> Bool { path.hasPrefix("/tmp/") }
     func createDirectory(at path: String) throws {}
     func deleteDirectory(at path: String) throws {}
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {}
     func symlinkTarget(at path: String) throws -> String { "" }
-    func isSymlink(at path: String) -> Bool { false }
+    func isSymlink(at path: String) -> Bool {
+        linkService.linked.contains { recorded in
+            (recorded.projectPath ?? "/tmp/user-wide") + "/links/" + recorded.platform.rawValue
+                + "/" + recorded.directoryName == path
+        }
+    }
     func isRegularFile(at path: String) -> Bool { true }
     func listDirectory(at path: String) throws -> [String] { [] }
     func contentsHash(at path: String) throws -> String { "hash" }
@@ -117,7 +124,7 @@ final class CategoryReconcileWiringTests: XCTestCase {
         linkService: RecordingLinkService
     ) -> CategoryReconciler {
         CategoryReconciler(platformVM: PlatformViewModel(
-            fileService: StubFileService(),
+            fileService: StubFileService(linkService: linkService),
             linkService: linkService,
             agentDetection: StubDetection(installed: installed),
             deployStateStore: .memoryBacked

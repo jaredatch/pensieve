@@ -9,6 +9,13 @@ enum UpstreamHistoryFileContent: Codable, Equatable {
     case text(String)
     case binary
     case tooLarge
+
+    static func utf8PreservingBOM(_ data: Data) -> String? {
+        guard String(data: data, encoding: .utf8) != nil else { return nil }
+        // UTF-8 is validated above; decode the original bytes to preserve every leading BOM.
+        // swiftlint:disable:next optional_data_string_conversion
+        return String(decoding: data, as: UTF8.self)
+    }
 }
 
 struct UpstreamHistoryBaselineFile: Codable, Equatable {

@@ -5,41 +5,42 @@ struct AddProjectSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
 
-    @State private var name = ""
-    @State private var path = ""
-    @State private var identityStatus: IdentityStatus?
+    @State private var model: AddProjectModel
     @State private var didSubmit = false
     @FocusState private var nameFocused: Bool
 
-    private let identityService: ProjectIdentityServiceProtocol = ProjectIdentityService()
+    private let manifestService: ManifestSnapshotting
+    private let manifestRoot: String
     private let notifier: SyncStateNotifying
     private let intentReconciler: @MainActor (ModelContext) -> BatchResult
     private let onCreated: (Project) -> Void
 
     init(
+        model: AddProjectModel = AddProjectModel(),
+        manifestService: ManifestSnapshotting = ManifestService(),
+        manifestRoot: String = Constants.pensieveBaseDir,
         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
         intentReconciler: @escaping @MainActor (ModelContext) -> BatchResult = { _ in BatchResult() },
         onCreated: @escaping (Project) -> Void = { _ in }
     ) {
+        _model = State(initialValue: model)
+        self.manifestService = manifestService
+        self.manifestRoot = manifestRoot
         self.notifier = notifier
         self.intentReconciler = intentReconciler
         self.onCreated = onCreated
     }
 
-    private var isValid: Bool {
-        !name.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !path.trimmingCharacters(in: .whitespaces).isEmpty
-    }
-
     var body: some View {
+        @Bindable var model = model
         VStack(alignment: .leading, spacing: Spacing.lg) {
             Text("Add Project").font(.title2.bold())
-            TextField("Project Name", text: $name)
+            TextField("Project Name", text: $model.name)
                 .textFieldStyle(.roundedBorder)
                 .focused($nameFocused)
                 .onSubmit(submit)
             HStack {
-                TextField("Path", text: $path)
+                TextField("Path", text: $model.path)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(submit)
                 Button("Browse…") {
@@ -47,29 +48,36 @@ struct AddProjectSheet: View {
                 }
             }
 
-            if let identityStatus {
-                Text(identityStatus.message)
+            if let message = model.identityMessage {
+                Text(message)
                     .font(.caption)
-                    .foregroundStyle(identityStatus.foregroundStyle)
+                    .foregroundStyle(model.hasExistingIdentity ? .secondary : .tertiary)
             }
 
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Add", action: submit).keyboardShortcut(.defaultAction).disabled(!isValid)
+                Button("Add", action: submit).keyboardShortcut(.defaultAction).disabled(!model.canSubmit)
             }
         }
         .padding(Spacing.xl)
         .frame(width: 450)
         .onAppear { nameFocused = true }
+        .onDisappear { model.cancelSubmission() }
     }
 
     private func submit() {
-        guard isValid, !didSubmit else { return }
+        guard !didSubmit else { return }
+        model.submit(onCreated: registerAndDismiss)
+    }
+
+    private func registerAndDismiss(_ project: Project) {
+        guard !didSubmit else { return }
         didSubmit = true
         let created = registerProject(
-            makeProject(),
-            manifestService: ManifestService(),
+            project,
+            manifestService: manifestService,
+            manifestRoot: manifestRoot,
             context: context,
             intentReconciler: intentReconciler,
             notifier: notifier
@@ -86,47 +94,10 @@ struct AddProjectSheet: View {
         panel.message = "Select a project directory"
 
         if panel.runModal() == .OK, let url = panel.url {
-            path = url.path
-            if name.isEmpty {
-                name = url.lastPathComponent
+            model.path = url.path
+            if model.name.isEmpty {
+                model.name = url.lastPathComponent
             }
-            refreshIdentityStatus()
-        }
-    }
-
-    private func refreshIdentityStatus() {
-        let trimmedPath = path.trimmingCharacters(in: .whitespaces)
-        guard !trimmedPath.isEmpty else {
-            identityStatus = nil
-            return
-        }
-        identityStatus = IdentityStatus(identity: identityService.peekIdentity(forProjectAt: trimmedPath))
-    }
-
-    private func makeProject() -> Project {
-        ProjectRegistration.makeProject(
-            name: name.trimmingCharacters(in: .whitespaces),
-            path: path.trimmingCharacters(in: .whitespaces),
-            using: identityService
-        )
-    }
-}
-
-private struct IdentityStatus {
-    let message: String
-    let foregroundStyle: HierarchicalShapeStyle
-
-    init(identity: ProjectIdentity?) {
-        switch identity?.kind {
-        case .remote:
-            message = "Git remote: \(identity?.key ?? "")"
-            foregroundStyle = .secondary
-        case .marker:
-            message = "Marker found"
-            foregroundStyle = .secondary
-        case nil:
-            message = "Marker will be created on Add"
-            foregroundStyle = .tertiary
         }
     }
 }
