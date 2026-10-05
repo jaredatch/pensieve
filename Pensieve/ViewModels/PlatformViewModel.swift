@@ -4,11 +4,11 @@ import SwiftUI
 
 @Observable
 final class PlatformViewModel {
-    private let linkService: LinkServiceProtocol
-    private let cursorCompiler: CursorCompilerProtocol
+    let linkService: LinkServiceProtocol
+    let cursorCompiler: CursorCompilerProtocol
     private let fileService: FileServiceProtocol
     let projectReconcilePolicy: ProjectReconcilePolicy
-    private let deployStateStore: DeployStateStore
+    let deployStateStore: DeployStateStore
     private let now: () -> Date
     private let persist: (ModelContext) throws -> Void
     /// Installed agents detected once at construction (install state doesn't change mid-session).
@@ -88,14 +88,6 @@ final class PlatformViewModel {
         }
     }
 
-    func artifactExists(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) -> Bool {
-        guard target.project == nil || platform.supportsProjectScope else { return false }
-        guard ProjectDirectory.canAccess(target.project?.path) else { return false }
-        let path = artifactPath(skill: skill, platform: platform, target: target)
-        guard !path.isEmpty else { return false }
-        return (platform.usesSymlinks && fileService.isSymlink(at: path)) || fileService.fileExists(at: path)
-    }
-
     // MARK: - Throwing core (one pair)
 
     /// Deploy a single (skill, platform) pair, throwing on any failure. The single-deploy wrapper
@@ -165,7 +157,7 @@ final class PlatformViewModel {
         }
     }
 
-    private func removeArtifact(skill: Skill, platform: PlatformTarget, target: DeployTarget) throws {
+    func removeArtifact(skill: Skill, platform: PlatformTarget, target: DeployTarget) throws {
         let projectPath = target.project?.path
         if platform.usesSymlinks {
             try linkService.unlink(skill: skill, platform: platform, projectPath: projectPath)
@@ -174,7 +166,7 @@ final class PlatformViewModel {
         }
     }
 
-    private func artifactPath(skill: Skill, platform: PlatformTarget, target: DeployTarget) -> String {
+    func artifactPath(skill: Skill, platform: PlatformTarget, target: DeployTarget) -> String {
         let projectPath = target.project?.path
         return platform.usesSymlinks
             ? linkService.linkPath(skill: skill, platform: platform, projectPath: projectPath)
@@ -320,62 +312,6 @@ final class PlatformViewModel {
     func brokenLinks(skills: [Skill]) -> [BrokenLink] {
         linkService.validateAll(skills: skills)
     }
-}
-
-extension PlatformViewModel {
-    /// Remove every symlink Pensieve made for this skill on the platforms detected at launch,
-    /// user-wide and in every given project, and drop each one's deploy-state record exactly once —
-    /// per-pair outcomes. A symlink is ours only when isLinked (it points at Pensieve's target).
-    /// Cursor files are never touched here (no durable ownership signal). A symlink-platform
-    /// record with nothing of ours at its path is just dropped. Deploy state is read once, up front;
-    /// a refused read (corrupt bytes or a newer schema) touches nothing that exists.
-    func removeAllDeploys(skill: Skill, projects: [Project]) -> BatchResult {
-        var result = BatchResult()
-        let targets: [DeployTarget] = [.userWide] + projects.map { .project($0) }
-        let recorded: Set<String>?     // the one read; nil = the store refused it (stateProblem says why)
-        let stateProblem: String
-        do {
-            recorded = try deployStateStore.recordedArtifactPaths()
-            stateProblem = ""
-        } catch DeployStateError.unsupportedSchema(let version) {
-            recorded = nil
-            stateProblem = "deploy state uses a newer schema (\(version)); update Pensieve"
-        } catch {
-            recorded = nil
-            stateProblem = "deploy state unreadable"
-        }
-        for target in targets {
-            for platform in deployablePlatforms(forProject: target.project != nil) where platform.usesSymlinks {
-                let path = artifactPath(skill: skill, platform: platform, target: target)
-                // `isDeployed` is `isLinked` here: symlink AND target == ours.
-                let ours = isDeployed(skill: skill, platform: platform, target: target)
-                guard let recorded else {
-                    if ours {
-                        result.outcomes.append(BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: platform,
-                                                                target: BatchPairTarget(target),
-                                                                error: "\(stateProblem); nothing removed at \(path)"))
-                    }
-                    continue
-                }
-                guard ours || recorded.contains(path) else { continue }
-                do {
-                    if ours { try removeArtifact(skill: skill, platform: platform, target: target) }
-                    try deployStateStore.remove(artifactPath: path)   // the one state write for this pair
-                    result.outcomes.append(BatchPairOutcome(
-                        skillID: skill.id, skillName: skill.name, platform: platform,
-                        target: BatchPairTarget(target), error: nil
-                    ))
-                } catch {
-                    result.outcomes.append(BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: platform,
-                                                            target: BatchPairTarget(target),
-                                                            error: error.localizedDescription))
-                }
-            }
-        }
-        if !result.outcomes.isEmpty { noteDeployStateChanged() }
-        return result
-    }
-
 }
 
 extension PlatformViewModel {

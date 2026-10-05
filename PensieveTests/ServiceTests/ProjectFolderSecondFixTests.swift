@@ -6,7 +6,7 @@ import XCTest
 
 @MainActor
 final class ProjectFolderSecondFixTests: XCTestCase {
-    func testUserWideIntentRemovalUnlinksRetargetedLink() throws {
+    func testUserWideIntentRemovalPreservesForeignRetargetedLink() throws {
         let h = try ProjectFolderCallerHarness(installed: [.codex])
         defer { h.cleanup() }
         let mapped = LinkServiceCanonicalDirectoryFileService(wrapped: h.files, pathMappings: [
@@ -25,12 +25,12 @@ final class ProjectFolderSecondFixTests: XCTestCase {
         try h.files.createSymlink(at: physical, pointingTo: h.otherProject.path)
         for row in try h.context.fetch(FetchDescriptor<MachineDeployIntent>()) { h.context.delete(row) }
         try h.context.save()
-        XCTAssertEqual(intent.reconcile(context: h.context).successes.count, 1)
-        XCTAssertFalse(h.files.isSymlink(at: physical))
+        XCTAssertEqual(intent.reconcile(context: h.context).successes.count, 0)
+        XCTAssertEqual(try h.files.symlinkTarget(at: physical), h.otherProject.path)
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
     }
 
-    func testDeploymentsDeselectionRemovesUnledgeredRetargetedLink() throws {
+    func testDeploymentsDeselectionPreservesUnledgeredForeignLink() throws {
         let h = try ProjectFolderCallerHarness(installed: [.codex])
         defer { h.cleanup() }
         try h.files.createDirectory(at: h.project.path)
@@ -38,11 +38,12 @@ final class ProjectFolderSecondFixTests: XCTestCase {
         try h.files.createSymlink(at: path, pointingTo: h.otherProject.path)
         let result = try h.model().set(false, skill: h.skill, platform: .codex,
             target: .project(h.project), context: h.context)
-        XCTAssertEqual(result.successes.count, 1, "The unledgered artifact still needs removal")
-        XCTAssertFalse(h.files.isSymlink(at: path))
+        XCTAssertEqual(result.successes.count, 0, "There is no owned artifact or ledger row to remove")
+        XCTAssertFalse(result.hasFailures)
+        XCTAssertEqual(try h.files.symlinkTarget(at: path), h.otherProject.path)
     }
 
-    func testUnassignmentUnlinksRetargetedLinksForBothProjectOwners() throws {
+    func testUnassignmentPreservesForeignLinksForBothProjectOwners() throws {
         for categoryOwned in [false, true] {
             for platform in [PlatformTarget.claudeCode, .grok, .codex] {
                 let h = try ProjectFolderCallerHarness(installed: [platform])
@@ -61,8 +62,10 @@ final class ProjectFolderSecondFixTests: XCTestCase {
                     for row in try h.context.fetch(FetchDescriptor<MachineDeployIntent>()) { h.context.delete(row) }
                 }
                 try h.context.save()
-                XCTAssertEqual(run().successes.count, 1, "Unassign must perform the unlink")
-                XCTAssertFalse(h.files.isSymlink(at: path), "Retargeted links must not be orphaned")
+                let result = run()
+                XCTAssertFalse(result.hasFailures)
+                XCTAssertEqual(result.successes.count, categoryOwned ? 1 : 0)
+                XCTAssertEqual(try h.files.symlinkTarget(at: path), h.otherProject.path)
                 XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
                 XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0)
             }
@@ -144,6 +147,10 @@ final class SecondFixPathFiles: FileServiceProtocol {
     var paths: [String] = []
     var probeError: Error?
     var symlinkTargets: [String: String] = [:]
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        paths.append(path)
+        return symlinkTargets[path] == nil ? nil : .symlink
+    }
     func readFile(at path: String) throws -> String { paths.append(path); return "" }
     func writeFile(at path: String, content: String) throws { paths.append(path) }
     func deleteFile(at path: String) throws { paths.append(path) }

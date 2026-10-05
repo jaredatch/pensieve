@@ -24,7 +24,7 @@ struct LinkServiceScriptedPathState {
     static let retargetedDirectorySymlink = LinkServiceScriptedPathState(
         isSymlink: true, fileExists: false, directoryExists: true, symlinkTarget: .retargeted)
     static let brokenSymlink = LinkServiceScriptedPathState(
-        isSymlink: true, fileExists: false, directoryExists: false, symlinkTarget: .unavailable)
+        isSymlink: true, fileExists: false, directoryExists: false, symlinkTarget: .canonical)
 }
 
 enum LinkServiceScriptedError: Error {
@@ -66,6 +66,12 @@ final class LinkServiceScriptedFileService: FileServiceProtocol {
     }
     func deleteFile(at path: String) throws { deleteFileCalled = true }
     func fileExists(at path: String) -> Bool { path == linkPath && state.fileExists }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        guard path == linkPath else { return path == canonicalDirectory ? .directory : nil }
+        if state.isSymlink { return .symlink }
+        if state.directoryExists { return .directory }
+        return state.fileExists ? .regular : nil
+    }
     func isExecutableFile(at path: String) -> Bool { false }
     func isUserExecutableFile(at path: String) -> Bool {
         XCTFail("Scripted double does not support isUserExecutableFile: \(path)")
@@ -93,7 +99,7 @@ final class LinkServiceScriptedFileService: FileServiceProtocol {
         case .canonical:
             return canonicalDirectory
         case .retargeted:
-            return canonicalDirectory + "-retargeted"
+            return "/outside/retargeted"
         case .unavailable:
             throw LinkServiceScriptedError.symlinkTargetUnavailable
         }
@@ -122,6 +128,9 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     var beforeDirectoryCreation: ((String) throws -> Void)?
     var beforeArtifactCreation: ((String) throws -> Void)?
     var beforeProjectProbe: ((String) throws -> Void)?
+    var beforeRuleRead: ((String) throws -> Void)?
+    /// Physical-path consumers compare physical literals; containment still applies to every lookup.
+    var translatesSymlinkTargets = true
 
     init(
         wrapped: FileServiceProtocol,
@@ -200,6 +209,16 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     func readData(at path: String) throws -> Data {
         try wrapped.readData(at: resolved(path))
     }
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        let physical = resolved(path)
+        try beforeRuleRead?(physical)
+        return try wrapped.readRegularFileData(at: physical, maximumBytes: maximumBytes)
+    }
+    func readRegularFileHeader(at path: String, maximumBytes: Int) throws -> Data {
+        let physical = resolved(path)
+        try beforeRuleRead?(physical)
+        return try wrapped.readRegularFileHeader(at: physical, maximumBytes: maximumBytes)
+    }
     func writeFile(at path: String, content: String) throws {
         try wrapped.writeFile(at: resolved(path), content: content)
     }
@@ -265,7 +284,7 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     }
     func symlinkTarget(at path: String) throws -> String {
         let target = try wrapped.symlinkTarget(at: resolved(path))
-        return logicalPath(for: target)
+        return translatesSymlinkTargets ? logicalPath(for: target) : target
     }
     func isSymlink(at path: String) -> Bool {
         wrapped.isSymlink(at: resolved(path))

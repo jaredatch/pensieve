@@ -199,7 +199,8 @@ struct HandoverFailingFetcher: ReconcilerStateFetching {
 }
 
 /// Uses temp agent paths for removal and existence checks. Any attempt to create a deploy fails
-/// and is counted, so transferred ownership must reconcile without repairing the test's artifacts.
+/// and is counted. Rechecking transferred ownership can fail, but never repairs the artifacts.
+/// Canonical admission reads are mapped to the fixture store, never the host's default store.
 final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
     let root: String
     let files = FileService()
@@ -208,7 +209,10 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
     var allowCreation = false
     init(root: String) { self.root = root }
     var platformVM: PlatformViewModel {
-        PlatformViewModel(fileService: files, linkService: self, cursorCompiler: self,
+        let admissions = LinkServiceCanonicalDirectoryFileService(wrapped: files,
+            pathMappings: [(Constants.pensieveSkillsDir, root + "/skills")], physicalSandbox: root)
+        admissions.translatesSymlinkTargets = false
+        return PlatformViewModel(fileService: admissions, linkService: self, cursorCompiler: self,
                           agentDetection: DeployStubDetection(installed: [.codex, .cursor]),
                           deployStateStore: .memoryBacked)
     }

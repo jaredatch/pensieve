@@ -51,10 +51,12 @@ final class DeletionTestLinkService: LinkServiceProtocol {
 }
 
 final class DeletionTestCursorCompiler: CursorCompilerProtocol {
+    var ownedProjectPaths: Set<String?> = []
     private(set) var removeProjectPaths: [String?] = []
     func compile(skill: Skill, projectPath: String?) throws {}
     func remove(skill: Skill, projectPath: String?) throws { removeProjectPaths.append(projectPath) }
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
+    func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { ownedProjectPaths.contains(projectPath) }
     func outputPath(skill: Skill, projectPath: String?) -> String {
         "/cursor/\(projectPath ?? "user")/\(skill.directoryName).mdc"
     }

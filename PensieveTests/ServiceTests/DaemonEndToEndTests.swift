@@ -161,7 +161,8 @@ final class DaemonEndToEndTests: XCTestCase {
     private func seedMachineBDeploys() throws {
         try fileService.createSymlink(at: agentDir + "/alpha", pointingTo: cloneB + "/skills/alpha")
         try fileService.createSymlink(at: agentDir + "/beta", pointingTo: cloneB + "/skills/beta")
-        try fileService.writeFile(at: cursorRulesDir + "/gamma.mdc", content: "stale cursor rule\n")
+        try fileService.writeFile(at: cursorRulesDir + "/gamma.mdc",
+                                  content: "---\n# pensieve: managed\n---\nstale cursor rule\n")
         try fileService.writeFile(at: cursorRulesDir + "/alpha.mdc", content: "personal collision\n")
         try DeployStateStore(fileService: fileService, appSupportDir: appSupport).replaceAll([
             deployStateRecord(slug: "alpha", platform: .claudeCode, artifactPath: agentDir + "/alpha"),

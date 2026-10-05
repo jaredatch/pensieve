@@ -74,7 +74,7 @@ final class DeployReconcilerCursorTests: XCTestCase {
     func testStaleMdcRegenerated() throws {
         let raw = try makeStoreSkill("foo", description: "Foo desc", body: "NEW BODY")
         let mdcPath = cursorRulesDir + "/foo.mdc"
-        try "STALE".write(toFile: mdcPath, atomically: true, encoding: .utf8)
+        try "---\n# pensieve: managed\n---\nSTALE".write(toFile: mdcPath, atomically: true, encoding: .utf8)
         try seedRecords([record(slug: "foo", artifactPath: mdcPath)])
         let result = makeReconciler().reconcileCursor(manifest: snapshot([overlay(slug: "foo", cursor: nil)]))
         let expected = CursorMDC.generate(directoryName: "foo", description: "Foo desc",
@@ -88,7 +88,7 @@ final class DeployReconcilerCursorTests: XCTestCase {
     func testDescriptionFallsBackToFrontmatter() throws {
         try makeStoreSkill("bar", description: "Frontmatter Desc", body: "body")
         let mdcPath = cursorRulesDir + "/bar.mdc"
-        try "STALE".write(toFile: mdcPath, atomically: true, encoding: .utf8)
+        try "---\n# pensieve: managed\n---\nSTALE".write(toFile: mdcPath, atomically: true, encoding: .utf8)
         try seedRecords([record(slug: "bar", artifactPath: mdcPath)])
         let cursor = CursorAdapterConfig(description: nil, globs: nil, alwaysApply: false)
         _ = makeReconciler().reconcileCursor(manifest: snapshot([overlay(slug: "bar", cursor: cursor)]))
@@ -122,7 +122,7 @@ final class DeployReconcilerCursorTests: XCTestCase {
     func testIdempotentSecondRunTouchesNothing() throws {
         try makeStoreSkill("baz", description: "Baz", body: "body")
         let mdcPath = cursorRulesDir + "/baz.mdc"
-        try "STALE".write(toFile: mdcPath, atomically: true, encoding: .utf8)
+        try "---\n# pensieve: managed\n---\nSTALE".write(toFile: mdcPath, atomically: true, encoding: .utf8)
         try seedRecords([record(slug: "baz", artifactPath: mdcPath)])
         let manifest = snapshot([overlay(slug: "baz", cursor: nil)])
         let first = makeReconciler().reconcileCursor(manifest: manifest)
@@ -193,9 +193,34 @@ final class DeployReconcilerCursorTests: XCTestCase {
         try "schema_version: 1".write(toFile: root + "/manifest/manifest.yaml", atomically: true, encoding: .utf8)
         try makeStoreSkill("qux", description: "Qux", body: "body")
         let mdcPath = cursorRulesDir + "/qux.mdc"
-        try "STALE".write(toFile: mdcPath, atomically: true, encoding: .utf8)
+        try "---\n# pensieve: managed\n---\nSTALE".write(toFile: mdcPath, atomically: true, encoding: .utf8)
         try seedRecords([record(slug: "qux", artifactPath: mdcPath)])
         let outcome = try makeReconciler().reconcile(root: root)
         XCTAssertEqual(outcome.recompiledRules, 1)
+    }
+
+    func testRecordedForeignRulesAreNotAuthorityAndLegacyIsMarked() throws {
+        let raw = try makeStoreSkill("owned", description: "Description", body: "Body")
+        let path = cursorRulesDir + "/owned.mdc"
+        try seedRecords([record(slug: "owned", artifactPath: path)])
+        let manifest = snapshot([])
+        let legacy = CursorMDC.generateLegacy(directoryName: "owned", description: "Description",
+                                              cursorConfig: nil, body: SkillParser.stripFrontmatter(raw))
+        for text in ["User rule", legacy + "x"] {
+            try fileService.writeFile(at: path, content: text)
+            XCTAssertTrue(makeReconciler().reconcileCursor(manifest: manifest).recompiled.isEmpty)
+            XCTAssertEqual(try fileService.readFile(at: path), text)
+        }
+        try fileService.writeFile(at: path, content: legacy)
+        XCTAssertEqual(makeReconciler().reconcileCursor(manifest: manifest).recompiled, [path])
+        XCTAssertTrue(CursorMDC.hasOwnershipMark(in: try fileService.readRegularFileHeader(at: path, maximumBytes: 1_024)))
+        let sentinel = tempDir + "/marked"
+        let marked = "---\n# pensieve: managed\n---\nTarget"
+        try fileService.writeFile(at: sentinel, content: marked)
+        try fileService.deleteFile(at: path)
+        try fileService.createSymlink(at: path, pointingTo: sentinel)
+        XCTAssertTrue(makeReconciler().reconcileCursor(manifest: manifest).recompiled.isEmpty)
+        XCTAssertEqual(try fileService.symlinkTarget(at: path), sentinel)
+        XCTAssertEqual(try fileService.readFile(at: sentinel), marked)
     }
 }

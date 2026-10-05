@@ -48,7 +48,7 @@ final class ProjectFolderRoundOneTests: XCTestCase {
         XCTAssertEqual(paths, [])
     }
 
-    func testForeignArtifactsAreNotRealizedAndConvergenceHealsLinksOrReportsOccupied() throws {
+    func testForeignArtifactsAreNotRealizedAndConvergenceReportsOccupied() throws {
         for categoryOwned in [false, true] {
             for platform in [PlatformTarget.claudeCode, .grok, .codex] {
                 for occupant in ["file", "directory", "foreign-link"] {
@@ -70,24 +70,14 @@ final class ProjectFolderRoundOneTests: XCTestCase {
                     }
                     XCTAssertFalse(h.platformVM.isDeployed(skill: h.skill, platform: platform, target: .project(h.project)),
                                    "\(platform) / \(occupant) is not a link to the store")
-                    XCTAssertEqual(h.platformVM.artifactExists(
-                        skill: h.skill, platform: platform, target: .project(h.project)), occupant != "directory",
-                        "Removal preserves master's file/link presence check")
+                    XCTAssertFalse(h.platformVM.artifactExists(
+                        skill: h.skill, platform: platform, target: .project(h.project)))
                     let result = run()
+                    XCTAssertEqual(result.failureCount, 1, "Convergence must report the occupant")
+                    XCTAssertTrue(result.failures.first?.error?.contains("already exists") == true)
+                    XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<DeployRecord>()), 1)
                     if occupant == "foreign-link" {
-                        XCTAssertFalse(result.hasFailures, "Convergence heals the foreign link")
-                        XCTAssertEqual(result.successes.count, 1)
-                        let expected = LinkService(fileService: h.mapped).targetPath(
-                            skill: h.skill, platform: platform, projectPath: h.project.path)
-                        XCTAssertEqual(try h.mapped.symlinkTarget(at: path), expected)
-                        XCTAssertTrue(h.platformVM.artifactExists(
-                            skill: h.skill, platform: platform, target: .project(h.project)))
-                        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<DeployRecord>()), 2)
-                        XCTAssertTrue(run().outcomes.isEmpty, "The healed pair converges without another deploy")
-                    } else {
-                        XCTAssertEqual(result.failureCount, 1, "Convergence must report the occupant")
-                        XCTAssertTrue(result.failures.first?.error?.contains("already exists") == true)
-                        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<DeployRecord>()), 1)
+                        XCTAssertEqual(try h.files.symlinkTarget(at: path), h.otherProject.path)
                     }
                     let rows = categoryOwned
                         ? try h.context.fetchCount(FetchDescriptor<SkillProjectAssignment>())
@@ -100,7 +90,7 @@ final class ProjectFolderRoundOneTests: XCTestCase {
         }
     }
 
-    func testCursorExistingFileStillCountsAsRealized() throws {
+    func testCursorForeignFileFailsConvergence() throws {
         let h = try ProjectFolderCallerHarness(installed: [.cursor])
         defer { h.cleanup() }
         try h.files.createDirectory(at: h.project.path)
@@ -110,8 +100,8 @@ final class ProjectFolderRoundOneTests: XCTestCase {
             baseDir: h.root + "/store/skills"))
         let path = compiler.outputPath(skill: h.skill, projectPath: h.project.path)
         try h.files.writeFile(at: path, content: "Edited Cursor rule")
-        XCTAssertTrue(h.platformVM.artifactExists(skill: h.skill, platform: .cursor, target: .project(h.project)))
-        XCTAssertTrue(h.intent.reconcile(context: h.context).outcomes.isEmpty)
+        XCTAssertFalse(h.platformVM.artifactExists(skill: h.skill, platform: .cursor, target: .project(h.project)))
+        XCTAssertEqual(h.intent.reconcile(context: h.context).failureCount, 1)
         XCTAssertEqual(try h.files.readFile(at: path), "Edited Cursor rule")
     }
 }

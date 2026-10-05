@@ -90,11 +90,19 @@ extension IntentReconciler {
             for triple in group {
                 if state.categoryTriples.contains(triple) {
                     deleteProjectRows(matching: triple, state: state, context: context)
-                } else if let platform = PlatformTarget(rawValue: triple.platformRaw),
-                          platformVM.artifactExists(
-                            skill: skill, platform: platform, target: .project(project)
-                          ) {
-                    platforms.append(platform)
+                } else if let platform = PlatformTarget(rawValue: triple.platformRaw) {
+                    do {
+                        if try platformVM.artifactIsOwned(skill: skill, platform: platform, target: .project(project)) {
+                            platforms.append(platform)
+                        } else {
+                            deleteProjectRows(matching: triple, state: state, context: context)
+                        }
+                    } catch {
+                        aggregate.outcomes.append(BatchPairOutcome(
+                            skillID: skill.id, skillName: skill.name, platform: platform, target: .project(project.id),
+                            error: BatchPairOutcome.failureMessage(error, target: .project(project))
+                        ))
+                    }
                 } else {
                     deleteProjectRows(matching: triple, state: state, context: context)
                 }

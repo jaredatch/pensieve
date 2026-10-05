@@ -29,8 +29,12 @@ extension ScenarioHandoverTests {
             let deployments = HandoverDeployments(root: harness.root)
             let reconciler = IntentReconciler(platformVM: deployments.platformVM, machineIdentity: harness.identity,
                                              handoverIsComplete: { true })
-            for _ in 0..<2 { XCTAssertFalse(reconciler.reconcile(context: context).hasFailures, kind) }
-            XCTAssertEqual(deployments.createCalls, 0, kind)
+            let retry = ["cursor-foreign", "cursor-stale"].contains(kind)
+            for _ in 0..<2 {
+                XCTAssertEqual(reconciler.reconcile(context: context).failureCount, retry ? 1 : 0, kind)
+                XCTAssertEqual(try context.fetchCount(FetchDescriptor<IntentAssignment>()), managed ? 1 : 0, kind)
+            }
+            XCTAssertEqual(deployments.createCalls, retry ? 2 : 0, kind)
             XCTAssertEqual(deployments.removeCalls, 0, kind)
             XCTAssertEqual(try harness.deployedFiles(), before, kind)
             if !managed {

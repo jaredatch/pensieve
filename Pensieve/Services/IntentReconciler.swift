@@ -113,7 +113,14 @@ struct IntentReconciler: IntentReconcilerProtocol {
             guard row.projectID == nil else { return nil }
             return UserPair(skillID: row.skillID, platformRaw: row.platformRaw)
         })
-        deployUserWide(desired.subtracting(current), state: state, context: context, aggregate: &aggregate)
+        let realized = current.intersection(desired).filter { pair in
+            guard let skill = state.skillByID[pair.skillID],
+                  let platform = PlatformTarget(rawValue: pair.platformRaw) else { return true }
+            return platform.usesSymlinks
+                ? platformVM.isDeployed(skill: skill, platform: platform)
+                : platformVM.artifactExists(skill: skill, platform: platform)
+        }
+        deployUserWide(desired.subtracting(realized), state: state, context: context, aggregate: &aggregate)
         removeUserWide(current.subtracting(desired), state: state, context: context, aggregate: &aggregate)
     }
 
@@ -145,6 +152,9 @@ struct IntentReconciler: IntentReconcilerProtocol {
             )
             aggregate.outcomes.append(contentsOf: result.outcomes)
             for outcome in result.outcomes where outcome.error == nil {
+                guard !state.ledger.contains(where: {
+                    $0.projectID == nil && $0.skillID == outcome.skillID && $0.platformRaw == outcome.platform.rawValue
+                }) else { continue }
                 context.insert(IntentAssignment(
                     skillID: outcome.skillID, platformRaw: outcome.platform.rawValue
                 ))
@@ -164,9 +174,19 @@ struct IntentReconciler: IntentReconcilerProtocol {
             for pair in group {
                 if state.scenarioPairs.contains(pair) {
                     deleteUserRows(matching: pair, state: state, context: context)
-                } else if let platform = PlatformTarget(rawValue: pair.platformRaw),
-                          platformVM.artifactExists(skill: skill, platform: platform, target: .userWide) {
-                    platforms.append(platform)
+                } else if let platform = PlatformTarget(rawValue: pair.platformRaw) {
+                    do {
+                        if try platformVM.artifactIsOwned(skill: skill, platform: platform) {
+                            platforms.append(platform)
+                        } else {
+                            deleteUserRows(matching: pair, state: state, context: context)
+                        }
+                    } catch {
+                        aggregate.outcomes.append(BatchPairOutcome(
+                            skillID: skill.id, skillName: skill.name, platform: platform, target: .userWide,
+                            error: error.localizedDescription
+                        ))
+                    }
                 } else {
                     deleteUserRows(matching: pair, state: state, context: context)
                 }

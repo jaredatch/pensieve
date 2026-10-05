@@ -285,15 +285,15 @@ extension PlatformViewModelTests {
     }
 
     @MainActor
-    func testRemoveAllDeploysLeavesCursorArtifactsAlone() throws {
+    func testRemoveAllDeploysDropsForeignCursorRecordWithoutRemovingRule() throws {
         let store = DeployStateStore(fileService: FileService(), appSupportDir: try deletionRoot())
         let skill = Skill(name: "A", directoryName: "a"), link = DeletionTestLinkService()
         let cursor = DeletionTestCursorCompiler(), path = cursor.outputPath(skill: skill, projectPath: nil)
         try store.replaceAll([stateRecord(path: path, platform: .cursor)])
         let result = deletionVM(installed: [.cursor], link: link, cursor: cursor, store: store)
             .removeAllDeploys(skill: skill, projects: [])
-        XCTAssertTrue(result.outcomes.isEmpty); XCTAssertTrue(cursor.removeProjectPaths.isEmpty)
-        XCTAssertEqual(try store.read().records.map(\.artifactPath), [path])
+        XCTAssertEqual(result.successes.count, 1); XCTAssertTrue(cursor.removeProjectPaths.isEmpty)
+        XCTAssertTrue(try store.read().records.isEmpty)
     }
 
     @MainActor

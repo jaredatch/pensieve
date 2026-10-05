@@ -17,6 +17,7 @@ protocol LinkServiceProtocol {
     func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws
     /// Check if symlink exists and points to correct target
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool
     /// Get the link path for a skill on a platform
     func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String
     /// Get the target path that the symlink should point to
@@ -25,13 +26,21 @@ protocol LinkServiceProtocol {
     func validateAll(skills: [Skill]) -> [BrokenLink]
 }
 
+extension LinkServiceProtocol {
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        isLinked(skill: skill, platform: platform, projectPath: projectPath)
+    }
+}
+
 // MARK: - Implementation
 
 final class LinkService: LinkServiceProtocol {
     private let fileService: FileServiceProtocol
+    private let ownership: DeployArtifactOwnershipChecking
 
     init(fileService: FileServiceProtocol) {
         self.fileService = fileService
+        self.ownership = DeployArtifactOwnership(fileService: fileService)
     }
 
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
@@ -60,8 +69,13 @@ final class LinkService: LinkServiceProtocol {
             throw LinkError.targetDoesNotExist(target)
         }
 
-        if !fileService.isSymlink(at: link),
-           fileService.fileExists(at: link) || fileService.directoryExists(at: link) {
+        let occupant = try ownership.link(
+            at: link, skillsDirectory: Constants.pensieveSkillsDir, linksFile: platform == .codex && projectPath != nil
+        )
+        if occupant == .foreign {
+            if try fileService.entryTypeWithoutFollowingLinks(at: link) == .symlink {
+                throw ArtifactOwnershipError.occupiedPath(link)
+            }
             throw LinkError.occupiedByRealPath(link)
         }
 
@@ -87,8 +101,18 @@ final class LinkService: LinkServiceProtocol {
 
         guard ProjectDirectory.canAccess(projectPath) else { return }
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
-        guard platform.usesSymlinks, fileService.isSymlink(at: link) else { return }
+        guard try ownsArtifact(skill: skill, platform: platform, projectPath: projectPath) else { return }
         try fileService.deleteFile(at: link)
+    }
+
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        guard platform.usesSymlinks, projectPath == nil || platform.supportsProjectScope,
+              ProjectDirectory.canAccess(projectPath) else { return false }
+        try Self.validatePathComponent(skill.directoryName)
+        return try ownership.link(
+            at: linkPath(skill: skill, platform: platform, projectPath: projectPath),
+            skillsDirectory: Constants.pensieveSkillsDir, linksFile: platform == .codex && projectPath != nil
+        ) == .owned
     }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
