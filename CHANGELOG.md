@@ -9,6 +9,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - Pensieve is open source. The code lives at [github.com/jaredatch/pensieve](https://github.com/jaredatch/pensieve), and that's the place to report a bug or ask for something.
 - Pensieve has its own app icon at last, and its own glyph in the menu bar in place of the stock brain symbol.
 - A skill that's close to or over a platform's token budget now says so on its Overview tab.
+- About Pensieve now credits the open-source code Pensieve ships with, and shows each project's license.
 
 ### Removed
 
