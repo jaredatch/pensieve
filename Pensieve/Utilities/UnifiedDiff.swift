@@ -25,12 +25,12 @@ struct UnifiedDiff: Equatable {
 
     let isTooLarge: Bool
 
-    init(old: String, new: String) {
-        self = (try? Self.compute(old: old, new: new, checkpoint: { _ in })) ?? Self.exceeded
+    init(old: String, new: String, budget: BoundedLineDifference.WorkBudget = .init()) {
+        self = (try? Self.compute(old: old, new: new, budget: budget, checkpoint: { _ in })) ?? Self.exceeded
     }
 
-    init(old: String, new: String, checkpoint: (Int) throws -> Void) throws {
-        self = try Self.compute(old: old, new: new, checkpoint: checkpoint)
+    init(old: String, new: String, budget: BoundedLineDifference.WorkBudget = .init(), checkpoint: (Int) throws -> Void) throws {
+        self = try Self.compute(old: old, new: new, budget: budget, checkpoint: checkpoint)
     }
 
     private init(hunks: [UnifiedDiffHunk], linesAdded: Int, linesRemoved: Int, isTooLarge: Bool) {
@@ -44,12 +44,15 @@ struct UnifiedDiff: Equatable {
         UnifiedDiff(hunks: [], linesAdded: 0, linesRemoved: 0, isTooLarge: true)
     }
 
-    private static func compute(old: String, new: String, checkpoint: (Int) throws -> Void) throws -> UnifiedDiff {
+    private static func compute(old: String, new: String, budget: BoundedLineDifference.WorkBudget,
+                                checkpoint: (Int) throws -> Void) throws -> UnifiedDiff {
         try checkpoint(0)
+        guard !budget.isExhausted else { return exceeded }
         let before = Self.lines(old)
         let after = Self.lines(new)
         try checkpoint(0)
-        guard let difference = try BoundedLineDifference.compute(before: before, after: after, checkpoint: checkpoint) else {
+        guard let difference = try BoundedLineDifference.compute(before: before, after: after,
+                                                                  budget: budget, checkpoint: checkpoint) else {
             return exceeded
         }
         let rows = Self.rows(before: before, after: after, removed: difference.removed, added: difference.added)

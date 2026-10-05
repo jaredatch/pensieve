@@ -30,8 +30,28 @@ final class ImportBoundedReadTests: XCTestCase {
         }
         XCTAssertEqual(String(data: data, encoding: .utf8), "abc")
         XCTAssertEqual(allocated, 4, "The retained prefix allocation is min(bound, file size) + 1")
-        let prefix = try spy.files.readRegularFilePrefix(at: path, maximumBytes: 2)
+        let prefix = try spy.files.readRegularFilePrefix(at: path, maximumBytes: 1)
         XCTAssertEqual(String(data: prefix, encoding: .utf8), "ab")
+    }
+
+    func testPrefixGrowthAfterFstatReadsUntilEofOrTheLookaheadByte() throws {
+        let path = root + "/growth"
+        for maximum in [6, 12] {
+            try spy.files.writeFile(at: path, content: "abc")
+            var grew = false
+            let data = try spy.files.readRegularFilePrefix(at: path, maximumBytes: maximum) { _ in
+                guard !grew else { return }
+                let writer = open(path, O_WRONLY | O_APPEND)
+                defer { close(writer) }
+                XCTAssertGreaterThanOrEqual(writer, 0)
+                let extra = Array("defgh".utf8)
+                XCTAssertEqual(extra.withUnsafeBytes { Darwin.write(writer, $0.baseAddress, $0.count) }, extra.count)
+                grew = true
+            }
+            XCTAssertTrue(grew)
+            XCTAssertEqual(String(data: data, encoding: .utf8), maximum == 6 ? "abcdefg" : "abcdefgh")
+            XCTAssertEqual(data.count > maximum, maximum == 6, "Lookahead must mean content continues beyond the bound")
+        }
     }
 
     func testCursorSpecialLeavesAreNotReadAndOtherRulesRemain() throws {

@@ -45,7 +45,7 @@ extension SkillInstallService {
     /// Oversized bodies are not validated beyond that prefix; apply still validates the whole file.
     func requirePreviewInstallable(_ candidate: SkillCandidate, at path: String) throws {
         let maximum = FileTreeComparisonLimits.updatePreview.maximumFileBytes
-        let bounded = try fileService.readRegularFilePrefix(at: path, maximumBytes: maximum + 1)
+        let bounded = try fileService.readRegularFilePrefix(at: path, maximumBytes: maximum)
         let prefix = bounded.count > maximum
         let data = prefix ? bounded.prefix(maximum) : bounded
         var text = String(data: data, encoding: .utf8)

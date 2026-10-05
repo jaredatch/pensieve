@@ -30,22 +30,29 @@ struct PinnedSkillFileDiff: Equatable {
 }
 
 struct PinnedSkillDiff: Equatable {
+    static let maximumDiffWork = 64 * 1_024 * 1_024
+
     let files: [PinnedSkillFileDiff]
     let unreadFileCount: Int
     let bytesRead: Int
     var isIncomplete: Bool { unreadFileCount > 0 }
 
     init(comparison: FileTreeComparison) {
-        self.init(comparison: comparison, makeFile: PinnedSkillFileDiff.init)
+        let budget = BoundedLineDifference.WorkBudget(maximumWork: Self.maximumDiffWork)
+        self.init(comparison: comparison) { change in
+            PinnedSkillFileDiff(change: change) { UnifiedDiff(old: $0, new: $1, budget: budget) }
+        }
     }
 
     /// Throwing preview builder exposes diff progress so cancellation can stop inside the work.
-    static func build(comparison: FileTreeComparison, checkpoint: (Int) throws -> Void = { _ in }) throws -> PinnedSkillDiff {
+    static func build(comparison: FileTreeComparison,
+                      budget: BoundedLineDifference.WorkBudget = .init(maximumWork: maximumDiffWork),
+                      checkpoint: (Int) throws -> Void = { _ in }) throws -> PinnedSkillDiff {
         try Task.checkCancellation()
         return try PinnedSkillDiff(comparison: comparison) { change in
             try Task.checkCancellation()
             let file = try PinnedSkillFileDiff(change: change) { old, new in
-                try UnifiedDiff(old: old, new: new) { work in
+                try UnifiedDiff(old: old, new: new, budget: budget) { work in
                     try Task.checkCancellation()
                     try checkpoint(work)
                     try Task.checkCancellation()

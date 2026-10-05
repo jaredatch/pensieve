@@ -9,13 +9,10 @@ protocol FileServiceProtocol {
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data
     /// Checks the opened inode's resolved path is inside this directory before reading any bytes.
     func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data
-    /// Inventories both no-follow trees before reading, then compares their regular files under shared limits.
-    func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
-                          limits: FileTreeComparisonLimits) throws -> FileTreeComparison
     /// Runs admission after both inventories, before any compared file content is read.
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
                           limits: FileTreeComparisonLimits, beforeReading: () throws -> Void) throws -> FileTreeComparison
-    /// Reads only a bounded prefix even when the regular file is larger, for frontmatter admission.
+    /// Reads through EOF or maximumBytes + 1, retaining one lookahead byte for bounded frontmatter admission.
     func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data
     func writeFile(at path: String, content: String) throws
     func writeData(at path: String, data: Data) throws
@@ -76,10 +73,11 @@ extension FileServiceProtocol {
     func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data {
         throw CocoaError(.featureUnsupported)
     }
-    /// Inert default: tree comparisons must be modeled explicitly by filesystem doubles.
+    /// Convenience routes every comparison through the canonical admission requirement.
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
                           limits: FileTreeComparisonLimits) throws -> FileTreeComparison {
-        throw CocoaError(.featureUnsupported)
+        try compareFileTrees(local: local, upstream: upstream, excludingUpstreamGit: excludingUpstreamGit,
+                             limits: limits, beforeReading: {})
     }
     /// Inert default: unmodeled admission ordering must never read content on the host.
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,

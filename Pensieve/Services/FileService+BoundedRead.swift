@@ -68,18 +68,21 @@ extension FileService {
 
     /// Reports the retained buffer size at allocation for resource regression tests.
     func readRegularFilePrefix(at path: String, maximumBytes: Int, allocation: (Int) -> Void) throws -> Data {
-        guard maximumBytes >= 0 else { throw CocoaError(.fileReadTooLarge) }
+        guard maximumBytes >= 0, maximumBytes < Int.max else { throw CocoaError(.fileReadTooLarge) }
         let (descriptor, status) = try Self.openRegularFile(at: path)
         defer { close(descriptor) }
         guard status.st_size >= 0 else { throw CocoaError(.fileReadUnknown) }
-        // maximumBytes includes the caller's one lookahead byte. Never reserve the whole
-        // text bound for a small file; retain only min(bound, admitted size) + 1.
-        let capacity = maximumBytes == 0 ? 0 : min(maximumBytes - 1, Int(status.st_size)) + 1
-        var result = Data(count: capacity)
+        // The admitted size only chooses initial capacity. A stale size never ends the read.
+        let limit = maximumBytes + 1
+        var result = Data(count: min(maximumBytes, Int(status.st_size)) + 1)
         allocation(result.count)
         var offset = 0
-        while offset < result.count {
+        while offset < limit {
             try Task.checkCancellation()
+            if offset == result.count {
+                result.count = result.count <= limit / 2 ? result.count * 2 : limit
+                allocation(result.count)
+            }
             let requested = min(64 * 1_024, result.count - offset)
             let count = result.withUnsafeMutableBytes { Darwin.read(descriptor, $0.baseAddress?.advanced(by: offset), requested) }
             if count < 0 && errno == EINTR { continue }

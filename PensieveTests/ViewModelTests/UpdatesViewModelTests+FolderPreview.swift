@@ -170,7 +170,7 @@ extension UpdatesViewModelTests {
             let spy = ImportBoundedReadSpy()
             _ = try makePreviewService(fixture: fixture, spy: spy).previewUpdate(PinnedSkillUpdate(skill: fixture.skill))
             XCTAssertEqual(spy.readAttempts.count, 1, "One bounded admission read, including oversized bodies")
-            XCTAssertEqual(Array(spy.limits.values), [maximum + 1])
+            XCTAssertEqual(Array(spy.limits.values), [maximum])
         }
     }
 

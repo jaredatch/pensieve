@@ -23,6 +23,14 @@ final class FileTreeComparisonTests: XCTestCase {
                                    limits: limits, checkpoint: checkpoint)
     }
 
+    func testComparisonConvenienceDispatchesToTheCanonicalProtocolRequirement() throws {
+        let spy = ImportBoundedReadSpy()
+        let service: FileServiceProtocol = spy
+        XCTAssertNoThrow(try service.compareFileTrees(local: old, upstream: new, excludingUpstreamGit: true,
+                                                     limits: .updatePreview))
+        XCTAssertEqual(spy.comparisonThreads.count, 1, "A double implements just the canonical comparison requirement")
+    }
+
     func testAddedRemovedChangedUnchangedAndLocalGitMatchReplacement() throws {
         try files.writeFile(at: old + "/remove.txt", content: "one\ntwo\n")
         try files.writeFile(at: new + "/add.txt", content: "three\n")

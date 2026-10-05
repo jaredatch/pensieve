@@ -6,12 +6,27 @@ enum BoundedLineDifference {
     static let maximumWork = 16 * 1_024 * 1_024
     static let checkpointInterval = 1_024
 
+    /// A preview owns one budget; file searches commit their actual work on success or refusal.
+    final class WorkBudget {
+        let maximum: Int
+        private(set) var consumed = 0
+        var remaining: Int { maximum - consumed }
+        var isExhausted: Bool { remaining == 0 }
+        init(maximumWork: Int = BoundedLineDifference.maximumWork) { maximum = max(0, maximumWork) }
+        func spend(_ work: Int) {
+            precondition(work >= 0 && work <= remaining)
+            consumed += work
+        }
+    }
+
     struct Edits {
         var removed: Set<Int> = []
         var added: Set<Int> = []
     }
 
-    static func compute(before: [String], after: [String], checkpoint: (Int) throws -> Void) throws -> Edits? {
+    static func compute(before: [String], after: [String], workLimit: Int = maximumWork,
+                        budget: WorkBudget = WorkBudget(), checkpoint: (Int) throws -> Void) throws -> Edits? {
+        guard !budget.isExhausted else { return nil }
         // Data equality preserves exact UTF-8 bytes, including Unicode spelling and line endings.
         var identities: [Data: Int] = [:]
         func keys(_ lines: [String]) throws -> [Int] {
@@ -27,13 +42,12 @@ enum BoundedLineDifference {
         let old = try keys(before)
         let new = try keys(after)
         return try withoutActuallyEscaping(checkpoint) { callback in
-            let search = Search(old: old, new: new, checkpoint: callback)
+            let search = Search(old: old, new: new, workLimit: min(workLimit, budget.remaining), checkpoint: callback)
+            defer { budget.spend(search.work) }
             do {
                 try search.match(old.indices, new.indices)
-                try checkpoint(search.work)
                 return search.edits
             } catch Failure.workExceeded {
-                try checkpoint(search.work)
                 return nil
             }
         }
@@ -47,15 +61,17 @@ enum BoundedLineDifference {
         let checkpoint: (Int) throws -> Void
         var edits = Edits()
         var work = 0
+        let workLimit: Int
 
-        init(old: [Int], new: [Int], checkpoint: @escaping (Int) throws -> Void) {
+        init(old: [Int], new: [Int], workLimit: Int, checkpoint: @escaping (Int) throws -> Void) {
+            self.workLimit = workLimit
             self.old = old
             self.new = new
             self.checkpoint = checkpoint
         }
 
         func charge() throws {
-            guard work < maximumWork else { throw Failure.workExceeded }
+            guard work < workLimit else { throw Failure.workExceeded }
             work += 1
             if work % checkpointInterval == 0 { try checkpoint(work) }
         }
@@ -92,11 +108,14 @@ enum BoundedLineDifference {
                 try new.withUnsafeBufferPointer { new in
                     try forward.withUnsafeMutableBufferPointer { forward in
                         try reverse.withUnsafeMutableBufferPointer { reverse in
-                            // Nonempty ranges and allocated frontiers prove these four pointers exist.
-                            var search = MiddleSnake(old: old.baseAddress!, new: new.baseAddress!,
-                                                     forward: forward.baseAddress!, backward: reverse.baseAddress!,
+                            guard let oldBase = old.baseAddress, let newBase = new.baseAddress,
+                                  let forwardBase = forward.baseAddress, let reverseBase = reverse.baseAddress else {
+                                throw Failure.workExceeded
+                            }
+                            var search = MiddleSnake(old: oldBase, new: newBase,
+                                                     forward: forwardBase, backward: reverseBase,
                                                      before: before, after: after, length: length,
-                                                     work: work, checkpoint: checkpoint)
+                                                     work: work, checkpoint: checkpoint, workLimit: workLimit)
                             defer { work = search.work }
                             return try search.find()
                         }
@@ -116,6 +135,7 @@ enum BoundedLineDifference {
         let length: Int
         var work: Int
         let checkpoint: (Int) throws -> Void
+        let workLimit: Int
         var starts = [0, 0]
         var ends = [0, 0]
 
@@ -129,7 +149,6 @@ enum BoundedLineDifference {
 
         func check(_ spent: Int) throws {
             try checkpoint(spent)
-            guard spent < maximumWork else { throw Failure.workExceeded }
         }
 
         mutating func scan(depth: Int, reversed: Bool) throws -> (Int, Int)? {
@@ -146,6 +165,7 @@ enum BoundedLineDifference {
             var diagonal = -depth + starts[side]
             while diagonal <= depth - ends[side] {
                 defer { diagonal += 2 }
+                guard spent < workLimit else { throw Failure.workExceeded }
                 spent += 1
                 if spent % checkpointInterval == 0 { try check(spent) }
                 let index = offset + diagonal
@@ -154,6 +174,7 @@ enum BoundedLineDifference {
                 var y = x - diagonal
                 while x < oldCount && y < newCount && old[reversed ? before.upperBound - x - 1 : before.lowerBound + x]
                     == new[reversed ? after.upperBound - y - 1 : after.lowerBound + y] {
+                    guard spent < workLimit else { throw Failure.workExceeded }
                     spent += 1
                     if spent % checkpointInterval == 0 { try check(spent) }
                     x += 1

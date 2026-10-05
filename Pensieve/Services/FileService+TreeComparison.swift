@@ -9,12 +9,6 @@ extension FileService {
     }
 
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
-                          limits: FileTreeComparisonLimits) throws -> FileTreeComparison {
-        try compareFileTrees(local: local, upstream: upstream, excludingUpstreamGit: excludingUpstreamGit,
-                             limits: limits, checkpoint: { _ in })
-    }
-
-    func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
                           limits: FileTreeComparisonLimits, beforeReading: () throws -> Void) throws -> FileTreeComparison {
         try compareFileTrees(local: local, upstream: upstream, excludingUpstreamGit: excludingUpstreamGit,
                              limits: limits, beforeReading: beforeReading, checkpoint: { _ in })

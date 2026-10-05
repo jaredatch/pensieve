@@ -5,12 +5,12 @@ final class UnifiedDiffWorkTests: XCTestCase {
     func testDiffPastWorkBoundHasNoCountsAndWorstCaseStaysWithinFiveTimesBenign() throws {
         let maximumLines = 1_048_576 / 5
         let old = String(repeating: "aaaa\n", count: maximumLines)
-        let start = Date()
-        let ordinary = try measuredPreview(old: old, new: "bbbb\n" + old.dropFirst(5))
-        let baseline = Date().timeIntervalSince(start)
-        XCTAssertEqual(ordinary.preview.files.first?.linesAdded, 1)
-        XCTAssertEqual(ordinary.preview.files.first?.linesRemoved, 1)
-        var receipts = ["DIFF_REFERENCE bytes=\(old.utf8.count) work=\(ordinary.work) seconds=\(baseline)"]
+        let changed = "bbbb\n" + old.dropFirst(5)
+        let references = try referenceTimings(old: old, new: changed)
+        let baseline = references.sorted()[references.count / 2]
+        var receipts = ["DIFF_REFERENCE bytes=\(old.utf8.count) work=209721 seconds=\(baseline)"]
+        receipts += references.enumerated().map { "DIFF_REFERENCE_SAMPLE index=\($0.offset) seconds=\($0.element)" }
+        var worst = 0.0
         var samples: [Int: Bool] = [:]
         func measure(_ count: Int) throws -> Bool {
             if let result = samples[count] { return result }
@@ -29,7 +29,7 @@ final class UnifiedDiffWorkTests: XCTestCase {
                 XCTAssertEqual(file.linesAdded, count)
                 XCTAssertEqual(file.linesRemoved, count)
             }
-            XCTAssertLessThanOrEqual(elapsed, baseline * 5, "all-different \(count) lines, work \(sample.work)")
+            worst = max(worst, elapsed)
             receipts.append("DIFF_SWEEP lines=\(count) bytes=\(count * 5) work=\(sample.work) "
                             + "seconds=\(elapsed) refused=\(refused)")
             samples[count] = refused
@@ -43,7 +43,12 @@ final class UnifiedDiffWorkTests: XCTestCase {
             count = min(maximumLines, count * 2)
             XCTAssertTrue(try measure(count))
         }
+        XCTAssertLessThanOrEqual(worst, baseline * 5, "The sweep worst must fit five times the median reference")
+        receipts.append("DIFF_WORST seconds=\(worst) medianReference=\(baseline) ratio=\(worst / baseline)")
         try recordSweep(receipts)
+        try assertSharedPreviewWorkBound()
+        try testMiddleSnakeNeverCrossesAWorkLimitBetweenCheckpoints()
+        testFinishedDiffDoesNotCallATrailingWorkCheckpoint()
     }
 
     func testCancellingPreviewStopsAtAMidDiffCheckpoint() async throws {
@@ -78,6 +83,90 @@ final class UnifiedDiffWorkTests: XCTestCase {
         try PreviewResourceTestEvidence.record("cancellation", message: receipt)
     }
 
+    func testPreviewSharesWorkBudgetAndOrdinaryMultiFileDiffsRemainComplete() throws {
+        try assertSharedPreviewWorkBound()
+    }
+
+    private func assertSharedPreviewWorkBound() throws {
+        let start = Date()
+        _ = try measuredPreview(old: String(repeating: "aaaa\n", count: 4_100),
+                                new: String(repeating: "bbbb\n", count: 4_100))
+        let oneBudgetTime = Date().timeIntervalSince(start)
+        let hard = comparison(count: 1_000, lines: 3_200)
+        var finishedWork = 0
+        var currentWork = 0
+        let began = Date()
+        let budget = BoundedLineDifference.WorkBudget(maximumWork: PinnedSkillDiff.maximumDiffWork)
+        let preview = try PinnedSkillDiff.build(comparison: hard, budget: budget) { work in
+            if work == 0, currentWork > 0 { finishedWork += currentWork; currentWork = 0 }
+            currentWork = max(currentWork, work)
+            if finishedWork + currentWork > PinnedSkillDiff.maximumDiffWork + BoundedLineDifference.maximumWork {
+                XCTFail("One preview must stop at its shared work budget")
+                throw DiffWorkWatchdog.exceeded
+            }
+        }
+        let elapsed = Date().timeIntervalSince(began)
+        let budgetRatio = Double(PinnedSkillDiff.maximumDiffWork) / Double(BoundedLineDifference.maximumWork)
+        XCTAssertLessThanOrEqual(elapsed, oneBudgetTime * (budgetRatio + 2))
+        XCTAssertEqual(budget.consumed, PinnedSkillDiff.maximumDiffWork, "One preview spends exactly its shared budget")
+        XCTAssertEqual(preview.files.count, 1_000)
+        XCTAssertEqual(preview.files.first?.linesAdded, 3_200)
+        for file in preview.files.suffix(990) {
+            XCTAssertEqual(file.content, .tooLarge)
+            XCTAssertNil(file.diff)
+            XCTAssertNil(file.linesAdded)
+            XCTAssertNil(file.linesRemoved)
+        }
+        let ordinaryBudget = BoundedLineDifference.WorkBudget(maximumWork: PinnedSkillDiff.maximumDiffWork)
+        let ordinary = try PinnedSkillDiff.build(comparison: comparison(count: 9, lines: 2_500),
+                                                budget: ordinaryBudget)
+        XCTAssertEqual(ordinary.files.count, 9)
+        XCTAssertTrue(ordinary.files.allSatisfy { $0.linesAdded == 2_500 && $0.linesRemoved == 2_500 })
+        let receipt = "PREVIEW_WORK files=1000 budget=\(PinnedSkillDiff.maximumDiffWork) seconds=\(elapsed) "
+            + "singleBudgetSeconds=\(oneBudgetTime) ordinaryFiles=9 ordinaryWork=\(ordinaryBudget.consumed)"
+        print(receipt)
+        try PreviewResourceTestEvidence.record("preview", message: receipt)
+    }
+
+    func testMiddleSnakeNeverCrossesAWorkLimitBetweenCheckpoints() throws {
+        for limit in 1...24 {
+            let budget = BoundedLineDifference.WorkBudget(maximumWork: limit)
+            let edits = try BoundedLineDifference.compute(before: ["old\n"], after: ["new\n"],
+                                                        workLimit: limit, budget: budget) { _ in }
+            XCTAssertLessThanOrEqual(budget.consumed, limit, "Every charge must respect the exact remaining budget")
+            if limit < 7 { XCTAssertNil(edits, "A middle-snake search starting at the cap must refuse") }
+            if limit == 7 { XCTAssertEqual(edits?.added.count, 1, "Finishing exactly at the cap is allowed") }
+        }
+    }
+
+    func testFinishedDiffDoesNotCallATrailingWorkCheckpoint() {
+        var edits: BoundedLineDifference.Edits?
+        XCTAssertNoThrow(edits = try BoundedLineDifference.compute(before: ["old\n"], after: ["new\n"]) { work in
+            if work > 0 { throw CancellationError() }
+        }, "A finished small search must not be cancelled by a redundant trailing checkpoint")
+        XCTAssertEqual(edits?.added.count, 1)
+        XCTAssertEqual(edits?.removed.count, 1)
+    }
+
+    private func comparison(count: Int, lines: Int) -> FileTreeComparison {
+        let before = String(repeating: "aaaa\n", count: lines)
+        let after = String(repeating: "bbbb\n", count: lines)
+        return FileTreeComparison(changes: (0..<count).map {
+            FileTreeChange(path: "file\($0)", kind: .modified, content: .text(old: before, new: after))
+        }, unreadFileCount: 0, bytesRead: count * lines * 10)
+    }
+
+    private func referenceTimings(old: String, new: String) throws -> [TimeInterval] {
+        try (0..<5).map { _ in
+            let start = Date()
+            let ordinary = try measuredPreview(old: old, new: new)
+            let elapsed = Date().timeIntervalSince(start)
+            XCTAssertEqual(ordinary.preview.files.first?.linesAdded, 1)
+            XCTAssertEqual(ordinary.preview.files.first?.linesRemoved, 1)
+            return elapsed
+        }
+    }
+
     private func findBudgetCrossing(maximumLines: Int, measure: (Int) throws -> Bool) throws -> (Int, Int) {
         var lower = 0
         var upper = 1
@@ -101,11 +190,11 @@ final class UnifiedDiffWorkTests: XCTestCase {
     }
 
     private func measuredPreview(old: String, new: String) throws -> (preview: PinnedSkillDiff, work: Int) {
-        var charged = 0
+        let budget = BoundedLineDifference.WorkBudget(maximumWork: PinnedSkillDiff.maximumDiffWork)
         let preview = try PinnedSkillDiff.build(comparison: FileTreeComparison(changes: [FileTreeChange(
             path: "many-lines", kind: .modified, content: .text(old: old, new: new)
-        )], unreadFileCount: 0, bytesRead: old.utf8.count + new.utf8.count)) { charged = max(charged, $0) }
-        return (preview, charged)
+        )], unreadFileCount: 0, bytesRead: old.utf8.count + new.utf8.count), budget: budget)
+        return (preview, budget.consumed)
     }
 }
 
@@ -121,3 +210,5 @@ private final class DiffWorkProgress {
         return values.count
     }
 }
+
+private enum DiffWorkWatchdog: Error { case exceeded }
