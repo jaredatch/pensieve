@@ -41,12 +41,30 @@ final class UpdateReviewFixture {
 
     func operations(rows: [UpdatesRow], preview: PinnedSkillDiff = preview(),
                     diff: UpdatesViewModel.DiffOperation? = nil,
-                    apply: UpdatesViewModel.ApplyOperation? = nil) -> UpdatesViewModel {
-        UpdatesViewModel(rowLoader: { _ in rows }, applyOperation: apply ?? { _, _, _, _, _, _ in
+                    apply: UpdatesViewModel.ApplyOperation? = nil) -> UpdateReviewOperations {
+        UpdateReviewOperations(rowLoader: { _ in rows }, previewRowLoader: { id, _ in rows.first { $0.id == id } },
+                               applyOperation: apply ?? { _, _, _, _, _, _ in
             throw SkillUpdateFlowError.repositoryChanged
         }, diffOperation: diff ?? { _, _, _, _ in preview }, recheckOperation: { _, _ in
             throw SkillUpdateFlowError.skillNotFound
         })
+    }
+
+    func sheet(rows: [UpdatesRow], diff: UpdatesViewModel.DiffOperation? = nil,
+               apply: UpdatesViewModel.ApplyOperation? = nil) -> UpdatesViewModel {
+        sheet(operations: operations(rows: rows, diff: diff, apply: apply), gate: SkillUpdateApplyGate())
+    }
+
+    func review(rows: [UpdatesRow], diff: UpdatesViewModel.DiffOperation? = nil,
+                apply: UpdatesViewModel.ApplyOperation? = nil) -> (UpdatesViewModel, ViewChangesViewModel) {
+        let operations = operations(rows: rows, diff: diff, apply: apply)
+        let gate = SkillUpdateApplyGate()
+        return (sheet(operations: operations, gate: gate), ViewChangesViewModel(operations: operations, applyGate: gate))
+    }
+
+    private func sheet(operations: UpdateReviewOperations, gate: SkillUpdateApplyGate) -> UpdatesViewModel {
+        UpdatesViewModel(rowLoader: operations.rowLoader, applyOperation: operations.applyOperation,
+                         diffOperation: operations.diffOperation, recheckOperation: operations.recheckOperation, applyGate: gate)
     }
 
     nonisolated static func preview() -> PinnedSkillDiff {

@@ -8,9 +8,7 @@ extension UpdatesViewModelTests {
         let first = insertUpdateSkill(slug: "first-recheck")
         let second = insertUpdateSkill(slug: "second-recheck")
         try context.save()
-        let rows = try [first, second].map {
-            try UpdatesViewModel.makeRow(skill: $0, driftedLocally: false)
-        }
+        let rows = try [first, second].map { try UpdatesViewModel.makeRow(skill: $0, driftedLocally: false) }
         let gate = TestWait.Gate(owner: self)
         let started = DispatchSemaphore(value: 0)
         let diffCalls = LockedCallRecorder()
@@ -41,7 +39,10 @@ extension UpdatesViewModelTests {
         XCTAssertEqual(model.recheckingSkillID, rows[0].id)
         XCTAssertEqual(model.status(for: rows[0]), .updating)
 
-        let window = ViewChangesViewModel(operations: model)
+        let review = UpdateReviewOperations(rowLoader: model.rowLoader,
+            previewRowLoader: { id, _ in rows.first { $0.id == id } }, applyOperation: model.applyOperation,
+            diffOperation: model.diffOperation, recheckOperation: model.recheckOperation)
+        let window = ViewChangesViewModel(operations: review, applyGate: model.applyGate)
         window.open(skillID: rows[1].id, context: context)
         await TestWait.until(failureMessage: "independent window preview did not finish") { window.state != .loading }
         await model.applySelectedAndReport(context: context)

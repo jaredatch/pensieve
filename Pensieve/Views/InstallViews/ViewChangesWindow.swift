@@ -34,30 +34,52 @@ struct ViewChangesScene: Scene {
 struct ViewChangesWindow: View {
     @Bindable var model: ViewChangesViewModel
     @Bindable var library: SkillLibraryViewModel
-    @Query private var skills: [Skill]
     @Environment(\.dismiss) private var dismiss
 
+    var body: some View {
+        ViewChangesWindowContent(skillID: model.requestedSkillID, model: model, library: library, onClose: { dismiss() })
+    }
+
+    /// Opening a preview looks up this skill once and leaves draft and sheet state alone.
+    static func present(skillID: UUID, model: ViewChangesViewModel, library: SkillLibraryViewModel,
+                        context: ModelContext, windows: [NSWindow]? = nil, open: () -> Void) {
+        model.open(skillID: skillID, context: context, folderRevisions: library.folderChangeRevisions)
+        WindowPolicy.showChangesWindow(among: windows ?? NSApp.windows, open: open)
+    }
+}
+
+private struct ViewChangesWindowContent: View {
+    @Bindable var model: ViewChangesViewModel
+    @Bindable var library: SkillLibraryViewModel
+    @Query private var skills: [Skill]
+    let onClose: () -> Void
+
+    init(skillID: UUID?, model: ViewChangesViewModel, library: SkillLibraryViewModel, onClose: @escaping () -> Void) {
+        self.model = model
+        self.library = library
+        self.onClose = onClose
+        if let skillID {
+            _skills = Query(filter: #Predicate<Skill> { $0.id == skillID })
+        } else {
+            _skills = Query(filter: #Predicate<Skill> { _ in false })
+        }
+    }
+
     private var identities: [ViewChangesIdentity] {
-        skills.map { ViewChangesIdentity(skill: $0, folderRevision: library.folderChangeRevisions[$0.directoryName, default: 0]) }
+        skills.map {
+            ViewChangesIdentity(skill: $0, folderRevision: library.folderChangeRevisions[$0.directoryName, default: 0])
+        }
     }
 
     var body: some View {
-        ViewChangesView(model: model, library: library, onClose: { dismiss() })
+        ViewChangesView(model: model, library: library, onClose: onClose)
             .onAppear { validate() }
             .onChange(of: identities) { _, _ in validate() }
+            .onChange(of: model.isApplying) { _, applying in if !applying { validate() } }
     }
 
     private func validate() {
         model.validate(skills: skills, folderRevisions: library.folderChangeRevisions)
-    }
-
-    /// Both entry points share the real singleton-window policy; opening doesn't touch editor drafts or sheet state.
-    static func present(skillID: UUID, model: ViewChangesViewModel, library: SkillLibraryViewModel,
-                        context: ModelContext, windows: [NSWindow]? = nil, open: () -> Void) {
-        let skill = try? context.fetch(FetchDescriptor<Skill>()).first { $0.id == skillID }
-        let revision = skill.map { library.folderChangeRevisions[$0.directoryName, default: 0] } ?? 0
-        model.open(skillID: skillID, context: context, folderRevision: revision)
-        WindowPolicy.showChangesWindow(among: windows ?? NSApp.windows, open: open)
     }
 }
 

@@ -11,15 +11,15 @@ enum WindowPolicy {
     static let changesWindowID = "view-changes"
 
     static func configureChangesWindow(_ window: NSWindow) {
-        window.identifier = NSUserInterfaceItemIdentifier(changesWindowID)
         window.setAccessibilityIdentifier(changesWindowID)
+        window.titlebarSeparatorStyle = .none
         window.isRestorable = false
         window.tabbingMode = .disallowed
     }
 
     static func showChangesWindow(among windows: [NSWindow], open: () -> Void) {
         if let window = windows.first(where: {
-            ($0.isVisible || $0.isMiniaturized) && $0.identifier?.rawValue == changesWindowID
+            ($0.isVisible || $0.isMiniaturized) && $0.accessibilityIdentifier() == changesWindowID
         }) {
             if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)

@@ -45,9 +45,14 @@ extension UpdatesViewModelTests {
         window.open(skillID: fixture.skill.id, context: context)
         await windowLoaded(window)
         try fileService.writeFile(at: fixture.repository + "/README.md", content: "move repository head\n")
-        _ = try commit(fixture.repository, message: "head moved after preview")
+        let moved = try commit(fixture.repository, message: "head moved after preview")
         try await assertWindowRefusal(window, fixture: fixture, library: library,
                                       message: SkillUpdateFlowError.repositoryChangedMessage)
+        XCTAssertTrue(window.canRecheck)
+        window.recheck(context: context)
+        await windowLoaded(window)
+        XCTAssertEqual(window.row?.upstreamCommit, moved, "Re-check loads the newly pinned revision")
+        XCTAssertTrue(window.canUpdate)
     }
 
     func testWindowApplyTimeDriftRefusesBeforeWritingAndOffersExplicitReplacement() async throws {
@@ -102,9 +107,15 @@ extension UpdatesViewModelTests {
                                                 currentBody: library.readBody(fixture.skill)))
     }
 
-    private func makeRealWindow(
+    func makeRealWindow(fixture: RealFixture, service: SkillInstallService? = nil)
+        -> (ViewChangesViewModel, SkillLibraryViewModel) {
+        let (operations, library) = makeRealReviewOperations(fixture: fixture, service: service)
+        return (ViewChangesViewModel(operations: operations), library)
+    }
+
+    func makeRealReviewOperations(
         fixture: RealFixture, service: SkillInstallService? = nil
-    ) -> (ViewChangesViewModel, SkillLibraryViewModel) {
+    ) -> (UpdateReviewOperations, SkillLibraryViewModel) {
         let library = SkillLibraryViewModel(
             skillStore: SkillStore(fileService: fileService, baseDir: fixture.storeRoot + "/skills"), fileService: fileService,
             fileWatchService: FileWatchService(rootDir: fixture.storeRoot + "/skills"), manifestRoot: fixture.storeRoot
@@ -116,18 +127,18 @@ extension UpdatesViewModelTests {
             remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) }
         )
         let defaults = UpdatesViewModel.DefaultOperations(updateCheckService: checker, skillInstallService: installer)
-        let model = UpdatesViewModel(
-            rowLoader: defaults.rowLoader, applyOperation: defaults.applyOperation,
+        let model = UpdateReviewOperations(
+            rowLoader: defaults.rowLoader, previewRowLoader: defaults.previewRowLoader, applyOperation: defaults.applyOperation,
             diffOperation: defaults.diffOperation, recheckOperation: defaults.recheckOperation,
             bodyWriteRegistration: SyncBodyWriteRegistration(
                 begin: library.beginAppAuthoredBodyWrite,
                 end: { library.finishAppAuthoredBodyWrite(directoryName: $0, succeeded: $1) }
             )
         )
-        return (ViewChangesViewModel(operations: model), library)
+        return (model, library)
     }
 
-    private func windowLoaded(_ model: ViewChangesViewModel) async {
+    func windowLoaded(_ model: ViewChangesViewModel) async {
         await TestWait.until(failureMessage: "real window preview did not finish") { model.state != .loading }
         XCTAssertNotNil(model.selectedFile)
     }

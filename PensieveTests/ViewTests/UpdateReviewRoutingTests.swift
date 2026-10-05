@@ -10,8 +10,7 @@ final class UpdateReviewRoutingTests: XCTestCase {
         let first = try fixture.skill("first")
         let second = try fixture.skill("second")
         let rows = try [first, second].map { try UpdatesViewModel.makeRow(skill: $0, driftedLocally: true) }
-        let sheet = fixture.operations(rows: rows)
-        let preview = ViewChangesViewModel(operations: sheet)
+        let (sheet, preview) = fixture.review(rows: rows)
         var opened: [String] = []
         let routing = UpdateReviewRouting(preview: preview, updates: sheet, library: fixture.library,
                                          context: fixture.context, windows: { [] }, openWindow: { opened.append($0) })
@@ -39,8 +38,7 @@ final class UpdateReviewRoutingTests: XCTestCase {
         let first = try fixture.skill("first")
         let second = try fixture.skill("second")
         let rows = try [first, second].map { try UpdatesViewModel.makeRow(skill: $0, driftedLocally: false) }
-        let sheet = fixture.operations(rows: rows)
-        let preview = ViewChangesViewModel(operations: sheet)
+        let (sheet, preview) = fixture.review(rows: rows)
         let routing = UpdateReviewRouting(preview: preview, updates: sheet, library: fixture.library,
                                          context: fixture.context, windows: { [] }, openWindow: { _ in })
         sheet.present(selecting: first.id, library: fixture.library)
@@ -67,7 +65,7 @@ final class UpdateReviewRoutingTests: XCTestCase {
         let started = DispatchSemaphore(value: 0)
         let finished = DispatchSemaphore(value: 0)
         let cancelled = UpdateReviewRecorder<Bool>()
-        let sheet = fixture.operations(rows: rows, diff: { id, _, _, _ in
+        let (sheet, preview) = fixture.review(rows: rows, diff: { id, _, _, _ in
             if id == first.id {
                 started.signal()
                 try gate.wait()
@@ -79,7 +77,6 @@ final class UpdateReviewRoutingTests: XCTestCase {
             }
             return UpdateReviewFixture.preview()
         })
-        let preview = ViewChangesViewModel(operations: sheet)
         let window = makeWindow()
         defer { window.close() }
         var opened: [String] = []

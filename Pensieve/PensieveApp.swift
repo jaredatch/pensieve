@@ -80,7 +80,8 @@ struct PensieveApp: App {
             updatesOperations: runtime.updatesViewModelOperations,
             notifier: runtime.syncStateNotifier,
             echoRegistrar: runtime.syncWriteEchoRegistrar,
-            bodyWriteRegistration: runtime.syncBodyWriteRegistration
+            bodyWriteRegistration: runtime.syncBodyWriteRegistration,
+            applyGate: runtime.updateApplyGate
         )
     }
 

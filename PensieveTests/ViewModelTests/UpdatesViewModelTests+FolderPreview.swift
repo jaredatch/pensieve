@@ -62,9 +62,10 @@ extension UpdatesViewModelTests {
             skillInstallService: service
         )
         let row = try UpdatesViewModel.makeRow(skill: fixture.skill, driftedLocally: false)
-        let model = makeModel(rows: [row], diff: operations.diffOperation)
-        await model.loadAndReport(context: context)
-        let window = ViewChangesViewModel(operations: model)
+        let review = UpdateReviewOperations(rowLoader: operations.rowLoader, previewRowLoader: operations.previewRowLoader,
+            applyOperation: operations.applyOperation, diffOperation: operations.diffOperation,
+            recheckOperation: operations.recheckOperation)
+        let window = ViewChangesViewModel(operations: review)
         window.open(skillID: row.id, context: context)
         await TestWait.until(failureMessage: "preview did not finish") { window.state != .loading }
         XCTAssertNotNil(window.selectedFile)

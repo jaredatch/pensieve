@@ -2,14 +2,15 @@ import SwiftData
 
 extension AppRuntime {
     func makeViewChangesModel() -> ViewChangesViewModel {
-        ViewChangesViewModel(operations: UpdatesViewModel(
+        ViewChangesViewModel(operations: UpdateReviewOperations(
             rowLoader: updatesViewModelOperations.rowLoader,
+            previewRowLoader: updatesViewModelOperations.previewRowLoader,
             applyOperation: updatesViewModelOperations.applyOperation,
             diffOperation: updatesViewModelOperations.diffOperation,
             recheckOperation: updatesViewModelOperations.recheckOperation,
             notifier: syncStateNotifier, echoRegistrar: syncWriteEchoRegistrar,
             bodyWriteRegistration: syncBodyWriteRegistration
-        ))
+        ), applyGate: updateApplyGate)
     }
 
     func mainWindowAppeared() async {

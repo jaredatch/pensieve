@@ -72,8 +72,7 @@ final class ViewChangesViewModelTests: XCTestCase {
     func testSheetResetDoesNotTouchPreviewOrFileSelection() async throws {
         let skill = try fixture.skill("retained")
         let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
-        let sheet = fixture.operations(rows: [row])
-        let model = ViewChangesViewModel(operations: sheet)
+        let (sheet, model) = fixture.review(rows: [row])
         model.open(skillID: skill.id, context: fixture.context)
         await loaded(model)
         model.selectFile(path: "scripts/setup.sh")
@@ -135,7 +134,7 @@ final class ViewChangesViewModelTests: XCTestCase {
         let second = try fixture.skill("second")
         let rows = try [first, second].map { try UpdatesViewModel.makeRow(skill: $0, driftedLocally: true) }
         let calls = UpdateReviewRecorder<UUID>()
-        let sheet = fixture.operations(rows: rows, apply: { id, _, _, _, _, _ in
+        let sheet = fixture.sheet(rows: rows, apply: { id, _, _, _, _, _ in
             calls.append(id)
             throw SkillUpdateFlowError.repositoryChanged
         })
@@ -150,29 +149,35 @@ final class ViewChangesViewModelTests: XCTestCase {
     }
 
     func testDraftCancellationPrecedesAnyReplacementQuestionOrApply() async throws {
-        let skill = try fixture.skill("draft")
-        let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: true)
-        let calls = UpdateReviewRecorder<UUID>()
-        let model = ViewChangesViewModel(operations: fixture.operations(rows: [row], apply: { id, _, _, _, _, _ in
-            calls.append(id)
-            throw SkillUpdateFlowError.repositoryChanged
-        }))
-        fixture.library.setLastWrittenBody("old body\n", directoryName: skill.directoryName)
-        fixture.library.noteEditorChanged(skill, body: "unsaved draft")
-        var answer: ((UnsavedChangesChoice) -> Void)?
-        fixture.library.unsavedChangesPresenter = { _, resolve in answer = resolve }
-        model.open(skillID: skill.id, context: fixture.context)
-        await loaded(model)
-        XCTAssertTrue(fixture.library.hasUnsavedChanges)
-        XCTAssertNil(answer, "opening a preview must not leave the draft")
-        model.requestUpdate(library: fixture.library, context: fixture.context, onSuccess: { XCTFail("Cancelled update closed") })
-        XCTAssertNotNil(answer)
-        XCTAssertTrue(calls.values.isEmpty)
-        XCTAssertFalse(model.asksToReplaceLocalEdits)
-        answer?(.cancel)
-        XCTAssertFalse(model.isPreparingUpdate)
-        XCTAssertTrue(fixture.library.hasUnsavedChanges)
-        XCTAssertTrue(calls.values.isEmpty)
+        for drifted in [true, false] {
+            let skill = try fixture.skill(drifted ? "draft-drifted" : "draft-clean")
+            let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: drifted)
+            let calls = UpdateReviewRecorder<UUID>()
+            let model = ViewChangesViewModel(operations: fixture.operations(rows: [row], apply: { id, _, _, _, _, _ in
+                calls.append(id)
+                throw SkillUpdateFlowError.repositoryChanged
+            }))
+            fixture.library.setLastWrittenBody("old body\n", directoryName: skill.directoryName)
+            fixture.library.noteEditorChanged(skill, body: "unsaved draft")
+            var answer: ((UnsavedChangesChoice) -> Void)?
+            fixture.library.unsavedChangesPresenter = { _, resolve in answer = resolve }
+            model.open(skillID: skill.id, context: fixture.context)
+            await loaded(model)
+            XCTAssertTrue(fixture.library.hasUnsavedChanges)
+            XCTAssertNil(answer, "opening a preview must not leave the draft")
+            model.requestUpdate(library: fixture.library, context: fixture.context,
+                                onSuccess: { XCTFail("Cancelled update closed") })
+            XCTAssertNotNil(answer)
+            XCTAssertTrue(calls.values.isEmpty)
+            XCTAssertFalse(model.asksToReplaceLocalEdits)
+            answer?(.cancel)
+            XCTAssertFalse(model.asksToReplaceLocalEdits, "Cancel must not ask to replace local edits")
+            await Task.yield()
+            XCTAssertFalse(model.isPreparingUpdate)
+            XCTAssertFalse(model.isApplying, "Cancel must never reserve an apply")
+            XCTAssertTrue(fixture.library.hasUnsavedChanges)
+            XCTAssertTrue(calls.values.isEmpty)
+        }
     }
 
     func testDriftConfirmationDeclinePreservesBytesAndConfirmationAllowsApply() async throws {
@@ -209,7 +214,9 @@ final class ViewChangesViewModelTests: XCTestCase {
             let file = PinnedSkillFileDiff(change: FileTreeChange(path: "file", kind: .modified, content: content))
             XCTAssertTrue(ViewChangesPresentation.unavailableReason(file)?.contains(expected) == true)
             if case .modeOnly = content {
-                XCTAssertEqual(ViewChangesPresentation.summary(file), "0 additions, 0 deletions")
+                XCTAssertNil(ViewChangesPresentation.sidebarCounts(file), "Mode changes have no line counts")
+                XCTAssertEqual(ViewChangesPresentation.summary(file), "Permissions changed")
+                XCTAssertEqual(ViewChangesPresentation.unavailableTitle(file), "Permissions Changed")
             } else {
                 XCTAssertNil(file.linesAdded)
                 XCTAssertNil(file.linesRemoved)

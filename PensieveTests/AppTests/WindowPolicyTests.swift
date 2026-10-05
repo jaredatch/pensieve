@@ -79,7 +79,7 @@ final class WindowPolicyTests: XCTestCase {
     }
 
     func testViewChangesWindowIsNeverPickedOrClosedAsAnExtraMainWindow() {
-        let changes = makeWindow(identifier: WindowPolicy.changesWindowID)
+        let changes = makeWindow(identifier: "view-changes-AppWindow-1")
         let first = makeWindow(identifier: "main-AppWindow-1")
         let extra = makeWindow(identifier: "main-AppWindow-2")
         let settings = makeWindow(identifier: "com_apple_SwiftUI_Settings_window")
@@ -88,7 +88,8 @@ final class WindowPolicyTests: XCTestCase {
         WindowPolicy.configureChangesWindow(changes)
         windows.forEach { $0.orderFront(nil) }
 
-        XCTAssertEqual(changes.identifier?.rawValue, WindowPolicy.changesWindowID)
+        XCTAssertEqual(changes.identifier?.rawValue, "view-changes-AppWindow-1",
+                       "SwiftUI retains ownership of its scene identifier")
         XCTAssertEqual(changes.accessibilityIdentifier(), WindowPolicy.changesWindowID)
         XCTAssertFalse(changes.isRestorable)
         XCTAssertEqual(changes.tabbingMode, .disallowed)

@@ -158,7 +158,7 @@ final class UpdatesViewModelTests: XCTestCase {
         await model.loadAndReport(context: context)
         let row = try XCTUnwrap(model.rows.first)
 
-        let window = ViewChangesViewModel(operations: model)
+        let (window, _) = makeRealWindow(fixture: fixture)
         window.open(skillID: row.id, context: context)
         await TestWait.until(failureMessage: "update diff did not finish") { window.state != .loading }
 

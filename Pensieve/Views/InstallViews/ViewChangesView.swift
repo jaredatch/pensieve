@@ -14,7 +14,6 @@ struct ViewChangesView: View {
                 .navigationSplitViewColumnWidth(DesignTokens.changesSidebarWidth)
         } detail: {
             VStack(spacing: 0) {
-                toolbar
                 separator
                 if let message = model.applyMessage {
                     Label(message, systemImage: "exclamationmark.triangle")
@@ -22,12 +21,20 @@ struct ViewChangesView: View {
                         .foregroundStyle(.orange)
                         .padding(Spacing.sm)
                 }
+                if model.canRecheck && model.applyMessage != nil {
+                    Button("Re-check") { model.recheck(context: context) }
+                        .accessibilityIdentifier("changes-recheck")
+                        .padding(Spacing.sm)
+                }
                 content
             }
+            .toolbar { changesToolbar }
         }
         .navigationSplitViewStyle(.balanced)
+        .toolbarBackground(.hidden, for: .windowToolbar)
         .accessibilityIdentifier("view-changes-content")
-        .frame(minWidth: DesignTokens.changesWindowWidth, minHeight: DesignTokens.changesWindowHeight)
+        .frame(minWidth: DesignTokens.changesWindowWidth,
+               minHeight: DesignTokens.changesWindowHeight - DesignTokens.changesToolbarHeight)
         .background(ViewChangesWindowLifecycle(onClose: model.close))
         .alert("Replace your local edits?", isPresented: $model.asksToReplaceLocalEdits) {
             Button("Cancel", role: .cancel) { replaceLocalEdits(false) }
@@ -41,12 +48,14 @@ struct ViewChangesView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("\(model.files.count) Changed Files")
+            if let header = ViewChangesPresentation.sidebarHeader(model.state) {
+                Text(header)
                 .font(DesignTokens.changesFileFolder)
                 .foregroundStyle(.secondary)
                 .padding(.leading, DesignTokens.changesFileRowHorizontalPadding)
                 .padding(.top, DesignTokens.changesSidebarHeaderTop)
                 .padding(.bottom, DesignTokens.changesSidebarHeaderBottom)
+            }
             ScrollView {
                 LazyVStack(spacing: DesignTokens.changesFileRowSpacing) {
                     ForEach(model.files, id: \.path) { file in
@@ -63,20 +72,23 @@ struct ViewChangesView: View {
         .accessibilityIdentifier("changes-files")
     }
 
-    private var toolbar: some View {
-        HStack(spacing: DesignTokens.changesToolbarGap) {
-            VStack(alignment: .leading, spacing: DesignTokens.changesTitleGap) {
-                Text(verbatim: model.row.map { "Changes to \($0.skillName)" } ?? "View Changes")
-                    .font(DesignTokens.changesTitle)
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.changesTitleGap) {
+            Text(verbatim: model.row.map { "Changes to \($0.skillName)" } ?? "View Changes")
+                .font(DesignTokens.changesTitle)
+                .lineLimit(1)
+            if let row = model.row {
+                Text(verbatim: ViewChangesPresentation.subtitle(row))
+                    .font(DesignTokens.changesSubtitle)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if let row = model.row {
-                    Text(verbatim: ViewChangesPresentation.subtitle(row))
-                        .font(DesignTokens.changesSubtitle)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
             }
-            Spacer(minLength: DesignTokens.changesToolbarGap)
+        }
+    }
+
+    @ToolbarContentBuilder private var changesToolbar: some ToolbarContent {
+        ToolbarItem(id: "changes-heading", placement: .navigation) { heading }
+        ToolbarItemGroup(placement: .primaryAction) {
             Button("View on GitHub") {
                 if let url = model.row?.compareURL { openURL(url) }
             }
@@ -95,8 +107,6 @@ struct ViewChangesView: View {
                 .disabled(!model.canUpdate || library.libraryUnavailable)
                 .accessibilityIdentifier("changes-update")
         }
-        .padding(.horizontal, DesignTokens.changesToolbarInset)
-        .frame(height: DesignTokens.changesToolbarHeight)
     }
 
     private var separator: some View {
@@ -111,8 +121,11 @@ struct ViewChangesView: View {
             ProgressView("Loading changes…").frame(maxWidth: .infinity, maxHeight: .infinity)
         case let .failed(message):
             EmptyStateView("Couldn't Load Changes", description: message) {
-                Button("Retry") { retry() }
-                    .accessibilityIdentifier("changes-retry")
+                if model.canRecheck {
+                    Button("Re-check") { model.recheck(context: context) }.accessibilityIdentifier("changes-recheck")
+                } else {
+                    Button("Retry") { retry() }.accessibilityIdentifier("changes-retry")
+                }
             }
         case let .stale(message):
             EmptyStateView("Preview No Longer Current", description: message)
@@ -133,7 +146,7 @@ struct ViewChangesView: View {
                 .padding(.horizontal, DesignTokens.changesToolbarInset)
                 .frame(height: DesignTokens.changesFileHeaderHeight)
                 if let reason = ViewChangesPresentation.unavailableReason(file) {
-                    EmptyStateView("Diff Unavailable", description: reason)
+                    EmptyStateView(ViewChangesPresentation.unavailableTitle(file), description: reason)
                 } else if let diff = file.diff {
                     UnifiedDiffView(diff: diff).id(file.path)
                 }
@@ -146,8 +159,7 @@ struct ViewChangesView: View {
     }
 
     private func retry() {
-        let revision = model.row.map { library.folderChangeRevisions[$0.slug, default: 0] } ?? 0
-        model.retry(context: context, folderRevision: revision)
+        model.retry(context: context, folderRevisions: library.folderChangeRevisions)
     }
 
     private func replaceLocalEdits(_ replace: Bool) {
@@ -173,11 +185,17 @@ private struct ViewChangesFileRow: View {
             }
             Spacer(minLength: 0)
             HStack(spacing: DesignTokens.changesCountGap) {
-                if let added = file.linesAdded, let removed = file.linesRemoved {
+                if let counts = ViewChangesPresentation.sidebarCounts(file) {
+                    let added = counts.added
+                    let removed = counts.removed
                     if added > 0 || removed == 0 { Text("+\(added)").foregroundStyle(Color(nsColor: .systemGreen)) }
                     if removed > 0 { Text("−\(removed)").foregroundStyle(Color(nsColor: .systemRed)) }
                 } else {
-                    Text(verbatim: ViewChangesPresentation.summary(file)).foregroundStyle(.secondary).lineLimit(1)
+                    if case .modeOnly = file.content {
+                        Text("Mode").foregroundStyle(.secondary)
+                    } else {
+                        Text(verbatim: ViewChangesPresentation.summary(file)).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
             }
             .font(DesignTokens.changesCount)

@@ -2,6 +2,23 @@ import Foundation
 
 /// Presentation of precomputed hunks only. This mapping never runs a diff or reads file contents.
 enum ViewChangesPresentation {
+    static func sidebarHeader(_ state: ViewChangesViewModel.State) -> String? {
+        guard case let .loaded(preview) = state else { return nil }
+        let count = preview.files.count
+        return "\(count) Changed \(count == 1 ? "File" : "Files")"
+    }
+
+    static func sidebarCounts(_ file: PinnedSkillFileDiff) -> (added: Int, removed: Int)? {
+        if case .modeOnly = file.content { return nil }
+        guard let added = file.linesAdded, let removed = file.linesRemoved else { return nil }
+        return (added, removed)
+    }
+
+    static func unavailableTitle(_ file: PinnedSkillFileDiff) -> String {
+        if case .modeOnly = file.content { return "Permissions Changed" }
+        return "Diff Unavailable"
+    }
+
     static func subtitle(_ row: UpdatesRow) -> String {
         let days = max(0, Int(row.updateDate.timeIntervalSince(row.installedDate) / 86_400))
         let age = days == 1 ? "1 day newer" : "\(days) days newer"
@@ -9,6 +26,7 @@ enum ViewChangesPresentation {
     }
 
     static func summary(_ file: PinnedSkillFileDiff) -> String {
+        if case .modeOnly = file.content { return "Permissions changed" }
         guard let added = file.linesAdded, let removed = file.linesRemoved else {
             switch file.content {
             case .binary: return "Binary file"

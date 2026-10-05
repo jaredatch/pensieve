@@ -17,7 +17,9 @@ final class UpdatesViewModel {
     var confirmedDriftSkillIDs: Set<UUID> = []
     var statuses: [UUID: UpdatesRowStatus] = [:]
     var isLoading = false
-    var isApplying = false
+    var isApplyingBatch = false
+    let applyGate: SkillUpdateApplyGate
+    var isApplying: Bool { isApplyingBatch || rows.contains { applyGate.isApplying($0.id) } }
     var recheckingSkillID: UUID?
     var loadError: String?
     var isPresented = false
@@ -41,8 +43,10 @@ final class UpdatesViewModel {
         recheckOperation: @escaping RecheckOperation,
         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
         echoRegistrar: @escaping SyncWriteEchoRegistering = SyncWriteEchoRegistrar.suppressed,
-        bodyWriteRegistration: SyncBodyWriteRegistration = .suppressed
+        bodyWriteRegistration: SyncBodyWriteRegistration = .suppressed,
+        applyGate: SkillUpdateApplyGate? = nil
     ) {
+        self.applyGate = applyGate ?? SkillUpdateApplyGate()
         self.rowLoader = rowLoader
         self.applyOperation = applyOperation
         self.diffOperation = diffOperation
@@ -91,11 +95,11 @@ final class UpdatesViewModel {
     }
 
     func status(for row: UpdatesRow) -> UpdatesRowStatus {
-        statuses[row.id] ?? .idle
+        applyGate.isApplying(row.id) ? .updating : statuses[row.id] ?? .idle
     }
 
     func load(context: ModelContext) {
-        guard !isLoading, !isApplying else { return }
+        guard !isLoading, !isApplyingBatch else { return }
         let id = beginOperation()
         isLoading = true
         let container = context.container
@@ -103,7 +107,7 @@ final class UpdatesViewModel {
     }
 
     func loadAndReport(context: ModelContext) async {
-        guard !isLoading, !isApplying else { return }
+        guard !isLoading, !isApplyingBatch else { return }
         let id = beginOperation()
         isLoading = true
         await performLoad(container: context.container, operationID: id)
@@ -112,7 +116,7 @@ final class UpdatesViewModel {
     func applySelected(context: ModelContext) {
         guard canApply else { return }
         let id = beginOperation()
-        isApplying = true
+        isApplyingBatch = true
         let selected = rows.filter { selectedSkillIDs.contains($0.id) }
         let container = context.container
         operationTask = Task {
@@ -128,7 +132,7 @@ final class UpdatesViewModel {
     func applySelectedAndReport(context: ModelContext) async {
         guard canApply else { return }
         let id = beginOperation()
-        isApplying = true
+        isApplyingBatch = true
         let selected = rows.filter { selectedSkillIDs.contains($0.id) }
         await performApply(
             rows: selected,
@@ -169,6 +173,7 @@ final class UpdatesViewModel {
 
     func present(selecting skillID: UUID? = nil, library: SkillLibraryViewModel) {
         guard !library.libraryUnavailable else { return }
+        applyGate.bind(library: library)
         library.confirmLeavingAnyDraft { [weak self] proceed in
             guard let self, proceed else { return }
             self.reset()
@@ -195,7 +200,7 @@ final class UpdatesViewModel {
         operationTask = nil
         backgroundCancel = nil
         isLoading = false
-        isApplying = false
+        isApplyingBatch = false
         recheckingSkillID = nil
     }
 

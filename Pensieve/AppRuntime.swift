@@ -19,6 +19,7 @@ final class AppRuntime {
     let syncModel: SyncModel
     let scheduler: SyncScheduler
     let provenanceVM: SkillProvenanceViewModel
+    let updateApplyGate = SkillUpdateApplyGate()
     let updatesViewModelOperations: UpdatesViewModel.DefaultOperations
     let reconcileIntent: @MainActor (ModelContext) -> BatchResult
 

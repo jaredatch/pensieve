@@ -43,6 +43,46 @@ final class ViewChangesSceneTests: XCTestCase {
         XCTAssertEqual(model.state, .idle)
     }
 
+    func testSceneChromeAndMinimumSizeFitThe1040By660Frame() async throws {
+        if #available(macOS 26, *) {
+            let fixture = try UpdateReviewFixture()
+            defer { try? fixture.cleanup() }
+            let skill = try fixture.skill("geometry")
+            let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
+            let model = ViewChangesViewModel(operations: fixture.operations(rows: [row]))
+            model.open(skillID: skill.id, context: fixture.context)
+            await TestWait.until(failureMessage: "geometry preview did not load") { model.state != .loading }
+            let representation = NSHostingSceneRepresentation {
+                ViewChangesScene(model: model, library: fixture.library, container: fixture.container)
+            }
+            NSApp.addSceneRepresentation(representation)
+            representation.environment.openWindow(id: WindowPolicy.changesWindowID)
+            await TestWait.until(failureMessage: "View Changes scene did not open") {
+                NSApp.windows.contains { $0.isVisible && $0.accessibilityIdentifier() == WindowPolicy.changesWindowID }
+            }
+            let window = try XCTUnwrap(NSApp.windows.first {
+                $0.isVisible && $0.accessibilityIdentifier() == WindowPolicy.changesWindowID
+            })
+            defer { window.close() }
+            let main = makeWindow(id: "main-AppWindow-geometry")
+            defer { main.close() }
+            main.orderFront(nil)
+            XCTAssertTrue(WindowPolicy.mainWindow(among: [window, main]) === main)
+            XCTAssertTrue(WindowPolicy.extraMainWindows(among: [main, window]).isEmpty)
+            XCTAssertEqual(window.frame.width, 1040, accuracy: 1)
+            XCTAssertLessThanOrEqual(window.minSize.height, 660, "The window must resize to the frame's height")
+            XCTAssertEqual(window.frame.height, 660, accuracy: 1, "Default size includes all window chrome")
+            XCTAssertEqual(window.titlebarSeparatorStyle, .none, "Full-height chrome has no title-bar strip")
+            let heading = try XCTUnwrap(window.toolbar?.items.first {
+                $0.itemIdentifier.rawValue.contains("changes-heading")
+            }?.view, "The heading belongs in the native toolbar, level with window controls")
+            let close = try XCTUnwrap(window.standardWindowButton(.closeButton))
+            XCTAssertEqual(heading.convert(heading.bounds, to: nil).midY,
+                           close.convert(close.bounds, to: nil).midY, accuracy: 8,
+                           "Toolbar and traffic lights share the same row")
+        }
+    }
+
     private func makeWindow(id: String) -> NSWindow {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 700),
                               styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
