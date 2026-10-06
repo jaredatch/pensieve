@@ -16,6 +16,8 @@ struct SkillContentTab: View {
     let onSelectFile: (String) -> Void
     let onSelectMode: (SkillContentPresentation.Mode) -> Void
     @State private var loadedOtherFile: SkillContentFileText?
+    @State private var pendingLinkSelection: LinkSelection?
+    @State private var linkScrollSkillID: UUID?
 
     private var choice: SkillContentPresentation.FileChoice { presentation.choice }
     private var file: String { choice.relativePath }
@@ -28,15 +30,37 @@ struct SkillContentTab: View {
     private var otherFileText: String? {
         loadedOtherFile?.text(for: skill.id, relativePath: file)
     }
+    private var acceptedLinkSelection: LinkSelection? {
+        guard let pendingLinkSelection, pendingLinkSelection.skillID == skill.id,
+              pendingLinkSelection.file == file else { return nil }
+        return pendingLinkSelection
+    }
+    private var fileRowAnchor: FileRowAnchor { FileRowAnchor(skillID: skill.id) }
 
     var body: some View {
         // The header scrolls with the page, so no rule sets the file row off: the gap below it matches the
         // gap above. The rendered preview pads its own top by the same 16, the source editor takes it here.
-        VStack(spacing: 0) {
-            fileRow
-                .padding(.horizontal, Spacing.lg)
-                .padding(.top, DesignTokens.contentRowTop)
-            content
+        ScrollViewReader { proxy in
+            VStack(spacing: 0) {
+                fileRow
+                    .overlay(alignment: .top) { Color.clear.frame(height: 1).id(fileRowAnchor) }
+                    .padding(.horizontal, Spacing.lg)
+                    .padding(.top, DesignTokens.contentRowTop)
+                content
+            }
+            // Even a short linked file needs room to place its file row at the viewport top. Keep that
+            // room on subsequent picker changes so shrinking the document cannot move the page.
+            .modifier(LinkScrollSpace(active: linkScrollSkillID == skill.id || acceptedLinkSelection != nil))
+            .task(id: acceptedLinkSelection?.id) {
+                guard acceptedLinkSelection != nil else { return }
+                linkScrollSkillID = skill.id
+                proxy.scrollTo(fileRowAnchor, anchor: .top)
+                pendingLinkSelection = nil
+            }
+        }
+        .onChange(of: skill.id) { _, _ in
+            pendingLinkSelection = nil
+            linkScrollSkillID = nil
         }
         // A bundle file's change reaches the app only as a watcher event (the library reads SKILL.md's body as
         // an echo), so the sequence is in the key beside the two SKILL.md signals.
@@ -55,7 +79,10 @@ struct SkillContentTab: View {
 
     private var fileRow: some View {
         HStack(spacing: Spacing.sm) {
-            Picker("File", selection: Binding(get: { file }, set: { onSelectFile($0) })) {
+            Picker("File", selection: Binding(get: { file }, set: {
+                pendingLinkSelection = nil
+                onSelectFile($0)
+            })) {
                 ForEach(presentation.choices) { Text($0.relativePath).tag($0.relativePath) }
             }
             .labelsHidden()
@@ -97,7 +124,12 @@ struct SkillContentTab: View {
                          documentRelativePath: file,
                          imageRevision: folderRevision,
                          imageLoader: PreviewImageLoader(fileService: library.fileService),
-                         files: presentation.choices.map(\.relativePath), onSelectFile: onSelectFile)
+                         files: presentation.choices.map(\.relativePath), onSelectFile: { path in
+                             if path != file {
+                                 pendingLinkSelection = LinkSelection(skillID: skill.id, file: path)
+                             }
+                             onSelectFile(path)
+                         })
     }
 
     @ViewBuilder private var content: some View {
@@ -124,6 +156,31 @@ struct SkillContentTab: View {
             Color(.textBackgroundColor)
                 .frame(minHeight: Self.sourceEditorMinimumHeight, maxHeight: .infinity)
                 .padding(.top, DesignTokens.contentRowTop)
+        }
+    }
+
+    private struct LinkSelection {
+        let id = UUID()
+        let skillID: UUID
+        let file: String
+    }
+
+    private struct FileRowAnchor: Hashable {
+        let skillID: UUID
+    }
+
+    /// Resizing changes the scroll space without reevaluating the tab's Markdown content.
+    private struct LinkScrollSpace: ViewModifier {
+        let active: Bool
+        @State private var viewportHeight: CGFloat = 0
+
+        func body(content: Content) -> some View {
+            content
+                .frame(minHeight: active ? viewportHeight + DesignTokens.contentRowTop : nil, alignment: .topLeading)
+                .background {
+                    Color.clear.containerRelativeFrame(.vertical)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
+                }
         }
     }
 }

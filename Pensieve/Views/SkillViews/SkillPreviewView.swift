@@ -47,13 +47,13 @@ private struct RenderedSkillMarkdown: View {
     let preview: SkillPreviewView
     let colorScheme: ColorScheme
     @State private var budget: PreviewImageBudgeting = PreviewImageDecodeBudget()
-    @State private var headings: [SkillPreviewLinkPolicy.HeadingTarget] = []
+    @State private var headings = HeadingTargets()
 
     var body: some View {
         ScrollViewReader { proxy in
             markdown
                 .coordinateSpace(name: SkillPreviewHeadingPreference.coordinateSpace)
-                .onPreferenceChange(SkillPreviewHeadingPreference.self) { headings = $0 }
+                .onPreferenceChange(SkillPreviewHeadingPreference.self) { headings.value = $0 }
                 .environment(\.openURL, OpenURLAction { url in
                     switch SkillPreviewLinkPolicy.decision(for: url, documentRelativePath: preview.documentRelativePath,
                                                           files: preview.files) {
@@ -61,7 +61,7 @@ private struct RenderedSkillMarkdown: View {
                         openURL(url)
                         return .handled
                     case .scrollTo(let slug):
-                        if let target = SkillPreviewLinkPolicy.firstHeading(for: slug, in: headings) {
+                        if let target = SkillPreviewLinkPolicy.firstHeading(for: slug, in: headings.value) {
                             proxy.scrollTo(target, anchor: .top)
                         }
                         return .handled
@@ -98,4 +98,9 @@ private struct RenderedSkillMarkdown: View {
             }
             .onDisappear { budget.cancel() }
     }
+}
+
+/// Layout updates only the click targets; mutating this non-observed box does not reparse Markdown.
+private final class HeadingTargets {
+    var value: [SkillPreviewLinkPolicy.HeadingTarget] = []
 }

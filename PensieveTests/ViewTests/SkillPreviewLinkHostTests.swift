@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 import XCTest
 @testable import Pensieve
@@ -29,9 +30,57 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         XCTAssertEqual(external.map(\.absoluteString), ["https://example.com"], "The same preview must route live clicks")
     }
 
+    func testLinkedFileResetsScrollButPickerSelectionKeepsOffset() async throws {
+        let paragraphs = (1...40).map { "Paragraph \($0). Filling the document." }.joined(separator: "\n\n")
+        for destination in ["# Reference\n\n" + paragraphs, "# Reference\nTiny."] {
+            try await assertFileNavigation(markdown: paragraphs, destination: destination)
+        }
+    }
+
+    private func assertFileNavigation(markdown: String, destination: String) async throws {
+        let selection = PreviewFileSelection()
+        let fixture = hostTab(markdown: markdown + "\n\n[Reference](./references/x.md)",
+                              onSelectFile: { _ in }, openURL: { _ in XCTFail("File link escaped") },
+                              selection: selection, otherMarkdown: destination)
+        defer { fixture.window.close() }
+        let link = try await findLink("Reference", in: fixture.host)
+        let scroller = try XCTUnwrap(views(fixture.host).compactMap { $0 as? NSScrollView }.first)
+        let picker = try XCTUnwrap(views(fixture.host).compactMap { $0 as? NSPopUpButton }.first)
+        let viewport = fixture.window.convertToScreen(scroller.convert(scroller.bounds, to: nil))
+        let bottom = try XCTUnwrap(scroller.documentView).bounds.height - scroller.contentView.bounds.height
+        scroller.contentView.scroll(to: NSPoint(x: 0, y: bottom))
+        scroller.reflectScrolledClipView(scroller.contentView)
+        XCTAssertGreaterThan(scroller.contentView.bounds.minY, 500)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Scrolled link must be inside the viewport") {
+            fixture.host.layoutSubtreeIfNeeded()
+            return viewport.contains(link.accessibilityFrame())
+        }
+        try click(link, in: fixture.window)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Linked reference must load") {
+            fixture.host.layoutSubtreeIfNeeded()
+            return selection.file == "references/x.md" && picker.titleOfSelectedItem == "references/x.md"
+                && self.elements(fixture.host).contains { ($0.accessibilityValue() as? String) == "Reference" }
+        }
+        let rowTop = viewport.maxY - picker.accessibilityFrame().maxY
+        XCTAssertEqual(rowTop, 0, accuracy: 1, "A linked file must put its file row at the viewport top")
+
+        scroller.contentView.scroll(to: NSPoint(x: 0, y: 200))
+        scroller.reflectScrolledClipView(scroller.contentView)
+        let offset = scroller.contentView.bounds.minY
+        let menu = try XCTUnwrap(picker.menu)
+        let item = try XCTUnwrap(menu.items.firstIndex { $0.title == "SKILL.md" })
+        menu.performActionForItem(at: item)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Picker must select SKILL.md") {
+            fixture.host.layoutSubtreeIfNeeded()
+            return selection.file == "SKILL.md" && picker.titleOfSelectedItem == "SKILL.md"
+        }
+        XCTAssertEqual(scroller.contentView.bounds.minY, offset, accuracy: 1,
+                       "Picker selection must leave the page offset alone")
+    }
+
     func testAnchorReaderScrollsEnclosingDetailPageToFirstDuplicate() async throws {
         let paragraphs = (1...40).map { "Paragraph \($0). Filling the document." }.joined(separator: "\n\n")
-        let markdown = "[Jump](#authoring-gate) [Missing](#missing)\n\n" + paragraphs
+        let markdown = "[Jump](./SKILL.md#authoring-gate) [Missing](#missing)\n\n" + paragraphs
             + "\n\n## Authoring gate\n\nFirst target\n\n" + paragraphs + "\n\n## Authoring gate\n\nSecond target"
         let fixture = hostTab(markdown: markdown, onSelectFile: { _ in }, openURL: { _ in XCTFail("Anchor escaped") })
         defer { fixture.window.close() }
@@ -46,6 +95,7 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         await TestWait.until(timeout: .seconds(3), failureMessage: "Anchor must move the enclosing detail scroller") {
             scrollView.contentView.bounds.minY > 100
         }
+        XCTAssertGreaterThan(scrollView.contentView.bounds.minY, 100, "Same-document file fragment must scroll")
         let first = try XCTUnwrap(elements(fixture.host).first { ($0.accessibilityValue() as? String) == "First target" })
         let frame = first.accessibilityFrame()
         let viewport = scrollView.convert(scrollView.bounds, to: nil)
@@ -53,10 +103,12 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         XCTAssertTrue(screenViewport.intersects(frame), "First duplicate must be visible after jumping")
     }
 
-    private func hostTab(markdown: String, onSelectFile: @escaping (String) -> Void, openURL: @escaping (URL) -> Void)
+    private func hostTab(markdown: String, onSelectFile: @escaping (String) -> Void, openURL: @escaping (URL) -> Void,
+                         selection: PreviewFileSelection? = nil, otherMarkdown: String = "# Reference")
         -> (host: NSHostingView<AnyView>, window: NSWindow) {
         let base = NSTemporaryDirectory() + "PreviewLinkHost-" + UUID().uuidString
         let files = DeployRecordingFileService()
+        files.contents[Constants.pensieveSkillsDir + "/link-test/references/x.md"] = otherMarkdown
         let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: files, baseDir: base),
                                             fileService: files, manifestRoot: base)
         let skill = Skill(name: "Link test", directoryName: "link-test")
@@ -64,10 +116,11 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         snapshot.inventory.files = ["SKILL.md", "references/x.md"].map {
             .init(relativePath: $0, bytes: 20, tokens: 5)
         }
-        let presentation = SkillContentPresentation.resolve(selectedFile: "SKILL.md", requestedMode: .rendered,
-                                                             inventory: snapshot.inventory)
-        let tab = SkillContentTab(skill: skill, snapshot: snapshot, library: library, presentation: presentation,
-                                  onSelectFile: onSelectFile, onSelectMode: { _ in })
+        let tab = PreviewContentHarness(skill: skill, snapshot: snapshot, library: library,
+                                        selection: selection ?? PreviewFileSelection(), onSelectFile: { path in
+                                            onSelectFile(path)
+                                            selection?.file = path
+                                        })
         let layout = SkillDetailScrollLayout(skillID: skill.id, contentOwnsScroller: false,
                                              chrome: { Text("Detail header") }, tabContent: { tab })
         let host = NSHostingView(rootView: AnyView(layout.frame(width: 640, height: 480)
@@ -125,5 +178,25 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         // Selectable Markdown text tracks mouse-up inside mouseDown's nested event loop.
         NSApp.postEvent(try event(.leftMouseUp), atStart: true)
         window.sendEvent(try event(.leftMouseDown))
+    }
+}
+
+@Observable
+private final class PreviewFileSelection {
+    var file = "SKILL.md"
+}
+
+private struct PreviewContentHarness: View {
+    let skill: Skill
+    let snapshot: DetailContentSnapshot
+    let library: SkillLibraryViewModel
+    let selection: PreviewFileSelection
+    let onSelectFile: (String) -> Void
+
+    var body: some View {
+        let presentation = SkillContentPresentation.resolve(selectedFile: selection.file, requestedMode: .rendered,
+                                                             inventory: snapshot.inventory)
+        SkillContentTab(skill: skill, snapshot: snapshot, library: library, presentation: presentation,
+                        onSelectFile: onSelectFile, onSelectMode: { _ in })
     }
 }

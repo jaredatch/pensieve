@@ -17,8 +17,8 @@ enum SkillPreviewLinkPolicy {
     }
 
     static func decision(for url: URL, documentRelativePath: String, files: [String]) -> Decision {
-        if let scheme = url.scheme {
-            return ["http", "https"].contains(scheme.lowercased()) ? .openWeb : .ignore
+        if url.scheme != nil {
+            return WebLinkPolicy.isWebURL(url) ? .openWeb : .ignore
         }
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               components.host == nil, components.query == nil,
@@ -30,8 +30,11 @@ enum SkillPreviewLinkPolicy {
         guard !path.hasPrefix("/"), !path.contains("\\"),
               !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return .ignore }
         let folder = documentRelativePath.split(separator: "/").dropLast().map(String.init)
-        guard let resolved = normalized(folder + path.split(separator: "/").map(String.init)),
-              files.contains(resolved) else { return .ignore }
+        guard let resolved = normalized(folder + path.split(separator: "/").map(String.init)) else { return .ignore }
+        if resolved == documentRelativePath, let fragment = components.fragment, !fragment.isEmpty {
+            return .scrollTo(fragment)
+        }
+        guard files.contains(resolved) else { return .ignore }
         return .selectFile(resolved)
     }
 
@@ -62,6 +65,17 @@ enum SkillPreviewLinkPolicy {
 
     /// Geometry supplies document order even when SwiftUI reports preferences out of order.
     static func firstHeading(for slug: String, in headings: [HeadingTarget]) -> UUID? {
-        headings.filter { $0.slug == slug }.min { $0.position < $1.position }?.id
+        var used: Set<String> = []
+        for heading in headings.sorted(by: { $0.position < $1.position }) {
+            var candidate = heading.slug
+            var suffix = 0
+            while used.contains(candidate) {
+                suffix += 1
+                candidate = "\(heading.slug)-\(suffix)"
+            }
+            used.insert(candidate)
+            if candidate == slug.lowercased() { return heading.id }
+        }
+        return nil
     }
 }

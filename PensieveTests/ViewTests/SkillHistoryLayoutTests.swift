@@ -6,6 +6,14 @@ import XCTest
 
 @MainActor
 final class SkillHistoryLayoutTests: XCTestCase {
+    func testOwnWindowAccessibilityReadStaysOnMainThread() async throws {
+        let fixture = try installedTab(rowCount: 3)
+        let host = makeHost(fixture.tab, height: 480)
+        defer { host.window.close() }
+        let tree = try await waitForRows(in: host.window)
+        XCTAssertTrue(tree.readOnMainThread, "Own-process accessibility read ran on main thread: \(tree.readOnMainThread)")
+    }
+
     func testInstalledRowsKeep24PointGapsAtShortAndTallHeights() async throws {
         let tab = try installedTab(rowCount: 3).tab
         try await assertFixedGaps(tab)
@@ -186,38 +194,35 @@ final class SkillHistoryLayoutTests: XCTestCase {
     }
 
     private func visibleSubjects(in tree: HistoryAccessibility.Node) -> [String] {
-        tree.descendants.map(\.label).filter { $0.hasPrefix("Version ") }.sorted {
-            $0.localizedStandardCompare($1) == .orderedAscending
-        }
+        tree.descendants.filter { $0.label.hasPrefix("Version ") && !$0.frame.isEmpty }
+            .sorted { $0.frame.minY < $1.frame.minY }.map(\.label)
     }
 
     private enum LayoutFailure: Error { case rowsUnavailable }
 
     private func subject(_ index: Int) -> String {
-        index == 1 ? "Version 1\nA second subject line" : "Version \(index)"
+        index == 1 ? "Version 11\nA second subject line" : "Version \(12 - index)"
     }
 }
 
-/// Queries our own test window through the public accessibility API. Requests run off the main
-/// actor so AppKit can answer them; direct NSView queries omit SwiftUI's exported text nodes.
-/// Presses stay on the main actor because an action in our own process invokes its callback directly.
+/// Queries our own process's exported accessibility tree, including SwiftUI text nodes omitted by
+/// direct NSView queries. Reads and presses stay on the main actor with the AppKit window and callbacks.
+@MainActor
 private enum HistoryAccessibility {
     struct Node: Equatable {
         let role: String
         let label: String
         let frame: CGRect
         let children: [Node]
+        let readOnMainThread = Thread.isMainThread
         var descendants: [Node] { children.flatMap { [$0] + $0.descendants } }
     }
 
     static func snapshot(windowTitle: String) async -> Node? {
-        await Task.detached {
-            guard let window = window(titled: windowTitle) else { return nil }
-            return node(window)
-        }.value
+        guard let window = window(titled: windowTitle) else { return nil }
+        return node(window)
     }
 
-    @MainActor
     static func press(_ title: String, windowTitle: String) -> Bool {
         guard let window = window(titled: windowTitle) else { return false }
         var pending = [window]

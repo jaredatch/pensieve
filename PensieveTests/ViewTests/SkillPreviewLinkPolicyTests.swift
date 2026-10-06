@@ -15,6 +15,9 @@ final class SkillPreviewLinkPolicyTests: XCTestCase {
             .init(link: "HTTPS://example.com", document: "SKILL.md", expected: .openWeb),
             .init(link: "#authoring-gate", document: "SKILL.md", expected: .scrollTo("authoring-gate")),
             .init(link: "#caf%C3%A9", document: "SKILL.md", expected: .scrollTo("café")),
+            .init(link: "SKILL.md#authoring-gate", document: "SKILL.md", expected: .scrollTo("authoring-gate")),
+            .init(link: "./SKILL.md#x", document: "SKILL.md", expected: .scrollTo("x")),
+            .init(link: "./guide.md#part", document: "references/guide.md", expected: .scrollTo("part")),
             .init(link: "CAMPAIGN.md", document: "SKILL.md", expected: .selectFile("CAMPAIGN.md")),
             .init(link: "./references/x.md", document: "SKILL.md", expected: .selectFile("references/x.md")),
             .init(link: "references/x.md#part", document: "SKILL.md", expected: .selectFile("references/x.md")),
@@ -74,14 +77,20 @@ final class SkillPreviewLinkPolicyTests: XCTestCase {
         }
     }
 
-    func testDuplicateSlugUsesFirstHeadingAndMissingAnchorHasNoTarget() {
-        let first = UUID(), second = UUID()
+    func testDuplicateSlugUsesFirstHeadingAndMissingAnchorHasNoTarget() throws {
+        let first = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
+        let second = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000002"))
+        let third = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000003"))
         let targets: [SkillPreviewLinkPolicy.HeadingTarget] = [
+            .init(id: third, slug: "authoring-gate", position: 900),
             .init(id: second, slug: "authoring-gate", position: 600),
             .init(id: UUID(), slug: "other", position: 0),
             .init(id: first, slug: "authoring-gate", position: 100)
         ]
         XCTAssertEqual(SkillPreviewLinkPolicy.firstHeading(for: "authoring-gate", in: targets), first)
+        XCTAssertEqual(SkillPreviewLinkPolicy.firstHeading(for: "Authoring-Gate", in: targets), first)
+        XCTAssertEqual(SkillPreviewLinkPolicy.firstHeading(for: "authoring-gate-1", in: targets), second)
+        XCTAssertEqual(SkillPreviewLinkPolicy.firstHeading(for: "AUTHORING-GATE-2", in: targets), third)
         XCTAssertNil(SkillPreviewLinkPolicy.firstHeading(for: "missing", in: targets))
     }
 }
