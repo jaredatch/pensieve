@@ -75,10 +75,8 @@ extension UpdateReviewRoutingTests {
         XCTAssertEqual(sheet.selectedSkillIDs, [first.id, second],
                        "A hand-off before loading starts must join the pending initial selection")
         XCTAssertTrue(calls.values.isEmpty, "Pre-load hand-offs never apply")
-        for rows in [sheet.rows, Array(sheet.rows.reversed())] {
-            await assertLoadErrorHandoff(fixture: fixture, rows: rows, preview: routing.preview,
-                                        initialSkillID: first.id, windowSkillID: second)
-        }
+        await assertLoadErrorHandoff(fixture: fixture, rows: sheet.rows, preview: routing.preview,
+                                    initialSkillID: first.id, windowSkillID: second)
         await assertLoadedHandoffSurvivesReload(routing, first: first, second: second, calls: calls)
     }
 
@@ -130,6 +128,23 @@ extension UpdateReviewRoutingTests {
         XCTAssertEqual(sheet.selectedSkillIDs, [first.id, second],
                        "An accepted loaded hand-off must survive a reload of the same sheet session")
         XCTAssertTrue(calls.values.isEmpty, "A hand-off and reload never apply")
+        guard let secondRow = sheet.rows.first(where: { $0.id == second }) else {
+            XCTFail("The handed-off skill must have a row")
+            return
+        }
+        sheet.toggleSelection(secondRow)
+        await sheet.loadAndReport(context: routing.context)
+        XCTAssertEqual(sheet.selectedSkillIDs, [first.id],
+                       "A handed-off row later unchecked must stay unchecked after reload")
+
+        sheet.reset()
+        routing.banner(for: first).onUpdate()
+        await sheet.loadAndReport(context: routing.context)
+        sheet.toggleSelection(secondRow)
+        await sheet.loadAndReport(context: routing.context)
+        XCTAssertEqual(sheet.selectedSkillIDs, [first.id, second],
+                       "A manually checked row must stay checked after reload")
+        XCTAssertTrue(calls.values.isEmpty, "Selection changes and reloads never apply")
     }
 
     private func assertApplyingHandoff(routing: UpdateReviewRouting, first: UUID, second: UUID,

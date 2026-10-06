@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ViewChangesFileRow: View {
     let file: PinnedSkillFileDiff
-    let selected: Bool
 
     var body: some View {
         let parent = (file.path as NSString).deletingLastPathComponent
@@ -40,8 +39,6 @@ struct ViewChangesFileRow: View {
         .padding(.horizontal, DesignTokens.changesFileRowHorizontalPadding)
         .frame(maxWidth: .infinity)
         .frame(height: parent.isEmpty ? DesignTokens.changesFileRowHeight : DesignTokens.changesNestedFileRowHeight)
-        .background(selected ? DesignTokens.changesFileRowSelectedFill : .clear,
-                    in: RoundedRectangle(cornerRadius: DesignTokens.changesFileRowCornerRadius))
         .contentShape(Rectangle())
     }
 }

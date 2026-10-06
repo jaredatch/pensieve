@@ -4,7 +4,16 @@ enum UpdatesLoadPhase: Equatable {
     case idle
     case loading
     case loaded
+    case reloading
     case failed(String)
+    case reloadFailed(String)
+
+    var hasLoadedRows: Bool {
+        switch self {
+        case .loaded, .reloading, .reloadFailed: return true
+        case .idle, .loading, .failed: return false
+        }
+    }
 }
 
 struct UpdatesRow: Identifiable, Equatable {

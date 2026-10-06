@@ -151,7 +151,6 @@ enum DesignTokens {
     static let changesSidebarHeaderBottom: CGFloat = 6
     static let changesFileRowHeight: CGFloat = 28
     static let changesNestedFileRowHeight: CGFloat = 42
-    static let changesFileRowCornerRadius: CGFloat = 10
     static let changesFileRowHorizontalPadding: CGFloat = 10
     static let changesFileRowGap: CGFloat = 8
     static let changesFileRowSpacing: CGFloat = 2
@@ -178,7 +177,6 @@ enum DesignTokens {
     static let diffHunkFill = dynamic(light: 0.04, dark: 0.04)
     static let diffRemovedFill = Color(nsColor: .systemRed).opacity(0.10)
     static let diffAddedFill = Color(nsColor: .systemGreen).opacity(0.12)
-    static let changesFileRowSelectedFill = dynamic(light: 0.05, dark: 0.05)
     static let changesDividerFill = dynamic(light: 0.05, dark: 0.05)
 
     // MARK: - Tab content
