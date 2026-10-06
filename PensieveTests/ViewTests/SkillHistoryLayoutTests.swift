@@ -1,5 +1,4 @@
 import AppKit
-import ApplicationServices
 import SwiftUI
 import XCTest
 @testable import Pensieve
@@ -7,8 +6,11 @@ import XCTest
 @MainActor
 final class SkillHistoryLayoutTests: XCTestCase {
     func testInstalledRowsKeep24PointGapsAtShortAndTallHeights() async throws {
-        let tab = try installedTab(rowCount: 3).tab
-        try await assertFixedGaps(tab)
+        let tab = try installedTab(rowCount: 3)
+        try await assertFixedGaps(tab, rowCount: 3, tails: [
+            AnyView(Text("1 file changed · +2 −1").font(.caption)),
+            AnyView(Text("1 file changed · +2 −1").font(.caption))
+        ])
     }
 
     func testAuthoredRowsKeep24PointGapsAtShortAndTallHeights() async throws {
@@ -30,68 +32,16 @@ final class SkillHistoryLayoutTests: XCTestCase {
             store: store,
             workingDir: base
         )
-        try await assertFixedGaps(AnyView(tab))
+        try await assertFixedGaps(AnyView(tab), rowCount: 4, tails: [
+            AnyView(Text(subject(0)).font(.body)),
+            AnyView(Button("View Diff", action: {}).controlSize(.large))
+        ])
     }
 
-    func testInstalledTimelineShowsTenNewestCommitsThenRevealsHeldRows() async throws {
-        let fixture = try installedTab(rowCount: 12)
-        let host = makeHost(fixture.tab, height: 1800)
-        defer { host.window.close() }
-        let tree = try await waitForRows(in: host.window)
-
-        XCTAssertEqual(visibleSubjects(in: tree), (0..<10).map(subject))
-        XCTAssertTrue(tree.descendants.contains {
-            ["AXButton", "AXLink"].contains($0.role) && $0.label == "Show older commits"
-        })
-        let pressed = HistoryAccessibility.press("Show older commits", windowTitle: host.window.title)
-        XCTAssertTrue(pressed)
-        let revealed = try await waitForRows(in: host.window, lastSubject: subject(11))
-        XCTAssertEqual(visibleSubjects(in: revealed), (0..<12).map(subject))
-        XCTAssertEqual(fixture.history.currentRequest?.windowCount, 1)
-        XCTAssertFalse(revealed.descendants.contains { $0.label == "Show older commits" })
-    }
-
-    func testInstalledTimelineShowsAllFewerThanTenCommitsAndKeepsOlderWindowRule() async throws {
-        for hasOlder in [false, true] {
-            let fixture = try installedTab(rowCount: 6, hasOlder: hasOlder)
-            let host = makeHost(fixture.tab, height: 1000)
-            defer { host.window.close() }
-            let tree = try await waitForRows(in: host.window)
-
-            XCTAssertEqual(visibleSubjects(in: tree), (0..<6).map(subject))
-            XCTAssertEqual(tree.descendants.contains {
-                ["AXButton", "AXLink"].contains($0.role) && $0.label == "Show older commits"
-            }, hasOlder)
-        }
-    }
-
-    private func installedTab(
-        rowCount: Int,
-        hasOlder: Bool = false
-    ) throws -> (tab: AnyView, history: UpstreamHistoryViewModel) {
+    private func installedTab(rowCount: Int) throws -> AnyView {
         let skill = installedHistorySkill()
         let origin = try XCTUnwrap(skill.installedOrigin)
-        let rows = (0..<rowCount).map { index in
-            UpstreamHistoryRow(
-                sha: String(format: "%040x", index + 1),
-                author: "Author",
-                date: Date(timeIntervalSince1970: TimeInterval(1_700_000_000 - index)),
-                subject: subject(index),
-                filesChanged: 1,
-                linesAdded: 2,
-                linesRemoved: 1,
-                skillMarkdown: index == 1 ? nil : .text("# Version \(index)")
-            )
-        }
-        let result = UpstreamHistoryResult(
-            headCommit: rows[0].sha,
-            rows: rows,
-            installedPosition: .at(sha: rows[0].sha),
-            hasOlderHistory: hasOlder,
-            installedBaseline: .files([]),
-            localEdits: .none,
-            windowCount: 1
-        )
+        let result = historyTimelineResult(rowCount: rowCount)
         let history = historyOwner(read: { _, _, _ in result })
         let tab = InstalledSkillHistoryView(
             skill: skill,
@@ -103,33 +53,56 @@ final class SkillHistoryLayoutTests: XCTestCase {
             onUpdateCheck: { _ in },
             history: history
         )
-        return (AnyView(tab), history)
+        return AnyView(tab)
     }
 
     private func assertFixedGaps(
         _ tab: AnyView,
+        rowCount: Int,
+        tails: [AnyView],
         file: StaticString = #filePath,
         line: UInt = #line
     ) async throws {
-        var measured: [[CGFloat]] = []
+        // Rasterized glyphs end before their Text's layout frame. Measure that inset with
+        // independent, naturally sized footer hosts; no timeline spacing enters this calibration.
+        let bottomInsets = try tails.map(bottomInkInset)
+        var measured: [HistoryPixels.Positions] = []
         for height: CGFloat in [480, 1000] {
             let host = makeHost(tab, height: height)
             defer { host.window.close() }
-            let tree = try await waitForRows(in: host.window)
-            let bounds = try (0..<3).map { index in
-                try rowContentBounds(subject: subject(index), in: tree)
-            }
-            let gaps = (0..<2).map { bounds[$0 + 1].minY - bounds[$0].maxY }
-            measured.append(gaps)
-            for (index, gap) in gaps.enumerated() {
-                XCTAssertEqual(gap, 24, accuracy: 1,
-                               "row \(index) bottom gap at height \(height)", file: file, line: line)
+            let positions = try await waitForRows(in: host.view, rowCount: rowCount)
+            measured.append(positions)
+            for index in 0..<2 {
+                let contentBottom = positions.inkBottoms[index] + bottomInsets[index]
+                let rowHeight = contentBottom - positions.rowTops[index]
+                let pitch = positions.rowTops[index + 1] - positions.rowTops[index]
+                XCTAssertEqual(pitch, rowHeight + 24, accuracy: 1,
+                               "row \(index) pitch must equal content height + 24 at height \(height)",
+                               file: file, line: line)
             }
         }
         for index in 0..<2 {
-            XCTAssertEqual(measured[0][index], measured[1][index], accuracy: 1,
-                           "row \(index) gap must survive resizing", file: file, line: line)
+            let shortPitch = measured[0].rowTops[index + 1] - measured[0].rowTops[index]
+            let tallPitch = measured[1].rowTops[index + 1] - measured[1].rowTops[index]
+            XCTAssertEqual(shortPitch, tallPitch, accuracy: 1,
+                           "row \(index) pitch must survive resizing", file: file, line: line)
         }
+    }
+
+    private func bottomInkInset(_ tail: AnyView) throws -> CGFloat {
+        let view = NSHostingView(rootView: tail.background(Color(nsColor: .windowBackgroundColor)))
+        let size = view.fittingSize
+        let window = NSWindow(contentRect: CGRect(origin: .zero, size: size),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .aqua)
+        window.contentView = view
+        window.orderFront(nil)
+        defer { window.close() }
+        view.layoutSubtreeIfNeeded()
+        let pixels = try XCTUnwrap(HistoryPixels.capture(in: view))
+        let inkBottom = try XCTUnwrap(pixels.inkBottom(from: 0, to: size.height, left: 0))
+        return size.height - inkBottom
     }
 
     private func makeHost(_ tab: AnyView, height: CGFloat) -> (view: NSView, window: NSWindow) {
@@ -138,56 +111,43 @@ final class SkillHistoryLayoutTests: XCTestCase {
         } tabContent: {
             tab
         }
-        let controller = NSHostingController(rootView: AnyView(layout.frame(width: 640, height: height)))
-        let view = controller.view
+        let view = NSHostingView(rootView: AnyView(layout.frame(width: 640, height: height)
+            .background(Color(nsColor: .windowBackgroundColor))))
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: height),
             styleMask: [.borderless], backing: .buffered, defer: false
         )
         window.title = "History layout " + UUID().uuidString
         window.isReleasedWhenClosed = false
-        window.contentViewController = controller
+        window.appearance = NSAppearance(named: .aqua)
+        window.contentView = view
+        window.orderFront(nil)
         view.layoutSubtreeIfNeeded()
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
         return (view, window)
     }
 
-    private func waitForRows(in window: NSWindow, lastSubject: String? = nil) async throws -> HistoryAccessibility.Node {
-        let expected = lastSubject ?? subject(2)
+    private func waitForRows(in view: NSView, rowCount: Int) async throws -> HistoryPixels.Positions {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(3))
-        var last: HistoryAccessibility.Node?
-        var previous: HistoryAccessibility.Node?
+        var previous: HistoryPixels.Positions?
+        var last: HistoryPixels?
         repeat {
-            window.contentView?.layoutSubtreeIfNeeded()
-            last = HistoryAccessibility.snapshot(windowTitle: window.title)
-            // SwiftUI can expose the labels before their screen positions have settled.
-            if let last, last == previous,
-               last.descendants.contains(where: { $0.label == expected }) { return last }
-            previous = last
+            view.layoutSubtreeIfNeeded()
+            last = HistoryPixels.capture(in: view)
+            let positions = last?.positions
+            if let positions, positions.rowTops.count == rowCount,
+               positions.inkBottoms.count == rowCount - 1, positions == previous { return positions }
+            previous = positions
             try await Task.sleep(for: .milliseconds(10))
         } while clock.now < deadline
-        XCTFail("History rows did not load: \(last?.descendants.map(\.label) ?? [])")
+        if let image = last?.bitmap.cgImage {
+            let attachment = XCTAttachment(image: NSImage(cgImage: image, size: view.bounds.size))
+            attachment.name = "History render at \(view.bounds.height) points"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        XCTFail("History markers did not load within 3 s: \(last?.positions.rowTops ?? [])")
         throw LayoutFailure.rowsUnavailable
-    }
-
-    /// Accessibility positions use screen coordinates with Y increasing downward. The row's text
-    /// and controls give its content bounds independently of the dot column and bottom padding.
-    private func rowContentBounds(subject: String, in tree: HistoryAccessibility.Node) throws -> CGRect {
-        let row = try XCTUnwrap(tree.descendants.first { element in
-            guard element.role == "AXGroup" else { return false }
-            let labels = element.descendants.map(\.label)
-            return labels.contains(subject) && labels.filter { $0.hasPrefix("Version ") }.count == 1
-        }, "No accessibility row containing \(subject)")
-        let content = row.descendants.filter { !$0.label.isEmpty && $0.children.isEmpty && !$0.frame.isEmpty }
-        XCTAssertFalse(content.isEmpty)
-        return content.map(\.frame).reduce(CGRect.null) { $0.union($1) }
-    }
-
-    private func visibleSubjects(in tree: HistoryAccessibility.Node) -> [String] {
-        tree.descendants.filter { $0.label.hasPrefix("Version ") && !$0.frame.isEmpty }
-            .sorted { $0.frame.minY < $1.frame.minY }.map(\.label)
     }
 
     private enum LayoutFailure: Error { case rowsUnavailable }
@@ -197,70 +157,78 @@ final class SkillHistoryLayoutTests: XCTestCase {
     }
 }
 
-/// Queries our own process's exported accessibility tree, including SwiftUI text nodes omitted by
-/// direct NSView queries. Reads and presses stay on the main actor with the AppKit window and callbacks.
+/// Reads rendered marker and content pixels in bitmap coordinates (Y increases downward).
 @MainActor
-private enum HistoryAccessibility {
-    struct Node: Equatable {
-        let role: String
-        let label: String
-        let frame: CGRect
-        let children: [Node]
-        var descendants: [Node] { children.flatMap { [$0] + $0.descendants } }
+private struct HistoryPixels {
+    struct Positions: Equatable {
+        let rowTops: [CGFloat]
+        let inkBottoms: [CGFloat]
     }
 
-    static func snapshot(windowTitle: String) -> Node? {
-        // Reading this process's own accessibility tree needs no Accessibility permission.
-        guard let window = window(titled: windowTitle) else { return nil }
-        return node(window)
+    let bitmap: NSBitmapImageRep
+    let scaleX: CGFloat
+    let scaleY: CGFloat
+    let bytes: [UInt8]
+    let backgroundOffset: Int
+
+    static func capture(in view: NSView) -> HistoryPixels? {
+        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        guard let image = bitmap.cgImage,
+              let context = CGContext(data: nil, width: image.width, height: image.height,
+                                      bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let data = context.data else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let bytes = Array(UnsafeBufferPointer(start: data.assumingMemoryBound(to: UInt8.self),
+                                             count: image.width * image.height * 4))
+        let corners = [0, (image.width - 1) * 4,
+                       (image.height - 1) * image.width * 4, bytes.count - 4]
+        guard let background = corners.first(where: { bytes[$0 + 3] == 255 }) else { return nil }
+        return HistoryPixels(bitmap: bitmap, scaleX: CGFloat(bitmap.pixelsWide) / view.bounds.width,
+                             scaleY: CGFloat(bitmap.pixelsHigh) / view.bounds.height,
+                             bytes: bytes, backgroundOffset: background)
     }
 
-    static func press(_ title: String, windowTitle: String) -> Bool {
-        guard let window = window(titled: windowTitle) else { return false }
-        var pending = [window]
-        while let element = pending.popLast() {
-            if label(element) == title, ["AXButton", "AXLink"].contains(string(.role, of: element)) {
-                return AXUIElementPerformAction(element, kAXPressAction as CFString) == .success
+    var positions: Positions {
+        // Three points off center intersects the ten-point dots, avoiding the one-point connector.
+        let x = Int((Spacing.lg + 6 + 3) * scaleX)
+        var runs: [ClosedRange<Int>] = []
+        for y in 0..<bitmap.pixelsHigh where isInk(x: x, y: y) {
+            if let last = runs.last, last.upperBound == y - 1 {
+                runs[runs.count - 1] = last.lowerBound...y
+            } else {
+                runs.append(y...y)
             }
-            pending.append(contentsOf: children(element))
         }
-        return false
-    }
-
-    private static func window(titled title: String) -> AXUIElement? {
-        let app = AXUIElementCreateApplication(getpid())
-        return (attribute(.windows, of: app) as? [AXUIElement])?.first { string(.title, of: $0) == title }
-    }
-
-    private static func node(_ element: AXUIElement) -> Node {
-        var position = CGPoint.zero
-        var size = CGSize.zero
-        // The Core Foundation type ID proves these references are AXValues before the pointer casts.
-        if let value = attribute(.position, of: element), CFGetTypeID(value) == AXValueGetTypeID() {
-            AXValueGetValue(unsafeBitCast(value, to: AXValue.self), .cgPoint, &position)
+        let tops = runs.filter { (6...10).contains(CGFloat($0.count) / scaleY) }.map {
+            // The marker's center is four points of top connector plus its five-point radius.
+            CGFloat($0.lowerBound + $0.upperBound + 1) / (2 * scaleY) - 9
         }
-        if let value = attribute(.size, of: element), CFGetTypeID(value) == AXValueGetTypeID() {
-            AXValueGetValue(unsafeBitCast(value, to: AXValue.self), .cgSize, &size)
+        let bottoms = zip(tops, tops.dropFirst()).compactMap { top, next in
+            inkBottom(from: top, to: next, left: Spacing.lg + 12 + Spacing.lg)
         }
-        return Node(role: string(.role, of: element), label: label(element),
-                    frame: CGRect(origin: position, size: size), children: children(element).map(node))
+        return Positions(rowTops: tops, inkBottoms: bottoms)
     }
 
-    private static func children(_ element: AXUIElement) -> [AXUIElement] {
-        attribute(.children, of: element) as? [AXUIElement] ?? []
+    func inkBottom(from top: CGFloat, to bottom: CGFloat, left: CGFloat) -> CGFloat? {
+        let firstX = Int(left * scaleX)
+        for y in stride(from: min(Int(bottom * scaleY), bitmap.pixelsHigh) - 1,
+                        through: max(Int(top * scaleY), 0), by: -1) {
+            for x in firstX..<bitmap.pixelsWide where isInk(x: x, y: y) {
+                return CGFloat(y + 1) / scaleY
+            }
+        }
+        return nil
     }
 
-    private static func label(_ element: AXUIElement) -> String {
-        [.value, .title, .description].map { string($0, of: element) }.first { !$0.isEmpty } ?? ""
-    }
-
-    private static func string(_ name: NSAccessibility.Attribute, of element: AXUIElement) -> String {
-        attribute(name, of: element) as? String ?? ""
-    }
-
-    private static func attribute(_ name: NSAccessibility.Attribute, of element: AXUIElement) -> CFTypeRef? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, name.rawValue as CFString, &value) == .success else { return nil }
-        return value
+    private func isInk(x: Int, y: Int) -> Bool {
+        let offset = (y * bitmap.pixelsWide + x) * 4
+        guard bytes[offset + 3] > 127 else { return false }
+        // The opaque host's margin is the background reference for both light and dark pixels.
+        return max(abs(Int(bytes[offset]) - Int(bytes[backgroundOffset])),
+                   abs(Int(bytes[offset + 1]) - Int(bytes[backgroundOffset + 1])),
+                   abs(Int(bytes[offset + 2]) - Int(bytes[backgroundOffset + 2]))) > 7
     }
 }
