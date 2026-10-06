@@ -1,6 +1,7 @@
 import AppKit
 import Observation
 import SwiftUI
+import WebKit
 import XCTest
 @testable import Pensieve
 
@@ -30,52 +31,146 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         XCTAssertEqual(external.map(\.absoluteString), ["https://example.com"], "The same preview must route live clicks")
     }
 
-    func testLinkedFileResetsScrollButPickerSelectionKeepsOffset() async throws {
-        let paragraphs = (1...40).map { "Paragraph \($0). Filling the document." }.joined(separator: "\n\n")
-        for destination in ["# Reference\n\n" + paragraphs, "# Reference\nTiny."] {
-            try await assertFileNavigation(markdown: paragraphs, destination: destination)
+    func testLongFileLinkPutsFileRowAtViewportTop() async throws {
+        let selection = PreviewFileSelection()
+        let fixture = navigationFixture(selection: selection, destination: "# Reference\n\n" + paragraphs)
+        defer { fixture.window.close() }
+        try await followReference(in: fixture, selection: selection)
+        let scroller = try pageScroller(in: fixture.host)
+        let row = try filePicker(in: fixture.host)
+        let rowTop = viewport(of: scroller, in: fixture.window).maxY - row.accessibilityFrame().maxY
+        XCTAssertEqual(rowTop, 0, accuracy: 1, "Long linked file must put its file row at the viewport top")
+    }
+
+    func testShortFileLinkHasTheSameScrollRangeAsPickerSelection() async throws {
+        let linkedSelection = PreviewFileSelection()
+        let linked = navigationFixture(selection: linkedSelection, destination: "# Reference\nTiny.")
+        defer { linked.window.close() }
+        try await followReference(in: linked, selection: linkedSelection)
+        let linkedScroller = try pageScroller(in: linked.host)
+        let row = try filePicker(in: linked.host)
+        XCTAssertTrue(viewport(of: linkedScroller, in: linked.window).contains(row.accessibilityFrame()),
+                      "Short linked file must leave the file row inside the viewport")
+
+        let pickedSelection = PreviewFileSelection()
+        let picked = navigationFixture(selection: pickedSelection, destination: "# Reference\nTiny.")
+        defer { picked.window.close() }
+        try pickFile("references/x.md", in: picked.host)
+        await waitForReference(in: picked.host, selection: pickedSelection)
+        let pickedRange = try scrollRange(of: pageScroller(in: picked.host))
+        XCTAssertEqual(pickedRange, 0, accuracy: 1, "Short picked file must fit without page scrolling")
+        XCTAssertEqual(scrollRange(of: linkedScroller), pickedRange, accuracy: 1,
+                       "Link and picker selection must give a short file the same scroll range")
+    }
+
+    func testPickerSelectionKeepsThePageOffset() async throws {
+        let selection = PreviewFileSelection()
+        let fixture = navigationFixture(selection: selection, destination: "# Reference\n\n" + paragraphs)
+        defer { fixture.window.close() }
+        try await followReference(in: fixture, selection: selection)
+        let scroller = try pageScroller(in: fixture.host)
+        scroller.contentView.scroll(to: NSPoint(x: 0, y: 200))
+        scroller.reflectScrolledClipView(scroller.contentView)
+        XCTAssertEqual(scroller.contentView.bounds.minY, 200, accuracy: 1)
+        try pickFile("SKILL.md", in: fixture.host)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Picker must select SKILL.md") {
+            fixture.host.layoutSubtreeIfNeeded()
+            return selection.file == "SKILL.md"
+        }
+        XCTAssertEqual(scroller.contentView.bounds.minY, 200, accuracy: 1,
+                       "Picker selection must leave the page offset alone")
+    }
+
+    func testSourceAfterLinkFitsLikeSourceWithoutLink() async throws {
+        for file in ["SKILL.md", "references/x.md", "scripts/x.sh"] {
+            let selection = PreviewFileSelection()
+            let linked = navigationFixture(selection: selection, destination: "# Reference\nTiny.")
+            defer { linked.window.close() }
+            try await followReference(in: linked, selection: selection)
+            if file != selection.file { try pickFile(file, in: linked.host) }
+            selection.mode = .source
+            let editor = try await waitForEditor(in: linked.host)
+
+            let freshSelection = PreviewFileSelection()
+            freshSelection.file = file
+            freshSelection.mode = .source
+            let fresh = navigationFixture(selection: freshSelection, destination: "# Reference\nTiny.")
+            defer { fresh.window.close() }
+            _ = try await waitForEditor(in: fresh.host)
+            let freshRange = try scrollRange(of: pageScroller(in: fresh.host))
+            let linkedScroller = try pageScroller(in: linked.host)
+            XCTAssertEqual(freshRange, 0, accuracy: 1, "Fresh source must fit; \(file)")
+            XCTAssertEqual(scrollRange(of: linkedScroller), freshRange, accuracy: 1,
+                           "Source after a link must have no added page scroll range; \(file)")
+            XCTAssertGreaterThanOrEqual(editor.frame.height, SkillContentTab.sourceEditorMinimumHeight, file)
         }
     }
 
-    private func assertFileNavigation(markdown: String, destination: String) async throws {
-        let selection = PreviewFileSelection()
-        let fixture = hostTab(markdown: markdown + "\n\n[Reference](./references/x.md)",
-                              onSelectFile: { _ in }, openURL: { _ in XCTFail("File link escaped") },
-                              selection: selection, otherMarkdown: destination)
-        defer { fixture.window.close() }
+    private var paragraphs: String {
+        (1...40).map { "Paragraph \($0). Filling the document." }.joined(separator: "\n\n")
+    }
+
+    private func navigationFixture(selection: PreviewFileSelection, destination: String)
+        -> (host: NSHostingView<AnyView>, window: NSWindow) {
+        hostTab(markdown: paragraphs + "\n\n[Reference](./references/x.md)",
+                onSelectFile: { _ in }, openURL: { _ in XCTFail("File link escaped") },
+                selection: selection, otherMarkdown: destination)
+    }
+
+    private func followReference(in fixture: (host: NSHostingView<AnyView>, window: NSWindow),
+                                 selection: PreviewFileSelection) async throws {
         let link = try await findLink("Reference", in: fixture.host)
-        let scroller = try XCTUnwrap(views(fixture.host).compactMap { $0 as? NSScrollView }.first)
-        let picker = try XCTUnwrap(views(fixture.host).compactMap { $0 as? NSPopUpButton }.first)
-        let viewport = fixture.window.convertToScreen(scroller.convert(scroller.bounds, to: nil))
-        let bottom = try XCTUnwrap(scroller.documentView).bounds.height - scroller.contentView.bounds.height
-        scroller.contentView.scroll(to: NSPoint(x: 0, y: bottom))
+        let scroller = try pageScroller(in: fixture.host)
+        let screenViewport = viewport(of: scroller, in: fixture.window)
+        scroller.contentView.scroll(to: NSPoint(x: 0, y: scrollRange(of: scroller)))
         scroller.reflectScrolledClipView(scroller.contentView)
         XCTAssertGreaterThan(scroller.contentView.bounds.minY, 500)
         await TestWait.until(timeout: .seconds(3), failureMessage: "Scrolled link must be inside the viewport") {
             fixture.host.layoutSubtreeIfNeeded()
-            return viewport.contains(link.accessibilityFrame())
+            return screenViewport.contains(link.accessibilityFrame())
         }
         try click(link, in: fixture.window)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Linked reference must load") {
-            fixture.host.layoutSubtreeIfNeeded()
-            return selection.file == "references/x.md" && picker.titleOfSelectedItem == "references/x.md"
-                && self.elements(fixture.host).contains { ($0.accessibilityValue() as? String) == "Reference" }
-        }
-        let rowTop = viewport.maxY - picker.accessibilityFrame().maxY
-        XCTAssertEqual(rowTop, 0, accuracy: 1, "A linked file must put its file row at the viewport top")
+        await waitForReference(in: fixture.host, selection: selection)
+    }
 
-        scroller.contentView.scroll(to: NSPoint(x: 0, y: 200))
-        scroller.reflectScrolledClipView(scroller.contentView)
-        let offset = scroller.contentView.bounds.minY
-        let menu = try XCTUnwrap(picker.menu)
-        let item = try XCTUnwrap(menu.items.firstIndex { $0.title == "SKILL.md" })
-        menu.performActionForItem(at: item)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Picker must select SKILL.md") {
-            fixture.host.layoutSubtreeIfNeeded()
-            return selection.file == "SKILL.md" && picker.titleOfSelectedItem == "SKILL.md"
+    private func waitForReference(in host: NSView, selection: PreviewFileSelection) async {
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Linked or picked reference must load") {
+            host.layoutSubtreeIfNeeded()
+            return selection.file == "references/x.md"
+                && self.elements(host).contains { ($0.accessibilityValue() as? String) == "Reference" }
         }
-        XCTAssertEqual(scroller.contentView.bounds.minY, offset, accuracy: 1,
-                       "Picker selection must leave the page offset alone")
+    }
+
+    private func waitForEditor(in host: NSView) async throws -> WKWebView {
+        var editor: WKWebView?
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Source editor must finish layout") {
+            host.layoutSubtreeIfNeeded()
+            editor = self.views(host).compactMap { $0 as? WKWebView }.first
+            return editor != nil && editor?.frame.height ?? 0 >= SkillContentTab.sourceEditorMinimumHeight
+        }
+        return try XCTUnwrap(editor)
+    }
+
+    private func pickFile(_ file: String, in host: NSView) throws {
+        let menu = try XCTUnwrap(filePicker(in: host).menu)
+        let item = try XCTUnwrap(menu.items.firstIndex { $0.title == file })
+        menu.performActionForItem(at: item)
+    }
+
+    private func filePicker(in host: NSView) throws -> NSPopUpButton {
+        try XCTUnwrap(views(host).compactMap { $0 as? NSPopUpButton }.first)
+    }
+
+    private func pageScroller(in host: NSView) throws -> NSScrollView {
+        try XCTUnwrap(views(host).compactMap { $0 as? NSScrollView }.first)
+    }
+
+    private func scrollRange(of scroller: NSScrollView) -> CGFloat {
+        max(0, (scroller.documentView?.bounds.height ?? 0) - scroller.contentView.bounds.height)
+    }
+
+    private func viewport(of scroller: NSScrollView, in window: NSWindow) -> CGRect {
+        window.convertToScreen(scroller.convert(scroller.bounds, to: nil))
     }
 
     func testAnchorReaderScrollsEnclosingDetailPageToFirstDuplicate() async throws {
@@ -109,11 +204,12 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         let base = NSTemporaryDirectory() + "PreviewLinkHost-" + UUID().uuidString
         let files = DeployRecordingFileService()
         files.contents[Constants.pensieveSkillsDir + "/link-test/references/x.md"] = otherMarkdown
+        files.contents[Constants.pensieveSkillsDir + "/link-test/scripts/x.sh"] = "echo hi"
         let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: files, baseDir: base),
                                             fileService: files, manifestRoot: base)
         let skill = Skill(name: "Link test", directoryName: "link-test")
         var snapshot = DetailContentSnapshot(body: markdown)
-        snapshot.inventory.files = ["SKILL.md", "references/x.md"].map {
+        snapshot.inventory.files = ["SKILL.md", "references/x.md", "scripts/x.sh"].map {
             .init(relativePath: $0, bytes: 20, tokens: 5)
         }
         let tab = PreviewContentHarness(skill: skill, snapshot: snapshot, library: library,
@@ -121,9 +217,7 @@ final class SkillPreviewLinkHostTests: XCTestCase {
                                             onSelectFile(path)
                                             selection?.file = path
                                         })
-        let layout = SkillDetailScrollLayout(skillID: skill.id, contentOwnsScroller: false,
-                                             chrome: { Text("Detail header") }, tabContent: { tab })
-        let host = NSHostingView(rootView: AnyView(layout.frame(width: 640, height: 480)
+        let host = NSHostingView(rootView: AnyView(tab.frame(width: 640, height: 480)
             .environment(\.openURL, OpenURLAction { openURL($0); return .handled })))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
                               styleMask: [.borderless], backing: .buffered, defer: false)
@@ -184,6 +278,7 @@ final class SkillPreviewLinkHostTests: XCTestCase {
 @Observable
 private final class PreviewFileSelection {
     var file = "SKILL.md"
+    var mode = SkillContentPresentation.Mode.rendered
 }
 
 private struct PreviewContentHarness: View {
@@ -194,9 +289,14 @@ private struct PreviewContentHarness: View {
     let onSelectFile: (String) -> Void
 
     var body: some View {
-        let presentation = SkillContentPresentation.resolve(selectedFile: selection.file, requestedMode: .rendered,
+        let presentation = SkillContentPresentation.resolve(selectedFile: selection.file, requestedMode: selection.mode,
                                                              inventory: snapshot.inventory)
-        SkillContentTab(skill: skill, snapshot: snapshot, library: library, presentation: presentation,
-                        onSelectFile: onSelectFile, onSelectMode: { _ in })
+        SkillDetailScrollLayout(skillID: skill.id,
+                              contentOwnsScroller: DetailView.contentOwnsScroller(tab: .content, presentation: presentation)) {
+            Text("Detail header")
+        } tabContent: {
+            SkillContentTab(skill: skill, snapshot: snapshot, library: library, presentation: presentation,
+                            onSelectFile: onSelectFile, onSelectMode: { selection.mode = $0 })
+        }
     }
 }

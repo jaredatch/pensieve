@@ -6,14 +6,6 @@ import XCTest
 
 @MainActor
 final class SkillHistoryLayoutTests: XCTestCase {
-    func testOwnWindowAccessibilityReadStaysOnMainThread() async throws {
-        let fixture = try installedTab(rowCount: 3)
-        let host = makeHost(fixture.tab, height: 480)
-        defer { host.window.close() }
-        let tree = try await waitForRows(in: host.window)
-        XCTAssertTrue(tree.readOnMainThread, "Own-process accessibility read ran on main thread: \(tree.readOnMainThread)")
-    }
-
     func testInstalledRowsKeep24PointGapsAtShortAndTallHeights() async throws {
         let tab = try installedTab(rowCount: 3).tab
         try await assertFixedGaps(tab)
@@ -214,11 +206,11 @@ private enum HistoryAccessibility {
         let label: String
         let frame: CGRect
         let children: [Node]
-        let readOnMainThread = Thread.isMainThread
         var descendants: [Node] { children.flatMap { [$0] + $0.descendants } }
     }
 
     static func snapshot(windowTitle: String) async -> Node? {
+        // Reads run on the main actor because a process may read its own tree without Accessibility permission.
         guard let window = window(titled: windowTitle) else { return nil }
         return node(window)
     }

@@ -53,7 +53,10 @@ private struct RenderedSkillMarkdown: View {
         ScrollViewReader { proxy in
             markdown
                 .coordinateSpace(name: SkillPreviewHeadingPreference.coordinateSpace)
-                .onPreferenceChange(SkillPreviewHeadingPreference.self) { headings.value = $0 }
+                .onPreferenceChange(SkillPreviewHeadingPreference.self) { [headings] targets in
+                    // SwiftUI delivers layout preferences on the main thread; check the actor explicitly.
+                    MainActor.assumeIsolated { headings.value = targets }
+                }
                 .environment(\.openURL, OpenURLAction { url in
                     switch SkillPreviewLinkPolicy.decision(for: url, documentRelativePath: preview.documentRelativePath,
                                                           files: preview.files) {
@@ -101,6 +104,6 @@ private struct RenderedSkillMarkdown: View {
 }
 
 /// Layout updates only the click targets; mutating this non-observed box does not reparse Markdown.
-private final class HeadingTargets {
+@MainActor private final class HeadingTargets {
     var value: [SkillPreviewLinkPolicy.HeadingTarget] = []
 }
