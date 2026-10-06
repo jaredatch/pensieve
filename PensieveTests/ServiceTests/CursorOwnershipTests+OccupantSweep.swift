@@ -6,6 +6,16 @@ extension CursorOwnershipTests {
     enum Occupant: String, CaseIterable {
         case absent, marked, unmarked, legacy, unreadable, linkToMarked, directory, fifo
         case ownedLink, brokenOwnedLink, otherSkillLink, foreignLink, relativeLink, traversalLink, lookalikeLink, storeLink
+        case parentThenCombiningLink, interiorCombiningLink, leadingCombiningTraversalLink
+
+        var combiningTraversalRemainder: String? {
+            switch self {
+            case .parentThenCombiningLink: "../\u{0301}outside"
+            case .interiorCombiningLink: "x/\u{0301}.."
+            case .leadingCombiningTraversalLink: "\u{0301}../y"
+            default: nil
+            }
+        }
     }
 
     func testGeneratedAgentOccupantDeployAndRemovalSweep() throws {
@@ -21,8 +31,73 @@ extension CursorOwnershipTests {
                 }
             }
         }
-        XCTAssertEqual(cases, 320)
+        XCTAssertEqual(cases, 380)
         XCTAssertEqual(try files.readFile(at: root + "/marked-target.mdc"), "---\n# pensieve: managed\n---\nTarget")
+    }
+
+    func testCombiningMarkTraversalLinkDeployPreservesBytesInEveryScope() throws {
+        try verifyCombiningMarkTraversalLinks(removing: false)
+    }
+
+    func testCombiningMarkTraversalLinkRemovalPreservesBytesInEveryScope() throws {
+        try verifyCombiningMarkTraversalLinks(removing: true)
+    }
+
+    private func verifyCombiningMarkTraversalLinks(removing: Bool) throws {
+        let links = LinkService(fileService: mapped)
+        let occupants: [Occupant] = [.parentThenCombiningLink, .interiorCombiningLink, .leadingCombiningTraversalLink]
+        var cases = 0
+        defer { XCTAssertEqual(cases, 27, "All link agents, supported scopes and target shapes must run") }
+        for platform in PlatformTarget.allCases where platform.usesSymlinks {
+            let scopes: [String?] = platform.supportsProjectScope ? [nil, root + "/project"] : [nil]
+            for project in scopes {
+                let path = links.linkPath(skill: skill, platform: platform, projectPath: project)
+                let physical = project == nil ? root + "/user/" + platform.rawValue + "/" + skill.directoryName : path
+                // Cover the literal requested shapes and the corresponding project Codex file targets.
+                let suffixes = platform == .codex && project != nil ? ["", "/SKILL.md"] : [""]
+                for occupant in occupants {
+                    for suffix in suffixes {
+                        cases += 1
+                        if try files.entryExistsWithoutFollowingLinks(at: physical) { try files.deleteFile(at: physical) }
+                        let target = try linkTarget(occupant, store: root + "/store/skills", suffix: suffix)
+                        try files.createSymlink(at: physical, pointingTo: target)
+                        let caseLinks = try traversalLinks(at: path, physical: physical, occupant: occupant, suffix: suffix)
+                        let before = try traversalLinkBytes(at: physical)
+                        XCTAssertNotNil(before)
+                        let label = "\(platform) / project=\(project != nil) / \(occupant) / \(suffix)"
+                        if removing {
+                            XCTAssertFalse(try caseLinks.unlink(skill: skill, platform: platform, projectPath: project), label)
+                        } else {
+                            XCTAssertThrowsError(try caseLinks.link(
+                                skill: skill, platform: platform, projectPath: project), label) {
+                                guard case ArtifactOwnershipError.occupiedPath(let occupied) = $0 else {
+                                    return XCTFail("Expected occupied path, got \($0): \(label)")
+                                }
+                                XCTAssertEqual(occupied, path, label)
+                            }
+                        }
+                        XCTAssertEqual(try files.entryTypeWithoutFollowingLinks(at: physical), .symlink, label)
+                        XCTAssertEqual(try traversalLinkBytes(at: physical), before, label)
+                    }
+                }
+            }
+        }
+    }
+
+    private func traversalLinkBytes(at path: String) throws -> Data? {
+        guard try files.entryTypeWithoutFollowingLinks(at: path) == .symlink else { return nil }
+        return Data(try files.symlinkTarget(at: path).utf8)
+    }
+
+    private func traversalLinks(at path: String, physical: String, occupant: Occupant, suffix: String) throws -> LinkService {
+        let logicalTarget = try linkTarget(occupant, store: Constants.pensieveSkillsDir, suffix: suffix)
+        let physicalTarget = try files.symlinkTarget(at: physical)
+        // Exact target mappings keep the fixture's grapheme-prefix residual out of ownership's input.
+        let boundary = LinkServiceCanonicalDirectoryFileService(wrapped: files, pathMappings: [
+            (logicalTarget, physicalTarget), (path, physical), (Constants.pensieveSkillsDir, root + "/store/skills")
+        ], physicalSandbox: root)
+        XCTAssertEqual(Data(try boundary.symlinkTarget(at: path).utf8), Data(logicalTarget.utf8))
+        return LinkService(fileService: boundary)
     }
 
     private func runOccupantCase(platform: PlatformTarget, project: String?, occupant: Occupant, removing: Bool) throws {
@@ -36,10 +111,13 @@ extension CursorOwnershipTests {
             : path
         if try files.entryExistsWithoutFollowingLinks(at: physical) { try files.deleteFile(at: physical) }
         try install(occupant, at: physical, linksFile: platform == .codex && project != nil)
+        let operationLinks = platform.usesSymlinks && occupant.combiningTraversalRemainder != nil
+            ? try traversalLinks(at: path, physical: physical, occupant: occupant,
+                                 suffix: platform == .codex && project != nil ? "/SKILL.md" : "") : links
         let before = try snapshot(physical)
         mapped.beforeRuleRead = occupant == .unreadable ? { _ in throw CocoaError(.fileReadNoPermission) } : nil
         let problem = try boundedArtifactOperation(fifo: occupant == .fifo ? physical : nil) {
-            try self.operate(platform: platform, project: project, removing: removing)
+            try self.operate(platform: platform, project: project, removing: removing, links: operationLinks)
         }
         mapped.beforeRuleRead = nil
         let owned = platform.usesSymlinks
@@ -66,9 +144,8 @@ extension CursorOwnershipTests {
         }
     }
 
-    private func operate(platform: PlatformTarget, project: String?, removing: Bool) throws {
+    private func operate(platform: PlatformTarget, project: String?, removing: Bool, links: LinkService) throws {
         if platform.usesSymlinks {
-            let links = LinkService(fileService: mapped)
             if removing { try links.unlink(skill: skill, platform: platform, projectPath: project) } else {
                 try links.link(skill: skill, platform: platform, projectPath: project)
             }
@@ -99,6 +176,7 @@ extension CursorOwnershipTests {
     }
 
     private func linkTarget(_ occupant: Occupant, store: String, suffix: String) throws -> String {
+        if let remainder = occupant.combiningTraversalRemainder { return store + "/" + remainder + suffix }
         switch occupant {
         case .ownedLink: return store + "/" + skill.directoryName + suffix
         case .brokenOwnedLink: return store + "/gone" + suffix
@@ -116,7 +194,7 @@ extension CursorOwnershipTests {
     private func snapshot(_ path: String) throws -> String {
         guard let type = try files.entryTypeWithoutFollowingLinks(at: path) else { return "absent" }
         switch type {
-        case .symlink: return "link: " + (try files.symlinkTarget(at: path))
+        case .symlink: return "link: " + Data(try files.symlinkTarget(at: path).utf8).base64EncodedString()
         case .regular: return "file: " + (try files.readData(at: path)).base64EncodedString()
         case .directory: return "directory: " + (try files.readFile(at: path + "/payload"))
         case .other: return "fifo"
