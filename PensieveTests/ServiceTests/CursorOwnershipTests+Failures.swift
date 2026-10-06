@@ -43,7 +43,9 @@ extension CursorOwnershipTests {
                 vm.remove(skill: skill, platform: .cursor, target: .project(project))
                 XCTAssertTrue(vm.error?.contains("Could not check ownership") == true)
             case "bulk":
-                XCTAssertEqual(vm.removeBatch(skills: [skill], platforms: [.cursor], target: .project(project)).failureCount, 1)
+                XCTAssertEqual(vm.removeBatch(
+                    pairs: DeployRemovalPair.expand(skills: [skill], platforms: [.cursor]),
+                    target: .project(project)).failureCount, 1)
             case "category":
                 // No competing intent owner: the category must attempt removal and keep its ledger on failure.
                 for row in try context.fetch(FetchDescriptor<IntentAssignment>()) { context.delete(row) }

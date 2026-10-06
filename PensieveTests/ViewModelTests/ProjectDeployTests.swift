@@ -140,12 +140,14 @@ final class ProjectDeployTests: XCTestCase {
 
         let projectLinkService = RecordingLinkService()
         let projectVM = makeViewModel(linkService: projectLinkService)
-        _ = projectVM.removeBatch(skills: [skill], platforms: [.claudeCode], target: .project(project))
+        _ = projectVM.removeBatch(
+            pairs: DeployRemovalPair.expand(skills: [skill], platforms: [.claudeCode]),
+            target: .project(project))
         XCTAssertEqual(projectLinkService.lastUnlinkProjectPath, project.path)
 
         let userLinkService = RecordingLinkService()
         let userVM = makeViewModel(linkService: userLinkService)
-        _ = userVM.removeBatch(skills: [skill], platforms: [.claudeCode], target: .userWide)
+        _ = userVM.removeBatch(pairs: DeployRemovalPair.expand(skills: [skill], platforms: [.claudeCode]), target: .userWide)
         XCTAssertNil(userLinkService.lastUnlinkProjectPath)
     }
 

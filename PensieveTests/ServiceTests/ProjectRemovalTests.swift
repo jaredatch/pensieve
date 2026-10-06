@@ -119,8 +119,8 @@ final class ProjectRemovalTests: XCTestCase {
         XCTAssertTrue(try h.context.fetch(FetchDescriptor<IntentAssignment>()).contains { $0.platformRaw == "codex" })
         XCTAssertFalse(try h.context.fetch(FetchDescriptor<IntentAssignment>()).contains { $0.platformRaw == "claudeCode" },
                        "A completed direct pair retires its ledger just like a category pair")
-        XCTAssertTrue(ProjectListView.removalFailureMessage(projectName: h.project.name, result: result).contains(failedPath))
-        let message = ProjectListView.removalFailureMessage(projectName: h.project.name, result: result)
+        XCTAssertTrue(ProjectRemovalModel.removalFailureMessage(projectName: h.project.name, result: result).contains(failedPath))
+        let message = ProjectRemovalModel.removalFailureMessage(projectName: h.project.name, result: result)
         XCTAssertTrue(message.contains("stopped partway"))
         XCTAssertTrue(message.contains("retry"))
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)

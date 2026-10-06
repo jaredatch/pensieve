@@ -287,15 +287,7 @@ final class PlatformViewModel {
         return result
     }
 
-    /// Remove every (skill × platform) pair, resilient to a single failing pair. Mirrors `removeOne`.
-    func removeBatch(
-        skills: [Skill],
-        platforms: [PlatformTarget],
-        target: DeployTarget = .userWide
-    ) -> BatchResult {
-        removeBatch(pairs: DeployRemovalPair.expand(skills: skills, platforms: platforms), target: target)
-    }
-
+    /// Execute the owned pairs admitted by `removeOwnedBatch`, retaining per-pair failures.
     func removeBatch(pairs: [DeployRemovalPair], target: DeployTarget) -> BatchResult {
         var result = BatchResult()
         for pair in pairs {

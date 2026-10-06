@@ -120,8 +120,7 @@ extension CursorOwnershipTests {
             } else { XCTAssertEqual(status, 0, diagnostics) }
         }
     }
-
-    private func typecheckOwnershipProbe(_ source: String, products: String, checkout: String) throws -> (Int32, String) {
+    func typecheckOwnershipProbe(_ source: String, products: String, checkout: String) throws -> (Int32, String) {
         let process = Process()
         let output = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")

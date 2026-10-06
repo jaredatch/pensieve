@@ -40,7 +40,7 @@ final class ProjectRemovalExecutionTests: XCTestCase {
         }
         let result = removeRegisteredProject(h.project, reconciler: h.category,
             platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, context: h.context)
-        let message = ProjectListView.removalFailureMessage(projectName: h.project.name, result: result)
+        let message = ProjectRemovalModel.removalFailureMessage(projectName: h.project.name, result: result)
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(message.contains("folder"))
         XCTAssertTrue(message.contains(h.project.path))

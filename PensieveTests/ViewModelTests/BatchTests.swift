@@ -95,8 +95,7 @@ final class Batch: XCTestCase {
 
     func testProjectRemovalReadFailureMessageNamesNoDeployCount() {
         let result = BatchResult.readFailure("project deploy intent ownership", error: StubError())
-
-        let message = ProjectListView.removalFailureMessage(projectName: "Example", result: result)
+        let message = ProjectRemovalModel.removalFailureMessage(projectName: "Example", result: result)
 
         XCTAssertTrue(message.contains("Removal stopped because Pensieve couldn't read its deploy records"))
         XCTAssertTrue(message.contains("“Example” stays registered"))
@@ -176,8 +175,9 @@ final class Batch: XCTestCase {
             agentDetection: StubDetection(),
             deployStateStore: makeDeployStateStore()
         )
-
-        let result = vm.removeBatch(skills: [alpha, bravo], platforms: [.claudeCode, .openClaw])
+        let result = vm.removeBatch(
+            pairs: DeployRemovalPair.expand(skills: [alpha, bravo], platforms: [.claudeCode, .openClaw]),
+            target: .userWide)
 
         XCTAssertEqual(result.outcomes.count, 4)
         XCTAssertEqual(result.failures.count, 1, "one bad pair must not abort the rest")

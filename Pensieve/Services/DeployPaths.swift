@@ -4,8 +4,25 @@ import Foundation
 /// `LinkService.linkPath`/`targetPath` so the GUI deploy path and the daemon's reconcile share one
 /// implementation. Takes a plain `directoryName` instead of a `@Model` `Skill`.
 enum DeployPaths {
-    static func cursorPath(directoryName: String, projectPath: String?) -> String {
-        let root = projectPath.map { $0 + "/.cursor/rules" } ?? PathConstants.cursorUserRulesDir
+    /// Invert only the exact builder layout, without resolving or normalizing recorded paths.
+    static func slug(artifactPath: String, platform: PlatformTarget, projectPath: String?,
+                     cursorUserRulesDirectory: String = PathConstants.cursorUserRulesDir) -> String? {
+        guard projectPath == nil || platform.supportsProjectScope else { return nil }
+        let suffix = platform == .cursor ? ".mdc" : platform == .codex && projectPath != nil ? ".md" : ""
+        let template = platform == .cursor
+            ? cursorPath(directoryName: "", projectPath: projectPath, userRulesDirectory: cursorUserRulesDirectory)
+            : linkPath(directoryName: "", platform: platform, projectPath: projectPath)
+        let prefix = String(template.dropLast(suffix.count))
+        guard artifactPath.hasPrefix(prefix), artifactPath.hasSuffix(suffix) else { return nil }
+        let leaf = artifactPath.dropFirst(prefix.count)
+        guard leaf.count > suffix.count else { return nil }
+        let slug = String(leaf.dropLast(suffix.count))
+        return slug.contains("/") ? nil : slug
+    }
+
+    static func cursorPath(directoryName: String, projectPath: String?,
+                           userRulesDirectory: String = PathConstants.cursorUserRulesDir) -> String {
+        let root = projectPath.map { $0 + "/.cursor/rules" } ?? userRulesDirectory
         return root + "/" + directoryName + ".mdc"
     }
 

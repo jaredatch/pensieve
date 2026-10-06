@@ -17,7 +17,7 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         let result = remove(h, project: project, context: context)
         XCTAssertTrue(result.hasFailures, "A read-only persistent store must report the refused save")
         guard result.hasFailures else { return }
-        XCTAssertTrue(ProjectListView.removalFailureMessage(projectName: name, result: result)
+        XCTAssertTrue(ProjectRemovalModel.removalFailureMessage(projectName: name, result: result)
             .contains("stays registered"))
         XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").deployIntents.count, 2,
                        "A refused save must leave the manifest agreeing with the registered project's intents")
@@ -42,9 +42,9 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         let result = remove(h, project: h.project, context: h.context)
         XCTAssertTrue(faulted, "The real manifest writer must reach the fault")
         XCTAssertTrue(result.hasFailures)
-        XCTAssertTrue(ProjectListView.removalFailureMessage(projectName: h.project.name, result: result)
+        XCTAssertTrue(ProjectRemovalModel.removalFailureMessage(projectName: h.project.name, result: result)
             .contains("stays registered"))
-        let message = ProjectListView.removalFailureMessage(projectName: h.project.name, result: result)
+        let message = ProjectRemovalModel.removalFailureMessage(projectName: h.project.name, result: result)
         XCTAssertFalse(message.contains(".:"))
         XCTAssertFalse(message.contains("stopped partway"))
         XCTAssertTrue(message.contains("Nothing was changed."))
@@ -82,7 +82,7 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         XCTAssertEqual(fault.refusedSaves, 1)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
         XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").deployIntents.count, 2)
-        let message = ProjectListView.removalFailureMessage(projectName: project.name, result: result)
+        let message = ProjectRemovalModel.removalFailureMessage(projectName: project.name, result: result)
         XCTAssertFalse(message.contains("Nothing was changed."), "The withdrawal remains saved after restoration fails")
         XCTAssertTrue(message.contains("Pensieve stopped requesting this project's deploys."))
         h.mapped.beforeFileWrite = nil

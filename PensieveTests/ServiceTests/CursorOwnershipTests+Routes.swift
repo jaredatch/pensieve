@@ -59,7 +59,9 @@ extension CursorOwnershipTests {
             vm.remove(skill: skill, platform: platform, target: target)
             XCTAssertNil(vm.error)
         case "bulk":
-            XCTAssertFalse(vm.removeBatch(skills: [skill], platforms: [platform], target: target).hasFailures)
+            XCTAssertFalse(vm.removeBatch(
+                pairs: DeployRemovalPair.expand(skills: [skill], platforms: [platform]),
+                target: target).hasFailures)
         case "category":
             context.insert(SkillProjectAssignment(skillID: skill.id, projectID: project.id, platform: platform))
             try context.save()

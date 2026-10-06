@@ -172,7 +172,9 @@ struct ProjectRemovalPlan {
         let projectID = project.id
         let history = try context.fetch(FetchDescriptor<DeployRecord>(predicate: #Predicate { $0.projectID == projectID }))
         for row in history where row.targetPath.hasPrefix(project.path + "/") {
-            let skill = evidence.byID[row.skillID] ?? historicalSkill(path: row.targetPath, platform: row.platform)
+            guard let slug = DeployPaths.slug(artifactPath: row.targetPath, platform: row.platform,
+                                              projectPath: project.path) else { continue }
+            let skill = evidence.byID[row.skillID] ?? evidence.bySlug[slug] ?? Skill(name: slug, directoryName: slug)
             try admit(skill: skill, platform: row.platform, project: project, platformVM: platformVM,
                       recordedPath: row.targetPath, into: &candidates)
         }
@@ -186,19 +188,6 @@ struct ProjectRemovalPlan {
         try LinkService.validatePathComponent(skill.directoryName)
         let path = platformVM.artifactPath(skill: skill, platform: platform, target: .project(project))
         guard recordedPath == nil || recordedPath == path else { return }
-        candidates[path] = DeployRemovalPair(skill: skill, platform: platform)
-    }
-
-    private static func historicalSkill(path: String, platform: PlatformTarget) -> Skill {
-        let file = path as NSString
-        let slug: String
-        if platform == .cursor {
-            slug = file.deletingPathExtension.components(separatedBy: "/").last ?? ""
-        } else if platform == .codex {
-            slug = (file.deletingLastPathComponent as NSString).lastPathComponent
-        } else {
-            slug = file.lastPathComponent
-        }
-        return Skill(name: slug, directoryName: slug)
+        if candidates[path] == nil { candidates[path] = DeployRemovalPair(skill: skill, platform: platform) }
     }
 }

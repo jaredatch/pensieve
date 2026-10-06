@@ -80,8 +80,9 @@ final class DeployReconciler: DeployReconciling {
         guard fileService.directoryExists(at: cursorRulesDir),
               let entries = try? fileService.listDirectory(at: cursorRulesDir) else { return result }
         for entry in entries where entry.hasSuffix(".mdc") {
-            let slug = String(entry.dropLast(4))   // strip ".mdc"
             let mdcPath = cursorRulesDir + "/" + entry
+            guard let slug = DeployPaths.slug(artifactPath: mdcPath, platform: .cursor, projectPath: nil,
+                                              cursorUserRulesDirectory: cursorRulesDir) else { continue }
             guard records.contains(where: {
                 $0.artifactPath == mdcPath
                     && $0.scope == "user"
