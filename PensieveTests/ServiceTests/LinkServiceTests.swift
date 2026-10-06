@@ -207,13 +207,25 @@ final class LinkServiceTests: XCTestCase {
         }
     }
 
-    func testClaudeCodeProjectScopeDoesNotThrowUnsupportedScope() {
-        let skill = makeSkill(dirName: "missing-\(UUID().uuidString)")
-        XCTAssertThrowsError(try linkService.link(skill: skill, platform: .claudeCode, projectPath: "/x")) { error in
-            if case LinkError.projectScopeUnsupported = error {
-                XCTFail("Claude Code project deploy must not trip the unsupported-scope guard")
-            }
-        }
+    func testClaudeCodeProjectScopeDoesNotThrowUnsupportedScope() throws {
+        let skill = makeSkill()
+        try createSkillOnDisk(dirName: skill.directoryName)
+        let project = tempDir + "/project"
+        try fileService.createDirectory(at: project)
+        let target = skillsDir + "/" + skill.directoryName
+        let mapped = LinkServiceCanonicalDirectoryFileService(
+            wrapped: fileService,
+            pathMappings: [(Constants.pensieveSkillsDir + "/" + skill.directoryName, target)],
+            physicalSandbox: tempDir)
+        let service = LinkService(fileService: mapped)
+
+        XCTAssertNoThrow(try service.link(skill: skill, platform: .claudeCode, projectPath: project),
+                         "Claude Code project deploy must succeed for a real skill and project")
+
+        let link = project + "/.claude/skills/" + skill.directoryName
+        XCTAssertTrue(fileService.isSymlink(at: link), "Claude Code project deploy must create its skill link")
+        XCTAssertEqual(try fileService.symlinkTarget(at: link), target)
+        XCTAssertEqual(try fileService.readFile(at: link + "/SKILL.md"), "# Test")
     }
 
     // MARK: - Path Component Validation

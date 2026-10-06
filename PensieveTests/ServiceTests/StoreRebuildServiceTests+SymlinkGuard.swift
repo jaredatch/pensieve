@@ -33,26 +33,29 @@ extension StoreRebuildServiceTests {
     @MainActor
     func testRebuildSkipsRealpathEscapingSlugDirPreservingRow() throws {
         let context = try makeContext()
-        // Ingest a real "victim" row plus a real sibling "decoy" skill dir inside the store.
         try writeSkillFile(slug: "victim", name: "Original", description: "orig")
-        try writeSkillFile(slug: "decoy", name: "Decoy", description: "decoy")
-        try writeManifest(skills: [overlay("victim"), overlay("decoy")])
+        try writeManifest(skills: [overlay("victim")])
         _ = service.rebuild(fromRoot: tempDir, context: context)
-        XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).count, 2)
-
-        // Replace victim's real slug dir with a symlink to the SIBLING slug dir: the target stays inside
-        // the store yet realpath-escapes victim's canonical `skills/victim` position. The resolver must
-        // still reject it, so the row is preserved and NOT re-ingested through the link.
-        try FileManager.default.removeItem(atPath: tempDir + "/skills/victim")
-        try FileManager.default.createSymbolicLink(
-            atPath: tempDir + "/skills/victim", withDestinationPath: tempDir + "/skills/decoy")
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).count, 1)
+        let outside = tempDir + "/outside"
+        let evil = SkillSerializer.serialize(name: "Evil", description: "pwned", body: "# evil")
+        try fileService.writeFile(at: outside + "/SKILL.md", content: evil)
+        let swapping = StoreDirectorySwapFileService(
+            wrapped: fileService, directory: tempDir + "/skills/victim", outsideDirectory: outside)
+        let service = StoreRebuildService(fileService: swapping, manifestService: manifest)
 
         let result = service.rebuild(fromRoot: tempDir, context: context)
 
+        XCTAssertNil(swapping.swapError)
+        XCTAssertGreaterThan(swapping.swapCount, 0, "The fixture must swap a real directory after its type probe")
         XCTAssertTrue(result.warnings.contains { $0.contains("victim") && $0.contains("symlink") })
-        XCTAssertEqual(result.skillsRemoved, 0)        // victim row preserved, never deleted
+        XCTAssertEqual(result.skillsRemoved, 0, "A realpath escape must preserve the existing row")
+        XCTAssertEqual(result.skillsUpdated, 0, "Rebuild must not ingest the outside skill")
         let skills = try context.fetch(FetchDescriptor<Skill>())
+        XCTAssertEqual(skills.count, 1)
         let victim = try XCTUnwrap(skills.first { $0.directoryName == "victim" })
-        XCTAssertEqual(victim.name, "Original")        // NOT re-ingested as the sibling "Decoy"
+        XCTAssertEqual(victim.name, "Original", "Rebuild must preserve the original identity")
+        XCTAssertEqual(victim.skillDescription, "orig")
+        XCTAssertEqual(try fileService.readFile(at: outside + "/SKILL.md"), evil)
     }
 }
