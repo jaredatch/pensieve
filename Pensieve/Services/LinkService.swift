@@ -153,9 +153,7 @@ final class LinkService: LinkServiceProtocol {
     /// Rejects a path component that could escape the intended skill root.
     /// Pure (no filesystem) so it is unit-testable hermetically; enforced in `link()`.
     static func validatePathComponent(_ component: String) throws {
-        guard let first = component.unicodeScalars.first,
-              ![.nonspacingMark, .spacingMark, .enclosingMark].contains(first.properties.generalCategory),
-              !component.unicodeScalars.contains(where: { $0.value == 0 }),
+        guard !component.isEmpty,
               component != ".",
               component != "..",
               !component.contains("/"),

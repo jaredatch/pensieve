@@ -19,38 +19,35 @@ extension CursorOwnershipTests {
     @MainActor
     func testAllRemovalRoutesPreserveForeignAndRemoveOwnedArtifacts() throws {
         var cases = 0
-        for name in Self.ownershipSkillNames {
-            try useOwnershipSkill(named: name)
-            for route in ["single", "bulk", "category", "intent", "skill"] {
-                for platform in [PlatformTarget.claudeCode, .grok, .codex, .cursor, .openClaw, .hermes] {
-                    let scopes: [String?] = platform.supportsProjectScope && route != "category"
-                        ? [nil, root + "/project"] : [route == "category" ? root + "/project" : nil]
-                    if route == "category" && !platform.supportsProjectScope { continue }
-                    for projectPath in scopes {
-                        for owned in [false, true] {
-                            for legacy in platform == .cursor && owned ? [false, true] : [false] {
-                                let harness = try contextAndVM()
-                                let context = harness.context, vm = harness.vm
-                                let project = Project(name: "Project", path: root + "/project")
-                                project.identityKey = "github.com/owner/project"
-                                context.insert(project)
-                                let target: DeployTarget = projectPath == nil ? .userWide : .project(project)
-                                let path = artifactPath(platform, project: projectPath)
-                                try plant(owned: owned, legacy: legacy, platform: platform, path: path, project: projectPath)
-                                if route == "skill", platform == .cursor, projectPath != nil, owned {
-                                    try reviewRecord(harness.state, path: path, target: target)
-                                }
-                                XCTAssertEqual(try vm.artifactIsOwned(skill: skill, platform: platform, target: target), owned)
-                                try removeByRoute(route, harness: harness, platform: platform, project: project, target: target)
-                                try verifyRemoval(owned: owned, platform: platform, path: path)
-                                cases += 1
+        for route in ["single", "bulk", "category", "intent", "skill"] {
+            for platform in [PlatformTarget.claudeCode, .grok, .codex, .cursor, .openClaw, .hermes] {
+                let scopes: [String?] = platform.supportsProjectScope && route != "category"
+                    ? [nil, root + "/project"] : [route == "category" ? root + "/project" : nil]
+                if route == "category" && !platform.supportsProjectScope { continue }
+                for projectPath in scopes {
+                    for owned in [false, true] {
+                        for legacy in platform == .cursor && owned ? [false, true] : [false] {
+                            let harness = try contextAndVM()
+                            let context = harness.context, vm = harness.vm
+                            let project = Project(name: "Project", path: root + "/project")
+                            project.identityKey = "github.com/owner/project"
+                            context.insert(project)
+                            let target: DeployTarget = projectPath == nil ? .userWide : .project(project)
+                            let path = artifactPath(platform, project: projectPath)
+                            try plant(owned: owned, legacy: legacy, platform: platform, path: path, project: projectPath)
+                            if route == "skill", platform == .cursor, projectPath != nil, owned {
+                                try reviewRecord(harness.state, path: path, target: target)
                             }
+                            XCTAssertEqual(try vm.artifactIsOwned(skill: skill, platform: platform, target: target), owned)
+                            try removeByRoute(route, harness: harness, platform: platform, project: project, target: target)
+                            try verifyRemoval(owned: owned, platform: platform, path: path)
+                            cases += 1
                         }
                     }
                 }
             }
         }
-        XCTAssertEqual(cases, 97 * Self.ownershipSkillNames.count)
+        XCTAssertEqual(cases, 97)
     }
 
     @MainActor

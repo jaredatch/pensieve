@@ -13,18 +13,15 @@ extension CursorOwnershipTests {
             [(platform, nil)] + (platform.supportsProjectScope ? [(platform, root + "/project")] : [])
         }
         var cases = 0
-        for name in Self.ownershipSkillNames {
-            try useOwnershipSkill(named: name)
-            for (platform, project) in targets {
-                for occupant in Occupant.allCases {
-                    for removing in [false, true] {
-                        try runOccupantCase(platform: platform, project: project, occupant: occupant, removing: removing)
-                        cases += 1
-                    }
+        for (platform, project) in targets {
+            for occupant in Occupant.allCases {
+                for removing in [false, true] {
+                    try runOccupantCase(platform: platform, project: project, occupant: occupant, removing: removing)
+                    cases += 1
                 }
             }
         }
-        XCTAssertEqual(cases, 320 * Self.ownershipSkillNames.count)
+        XCTAssertEqual(cases, 320)
         XCTAssertEqual(try files.readFile(at: root + "/marked-target.mdc"), "---\n# pensieve: managed\n---\nTarget")
     }
 

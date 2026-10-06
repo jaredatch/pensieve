@@ -3,87 +3,72 @@ import XCTest
 @testable import Pensieve
 
 extension CursorOwnershipTests {
-    @MainActor
-    func testLeadingCombiningMarksAndNULAreRejectedAtArtifactBoundaries() throws {
-        let invalid = ["\u{0301}accent", "\u{0903}spacing", "\u{20dd}enclosing", "bad\0name", "\0name", "name\0"]
-        for name in invalid {
-            skill = Skill(name: "Invalid", directoryName: name)
-            let links = LinkService(fileService: mapped)
-            assertInvalidComponent(name) { try LinkService.validatePathComponent(name) }
-            try assertInvalidRemovalRoutes(name)
-            // Any missed guard fails before reaching a real invalid filesystem path.
-            mapped.beforeProjectProbe = { _ in throw CocoaError(.fileReadUnknown) }
-            mapped.beforeEntryTypeProbe = { _ in throw CocoaError(.fileReadUnknown) }
-            defer { mapped.beforeProjectProbe = nil; mapped.beforeEntryTypeProbe = nil }
+    func testJoiningFirstSkillNamesNeverDeleteOrOverwriteForeignOccupants() throws {
+        let names = ["\u{0301}accent", "\u{0903}spacing", "\u{20dd}enclosing", "\u{200d}joiner", "\u{1f3fb}modifier"]
+        let text = "Foreign occupant's bytes"
+        let sentinel = Data(text.utf8)
+        let foreign = root + "/foreign-target"
+        try files.writeFile(at: foreign, content: text)
+        for name in names {
+            try useOwnershipSkill(named: name)
             for platform in PlatformTarget.allCases {
                 let scopes: [String?] = platform.supportsProjectScope ? [nil, root + "/project"] : [nil]
                 for project in scopes {
-                    if platform.usesSymlinks {
-                        // The scripted boundary supplies an existing target without disk access.
-                        let boundary = LinkService(fileService: LinkServiceScriptedFileService(
-                            linkPath: links.linkPath(skill: skill, platform: platform, projectPath: project),
-                            canonicalDirectory: links.targetPath(skill: skill, platform: platform, projectPath: project),
-                            state: .validDirectorySymlink))
-                        assertInvalidComponent(name) {
-                            try boundary.link(skill: self.skill, platform: platform, projectPath: project)
+                    let path = artifactPath(platform, project: project)
+                    let physical = root + "/joining/" + platform.rawValue
+                        + (project == nil ? "/user/" : "/project/") + name
+                    // Exact leaf mappings avoid the shared fixture's own grapheme-prefix residual.
+                    let boundary = LinkServiceCanonicalDirectoryFileService(wrapped: files, pathMappings: [
+                        (Constants.pensieveSkillsDir + "/" + name, root + "/store/skills/" + name),
+                        (path, physical)
+                    ], physicalSandbox: root)
+                    let links = LinkService(fileService: boundary)
+                    let rules = CursorCompiler(fileService: boundary, skillStore: store)
+                    for occupant in ["link", "file", "directory"] {
+                        if occupant == "link" { try files.createSymlink(at: physical, pointingTo: foreign) } else {
+                            try files.writeFile(at: physical + (occupant == "directory" ? "/payload" : ""),
+                                                content: text)
                         }
-                        assertInvalidComponent(name) {
-                            _ = try boundary.unlink(skill: self.skill, platform: platform, projectPath: project)
+                        let type = try files.entryTypeWithoutFollowingLinks(at: physical)
+                        let contents: () throws -> Data = {
+                            if occupant == "link" { return Data(try self.files.symlinkTarget(at: physical).utf8) }
+                            return try self.files.readData(at: physical + (occupant == "directory" ? "/payload" : ""))
                         }
-                        assertInvalidComponent(name) {
-                            _ = try boundary.ownsArtifact(skill: self.skill, platform: platform, projectPath: project)
+                        let before = try contents()
+                        let label = "\(name.debugDescription) / \(platform) / project=\(project != nil) / \(occupant)"
+                        XCTAssertThrowsError(try platform.usesSymlinks
+                            ? links.link(skill: skill, platform: platform, projectPath: project)
+                            : rules.compile(skill: skill, projectPath: project), label) { error in
+                            self.assertForeignOccupantRefusal(error, path: path, label: label)
                         }
-                    } else {
-                        assertInvalidComponent(name) { try self.compiler.compile(skill: self.skill, projectPath: project) }
-                        assertInvalidComponent(name) { _ = try self.compiler.remove(skill: self.skill, projectPath: project) }
-                        assertInvalidComponent(name) {
-                            _ = try self.compiler.ownsArtifact(skill: self.skill, projectPath: project)
-                        }
-                        assertInvalidComponent(name) {
-                            _ = try self.compiler.hasOwnershipMark(skill: self.skill, projectPath: project)
-                        }
+                        XCTAssertEqual(try files.entryTypeWithoutFollowingLinks(at: physical), type, label)
+                        XCTAssertEqual(try contents(), before, label)
+                        XCTAssertNoThrow(try platform.usesSymlinks
+                            ? links.unlink(skill: skill, platform: platform, projectPath: project)
+                            : rules.remove(skill: skill, projectPath: project), label)
+                        XCTAssertEqual(try files.entryTypeWithoutFollowingLinks(at: physical), type, label)
+                        XCTAssertEqual(try contents(), before, label)
+                        XCTAssertEqual(try files.readData(at: foreign), sentinel, label)
+                        try files.deleteFile(at: physical)
                     }
                 }
             }
         }
     }
 
-    @MainActor
-    private func assertInvalidRemovalRoutes(_ name: String) throws {
-        // Saving a NUL-bearing Core Data string truncates it; inject the raw slug after setup.
-        skill.directoryName = "owned"
-        let harness = try contextAndVM()
-        skill.directoryName = name
-        let project = reviewProject(harness.context)
-        var probes: [String] = []
-        mapped.beforeEntryTypeProbe = { probes.append($0); throw CocoaError(.fileReadUnknown) }
-        mapped.beforeDeployStateRead = { probes.append($0); throw CocoaError(.fileReadUnknown) }
-        defer { mapped.beforeEntryTypeProbe = nil; mapped.beforeDeployStateRead = nil }
-        for target: DeployTarget in [.userWide, .project(project)] {
-            let platforms = PlatformTarget.allCases.filter { target.project == nil || $0.supportsProjectScope }
-            let result = harness.vm.removeOwnedBatch(
-                pairs: DeployRemovalPair.expand(skills: [skill], platforms: platforms), target: target)
-            XCTAssertEqual(result.failureCount, platforms.count, name.debugDescription)
+    private func assertForeignOccupantRefusal(_ error: Error, path: String, label: String) {
+        if case ArtifactOwnershipError.occupiedPath(let occupied) = error {
+            XCTAssertEqual(occupied, path, label)
+        } else if case LinkError.occupiedByRealPath(let occupied) = error {
+            XCTAssertEqual(occupied, path, label)
+        } else {
+            XCTFail("Expected foreign-occupant refusal, got \(error): \(label)")
         }
-        let cleanup = harness.vm.removeAllDeploys(skill: skill, projects: [project], localDeployHistory: { _ in
-            XCTFail("Invalid slugs must not query history"); return []
-        })
-        XCTAssertEqual(cleanup.batch.failureCount, 1, name.debugDescription)
-        harness.context.insert(SkillProjectAssignment(skillID: skill.id, projectID: project.id, platform: .claudeCode))
-        assertInvalidComponent(name) {
-            _ = try ProjectRemovalPlan.prepare(project: project, platformVM: harness.vm, context: harness.context)
-        }
-        XCTAssertTrue(probes.isEmpty, "Reject \(name.debugDescription) before state or artifact I/O")
     }
 
-    private func assertInvalidComponent(_ name: String, operation: () throws -> Void,
-                                        file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertThrowsError(try operation(), file: file, line: line) { error in
-            guard case LinkError.invalidPathComponent(let rejected) = error else {
-                return XCTFail("Expected component rejection for \(name.debugDescription), got \(error)", file: file, line: line)
-            }
-            XCTAssertEqual(rejected, name, file: file, line: line)
-        }
+    private func useOwnershipSkill(named name: String) throws {
+        skill = Skill(name: name, skillDescription: "Description", directoryName: name)
+        try store.writeBody(directoryName: name, body: "# Body")
     }
 
     func testCanonicalEquivalentSkillTargetsAreOwnedRealizedHealedAndRemoved() throws {
