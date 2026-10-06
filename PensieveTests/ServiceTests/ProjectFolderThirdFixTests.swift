@@ -72,9 +72,9 @@ final class ProjectFolderThirdFixTests: XCTestCase {
         for path in relativePaths {
             h.project.path = path
             try h.deployState.replaceAll(platforms.map { record(h, platform: $0) })
-            let result = vm.removeBatch(pairs: DeployRemovalPair.expand(skills: [h.skill], platforms: platforms),
+            let result = vm.removeOwnedBatch(pairs: DeployRemovalPair.expand(skills: [h.skill], platforms: platforms),
                                         target: .project(h.project))
-            XCTAssertEqual(result.successes.count, 4)
+            XCTAssertEqual(result.completedPairs.count, 4)
             XCTAssertFalse(result.hasFailures)
             XCTAssertEqual(try h.deployState.read().records, [], "Real legacy state paths must be retired")
         }

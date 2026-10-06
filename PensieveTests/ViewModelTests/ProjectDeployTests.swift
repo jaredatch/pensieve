@@ -14,6 +14,7 @@ final class ProjectDeployTests: XCTestCase {
     private final class RecordingLinkService: LinkServiceProtocol {
         private(set) var lastLinkProjectPath: String?
         private(set) var lastUnlinkProjectPath: String?
+        var ownsRemovalPairs = false
 
         func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
             lastLinkProjectPath = projectPath
@@ -23,7 +24,7 @@ final class ProjectDeployTests: XCTestCase {
             lastUnlinkProjectPath = projectPath
             return false
         }
-        func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
+        func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { ownsRemovalPairs }
 
         func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
 
@@ -139,15 +140,17 @@ final class ProjectDeployTests: XCTestCase {
         context.insert(project)
 
         let projectLinkService = RecordingLinkService()
+        projectLinkService.ownsRemovalPairs = true
         let projectVM = makeViewModel(linkService: projectLinkService)
-        _ = projectVM.removeBatch(
+        _ = projectVM.removeOwnedBatch(
             pairs: DeployRemovalPair.expand(skills: [skill], platforms: [.claudeCode]),
             target: .project(project))
         XCTAssertEqual(projectLinkService.lastUnlinkProjectPath, project.path)
 
         let userLinkService = RecordingLinkService()
+        userLinkService.ownsRemovalPairs = true
         let userVM = makeViewModel(linkService: userLinkService)
-        _ = userVM.removeBatch(pairs: DeployRemovalPair.expand(skills: [skill], platforms: [.claudeCode]), target: .userWide)
+        _ = userVM.removeOwnedBatch(pairs: DeployRemovalPair.expand(skills: [skill], platforms: [.claudeCode]), target: .userWide)
         XCTAssertNil(userLinkService.lastUnlinkProjectPath)
     }
 

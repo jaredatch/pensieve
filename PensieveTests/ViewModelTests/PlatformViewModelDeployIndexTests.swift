@@ -51,7 +51,7 @@ final class PlatformViewModelDeployIndexTests: XCTestCase {
 
         vm.deploy(skill: skill, platform: .claudeCode, target: .userWide, context: context)
         XCTAssertEqual(vm.deployIndex.summary(for: "idx"), "Claude Code · This Mac")
-        XCTAssertEqual(vm.removeBatch(
+        XCTAssertEqual(vm.removeOwnedBatch(
             pairs: DeployRemovalPair.expand(skills: [skill], platforms: [.claudeCode]),
             target: .userWide).successes.count, 1)
         XCTAssertFalse(vm.deployIndex.isDeployed(slug: "idx"))

@@ -8,16 +8,19 @@ enum DeployPaths {
     static func slug(artifactPath: String, platform: PlatformTarget, projectPath: String?,
                      cursorUserRulesDirectory: String = PathConstants.cursorUserRulesDir) -> String? {
         guard projectPath == nil || platform.supportsProjectScope else { return nil }
-        let suffix = platform == .cursor ? ".mdc" : platform == .codex && projectPath != nil ? ".md" : ""
+        let sentinel = "pensieve-artifact-slug"
         let template = platform == .cursor
-            ? cursorPath(directoryName: "", projectPath: projectPath, userRulesDirectory: cursorUserRulesDirectory)
-            : linkPath(directoryName: "", platform: platform, projectPath: projectPath)
-        let prefix = String(template.dropLast(suffix.count))
-        guard artifactPath.hasPrefix(prefix), artifactPath.hasSuffix(suffix) else { return nil }
-        let leaf = artifactPath.dropFirst(prefix.count)
-        guard leaf.count > suffix.count else { return nil }
-        let slug = String(leaf.dropLast(suffix.count))
-        return slug.contains("/") ? nil : slug
+            ? cursorPath(directoryName: sentinel, projectPath: projectPath, userRulesDirectory: cursorUserRulesDirectory)
+            : linkPath(directoryName: sentinel, platform: platform, projectPath: projectPath)
+        guard let slot = template.range(of: sentinel, options: .backwards) else { return nil }
+        let prefix = Array(template[..<slot.lowerBound].utf8)
+        let suffix = Array(template[slot.upperBound...].utf8)
+        let path = Array(artifactPath.utf8)
+        guard path.starts(with: prefix), path.suffix(suffix.count).elementsEqual(suffix),
+              path.count > prefix.count + suffix.count else { return nil }
+        let leaf = path.dropFirst(prefix.count).dropLast(suffix.count)
+        guard !leaf.contains(UInt8(ascii: "/")) else { return nil }
+        return String(bytes: leaf, encoding: .utf8)
     }
 
     static func cursorPath(directoryName: String, projectPath: String?,

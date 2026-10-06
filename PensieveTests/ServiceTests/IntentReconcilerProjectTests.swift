@@ -188,7 +188,7 @@ final class IntentReconcilerProjectTests: XCTestCase {
         let installedVM = harness.makePlatformVM(installed: [.codex])
         XCTAssertEqual(installedVM.deployIndex.records(for: skill.directoryName), records,
                        "The later view model reads the first pass's isolated deploy state")
-        XCTAssertFalse(installedVM.removeBatch(
+        XCTAssertFalse(installedVM.removeOwnedBatch(
             pairs: DeployRemovalPair.expand(skills: [skill], platforms: [.codex]),
             target: .project(project)).hasFailures)
         harness.platformVM.refreshDeployIndex()

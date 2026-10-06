@@ -43,7 +43,7 @@ extension CursorOwnershipTests {
                 vm.remove(skill: skill, platform: .cursor, target: .project(project))
                 XCTAssertTrue(vm.error?.contains("Could not check ownership") == true)
             case "bulk":
-                XCTAssertEqual(vm.removeBatch(
+                XCTAssertEqual(vm.removeOwnedBatch(
                     pairs: DeployRemovalPair.expand(skills: [skill], platforms: [.cursor]),
                     target: .project(project)).failureCount, 1)
             case "category":

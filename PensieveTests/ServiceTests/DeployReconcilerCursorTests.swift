@@ -83,6 +83,19 @@ final class DeployReconcilerCursorTests: XCTestCase {
         XCTAssertEqual(result.recompiled, [mdcPath])
     }
 
+    func testRecordedRuleWithLeadingCombiningMarkIsRecompiled() throws {
+        let slug = "\u{0301}accent"
+        try fileService.writeFile(at: storeSkillsDir + "/" + slug + "/SKILL.md",
+            content: "---\nname: Accent\ndescription: Description\n---\n\nNEW BODY\n")
+        let path = cursorRulesDir + "/" + slug + ".mdc"
+        try fileService.writeFile(at: path, content: "---\n# pensieve: managed\n---\nSTALE")
+        try seedRecords([record(slug: slug, artifactPath: path)])
+        let result = makeReconciler().reconcileCursor(manifest: snapshot([]))
+        XCTAssertEqual(result.recompiled, [path])
+        XCTAssertEqual(try fileService.readFile(at: path),
+            "---\n# pensieve: managed\ndescription: Description\nalwaysApply: false\n---\n\nNEW BODY\n")
+    }
+
     /// (b) When the Cursor overlay's description is nil, the regenerated `.mdc` uses the SKILL.md
     ///     frontmatter description.
     func testDescriptionFallsBackToFrontmatter() throws {

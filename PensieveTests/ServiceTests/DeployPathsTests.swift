@@ -3,7 +3,8 @@ import XCTest
 
 final class DeployPathsTests: XCTestCase {
     func testGeneratedArtifactPathsRoundTripEveryPlatformAndScope() {
-        let slugs = ["x", "review-skill", "with spaces", "under_score", "has.md", "has.mdc", "café", "技能"]
+        let slugs = ["x", "review-skill", "with spaces", "under_score", "has.md", "has.mdc", "café", "技能",
+                     "\u{0301}accent", "e\u{0301}", "🧑‍💻", "العربية", "\u{200D}joiner"]
         for platform in PlatformTarget.allCases {
             for projectPath: String? in [nil, "/tmp/project", "/tmp/project with spaces", "relative-project"] {
                 for slug in slugs {

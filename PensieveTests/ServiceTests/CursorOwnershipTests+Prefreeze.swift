@@ -66,6 +66,74 @@ extension CursorOwnershipTests {
     }
 
     @MainActor
+    func testInvalidRecoveredHistorySlugsDoNotBlockValidProjectRemoval() throws {
+        for invalidSlug in ["..", ".", "~x"] {
+            let harness = try contextAndVM()
+            let project = reviewProject(harness.context)
+            let validPaths = [PlatformTarget.codex, .cursor].map { artifactPath($0, project: project.path) }
+            for (platform, path) in zip([PlatformTarget.codex, .cursor], validPaths) {
+                try plant(owned: true, legacy: false, platform: platform, path: path, project: project.path)
+                harness.context.insert(DeployRecord(skillID: skill.id, platform: platform,
+                    targetPath: path, contentHash: "valid", projectID: project.id))
+            }
+            harness.context.insert(DeployRecord(skillID: UUID(), platform: .cursor,
+                targetPath: DeployPaths.cursorPath(directoryName: invalidSlug, projectPath: project.path),
+                contentHash: "invalid", projectID: project.id))
+            try harness.context.save()
+            let plan = try ProjectRemovalPlan.prepare(project: project, platformVM: harness.vm, context: harness.context)
+            XCTAssertEqual(plan.preview.artifactCount, 2, invalidSlug)
+            XCTAssertEqual(Set(plan.candidates.map(\.path)), Set(validPaths), invalidSlug)
+            let result = removeRegisteredProject(project, reconciler: CategoryReconciler(platformVM: harness.vm),
+                platformVM: harness.vm, localMachineID: ProjectIntentHarness.localID,
+                confirmedPreview: plan.preview, context: harness.context)
+            XCTAssertFalse(result.hasFailures, invalidSlug)
+            for path in validPaths { XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path), invalidSlug) }
+            XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<Project>()), 0, invalidSlug)
+        }
+    }
+
+    @MainActor
+    func testRenamedLiveHistoryUUIDFallsBackToRecordedSlugOrSyntheticSkill() throws {
+        for hasRecordedSkill in [true, false] {
+            let harness = try contextAndVM()
+            let project = reviewProject(harness.context)
+            let platform: PlatformTarget = hasRecordedSkill ? .cursor : .codex
+            let path = artifactPath(platform, project: project.path)
+            try plant(owned: true, legacy: hasRecordedSkill, platform: platform, path: path, project: project.path)
+            let renamed = Skill(name: "Renamed", directoryName: "renamed")
+            harness.context.insert(renamed)
+            let renamedPath = harness.vm.artifactPath(skill: renamed, platform: platform, target: .project(project))
+            let renamedBytes = "---\n# pensieve: managed\n---\nRenamed rule"
+            if platform == .cursor {
+                try mapped.writeFile(at: renamedPath, content: renamedBytes)
+            } else {
+                try mapped.createSymlink(at: renamedPath, pointingTo: Constants.pensieveSkillsDir + "/renamed/SKILL.md")
+            }
+            harness.context.insert(DeployRecord(skillID: renamed.id, platform: platform,
+                targetPath: path, contentHash: "before rename", projectID: project.id))
+            if !hasRecordedSkill { harness.context.delete(skill) }
+            try harness.context.save()
+            let plan = try ProjectRemovalPlan.prepare(project: project, platformVM: harness.vm, context: harness.context)
+            XCTAssertEqual(plan.preview.artifactCount, 1)
+            XCTAssertEqual(plan.candidates.map(\.path), [path])
+            XCTAssertEqual(plan.candidates.first?.pair.skill.directoryName, skill.directoryName)
+            if hasRecordedSkill { XCTAssertEqual(plan.candidates.first?.pair.skill.id, skill.id) }
+            let result = removeRegisteredProject(project, reconciler: CategoryReconciler(platformVM: harness.vm),
+                platformVM: harness.vm, localMachineID: ProjectIntentHarness.localID,
+                confirmedPreview: plan.preview, context: harness.context)
+            XCTAssertFalse(result.hasFailures)
+            XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path))
+            if platform == .cursor {
+                XCTAssertEqual(try mapped.readFile(at: renamedPath), renamedBytes)
+            } else {
+                XCTAssertEqual(try mapped.symlinkTarget(at: renamedPath), Constants.pensieveSkillsDir + "/renamed/SKILL.md")
+            }
+            XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<Project>()), 0)
+            try mapped.deleteFile(at: renamedPath)
+        }
+    }
+
+    @MainActor
     func testDeploymentsTabDeselectRemovesOwnedAndPreservesForeignArtifacts() throws {
         try verifyIntentRouteRemoval(bulk: false)
     }
@@ -77,11 +145,14 @@ extension CursorOwnershipTests {
 
     @MainActor
     private func verifyIntentRouteRemoval(bulk: Bool) throws {
+        var cases = 0
+        defer { XCTAssertEqual(cases, 22, "Every agent, scope and ownership case must run") }
         for platform in PlatformTarget.allCases {
             let scopes: [String?] = platform.supportsProjectScope ? [nil, root + "/project"] : [nil]
             for projectPath in scopes {
                 for owned in [false, true] {
                     for legacy in platform == .cursor && owned ? [false, true] : [false] {
+                        cases += 1
                         let harness = try contextAndVM()
                         let project = reviewProject(harness.context)
                         let target: DeployTarget = projectPath == nil ? .userWide : .project(project)
@@ -100,7 +171,10 @@ extension CursorOwnershipTests {
                                     machineIDs: [ProjectIntentHarness.localID], context: harness.context)
                                 : try model.setProjectSelection(false, skills: [skill], platforms: [platform],
                                     project: project, context: harness.context)
-                            guard case .localDeploy(let local) = outcome else { return XCTFail("Expected local removal") }
+                            guard case .localDeploy(let local) = outcome else {
+                                XCTFail("Expected local removal")
+                                continue
+                            }
                             result = local
                         }
                         XCTAssertFalse(result.hasFailures, "\(bulk)/\(platform)/\(String(describing: projectPath))")

@@ -287,29 +287,6 @@ final class PlatformViewModel {
         return result
     }
 
-    /// Execute the owned pairs admitted by `removeOwnedBatch`, retaining per-pair failures.
-    func removeBatch(pairs: [DeployRemovalPair], target: DeployTarget) -> BatchResult {
-        var result = BatchResult()
-        for pair in pairs {
-            let skill = pair.skill, platform = pair.platform
-            do {
-                try removeOne(skill: skill, platform: platform, target: target)
-                result.outcomes.append(BatchPairOutcome(
-                    skillID: skill.id, skillName: skill.name, platform: platform,
-                    target: BatchPairTarget(target), error: nil
-                ))
-            } catch {
-                result.outcomes.append(BatchPairOutcome(
-                    skillID: skill.id, skillName: skill.name, platform: platform,
-                    target: BatchPairTarget(target), error: BatchPairOutcome.failureMessage(error, target: target),
-                    projectFolderError: error as? ProjectFolderError
-                ))
-            }
-        }
-        noteDeployStateChanged()
-        return result
-    }
-
     // MARK: - Validation
 
     func brokenLinks(skills: [Skill]) -> [BrokenLink] {

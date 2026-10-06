@@ -38,6 +38,7 @@ final class Batch: XCTestCase {
         /// keys "directoryName|platform.rawValue" that should throw on link()/unlink().
         var failingLink: Set<String> = []
         var failingUnlink: Set<String> = []
+        var ownsRemovalPairs = false
         private(set) var linked: [String] = []
         private(set) var unlinked: [String] = []
 
@@ -52,7 +53,7 @@ final class Batch: XCTestCase {
             unlinked.append(key(skill, platform))
             return false
         }
-        func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
+        func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { ownsRemovalPairs }
 
         func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
         func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
@@ -167,6 +168,7 @@ final class Batch: XCTestCase {
         [alpha, bravo].forEach(context.insert)
 
         let stub = StubLinkService()
+        stub.ownsRemovalPairs = true
         stub.failingUnlink = ["alpha|\(PlatformTarget.claudeCode.rawValue)"]
 
         let vm = PlatformViewModel(
@@ -175,7 +177,7 @@ final class Batch: XCTestCase {
             agentDetection: StubDetection(),
             deployStateStore: makeDeployStateStore()
         )
-        let result = vm.removeBatch(
+        let result = vm.removeOwnedBatch(
             pairs: DeployRemovalPair.expand(skills: [alpha, bravo], platforms: [.claudeCode, .openClaw]),
             target: .userWide)
 

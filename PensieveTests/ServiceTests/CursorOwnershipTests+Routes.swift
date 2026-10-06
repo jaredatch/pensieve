@@ -59,7 +59,7 @@ extension CursorOwnershipTests {
             vm.remove(skill: skill, platform: platform, target: target)
             XCTAssertNil(vm.error)
         case "bulk":
-            XCTAssertFalse(vm.removeBatch(
+            XCTAssertFalse(vm.removeOwnedBatch(
                 pairs: DeployRemovalPair.expand(skills: [skill], platforms: [platform]),
                 target: target).hasFailures)
         case "category":

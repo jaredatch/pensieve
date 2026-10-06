@@ -37,6 +37,31 @@ extension PlatformViewModel {
         return result
     }
 
+    /// Execute the owned pairs admitted by `removeOwnedBatch`, retaining per-pair failures.
+    private func removeBatch(pairs: [DeployRemovalPair], target: DeployTarget) -> BatchResult {
+        var result = BatchResult()
+        for pair in pairs {
+            let skill = pair.skill, platform = pair.platform
+            do {
+                let path = artifactPath(skill: skill, platform: platform, target: target)
+                try removeArtifact(skill: skill, platform: platform, target: target)
+                retireDeployState(artifactPath: path)
+                result.outcomes.append(BatchPairOutcome(
+                    skillID: skill.id, skillName: skill.name, platform: platform,
+                    target: BatchPairTarget(target), error: nil
+                ))
+            } catch {
+                result.outcomes.append(BatchPairOutcome(
+                    skillID: skill.id, skillName: skill.name, platform: platform,
+                    target: BatchPairTarget(target), error: BatchPairOutcome.failureMessage(error, target: target),
+                    projectFolderError: error as? ProjectFolderError
+                ))
+            }
+        }
+        noteDeployStateChanged()
+        return result
+    }
+
     /// Remove owned deploys using one state snapshot and history only for unrecorded project rules.
     /// An unreadable snapshot fences owned artifacts; absent and foreign occupants remain no-ops.
     func removeAllDeploys(

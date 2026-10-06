@@ -95,11 +95,11 @@ final class ProjectFolderCallerTests: XCTestCase {
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 1)
-        let removed = harness.platformVM.removeBatch(
+        let removed = harness.platformVM.removeOwnedBatch(
             pairs: DeployRemovalPair.expand(skills: [harness.skill], platforms: [.claudeCode, .grok, .codex, .cursor]),
             target: .project(harness.project)
         )
-        XCTAssertEqual(removed.successes.count, 4)
+        XCTAssertEqual(removed.completedPairs.count, 4)
         let unregister = removeRegisteredProject(
             harness.project,
             reconciler: harness.category, manifestService: ManifestService(fileService: harness.files),

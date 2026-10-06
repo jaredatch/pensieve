@@ -2,14 +2,38 @@ import XCTest
 @testable import Pensieve
 
 extension CursorOwnershipTests {
-    func testRemovalAPIRequiresClassifiedPairsInsteadOfUnusedCartesianBatch() throws {
-        let admitted = "func probe(_ vm: PlatformViewModel, _ skill: Skill) { "
-            + "_ = vm.removeOwnedBatch(pairs: [DeployRemovalPair(skill: skill, platform: .cursor)], target: .userWide) }"
-        let obsolete = "func probe(_ vm: PlatformViewModel, _ skill: Skill) { "
-            + "_ = vm.removeBatch(skills: [skill], platforms: [.cursor], target: .userWide) }"
-        XCTAssertEqual(try checkRemovalBoundary(admitted).0, 0)
-        XCTAssertNotEqual(try checkRemovalBoundary(obsolete).0, 0,
-                          "The unused Cartesian removal API must be unavailable")
+    @MainActor
+    func testAvailableBatchRemovalRetiresForeignAndAbsentPairsWithoutReportingRemoval() throws {
+        for platform in [PlatformTarget.codex, .cursor] {
+            for inProject in [false, true] {
+                for absent in [false, true] {
+                    let harness = try contextAndVM()
+                    let project = reviewProject(harness.context)
+                    let target: DeployTarget = inProject ? .project(project) : .userWide
+                    let path = artifactPath(platform, project: target.project?.path)
+                    if !absent {
+                        try plant(owned: false, legacy: false, platform: platform,
+                            path: path, project: target.project?.path)
+                    }
+                    try reviewRecord(harness.state, path: path, platform: platform, target: target)
+                    let result = harness.vm.removeOwnedBatch(
+                        pairs: [DeployRemovalPair(skill: skill, platform: platform)], target: target)
+                    XCTAssertTrue(result.outcomes.isEmpty)
+                    XCTAssertFalse(result.hasFailures)
+                    XCTAssertEqual(result.retiredPairs,
+                        [BatchPairKey(skillID: skill.id, platform: platform, target: BatchPairTarget(target))])
+                    XCTAssertTrue(try harness.state.read().records.isEmpty)
+                    if absent {
+                        XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path))
+                    } else if platform.usesSymlinks {
+                        XCTAssertEqual(try mapped.symlinkTarget(at: path), root + "/foreign")
+                    } else {
+                        XCTAssertEqual(try mapped.readFile(at: path), "User rule")
+                    }
+                    if !absent { try mapped.deleteFile(at: path) }
+                }
+            }
+        }
     }
 
     func testProjectRemovalFailureFormatterBelongsToModelInsteadOfView() throws {

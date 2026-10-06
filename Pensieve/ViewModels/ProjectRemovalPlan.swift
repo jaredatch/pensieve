@@ -174,7 +174,12 @@ struct ProjectRemovalPlan {
         for row in history where row.targetPath.hasPrefix(project.path + "/") {
             guard let slug = DeployPaths.slug(artifactPath: row.targetPath, platform: row.platform,
                                               projectPath: project.path) else { continue }
-            let skill = evidence.byID[row.skillID] ?? evidence.bySlug[slug] ?? Skill(name: slug, directoryName: slug)
+            guard (try? LinkService.validatePathComponent(slug)) != nil else { continue }
+            let matchingSkill = evidence.byID[row.skillID].flatMap { skill in
+                platformVM.artifactPath(skill: skill, platform: row.platform, target: .project(project)) == row.targetPath
+                    ? skill : nil
+            }
+            let skill = matchingSkill ?? evidence.bySlug[slug] ?? Skill(name: slug, directoryName: slug)
             try admit(skill: skill, platform: row.platform, project: project, platformVM: platformVM,
                       recordedPath: row.targetPath, into: &candidates)
         }
