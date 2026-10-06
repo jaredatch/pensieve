@@ -16,7 +16,7 @@ extension SkillHistoryLayoutTests {
         XCTAssertEqual(button.presses, 1, "A caption becoming ready must still cause only one press")
     }
 
-    func testAccessibleButtonNamesDecideLookupWithoutOCR() {
+    func testAccessibleMatchSkipsOCRAndNonmatchingNameFallsBackToPixels() {
         for exposeLabel in [false, true] {
             let fixture = captionHost()
             let button = fixture.button
@@ -25,13 +25,15 @@ extension SkillHistoryLayoutTests {
             button.setAccessibilityRole(.button)
             if exposeLabel { button.exposedLabel = "Accessible" } else { button.exposedTitle = "Accessible" }
 
-            XCTAssertFalse(HistoryAccessibility.pressButtonIfFound(titled: "Ready", in: fixture.root),
-                           "A nonmatching accessibility name must prevent an OCR-based press")
-            XCTAssertEqual(button.captures, 0, "An accessibility name must decide a miss without capturing pixels")
             let pressed = HistoryAccessibility.pressButtonIfFound(titled: "Accessible", in: fixture.root)
             XCTAssertTrue(pressed, "The matching accessibility name must still locate and press the control")
             XCTAssertEqual(button.captures, 0, "An accessibility name must decide a match without capturing pixels")
-            XCTAssertEqual(button.presses, 1, "Only the matching accessibility name may press the control")
+            XCTAssertEqual(button.presses, 1, "The accessibility match must cause one press")
+
+            XCTAssertTrue(HistoryAccessibility.pressButtonIfFound(titled: "Ready", in: fixture.root),
+                          "A nonmatching accessibility name must allow the rendered caption to match")
+            XCTAssertEqual(button.captures, 1, "A nonmatching accessibility name must fall back to current pixels")
+            XCTAssertEqual(button.presses, 2, "Each separate matching lookup must cause exactly one press")
         }
     }
 

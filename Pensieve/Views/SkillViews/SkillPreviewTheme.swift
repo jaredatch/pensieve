@@ -38,7 +38,6 @@ enum SkillPreviewTheme {
             Image(systemName: symbols[min(configuration.listLevel, symbols.count) - 1])
                 .font(.system(size: (DesignTokens.markdownBodySize / 3).rounded()))
                 .frame(minWidth: DesignTokens.markdownListIndent - Spacing.sm, alignment: .trailing)
-                .offset(y: DesignTokens.markdownBulletOffset)
         }
         .numberedListMarker { configuration in
             Text(verbatim: "\(configuration.itemNumber).")

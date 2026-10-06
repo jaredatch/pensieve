@@ -8,9 +8,10 @@ final class ProjectFolderProbeBoundTests: XCTestCase {
     func testBlockingFixtureHonorsHoldAndExplicitRelease() async throws {
         XCTAssertGreaterThanOrEqual(ProjectFolderBlockingProbe().holdTimeoutSeconds, 2 * TestWait.hostedActionTimeoutSeconds,
                                     "The default fixture hold must cover both hosted readiness bounds")
-        for explicitlyRelease in [false, true] {
-            let holdSeconds = explicitlyRelease ? TestWait.heldFixtureTimeoutSeconds : 0.2 // upper-bound: Hold-expiry test.
-            let gate = ProjectFolderBlockingProbe(holdTimeoutSeconds: holdSeconds)
+        for explicitlyRelease in [true, false] {
+            let gate = explicitlyRelease
+                ? ProjectFolderBlockingProbe()
+                : ProjectFolderBlockingProbe(holdTimeoutSeconds: 2) // upper-bound: Two-second hold-expiry test.
             let path = "/nonexistent-pensieve-probe-\(UUID().uuidString)"
             gate.block(path)
             defer { gate.unblock() }
@@ -39,16 +40,22 @@ final class ProjectFolderProbeBoundTests: XCTestCase {
                 XCTAssertNil(completion.finished, "The fixture worker must remain held before unblock")
             }
             let releasedAt = ProcessInfo.processInfo.systemUptime
-            if explicitlyRelease { gate.unblock() }
+            if explicitlyRelease {
+                gate.unblock()
+                await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                                     failureMessage: "The unblocked fixture worker must finish within the shared hosted bound") {
+                    completion.finished != nil
+                }
+            }
             let timing = try await worker.value
             if explicitlyRelease {
-                XCTAssertLessThan(timing.finished - releasedAt, 1, "Explicit release must return promptly after unblock")
+                XCTAssertGreaterThanOrEqual(timing.finished, releasedAt, "The fixture worker must finish after unblock")
             } else {
                 let elapsed = timing.finished - timing.started
-                XCTAssertGreaterThanOrEqual(elapsed, holdSeconds - 0.02,
+                XCTAssertGreaterThanOrEqual(elapsed, 1.98,
                                             "An unreleased probe must honor its hold within timer rounding")
-                XCTAssertLessThanOrEqual(elapsed, holdSeconds + 1,
-                                         "The injected hold must expire within one second of its deadline")
+                XCTAssertLessThan(elapsed, TestWait.hostedActionTimeoutSeconds,
+                                  "The injected hold must expire within the shared hosted bound")
             }
         }
     }

@@ -38,15 +38,12 @@ enum HistoryAccessibility {
             guard let object = candidate as? NSObject,
                   visited.insert(ObjectIdentifier(object)).inserted else { continue }
             guard let element = candidate as? NSAccessibilityProtocol else { continue }
-            let accessibleTitles = [element.accessibilityTitle(), element.accessibilityLabel()]
-                .compactMap { $0 }.filter { !$0.isEmpty }
-            if element.accessibilityRole() == .button, accessibleTitles.contains(title) {
+            if element.accessibilityRole() == .button,
+               [element.accessibilityTitle(), element.accessibilityLabel()].contains(title) {
                 return element
             }
             // Each poll reads current pixels, including a caption changed at identical bounds.
-            // A nonempty accessibility name already decides a match or a miss without OCR.
-            if accessibleTitles.isEmpty, let button = candidate as? NSButton,
-               renderedTitle(of: button) == title { return button }
+            if let button = candidate as? NSButton, renderedTitle(of: button) == title { return button }
             pending.append(contentsOf: element.accessibilityChildren() ?? [])
             pending.append(contentsOf: element.accessibilityChildrenInNavigationOrder() ?? [])
             if let view = candidate as? NSView { pending.append(contentsOf: view.subviews) }
@@ -59,7 +56,7 @@ enum HistoryAccessibility {
         button.cacheDisplay(in: button.bounds, to: bitmap)
         guard let image = bitmap.cgImage else { return nil }
         let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .fast
+        request.recognitionLevel = .accurate
         request.recognitionLanguages = ["en-US"]
         guard (try? VNImageRequestHandler(cgImage: image).perform([request])) != nil else { return nil }
         return request.results?.compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")

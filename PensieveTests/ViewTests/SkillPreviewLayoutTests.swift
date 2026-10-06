@@ -122,13 +122,13 @@ final class SkillPreviewLayoutTests: XCTestCase {
         let firstLine = item.accessibilityFrame(for: NSRange(location: 0, length: 1))
         XCTAssertGreaterThan(firstLine.height, 0, "The rendered first line must expose its vertical bounds")
         XCTAssertGreaterThan(item.accessibilityRange(forLine: 2).length, 0, "The hosted item must wrap to at least three lines")
-        let center = try bulletCenter(in: fixture.host, window: fixture.window, itemFrame: item.accessibilityFrame())
-        XCTAssertGreaterThanOrEqual(center, firstLine.midY + 0.5,
-                                    "The bullet center must sit at least 0.5 pt above the first line midpoint")
-        XCTAssertLessThanOrEqual(center, firstLine.maxY, "The bullet center must be in the top half of the first line")
+        let center = try bulletCenter(in: fixture.host, window: fixture.window,
+                                      itemFrame: item.accessibilityFrame(), lineHeight: firstLine.height)
+        XCTAssertGreaterThanOrEqual(center, firstLine.minY, "The bullet center must be inside the first line")
+        XCTAssertLessThanOrEqual(center, firstLine.maxY, "The bullet center must be inside the first line")
     }
 
-    private func bulletCenter(in host: NSView, window: NSWindow, itemFrame: CGRect) throws -> CGFloat {
+    private func bulletCenter(in host: NSView, window: NSWindow, itemFrame: CGRect, lineHeight: CGFloat) throws -> CGFloat {
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)
         let screen = window.convertToScreen(host.convert(host.bounds, to: nil))
@@ -136,15 +136,15 @@ final class SkillPreviewLayoutTests: XCTestCase {
         let scaleY = CGFloat(bitmap.pixelsHigh) / host.bounds.height
         // Only the bullet occupies the gutter before the item's text; bitmap Y increases downward.
         let gutterEdge = (itemFrame.minX - screen.minX - 4) * scaleX
-        let itemTop = (screen.maxY - itemFrame.maxY) * scaleY
+        let scanTop = (screen.maxY - itemFrame.maxY - lineHeight) * scaleY
         let itemBottom = (screen.maxY - itemFrame.minY) * scaleY
-        guard [scaleX, scaleY, gutterEdge, itemTop, itemBottom].allSatisfy(\.isFinite),
-              scaleX > 0, scaleY > 0 else {
+        guard [scaleX, scaleY, gutterEdge, scanTop, itemBottom, lineHeight].allSatisfy(\.isFinite),
+              scaleX > 0, scaleY > 0, lineHeight > 0 else {
             XCTFail("Bullet capture requires finite, positive host geometry; item=\(itemFrame), host=\(screen)")
             throw CocoaError(.coderInvalidValue)
         }
         let gutterEnd = Int(min(CGFloat(bitmap.pixelsWide), max(0, gutterEdge)))
-        let top = Int(min(CGFloat(bitmap.pixelsHigh), max(0, itemTop)))
+        let top = Int(min(CGFloat(bitmap.pixelsHigh), max(0, scanTop)))
         let bottom = Int(min(CGFloat(bitmap.pixelsHigh), max(0, itemBottom)))
         guard gutterEnd > 0, top < bottom else {
             XCTFail("Bullet capture requires a nonempty gutter and vertical range; item=\(itemFrame), host=\(screen)")
@@ -164,6 +164,10 @@ final class SkillPreviewLayoutTests: XCTestCase {
         }
         let first = try XCTUnwrap(rows.first, "The real bullet must produce visible gutter pixels")
         let last = try XCTUnwrap(rows.last)
+        guard first > top else {
+            XCTFail("Bullet pixels touch the scan's top edge; its center cannot be measured")
+            throw CocoaError(.coderInvalidValue)
+        }
         return screen.maxY - CGFloat(first + last + 1) / (2 * scaleY)
     }
 

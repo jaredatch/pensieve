@@ -22,8 +22,6 @@ enum DesignTokens {
     static let markdownRuleThickness: CGFloat = 13.0 / 16 // 1 px
     static let markdownListIndent: CGFloat = markdownBodySize * 2 // 2em
     static let markdownListItemGap: CGFloat = markdownBodySize * 0.25 // .25em
-    /// Lift the marker by the body descender so it clears the first line's midpoint after pixel rounding.
-    static let markdownBulletOffset = NSFont.systemFont(ofSize: markdownBodySize).descender
     static let markdownCodeScale: CGFloat = 0.85
     static let markdownCodePadding: CGFloat = Spacing.md // 16 px → 13 → 12 pt
     static let markdownCodeRadius: CGFloat = CornerRadius.sm // 6 px → 4.875 → 4 pt
