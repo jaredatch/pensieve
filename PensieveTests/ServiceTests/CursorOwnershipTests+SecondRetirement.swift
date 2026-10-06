@@ -47,6 +47,7 @@ extension CursorOwnershipTests {
                 try harness.context.save()
                 let result = reviewIntent(harness.vm).reconcile(context: harness.context)
                 XCTAssertTrue(result.outcomes.isEmpty)
+                XCTAssertFalse(result.hasFailures)
                 XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
                 XCTAssertEqual(try files.readFile(at: statePath), newer)
                 if foreign {

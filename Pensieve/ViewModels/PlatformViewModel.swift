@@ -9,6 +9,7 @@ final class PlatformViewModel {
     private let fileService: FileServiceProtocol
     let projectReconcilePolicy: ProjectReconcilePolicy
     let deployStateStore: DeployStateStore
+    let removalService: DeployRemovalServicing
     private let now: () -> Date
     private let persist: (ModelContext) throws -> Void
     /// Installed agents detected once at construction (install state doesn't change mid-session).
@@ -40,7 +41,9 @@ final class PlatformViewModel {
             fileService: fs,
             skillStore: SkillStore(fileService: fs)
         )
-        self.deployStateStore = deployStateStore ?? DeployStateStore(fileService: fs)
+        let stateStore = deployStateStore ?? DeployStateStore(fileService: fs)
+        self.deployStateStore = stateStore
+        self.removalService = DeployRemovalService(stateStore: stateStore)
         self.now = now
         self.persist = persist
         self.installed = (agentDetection ?? AgentDetectionService()).installedPlatforms()
@@ -145,32 +148,33 @@ final class PlatformViewModel {
         return DeployOutcome(targetPath: targetPath)
     }
 
-    /// Remove a single (skill, platform) pair, throwing on failure. Mirrors the existing
-    /// `remove` behavior (no DeployRecord deletion — unchanged from before this stage).
-    private func removeOne(skill: Skill, platform: PlatformTarget, target: DeployTarget) throws {
-        let path = artifactPath(skill: skill, platform: platform, target: target)
-        try removeArtifact(skill: skill, platform: platform, target: target)
-        retireDeployState(artifactPath: path)
-    }
-
-    /// State retirement is best effort after ownership is known, just as it is after an unlink.
-    @discardableResult
-    func retireDeployState(artifactPath: String) -> Bool {
-        do {
-            return try deployStateStore.remove(artifactPath: artifactPath)
-        } catch {
-            NSLog("Pensieve deploy-state remove failed for \(artifactPath): \(error)")
-            return false
-        }
-    }
-
-    @discardableResult
-    func removeArtifact(skill: Skill, platform: PlatformTarget, target: DeployTarget) throws -> Bool {
+    func removalOperation(skill: Skill, platform: PlatformTarget, target: DeployTarget) -> DeployRemovalOperation {
         let projectPath = target.project?.path
-        if platform.usesSymlinks {
-            return try linkService.unlink(skill: skill, platform: platform, projectPath: projectPath)
-        } else {
-            return try cursorCompiler.remove(skill: skill, projectPath: projectPath)
+        let adapter: Any = platform.usesSymlinks ? linkService : cursorCompiler
+        if let preparing = adapter as? DeployRemovalPreparing {
+            return preparing.removalOperation(skill: skill, platform: platform, projectPath: projectPath)
+        }
+        return DeployRemovalOperation(classify: {
+            try self.artifactIsOwned(skill: skill, platform: platform, target: target)
+        }, delete: {
+            if platform.usesSymlinks {
+                return try self.linkService.unlink(skill: skill, platform: platform, projectPath: projectPath)
+            }
+            return try self.cursorCompiler.remove(skill: skill, projectPath: projectPath)
+        })
+    }
+
+    func removalCandidate(pair: DeployRemovalPair, target: DeployTarget,
+                          evidence: Set<DeployRemovalEvidence>) -> DeployRemovalCandidate {
+        let path = artifactPath(skill: pair.skill, platform: pair.platform, target: target)
+        return DeployRemovalCandidate(key: DeployRemovalKey(slug: pair.skill.directoryName, platform: pair.platform,
+            projectPath: target.project?.path, artifactPath: path),
+            evidence: evidence, operation: removalOperation(skill: pair.skill, platform: pair.platform, target: target))
+    }
+
+    func logRemovalStateFailure(_ result: DeployRemovalResult) {
+        if let error = result.stateWriteFailure {
+            NSLog("Pensieve deploy-state remove failed for \(result.completed.map(\.artifactPath).sorted()): \(error)")
         }
     }
 
@@ -236,12 +240,11 @@ final class PlatformViewModel {
 
     func remove(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) {
         defer { noteDeployStateChanged() }
-        do {
-            try removeOne(skill: skill, platform: platform, target: target)
-            error = nil
-        } catch {
-            self.error = "Remove failed: \(error.localizedDescription)"
-        }
+        let candidate = removalCandidate(pair: DeployRemovalPair(skill: skill, platform: platform),
+            target: target, evidence: [.selection])
+        let result = removalService.remove([candidate])
+        logRemovalStateFailure(result)
+        error = result.failures[candidate.key].map { "Remove failed: \($0.localizedDescription)" }
     }
 
     /// Toggle a single (skill, platform, target): remove when currently deployed, deploy otherwise.

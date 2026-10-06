@@ -8,57 +8,28 @@ struct SkillCleanupResult {
 extension PlatformViewModel {
     /// Only owned artifacts are removal actions. Foreign and absent pairs retire silently.
     func removeOwnedBatch(pairs: [DeployRemovalPair], target: DeployTarget) -> BatchResult {
+        let candidates = pairs.map { removalCandidate(pair: $0, target: target, evidence: [.selection]) }
+        let removal = removalService.remove(candidates)
+        logRemovalStateFailure(removal)
         var result = BatchResult()
-        var owned: [DeployRemovalPair] = []
-        var stateChanged = false
-        for pair in pairs {
-            let skill = pair.skill, platform = pair.platform
-            do {
-                if try artifactIsOwned(skill: skill, platform: platform, target: target) {
-                    owned.append(pair)
-                } else {
-                    let changed = retireDeployState(artifactPath: artifactPath(skill: skill, platform: platform, target: target))
-                    stateChanged = changed || stateChanged
-                    result.retiredPairs.insert(BatchPairKey(
-                        skillID: skill.id, platform: platform, target: BatchPairTarget(target)))
-                }
-            } catch {
-                result.outcomes.append(BatchPairOutcome(
-                    skillID: skill.id, skillName: skill.name, platform: platform, target: BatchPairTarget(target),
-                    error: BatchPairOutcome.failureMessage(error, target: target)
-                ))
+        let work = Array(zip(pairs, candidates))
+        let inspectionFailures = work.filter { removal.failuresBeforeDeletion.contains($0.1.key) }
+        let remaining = work.filter { !removal.failuresBeforeDeletion.contains($0.1.key) }
+        for (pair, candidate) in inspectionFailures + remaining {
+            let key = BatchPairKey(skillID: pair.skill.id, platform: pair.platform, target: BatchPairTarget(target))
+            if let error = removal.failures[candidate.key] {
+                result.outcomes.append(BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
+                    platform: pair.platform, target: key.target, error: BatchPairOutcome.failureMessage(error, target: target),
+                    projectFolderError: error as? ProjectFolderError))
+            } else if removal.completed.contains(candidate.key), removal.attemptedDeletions.contains(candidate.key) {
+                result.outcomes.append(BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
+                    platform: pair.platform, target: key.target, error: nil))
+            } else if removal.retired.contains(candidate.key) {
+                result.retiredPairs.insert(key)
             }
         }
-        if !owned.isEmpty {
-            result.append(removeBatch(pairs: owned, target: target))
-        } else if stateChanged {
-            noteDeployStateChanged()
-        }
-        return result
-    }
-
-    /// Execute the owned pairs admitted by `removeOwnedBatch`, retaining per-pair failures.
-    private func removeBatch(pairs: [DeployRemovalPair], target: DeployTarget) -> BatchResult {
-        var result = BatchResult()
-        for pair in pairs {
-            let skill = pair.skill, platform = pair.platform
-            do {
-                let path = artifactPath(skill: skill, platform: platform, target: target)
-                try removeArtifact(skill: skill, platform: platform, target: target)
-                retireDeployState(artifactPath: path)
-                result.outcomes.append(BatchPairOutcome(
-                    skillID: skill.id, skillName: skill.name, platform: platform,
-                    target: BatchPairTarget(target), error: nil
-                ))
-            } catch {
-                result.outcomes.append(BatchPairOutcome(
-                    skillID: skill.id, skillName: skill.name, platform: platform,
-                    target: BatchPairTarget(target), error: BatchPairOutcome.failureMessage(error, target: target),
-                    projectFolderError: error as? ProjectFolderError
-                ))
-            }
-        }
-        noteDeployStateChanged()
+        // A checked owned removal refreshes even when its delete failed, as the old batch did.
+        if !removal.removed.isEmpty || removal.didAttemptDeletion || removal.didChangeRecords { noteDeployStateChanged() }
         return result
     }
 
@@ -94,27 +65,49 @@ extension PlatformViewModel {
             result.batch.recordReadFailure("local deploy history for “\(skill.name)”", error: error)
             return result
         }
-        var candidates: [SkillCleanupCandidate] = []
+        let candidates = skillCleanupCandidates(skill: skill, evidence: evidence, locallyDeployed: locallyDeployed,
+            recorded: recorded, stateProblem: stateProblem)
+        let removal = removalService.remove(candidates.map(\.removal))
+        let inspectionFailures = candidates.filter { removal.failuresBeforeDeletion.contains($0.removal.key) }
+        let remaining = candidates.filter { !removal.failuresBeforeDeletion.contains($0.removal.key) }
+        for (location, candidate) in inspectionFailures + remaining {
+            let problem = removal.failures[candidate.key]
+                ?? (removal.completed.contains(candidate.key) ? removal.stateWriteFailure : nil)
+            guard problem != nil || removal.completed.contains(candidate.key) else { continue }
+            result.batch.outcomes.append(BatchPairOutcome(skillID: skill.id, skillName: skill.name,
+                platform: location.platform, target: BatchPairTarget(location.target), error: problem?.localizedDescription))
+        }
+        result.didChangeDeploys = !removal.removed.isEmpty
+        if result.didChangeDeploys || removal.didChangeRecords { noteDeployStateChanged() }
+        return result
+    }
+
+    private func skillCleanupCandidates(
+        skill: Skill, evidence: SkillCleanupEvidence, locallyDeployed: Set<String>,
+        recorded: Set<String>?, stateProblem: String
+    ) -> [(location: SkillCleanupLocation, removal: DeployRemovalCandidate)] {
+        var candidates: [(location: SkillCleanupLocation, removal: DeployRemovalCandidate)] = []
         for location in evidence.locations
             where !evidence.historyPaths.contains(location.path) || locallyDeployed.contains(location.path) {
+            var sources: Set<DeployRemovalEvidence> = [.enumeratedSkillPath]
+            if recorded?.contains(location.path) == true { sources.insert(.deployState) }
+            if locallyDeployed.contains(location.path) { sources.insert(.localHistory) }
+            var candidate = removalCandidate(pair: DeployRemovalPair(skill: skill, platform: location.platform),
+                target: location.target, evidence: sources)
             if let error = evidence.probeFailures[location.path] {
-                result.batch.outcomes.append(BatchPairOutcome(
-                    skillID: skill.id, skillName: skill.name, platform: location.platform,
-                    target: BatchPairTarget(location.target), error: error.localizedDescription))
-            } else if let candidate = skillCleanupCandidate(skill: skill, location: location,
-                recorded: recorded, stateProblem: stateProblem, result: &result.batch) {
-                candidates.append(candidate)
+                // History admitted a path whose metadata lookup already failed. Report that error
+                // without opening the occupant, in the same order as other inspection failures.
+                candidate = DeployRemovalCandidate(key: candidate.key, evidence: sources,
+                    operation: DeployRemovalOperation(classify: { throw error }, delete: { false }))
             }
+            candidate.retireIfUnowned = recorded?.contains(location.path) == true
+            if recorded == nil {
+                candidate.removalBlocker = SkillCleanupStateFailure(
+                    message: "\(stateProblem); nothing removed at \(location.path)")
+            }
+            candidates.append((location, candidate))
         }
-        var stateChanged = false
-        for candidate in candidates {
-            let pair = removeAllDeployPair(skill: skill, candidate: candidate)
-            result.batch.outcomes.append(pair.outcome)
-            result.didChangeDeploys = pair.didChangeDeploys || result.didChangeDeploys
-            stateChanged = pair.didChangeRecords || stateChanged
-        }
-        if result.didChangeDeploys || stateChanged { noteDeployStateChanged() }
-        return result
+        return candidates
     }
 
     private func skillCleanupEvidence(
@@ -141,59 +134,9 @@ extension PlatformViewModel {
         return evidence
     }
 
-    private func skillCleanupCandidate(
-        skill: Skill, location: SkillCleanupLocation,
-        recorded: Set<String>?, stateProblem: String, result: inout BatchResult
-    ) -> SkillCleanupCandidate? {
-        let platform = location.platform, target = location.target, path = location.path
-        do {
-            let ours = try artifactIsOwned(skill: skill, platform: platform, target: target)
-            guard let recorded else {
-                guard ours else { return nil }
-                result.outcomes.append(BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: platform,
-                    target: BatchPairTarget(target), error: "\(stateProblem); nothing removed at \(path)"))
-                return nil
-            }
-            guard ours || recorded.contains(path) else { return nil }
-            return SkillCleanupCandidate(location: location, isOwned: ours)
-        } catch {
-            result.outcomes.append(BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: platform,
-                target: BatchPairTarget(target), error: error.localizedDescription))
-            return nil
-        }
-    }
-
-    private func removeAllDeployPair(
-        skill: Skill, candidate: SkillCleanupCandidate
-    ) -> SkillCleanupPairResult {
-        let location = candidate.location
-        let problem: String?
-        var didChangeDeploys = false
-        var didChangeRecords = false
-        do {
-            if candidate.isOwned {
-                didChangeDeploys = try removeArtifact(skill: skill, platform: location.platform, target: location.target)
-            }
-            didChangeRecords = try deployStateStore.remove(artifactPath: location.path)
-            problem = nil
-        } catch {
-            problem = error.localizedDescription
-        }
-        return SkillCleanupPairResult(outcome: BatchPairOutcome(
-            skillID: skill.id, skillName: skill.name, platform: location.platform,
-            target: BatchPairTarget(location.target), error: problem),
-            didChangeDeploys: didChangeDeploys, didChangeRecords: didChangeRecords)
-    }
-
-    private struct SkillCleanupPairResult {
-        let outcome: BatchPairOutcome
-        let didChangeDeploys: Bool
-        let didChangeRecords: Bool
-    }
-
-    private struct SkillCleanupCandidate {
-        let location: SkillCleanupLocation
-        let isOwned: Bool
+    private struct SkillCleanupStateFailure: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
     }
 
     private struct SkillCleanupLocation {

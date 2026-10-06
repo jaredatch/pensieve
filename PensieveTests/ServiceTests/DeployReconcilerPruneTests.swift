@@ -169,6 +169,36 @@ final class DeployReconcilerPruneTests: XCTestCase {
         XCTAssertEqual(try deployStateStore.read().records.map(\.artifactPath), [agentDir + "/other"])
     }
 
+    func testPruneRechecksOwnershipAndKeepsUnreadableOrReplacedLinkRecorded() throws {
+        for replacement in [false, true] {
+            let path = agentDir + "/gone"
+            try link("gone", to: storeSkillsDir + "/gone")
+            try deployStateStore.replaceAll([record(slug: "gone", artifactPath: path)])
+            let mapped = LinkServiceCanonicalDirectoryFileService(wrapped: fileService,
+                pathMappings: [], physicalSandbox: tempDir)
+            var reads = 0
+            mapped.beforeSymlinkRead = { candidate in
+                guard candidate == path else { return }
+                reads += 1
+                if reads == 2 {
+                    if replacement {
+                        try self.fileService.deleteFile(at: path)
+                        try self.fileService.createSymlink(at: path, pointingTo: self.tempDir + "/outside")
+                    } else { throw DeletionTestError() }
+                }
+            }
+            let result = DeployReconciler(fileService: mapped, deployState: deployStateStore,
+                pensieveSkillsDir: storeSkillsDir, agentSkillDirs: [agentDir]).pruneDangling()
+            XCTAssertTrue(result.removed.isEmpty)
+            XCTAssertEqual(reads, 2, "The dangling admission is followed by a fresh ownership check")
+            XCTAssertTrue(fileService.isSymlink(at: path))
+            XCTAssertEqual(try deployStateStore.read().records.map(\.artifactPath), [path])
+            XCTAssertEqual(try fileService.symlinkTarget(at: path),
+                           replacement ? tempDir + "/outside" : storeSkillsDir + "/gone")
+            try fileService.deleteFile(at: path)
+        }
+    }
+
     /// (16.3) A deploy-state write failure is tolerated: prune deletes the dangling link anyway.
     func testRecordRemovalFailureDoesNotBlockPrune() throws {
         let linkPath = agentDir + "/gone"

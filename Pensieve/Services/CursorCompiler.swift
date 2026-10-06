@@ -62,11 +62,7 @@ final class CursorCompiler: CursorCompilerProtocol {
 
     @discardableResult
     func remove(skill: Skill, projectPath: String?) throws -> Bool {
-        guard ProjectDirectory.canAccess(projectPath) else { return false }
-        let path = outputPath(skill: skill, projectPath: projectPath)
-        guard try ownsArtifact(skill: skill, projectPath: projectPath) else { return false }
-        try fileService.deleteFile(at: path)
-        return true
+        try DeployRemovalService.removeArtifact(removalOperation(skill: skill, platform: .cursor, projectPath: projectPath))
     }
 
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {
@@ -121,5 +117,13 @@ final class CursorCompiler: CursorCompilerProtocol {
     private func generateLegacyMDC(skill: Skill, body: String) -> String {
         CursorMDC.generateLegacy(directoryName: skill.directoryName, description: skill.skillDescription,
                                  cursorConfig: skill.cursorConfig, body: body)
+    }
+}
+
+extension CursorCompiler: DeployRemovalPreparing {
+    func removalOperation(skill: Skill, platform: PlatformTarget, projectPath: String?) -> DeployRemovalOperation {
+        DeployRemovalOperation(fileService: fileService, path: outputPath(skill: skill, projectPath: projectPath)) {
+            try self.ownsArtifact(skill: skill, projectPath: projectPath)
+        }
     }
 }

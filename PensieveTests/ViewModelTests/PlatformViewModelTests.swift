@@ -387,7 +387,7 @@ extension PlatformViewModelTests {
         fs.readCounts.removeAll()
         XCTAssertEqual(vm.removeAllDeploys(skill: skill, projects: [project],
             localDeployHistory: { _ in [] }).batch.successes.count, 3)
-        // One up-front read, one per removed record, and one index refresh after the batch.
-        XCTAssertEqual(fs.readCounts[statePath], 5)
+        // One up-front read, one locked batch retirement, and one index refresh.
+        XCTAssertEqual(fs.readCounts[statePath], 3)
     }
 }

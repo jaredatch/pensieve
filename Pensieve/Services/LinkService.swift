@@ -83,19 +83,7 @@ final class LinkService: LinkServiceProtocol {
 
     @discardableResult
     func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
-        guard projectPath == nil || platform.supportsProjectScope else { return false }
-        // Path-component safety invariant at the remove boundary too (mirrors link()):
-        // a malicious directoryName must not let a delete escape the intended deploy root.
-        try Self.validatePathComponent(skill.directoryName)
-        if platform == .hermes {
-            try Self.validatePathComponent(Constants.hermesDefaultCategory)
-        }
-
-        guard ProjectDirectory.canAccess(projectPath) else { return false }
-        let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
-        guard try ownsArtifact(skill: skill, platform: platform, projectPath: projectPath) else { return false }
-        try fileService.deleteFile(at: link)
-        return true
+        try DeployRemovalService.removeArtifact(removalOperation(skill: skill, platform: platform, projectPath: projectPath))
     }
 
     func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
@@ -185,6 +173,19 @@ enum LinkError: LocalizedError {
         case .occupiedByRealPath(let path):
             "A real file or directory already exists at \(path). "
                 + "Pensieve will not overwrite it — move or delete it, then deploy again."
+        }
+    }
+}
+
+extension LinkService: DeployRemovalPreparing {
+    func removalOperation(skill: Skill, platform: PlatformTarget, projectPath: String?) -> DeployRemovalOperation {
+        let path = linkPath(skill: skill, platform: platform, projectPath: projectPath)
+        return DeployRemovalOperation(fileService: fileService, path: path) {
+            guard projectPath == nil || platform.supportsProjectScope else { return false }
+            try Self.validatePathComponent(skill.directoryName)
+            if platform == .hermes { try Self.validatePathComponent(Constants.hermesDefaultCategory) }
+            guard ProjectDirectory.canAccess(projectPath) else { return false }
+            return try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
         }
     }
 }

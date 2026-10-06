@@ -90,37 +90,28 @@ struct ProjectRemovalPlan {
             return result
         }
         if preview.folderIsMissing { return result }
-        var changed = false
-        var completed: [(candidate: Candidate, deleted: Bool)] = []
-        for candidate in candidates {
-            let pair = candidate.pair
-            do {
-                let deleted = candidate.isOwned ? try platformVM.removeArtifact(
-                    skill: pair.skill, platform: pair.platform, target: .project(project)) : false
-                result.didRemoveArtifacts = deleted || result.didRemoveArtifacts
-                changed = deleted || changed
-                completed.append((candidate, deleted))
-            } catch {
+        let admitted = candidates.map {
+            platformVM.removalCandidate(pair: $0.pair, target: .project(project), evidence: [.localProjectRecords])
+        }
+        let removal = platformVM.removalService.remove(admitted)
+        result.didRemoveArtifacts = !removal.removed.isEmpty
+        let work = Array(zip(candidates, admitted))
+        let failed = work.filter { removal.failures[$0.1.key] != nil }
+        let completed = work.filter { removal.completed.contains($0.1.key) }
+        for (candidate, admittedCandidate) in failed + completed {
+            if let error = removal.failures[admittedCandidate.key]
+                ?? (removal.completed.contains(admittedCandidate.key) ? removal.stateWriteFailure : nil) {
                 result.outcomes.append(failure(candidate, project: project, error: error))
+            } else if removal.removed.contains(admittedCandidate.key) {
+                let pair = candidate.pair
+                result.outcomes.append(BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
+                    platform: pair.platform, target: .project(project.id), error: nil))
+            } else if removal.retired.contains(admittedCandidate.key) {
+                result.retiredPairs.insert(BatchPairKey(skillID: candidate.pair.skill.id,
+                    platform: candidate.pair.platform, target: .project(project.id)))
             }
         }
-        do {
-            let retired = try platformVM.deployStateStore.remove(artifactPaths: Set(completed.map { $0.candidate.path }))
-            changed = retired || changed
-            for item in completed {
-                let pair = item.candidate.pair
-                if item.deleted {
-                    result.outcomes.append(BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
-                        platform: pair.platform, target: .project(project.id), error: nil))
-                } else {
-                    result.retiredPairs.insert(BatchPairKey(skillID: pair.skill.id,
-                        platform: pair.platform, target: .project(project.id)))
-                }
-            }
-        } catch {
-            for item in completed { result.outcomes.append(failure(item.candidate, project: project, error: error)) }
-        }
-        if changed { platformVM.noteDeployStateChanged() }
+        if result.didRemoveArtifacts || removal.didChangeRecords { platformVM.noteDeployStateChanged() }
         return result
     }
 

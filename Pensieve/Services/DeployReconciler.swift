@@ -131,13 +131,17 @@ final class DeployReconciler: DeployReconciling {
     /// Only the LINK is ever removed, never a target. Pure filesystem; no SwiftData.
     func pruneDangling() -> PruneResult {
         var result = PruneResult()
+        var candidates: [DeployRemovalCandidate] = []
         for agentDir in agentSkillDirs {
             if fileService.isSymlink(at: agentDir) || !isRealpathContained(agentDir) {
                 result.skippedDirs.append(agentDir)
                 continue
             }
-            result.removed.append(contentsOf: prunedLinks(in: agentDir))
+            candidates.append(contentsOf: danglingCandidates(in: agentDir))
         }
+        let removal = DeployRemovalService(stateStore: deployState).remove(candidates)
+        // Prune counts physical success, even when the derived state file cannot be retired.
+        result.removed = candidates.filter { removal.removed.contains($0.key) }.map { $0.key.artifactPath }
         return result
     }
 
@@ -153,11 +157,11 @@ final class DeployReconciler: DeployReconciling {
         return realDir == realParent + "/" + last
     }
 
-    /// Prune the dangling Pensieve-owned symlinks directly under `agentDir`. Returns the removed link paths.
-    private func prunedLinks(in agentDir: String) -> [String] {
+    /// Gather dangling Pensieve links without changing artifacts or their records.
+    private func danglingCandidates(in agentDir: String) -> [DeployRemovalCandidate] {
         guard fileService.directoryExists(at: agentDir),
               let entries = try? fileService.listDirectory(at: agentDir) else { return [] }
-        var removed: [String] = []
+        var candidates: [DeployRemovalCandidate] = []
         for entry in entries {
             // The link's basename is the realized skill's slug; guard it through the single C7 guard.
             guard SkillStore.safeSkillDirectory(
@@ -175,17 +179,15 @@ final class DeployReconciler: DeployReconciling {
             }
             // (b) dangling: the canonical target no longer exists → remove the LINK (never the target).
             guard !fileService.fileExists(at: target), !fileService.directoryExists(at: target) else { continue }
-            // Report a removal only when the delete actually succeeded — a link we could not remove (e.g.
-            // a permissions error) is left for the next cycle, never counted as pruned (the count feeds
-            // the status file PLAN-14 reads).
-            do {
-                try fileService.deleteFile(at: link)
-                _ = try? deployState.remove(artifactPath: link)
-                removed.append(link)
-            } catch {
-                continue
+            let platform = PlatformTarget.allCases.first { DeployPaths.userSkillsRoot(for: $0) == agentDir } ?? .claudeCode
+            let operation = DeployRemovalOperation(fileService: fileService, path: link) {
+                try self.ownership.link(at: link, skillsDirectory: self.pensieveSkillsDir, linksFile: false).isOwned
             }
+            var candidate = DeployRemovalCandidate(key: DeployRemovalKey(slug: entry, platform: platform,
+                projectPath: nil, artifactPath: link), evidence: [.danglingLink], operation: operation)
+            candidate.retireIfUnowned = false
+            candidates.append(candidate)
         }
-        return removed
+        return candidates
     }
 }

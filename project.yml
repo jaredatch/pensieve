@@ -131,6 +131,7 @@ targets:
       - path: Pensieve/Services/FileService+BoundedRead.swift
       - path: Pensieve/Services/FileService+RuleHeader.swift
       - path: Pensieve/Services/DeployArtifactOwnership.swift
+      - path: Pensieve/Services/DeployRemovalService.swift
       - path: Pensieve/Services/FileService+DirectoryCopy.swift
       - path: Pensieve/Services/FileService+DirectoryProbe.swift
       - path: Pensieve/Services/GitService.swift
