@@ -8,7 +8,7 @@ final class SyncNudgeTests: XCTestCase {
     private var tempDir = ""
 
     override func setUpWithError() throws {
-        tempDir = FileManager.default.temporaryDirectory
+        tempDir = TestTemporaryDirectory.url
             .appendingPathComponent("pensieve-sync-nudge-\(UUID().uuidString)").path
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
     }
@@ -191,7 +191,10 @@ final class SyncNudgeTests: XCTestCase {
         counter.reset()
 
         _ = removeRegisteredProject(
-            project, categoryStore: store, reconciler: ResultReconciler(),
+            project, reconciler: ResultReconciler(),
+            platformVM: PlatformViewModel(fileService: FileService(),
+                agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked),
+            localMachineID: ProjectIntentHarness.localID,
             context: context, notifier: counter.notify
         )
         XCTAssertEqual(counter.value, 1)
@@ -232,7 +235,10 @@ final class SyncNudgeTests: XCTestCase {
         counter.reset()
 
         let result = removeRegisteredProject(
-            project, categoryStore: store, reconciler: ResultReconciler(fails: true),
+            project, reconciler: ResultReconciler(fails: true),
+            platformVM: PlatformViewModel(fileService: FileService(),
+                agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked),
+            localMachineID: ProjectIntentHarness.localID,
             context: context, notifier: counter.notify
         )
         XCTAssertTrue(result.hasFailures)
@@ -368,6 +374,10 @@ private struct FixedImportScanner: ImportScannerProtocol {
 }
 
 private struct ResultReconciler: CategoryReconcilerProtocol {
+    func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
+        reconcile(context: context)
+    }
+
     var fails = false
 
     func reconcile(context: ModelContext) -> BatchResult {

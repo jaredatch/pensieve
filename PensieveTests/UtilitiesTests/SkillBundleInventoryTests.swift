@@ -8,7 +8,7 @@ final class SkillBundleInventoryTests: XCTestCase {
     private let fileService = FileService()
 
     override func setUpWithError() throws {
-        root = NSTemporaryDirectory() + "SkillBundleInventoryTests-" + UUID().uuidString
+        root = TestTemporaryDirectory.path + "SkillBundleInventoryTests-" + UUID().uuidString
         try fileService.createDirectory(at: root)
     }
 

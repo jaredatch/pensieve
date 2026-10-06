@@ -3,7 +3,7 @@ import XCTest
 
 final class SyncLockTests: XCTestCase {
     private func tempLockPath() -> String {
-        NSTemporaryDirectory() + "PensieveSyncLockTests-\(UUID().uuidString)/sync.lock"
+        TestTemporaryDirectory.path + "PensieveSyncLockTests-\(UUID().uuidString)/sync.lock"
     }
 
     func testSecondAcquireIsNilWhileHeldThenSucceedsAfterRelease() {
@@ -28,7 +28,7 @@ final class SyncLockTests: XCTestCase {
 
     func testUnopenablePathFailsSafeToNil() {
         // A path whose parent cannot be created (a component that is a file, not a dir) → open fails → nil.
-        let base = NSTemporaryDirectory() + "PensieveSyncLockTests-\(UUID().uuidString)"
+        let base = TestTemporaryDirectory.path + "PensieveSyncLockTests-\(UUID().uuidString)"
         try? "x".write(toFile: base, atomically: true, encoding: .utf8)   // `base` is now a FILE
         XCTAssertNil(SyncLock.tryAcquire(at: base + "/child/sync.lock"),
                      "an unopenable lock path must fail safe to nil, not throw or proceed")

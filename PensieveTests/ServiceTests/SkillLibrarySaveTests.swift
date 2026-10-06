@@ -8,7 +8,7 @@ final class SkillLibrarySaveTests: XCTestCase {
     @MainActor
     func testCRLFEditorSaveIsAnEchoWithoutReloadOrOutsideChange() throws {
         let files = FileService()
-        let root = NSTemporaryDirectory() + "CRLFSave-" + UUID().uuidString
+        let root = TestTemporaryDirectory.path + "CRLFSave-" + UUID().uuidString
         defer { try? files.deleteDirectory(at: root) }
         let store = SkillStore(fileService: files, baseDir: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Old")

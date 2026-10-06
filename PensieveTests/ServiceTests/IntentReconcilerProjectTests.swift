@@ -147,7 +147,7 @@ final class IntentReconcilerProjectTests: XCTestCase {
         let project = try harness.insertProject(
             name: "Launch Project", path: "/projects/launch", key: "launch-key"
         )
-        let root = NSTemporaryDirectory() + "PensieveLaunchProjectApply-" + UUID().uuidString
+        let root = TestTemporaryDirectory.path + "PensieveLaunchProjectApply-" + UUID().uuidString
         let fileService = FileService()
         defer { try? fileService.deleteDirectory(at: root) }
         let slug = "launch-apply"
@@ -188,7 +188,9 @@ final class IntentReconcilerProjectTests: XCTestCase {
         let installedVM = harness.makePlatformVM(installed: [.codex])
         XCTAssertEqual(installedVM.deployIndex.records(for: skill.directoryName), records,
                        "The later view model reads the first pass's isolated deploy state")
-        XCTAssertFalse(installedVM.removeBatch(skills: [skill], platforms: [.codex], target: .project(project)).hasFailures)
+        XCTAssertFalse(installedVM.removeOwnedBatch(
+            pairs: DeployRemovalPair.expand(skills: [skill], platforms: [.codex]),
+            target: .project(project)).hasFailures)
         harness.platformVM.refreshDeployIndex()
         XCTAssertTrue(harness.platformVM.deployIndex.records(for: skill.directoryName).isEmpty,
                       "A removal by the later view model updates the same store")

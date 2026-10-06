@@ -27,6 +27,7 @@ final class DeployReconciler: DeployReconciling {
     private let cursorRulesDir: String
     private let manifestService: ManifestReadWriting
     private let deployState: DeployStateStore
+    private let ownership: DeployArtifactOwnershipChecking
 
     init(
         fileService: FileServiceProtocol,
@@ -42,6 +43,7 @@ final class DeployReconciler: DeployReconciling {
         self.cursorRulesDir = cursorRulesDir
         self.manifestService = manifestService
         self.deployState = deployState ?? DeployStateStore(fileService: fileService)
+        self.ownership = DeployArtifactOwnership(fileService: fileService)
     }
 
     /// User-wide agent skill dirs whose Pensieve symlinks the daemon prunes. Project-scoped agent dirs
@@ -66,9 +68,9 @@ final class DeployReconciler: DeployReconciling {
     }
 
     /// Regenerate stale recorded user-wide `~/.cursor/rules/*.mdc` after a content pull (symlinks
-    /// self-heal; `.mdc` does not). Ownership is files-based deploy state, not slug inference: a rule is
-    /// rewritten only when `deploy-state.json` contains an exact user/cursor `artifactPath` record for it
-    /// AND the canonical `SKILL.md` still passes the leaf guard. Unrecorded `.mdc` files are left untouched
+    /// self-heal; `.mdc` does not). A rule is rewritten only when deploy state records its exact
+    /// user/cursor path, it has the mark or byte-exact current legacy content, and the canonical
+    /// `SKILL.md` still passes the leaf guard. Unrecorded `.mdc` files are left untouched
     /// even when their slug matches a canonical skill, and the daemon still never deletes any `.mdc`.
     /// Only user-wide `~/.cursor/rules` is reconciled; project-scoped `.cursor/rules` is NOT (daemon scope
     /// fence). Pure filesystem; no SwiftData.
@@ -78,8 +80,9 @@ final class DeployReconciler: DeployReconciling {
         guard fileService.directoryExists(at: cursorRulesDir),
               let entries = try? fileService.listDirectory(at: cursorRulesDir) else { return result }
         for entry in entries where entry.hasSuffix(".mdc") {
-            let slug = String(entry.dropLast(4))   // strip ".mdc"
             let mdcPath = cursorRulesDir + "/" + entry
+            guard let slug = DeployPaths.slug(artifactPath: mdcPath, platform: .cursor, projectPath: nil,
+                                              cursorUserRulesDirectory: cursorRulesDir) else { continue }
             guard records.contains(where: {
                 $0.artifactPath == mdcPath
                     && $0.scope == "user"
@@ -105,8 +108,13 @@ final class DeployReconciler: DeployReconciling {
                 cursorConfig: cursor,
                 body: SkillParser.stripFrontmatter(raw)
             )
-            let current = try? fileService.readFile(at: mdcPath)
-            if current != expected, (try? fileService.writeFile(at: mdcPath, content: expected)) != nil {
+            let occupant = try? ownership.cursor(at: mdcPath) {
+                CursorMDC.generateLegacy(directoryName: slug, description: cursor?.description ?? parsed.description ?? "",
+                                         cursorConfig: cursor, body: SkillParser.stripFrontmatter(raw))
+            }
+            guard occupant?.isOwned == true else { continue }
+            let current = try? fileService.readRegularFileData(at: mdcPath, maximumBytes: expected.utf8.count)
+            if current != Data(expected.utf8), (try? fileService.writeFile(at: mdcPath, content: expected)) != nil {
                 result.recompiled.append(mdcPath)
             }
         }
@@ -117,7 +125,7 @@ final class DeployReconciler: DeployReconciling {
     /// entirely if the dir itself is a symlink or its realpath does not match its own literal
     /// parent+component (a redirected `~/.claude/skills` must never steer the prune — never walk it).
     /// Otherwise, for each entry that is a symlink, remove it IFF (a) its target is an ABSOLUTE path under
-    /// `pensieveSkillsDir + "/"` (Pensieve-owned — foreign and relative targets are never touched) AND
+    /// a direct child of `pensieveSkillsDir` (foreign and relative targets are never touched) AND
     /// (b) that target no longer exists (dangling). The link's own basename is guarded through
     /// `SkillStore.safeSkillDirectory` (the single C7 slug guard — no open-coded sixth guard).
     /// Only the LINK is ever removed, never a target. Pure filesystem; no SwiftData.
@@ -160,14 +168,11 @@ final class DeployReconciler: DeployReconciling {
             let link = agentDir + "/" + entry
             guard fileService.isSymlink(at: link),
                   let target = try? fileService.symlinkTarget(at: link) else { continue }
-            // (a) Pensieve-owned only. A legit Pensieve link points EXACTLY at `<pensieveSkillsDir>/<slug>`
-            //     — LinkService writes clean absolute targets (no `..`, no `.`, no intermediate symlink,
-            //     no CWD-relative form). An EXACT-string match is the robust ownership test: it rejects
-            //     foreign, relative, `..`-containing, and intermediate-symlink targets in one step, with
-            //     NO path-normalization games (a prefix/`standardized` check is fooled by
-            //     `<store>/alias/../outside` where `<store>/alias` is a symlink out, since lexical
-            //     collapse precedes symlink resolution). `entry` is the already-C7-guarded slug.
-            guard target == pensieveSkillsDir + "/" + entry else { continue }
+            // Ownership uses the literal direct-child shape, including links naming another skill.
+            // Never normalize targets: `<store>/alias/../outside` can escape through a linked alias.
+            guard DeployArtifactOwnership.ownsLinkTarget(target, skillsDirectory: pensieveSkillsDir, linksFile: false) else {
+                continue
+            }
             // (b) dangling: the canonical target no longer exists → remove the LINK (never the target).
             guard !fileService.fileExists(at: target), !fileService.directoryExists(at: target) else { continue }
             // Report a removal only when the delete actually succeeded — a link we could not remove (e.g.
@@ -175,7 +180,7 @@ final class DeployReconciler: DeployReconciling {
             // the status file PLAN-14 reads).
             do {
                 try fileService.deleteFile(at: link)
-                try? deployState.remove(artifactPath: link)
+                _ = try? deployState.remove(artifactPath: link)
                 removed.append(link)
             } catch {
                 continue

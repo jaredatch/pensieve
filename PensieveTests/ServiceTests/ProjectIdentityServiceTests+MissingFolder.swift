@@ -3,7 +3,7 @@ import XCTest
 
 extension ProjectIdentityServiceTests {
     func testMarkerWriteReusesTheFirstRootAdmission() throws {
-        let root = NSTemporaryDirectory() + "IdentityAdmission-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "IdentityAdmission-\(UUID().uuidString)"
         let files = FileService()
         try files.createDirectory(at: root)
         defer { try? files.deleteDirectory(at: root) }
@@ -18,7 +18,7 @@ extension ProjectIdentityServiceTests {
     }
 
     func testMissingIdentityPathThrowsAndCreatesNoAncestors() throws {
-        let root = NSTemporaryDirectory() + "MissingIdentity-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "MissingIdentity-\(UUID().uuidString)"
         let files = FileService()
         defer { try? files.deleteDirectory(at: root) }
         let path = root + "/nested/project"
@@ -32,7 +32,7 @@ extension ProjectIdentityServiceTests {
     }
 
     func testDeletionImmediatelyBeforeMarkerWriteDoesNotRecreateProject() throws {
-        let root = NSTemporaryDirectory() + "DeletedIdentity-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "DeletedIdentity-\(UUID().uuidString)"
         let files = FileService()
         let path = root + "/project"
         try files.createDirectory(at: path)

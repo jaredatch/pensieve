@@ -8,7 +8,7 @@ final class LinkServiceTests: XCTestCase {
     private var skillsDir: String!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveLinkTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveLinkTests-\(UUID().uuidString)"
         skillsDir = tempDir + "/pensieve-skills"
         try FileManager.default.createDirectory(atPath: skillsDir, withIntermediateDirectories: true)
 

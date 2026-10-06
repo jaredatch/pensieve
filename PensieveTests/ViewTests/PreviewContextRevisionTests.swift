@@ -5,7 +5,8 @@ import XCTest
 final class PreviewContextRevisionTests: XCTestCase {
     func testExistingAndMissingRelativeImagesReachContainedReadUnderPrivateAliasedRoot() async throws {
         let files = PreviewImageFileSpy()
-        let root = files.files.realPath(at: NSTemporaryDirectory()) + "/AliasedImages-" + UUID().uuidString + "/skill"
+        // The real system temp folder exercises macOS's /var to /private/var alias.
+        let root = files.files.realPath(at: TestTemporaryDirectory.systemPath) + "/AliasedImages-" + UUID().uuidString + "/skill"
         defer { try? files.files.deleteDirectory(at: URL(fileURLWithPath: root).deletingLastPathComponent().path) }
         try files.files.writeData(at: root + "/existing.png", data: PreviewImageFixture.png())
         XCTAssertTrue(root.hasPrefix("/private/"), "Exercise macOS's aliased temporary root")
@@ -30,7 +31,7 @@ final class PreviewContextRevisionTests: XCTestCase {
 
     func testPreviewRevisionIgnoresOtherSkillsAndSyncButTracksItsOwnFolder() throws {
         let files = FileService()
-        let base = NSTemporaryDirectory() + "ScopedImages-" + UUID().uuidString
+        let base = TestTemporaryDirectory.path + "ScopedImages-" + UUID().uuidString
         defer { try? files.deleteDirectory(at: base) }
         let store = SkillStore(fileService: files, baseDir: base)
         let slug = try store.createSkill(name: "Skill", description: "D", body: "Body")
@@ -69,7 +70,7 @@ final class PreviewContextRevisionTests: XCTestCase {
         let tab = SkillContentTab(skill: skill, snapshot: DetailContentSnapshot(), library: library,
                                   presentation: .init(choices: [choice], choice: choice, shownMode: .rendered),
                                   onSelectFile: { _ in }, onSelectMode: { _ in })
-        return tab.preview(markdownBody: "Body", skillsBase: base)
+        return tab.preview(markdownBody: "Body", skillsBase: base, onSelectFile: { _ in })
     }
 
     private func sourceFile(_ relativePath: String) throws -> String {

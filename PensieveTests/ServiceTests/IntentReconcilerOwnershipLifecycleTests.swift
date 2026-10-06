@@ -64,15 +64,15 @@ final class IntentReconcilerOwnershipLifecycleTests: XCTestCase {
 
         let result = removeRegisteredProject(
             first,
-            categoryStore: CategoryStore(),
             reconciler: NoopProjectCategoryReconciler(),
+            platformVM: harness.platformVM, localMachineID: ProjectIntentHarness.localID,
             context: harness.context
         )
 
         XCTAssertFalse(result.hasFailures)
-        XCTAssertTrue(harness.linkService.unlinkCalls.isEmpty)
+        XCTAssertEqual(harness.linkService.unlinkCalls.map(\.projectPath), [first.path])
         XCTAssertEqual(try harness.assignments().map(\.projectID), [second.id])
-        XCTAssertTrue(harness.fileService.symlinks.contains(
+        XCTAssertFalse(harness.fileService.symlinks.contains(
             harness.artifactPath(skill: skill, platform: .codex, project: first)
         ))
         XCTAssertEqual(try harness.intents().count, 1)

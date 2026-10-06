@@ -11,7 +11,7 @@ final class MachineStatePublishTests: XCTestCase {
     private let machineB = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB"
 
     override func setUpWithError() throws {
-        tempDir = FileManager.default.temporaryDirectory
+        tempDir = TestTemporaryDirectory.url
             .appendingPathComponent("MachineStatePublishTests-\(UUID().uuidString)").path
         try fileService.createDirectory(at: tempDir)
     }

@@ -36,7 +36,7 @@ final class SkillDeletionFlowTests: XCTestCase {
         let watcher = RecordingWatcher()
         let counter = DeletionCounter()
         let stateFS = MemoryDeployFileService()
-        let stateRoot = NSTemporaryDirectory() + "PensieveDeletionState-\(UUID().uuidString)"
+        let stateRoot = TestTemporaryDirectory.path + "PensieveDeletionState-\(UUID().uuidString)"
         let state = DeployStateStore(fileService: stateFS, appSupportDir: stateRoot)
         let library = SkillLibraryViewModel(
             skillStore: store, fileService: stateFS,
@@ -278,9 +278,11 @@ extension SkillDeletionFlowTests {
         XCTAssertEqual(f.counter.value, 1)
     }
 
-    func testDeleteLeavesOwnCursorArtifactAlone() throws {
+    func testDeleteRemovesOwnCursorArtifact() throws {
         let f = try fixture(); f.context.insert(ScenarioAssignment(skillID: f.skill.id, platform: .cursor)); try f.context.save()
-        XCTAssertTrue(delete(f)); XCTAssertTrue(f.cursor.removeProjectPaths.isEmpty)
+        f.cursor.ownedProjectPaths = [nil]
+        XCTAssertTrue(delete(f)); XCTAssertEqual(f.cursor.removeProjectPaths.count, 1)
+        XCTAssertNil(f.cursor.removeProjectPaths[0])
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<ScenarioAssignment>()).count, 0)
         XCTAssertEqual(f.counter.value, 1)
     }

@@ -9,7 +9,7 @@ final class SkillInstallServiceTests: XCTestCase {
     var service: SkillInstallService!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveSkillInstallServiceTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveSkillInstallServiceTests-\(UUID().uuidString)"
         scratchRoot = tempDir + "/scratch"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()

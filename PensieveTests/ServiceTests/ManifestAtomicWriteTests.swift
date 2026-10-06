@@ -43,7 +43,7 @@ final class ManifestAtomicWriteTests: XCTestCase {
     private var service: ManifestService!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveManifestAtomic-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveManifestAtomic-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         service = ManifestService(fileService: fileService)

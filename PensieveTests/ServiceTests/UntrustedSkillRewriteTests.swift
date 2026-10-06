@@ -7,7 +7,7 @@ final class UntrustedSkillRewriteTests: XCTestCase {
     private var files: ImportReadSpy!
 
     override func setUpWithError() throws {
-        root = NSTemporaryDirectory() + "UntrustedSkillRewrite-" + UUID().uuidString
+        root = TestTemporaryDirectory.path + "UntrustedSkillRewrite-" + UUID().uuidString
         files = ImportReadSpy(files: FileService())
         try files.createDirectory(at: root)
     }

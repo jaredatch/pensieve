@@ -68,7 +68,7 @@ struct MarkdownEditorWebView: NSViewRepresentable {
             webView.allowsBackForwardNavigationGestures = false
             webView.allowsLinkPreview = false
             #if DEBUG
-            if #available(macOS 13.3, *) { webView.isInspectable = true }
+            webView.isInspectable = true
             #endif
             // Transparent web view: let the host Color(.textBackgroundColor) show through (§4). WKWebView
             // draws an opaque (white) background by default and exposes `drawsBackground` ONLY as a KVC key
@@ -194,7 +194,7 @@ struct MarkdownEditorWebView: NSViewRepresentable {
                      createWebViewWith configuration: WKWebViewConfiguration,
                      for action: WKNavigationAction,
                      windowFeatures: WKWindowFeatures) -> WKWebView? {
-            if let url = action.request.url, let s = url.scheme?.lowercased(), s == "http" || s == "https" {
+            if let url = action.request.url, WebLinkPolicy.isWebURL(url) {
                 NSWorkspace.shared.open(url)
             }
             return nil

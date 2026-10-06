@@ -46,12 +46,15 @@ final class CategoryFixtureRecordingLinkService: LinkServiceProtocol {
         fileService?.links.insert(linkPath(skill: skill, platform: platform, projectPath: projectPath))
     }
 
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
         unlinkCalls.append(CategoryFixtureRecordedLink(
             directoryName: skill.directoryName, platform: platform, projectPath: projectPath
         ))
         if throwOnUnlink.contains(platform) { throw CategoryFixtureStubFailure() }
-        fileService?.links.remove(linkPath(skill: skill, platform: platform, projectPath: projectPath))
+        return fileService?.links.remove(linkPath(skill: skill, platform: platform, projectPath: projectPath)) != nil
+    }
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        fileService?.isSymlink(at: linkPath(skill: skill, platform: platform, projectPath: projectPath)) == true
     }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
@@ -82,10 +85,19 @@ final class CategoryFixtureRecordingCursorCompiler: CursorCompilerProtocol {
         fileService?.files.insert(outputPath(skill: skill, projectPath: projectPath))
     }
 
-    func remove(skill: Skill, projectPath: String?) throws {
+    func remove(skill: Skill, projectPath: String?) throws -> Bool {
         removeCalls.append(CategoryFixtureRecordedCursorCall(directoryName: skill.directoryName, projectPath: projectPath))
         if throwOnRemove { throw CategoryFixtureStubFailure() }
-        fileService?.files.remove(outputPath(skill: skill, projectPath: projectPath))
+        return fileService?.files.remove(outputPath(skill: skill, projectPath: projectPath)) != nil
+    }
+    func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
+        return fileService?.files.contains(outputPath(skill: skill, projectPath: projectPath)) == true
+    }
+    func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {
+        fileService?.files.contains(outputPath(skill: skill, projectPath: projectPath)) == true
+    }
+    func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool {
+        fileService?.files.contains(outputPath(skill: skill, projectPath: projectPath)) == true
     }
 
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }

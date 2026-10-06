@@ -57,7 +57,11 @@ private final class SnapshotLinkService: LinkServiceProtocol {
     }
 
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        if let projectPath, let linked = linkedByProjectPath[projectPath] { return linked.contains(platform) }
+        return linkedPlatforms.contains(platform)
+    }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
         isLinkedProjectPaths.append(projectPath)
@@ -80,7 +84,13 @@ private struct SnapshotCursorCompiler: CursorCompilerProtocol {
     var upToDate = false
 
     func compile(skill: Skill, projectPath: String?) throws {}
-    func remove(skill: Skill, projectPath: String?) throws {}
+    func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
+    func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
+        return upToDate
+    }
+    func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { upToDate }
+    func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { upToDate }
+
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool { upToDate }
     func outputPath(skill: Skill, projectPath: String?) -> String {
         (projectPath ?? "/tmp/user-wide") + "/" + skill.directoryName + ".mdc"

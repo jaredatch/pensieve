@@ -138,7 +138,7 @@ final class IntentReconcilerTests: XCTestCase {
 
     func testLaunchIngestedProjectIntentNeverDeploysUserWide() throws {
         let harness = try makeHarness(installed: [.codex])
-        let root = NSTemporaryDirectory() + "PensieveLaunchProjectIntent-" + UUID().uuidString
+        let root = TestTemporaryDirectory.path + "PensieveLaunchProjectIntent-" + UUID().uuidString
         let fileService = FileService()
         defer { try? fileService.deleteDirectory(at: root) }
         let manifest = ManifestService(fileService: fileService)

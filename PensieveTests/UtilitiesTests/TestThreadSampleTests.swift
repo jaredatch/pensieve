@@ -13,7 +13,7 @@ final class TestThreadSampleTests: XCTestCase {
 
     func testDeadlineKillsAndReapsChildWhileKeepingPartialReport() throws {
         let files = FileService()
-        let directory = NSTemporaryDirectory() + "SamplerDeadlineTest-" + UUID().uuidString
+        let directory = TestTemporaryDirectory.path + "SamplerDeadlineTest-" + UUID().uuidString
         try files.createDirectory(at: directory)
         defer { try? files.deleteDirectory(at: directory) }
         let executable = directory + "/sampler"

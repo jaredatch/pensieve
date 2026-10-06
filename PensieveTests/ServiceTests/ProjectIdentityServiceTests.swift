@@ -7,7 +7,7 @@ final class ProjectIdentityServiceTests: XCTestCase {
     private var tempDir: String!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveProjectIdentityTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveProjectIdentityTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         service = ProjectIdentityService(fileService: fileService)

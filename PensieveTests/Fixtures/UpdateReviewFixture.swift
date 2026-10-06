@@ -4,7 +4,7 @@ import SwiftData
 
 @MainActor
 final class UpdateReviewFixture {
-    let root = NSTemporaryDirectory() + "UpdateReview-\(UUID().uuidString)"
+    let root = TestTemporaryDirectory.path + "UpdateReview-\(UUID().uuidString)"
     let files = FileService()
     let container: ModelContainer
     let context: ModelContext

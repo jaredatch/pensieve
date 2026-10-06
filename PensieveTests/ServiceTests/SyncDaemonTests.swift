@@ -11,7 +11,7 @@ final class SyncDaemonTests: XCTestCase {
     private let clock: () -> Date = { Date(timeIntervalSince1970: 1_700_000_000) }
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveSyncDaemonTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveSyncDaemonTests-\(UUID().uuidString)"
         root = tempDir + "/store"
         appSupport = tempDir + "/app-support"
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)

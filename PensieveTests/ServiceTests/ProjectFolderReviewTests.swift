@@ -44,12 +44,16 @@ final class ProjectFolderReviewTests: XCTestCase {
         h.mapped.beforeProjectProbe = { path in
             if path == h.project.path { throw ProjectFolderError.couldNotCheck(path: path, reason: "Offline") }
         }
-        var removalError: String?
-        let result = ProjectListView.removeProject(h.otherProject, removalError: &removalError) {
-            removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
-                manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
-                reconciler: h.category, context: h.context)
+        let model = ProjectRemovalModel()
+        model.request(h.otherProject, platformVM: h.platformVM, context: h.context)
+        let result = model.confirm { _, plan in
+            removeRegisteredProject(h.otherProject,
+                reconciler: h.category, manifestService: ManifestService(fileService: h.files),
+                manifestRoot: h.root + "/store", platformVM: h.platformVM,
+                localMachineID: ProjectIntentHarness.localID, confirmedPreview: plan,
+            context: h.context)
         }
+        let removalError = model.error
         XCTAssertNil(removalError, "Removing B shows no alert when only another project's work fails")
         XCTAssertTrue(result.outcomes.isEmpty, "The caller receives only B's outcomes and unscoped ones")
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.project.id],
@@ -65,12 +69,16 @@ final class ProjectFolderReviewTests: XCTestCase {
             let unrelated = BatchPairOutcome(skillID: h.skill.id, skillName: h.skill.name, platform: .codex,
                 target: .project(h.project.id), error: "Unrelated failure")
             let reconciler = ProjectListFailureReconciler(result: BatchResult(outcomes: [failed, unrelated]))
-            var removalError: String?
-            let result = ProjectListView.removeProject(h.otherProject, removalError: &removalError) {
-                removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
-                    manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
-                    reconciler: reconciler, context: h.context)
+            let model = ProjectRemovalModel()
+            model.request(h.otherProject, platformVM: h.platformVM, context: h.context)
+            let result = model.confirm { _, plan in
+                removeRegisteredProject(h.otherProject,
+                    reconciler: reconciler, manifestService: ManifestService(fileService: h.files),
+                    manifestRoot: h.root + "/store", platformVM: h.platformVM,
+                    localMachineID: ProjectIntentHarness.localID, confirmedPreview: plan,
+            context: h.context)
             }
+            let removalError = model.error
             XCTAssertTrue(removalError?.contains("stays registered") == true,
                           "B's failure or an unscoped failure sets the caller's alert state")
             XCTAssertTrue(try h.context.fetch(FetchDescriptor<Project>()).contains { $0.id == h.otherProject.id },
@@ -160,9 +168,10 @@ final class ProjectFolderReviewTests: XCTestCase {
         h.mapped.beforeProjectProbe = { path in
             if path == h.project.path { throw ProjectFolderError.couldNotCheck(path: path, reason: "Offline") }
         }
-        let result = removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
-            manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
-            reconciler: h.category, context: h.context)
+        let result = removeRegisteredProject(h.otherProject,
+            reconciler: h.category, manifestService: ManifestService(fileService: h.files),
+            manifestRoot: h.root + "/store", platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
+            context: h.context)
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.project.id])
     }
@@ -194,6 +203,10 @@ final class ProjectFolderReviewTests: XCTestCase {
 }
 
 private struct ProjectListFailureReconciler: CategoryReconcilerProtocol {
+    func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
+        reconcile(context: context)
+    }
+
     let result: BatchResult
     func reconcile(context: ModelContext) -> BatchResult { result }
 }

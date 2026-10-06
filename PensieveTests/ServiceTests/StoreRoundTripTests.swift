@@ -18,7 +18,7 @@ final class StoreRoundTripTests: XCTestCase {
     private var rebuildService: StoreRebuildService!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveRoundTripTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveRoundTripTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         manifest = ManifestService(fileService: fileService)

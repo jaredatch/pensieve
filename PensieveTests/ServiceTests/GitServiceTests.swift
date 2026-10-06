@@ -13,7 +13,7 @@ final class GitServiceTests: XCTestCase {
     private var git: GitService!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveGitServiceTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveGitServiceTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         git = GitService()
     }

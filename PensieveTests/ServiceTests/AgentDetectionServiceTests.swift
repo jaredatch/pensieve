@@ -76,7 +76,7 @@ final class AgentDetectionServiceTests: XCTestCase {
     }
 
     func testSystemEnvironmentProbeRequiresExecutableBitForCLI() throws {
-        let tempDir = NSTemporaryDirectory() + "PensieveAgentDetectionTests-\(UUID().uuidString)"
+        let tempDir = TestTemporaryDirectory.path + "PensieveAgentDetectionTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: tempDir) }
 

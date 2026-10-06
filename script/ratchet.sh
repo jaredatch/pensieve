@@ -11,7 +11,8 @@
 #   ratchet.sh                     pre-commit, over the index: refuses a newly skipped test (outside the allowlist), a
 #                                  secret, a tmp/ cite from a plan that isn't in flight (on a merge, only a cite new against
 #                                  every parent), a frozen acceptance section whose hash no longer matches, a change the
-#                                  project's own check refuses (RATCHET_PROJECT_CHECK), and a test count below the floor. The
+#                                  project's own check refuses (RATCHET_PROJECT_CHECK), a file still holding conflict markers
+#                                  (an opening `<<<<<<<` and a closing `>>>>>>>` line both added), and a test count below the floor. The
 #                                  count floor runs last; a docs-only diff skips it.
 #   ratchet.sh --commit-msg FILE   commit-msg: a stage commit carries the LOG and the plan file; LOG growth needs a subject
 #                                  form (`PLAN-NN / review|close|patch|refreeze|fix`, the word ending at a non-alphanumeric,
@@ -568,6 +569,17 @@ secret_scan() {   # $1 = the ADDED/MODIFIED file list (deletions excluded — re
   bad="$(grep_hits -v 'ratchet:allow-secret[[:space:]]*$' <<< "$bad")" || return 2
   bad="$(cut -c1-80 <<< "$bad")" || return 2
   [ -z "$bad" ] || { echo "ratchet: an added line looks like a credential (a fixture that must carry a fake one ends the line with 'ratchet:allow-secret'):"; printf '%s\n' "$bad" | sed 's/^/  /'; return 1; }
+  return 0
+}
+
+# ---------- conflict markers ----------
+conflict_scan() {   # $1 = the unified diff (-U0, --no-prefix) → 0 iff no file in it adds both an opening (`<<<<<<<`) and a closing
+  # (`>>>>>>>`) conflict marker at column 0; 1 (named) otherwise; 2 on a tool error. Both are required, so a lone `=======` (a setext
+  # heading) or a marker quoted inside a line never trips it. Files are told apart by their `diff ` header, lines by hunk state.
+  local bad prog='function done_() { if (o && c) print f } /^diff / { done_(); f = $NF; o = c = 0; h = 0; next } /^@@/ { h = 1; next }
+    h && /^[+][<][<][<][<][<][<][<]( |$)/ { o = 1 } h && /^[+][>][>][>][>][>][>][>]( |$)/ { c = 1 } END { done_() }'   # [<] spelled out: the here-string lint reads three <s as one
+  bad="$(awk "$prog" <<< "$1")" || { echo "ratchet: awk failed scanning for conflict markers" >&2; return 2; }
+  [ -z "$bad" ] || { echo "ratchet: a staged file still holds conflict markers (resolve it, then stage it again; an example in a doc indents its markers):"; printf '%s\n' "$bad" | sed 's/^/  /'; return 1; }
   return 0
 }
 
@@ -1493,6 +1505,16 @@ outside'
   selfdiff="$(printf 'diff --git a b\n--- /dev/null\n+++ b\n@@ -0,0 +1,%s @@\n' "$(wc -l < "$self" | tr -d ' ')"; sed 's/^/+/' "$self")"
   [ "$(added_lines <<< "$selfdiff" | wc -l | tr -d ' ')" -eq "$(wc -l < "$self" | tr -d ' ')" ] || fail "the self-source diff did not reach the scanner in full"
   secret_scan "kit/ratchet.sh" "$selfdiff" >/dev/null || fail "this file's own added lines trip the secret scan — a wired hook would refuse the commit that installs it"
+  conflict_scan "$selfdiff" >/dev/null || fail "this file's own added lines trip the conflict-marker scan"
+  # conflict markers: an opening and a closing marker added at column 0 in ONE file refuse; either alone, split across files,
+  # indented, quoted, or removed (a resolution that deletes committed markers) passes; a lone ======= (a setext heading) passes
+  rc=0; conflict_scan "$(printf -- 'diff --git a.md a.md\n--- a.md\n+++ a.md\n@@ -1 +1,5 @@\n+<<<<<<< HEAD\n+ours\n+=======\n+theirs\n+>>>>>>> plan-07\n')" >/dev/null || rc=$?
+  [ "$rc" -eq 1 ] || fail "a file with staged conflict markers passed (rc=$rc)"
+  rc=0; conflict_scan "$(printf -- 'diff --git a.md a.md\n--- a.md\n+++ a.md\n@@ -1 +1,2 @@\n+<<<<<<<\n+>>>>>>>\n')" >/dev/null || rc=$?
+  [ "$rc" -eq 1 ] || fail "bare seven-character markers passed (rc=$rc)"
+  conflict_scan "$(printf -- 'diff --git a.md a.md\n--- a.md\n+++ a.md\n@@ -1 +1 @@\n+<<<<<<< HEAD\ndiff --git b.md b.md\n--- b.md\n+++ b.md\n@@ -1 +1 @@\n+>>>>>>> x\n')" >/dev/null || fail "markers split across two files refused"
+  conflict_scan "$(printf -- 'diff --git a.md a.md\n--- a.md\n+++ a.md\n@@ -1,3 +1 @@\n-<<<<<<< HEAD\n-=======\n->>>>>>> x\n+Title\n+=======\n')" >/dev/null || fail "removed markers or a setext heading refused"
+  conflict_scan "$(printf -- 'diff --git a.sh a.sh\n--- a.sh\n+++ a.sh\n@@ -1 +1,2 @@\n+  <<<<<<< indented\n+say ">>>>>>> quoted"\n+<<<<<<<<< nine\n')" >/dev/null || fail "indented, quoted or longer markers refused"
   # 7. the docs-commit decision: stage claim needs LOG + plan file; LOG growth needs a form; the boundary; the Lite shape
   docs_commit_ok "$(subject_of_msg "feat: x (PLAN-02 / 02.1)")" "feat: x (PLAN-02 / 02.1)" "$(printf 'docs/LOG.md\ndocs/plans/PLAN-02-y.md\nSources/a.swift\n')" 1 >/dev/null || fail "a conforming stage commit was refused"
   docs_commit_ok "$(subject_of_msg "feat: x (PLAN-02 / 02.1)")" "feat: x (PLAN-02 / 02.1)" "$(printf 'docs/LOG.md\ndocs/plans/PLAN-02-review/notes/e.md\n')" 1 >/dev/null 2>&1 && fail "a review-dir edit satisfied the plan-file rule"
@@ -2020,6 +2042,7 @@ fi
 # (b) secrets — the Never list, wired: added/modified file names, then every added line of the staged diff
 whole="$(git diff --cached -U0 --no-prefix)" || exit 1
 secret_scan "$present_files" "$whole" || exit 1
+conflict_scan "$whole" || exit $?                                                            # a resolution staged with its markers still in
 # (c) tmp/ cites — PLAN.md read from the INDEX (a close flips its row in the same commit)
 planmd=""; has="$(git ls-files --cached -- PLAN.md)" || exit 2
 [ -z "$has" ] || planmd="$(git show :PLAN.md)" || exit 2                                     # the INDEX copy; absent = no rows = any plan cite refused

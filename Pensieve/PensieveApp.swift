@@ -245,9 +245,9 @@ extension FocusedValues {
     }
 }
 
-/// The File › New Skill item as a `View`, so its enabled state observes the library: on the macOS 14
-/// baseline a `Commands` body does not track `@Observable` reads (that arrived in macOS 15), a view
-/// body does.
+/// The File › New Skill item as a `View`, so its enabled state observes the library. This wrapper
+/// remains from macOS 14, when a `Commands` body did not track `@Observable` reads (that arrived in
+/// macOS 15), but a view body did.
 private struct NewSkillCommand: View {
     let library: SkillLibraryViewModel
 
@@ -260,8 +260,8 @@ private struct NewSkillCommand: View {
     }
 }
 
-/// File › Save (⌘S) writes the unsaved draft — a `View`, so its enabled state observes the
-/// library on the macOS 14 baseline. Disabled while nothing is unsaved, and while the unsaved-changes
+/// File › Save (⌘S) writes the unsaved draft. Its `View` wrapper remains from macOS 14 to observe
+/// the library, like New Skill above. Disabled while nothing is unsaved, and while the unsaved-changes
 /// sheet is up: a ⌘S under the sheet would answer the question out from under it and make Don't Save keep the
 /// changes (batch Layer-2).
 private struct SaveSkillCommand: View {

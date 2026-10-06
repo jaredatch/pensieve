@@ -7,7 +7,7 @@ final class FileServiceAdmissionTests: XCTestCase {
     private var root: String!
 
     override func setUpWithError() throws {
-        root = NSTemporaryDirectory() + "FileServiceAdmission-\(UUID().uuidString)"
+        root = TestTemporaryDirectory.path + "FileServiceAdmission-\(UUID().uuidString)"
         try files.createDirectory(at: root)
     }
 

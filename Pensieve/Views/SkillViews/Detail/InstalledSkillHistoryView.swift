@@ -186,9 +186,7 @@ private struct InstalledHistoryLoadedTimeline: View {
     let onShowOlder: (InstalledSkillHistoryPresentation.OlderAction, Int) -> Void
 
     private var shownCount: Int {
-        showAllReadRows
-            ? result.rows.count
-            : min(InstalledSkillHistoryPresentation.initiallyShown, result.rows.count)
+        InstalledSkillHistoryPresentation.shownCount(total: result.rows.count, showAllReadRows: showAllReadRows)
     }
 
     private var upstreamRows: [InstalledSkillHistoryPresentation.UpstreamRow] {
@@ -234,14 +232,14 @@ private struct InstalledHistoryLoadedTimeline: View {
         let rowCount = upstreamRows.count + (local == nil ? 0 : 1) + (note == nil ? 0 : 1)
         let upstreamOffset = local == nil ? 0 : 1
         if let local {
-            InstalledHistoryTimelineRow(dot: .orange, connectsUp: false, connectsDown: rowCount > 1) {
+            SkillHistoryTimelineRow(dotColor: .orange, connectsUp: false, connectsDown: rowCount > 1) {
                 localRow(local)
             }
         }
         ForEach(Array(upstreamRows.enumerated()), id: \.element.id) { offset, row in
             let rowIndex = offset + upstreamOffset
-            InstalledHistoryTimelineRow(
-                dot: dotColor(row.badge),
+            SkillHistoryTimelineRow(
+                dotColor: dotColor(row.badge),
                 connectsUp: rowIndex > 0,
                 connectsDown: rowIndex < rowCount - 1
             ) {
@@ -249,8 +247,8 @@ private struct InstalledHistoryLoadedTimeline: View {
             }
         }
         if let note {
-            InstalledHistoryTimelineRow(
-                dot: Color(nsColor: .quaternaryLabelColor),
+            SkillHistoryTimelineRow(
+                dotColor: Color(nsColor: .quaternaryLabelColor),
                 connectsUp: upstreamRows.count + upstreamOffset > 0,
                 connectsDown: false
             ) {
@@ -349,40 +347,5 @@ private struct InstalledHistoryLoadedTimeline: View {
         case .installed: Color.green
         case nil: Color(nsColor: .quaternaryLabelColor)
         }
-    }
-}
-
-private struct InstalledHistoryTimelineRow<Content: View>: View {
-    let dot: Color
-    let connectsUp: Bool
-    let connectsDown: Bool
-    let content: Content
-
-    init(
-        dot: Color,
-        connectsUp: Bool,
-        connectsDown: Bool,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.dot = dot
-        self.connectsUp = connectsUp
-        self.connectsDown = connectsDown
-        self.content = content()
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: Spacing.lg) {
-            VStack(spacing: 0) {
-                Rectangle().fill(DesignTokens.timelineRule).frame(width: 1, height: 4)
-                    .opacity(connectsUp ? 1 : 0)
-                Circle().fill(dot).frame(width: 10, height: 10)
-                Rectangle().fill(DesignTokens.timelineRule).frame(width: 1).frame(maxHeight: .infinity)
-                    .opacity(connectsDown ? 1 : 0)
-            }
-            .frame(width: 12)
-            content
-                .padding(.bottom, Spacing.xxl)
-        }
-        .accessibilityElement(children: .contain)
     }
 }

@@ -4,11 +4,11 @@ import SwiftUI
 
 @Observable
 final class PlatformViewModel {
-    private let linkService: LinkServiceProtocol
+    let linkService: LinkServiceProtocol
     private let cursorCompiler: CursorCompilerProtocol
     private let fileService: FileServiceProtocol
     let projectReconcilePolicy: ProjectReconcilePolicy
-    private let deployStateStore: DeployStateStore
+    let deployStateStore: DeployStateStore
     private let now: () -> Date
     private let persist: (ModelContext) throws -> Void
     /// Installed agents detected once at construction (install state doesn't change mid-session).
@@ -88,14 +88,6 @@ final class PlatformViewModel {
         }
     }
 
-    func artifactExists(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) -> Bool {
-        guard target.project == nil || platform.supportsProjectScope else { return false }
-        guard ProjectDirectory.canAccess(target.project?.path) else { return false }
-        let path = artifactPath(skill: skill, platform: platform, target: target)
-        guard !path.isEmpty else { return false }
-        return (platform.usesSymlinks && fileService.isSymlink(at: path)) || fileService.fileExists(at: path)
-    }
-
     // MARK: - Throwing core (one pair)
 
     /// Deploy a single (skill, platform) pair, throwing on any failure. The single-deploy wrapper
@@ -158,23 +150,31 @@ final class PlatformViewModel {
     private func removeOne(skill: Skill, platform: PlatformTarget, target: DeployTarget) throws {
         let path = artifactPath(skill: skill, platform: platform, target: target)
         try removeArtifact(skill: skill, platform: platform, target: target)
+        retireDeployState(artifactPath: path)
+    }
+
+    /// State retirement is best effort after ownership is known, just as it is after an unlink.
+    @discardableResult
+    func retireDeployState(artifactPath: String) -> Bool {
         do {
-            try deployStateStore.remove(artifactPath: path)
+            return try deployStateStore.remove(artifactPath: artifactPath)
         } catch {
-            NSLog("Pensieve deploy-state remove failed for \(path): \(error)")
+            NSLog("Pensieve deploy-state remove failed for \(artifactPath): \(error)")
+            return false
         }
     }
 
-    private func removeArtifact(skill: Skill, platform: PlatformTarget, target: DeployTarget) throws {
+    @discardableResult
+    func removeArtifact(skill: Skill, platform: PlatformTarget, target: DeployTarget) throws -> Bool {
         let projectPath = target.project?.path
         if platform.usesSymlinks {
-            try linkService.unlink(skill: skill, platform: platform, projectPath: projectPath)
+            return try linkService.unlink(skill: skill, platform: platform, projectPath: projectPath)
         } else {
-            try cursorCompiler.remove(skill: skill, projectPath: projectPath)
+            return try cursorCompiler.remove(skill: skill, projectPath: projectPath)
         }
     }
 
-    private func artifactPath(skill: Skill, platform: PlatformTarget, target: DeployTarget) -> String {
+    func artifactPath(skill: Skill, platform: PlatformTarget, target: DeployTarget) -> String {
         let projectPath = target.project?.path
         return platform.usesSymlinks
             ? linkService.linkPath(skill: skill, platform: platform, projectPath: projectPath)
@@ -287,34 +287,6 @@ final class PlatformViewModel {
         return result
     }
 
-    /// Remove every (skill × platform) pair, resilient to a single failing pair. Mirrors `removeOne`.
-    func removeBatch(
-        skills: [Skill],
-        platforms: [PlatformTarget],
-        target: DeployTarget = .userWide
-    ) -> BatchResult {
-        var result = BatchResult()
-        for skill in skills {
-            for platform in platforms {
-                do {
-                    try removeOne(skill: skill, platform: platform, target: target)
-                    result.outcomes.append(BatchPairOutcome(
-                        skillID: skill.id, skillName: skill.name, platform: platform,
-                        target: BatchPairTarget(target), error: nil
-                    ))
-                } catch {
-                    result.outcomes.append(BatchPairOutcome(
-                        skillID: skill.id, skillName: skill.name, platform: platform,
-                        target: BatchPairTarget(target), error: BatchPairOutcome.failureMessage(error, target: target),
-                        projectFolderError: error as? ProjectFolderError
-                    ))
-                }
-            }
-        }
-        noteDeployStateChanged()
-        return result
-    }
-
     // MARK: - Validation
 
     func brokenLinks(skills: [Skill]) -> [BrokenLink] {
@@ -323,62 +295,49 @@ final class PlatformViewModel {
 }
 
 extension PlatformViewModel {
-    /// Remove every symlink Pensieve made for this skill on the platforms detected at launch,
-    /// user-wide and in every given project, and drop each one's deploy-state record exactly once —
-    /// per-pair outcomes. A symlink is ours only when isLinked (it points at Pensieve's target).
-    /// Cursor files are never touched here (no durable ownership signal). A symlink-platform
-    /// record with nothing of ours at its path is just dropped. Deploy state is read once, up front;
-    /// a refused read (corrupt bytes or a newer schema) touches nothing that exists.
-    func removeAllDeploys(skill: Skill, projects: [Project]) -> BatchResult {
-        var result = BatchResult()
-        let targets: [DeployTarget] = [.userWide] + projects.map { .project($0) }
-        let recorded: Set<String>?     // the one read; nil = the store refused it (stateProblem says why)
-        let stateProblem: String
-        do {
-            recorded = try deployStateStore.recordedArtifactPaths()
-            stateProblem = ""
-        } catch DeployStateError.unsupportedSchema(let version) {
-            recorded = nil
-            stateProblem = "deploy state uses a newer schema (\(version)); update Pensieve"
-        } catch {
-            recorded = nil
-            stateProblem = "deploy state unreadable"
-        }
-        for target in targets {
-            for platform in deployablePlatforms(forProject: target.project != nil) where platform.usesSymlinks {
-                let path = artifactPath(skill: skill, platform: platform, target: target)
-                // `isDeployed` is `isLinked` here: symlink AND target == ours.
-                let ours = isDeployed(skill: skill, platform: platform, target: target)
-                guard let recorded else {
-                    if ours {
-                        result.outcomes.append(BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: platform,
-                                                                target: BatchPairTarget(target),
-                                                                error: "\(stateProblem); nothing removed at \(path)"))
-                    }
-                    continue
-                }
-                guard ours || recorded.contains(path) else { continue }
-                do {
-                    if ours { try removeArtifact(skill: skill, platform: platform, target: target) }
-                    try deployStateStore.remove(artifactPath: path)   // the one state write for this pair
-                    result.outcomes.append(BatchPairOutcome(
-                        skillID: skill.id, skillName: skill.name, platform: platform,
-                        target: BatchPairTarget(target), error: nil
-                    ))
-                } catch {
-                    result.outcomes.append(BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: platform,
-                                                            target: BatchPairTarget(target),
-                                                            error: error.localizedDescription))
-                }
-            }
-        }
-        if !result.outcomes.isEmpty { noteDeployStateChanged() }
-        return result
+    /// Convergence upgrades legacy Cursor output; unknown ownership stays pending for the throwing deploy.
+    func isRealized(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) -> Bool {
+        platform.usesSymlinks
+            ? isDeployed(skill: skill, platform: platform, target: target)
+            : (try? cursorCompiler.hasOwnershipMark(skill: skill, projectPath: target.project?.path)) ?? false
     }
 
-}
+    /// Throwing ownership for consumers that retain their ledger when an occupant cannot be checked.
+    func artifactIsOwned(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) throws -> Bool {
+        guard target.project == nil || platform.supportsProjectScope else { return false }
+        guard ProjectDirectory.canAccess(target.project?.path) else { return false }
+        if platform.usesSymlinks {
+            return try linkService.ownsArtifact(skill: skill, platform: platform, projectPath: target.project?.path)
+        }
+        return try cursorCompiler.ownsArtifact(skill: skill, projectPath: target.project?.path)
+    }
 
-extension PlatformViewModel {
+    func projectCursorRuleMayExist(skill: Skill, project: Project) throws -> Bool {
+        try cursorCompiler.ruleMayExist(skill: skill, projectPath: project.path)
+    }
+
+    /// Direct unselection waits quietly for a missing project, before reading or retiring its artifacts.
+    func removeSelection(skills: [Skill], platforms: [PlatformTarget], target: DeployTarget) -> BatchResult {
+        removeSelection(pairs: DeployRemovalPair.expand(skills: skills, platforms: platforms), target: target)
+    }
+
+    func removeSelection(pairs: [DeployRemovalPair], target: DeployTarget) -> BatchResult {
+        do {
+            if let project = target.project { try fileService.requireProjectDirectory(at: project.path) }
+            return removeOwnedBatch(pairs: pairs, target: target)
+        } catch {
+            var result = BatchResult()
+            for pair in pairs {
+                result.outcomes.append(BatchPairOutcome(
+                    skillID: pair.skill.id, skillName: pair.skill.name, platform: pair.platform, target: BatchPairTarget(target),
+                    error: BatchPairOutcome.failureMessage(error, target: target),
+                    projectFolderError: error as? ProjectFolderError
+                ))
+            }
+            return result.skippingMissingProjects()
+        }
+    }
+
     /// Classifies user-wide legacy ownership before convergence. LinkService supplies the same
     /// literal-target judgment used by broken-link validation; every regular Cursor file stays owned.
     func scenarioHandoverDeployState(skill: Skill, platform: PlatformTarget) throws -> ScenarioHandoverDeployState {

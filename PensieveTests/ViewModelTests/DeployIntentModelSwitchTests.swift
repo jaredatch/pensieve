@@ -194,6 +194,7 @@ extension DeployIntentModelTests {
         let beta = Skill(name: "Beta", directoryName: "beta")
         let project = Project(name: "Project", path: "/tmp/project")
         project.identityKey = "github.com/owner/project"
+        harness.linkService.fileService.directories.insert(project.path)
         harness.context.insert(beta)
         harness.context.insert(project)
         try harness.context.save()
@@ -220,7 +221,7 @@ extension DeployIntentModelTests {
     }
 
     func testSwitchRefusesWhileSyncLockIsHeldBeforeChangingAnything() throws {
-        let lockPath = NSTemporaryDirectory() + "PensieveSwitchLock-" + UUID().uuidString + ".lock"
+        let lockPath = TestTemporaryDirectory.path + "PensieveSwitchLock-" + UUID().uuidString + ".lock"
         let harness = try makeHarness(lockPath: lockPath)
         let skill = try insertSkill(context: harness.context)
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))

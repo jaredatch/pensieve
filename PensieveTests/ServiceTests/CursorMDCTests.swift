@@ -11,7 +11,7 @@ final class CursorMDCTests: XCTestCase {
             body: "BODY"
         )
 
-        XCTAssertEqual(generated, "---\ndescription: d\nglobs: *.swift\nalwaysApply: false\n---\n\nBODY\n")
+        XCTAssertEqual(generated, "---\n# pensieve: managed\ndescription: d\nglobs: *.swift\nalwaysApply: false\n---\n\nBODY\n")
     }
 
     func testDescriptionFallsBackAndEmptyDescriptionOmitsLine() {
@@ -30,7 +30,7 @@ final class CursorMDCTests: XCTestCase {
             body: "BODY"
         )
         XCTAssertFalse(empty.contains("description:"))
-        XCTAssertEqual(empty, "---\nalwaysApply: false\n---\n\nBODY\n")
+        XCTAssertEqual(empty, "---\n# pensieve: managed\nalwaysApply: false\n---\n\nBODY\n")
     }
 
     func testConfigDescriptionOverridesSkillDescription() {
@@ -59,7 +59,7 @@ final class CursorMDCTests: XCTestCase {
         )
         let compiler = CursorCompiler(
             fileService: FileService(),
-            skillStore: SkillStore(fileService: FileService(), baseDir: NSTemporaryDirectory())
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestTemporaryDirectory.path)
         )
         let body = "# TS Rules"
 

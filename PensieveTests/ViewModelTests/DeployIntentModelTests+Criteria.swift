@@ -76,6 +76,7 @@ extension DeployIntentModelTests {
         let harness = try makeHarness()
         let skill = try insertSkill(context: harness.context)
         let project = try insertCriteriaProject("category", context: harness.context)
+        harness.linkService.fileService.directories.insert(project.path)
         harness.platformVM.deploy(
             skill: skill, platform: .codex, target: .project(project), context: harness.context
         )
@@ -88,7 +89,7 @@ extension DeployIntentModelTests {
             false, skill: skill, platform: .codex, target: .project(project), context: harness.context
         )
 
-        XCTAssertFalse(harness.platformVM.artifactExists(
+        XCTAssertFalse(try harness.platformVM.artifactIsOwned(
             skill: skill, platform: .codex, target: .project(project)
         ))
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)

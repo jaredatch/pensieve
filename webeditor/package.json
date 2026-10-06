@@ -7,7 +7,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "esbuild src/editor.mjs --bundle --format=iife --minify --target=safari16 --outfile=../Pensieve/Resources/EditorAssets/editor.bundle.js"
+    "build": "esbuild src/editor.mjs --bundle --format=iife --minify --legal-comments=eof --target=safari16 --outfile=../Pensieve/Resources/EditorAssets/editor.bundle.js"
   },
   "dependencies": {
     "@codemirror/state": "^6.0.0",

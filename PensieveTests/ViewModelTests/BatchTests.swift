@@ -38,6 +38,7 @@ final class Batch: XCTestCase {
         /// keys "directoryName|platform.rawValue" that should throw on link()/unlink().
         var failingLink: Set<String> = []
         var failingUnlink: Set<String> = []
+        var ownsRemovalPairs = false
         private(set) var linked: [String] = []
         private(set) var unlinked: [String] = []
 
@@ -47,10 +48,13 @@ final class Batch: XCTestCase {
             if failingLink.contains(key(skill, platform)) { throw StubError() }
             linked.append(key(skill, platform))
         }
-        func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
+        func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
             if failingUnlink.contains(key(skill, platform)) { throw StubError() }
             unlinked.append(key(skill, platform))
+            return false
         }
+        func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { ownsRemovalPairs }
+
         func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
         func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
             "/tmp/stub-link/\(skill.directoryName)"
@@ -73,7 +77,7 @@ final class Batch: XCTestCase {
     private func makeDeployStateStore() -> DeployStateStore {
         DeployStateStore(
             fileService: FileService(),
-            appSupportDir: NSTemporaryDirectory() + "PensieveBatchTests-\(UUID().uuidString)"
+            appSupportDir: TestTemporaryDirectory.path + "PensieveBatchTests-\(UUID().uuidString)"
         )
     }
 
@@ -92,8 +96,7 @@ final class Batch: XCTestCase {
 
     func testProjectRemovalReadFailureMessageNamesNoDeployCount() {
         let result = BatchResult.readFailure("project deploy intent ownership", error: StubError())
-
-        let message = ProjectListView.removalFailureMessage(projectName: "Example", result: result)
+        let message = ProjectRemovalModel.removalFailureMessage(projectName: "Example", result: result)
 
         XCTAssertTrue(message.contains("Removal stopped because Pensieve couldn't read its deploy records"))
         XCTAssertTrue(message.contains("“Example” stays registered"))
@@ -165,6 +168,7 @@ final class Batch: XCTestCase {
         [alpha, bravo].forEach(context.insert)
 
         let stub = StubLinkService()
+        stub.ownsRemovalPairs = true
         stub.failingUnlink = ["alpha|\(PlatformTarget.claudeCode.rawValue)"]
 
         let vm = PlatformViewModel(
@@ -173,8 +177,9 @@ final class Batch: XCTestCase {
             agentDetection: StubDetection(),
             deployStateStore: makeDeployStateStore()
         )
-
-        let result = vm.removeBatch(skills: [alpha, bravo], platforms: [.claudeCode, .openClaw])
+        let result = vm.removeOwnedBatch(
+            pairs: DeployRemovalPair.expand(skills: [alpha, bravo], platforms: [.claudeCode, .openClaw]),
+            target: .userWide)
 
         XCTAssertEqual(result.outcomes.count, 4)
         XCTAssertEqual(result.failures.count, 1, "one bad pair must not abort the rest")

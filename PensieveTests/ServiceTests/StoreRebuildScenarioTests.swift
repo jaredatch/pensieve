@@ -11,7 +11,7 @@ final class StoreRebuildScenarioTests: XCTestCase {
     private var service: StoreRebuildService!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveRebuildScenarioTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveRebuildScenarioTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         manifest = ManifestService(fileService: fileService)

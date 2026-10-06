@@ -11,7 +11,7 @@ final class StoreMigrationServiceTests: XCTestCase {
     private var service: StoreMigrationService!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveMigrationTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveMigrationTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         manifest = ManifestService(fileService: fileService)

@@ -33,7 +33,7 @@ final class UnifiedDiffTests: XCTestCase {
     }
 
     func testLineCountsMatchRealGitNumstatForFixturePairs() throws {
-        let root = NSTemporaryDirectory() + "UnifiedDiffOracle-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "UnifiedDiffOracle-\(UUID().uuidString)"
         let files = FileService()
         try files.createDirectory(at: root)
         defer { try? files.deleteDirectory(at: root) }
@@ -94,7 +94,7 @@ final class UnifiedDiffTests: XCTestCase {
     }
 
     private func assertFullDiffsMatchingGit(_ pairs: [(String, String)]) throws {
-        let root = NSTemporaryDirectory() + "LargeDiffOracle-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "LargeDiffOracle-\(UUID().uuidString)"
         let files = FileService()
         try files.createDirectory(at: root)
         defer { try? files.deleteDirectory(at: root) }

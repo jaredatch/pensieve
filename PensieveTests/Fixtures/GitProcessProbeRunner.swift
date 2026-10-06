@@ -20,7 +20,7 @@ enum GitProcessProbeRunner {
         waitForReady: Bool = false, noteTimeout: Bool = true
     ) throws -> Outcome {
         let files = FileService()
-        let directory = NSTemporaryDirectory() + "GitProcessProbe-" + UUID().uuidString
+        let directory = TestTemporaryDirectory.path + "GitProcessProbe-" + UUID().uuidString
         try files.createDirectory(at: directory)
         defer { try? files.deleteDirectory(at: directory) }
         let report = directory + "/report.txt"

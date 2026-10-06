@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 @testable import Pensieve
 
@@ -117,5 +118,9 @@ struct ProjectIntentHarness {
 }
 
 struct NoopProjectCategoryReconciler: CategoryReconcilerProtocol {
+    func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
+        reconcile(context: context)
+    }
+
     func reconcile(context: ModelContext) -> BatchResult { BatchResult() }
 }

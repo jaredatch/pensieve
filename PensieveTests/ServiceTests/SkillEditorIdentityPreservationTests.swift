@@ -8,7 +8,7 @@ final class SkillEditorIdentityPreservationTests: XCTestCase {
     private var store: SkillStore!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveEditorIdentityTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveEditorIdentityTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         store = SkillStore(fileService: fileService, baseDir: tempDir)

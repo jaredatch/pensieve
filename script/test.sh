@@ -31,10 +31,22 @@ fi
 
 # One test run per machine (the playbook's modules/macos-swift.md § Wrapper scripts): take the machine's test lock
 # before anything else, so a second run from any checkout waits in line. The kernel drops it when the holder exits.
+# Two lanes: a full suite first queues behind any other full suite on test-full.lock, and a --filter run skips that
+# line, so a focused proof never waits behind every queued suite. The holder line and the wait go to stderr.
 if [ -z "${XP_TEST_LOCK_HELD:-}" ]; then
-  lock="$HOME/.local/state/execplan/test.lock"; mkdir -p "${lock%/*}" || exit 2
-  /usr/bin/lockf -k -s -t 0 "$lock" true || echo "test.sh: waiting for this machine's test lock" >&2
-  XP_TEST_LOCK_HELD=1 exec /usr/bin/lockf -k "$lock" "$0" "$@"
+  dir="$HOME/.local/state/execplan"; mkdir -p "$dir" || exit 2
+  : "${XP_TEST_T0:=$(date +%s)}"; export XP_TEST_T0
+  case " $* " in *" --filter "*) ;; *)   # a full suite queues in its own lane first
+    if [ -z "${XP_TEST_FULL_HELD:-}" ]; then
+      /usr/bin/lockf -k -s -t 0 "$dir/test-full.lock" true || echo "test.sh: waiting behind another full suite" >&2
+      XP_TEST_FULL_HELD=1 exec /usr/bin/lockf -k "$dir/test-full.lock" "$0" "$@"
+    fi ;; esac
+  /usr/bin/lockf -k -s -t 0 "$dir/test.lock" true || echo "test.sh: waiting for this machine's test lock, held by: $(cat "$dir/test.lock.holder" 2>/dev/null)" >&2
+  XP_TEST_LOCK_HELD=1 exec /usr/bin/lockf -k "$dir/test.lock" "$0" "$@"
+fi
+if [ -n "${XP_TEST_T0:-}" ]; then   # this run took the lock itself (a caller holding it, like the self-test, skips this)
+  printf 'pid %s in %s: test.sh %s\n' "$$" "$PWD" "$*" > "$HOME/.local/state/execplan/test.lock.holder"   # before HOME moves below
+  echo "test.sh: waited $(( $(date +%s) - XP_TEST_T0 )) s for the test lock" >&2
 fi
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -92,12 +104,30 @@ mkdir -p "$HOME" "$CLANG_MODULE_CACHE_PATH" "$XDG_CACHE_HOME"
 # Keep in-progress bundles where CI can upload them even if the step kills this wrapper.
 mkdir -p "$DERIVED_DATA/TestRuns"
 python3 "$REPO/script/test_runs.py" "$DERIVED_DATA/TestRuns"
+# Prune only older evidence. Every report written by this run survives for CI upload.
+if ! python3 "$REPO/script/test_diagnostics.py" --prune "$TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR"; then
+  echo "test.sh: warning: timeout diagnostics pruning failed; continuing the test run" >&2
+fi
 rdir="$(mktemp -d "$DERIVED_DATA/TestRuns/run.XXXXXX")"
+# Foundation ignores TMPDIR on macOS. The fixture helper reads this forwarded variable instead.
+export TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT="$rdir/tmp"
+mkdir "$TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT"
+# A missing or damaged fixture repo must not discover this checkout above TestRuns.
+export TEST_RUNNER_GIT_CEILING_DIRECTORIES="$TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT"
 # Xcode buffers parallel hosts' stdout. Relay completed reports while tests are still running.
-python3 -u "$REPO/script/test_diagnostics.py" "$TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR" "$$" &
+python3 -u "$REPO/script/test_diagnostics.py" "$TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR" "$$" --ready "$rdir/.diagnostics-ready" &
 relay_pid=$!
 finish_relay() { kill -TERM "$relay_pid" 2>/dev/null || true; wait "$relay_pid" 2>/dev/null || true; }
 trap finish_relay EXIT
+relay_start=$SECONDS
+until [ -f "$rdir/.diagnostics-ready" ]; do
+  if ! kill -0 "$relay_pid" 2>/dev/null || [ "$((SECONDS - relay_start))" -ge 30 ]; then
+    echo "test.sh: timeout diagnostic relay did not become ready" >&2
+    exit 1
+  fi
+  sleep 0.05
+done
+rm -f "$rdir/.diagnostics-ready"
 bundle="$rdir/run.xcresult"
 status=0
 set +e
@@ -121,6 +151,14 @@ count=""
 if [ -d "$bundle" ]; then
   count="$(xcrun xcresulttool get test-results summary --path "$bundle" --compact | jq -r '.totalTestCount // empty')" || count=""
 fi
+# Xcode and Foundation leave empty temporary directories outside TMPDIR. The shallow sweep is bounded and best-effort.
+if system_temp="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" && [ -d "$system_temp" ]; then
+  python3 "$REPO/script/test_temp_cleanup.py" "$system_temp" >/dev/null 2>&1 || true
+fi
+# Completed runs need no fixture leftovers. Interrupted runs keep theirs under TestRuns' existing pruning.
+# A crashed host can leave mode-0 fixtures. Restore owner access without following symlinks.
+chmod -R -P u+rwx "$TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT" 2>/dev/null || true
+rm -rf "$TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT" 2>/dev/null || true
 unread=0
 case "$count" in
   ''|*[!0-9]*)
@@ -134,7 +172,7 @@ esac
 # Messages go to stderr: the count line must stay stdout's last line.
 if [ "$status" -ne 0 ] && [ -d "$bundle" ]; then
   if kept="$(keep_failed_bundle "$bundle" "$DERIVED_DATA/FailedRuns")"; then
-    rm -f "$rdir/.active.lock"
+    rm -f "$rdir/.active.lock" 2>/dev/null || true
     rmdir "$rdir" 2>/dev/null || true
     echo "test.sh: the failed run's result bundle is kept at $kept" >&2
     xcrun xcresulttool get test-results summary --path "$kept" --compact 2>/dev/null \
@@ -146,7 +184,7 @@ fi
 # the in-progress bundle stays in TestRuns instead of being deleted.
 finish_relay
 trap - EXIT
-if [ "$status" -eq 0 ]; then rm -rf "$rdir"; fi
+if [ "$status" -eq 0 ]; then rm -rf "$rdir" 2>/dev/null || true; fi
 printf 'PENSIEVE_TEST_COUNT=%s\n' "$count"
 
 # A passing run whose count can't be read is refused, never reported as 0 tests passing.

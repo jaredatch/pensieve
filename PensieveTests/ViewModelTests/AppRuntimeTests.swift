@@ -39,11 +39,19 @@ final class AppRuntimeTests: XCTestCase {
 
     private struct NoopLedgerReconciler: CategoryReconcilerProtocol,
         IntentReconcilerProtocol {
+        func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
+            reconcile(context: context)
+        }
+
         func reconcile(context: ModelContext) -> BatchResult { BatchResult() }
     }
 
     private final class RecordingLedgerReconciler: CategoryReconcilerProtocol,
         IntentReconcilerProtocol {
+        func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
+            reconcile(context: context)
+        }
+
         private(set) var calls = 0
 
         func reconcile(context: ModelContext) -> BatchResult {
@@ -154,7 +162,7 @@ final class AppRuntimeTests: XCTestCase {
         XCTAssertFalse(AppRuntime.shouldAutoShowImportWizard(skillCount: 0, storeQuarantined: true, storeUnreadable: false))
         XCTAssertFalse(AppRuntime.shouldAutoShowImportWizard(skillCount: 1, storeQuarantined: false, storeUnreadable: false))
 
-        let lockPath = NSTemporaryDirectory() + "/AppRuntimeQuarantine-\(UUID().uuidString)/sync.lock"
+        let lockPath = TestTemporaryDirectory.path + "/AppRuntimeQuarantine-\(UUID().uuidString)/sync.lock"
         let launchLock = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
         let harness = try makeRuntime(launchIngestLockPath: lockPath)
         XCTAssertTrue(harness.runtime.performLaunchWorkIfNeeded(context: harness.context))
@@ -304,7 +312,7 @@ extension AppRuntimeTests {
         let retryRan = expectation(description: "retry ran after lock holder released")
         var launchCalls = 0
         let deploy = RecordingDeployReconciler()
-        let lockPath = NSTemporaryDirectory() + "/AppRuntimeRetryLock-\(UUID().uuidString)/sync.lock"
+        let lockPath = TestTemporaryDirectory.path + "/AppRuntimeRetryLock-\(UUID().uuidString)/sync.lock"
         let harness = try makeRuntime(
             launchCalls: {
                 launchCalls += 1

@@ -47,7 +47,7 @@ final class DeployStateStoreTests: XCTestCase {
     private var lockPath: String { tempDir + "/deploy-state.lock" }
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveDeployStateStoreTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveDeployStateStoreTests-\(UUID().uuidString)"
         fileService = FileService()
         store = DeployStateStore(fileService: fileService, appSupportDir: tempDir)
     }

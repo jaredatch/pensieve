@@ -10,7 +10,7 @@ final class SkillLibraryBundleReadTests: XCTestCase {
     private let fileService = FileService()
 
     override func setUpWithError() throws {
-        base = NSTemporaryDirectory() + "SkillLibraryBundleReadTests-" + UUID().uuidString
+        base = TestTemporaryDirectory.path + "SkillLibraryBundleReadTests-" + UUID().uuidString
         try fileService.createDirectory(at: base + "/" + slug + "/references")
         try fileService.writeFile(at: base + "/" + slug + "/SKILL.md", content: "---\nname: Bundle\ndescription: d\n---\n\nBody")
         try fileService.writeFile(at: base + "/" + slug + "/references/voice.md", content: "Voice notes")

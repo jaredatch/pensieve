@@ -13,6 +13,14 @@ struct ProjectReconcilePolicy {
 
     init(fileService: FileServiceProtocol) { self.fileService = fileService }
 
+    func requireDirectory(_ project: Project) throws {
+        try fileService.requireProjectDirectory(at: project.path)
+    }
+
+    func resolvedDirectory(_ project: Project) -> String {
+        fileService.realPath(at: project.path)
+    }
+
     struct Work<Triple: ProjectReconcileTriple> {
         let deploy: Set<Triple>
         let remove: Set<Triple>
@@ -41,10 +49,7 @@ struct ProjectReconcilePolicy {
             guard problems[triple.projectID] == nil,
                   let project = projects[triple.projectID], let skill = skills[triple.skillID],
                   let platform = triple.platformTarget else { return true }
-            if platform.usesSymlinks {
-                return platformVM.isDeployed(skill: skill, platform: platform, target: .project(project))
-            }
-            return platformVM.artifactExists(skill: skill, platform: platform, target: .project(project))
+            return platformVM.isRealized(skill: skill, platform: platform, target: .project(project))
         }
         let deploy = desired.subtracting(realized)
         var unavailable: Set<Triple> = []

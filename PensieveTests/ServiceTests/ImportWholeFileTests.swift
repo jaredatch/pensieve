@@ -8,7 +8,7 @@ final class ImportWholeFileTests: XCTestCase {
     private var files: FileService!
 
     override func setUpWithError() throws {
-        root = NSTemporaryDirectory() + "ImportWholeFile-" + UUID().uuidString
+        root = TestTemporaryDirectory.path + "ImportWholeFile-" + UUID().uuidString
         files = FileService()
         try files.createDirectory(at: root)
     }

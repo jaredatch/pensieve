@@ -17,7 +17,7 @@ final class PreviewImageBudgetTests: XCTestCase {
 
     func testSpentBudgetRefusesBeforeLocalReadOrEmbeddedByteDecode() throws {
         let files = PreviewImageFileSpy()
-        let root = files.files.realPath(at: NSTemporaryDirectory()) + "/SpentBudget-" + UUID().uuidString
+        let root = files.files.realPath(at: TestTemporaryDirectory.path) + "/SpentBudget-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: root) }
         try files.files.writeData(at: root + "/image.png", data: PreviewImageFixture.png())
         let budget = PreviewImageDecodeBudget()

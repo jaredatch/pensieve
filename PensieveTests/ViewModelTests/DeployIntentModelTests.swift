@@ -113,28 +113,6 @@ final class DeployIntentModelTests: XCTestCase {
         XCTAssertEqual(harness.linkService.unlinkCalls.count, 0)
     }
 
-    func testPerformRemoveProjectRoutesToBatch() throws {
-        let harness = try makeHarness()
-        let skill = try insertSkill(context: harness.context)
-        let project = Project(name: "Project", path: "/tmp/project")
-        harness.context.insert(project)
-        harness.context.insert(MachineDeployIntent(
-            machineID: remoteID, skillSlug: skill.directoryName, platformRaw: PlatformTarget.codex.rawValue
-        ))
-        try harness.context.save()
-
-        let outcome = try BulkDeploySheet.perform(
-            .remove, forProject: true, platformVM: harness.platformVM, intentModel: harness.model,
-            skills: [skill], platforms: [.codex], target: .project(project),
-            machineIDs: [remoteID], context: harness.context
-        )
-
-        guard case let .localDeploy(batch) = outcome else { return XCTFail("expected project batch removal") }
-        XCTAssertEqual(batch.successes.count, 1)
-        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 1)
-        XCTAssertEqual(harness.linkService.unlinkCalls.map(\.projectPath), [project.path])
-    }
-
     func testPerformDeployUserWideRemoteOnlyRoutesToIntent() throws {
         let harness = try makeHarness()
         let skill = try insertSkill(context: harness.context)
@@ -267,7 +245,7 @@ final class DeployIntentModelTests: XCTestCase {
     }
 
     func testExistingStoreOpensUnderExtendedSchema() throws {
-        let directory = NSTemporaryDirectory() + "PensieveSchemaMigration-" + UUID().uuidString
+        let directory = TestTemporaryDirectory.path + "PensieveSchemaMigration-" + UUID().uuidString
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: directory) }
         let url = URL(fileURLWithPath: directory + "/default.store")
@@ -333,7 +311,7 @@ extension DeployIntentModelTests {
             agentDetection: DeployStubDetection(installed: [.codex]),
             deployStateStore: DeployStateStore.memoryBacked
         )
-        let root = NSTemporaryDirectory() + "PensieveDeployIntent-" + UUID().uuidString
+        let root = TestTemporaryDirectory.path + "PensieveDeployIntent-" + UUID().uuidString
         let manifestFileService = FileService()
         let manifestService = ManifestService(fileService: manifestFileService)
         let resolvedWriteManifest = writeManifest ?? { context in

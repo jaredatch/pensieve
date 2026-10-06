@@ -22,7 +22,7 @@ final class PlatformViewModelDeployIndexTests: XCTestCase {
         XCTAssertTrue(vm.deployIndex.isDeployed(slug: "alpha"))
         XCTAssertEqual(vm.deployIndex.summary(for: "alpha"), "Claude Code · This Mac")
 
-        XCTAssertEqual(vm.removeAllDeploys(skill: skill, projects: []).successes.count, 1)
+        XCTAssertEqual(vm.removeAllDeploys(skill: skill, projects: [], localDeployHistory: { _ in [] }).batch.successes.count, 1)
         XCTAssertTrue(vm.deployIndex.available)
         XCTAssertFalse(vm.deployIndex.isDeployed(slug: "alpha"))
     }
@@ -51,8 +51,9 @@ final class PlatformViewModelDeployIndexTests: XCTestCase {
 
         vm.deploy(skill: skill, platform: .claudeCode, target: .userWide, context: context)
         XCTAssertEqual(vm.deployIndex.summary(for: "idx"), "Claude Code · This Mac")
-
-        XCTAssertEqual(vm.removeBatch(skills: [skill], platforms: [.claudeCode], target: .userWide).successes.count, 1)
+        XCTAssertEqual(vm.removeOwnedBatch(
+            pairs: DeployRemovalPair.expand(skills: [skill], platforms: [.claudeCode]),
+            target: .userWide).successes.count, 1)
         XCTAssertFalse(vm.deployIndex.isDeployed(slug: "idx"))
 
         XCTAssertEqual(vm.deployBatch(skills: [skill], platforms: [.claudeCode], context: context).successes.count, 1)
@@ -100,7 +101,7 @@ final class PlatformViewModelDeployIndexTests: XCTestCase {
     }
 
     private func tempRoot() throws -> String {
-        let root = NSTemporaryDirectory() + "PlatformDeployIndex-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "PlatformDeployIndex-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(atPath: root) }
         return root

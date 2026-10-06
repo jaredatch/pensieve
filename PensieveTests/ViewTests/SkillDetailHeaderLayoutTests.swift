@@ -10,7 +10,7 @@ import XCTest
 @MainActor
 final class SkillDetailHeaderLayoutTests: XCTestCase {
     func testALinkedSkillsHeaderMatchesTheFramesRhythm() {
-        let base = NSTemporaryDirectory() + "SkillDetailHeaderLayoutTests-\(UUID().uuidString)"
+        let base = TestTemporaryDirectory.path + "SkillDetailHeaderLayoutTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: FileService(), baseDir: base))
         let skill = Skill(name: "basecamp", directoryName: "basecamp")
         skill.skillDescription = String(repeating: "Interact with Basecamp via the Basecamp CLI. ", count: 8)

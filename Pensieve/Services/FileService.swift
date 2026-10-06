@@ -7,6 +7,7 @@ protocol FileServiceProtocol {
     func readFile(at path: String) throws -> String
     func readData(at path: String) throws -> Data
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data
+    func readRegularFileHeader(at path: String, maximumBytes: Int) throws -> Data
     /// Checks the opened inode's resolved path is inside this directory before reading any bytes.
     func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data
     /// Runs admission after both inventories, before any compared file content is read.

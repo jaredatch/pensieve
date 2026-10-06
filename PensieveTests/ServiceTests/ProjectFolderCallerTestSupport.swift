@@ -19,9 +19,10 @@ struct ProjectFolderCallerHarness {
     let project: Project
     let otherProject: Project
 
-    init(installed: [PlatformTarget] = [.claudeCode, .grok, .codex, .cursor], files: FileService = FileService()) throws {
+    init(installed: [PlatformTarget] = [.claudeCode, .grok, .codex, .cursor], files: FileService = FileService(),
+         persistent: Bool = false) throws {
         self.files = files
-        root = NSTemporaryDirectory() + "ProjectFolderCallers-\(UUID().uuidString)"
+        root = TestTemporaryDirectory.path + "ProjectFolderCallers-\(UUID().uuidString)"
         let store = SkillStore(fileService: files, baseDir: root + "/store/skills")
         let slug = try store.createSkill(name: "Caller Skill", description: "Caller", body: "# Body")
         mapped = LinkServiceCanonicalDirectoryFileService(
@@ -30,7 +31,8 @@ struct ProjectFolderCallerHarness {
             physicalSandbox: root
         )
         context = ModelContext(try AppRuntime.makeContainer(
-            configuration: ModelConfiguration(isStoredInMemoryOnly: true)
+            configuration: persistent ? ModelConfiguration(url: URL(fileURLWithPath: root + "/removal.sqlite"))
+                : ModelConfiguration(isStoredInMemoryOnly: true)
         ))
         deployState = DeployStateStore(fileService: mapped, appSupportDir: root + "/support")
         platformVM = PlatformViewModel(

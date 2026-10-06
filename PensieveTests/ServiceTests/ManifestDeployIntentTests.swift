@@ -12,7 +12,7 @@ final class ManifestDeployIntentTests: XCTestCase {
     let fileService = FileService()
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveManifestIntent-" + UUID().uuidString
+        tempDir = TestTemporaryDirectory.path + "PensieveManifestIntent-" + UUID().uuidString
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         service = ManifestService(fileService: fileService)
     }

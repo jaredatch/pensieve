@@ -7,7 +7,7 @@ final class GrokDeployTests: XCTestCase {
 
     override func setUpWithError() throws {
         fileService = FileService()
-        tempDir = NSTemporaryDirectory() + "PensieveGrokDeployTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveGrokDeployTests-\(UUID().uuidString)"
         try fileService.createDirectory(at: tempDir)
     }
 
@@ -65,7 +65,7 @@ final class GrokDeployTests: XCTestCase {
         XCTAssertTrue(service.isLinked(skill: skill, platform: .grok, projectPath: projectPath))
     }
 
-    func testRetargetedLinkIsHealed() throws {
+    func testRetargetedForeignLinkIsRefused() throws {
         let context = try makeUserWideContext()
         let foreignTarget = tempDir + "/retargeted"
         try fileService.createDirectory(at: foreignTarget)
@@ -75,12 +75,9 @@ final class GrokDeployTests: XCTestCase {
         XCTAssertFalse(context.service.isLinked(
             skill: context.skill, platform: .grok, projectPath: nil))
 
-        try context.service.link(skill: context.skill, platform: .grok, projectPath: nil)
-
-        XCTAssertEqual(context.service.validateAll(skills: [context.skill]), [])
-        XCTAssertEqual(try fileService.symlinkTarget(at: context.physicalLink), context.physicalTarget)
-        XCTAssertTrue(context.service.isLinked(
-            skill: context.skill, platform: .grok, projectPath: nil))
+        XCTAssertThrowsError(try context.service.link(skill: context.skill, platform: .grok, projectPath: nil))
+        XCTAssertEqual(try fileService.symlinkTarget(at: context.physicalLink), foreignTarget)
+        XCTAssertFalse(context.service.isLinked(skill: context.skill, platform: .grok, projectPath: nil))
     }
 
     func testForeignSymlinkIsRemovedOnUnlink() throws {
@@ -92,7 +89,8 @@ final class GrokDeployTests: XCTestCase {
 
         try context.service.unlink(skill: context.skill, platform: .grok, projectPath: nil)
 
-        XCTAssertFalse(fileService.isSymlink(at: context.physicalLink))
+        XCTAssertTrue(fileService.isSymlink(at: context.physicalLink))
+        XCTAssertEqual(try fileService.symlinkTarget(at: context.physicalLink), foreignTarget)
         XCTAssertTrue(fileService.directoryExists(at: foreignTarget))
     }
 

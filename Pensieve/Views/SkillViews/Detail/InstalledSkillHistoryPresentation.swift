@@ -81,7 +81,7 @@ enum InstalledSkillHistoryPresentation {
         }
     }
 
-    static let initiallyShown = 3
+    static let initiallyShown = 10
     static let loadingTitle = "Loading upstream history…"
     static let updatingTitle = "Updating…"
     static let localCaption = "Your local edits · not yet saved to a version"
@@ -90,6 +90,10 @@ enum InstalledSkillHistoryPresentation {
     static let viewDiffTitle = "View Diff"
     static let viewEditsTitle = "View Edits"
     static let updateTitle = "Update to This"
+
+    static func shownCount(total: Int, showAllReadRows: Bool) -> Int {
+        showAllReadRows ? total : min(initiallyShown, total)
+    }
 
     static func shortHash(_ sha: String) -> String {
         String(sha.prefix(7))

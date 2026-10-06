@@ -9,7 +9,7 @@ final class FileTreeComparisonTests: XCTestCase {
     var new: String { root + "/new" }
 
     override func setUpWithError() throws {
-        root = NSTemporaryDirectory() + "FileTreeComparison-\(UUID().uuidString)"
+        root = TestTemporaryDirectory.path + "FileTreeComparison-\(UUID().uuidString)"
         try files.createDirectory(at: old)
         try files.createDirectory(at: new)
     }
