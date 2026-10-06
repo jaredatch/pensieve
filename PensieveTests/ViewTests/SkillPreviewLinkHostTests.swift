@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import WebKit
 import XCTest
 @testable import Pensieve
 
@@ -115,14 +114,16 @@ final class SkillPreviewLinkHostTests: XCTestCase {
             try await followReference(in: linked, selection: selection)
             if file != selection.file { try pickFile(file, in: linked.host) }
             selection.mode = .source
-            let editor = try await waitForEditor(in: linked.host)
+            let editor = try await TestWait.waitForEditor(in: linked.host,
+                                                         minimumHeight: SkillContentTab.sourceEditorMinimumHeight)
 
             let freshSelection = PreviewFileSelection()
             freshSelection.file = file
             freshSelection.mode = .source
             let fresh = navigationFixture(selection: freshSelection, destination: "# Reference\nTiny.")
             defer { fresh.window.close() }
-            _ = try await waitForEditor(in: fresh.host)
+            _ = try await TestWait.waitForEditor(in: fresh.host,
+                                                 minimumHeight: SkillContentTab.sourceEditorMinimumHeight)
             let freshRange = try scrollRange(of: pageScroller(in: fresh.host))
             let linkedScroller = try pageScroller(in: linked.host)
             XCTAssertEqual(freshRange, 0, accuracy: 1, "Fresh source must fit; \(file)")
@@ -148,8 +149,9 @@ final class SkillPreviewLinkHostTests: XCTestCase {
             return screenViewport.contains(link.accessibilityFrame())
         }
         try click(link, in: fixture.window)
-        let editor = try await waitForEditor(in: fixture.host)
-        let text = await TestWait.waitForEditorText("echo hi", in: editor, timeout: 3)
+        let editor = try await TestWait.waitForEditor(in: fixture.host,
+                                                     minimumHeight: SkillContentTab.sourceEditorMinimumHeight)
+        let text = await TestWait.waitForEditorText("echo hi", in: editor, timeout: .seconds(3))
         XCTAssertEqual(text, "echo hi", "Script source must load into its read-only editor")
         fixture.host.layoutSubtreeIfNeeded()
         XCTAssertEqual(selection.file, "scripts/x.sh")
@@ -262,16 +264,6 @@ extension SkillPreviewLinkHostTests {
             return selection.file == "references/x.md"
                 && self.elements(host).contains { ($0.accessibilityValue() as? String) == "Reference" }
         }
-    }
-
-    private func waitForEditor(in host: NSView) async throws -> WKWebView {
-        var editor: WKWebView?
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Source editor must finish layout") {
-            host.layoutSubtreeIfNeeded()
-            editor = self.views(host).compactMap { $0 as? WKWebView }.first
-            return editor != nil && editor?.frame.height ?? 0 >= SkillContentTab.sourceEditorMinimumHeight
-        }
-        return try XCTUnwrap(editor)
     }
 
     private func pickFile(_ file: String, in host: NSView) throws {

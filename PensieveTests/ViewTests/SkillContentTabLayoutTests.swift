@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import WebKit
 import XCTest
 @testable import Pensieve
 
@@ -75,10 +74,11 @@ final class SkillContentTabLayoutTests: XCTestCase {
 
     /// The file row sits in equal gaps: the tab strip above it, the file's content below it, and no rule
     /// between the row and the content (the header scrolls, so nothing needs setting off).
-    func testTheFileRowGapBelowMatchesTheGapAbove() throws {
+    @MainActor
+    func testTheFileRowGapBelowMatchesTheGapAbove() async throws {
         let fixture = sourceFixture(selectedFile: "SKILL.md", description: nil, height: 600)
         defer { fixture.window.close() }
-        let editor = try XCTUnwrap(waitForEditor(in: fixture.host, timeout: 3))
+        let editor = try await TestWait.waitForEditor(in: fixture.host)
         let popUp = try XCTUnwrap(Self.controls(in: fixture.host).compactMap { $0 as? NSPopUpButton }.first)
         let column = try XCTUnwrap(Self.nearestScrollView(to: popUp)?.documentView)
         let rowFrame = Self.flipped(popUp, in: column)
@@ -98,12 +98,12 @@ final class SkillContentTabLayoutTests: XCTestCase {
     private func assertSourceOverflowKeepsEditorUsable(selectedFile: String) async throws {
         let fixture = sourceFixture(selectedFile: selectedFile)
         defer { fixture.window.close() }
-        let editor = try XCTUnwrap(waitForEditor(in: fixture.host, timeout: 3), selectedFile)
+        let editor = try await TestWait.waitForEditor(in: fixture.host)
         let popUp = try XCTUnwrap(Self.controls(in: fixture.host).compactMap { $0 as? NSPopUpButton }.first)
         let columnScroller = try XCTUnwrap(Self.nearestScrollView(to: popUp))
 
         if selectedFile == "scripts/x.sh" {
-            let text = await TestWait.waitForEditorText("echo hi", in: editor, timeout: 3)
+            let text = await TestWait.waitForEditorText("echo hi", in: editor, timeout: .seconds(3))
             XCTAssertEqual(text, "echo hi")
         }
         XCTAssertGreaterThan(Self.scrollRange(of: columnScroller), 100, selectedFile)
@@ -172,25 +172,9 @@ final class SkillContentTabLayoutTests: XCTestCase {
             .joined(separator: "\n")
     }
 
-    private func waitForEditor(in host: NSView, timeout: TimeInterval) -> WKWebView? {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            host.layoutSubtreeIfNeeded()
-            if let editor = Self.views(in: host).compactMap({ $0 as? WKWebView }).first {
-                return editor
-            }
-            RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.01)))
-        } while Date() < deadline
-        return nil
-    }
-
     private static func controls(in view: NSView) -> [NSControl] {
         let own = [view].compactMap { $0 as? NSControl }.filter { $0 is NSPopUpButton || $0 is NSSegmentedControl }
         return own + view.subviews.flatMap { controls(in: $0) }
-    }
-
-    private static func views(in view: NSView) -> [NSView] {
-        [view] + view.subviews.flatMap { views(in: $0) }
     }
 
     private static func nearestScrollView(to view: NSView) -> NSScrollView? {

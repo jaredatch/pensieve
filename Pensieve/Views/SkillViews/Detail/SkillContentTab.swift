@@ -96,7 +96,6 @@ struct SkillContentTab: View {
     }
 
     private func followLink(_ path: String, proxy: ScrollViewProxy) {
-        guard path != file else { return }
         proxy.scrollTo(fileRowAnchor, anchor: .top)
         DispatchQueue.main.async { onSelectFile(path) }
     }

@@ -35,6 +35,20 @@ final class SkillPreviewLinkPolicyTests: XCTestCase {
         }
     }
 
+    func testSameDocumentLinksWithoutFragmentsAreIgnored() throws {
+        let cases: [RouteCase] = [
+            .init(link: "./SKILL.md", document: "SKILL.md", expected: .ignore),
+            .init(link: "SKILL.md", document: "SKILL.md", expected: .ignore),
+            .init(link: "x.md", document: "references/x.md", expected: .ignore)
+        ]
+        for entry in cases {
+            let url = try XCTUnwrap(URL(string: entry.link))
+            XCTAssertEqual(SkillPreviewLinkPolicy.decision(for: url, documentRelativePath: entry.document,
+                                                          files: ["SKILL.md", "references/x.md"]),
+                           entry.expected, "\(entry.link) inside \(entry.document)")
+        }
+    }
+
     func testIgnoresSchemesAbsolutePathsEscapesAndFilesOutsidePicker() throws {
         let files = ["SKILL.md", "references/x.md"]
         let blocked = ["file:///tmp/x.md", "FILE:///tmp/x.md", "mailto:a@example.com", "javascript:alert(1)",

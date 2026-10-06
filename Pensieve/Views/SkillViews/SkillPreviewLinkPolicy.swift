@@ -31,7 +31,8 @@ enum SkillPreviewLinkPolicy {
               !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return .ignore }
         let folder = documentRelativePath.split(separator: "/").dropLast().map(String.init)
         guard let resolved = normalized(folder + path.split(separator: "/").map(String.init)) else { return .ignore }
-        if resolved == documentRelativePath, let fragment = components.fragment, !fragment.isEmpty {
+        if resolved == documentRelativePath {
+            guard let fragment = components.fragment, !fragment.isEmpty else { return .ignore }
             return .scrollTo(fragment)
         }
         guard files.contains(resolved) else { return .ignore }
