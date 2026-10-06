@@ -16,7 +16,7 @@ final class ProjectFolderBlockingProbe: @unchecked Sendable {
             counts[path, default: 0] += 1
             return blockedPath == path
         }
-        if blocked { _ = release.wait(timeout: .now() + 4) }
+        if blocked { _ = release.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds) }
         return try FileService.probeDirectory(path)
     }
 }

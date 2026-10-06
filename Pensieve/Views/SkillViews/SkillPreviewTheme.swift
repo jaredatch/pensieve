@@ -31,8 +31,19 @@ enum SkillPreviewTheme {
         .list { SkillPreviewList(configuration: $0) }
         .listItem { configuration in
             configuration.label
-                .labelStyle(SkillPreviewListItemStyle())
                 .markdownMargin(top: DesignTokens.markdownListItemGap)
+        }
+        .bulletedListMarker { configuration in
+            let symbols = ["circle.fill", "circle", "square.fill"]
+            Image(systemName: symbols[min(configuration.listLevel, symbols.count) - 1])
+                .font(.system(size: (DesignTokens.markdownBodySize / 3).rounded()))
+                .frame(minWidth: DesignTokens.markdownListIndent - Spacing.sm, alignment: .trailing)
+        }
+        .numberedListMarker { configuration in
+            Text("\(configuration.itemNumber).")
+                .monospacedDigit()
+                .fixedSize()
+                .frame(minWidth: DesignTokens.markdownListIndent - Spacing.sm, alignment: .trailing)
         }
         .blockquote { configuration in
             HStack(spacing: 0) {
@@ -83,25 +94,6 @@ enum SkillPreviewTheme {
                 .markdownMargin(top: DesignTokens.markdownThematicBreakMargin,
                                 bottom: DesignTokens.markdownThematicBreakMargin)
         }
-}
-
-private struct SkillPreviewListItemStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(alignment: VerticalAlignment(SkillPreviewListFirstLine.self), spacing: 0) {
-            configuration.icon
-                .padding(.trailing, Spacing.xs)
-                .frame(width: DesignTokens.markdownListIndent, alignment: .trailing)
-            configuration.title
-        }
-    }
-}
-
-private enum SkillPreviewListFirstLine: AlignmentID {
-    static func defaultValue(in context: ViewDimensions) -> CGFloat {
-        // Center the marker beside the first line, including when the item wraps or contains nested blocks.
-        let laterLines = context[.lastTextBaseline] - context[.firstTextBaseline]
-        return (context.height - laterLines) / 2
-    }
 }
 
 private struct SkillPreviewList: View {

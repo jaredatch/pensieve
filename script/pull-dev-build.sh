@@ -102,10 +102,11 @@ resign_dev_app() (
     trap - EXIT HUP INT TERM
     if [ "$restore" -eq 1 ]; then
       # Restoring bytes also restores every original nested seal and entitlement.
-      if ! { rm -rf "$APP" && mv "$work/original.app" "$APP" && codesign --verify --deep --strict "$APP"; }; then
+      if ! { rm -rf "$APP" && mv "$work/original.app" "$APP"; }; then
         die "could not restore the original bundle; re-run to re-sync (backup directory: $work)"
       fi
-      say "warning: restored the original ad-hoc build; it still verifies"
+      say "warning: restored the original ad-hoc build"
+      codesign -v "$APP" 2>/dev/null || say "warning: signature check failed — if it won't launch, re-run to re-sync"
     fi
     rm -rf "$work"
     exit "$status"
@@ -130,9 +131,16 @@ resign_dev_app() (
     # executable/helper before its containing framework, XPC service or app.
     find "$APP/Contents" -depth \( -type f -o -type d \) -print0 > "$work/code-paths" || return 1
     while IFS= read -r -d '' code; do
+      [ ! -L "$code" ] || continue
       if [ -d "$code" ]; then
+        # Framework versions are sealed through the framework root, once.
+        case "$code" in *.app|*.framework|*.xpc|*.bundle|*.appex|*.plugin) ;; *) continue ;; esac
         codesign -d "$code" >/dev/null 2>&1 || continue
       else
+        case "$code" in
+          *.dylib|*.so|*/MacOS/*|*/Frameworks/*|*/Helpers/*|*/XPCServices/*|*/PlugIns/*|*/Library/LoginItems/*) ;;
+          *) [ -x "$code" ] || continue ;;
+        esac
         kind="$(file -b "$code")" || return 1
         case "$kind" in *Mach-O*) ;; *) continue ;; esac
       fi

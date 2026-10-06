@@ -101,9 +101,37 @@ final class SkillPreviewLayoutTests: XCTestCase {
         XCTAssertEqual(gap, 12, accuracy: 0.01, "Paragraphs must use the scaled 16px block gap")
     }
 
-    private func host(_ markdown: String) -> (host: NSHostingView<SkillPreviewView>, window: NSWindow) {
+    func testFailedImageInListKeepsPlaceholderLayout() async throws {
+        let alt = Array(repeating: "Missing diagram with a long description", count: 8).joined(separator: " ")
+        // The list's 26 pt indent leaves both real placeholders the same content width.
+        let outside = host("![\(alt)](https://preview.example/missing.png)", width: 300)
+        let inside = host("- ![\(alt)](https://preview.example/missing.png)", width: 326)
+        defer { outside.window.close(); inside.window.close() }
+        let outsideText = try await text(alt, in: outside.host)
+        let insideText = try await text(alt, in: inside.host)
+        XCTAssertEqual(insideText.accessibilityFrame().height, outsideText.accessibilityFrame().height, accuracy: 0.5,
+                       "At equal content width, a list must preserve the placeholder's wrapping and height")
+    }
+
+    func testWideNumberedMarkersStayInsideColumn() async throws {
+        let fixture = host("Paragraph.\n\n999. Three digits\n1000. Four digits\n1001. Next")
+        defer { fixture.window.close() }
+        let leading = try await text("Paragraph.", in: fixture.host).accessibilityFrame().minX
+        for (marker, item) in [("999.", "Three digits"), ("1,000.", "Four digits"), ("1,001.", "Next")] {
+            let markerText = try await text(marker, in: fixture.host)
+            let itemFrame = try await text(item, in: fixture.host).accessibilityFrame()
+            let font = NSFont.monospacedDigitSystemFont(ofSize: try fontSize(of: markerText), weight: .regular)
+            let intrinsicWidth = NSAttributedString(string: marker, attributes: [.font: font]).size().width
+            // AX reports the allocated marker frame, even if its glyphs spill outside it.
+            // Independent font metrics prove that the full glyph run fits before the text.
+            XCTAssertGreaterThanOrEqual(itemFrame.minX - leading + 0.5, intrinsicWidth + 4,
+                                        "Wide numbered markers need their full intrinsic width inside the column")
+        }
+    }
+
+    private func host(_ markdown: String, width: CGFloat = 600) -> (host: NSHostingView<SkillPreviewView>, window: NSWindow) {
         let host = NSHostingView(rootView: SkillPreviewView(markdownBody: markdown, scrolls: false))
-        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 600, height: 700),
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: 700),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host

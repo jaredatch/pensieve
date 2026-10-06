@@ -33,15 +33,11 @@ function_parameter_count:
   error: 6
 
 custom_rules:
-  short_positive_poll_wait:
+  short_test_timeout:
     included: 'PensieveTests/.*\.swift$'
     name: "Shared positive wait bound"
-    regex: '(?-s)\bTestWait\.until\(\s*timeout:\s*\.seconds\(\s*(?:[0-9]|1[0-4])(?:\.[0-9]+)?\s*\)(?![^\n]*//\s*upper-bound:)'
+    # Match the argument itself, including nested calls and duration units. Milliseconds below
+    # 15000 and seconds below 15 require the shared bound or an intentional-limit explanation.
+    regex: '(?-s)\btimeout:\s*(?:\.seconds\(\s*(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?\s*\)|\.milliseconds\(\s*(?:0_?)*(?:[0-9](?:_?[0-9]){0,3}|1_?[0-4](?:_?[0-9]){3})(?:\.[0-9](?:_?[0-9])*)?\s*\)|(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?(?=\s*(?:[,)]|//|/\*)))(?![^\n]*//\s*upper-bound:)'
     message: "Use TestWait.hostedActionTimeoutSeconds, or explain the intentional limit with // upper-bound: on this line."
-    severity: error
-  short_positive_expectation_wait:
-    included: 'PensieveTests/.*\.swift$'
-    name: "Shared expectation wait bound"
-    regex: '(?-s)\b(?:fulfillment|wait)\(\s*(?:of|for):[^)]*?timeout:\s*(?:[0-9]|1[0-4])(?:\.[0-9]+)?\s*[,)](?![^\n]*//\s*upper-bound:)'
-    message: "Use TestWait.hostedActionTimeoutSeconds, or explain an upper bound or inverted observation with // upper-bound:."
     severity: error

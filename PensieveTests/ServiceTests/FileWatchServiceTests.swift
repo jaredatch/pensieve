@@ -32,9 +32,10 @@ final class FileWatchServiceTests: XCTestCase {
 
         // SinceNow can advance past the first write while the stream starts under load.
         // Keep writing while the main run loop lets the main-queue delivery run.
-        let deadline = Date().addingTimeInterval(10.0)
+        let deadline = Date().addingTimeInterval(TestWait.hostedActionTimeoutSeconds)
         var nextWrite = Date.distantPast
         var writeNumber = 0
+        // Prove an external write is delivered once the stream is live, rather than its first write after start().
         while !receivedDirectoryNames.contains(directoryName), Date() < deadline {
             if Date() >= nextWrite {
                 try "# External Edit \(writeNumber)".write(

@@ -42,6 +42,8 @@ elif tool == 'pgrep':
     sys.exit(1)
 elif tool == 'defaults':
     print('com.jaredatch.Pensieve.debug')
+elif tool == 'file':
+    os.execv('/usr/bin/file', ['/usr/bin/file', *args])
 elif tool == 'codesign':
     target = Path(args[-1])
     if '-d' in args:
@@ -58,7 +60,9 @@ elif tool == 'codesign':
         state['dirty'] = target != app
         state_path.write_text(json.dumps(state))
     else:
-        if state['dirty'] or (state['identity'] != '-' and os.environ.get('PULL_TEST_VERIFY_FAIL')):
+        strict_ad_hoc_failure = ('--strict' in args and state['identity'] == '-'
+                                 and os.environ.get('PULL_TEST_ORIGINAL_STRICT_FAIL'))
+        if strict_ad_hoc_failure or state['dirty'] or (state['identity'] != '-' and os.environ.get('PULL_TEST_VERIFY_FAIL')):
             print('invalid outer seal', file=sys.stderr)
             sys.exit(1)
 elif tool == 'dogfood-fixture':
@@ -187,7 +191,7 @@ class PullDevSigningTests(unittest.TestCase):
         self.dogfood = self.root / 'dogfood-fixture'
         self.dogfood.write_text(SIGNING_TOOL.replace("tool = Path(sys.argv[0]).name", "tool = 'dogfood-fixture'"))
         self.dogfood.chmod(0o755)
-        for name in ('ssh', 'rsync', 'security', 'codesign', 'xattr', 'defaults', 'pgrep', 'open'):
+        for name in ('ssh', 'rsync', 'security', 'codesign', 'file', 'xattr', 'defaults', 'pgrep', 'open'):
             path = self.tools / name
             path.write_text(SIGNING_TOOL)
             path.chmod(0o755)
@@ -252,7 +256,6 @@ class PullDevSigningTests(unittest.TestCase):
         signed = [str(Path(args[-1]).relative_to(self.app)) for args in signatures]
         expected = set(self.nested) | {
             'Contents/Frameworks/Fixture.framework',
-            'Contents/Frameworks/Fixture.framework/Versions/A',
             'Contents/Frameworks/Fixture.framework/Versions/A/XPCServices/Worker.xpc',
             'Contents/Helpers/Updater.app', 'Contents/PlugIns/Plugin.bundle', '.'}
         self.assertEqual(set(signed), expected)
@@ -296,6 +299,53 @@ class PullDevSigningTests(unittest.TestCase):
                     elif original.is_file():
                         self.assertEqual(copied.read_bytes(), original.read_bytes())
                 self.assertEqual(list(self.app.parent.glob('.pensieve-dev-sign.*')), [])
+
+    def test_failed_signing_restores_non_strict_ad_hoc_bundle(self):
+        self.env['PULL_TEST_ORIGINAL_STRICT_FAIL'] = '1'
+        result = self.run_script('--no-open', PULL_TEST_SIGN_FAIL='Contents/Helpers/Updater.app')
+        self.assertIn('warning: restored the original ad-hoc build', result.stdout)
+        self.assertNotIn('could not restore', result.stderr)
+        self.assertIn(['-v', str(self.app)], self.calls('codesign'))
+        for options, expected in ((['--verify', '--deep', '--strict'], 1), (['-v'], 0)):
+            verified = subprocess.run(['codesign', *options, str(self.app)], env=self.env,
+                                      capture_output=True, text=True, timeout=5)
+            self.assertEqual(verified.returncode, expected, verified.stderr)
+        for original in self.source.rglob('*'):
+            copied = self.app / original.relative_to(self.source)
+            if original.is_symlink():
+                self.assertEqual(os.readlink(copied), os.readlink(original))
+            elif original.is_file():
+                self.assertEqual(copied.read_bytes(), original.read_bytes(), str(original))
+        self.assertEqual(list(self.app.parent.glob('.pensieve-dev-sign.*')), [])
+
+    def test_versioned_framework_is_signed_once(self):
+        self.run_script('--no-open')
+        framework = self.app / 'Contents/Frameworks/Fixture.framework'
+        framework_signs = [Path(args[-1]) for args in self.signatures()
+                           if Path(args[-1]) == framework or Path(args[-1]).parent == framework / 'Versions']
+        self.assertEqual(framework_signs, [framework], 'Sign the framework once through its canonical bundle')
+
+    def test_only_likely_code_is_probed_and_symlinks_are_skipped(self):
+        macho = (self.source / self.nested[0]).read_bytes()
+        extra_code = ['Contents/Resources/tool', 'Contents/Resources/library.dylib',
+                      'Contents/Resources/module.so', 'Contents/Library/LoginItems/Worker']
+        for name in [*extra_code, 'Contents/Resources/unused-macho']:
+            path = self.source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(macho)
+        (self.source / extra_code[0]).chmod(0o755)
+        (self.source / 'Contents/MacOS/alias').symlink_to('Pensieve')
+        (self.source / 'Contents/Resources/alias.dylib').symlink_to('library.dylib')
+        self.run_script('--no-open')
+        probes = [str(Path(args[-1]).relative_to(self.app)) for args in self.calls('file')]
+        self.assertCountEqual(probes, self.nested + extra_code,
+                              'Probe executable files, library suffixes and code directories only')
+        signed_files = [str(Path(args[-1]).relative_to(self.app)) for args in self.signatures()
+                        if Path(args[-1]).is_file()]
+        self.assertCountEqual(signed_files, self.nested + extra_code)
+        inspected_bundles = [Path(args[-1]) for args in self.calls('codesign') if '-d' in args]
+        self.assertTrue(all(path.suffix in ('.app', '.framework', '.xpc', '.bundle')
+                            for path in inspected_bundles), 'Ordinary directories need no codesign probe')
 
     def test_sandbox_receives_the_signed_app(self):
         result = self.run_script('--sandbox', '--offline')

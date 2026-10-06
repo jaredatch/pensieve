@@ -4,6 +4,18 @@ import XCTest
 @testable import Pensieve
 
 extension SkillHistoryLayoutTests {
+    func testLabeledButtonReportsPressWhenAccessibilityReturnsFalse() async {
+        let root = NSView()
+        let button = FalseReturningHistoryButton()
+        button.setAccessibilityRole(.button)
+        button.setAccessibilityLabel("Test press")
+        root.setAccessibilityChildren([button])
+        let pressed = await HistoryAccessibility.pressButton(titled: "Test press", in: root)
+        XCTAssertTrue(pressed,
+                      "Finding and pressing a labeled control must not depend on its AX return value")
+        XCTAssertEqual(button.presses, 1, "A located button must receive exactly one press")
+    }
+
     func testShowOlderCommitsButtonRevealsHeldRows() async throws {
         let host = makeHost(try countFixture(), height: 1800)
         defer { host.window.close() }
@@ -15,14 +27,19 @@ extension SkillHistoryLayoutTests {
             in: host.view, expecting: 10, timeout: TestWait.firstRenderTimeoutSeconds
         )
         XCTAssertEqual(initial.count, 10, "the installed view draws ten initial rows")
-        await TestWait.until(
-            timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
-            failureMessage: "the rendered Show older commits button must accept an accessibility press"
-        ) {
-            HistoryAccessibility.pressButton(titled: "Show older commits", in: host.view)
-        }
+        let pressed = await HistoryAccessibility.pressButton(titled: "Show older commits", in: host.view)
+        XCTAssertTrue(pressed, "The rendered Show older commits button must be found and pressed")
         let revealed = try await settledDots(in: host.view, expecting: 12)
         XCTAssertEqual(revealed.count, 12, "pressing Show older commits renders all twelve held rows")
+    }
+}
+
+private final class FalseReturningHistoryButton: NSAccessibilityElement {
+    private(set) var presses = 0
+
+    override func accessibilityPerformPress() -> Bool {
+        presses += 1
+        return false
     }
 }
 

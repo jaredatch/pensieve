@@ -115,7 +115,7 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
     }
 
     private func eventually(
-        timeout: TimeInterval = 3,
+        timeout: TimeInterval = TestWait.hostedActionTimeoutSeconds,
         _ condition: @escaping @MainActor () -> Bool
     ) async -> Bool {
         let clock = ContinuousClock()
@@ -229,7 +229,7 @@ extension InstalledSkillHistoryHostTests {
             reads.count == 1 && owner.state == .failed("The repository couldn't be reached.")
         }
         XCTAssertTrue(failedInitially)
-        var pressed = HistoryAccessibility.pressButton(
+        var pressed = HistoryAccessibility.pressButtonIfFound(
             titled: InstalledSkillHistoryPresentation.tryAgainTitle,
             in: fixture.host
         )
