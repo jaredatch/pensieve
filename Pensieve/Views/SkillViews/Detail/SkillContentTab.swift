@@ -39,10 +39,7 @@ struct SkillContentTab: View {
                     .overlay(alignment: .top) { Color.clear.frame(height: 1).id(fileRowAnchor) }
                     .padding(.horizontal, Spacing.lg)
                     .padding(.top, DesignTokens.contentRowTop)
-                content { path in
-                    if path != file { proxy.scrollTo(fileRowAnchor, anchor: .top) }
-                    DispatchQueue.main.async { onSelectFile(path) }
-                }
+                content(proxy: proxy)
             }
         }
         // A bundle file's change reaches the app only as a watcher event (the library reads SKILL.md's body as
@@ -98,19 +95,26 @@ struct SkillContentTab: View {
         }
     }
 
-    func preview(markdownBody: String, skillsBase: String, onSelectFile: ((String) -> Void)? = nil) -> SkillPreviewView {
+    private func followLink(_ path: String, proxy: ScrollViewProxy) {
+        guard path != file else { return }
+        proxy.scrollTo(fileRowAnchor, anchor: .top)
+        DispatchQueue.main.async { onSelectFile(path) }
+    }
+
+    func preview(markdownBody: String, skillsBase: String, onSelectFile: @escaping (String) -> Void) -> SkillPreviewView {
         SkillPreviewView(markdownBody: markdownBody, scrolls: false,
                          skillDirectory: SkillStore.skillDirectoryPath(slug: skill.directoryName, base: skillsBase),
                          documentRelativePath: file,
                          imageRevision: folderRevision,
                          imageLoader: PreviewImageLoader(fileService: library.fileService),
-                         files: presentation.choices.map(\.relativePath), onSelectFile: onSelectFile ?? self.onSelectFile)
+                         files: presentation.choices.map(\.relativePath), onSelectFile: onSelectFile)
     }
 
-    @ViewBuilder private func content(onSelectFile: @escaping (String) -> Void) -> some View {
+    @ViewBuilder private func content(proxy: ScrollViewProxy) -> some View {
         if choice.isSkillFile {
             if shownMode == .rendered {
-                preview(markdownBody: snapshot.body, skillsBase: Constants.pensieveSkillsDir, onSelectFile: onSelectFile)
+                preview(markdownBody: snapshot.body, skillsBase: Constants.pensieveSkillsDir,
+                        onSelectFile: { followLink($0, proxy: proxy) })
             } else {
                 SkillEditorView(skill: skill, library: library)
                     // One editor per skill: switching skills tears the prior WKWebView down, so a late
@@ -120,7 +124,8 @@ struct SkillContentTab: View {
                     .padding(.top, DesignTokens.contentRowTop)
             }
         } else if shownMode == .rendered {
-            preview(markdownBody: otherFileText ?? "", skillsBase: Constants.pensieveSkillsDir, onSelectFile: onSelectFile)
+            preview(markdownBody: otherFileText ?? "", skillsBase: Constants.pensieveSkillsDir,
+                    onSelectFile: { followLink($0, proxy: proxy) })
         } else if let otherFileText {
             MarkdownEditorWebView(bodyToLoad: otherFileText, loadVersion: otherFileText.hashValue, readOnly: true)
                 .id(file)

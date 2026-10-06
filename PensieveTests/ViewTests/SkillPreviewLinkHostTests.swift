@@ -1,5 +1,4 @@
 import AppKit
-import Observation
 import SwiftUI
 import WebKit
 import XCTest
@@ -28,10 +27,34 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         defer { fixture.window.close() }
         let link = try await findLink("Blocked", in: fixture.host)
         try click(link, in: fixture.window)
+        let _: Void = await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
         XCTAssertEqual(selections, [])
         XCTAssertEqual(external, [])
         try click(try await findLink("Web", in: fixture.host), in: fixture.window)
         XCTAssertEqual(external.map(\.absoluteString), ["https://example.com"], "The same preview must route live clicks")
+    }
+
+    func testSameFileLinkKeepsPageOffsetAndDoesNotNotifyOwner() async throws {
+        var selections: [String] = []
+        let fixture = hostTab(markdown: paragraphs + "\n\n[Current](./SKILL.md)",
+                              onSelectFile: { selections.append($0) }, openURL: { _ in XCTFail("Current file escaped") })
+        defer { fixture.window.close() }
+        let link = try await findLink("Current", in: fixture.host)
+        let scroller = try pageScroller(in: fixture.host)
+        let screenViewport = viewport(of: scroller, in: fixture.window)
+        scroller.contentView.scroll(to: NSPoint(x: 0, y: scrollRange(of: scroller)))
+        scroller.reflectScrolledClipView(scroller.contentView)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Current-file link must be visible") {
+            fixture.host.layoutSubtreeIfNeeded()
+            return screenViewport.contains(link.accessibilityFrame())
+        }
+        let offset = scroller.contentView.bounds.minY
+        XCTAssertGreaterThan(offset, 500)
+        try click(link, in: fixture.window)
+        let _: Void = await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
+        fixture.host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(selections, [], "A same-file link must not notify the owner")
+        XCTAssertEqual(scroller.contentView.bounds.minY, offset, accuracy: 1, "A same-file link must not scroll")
     }
 
     func testLongFileLinkPutsFileRowAtViewportTop() async throws {
@@ -126,7 +149,7 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         }
         try click(link, in: fixture.window)
         let editor = try await waitForEditor(in: fixture.host)
-        let text = await waitForEditorText("echo hi", in: editor, timeout: 3)
+        let text = await TestWait.waitForEditorText("echo hi", in: editor, timeout: 3)
         XCTAssertEqual(text, "echo hi", "Script source must load into its read-only editor")
         fixture.host.layoutSubtreeIfNeeded()
         XCTAssertEqual(selection.file, "scripts/x.sh")
@@ -150,23 +173,27 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         let link = try await findLink("Skill", in: fixture.host)
         let scroller = try pageScroller(in: fixture.host)
         let screenViewport = viewport(of: scroller, in: fixture.window)
-        scroller.contentView.scroll(to: NSPoint(x: 0, y: scrollRange(of: scroller)))
+        scroller.contentView.scroll(to: .zero)
         scroller.reflectScrolledClipView(scroller.contentView)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Return link must finish scrolling into view") {
-            fixture.host.layoutSubtreeIfNeeded()
-            return screenViewport.contains(link.accessibilityFrame())
-        }
-        XCTAssertGreaterThan(scroller.contentView.bounds.minY, 100, "Tall chrome must make the short file scroll")
-        try click(link, in: fixture.window)
+        fixture.host.layoutSubtreeIfNeeded()
+        let row = try filePicker(in: fixture.host)
+        XCTAssertGreaterThan(screenViewport.maxY - row.accessibilityFrame().maxY, screenViewport.height,
+                             "The file row must start below the viewport")
+        // Send the click to the rendered text field while its link is outside the window clip.
+        let nativeView = try XCTUnwrap(linkBackingView(link, in: fixture.host, window: fixture.window),
+                                      "The rendered link must have a native view")
+        try click(link, in: fixture.window, directlyIn: nativeView)
         await TestWait.until(timeout: .seconds(3), failureMessage: "Return link must load SKILL.md's long body") {
             fixture.host.layoutSubtreeIfNeeded()
             return selection.file == "SKILL.md" && self.elements(fixture.host).contains {
                 ($0.accessibilityValue() as? String) == "Skill"
             }
         }
-        let row = try filePicker(in: fixture.host)
         // From a page too short to scroll the row to the top, scrolling clamps and the row stays visible.
-        XCTAssertTrue(screenViewport.insetBy(dx: 0, dy: -1).contains(row.accessibilityFrame()))
+        let rowTop = screenViewport.maxY - row.accessibilityFrame().maxY
+        let rowBottom = screenViewport.maxY - row.accessibilityFrame().minY
+        XCTAssertGreaterThanOrEqual(rowTop, -1, "The linked file row must start inside the viewport")
+        XCTAssertLessThanOrEqual(rowBottom, screenViewport.height + 1, "The linked file row must end inside the viewport")
     }
 
     func testAnchorReaderScrollsEnclosingDetailPageToFirstDuplicate() async throws {
@@ -247,25 +274,6 @@ extension SkillPreviewLinkHostTests {
         return try XCTUnwrap(editor)
     }
 
-    private func waitForEditorText(_ expected: String, in editor: WKWebView, timeout: TimeInterval) async -> String? {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            var evaluationFinished = false
-            var text: String?
-            editor.evaluateJavaScript(
-                "window.Editor && window.Editor.getContent ? window.Editor.getContent() : null"
-            ) { result, _ in
-                text = result as? String
-                evaluationFinished = true
-            }
-            while !evaluationFinished, Date() < deadline { try? await Task.sleep(for: .milliseconds(10)) }
-            guard evaluationFinished else { return nil }
-            if text == expected { return text }
-            try? await Task.sleep(for: .milliseconds(10))
-        } while Date() < deadline
-        return nil
-    }
-
     private func pickFile(_ file: String, in host: NSView) throws {
         let menu = try XCTUnwrap(filePicker(in: host).menu)
         let item = try XCTUnwrap(menu.items.firstIndex { $0.title == file })
@@ -286,6 +294,14 @@ extension SkillPreviewLinkHostTests {
 
     private func viewport(of scroller: NSScrollView, in window: NSWindow) -> CGRect {
         window.convertToScreen(scroller.convert(scroller.bounds, to: nil))
+    }
+
+    private func linkBackingView(_ link: NSAccessibilityProtocol, in host: NSView, window: NSWindow) -> NSView? {
+        let frame = link.accessibilityFrame()
+        let point = window.convertPoint(fromScreen: NSPoint(x: frame.midX, y: frame.midY))
+        return views(host).compactMap { $0 as? NSTextField }.first {
+            $0.bounds.contains($0.convert(point, from: nil))
+        }
     }
 
     private func hostTab(markdown: String, onSelectFile: @escaping (String) -> Void, openURL: @escaping (URL) -> Void,
@@ -350,7 +366,7 @@ extension SkillPreviewLinkHostTests {
         [root] + root.subviews.flatMap(views)
     }
 
-    private func click(_ link: NSAccessibilityProtocol, in window: NSWindow) throws {
+    private func click(_ link: NSAccessibilityProtocol, in window: NSWindow, directlyIn view: NSView? = nil) throws {
         let frame = link.accessibilityFrame()
         XCTAssertGreaterThan(frame.width, 0, "Click must target the rendered link")
         let point = window.convertPoint(fromScreen: NSPoint(x: frame.midX, y: frame.midY))
@@ -363,38 +379,10 @@ extension SkillPreviewLinkHostTests {
         }
         // Selectable Markdown text tracks mouse-up inside mouseDown's nested event loop.
         NSApp.postEvent(try event(.leftMouseUp), atStart: true)
-        window.sendEvent(try event(.leftMouseDown))
-    }
-}
-
-private struct PreviewHostGeometry {
-    var height: CGFloat = 480
-    var chromeHeight: CGFloat?
-}
-
-@Observable
-private final class PreviewFileSelection {
-    var file = "SKILL.md"
-    var mode = SkillContentPresentation.Mode.rendered
-}
-
-private struct PreviewContentHarness: View {
-    let skill: Skill
-    let snapshot: DetailContentSnapshot
-    let library: SkillLibraryViewModel
-    let selection: PreviewFileSelection
-    let chromeHeight: CGFloat?
-    let onSelectFile: (String) -> Void
-
-    var body: some View {
-        let presentation = SkillContentPresentation.resolve(selectedFile: selection.file, requestedMode: selection.mode,
-                                                             inventory: snapshot.inventory)
-        SkillDetailScrollLayout(skillID: skill.id,
-                              contentOwnsScroller: DetailView.contentOwnsScroller(tab: .content, presentation: presentation)) {
-            Text("Detail header").frame(height: chromeHeight)
-        } tabContent: {
-            SkillContentTab(skill: skill, snapshot: snapshot, library: library, presentation: presentation,
-                            onSelectFile: onSelectFile, onSelectMode: { selection.mode = $0 })
+        if let view {
+            view.mouseDown(with: try event(.leftMouseDown))
+        } else {
+            window.sendEvent(try event(.leftMouseDown))
         }
     }
 }

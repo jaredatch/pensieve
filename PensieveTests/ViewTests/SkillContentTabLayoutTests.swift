@@ -88,12 +88,14 @@ final class SkillContentTabLayoutTests: XCTestCase {
         XCTAssertEqual(editorFrame.minY - rowFrame.maxY, rowFrame.minY, accuracy: 1)
     }
 
-    func testSourceOverflowKeepsTheProductionEditorUsable() throws {
-        try assertSourceOverflowKeepsEditorUsable(selectedFile: "SKILL.md")
-        try assertSourceOverflowKeepsEditorUsable(selectedFile: "scripts/x.sh")
+    @MainActor
+    func testSourceOverflowKeepsTheProductionEditorUsable() async throws {
+        try await assertSourceOverflowKeepsEditorUsable(selectedFile: "SKILL.md")
+        try await assertSourceOverflowKeepsEditorUsable(selectedFile: "scripts/x.sh")
     }
 
-    private func assertSourceOverflowKeepsEditorUsable(selectedFile: String) throws {
+    @MainActor
+    private func assertSourceOverflowKeepsEditorUsable(selectedFile: String) async throws {
         let fixture = sourceFixture(selectedFile: selectedFile)
         defer { fixture.window.close() }
         let editor = try XCTUnwrap(waitForEditor(in: fixture.host, timeout: 3), selectedFile)
@@ -101,7 +103,8 @@ final class SkillContentTabLayoutTests: XCTestCase {
         let columnScroller = try XCTUnwrap(Self.nearestScrollView(to: popUp))
 
         if selectedFile == "scripts/x.sh" {
-            XCTAssertEqual(waitForEditorText("echo hi", in: editor, timeout: 3), "echo hi")
+            let text = await TestWait.waitForEditorText("echo hi", in: editor, timeout: 3)
+            XCTAssertEqual(text, "echo hi")
         }
         XCTAssertGreaterThan(Self.scrollRange(of: columnScroller), 100, selectedFile)
         XCTAssertFalse(Self.isVisible(popUp, in: columnScroller), selectedFile)
@@ -179,26 +182,6 @@ final class SkillContentTabLayoutTests: XCTestCase {
             RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.01)))
         } while Date() < deadline
         return nil
-    }
-
-    private func waitForEditorText(_ expected: String, in editor: WKWebView, timeout: TimeInterval) -> String? {
-        let deadline = Date().addingTimeInterval(timeout)
-        var lastText: String?
-        repeat {
-            var evaluationFinished = false
-            editor.evaluateJavaScript(
-                "window.Editor && window.Editor.getContent ? window.Editor.getContent() : null"
-            ) { result, _ in
-                lastText = result as? String
-                evaluationFinished = true
-            }
-            while !evaluationFinished, Date() < deadline {
-                RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.01)))
-            }
-            if lastText == expected { return lastText }
-            RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.01)))
-        } while Date() < deadline
-        return lastText
     }
 
     private static func controls(in view: NSView) -> [NSControl] {
