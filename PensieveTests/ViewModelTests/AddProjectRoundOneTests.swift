@@ -12,7 +12,8 @@ final class AddProjectRoundOneTests: XCTestCase {
         let model = AddProjectModel(fileService: files, identityService: identities, previewDelay: {})
         model.name = "App"
         model.path = "  ~/code/app  "
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Expanded path preview") { !model.isCheckingIdentity }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Expanded path preview") { !model.isCheckingIdentity }
         XCTAssertTrue(model.isValid)
         XCTAssertEqual(identities.previewPaths, [expanded])
         XCTAssertEqual(model.makeProject()?.path, expanded)
@@ -29,7 +30,8 @@ final class AddProjectRoundOneTests: XCTestCase {
         let model = AddProjectModel(fileService: files, identityService: identities, previewDelay: {})
         model.name = "App"
         model.path = "code/app"
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Relative refusal") { !model.isCheckingIdentity }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Relative refusal") { !model.isCheckingIdentity }
         XCTAssertEqual(model.identityMessage, "Enter a full path, starting with / or ~/")
         XCTAssertFalse(model.canSubmit)
         XCTAssertNil(model.makeProject())
@@ -41,7 +43,7 @@ final class AddProjectRoundOneTests: XCTestCase {
         XCTAssertNil(model.makeProject())
         XCTAssertTrue(identities.previewPaths.isEmpty)
         XCTAssertTrue(identities.addPaths.isEmpty)
-        await fulfillment(of: [probed], timeout: 0.05)
+        await fulfillment(of: [probed], timeout: 0.05) // upper-bound: Inverted expectation observes no relative-path probe.
     }
 
     func testUnchangedPathKeepsCompletedStatusAndStartsNoProbe() async throws {
@@ -52,9 +54,12 @@ final class AddProjectRoundOneTests: XCTestCase {
         let model = AddProjectModel(fileService: h.mapped, previewDelay: { await delay.wait() })
         model.name = "App"
         model.path = h.otherProject.path
-        await TestWait.until(timeout: .seconds(1), failureMessage: "Initial debounce") { delay.scheduled == 1 }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Initial debounce") { delay.scheduled >= 1 }
+        XCTAssertEqual(delay.scheduled, 1, "Debounce must schedule once per changed path")
         delay.advance()
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Initial preview") { model.isValid }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Initial preview") { model.isValid }
         let message = model.identityMessage
         model.path = h.otherProject.path
         XCTAssertEqual(model.identityMessage, message)
@@ -76,9 +81,12 @@ final class AddProjectRoundOneTests: XCTestCase {
         model.submit { added.append($0) }
         model.submit { added.append($0) }
         XCTAssertTrue(added.isEmpty)
-        await TestWait.until(timeout: .seconds(1), failureMessage: "Debounce scheduled") { delay.scheduled == 1 }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Debounce scheduled") { delay.scheduled >= 1 }
+        XCTAssertEqual(delay.scheduled, 1, "Debounce must schedule once per changed path")
         delay.advance()
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Queued Return creates one project") { added.count == 1 }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Queued Return creates one project") { added.count >= 1 }
         XCTAssertEqual(added.count, 1)
         XCTAssertEqual(added.first?.path, h.otherProject.path)
     }
@@ -90,16 +98,20 @@ final class AddProjectRoundOneTests: XCTestCase {
         let release = DispatchSemaphore(value: 0)
         defer { release.signal() }
         h.mapped.beforeProjectProbe = { _ in
-            if !Thread.isMainThread { started.fulfill(); _ = release.wait(timeout: .now() + 3) }
+            if !Thread.isMainThread {
+                started.fulfill()
+                _ = release.wait(timeout: .now() + TestWait.heldFixtureTimeoutSeconds)
+            }
         }
         let model = AddProjectModel(fileService: h.mapped, previewDelay: {})
         model.name = "App"
         model.path = h.otherProject.path
-        await fulfillment(of: [started], timeout: 3)
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         var added: [Project] = []
         model.submit { added.append($0) }
         release.signal()
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Probe completion submits Return") { added.count == 1 }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Probe completion submits Return") { added.count >= 1 }
         XCTAssertEqual(added.count, 1)
     }
 
@@ -112,16 +124,21 @@ final class AddProjectRoundOneTests: XCTestCase {
             let model = AddProjectModel(fileService: h.mapped, previewDelay: { await delay.wait() })
             model.name = "App"
             model.path = edit == "refused" ? h.project.path : h.otherProject.path
-            await TestWait.until(timeout: .seconds(1), failureMessage: "Debounce scheduled") { delay.scheduled == 1 }
+            await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                                 failureMessage: "Debounce scheduled") { delay.scheduled >= 1 }
+            XCTAssertEqual(delay.scheduled, 1, "Debounce must schedule once per changed path")
             var added: [Project] = []
             model.submit { added.append($0) }
             if edit == "name" { model.name = "Changed" }
             if edit == "path" {
                 model.path = h.project.path
-                await TestWait.until(timeout: .seconds(1), failureMessage: "Edited debounce scheduled") { delay.scheduled == 2 }
+                await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                                     failureMessage: "Edited debounce scheduled") { delay.scheduled >= 2 }
+                XCTAssertEqual(delay.scheduled, 2, "Debounce must schedule once per changed path")
             }
             delay.advance()
-            await TestWait.until(timeout: .seconds(3), failureMessage: "Preview completed") { !model.isCheckingIdentity }
+            await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                                 failureMessage: "Preview completed") { !model.isCheckingIdentity }
             XCTAssertTrue(added.isEmpty)
             if edit != "name" { XCTAssertTrue(model.identityMessage?.contains("folder is missing") == true) }
         }

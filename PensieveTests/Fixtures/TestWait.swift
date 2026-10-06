@@ -6,9 +6,16 @@ private let defaultTestWaitTimeout: Duration = .seconds(TestWait.timeoutSeconds)
 enum TestWait {
     static let timeoutSeconds: TimeInterval = 30
 
-    // Cold AppKit/SwiftUI hosts and OCR can exceed three seconds on CI. Only first-render
-    // readiness gets this bounded allowance; subsequent interaction waits keep their own deadlines.
+    // Cold AppKit/SwiftUI hosts and OCR can exceed three seconds on CI. Hosted interaction
+    // readiness has a separate named bound below for the same scheduling delays under load.
     static let firstRenderTimeoutSeconds: TimeInterval = 15
+
+    // Hosted edits, submission and dismissal can exceed short deadlines in a loaded suite.
+    // Use the first-render allowance: polling still returns promptly, with a finite failure bound.
+    static let hostedActionTimeoutSeconds: TimeInterval = firstRenderTimeoutSeconds
+
+    // Held workers must survive both readiness handoffs; this finite bound only expires on a broken test.
+    static let heldFixtureTimeoutSeconds: TimeInterval = 2 * hostedActionTimeoutSeconds
 
     @MainActor
     static func until(

@@ -33,7 +33,7 @@ final class SyncCoordinatorTests: XCTestCase {
         }
         scheduler.coordinatorBecameReady()
         scheduler.launchIngestCompleted()
-        await fulfillment(of: [startupCompleted], timeout: 5)
+        await fulfillment(of: [startupCompleted], timeout: TestWait.hostedActionTimeoutSeconds)
 
         let peer = tempDir + "/peer"
         try harness.git.clone(remote: harness.remote, into: peer, credential: nil)
@@ -49,7 +49,7 @@ final class SyncCoordinatorTests: XCTestCase {
         XCTAssertTrue(try harness.git.stageAllAndCommit(at: peer, message: "remote category"))
         try harness.git.push(at: peer, credential: nil)
         scheduler.tick()
-        await fulfillment(of: [tickCompleted], timeout: 5)
+        await fulfillment(of: [tickCompleted], timeout: TestWait.hostedActionTimeoutSeconds)
 
         let fresh = ModelContext(harness.container)
         let categories = try fresh.fetch(FetchDescriptor<CoordinatorCategory>())
@@ -70,14 +70,14 @@ final class SyncCoordinatorTests: XCTestCase {
         }
         scheduler.coordinatorBecameReady()
         scheduler.launchIngestCompleted()
-        await fulfillment(of: [launched], timeout: 5)
+        await fulfillment(of: [launched], timeout: TestWait.hostedActionTimeoutSeconds)
         let originalHead = try rawGitOutput(["--git-dir", harness.remotePath, "rev-parse", "HEAD"])
 
         let context = ModelContext(harness.container)
         context.insert(CoordinatorCategory(name: "Local"))
         try context.save()
         scheduler.nudge()
-        await fulfillment(of: [nudged], timeout: 5)
+        await fulfillment(of: [nudged], timeout: TestWait.hostedActionTimeoutSeconds)
 
         let advancedHead = try rawGitOutput(["--git-dir", harness.remotePath, "rev-parse", "HEAD"])
         XCTAssertNotEqual(advancedHead, originalHead)
@@ -99,12 +99,12 @@ final class SyncCoordinatorTests: XCTestCase {
         }
         scheduler.coordinatorBecameReady()
         scheduler.launchIngestCompleted()
-        await fulfillment(of: [startupCompleted], timeout: 2)
+        await fulfillment(of: [startupCompleted], timeout: TestWait.hostedActionTimeoutSeconds)
 
         let held = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
         defer { held.release() }
         scheduler.tick()
-        await fulfillment(of: [tickCompleted], timeout: 2)
+        await fulfillment(of: [tickCompleted], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertEqual(result, .locked)
         XCTAssertFalse(scheduler.isSyncing)
     }
@@ -137,7 +137,7 @@ final class SyncCoordinatorTests: XCTestCase {
         await Task.yield()
         XCTAssertEqual(cycles, 0)
         scheduler.coordinatorBecameReady()
-        await fulfillment(of: [fired], timeout: 1)
+        await fulfillment(of: [fired], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertEqual(cycles, 1)
     }
 

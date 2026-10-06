@@ -42,7 +42,7 @@ final class UpstreamHistorySequenceSafetyTests: UpstreamHistoryCacheTestCase {
     func testSignalRechecksAfterNotificationDuringRegistration() async {
         let signal = TestWait.Signal()
         var ready = false
-        let result = await signal.wait(timeout: .milliseconds(20)) {
+        let result = await signal.wait(timeout: .seconds(TestWait.hostedActionTimeoutSeconds)) {
             let snapshot = ready
             if !ready {
                 ready = true
@@ -59,7 +59,7 @@ final class UpstreamHistorySequenceSafetyTests: UpstreamHistoryCacheTestCase {
         var checks = 0
         var returned: TestWait.SignalOutcome?
         let waiter = Task {
-            returned = await signal.wait(timeout: .seconds(5)) { checks += 1; return ready }
+            returned = await signal.wait(timeout: .seconds(TestWait.hostedActionTimeoutSeconds)) { checks += 1; return ready }
         }
         await TestWait.until(failureMessage: "Waiter did not register") { checks >= 2 }
         ready = true
@@ -79,8 +79,8 @@ final class UpstreamHistorySequenceSafetyTests: UpstreamHistoryCacheTestCase {
 
     func testHungRequestReportsFailureBeforeBoundedCleanup() async throws {
         let flow = UpstreamHistorySequenceHarness()
-        flow.frontierTimeout = .milliseconds(20)
-        flow.cleanupTimeout = .milliseconds(300)
+        flow.frontierTimeout = .milliseconds(20) // upper-bound: Report failure before cleanup cancels the hung request.
+        flow.cleanupTimeout = .milliseconds(300) // upper-bound: Require cleanup failure for the deliberately hung request.
         flow.timeoutThreadSample = { nil } // Deliberate timeout: keep the real failure assertions, omit sampling.
         var held: CheckedContinuation<Void, Never>?
         flow.enqueue("A") {

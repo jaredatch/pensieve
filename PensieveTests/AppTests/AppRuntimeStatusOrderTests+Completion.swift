@@ -27,7 +27,7 @@ extension AppRuntimeStatusOrderTests {
         }
         let model = runtime.syncModel
         let cycle = Task { await model.syncNowAndReport() }
-        await fulfillment(of: [reading], timeout: 2)
+        await fulfillment(of: [reading], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertTrue(model.isCycleInFlight)
         XCTAssertEqual(SyncFooterPresentation.make(state: model.state, canResolve: model.canResolve,
                 hovering: true, now: Date())?.action,
@@ -96,7 +96,7 @@ extension AppRuntimeStatusOrderTests {
             return "https://fixture.test/store.git"
         }
         let cycle = Task { await runtime.syncModel.syncNowAndReport() }
-        await fulfillment(of: [reading], timeout: 2)
+        await fulfillment(of: [reading], timeout: TestWait.hostedActionTimeoutSeconds)
         probe.set { .developerToolsMissing }
         await runtime.refreshGitUsability()
         probe.set { .usable }

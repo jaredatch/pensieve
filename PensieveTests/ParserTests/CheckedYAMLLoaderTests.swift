@@ -156,7 +156,7 @@ final class CheckedYAMLLoaderTests: XCTestCase {
         }
         thread.stackSize = 512 * 1_024
         thread.start()
-        wait(for: [finished], timeout: 5)
+        wait(for: [finished], timeout: TestWait.hostedActionTimeoutSeconds)
 
         XCTAssertEqual(result.loaderError, .nestingTooDeep)
         XCTAssertNil(result.parsedName)

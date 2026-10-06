@@ -31,6 +31,7 @@ final class IntentReconcilerTests: XCTestCase {
 
     func testRetractsOnIntentRemoval() throws {
         let harness = try makeHarness(installed: [.codex])
+        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<ScenarioAssignment>()), 0)
         let skill = try insertSkill("alpha", context: harness.context)
         insertIntent(machineID: localID, skill: skill, platform: .codex, context: harness.context)
         try harness.context.save()
@@ -63,29 +64,6 @@ final class IntentReconcilerTests: XCTestCase {
         XCTAssertTrue(harness.fileService.symlinks.contains(path))
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<DeployRecord>()), 1)
         XCTAssertTrue(try assignmentKeys(context: harness.context).isEmpty)
-    }
-
-    func testScenarioOwnedDeploySurvivesIntentRetraction() throws {
-        let harness = try makeHarness(installed: [.codex])
-        let skill = try insertSkill("shared", context: harness.context)
-        insertIntent(machineID: localID, skill: skill, platform: .codex, context: harness.context)
-        harness.context.insert(ScenarioAssignment(skillID: skill.id, platform: .codex))
-        try harness.context.save()
-        _ = harness.reconciler.reconcile(context: harness.context)
-        let path = harness.linkService.linkPath(skill: skill, platform: .codex, projectPath: nil)
-        harness.linkService.unlinkCalls.removeAll()
-        for row in try harness.context.fetch(FetchDescriptor<MachineDeployIntent>()) {
-            harness.context.delete(row)
-        }
-        try harness.context.save()
-
-        let result = harness.reconciler.reconcile(context: harness.context)
-
-        XCTAssertFalse(result.hasFailures)
-        XCTAssertTrue(harness.linkService.unlinkCalls.isEmpty)
-        XCTAssertTrue(harness.fileService.symlinks.contains(path))
-        XCTAssertTrue(try assignmentKeys(context: harness.context).isEmpty)
-        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<ScenarioAssignment>()), 1)
     }
 
     func testDanglingSlugSkipped() throws {
@@ -250,7 +228,7 @@ private extension IntentReconcilerTests {
             context: context,
             reconciler: IntentReconciler(
                 platformVM: platformVM,
-                machineIdentity: IntentIdentityStub(id: localID), handoverIsComplete: { false }
+                machineIdentity: IntentIdentityStub(id: localID)
             ),
             platformVM: platformVM,
             fileService: fileService,

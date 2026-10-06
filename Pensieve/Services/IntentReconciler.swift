@@ -11,7 +11,6 @@ struct IntentReconciler: IntentReconcilerProtocol {
     let platformVM: PlatformViewModel
     let stateFetcher: ReconcilerStateFetching
     private let machineIdentity: MachineIdentityProviding
-    private let handoverIsComplete: () -> Bool
 
     struct UserPair: Hashable {
         let skillID: UUID
@@ -32,20 +31,17 @@ struct IntentReconciler: IntentReconcilerProtocol {
         let projectsByKey: [String: [Project]]
         let projectByID: [UUID: Project]
         let ledger: [IntentAssignment]
-        let scenarioPairs: Set<UserPair>
         let categoryTriples: Set<ProjectTriple>
     }
 
     init(
         platformVM: PlatformViewModel,
         machineIdentity: MachineIdentityProviding = MachineIdentity(),
-        stateFetcher: ReconcilerStateFetching = ReconcilerStateFetcher(),
-        handoverIsComplete: @escaping () -> Bool
+        stateFetcher: ReconcilerStateFetching = ReconcilerStateFetcher()
     ) {
         self.platformVM = platformVM
         self.machineIdentity = machineIdentity
         self.stateFetcher = stateFetcher
-        self.handoverIsComplete = handoverIsComplete
     }
 
     @discardableResult
@@ -75,7 +71,6 @@ struct IntentReconciler: IntentReconcilerProtocol {
         let intents = try stateFetcher.deployIntents(context: context)
         let skills = try stateFetcher.skills(context: context)
         let ledger = try stateFetcher.intentAssignments(context: context)
-        let scenarioLedger = handoverIsComplete() ? [] : try stateFetcher.scenarioAssignments(context: context)
         let categoryLedger = try stateFetcher.categoryAssignments(context: context)
         let projects = try stateFetcher.projects(context: context)
         var projectsByKey: [String: [Project]] = [:]
@@ -90,9 +85,6 @@ struct IntentReconciler: IntentReconcilerProtocol {
             projectsByKey: projectsByKey,
             projectByID: Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }),
             ledger: ledger,
-            scenarioPairs: Set(scenarioLedger.map {
-                UserPair(skillID: $0.skillID, platformRaw: $0.platform.rawValue)
-            }),
             categoryTriples: Set(categoryLedger.map {
                 ProjectTriple(
                     skillID: $0.skillID, projectID: $0.projectID, platformRaw: $0.platform.rawValue
@@ -174,11 +166,7 @@ struct IntentReconciler: IntentReconcilerProtocol {
                     deleteUserRows(matching: pair, state: state, context: context)
                     continue
                 }
-                if state.scenarioPairs.contains(pair) {
-                    deleteUserRows(matching: pair, state: state, context: context)
-                } else {
-                    removals.append(DeployRemovalPair(skill: skill, platform: platform))
-                }
+                removals.append(DeployRemovalPair(skill: skill, platform: platform))
             }
         }
         guard !removals.isEmpty else { return }

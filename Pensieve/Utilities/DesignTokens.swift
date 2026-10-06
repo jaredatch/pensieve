@@ -1,8 +1,39 @@
 import SwiftUI
 
-/// Measured values from the Sketch Skills detail frames. Keep designed surfaces on these role tokens
+/// Measured values from the Skills detail frames and rendered Markdown reference. Keep surfaces on these role tokens
 /// instead of mapping Sketch style names back to SwiftUI's fixed text styles.
 enum DesignTokens {
+    // MARK: - Rendered Markdown
+
+    /// Primer Markdown CSS at a 13 pt body (#111). Pixel lengths scale by 13/16; lengths within
+    /// 1 pt of the 4 pt grid snap to it. Em lengths retain their ratios; hairlines never snap to zero.
+    static let markdownBodySize: CGFloat = 13
+    static let markdownBodyLineHeight: CGFloat = 1.5
+    static let markdownHeading1Scale: CGFloat = 2
+    static let markdownHeading2Scale: CGFloat = 1.5
+    static let markdownHeading3Scale: CGFloat = 1.25
+    static let markdownHeading4Scale: CGFloat = 1
+    static let markdownHeading5Scale: CGFloat = 0.875
+    static let markdownHeading6Scale: CGFloat = 0.85
+    static let markdownHeadingLineHeight: CGFloat = 1.25
+    static let markdownHeadingTop: CGFloat = Spacing.xl // 24 px → 19.5 → 20 pt
+    static let markdownBlockGap: CGFloat = Spacing.md // 16 px → 13 → 12 pt
+    static let markdownHeadingRulePadding: CGFloat = 0.3 // em of the heading's font
+    static let markdownRuleThickness: CGFloat = 13.0 / 16 // 1 px
+    static let markdownListIndent: CGFloat = markdownBodySize * 2 // 2em
+    static let markdownListItemGap: CGFloat = markdownBodySize * 0.25 // .25em
+    static let markdownCodeScale: CGFloat = 0.85
+    static let markdownCodePadding: CGFloat = Spacing.md // 16 px → 13 → 12 pt
+    static let markdownCodeRadius: CGFloat = CornerRadius.sm // 6 px → 4.875 → 4 pt
+    static let markdownCodeLineHeight: CGFloat = 1.45
+    static let markdownQuoteRule: CGFloat = markdownBodySize * 0.25 // .25em
+    static let markdownQuoteInset: CGFloat = markdownBodySize // 1em
+    static let markdownTableCellVertical: CGFloat = Spacing.xs // 6 px → 4.875 → 4 pt
+    static let markdownTableCellHorizontal: CGFloat = markdownBodySize * 0.8125 // .8125em; outside grid tolerance
+    static let markdownThematicBreakMargin: CGFloat = Spacing.xl // 24 px → 19.5 → 20 pt
+    static let markdownCodeFill = Color(nsColor: .quaternaryLabelColor)
+    static let markdownSeparator = Color(nsColor: .separatorColor)
+
     // MARK: - Detail header and tabs
 
     /// Measured from `Detail header / v2` on 2026-09-22.

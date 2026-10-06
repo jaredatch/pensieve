@@ -6,7 +6,6 @@ protocol ReconcilerStateFetching {
     func deployIntents(context: ModelContext) throws -> [MachineDeployIntent]
     func skills(context: ModelContext) throws -> [Skill]
     func intentAssignments(context: ModelContext) throws -> [IntentAssignment]
-    func scenarioAssignments(context: ModelContext) throws -> [ScenarioAssignment]
     func categoryAssignments(context: ModelContext) throws -> [SkillProjectAssignment]
     func projects(context: ModelContext) throws -> [Project]
 }
@@ -22,10 +21,6 @@ struct ReconcilerStateFetcher: ReconcilerStateFetching {
 
     func intentAssignments(context: ModelContext) throws -> [IntentAssignment] {
         try context.fetch(FetchDescriptor<IntentAssignment>())
-    }
-
-    func scenarioAssignments(context: ModelContext) throws -> [ScenarioAssignment] {
-        try context.fetch(FetchDescriptor<ScenarioAssignment>())
     }
 
     func categoryAssignments(context: ModelContext) throws -> [SkillProjectAssignment] {

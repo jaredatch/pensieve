@@ -4,10 +4,16 @@ import Foundation
 /// A lock protects the gate and counts. The only blocked operation is the injected directory
 /// lookup; real disk operations remain in FileService. A finite wait also bounds a broken implementation.
 final class ProjectFolderBlockingProbe: @unchecked Sendable {
+    let holdTimeoutSeconds: TimeInterval
+
     private let lock = NSLock()
     private let release = DispatchSemaphore(value: 0)
     private var blockedPath: String?
     private var counts: [String: Int] = [:]
+
+    init(holdTimeoutSeconds: TimeInterval = TestWait.heldFixtureTimeoutSeconds) {
+        self.holdTimeoutSeconds = holdTimeoutSeconds
+    }
     func block(_ path: String?) { lock.withLock { blockedPath = path } }
     func count(_ path: String) -> Int { lock.withLock { counts[path, default: 0] } }
     func unblock() { block(nil); release.signal() }
@@ -16,7 +22,7 @@ final class ProjectFolderBlockingProbe: @unchecked Sendable {
             counts[path, default: 0] += 1
             return blockedPath == path
         }
-        if blocked { _ = release.wait(timeout: .now() + 4) }
+        if blocked { _ = release.wait(timeout: .now() + holdTimeoutSeconds) }
         return try FileService.probeDirectory(path)
     }
 }

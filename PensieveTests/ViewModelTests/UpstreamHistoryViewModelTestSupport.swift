@@ -130,3 +130,31 @@ func waitForHistoryCondition(_ condition: @escaping @MainActor () -> Bool) async
     await TestWait.until(failureMessage: "History condition did not become true") { condition() }
     return condition()
 }
+
+/// A visible value can precede worker completion. Reads and work that can start a read
+/// must finish before callers count service calls. A head probe may deliberately remain
+/// held while a kept result is visible. An absence observation pumps the actor/run loop
+/// for its whole bound so an unmounted view cannot pass before a stray task starts.
+@MainActor
+func waitForSettledHistory(
+    owner: UpstreamHistoryViewModel,
+    expected: UpstreamHistoryLoadState,
+    timeout: Duration = .seconds(TestWait.hostedActionTimeoutSeconds),
+    observeFor: Duration = .zero,
+    failureMessage: String,
+    ready: @escaping @MainActor () -> Bool = { true }
+) async {
+    let clock = ContinuousClock()
+    let observationEnd = clock.now.advanced(by: observeFor)
+    await TestWait.until(timeout: timeout, failureMessage: failureMessage, diagnostics: {
+        "expected=\(expected); actual=\(owner.state); jobs=\(owner.flows.values.reduce(0) { $0 + $1.jobs.count })"
+    }, {
+        ready() && clock.now >= observationEnd && owner.state == expected
+            && owner.flows.values.allSatisfy { flow in
+                flow.jobs.values.allSatisfy { job in
+                    if case .probe = job.purpose { return true }
+                    return false
+                }
+            }
+    })
+}

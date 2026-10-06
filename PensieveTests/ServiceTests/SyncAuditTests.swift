@@ -129,7 +129,7 @@ final class SyncAuditTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(group.wait(timeout: .now() + 2), .success)
+        XCTAssertEqual(group.wait(timeout: .now() + TestWait.hostedActionTimeoutSeconds), .success)
         let log = try String(contentsOfFile: tempDir + "/daemon.log", encoding: .utf8)
         XCTAssertEqual(log.split(separator: "\n").count, 2)
         XCTAssertTrue(log.contains("synced first"))

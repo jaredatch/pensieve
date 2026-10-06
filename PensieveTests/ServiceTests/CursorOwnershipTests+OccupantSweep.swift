@@ -209,7 +209,7 @@ extension CursorOwnershipTests {
     }
 }
 
-/// Runs FIFO operations with a held writer and a two-second deadline. A blocking open/read
+/// Runs FIFO operations with a held writer and the shared positive-wait deadline. A blocking open/read
 /// completes only after the deadline closes the writer, and fails the test. This bounds FIFO
 /// reads, not arbitrary worker deadlocks. The worker hands its result back through the semaphore.
 private func boundedArtifactOperation(fifo: String?, operation: @escaping () throws -> Void) throws -> Error? {
@@ -222,11 +222,11 @@ private func boundedArtifactOperation(fifo: String?, operation: @escaping () thr
         do { try operation() } catch { result.error = error }
         done.signal()
     }
-    let finished = done.wait(timeout: .now() + 2) == .success
+    let finished = done.wait(timeout: .now() + TestWait.hostedActionTimeoutSeconds) == .success
     close(writer)
     guard finished else {
-        _ = done.wait(timeout: .now() + 2)
-        XCTFail("Artifact operation blocked on FIFO beyond two seconds")
+        _ = done.wait(timeout: .now() + 2) // upper-bound: Bound cleanup after releasing a blocked FIFO reader.
+        XCTFail("Artifact operation blocked on FIFO beyond the shared wait bound")
         throw CocoaError(.fileReadUnknown)
     }
     return result.error

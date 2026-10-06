@@ -23,7 +23,7 @@ final class AppRuntimeConfigurationOrderTests: XCTestCase {
             return nil
         }
         let old = Task { await runtime.refreshGitConfiguration(probingGit: false) }
-        await fulfillment(of: [started], timeout: 2)
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         await runtime.refreshGitConfiguration(probingGit: false)
         release.signal()
         await old.value
@@ -51,7 +51,7 @@ final class AppRuntimeConfigurationOrderTests: XCTestCase {
                 return absent ? "https://fixture.test/latest.git" : nil
             }
             let old = Task { await runtime.refreshGitConfiguration(probingGit: false) }
-            await fulfillment(of: [started], timeout: 2)
+            await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
             model.apply(absent ? .noRemote : .synced(pushed: false, warnings: [], completedAt: Date()))
             release.signal()
             await old.value

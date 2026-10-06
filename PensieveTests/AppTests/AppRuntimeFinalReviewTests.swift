@@ -97,7 +97,7 @@ final class AppRuntimeFinalReviewTests: XCTestCase {
             return "https://fixture.test/new.git"
         }
         let read = Task { await runtime.refreshGitConfiguration(probingGit: false) }
-        await fulfillment(of: [started], timeout: 2)
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         model.apply(.synced(pushed: false, warnings: [], completedAt: Date()))
         release.signal()
         await read.value
@@ -161,7 +161,7 @@ final class AppRuntimeFinalReviewTests: XCTestCase {
         }
         probe.set { .usable }
         let old = Task { await runtime.refreshGitUsability() }
-        await fulfillment(of: [started], timeout: 2)
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         probe.set { .licenseNotAccepted }
         await runtime.refreshGitUsability()
         runtime.checkForSkillUpdatesIfDue()
@@ -370,7 +370,7 @@ extension AppRuntimeFinalReviewTests {
         )
         await runtime.bootstrapTask.value
         runtime.checkForSkillUpdatesIfDue()
-        await fulfillment(of: [started], timeout: 2)
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         runtime.checkForSkillUpdatesNow()
         XCTAssertTrue(runtime.updateCheckInFlight)
         XCTAssertEqual(calls.count, 1)

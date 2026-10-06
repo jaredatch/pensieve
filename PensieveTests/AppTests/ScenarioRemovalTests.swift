@@ -48,7 +48,6 @@ final class ScenarioRemovalTests: XCTestCase {
         let defaults = try isolatedDefaults()
         defaults.set(false, forKey: AppRuntime.backgroundSyncEnabledKey)
         defaults.set(true, forKey: AppRuntime.migrationDefaultsKey)
-        defaults.set(true, forKey: ScenarioHandover.doneKey)
         let launchLock: SyncLock? = deferred ? try XCTUnwrap(SyncLock.tryAcquire(at: paths.syncLockPath)) : nil
         defer { launchLock?.release() }
         let runtime = try AppRuntime(defaults: defaults, launchIngestRetryNanoseconds: 10_000_000,

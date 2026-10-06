@@ -71,8 +71,8 @@ extension CursorOwnershipTests {
             context.insert(IntentAssignment(skillID: skill.id, platformRaw: platform.rawValue, projectID: target.project?.id))
             try context.save()
             XCTAssertFalse(IntentReconciler(platformVM: vm,
-                machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID),
-                handoverIsComplete: { true }).reconcile(context: context).hasFailures)
+                machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID))
+                .reconcile(context: context).hasFailures)
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
         default:
             let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
@@ -131,8 +131,8 @@ extension CursorOwnershipTests {
         try context.save()
         let result = category ? CategoryReconciler(platformVM: vm).reconcile(context: context)
             : IntentReconciler(platformVM: vm,
-                               machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID),
-                               handoverIsComplete: { true }).reconcile(context: context)
+                               machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID))
+            .reconcile(context: context)
         // Category wants all installed project agents; only the colliding pair fails.
         XCTAssertEqual(result.failureCount, 1)
         XCTAssertTrue(result.failures.first?.error?.contains(path) == true)
@@ -159,8 +159,7 @@ extension CursorOwnershipTests {
                 skillSlug: skill.directoryName, platformRaw: platform.rawValue))
             try context.save()
             let reconciler = IntentReconciler(platformVM: vm,
-                machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID),
-                handoverIsComplete: { true })
+                machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID))
             XCTAssertEqual(reconciler.reconcile(context: context).successes.count, 1)
             let path = artifactPath(platform, project: nil)
             try plant(owned: false, legacy: false, platform: platform, path: path, project: nil)

@@ -172,7 +172,7 @@ extension DeployIntentModelTests {
         XCTAssertNil(harness.model.error)
     }
 
-    func testRepairAndOtherOwnerRemovalIgnoreUnrelatedReconcileFailure() throws {
+    func testRepairAndRemovalIgnoreUnrelatedReconcileFailure() throws {
         let harness = try makeHarness()
         let alpha = try insertSkill(context: harness.context)
         let beta = try insertReviewSkill("beta", context: harness.context)
@@ -196,8 +196,6 @@ extension DeployIntentModelTests {
         XCTAssertTrue(harness.platformVM.isDeployed(skill: alpha, platform: .codex))
         XCTAssertNil(harness.model.error)
 
-        harness.context.insert(ScenarioAssignment(skillID: alpha.id, platform: .codex))
-        try harness.context.save()
         _ = try harness.model.set(
             false, skill: alpha, platform: .codex, target: .userWide, context: harness.context
         )

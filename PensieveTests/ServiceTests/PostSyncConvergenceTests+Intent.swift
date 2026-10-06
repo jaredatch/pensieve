@@ -17,8 +17,7 @@ extension PostSyncConvergenceTests {
         let recorder = ConvergenceRecorder()
         let intent = IntentReconciler(
             platformVM: harness.platformVM,
-            machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID),
-            handoverIsComplete: { true }
+            machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID)
         )
         let convergence = PostSyncConvergence(
             root: "/unused",

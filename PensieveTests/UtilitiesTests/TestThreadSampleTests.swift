@@ -26,7 +26,9 @@ final class TestThreadSampleTests: XCTestCase {
         var ready = false
         var deadlineStarted = 0.0
         defer { if let child { cleanUp(child) } }
-        let report = TestThreadSample.capture(executable: executable, timeout: 0.2) { pid, path in
+        let report = TestThreadSample.capture(
+            executable: executable, timeout: 0.2 // upper-bound: Kill the sampler after its deliberate deadline.
+        ) { pid, path in
             child = pid
             let startupDeadline = ProcessInfo.processInfo.systemUptime + 10
             while ProcessInfo.processInfo.systemUptime < startupDeadline {

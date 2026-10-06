@@ -2,11 +2,9 @@ import Foundation
 
 extension AppRuntime {
     /// Constructs launch collaborators from explicit inputs without owning runtime launch state.
-    static func makeLaunchIntentReconciler(platformVM: PlatformViewModel, paths: AppRuntimePaths,
-                                           defaults: UserDefaults) -> IntentReconciler {
+    static func makeLaunchIntentReconciler(platformVM: PlatformViewModel, paths: AppRuntimePaths) -> IntentReconciler {
         IntentReconciler(platformVM: platformVM,
-            machineIdentity: MachineIdentity(appSupportDir: paths.appSupportDir),
-            handoverIsComplete: { defaults.bool(forKey: ScenarioHandover.doneKey) })
+            machineIdentity: MachineIdentity(appSupportDir: paths.appSupportDir))
     }
 
     static func deferredLaunchOutcome() -> LaunchReconcileOutcome {

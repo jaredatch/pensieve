@@ -28,7 +28,7 @@ final class UpstreamHistorySequenceReviewTests: UpstreamHistoryCacheTestCase {
     func testFrontierTimeoutStopsBeforeAnyLaterRelease() async throws {
         let fixture = try sequenceFixture(.empty)
         let flow = fixture.flow
-        flow.frontierTimeout = .milliseconds(20)
+        flow.frontierTimeout = .milliseconds(20) // upper-bound: Prove a timed-out frontier refuses later releases.
         var sampleCalls = 0
         flow.timeoutThreadSample = {
             sampleCalls += 1

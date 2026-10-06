@@ -15,12 +15,14 @@ final class GitServiceTests: XCTestCase {
     override func setUpWithError() throws {
         tempDir = TestTemporaryDirectory.path + "PensieveGitServiceTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
-        git = GitService()
+        git = GitService(fileService: LinkServiceCanonicalDirectoryFileService(
+            wrapped: FileService(),
+            pathMappings: [(PathConstants.gitAskpassHelperPath, tempDir + "/askpass")],
+            physicalSandbox: tempDir
+        ))
     }
 
     override func tearDownWithError() throws {
-        // The askpass helper (08.2) is written under Application Support on any .httpsToken env build.
-        try? FileManager.default.removeItem(atPath: Constants.gitAskpassHelperPath)
         if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
             try FileManager.default.removeItem(atPath: tempDir)
         }
@@ -387,27 +389,97 @@ extension GitServiceTests {
         let secret = "ghp_\(UUID().uuidString)"
         let env = try git.childEnvironment(credential: .httpsToken(username: "x-access-token", token: secret))
         let helper = try XCTUnwrap(env["GIT_ASKPASS"])
-        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: helper))
-        let helperBody = try String(contentsOfFile: helper, encoding: .utf8)
+        XCTAssertTrue(git.fileService.isExecutableFile(at: helper))
+        let helperBody = try git.fileService.readFile(at: helper)
         XCTAssertFalse(helperBody.contains(secret))   // the helper reads env; it holds NO secret at rest
         XCTAssertTrue(helperBody.contains("PENSIEVE_GIT_PASSWORD"))
     }
 
-    func testTokenNeverAppearsInAnyNetworkOpArgv() throws {
-        // The credential is consumed ONLY by childEnvironment; it never enters an args array.
-        let secret = "ghp_\(UUID().uuidString)"
-        let env = try git.childEnvironment(credential: .httpsToken(username: "u", token: secret))
-        // Representative network-op argument arrays (as the ops build them) — none carries the secret.
-        let opArgs: [[String]] = [
-            ["clone", "--quiet", "https://github.com/octocat/x.git", tempDir + "/x"],
-            ["-C", tempDir + "/x", "push", "-u", "origin", "main"],
-            ["-C", tempDir + "/x", "pull", "--rebase", "origin", "main"],
-            ["ls-remote", "--heads", "https://github.com/octocat/x.git"]
-        ]
-        for args in opArgs {
-            XCTAssertFalse(args.contains { $0.contains(secret) }, "secret leaked into argv: \(args)")
+    private struct NetworkCredentialOperation {
+        let name: String
+        let command: String
+        let run: () throws -> Void
+
+        init(_ name: String, _ command: String, _ run: @escaping () throws -> Void) {
+            self.name = name
+            self.command = command
+            self.run = run
         }
-        XCTAssertEqual(env["PENSIEVE_GIT_PASSWORD"], secret)   // ...but it IS in the child env (env-fed)
+    }
+
+    func testTokenNeverAppearsInAnyNetworkOpArgv() throws {
+        let fixture = try GitFailureFixture()
+        defer { try? fixture.remove() }
+        let secret = "ghp_\(UUID().uuidString)"
+        let credential = GitCredential.httpsToken(username: "u", token: secret)
+        let service = try fixture.credentialRecordingExecutable(expectedToken: secret)
+        let remote = "https://fixture.test/store.git"
+        let root = fixture.root
+        let operations: [NetworkCredentialOperation] = [
+            .init("clone", "clone", { try service.clone(remote: remote, into: root, credential: credential) }),
+            .init("cloneShallow default branch", "clone", {
+                try service.cloneShallow(remote: remote, branch: nil, into: root, credential: credential)
+            }),
+            .init("cloneShallow named branch", "clone", {
+                try service.cloneShallow(remote: remote, branch: "main", into: root, credential: credential)
+            }),
+            .init("remoteHasCommits", "ls-remote", { _ = service.remoteHasCommits(remote: remote, credential: credential) }),
+            .init("remoteDefaultBranch", "ls-remote", {
+                _ = try service.remoteDefaultBranch(remote: remote, credential: credential)
+            }),
+            .init("remoteBranches", "ls-remote", { _ = try service.remoteBranches(remote: remote, credential: credential) }),
+            .init("remoteHead", "ls-remote", { _ = try service.remoteHead(remote: remote, ref: "main", credential: credential) }),
+            .init("fetch", "fetch", { try service.fetch(at: root, credential: credential) }),
+            .init("fetchBranch", "fetch", { try service.fetchBranch("main", at: root, credential: credential) }),
+            .init("pullRebase", "pull", { _ = try service.pullRebase(at: root, credential: credential) }),
+            .init("push", "push", { try service.push(at: root, credential: credential) }),
+            .init("collapseToSingleCommit", "fetch", {
+                _ = try service.collapseToSingleCommit(at: root, message: "collapsed", credential: credential)
+            }),
+            .init("fastForwardOnly", "fetch", { _ = try service.fastForwardOnly(at: root, credential: credential) })
+        ]
+        for operation in operations {
+            try assertNetworkCredential(operation.name, command: operation.command, secret: secret, fixture: fixture,
+                                        operation: operation.run)
+        }
+        try assertHistoryNetworkCredentials(service, secret: secret, fixture: fixture)
+    }
+
+    private func assertNetworkCredential(
+        _ name: String, command: String, secret: String, fixture: GitFailureFixture,
+        networkCalls: Int = 1, operation: () throws -> Void
+    ) throws {
+        // Each operation starts with an empty receipt, so a previous call cannot supply its proof.
+        try fixture.files.writeFile(at: fixture.trace, content: "")
+        try fixture.files.writeFile(at: fixture.credentialTrace, content: "")
+        try operation()
+        let argv = try fixture.files.readFile(at: fixture.trace)
+        XCTAssertFalse(argv.contains(secret), "\(name): token must be absent from received argv")
+        let receipts = try fixture.files.readFile(at: fixture.credentialTrace).split(separator: "\n").filter {
+            $0.split(separator: "\t", maxSplits: 1).last?.split(separator: " ").contains(Substring(command)) == true
+        }
+        XCTAssertEqual(receipts.count, networkCalls, "\(name): network argv receipt must exist for every call")
+        for receipt in receipts {
+            XCTAssertEqual(receipt.split(separator: "\t", maxSplits: 1).first, "received",
+                           "\(name): git must receive the token through its environment")
+        }
+    }
+
+    private func assertHistoryNetworkCredentials(_ service: GitService, secret: String, fixture: GitFailureFixture) throws {
+        let head = String(repeating: "a", count: 40)
+        let older = String(repeating: "b", count: 40)
+        for (ref, installed) in [("main", head), ("v1", head), ("main", older)] {
+            let fetches = ref == "v1" || installed == older ? 2 : 1
+            try assertNetworkCredential("upstreamHistory \(ref) installed \(installed)",
+                                        command: "fetch", secret: secret, fixture: fixture, networkCalls: fetches) {
+                _ = try service.upstreamHistory(UpstreamHistoryGitRequest(
+                    remote: "https://fixture.test/store.git", ref: ref, installedCommit: installed,
+                    path: "skills/example", repositoryPath: fixture.root, commitLimit: 2, rowLimit: 3,
+                    textByteLimit: 1_024, baselineFileLimit: 10, baselineByteLimit: 10_000,
+                    credential: .httpsToken(username: "u", token: secret)
+                ))
+            }
+        }
     }
 
     func testSshAgentSetsNoAskpass() throws {

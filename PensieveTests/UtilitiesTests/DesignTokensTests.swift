@@ -4,6 +4,16 @@ import XCTest
 @testable import Pensieve
 
 final class DesignTokensTests: XCTestCase {
+    func testMarkdownLengthsRetainPrimerEmRatios() {
+        let body = DesignTokens.markdownBodySize
+        XCTAssertEqual(DesignTokens.markdownListIndent / body, 2, accuracy: 0.0001)
+        XCTAssertEqual(DesignTokens.markdownListItemGap / body, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(DesignTokens.markdownQuoteRule / body, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(DesignTokens.markdownQuoteInset / body, 1, accuracy: 0.0001)
+        XCTAssertEqual(DesignTokens.markdownTableCellHorizontal / body, 0.8125, accuracy: 0.0001)
+        XCTAssertEqual(DesignTokens.markdownCodeRadius, 4)
+    }
+
     func testHeaderTypographyMatchesMeasuredTokens() {
         XCTAssertEqual(DesignTokens.detailTitleSize, 22)
         XCTAssertEqual(DesignTokens.detailTitleWeight, .bold)

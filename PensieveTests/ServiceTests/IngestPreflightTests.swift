@@ -234,7 +234,7 @@ final class IngestPreflightTests: XCTestCase {
         } else {
             scheduler.coordinatorBecameReady()
         }
-        await fulfillment(of: [fired], timeout: 1)
+        await fulfillment(of: [fired], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertEqual(engine.syncCalls, 1)
     }
 

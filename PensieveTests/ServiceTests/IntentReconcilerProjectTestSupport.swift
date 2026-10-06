@@ -51,7 +51,7 @@ struct ProjectIntentHarness {
         reconciler = IntentReconciler(
             platformVM: platformVM,
             machineIdentity: ProjectIntentIdentityStub(id: Self.localID, fails: identityFails),
-            stateFetcher: stateFetcher, handoverIsComplete: { false }
+            stateFetcher: stateFetcher
         )
     }
 

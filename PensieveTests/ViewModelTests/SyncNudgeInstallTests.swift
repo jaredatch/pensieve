@@ -96,11 +96,11 @@ extension SyncNudgeTests {
 
         await model.fetchAndReport()
         model.installSelected(context: context)
-        await fulfillment(of: [writeFinished], timeout: 1)
+        await fulfillment(of: [writeFinished], timeout: TestWait.hostedActionTimeoutSeconds)
         watcher.emit(candidate.slug)
         XCTAssertEqual(nudgeCount, 0)
         releaseInstall.open()
-        await fulfillment(of: [installNudge], timeout: 1)
+        await fulfillment(of: [installNudge], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertEqual(nudgeCount, 1)
     }
 
@@ -199,10 +199,10 @@ extension SyncNudgeTests {
         )
         await lateModel.fetchAndReport()
         lateModel.installSelected(context: context)
-        await fulfillment(of: [started], timeout: 1)
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         lateModel.cancel()
         release.open()
-        await fulfillment(of: [lateNudge], timeout: 1)
+        await fulfillment(of: [lateNudge], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertEqual(nudgeCount, 1)
     }
 
@@ -234,10 +234,10 @@ extension SyncNudgeTests {
         adoptionModel.urlText = "https://github.com/example/fixture"
         await adoptionModel.fetchAndReport()
         adoptionModel.confirm(context: context)
-        await fulfillment(of: [adoptionStarted], timeout: 1)
+        await fulfillment(of: [adoptionStarted], timeout: TestWait.hostedActionTimeoutSeconds)
         adoptionModel.cancel()
         adoptionRelease.open()
-        await fulfillment(of: [adoptionNudge], timeout: 1)
+        await fulfillment(of: [adoptionNudge], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertEqual(nudgeCount, 1)
     }
 
@@ -280,10 +280,10 @@ extension SyncNudgeTests {
         )
         await model.loadAndReport(context: context)
         model.applySelected(context: context)
-        await fulfillment(of: [started], timeout: 1)
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         model.cancel()
         release.open()
-        await fulfillment(of: [lateNudge], timeout: 1)
+        await fulfillment(of: [lateNudge], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertEqual(nudgeCount, 1)
     }
 

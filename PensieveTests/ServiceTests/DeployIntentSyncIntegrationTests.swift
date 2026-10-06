@@ -18,7 +18,7 @@ extension DeployIntentModelTests {
         ).reconcileOnLaunch(context: harness.context, alreadyMigrated: true)
         _ = IntentReconciler(
             platformVM: harness.platformVM,
-            machineIdentity: DeployIntentIdentityForSyncTest(id: localID), handoverIsComplete: { false }
+            machineIdentity: DeployIntentIdentityForSyncTest(id: localID)
         ).reconcile(context: harness.context)
         try assertNoIntegrationIntent(harness, skill: skill)
 
@@ -34,7 +34,7 @@ extension DeployIntentModelTests {
         )
         _ = IntentReconciler(
             platformVM: harness.platformVM,
-            machineIdentity: DeployIntentIdentityForSyncTest(id: localID), handoverIsComplete: { false }
+            machineIdentity: DeployIntentIdentityForSyncTest(id: localID)
         ).reconcile(context: harness.context)
 
         try assertNoIntegrationIntent(harness, skill: skill)
