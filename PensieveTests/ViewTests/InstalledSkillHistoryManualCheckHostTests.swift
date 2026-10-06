@@ -35,14 +35,17 @@ final class HistoryManualCheckHostTests: XCTestCase {
         window.makeKeyAndOrderFront(nil)
         defer { window.close() }
 
-        let loaded = await eventually(timeout: TestWait.firstRenderTimeoutSeconds) { reads.count == 1 }
-        XCTAssertTrue(loaded)
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                             failureMessage: "The visible history must perform its initial read") { reads.count == 1 }
+        XCTAssertEqual(reads.count, 1)
         session.requestedWindow = 3
-        let expanded = await eventually { reads.count == 2 }
-        XCTAssertTrue(expanded)
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Expanding history must read the requested window") { reads.count == 2 }
+        XCTAssertEqual(reads.count, 2)
         owner.invalidateForManualCheck(skillID: skill.id)
-        let refreshed = await eventually { reads.count == 3 }
-        XCTAssertTrue(refreshed)
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Manual check must refire the visible history read") { reads.count == 3 }
+        XCTAssertEqual(reads.count, 3)
         XCTAssertEqual(reads.windows, [1, 3, 3])
         XCTAssertEqual(intents, [.appearance, .mountedRefresh, .retry])
     }
@@ -63,7 +66,7 @@ final class HistoryManualCheckHostTests: XCTestCase {
             head: { origin in
                 if origin.installedCommit == second.installedOrigin?.installedCommit {
                     secondProbeStarted.signal()
-                    _ = releaseSecondProbe.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds)
+                    _ = releaseSecondProbe.wait(timeout: .now() + TestWait.heldFixtureTimeoutSeconds)
                 }
                 return origin.installedCommit
             }
@@ -84,11 +87,13 @@ final class HistoryManualCheckHostTests: XCTestCase {
         window.makeKeyAndOrderFront(nil)
         defer { window.close() }
 
-        let firstLoaded = await eventually(timeout: TestWait.firstRenderTimeoutSeconds) { reads.count == 2 }
-        XCTAssertTrue(firstLoaded)
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                             failureMessage: "The first skill must load after the kept second result") { reads.count == 2 }
+        XCTAssertEqual(reads.count, 2)
         owner.invalidateForManualCheck(skillID: first.id)
-        let firstRefreshed = await eventually { reads.count == 3 }
-        XCTAssertTrue(firstRefreshed)
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Manual check must refresh the first skill before switching") { reads.count == 3 }
+        XCTAssertEqual(reads.count, 3)
         owner.probedSkillIDs.remove(second.id)
         model.skill = second
         let secondProbeDidStart = await waitForHistorySemaphore(secondProbeStarted)
@@ -97,19 +102,6 @@ final class HistoryManualCheckHostTests: XCTestCase {
         XCTAssertEqual(reads.count, 3)
         let secondOrigin = try? XCTUnwrap(second.installedOrigin)
         XCTAssertEqual(owner.state, .loaded(Self.result(head: secondOrigin?.installedCommit ?? "", window: 1)))
-    }
-
-    private func eventually(
-        timeout: TimeInterval = TestWait.hostedActionTimeoutSeconds,
-        _ condition: @escaping @MainActor () -> Bool
-    ) async -> Bool {
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: .seconds(timeout))
-        while clock.now < deadline {
-            if condition() { return true }
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
-        return condition()
     }
 
     private static func result(head: String, window: Int) -> UpstreamHistoryResult {

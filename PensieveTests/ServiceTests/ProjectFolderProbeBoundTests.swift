@@ -5,9 +5,38 @@ import XCTest
 
 @MainActor
 final class ProjectFolderProbeBoundTests: XCTestCase {
-    func testBlockingFixtureHoldCoversBothReadinessBounds() {
-        XCTAssertEqual(ProjectFolderBlockingProbe.holdTimeoutSeconds, 2 * TestWait.hostedActionTimeoutSeconds,
-                       "The fixture hold must cover both shared readiness bounds")
+    func testBlockingFixtureHonorsHoldAndExplicitRelease() async throws {
+        XCTAssertEqual(ProjectFolderBlockingProbe().holdTimeoutSeconds, TestWait.heldFixtureTimeoutSeconds,
+                       "The default fixture hold must use the shared held-worker bound")
+        for explicitlyRelease in [false, true] {
+            let gate = ProjectFolderBlockingProbe(holdTimeoutSeconds: explicitlyRelease ? 2 : 0.2)
+            let path = "/nonexistent-pensieve-probe-\(UUID().uuidString)"
+            gate.block(path)
+            defer { gate.unblock() }
+            let worker = Task {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<TimeInterval, Error>) in
+                    // A blocking fixture belongs on a Dispatch worker, never a cooperative executor thread.
+                    DispatchQueue.global().async {
+                        let started = ProcessInfo.processInfo.systemUptime
+                        do {
+                            _ = try gate.probe(path)
+                            continuation.resume(returning: ProcessInfo.processInfo.systemUptime - started)
+                        } catch { continuation.resume(throwing: error) }
+                    }
+                }
+            }
+            await TestWait.until(failureMessage: "The fixture worker must enter its blocked probe") {
+                gate.count(path) == 1
+            }
+            if explicitlyRelease { gate.unblock() }
+            let elapsed = try await worker.value
+            if explicitlyRelease {
+                XCTAssertLessThan(elapsed, 1, "Explicit release must return promptly, before the two-second hold")
+            } else {
+                XCTAssertGreaterThanOrEqual(elapsed, 0.18, "An unreleased probe must honor its 0.2-second hold")
+                XCTAssertLessThan(elapsed, 1, "The injected short hold must expire promptly")
+            }
+        }
     }
 
     func testConvergenceBoundsBlockedProbeRetainsRowsAndDeploysOtherProjectsForBothOwners() throws {

@@ -36,8 +36,9 @@ custom_rules:
   short_test_timeout:
     included: 'PensieveTests/.*\.swift$'
     name: "Shared positive wait bound"
-    # Match arguments and typed defaults, including DispatchTime offsets. Milliseconds below
-    # 15000 and seconds below 15 require the shared bound or an intentional-limit explanation.
-    regex: '(?-s)\btimeout:\s*(?:[A-Za-z_][A-Za-z0-9_.<>?]*\s*=\s*)?(?:\.seconds\(\s*(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?\s*\)|\.milliseconds\(\s*(?:0_?)*(?:[0-9](?:_?[0-9]){0,3}|1_?[0-4](?:_?[0-9]){3})(?:\.[0-9](?:_?[0-9])*)?\s*\)|(?:\.now\(\)\s*\+\s*)?(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?(?=\s*(?:[,)]|//|/\*)))(?![^\n]*//\s*upper-bound:)'
+    # Match arguments, defaults and properties ending in timeout (case insensitive),
+    # including DispatchTime offsets with bare seconds or interval units. Values below
+    # 15 seconds require the shared bound or an intentional-limit explanation.
+    regex: '(?-s)(?i:\b(?:[a-z_][a-z0-9_]*)?timeout)\s*(?::\s*(?:[A-Za-z_][A-Za-z0-9_.<>?]*\s*=\s*)?|=\s*)(?:(?:DispatchTime)?\.now\(\)\s*\+\s*)?(?:\.seconds\(\s*(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?\s*\)|\.milliseconds\(\s*(?:0_?)*(?:[0-9](?:_?[0-9]){0,3}|1_?[0-4](?:_?[0-9]){3})(?:\.[0-9](?:_?[0-9])*)?\s*\)|(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?(?=[ \t]*(?:[,;})]|//|/\*|\r?\n|$)))(?![^\n]*//\s*upper-bound:)'
     message: "Use TestWait.hostedActionTimeoutSeconds, or explain the intentional limit with // upper-bound: on this line."
     severity: error

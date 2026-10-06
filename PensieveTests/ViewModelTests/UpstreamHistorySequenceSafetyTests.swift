@@ -79,8 +79,8 @@ final class UpstreamHistorySequenceSafetyTests: UpstreamHistoryCacheTestCase {
 
     func testHungRequestReportsFailureBeforeBoundedCleanup() async throws {
         let flow = UpstreamHistorySequenceHarness()
-        flow.frontierTimeout = .milliseconds(20)
-        flow.cleanupTimeout = .milliseconds(300)
+        flow.frontierTimeout = .milliseconds(20) // upper-bound: Report failure before cleanup cancels the hung request.
+        flow.cleanupTimeout = .milliseconds(300) // upper-bound: Require cleanup failure for the deliberately hung request.
         flow.timeoutThreadSample = { nil } // Deliberate timeout: keep the real failure assertions, omit sampling.
         var held: CheckedContinuation<Void, Never>?
         flow.enqueue("A") {

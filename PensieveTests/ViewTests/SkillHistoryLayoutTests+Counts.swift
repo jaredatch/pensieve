@@ -5,22 +5,28 @@ import XCTest
 
 extension SkillHistoryLayoutTests {
     func testUnlabeledButtonCaptionCanBecomeReadyAfterFirstPoll() async {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
-        let button = ChangingHistoryCaptionButton(frame: NSRect(x: 20, y: 20, width: 180, height: 40))
-        button.title = "Loading"
-        button.bezelStyle = .rounded
-        root.addSubview(button)
-        let window = NSWindow(contentRect: root.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = root
-        window.orderFront(nil)
-        defer { window.close() }
+        let fixture = captionHost(title: "Loading")
+        let button = fixture.button
+        defer { fixture.window.close() }
 
-        let pressed = await HistoryAccessibility.pressButton(titled: "Ready", in: root)
+        let pressed = await HistoryAccessibility.pressButton(titled: "Ready", in: fixture.root)
         XCTAssertTrue(pressed,
                       "A later poll must locate the newly rendered caption; title=\(button.title), reads=\(button.captures)")
         XCTAssertGreaterThan(button.captures, 1, "A stale OCR miss must be read again")
         XCTAssertEqual(button.presses, 1, "A caption becoming ready must still cause only one press")
+    }
+
+    func testMatchingCaptionReusesPixelsUntilButtonBoundsChange() {
+        let fixture = captionHost(title: "Ready")
+        defer { fixture.window.close() }
+        let locator = HistoryAccessibility.ButtonLocator(title: "Ready")
+        XCTAssertNotNil(locator.find(in: fixture.root))
+        XCTAssertNotNil(locator.find(in: fixture.root))
+        XCTAssertEqual(fixture.button.captures, 1, "A matching caption at unchanged bounds must reuse its capture")
+        fixture.button.setFrameSize(NSSize(width: 200, height: 40))
+        XCTAssertNotNil(locator.find(in: fixture.root))
+        XCTAssertEqual(fixture.button.captures, 2, "Changed button bounds must refresh the captured caption")
+        XCTAssertEqual(fixture.button.presses, 0, "Locating and caching must never press a button")
     }
 
     func testLabeledButtonReportsPressWhenAccessibilityReturnsFalse() async {
@@ -79,13 +85,33 @@ private final class ChangingHistoryCaptionButton: NSButton {
     }
 
     override func cacheDisplay(in rect: NSRect, to bitmapImageRep: NSBitmapImageRep) {
+        // This test assumes renderedTitle captures through cacheDisplay before the next poll.
         super.cacheDisplay(in: rect, to: bitmapImageRep)
         captures += 1
         if captures == 1 { DispatchQueue.main.async { self.title = "Ready" } }
     }
 }
 
+private struct CaptionHost {
+    let root: NSView
+    let button: ChangingHistoryCaptionButton
+    let window: NSWindow
+}
+
 private extension SkillHistoryLayoutTests {
+    func captionHost(title: String) -> CaptionHost {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+        let button = ChangingHistoryCaptionButton(frame: NSRect(x: 20, y: 20, width: 180, height: 40))
+        button.title = title
+        button.bezelStyle = .rounded
+        root.addSubview(button)
+        let window = NSWindow(contentRect: root.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        window.orderFront(nil)
+        return CaptionHost(root: root, button: button, window: window)
+    }
+
     func countFixture() throws -> AnyView {
         let skill = installedHistorySkill()
         let result = historyTimelineResult(rowCount: 12)

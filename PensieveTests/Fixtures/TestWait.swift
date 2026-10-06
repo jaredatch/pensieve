@@ -14,6 +14,9 @@ enum TestWait {
     // Use the first-render allowance: polling still returns promptly, with a finite failure bound.
     static let hostedActionTimeoutSeconds: TimeInterval = firstRenderTimeoutSeconds
 
+    // Held workers must survive both readiness handoffs; this finite bound only expires on a broken test.
+    static let heldFixtureTimeoutSeconds: TimeInterval = 2 * hostedActionTimeoutSeconds
+
     @MainActor
     static func until(
         timeout: Duration = defaultTestWaitTimeout,

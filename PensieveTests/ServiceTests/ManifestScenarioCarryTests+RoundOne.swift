@@ -15,7 +15,7 @@ extension ManifestScenarioCarryTests {
         let first = ScenarioCarryFileService()
         first.afterDirectoryCheck = {
             firstOpened.signal()
-            if releaseFirst.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds) != .success {
+            if releaseFirst.wait(timeout: .now() + TestWait.heldFixtureTimeoutSeconds) != .success {
                 errors.record(DeployStubFailure())
             }
         }

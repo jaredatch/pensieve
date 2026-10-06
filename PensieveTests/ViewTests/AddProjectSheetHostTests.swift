@@ -111,7 +111,7 @@ final class AddProjectSheetHostTests: XCTestCase {
             guard !Thread.isMainThread else { return }
             started.fulfill()
             // Keep the probe pending through both the start handoff and the hosted render wait.
-            _ = release.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds)
+            _ = release.wait(timeout: .now() + TestWait.heldFixtureTimeoutSeconds)
         }
         model.path = h.project.path
         await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)

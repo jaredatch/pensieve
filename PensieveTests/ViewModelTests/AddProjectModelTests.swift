@@ -28,7 +28,7 @@ final class AddProjectModelTests: XCTestCase {
         h.mapped.beforeProjectProbe = { path in
             guard path == pendingPath else { return }
             started.fulfill()
-            _ = release.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds)
+            _ = release.wait(timeout: .now() + TestWait.heldFixtureTimeoutSeconds)
             cancellation.record(Task.isCancelled)
             finished.fulfill()
         }
@@ -89,7 +89,7 @@ final class AddProjectModelTests: XCTestCase {
         h.mapped.beforeProjectProbe = { path in
             if Thread.isMainThread { mainProbes.record(path) } else {
                 started.fulfill()
-                _ = release.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds)
+                _ = release.wait(timeout: .now() + TestWait.heldFixtureTimeoutSeconds)
             }
         }
         model.path = h.project.path
@@ -119,7 +119,7 @@ final class AddProjectModelTests: XCTestCase {
         h.mapped.beforeProjectProbe = { path in
             if path == h.project.path {
                 started.fulfill()
-                _ = release.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds)
+                _ = release.wait(timeout: .now() + TestWait.heldFixtureTimeoutSeconds)
                 finished.fulfill()
             }
         }

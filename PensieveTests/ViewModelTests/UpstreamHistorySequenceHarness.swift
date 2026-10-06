@@ -43,7 +43,7 @@ final class UpstreamHistorySequenceHarness {
     var timeoutThreadSample: () -> String? = { TestThreadSample.capture() }
     var cleanupFailed = false
     var scenario = "unnamed"
-    var cleanupTimeout: Duration = .seconds(5)
+    var cleanupTimeout: Duration = .seconds(TestWait.hostedActionTimeoutSeconds)
     var frontierTimeout: Duration = .seconds(30)
     var frontierChecks = 0
     var frontierWaits = 0

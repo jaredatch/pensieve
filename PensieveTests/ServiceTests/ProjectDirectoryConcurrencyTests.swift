@@ -19,7 +19,7 @@ final class ProjectDirectoryConcurrencyTests: XCTestCase {
             let files = FileService(directoryProbe: { _ in
                 lock.withLock { probes += 1 }
                 started.fulfill()
-                _ = release.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds)
+                _ = release.wait(timeout: .now() + TestWait.heldFixtureTimeoutSeconds)
                 return answer
             })
             let check = {
@@ -108,7 +108,7 @@ final class ProjectDirectoryConcurrencyTests: XCTestCase {
         let path = "/fixture/\(UUID().uuidString)"
         let lookup: (String) -> Bool = { _ in
             started.fulfill()
-            _ = release.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds)
+            _ = release.wait(timeout: .now() + TestWait.heldFixtureTimeoutSeconds)
             finished.fulfill()
             return true
         }
@@ -162,7 +162,7 @@ private final class ControlledWaitFlight {
         }
         if isStarter {
             waiting.fulfill()
-            _ = resume.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds)
+            _ = resume.wait(timeout: .now() + TestWait.heldFixtureTimeoutSeconds)
         } else { lock.withLock { clock = deadline } }
         return .timedOut
     }

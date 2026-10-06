@@ -100,7 +100,7 @@ final class AddProjectRoundOneTests: XCTestCase {
         h.mapped.beforeProjectProbe = { _ in
             if !Thread.isMainThread {
                 started.fulfill()
-                _ = release.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds)
+                _ = release.wait(timeout: .now() + TestWait.heldFixtureTimeoutSeconds)
             }
         }
         let model = AddProjectModel(fileService: h.mapped, previewDelay: {})
