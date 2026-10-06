@@ -142,7 +142,7 @@ TIMEOUT_NORMAL="${DRIVE_STAGE_TIMEOUT:-3600}"
 TIMEOUT_HEAVY="${DRIVE_STAGE_TIMEOUT_HEAVY:-7200}"
 CODEX_VERSION="${DRIVE_STAGE_CODEX_VERSION-0.160.0}"   # the pin, e.g. 0.144.3 — what the invocation below was last probed against; empty = unpinned (a launch is refused until it is set). `-` not `:-`: an explicitly EMPTY env value means unpinned even on a filled copy (the self-test relies on it)
 REVIEW_MANDATE="${DRIVE_STAGE_REVIEW_MANDATE:-private/.codex/agents/pensieve-reviewer.toml}"   # the stage reviewer's mandate file, repo-relative: templates/codex-reviewer.toml copied to .codex/agents/<project>-reviewer.toml; --review is refused while it reads EDIT-ME
-HERDR_TESTED="${DRIVE_STAGE_HERDR_VERSION-0.9.1}"   # the pane's gate: the Herdr version (client AND server) the pane calls were probed on; any other refuses before a tab is made
+HERDR_TESTED="${DRIVE_STAGE_HERDR_VERSION-0.9.3}"   # the pane's gate: the Herdr version (client AND server) the pane calls were probed on; any other refuses before a tab is made
 # --------------------------------------------------------------------------------------------------
 PROJECT="${DRIVE_STAGE_PROJECT:-}"   # a pane launch names its agent <project>-codex-NN-X or <project>-codex-<slug> (Herdr names are global across workspaces); empty = the main checkout's folder name
 PANE_DELIVERY="${DRIVE_STAGE_PANE_DELIVERY:-180}"   # a pane launch / a queued --continue: seconds for the tagged message to show in Codex's session record before its delivery reads as unconfirmed
