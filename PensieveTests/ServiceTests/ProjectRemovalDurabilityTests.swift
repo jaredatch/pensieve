@@ -82,6 +82,9 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         XCTAssertEqual(fault.refusedSaves, 1)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
         XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").deployIntents.count, 2)
+        let message = ProjectListView.removalFailureMessage(projectName: project.name, result: result)
+        XCTAssertFalse(message.contains("Nothing was changed."), "The withdrawal remains saved after restoration fails")
+        XCTAssertTrue(message.contains("Pensieve stopped requesting this project's deploys."))
         h.mapped.beforeFileWrite = nil
         fault.refusesRestore = false
         try relaunchAndRetry(h, projectID: projectID)

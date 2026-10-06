@@ -14,7 +14,7 @@ struct ProjectRemovalWithdrawal {
     let manifestRoot: String
     let logFailure: (String) -> Void
 
-    func apply(project: Project, request: ProjectRemovalWithdrawalRequest, context: ModelContext) throws {
+    func apply(project: Project, request: ProjectRemovalWithdrawalRequest, context: ModelContext) throws -> Bool {
         let key = project.identityKey
         let categories: [Category]
         if !request.keepingSharedKey, let key {
@@ -45,24 +45,33 @@ struct ProjectRemovalWithdrawal {
         } catch {
             let publicationError = error
             var restoration = "The saved requests were kept."
+            var withdrawalRemainsSaved = false
             do {
                 if changed {
-                    for membership in memberships { membership.category.projectKeys = membership.keys }
-                    for fact in facts {
-                        context.insert(MachineDeployIntent(machineID: fact.machineID, skillSlug: fact.skillSlug,
-                            platformRaw: fact.platformRaw, projectKey: fact.projectKey))
-                    }
-                    try context.save()
+                    try restore(memberships: memberships, facts: facts, context: context)
                     restoration = "The saved withdrawal was restored."
                 }
             } catch {
                 context.rollback()
                 restoration = "The withdrawal remains saved."
+                withdrawalRemainsSaved = changed
                 logFailure("Couldn't restore project withdrawal: " + error.localizedDescription)
             }
             repairManifest(context: context)
-            throw failure("publish project withdrawal", publicationError, detail: restoration)
+            throw failure("publish project withdrawal", publicationError, detail: restoration,
+                          didWithdrawRequests: withdrawalRemainsSaved)
         }
+        return changed
+    }
+
+    private func restore(memberships: [(category: Category, keys: [String])], facts: [DeployIntentRecord],
+                         context: ModelContext) throws {
+        for membership in memberships { membership.category.projectKeys = membership.keys }
+        for fact in facts {
+            context.insert(MachineDeployIntent(machineID: fact.machineID, skillSlug: fact.skillSlug,
+                platformRaw: fact.platformRaw, projectKey: fact.projectKey))
+        }
+        try context.save()
     }
 
     func repairManifest(context: ModelContext) {
@@ -78,10 +87,16 @@ struct ProjectRemovalWithdrawal {
         try manifestService.write(manifestService.snapshot(from: context), toRoot: manifestRoot)
     }
 
-    private func failure(_ operation: String, _ error: Error, detail: String? = nil) -> NSError {
+    private func failure(_ operation: String, _ error: Error, detail: String? = nil,
+                         didWithdrawRequests: Bool = false) -> ProjectRemovalWithdrawalFailure {
         let reason = error.localizedDescription.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
-        return NSError(domain: "ProjectRemoval", code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Couldn't " + operation + ": " + reason
-                           + (detail.map { ". " + $0 } ?? "")])
+        return ProjectRemovalWithdrawalFailure(message: "Couldn't " + operation + ": " + reason
+            + (detail.map { ". " + $0 } ?? ""), didWithdrawRequests: didWithdrawRequests)
     }
+}
+
+struct ProjectRemovalWithdrawalFailure: LocalizedError {
+    let message: String
+    let didWithdrawRequests: Bool
+    var errorDescription: String? { message }
 }

@@ -96,7 +96,11 @@ final class ProjectRemovalFreshnessTests: XCTestCase {
                 model.request(h.project, platformVM: h.platformVM, context: h.context)
                 XCTAssertEqual(model.preview?.artifactCount, 0)
                 XCTAssertTrue(model.preview?.message.contains("other registration") == true)
-                XCTAssertFalse(confirm(model, h).hasFailures)
+                let reconciler = RemovalCheckpointReconciler(reconciler: h.category) {
+                    h.mapped.beforeProjectProbe = { _ in throw NSError(domain: NSPOSIXErrorDomain, code: 13) }
+                    return BatchResult()
+                }
+                XCTAssertFalse(confirm(model, h, reconciler: reconciler).hasFailures)
                 XCTAssertTrue(h.files.isSymlink(at: path))
                 XCTAssertEqual(try h.deployState.read(), state)
                 XCTAssertEqual(Set(try h.context.fetch(FetchDescriptor<DeployRecord>()).map(\.id)), historyIDs)
@@ -107,31 +111,50 @@ final class ProjectRemovalFreshnessTests: XCTestCase {
     }
 
     func testFailureCopyDistinguishesNoRemovalFromRemovalBeforeStateSaveFailure() throws {
-        for stateFailure in [false, true] {
+        for failure in ["preparation", "unlink", "state write"] {
             let h = try ProjectFolderCallerHarness(installed: [.codex])
             defer { h.cleanup() }
             try h.files.createDirectory(at: h.project.path)
             try h.addIntent()
             XCTAssertFalse(h.intent.reconcile(context: h.context).hasFailures)
-            if stateFailure {
-                h.mapped.beforeDeployStateWrite = { _ in throw NSError(domain: NSPOSIXErrorDomain, code: 5) }
-            } else {
-                h.mapped.beforeArtifactDeletion = { _ in throw NSError(domain: NSPOSIXErrorDomain, code: 13) }
-            }
+            let category = try h.addCategory()
+            let manifest = ManifestService(fileService: h.mapped)
+            let root = h.root + "/sync"
+            try manifest.write(try manifest.snapshot(from: h.context), toRoot: root)
             let model = ProjectRemovalModel()
             model.request(h.project, platformVM: h.platformVM, context: h.context)
-            XCTAssertTrue(confirm(model, h).hasFailures)
-            XCTAssertEqual(h.files.isSymlink(at: h.artifact(.codex)), !stateFailure)
-            XCTAssertEqual(model.error?.contains("stopped partway"), stateFailure)
-            XCTAssertEqual(model.error?.contains("Nothing was changed."), !stateFailure)
+            if failure == "state write" {
+                h.mapped.beforeDeployStateWrite = { _ in throw NSError(domain: NSPOSIXErrorDomain, code: 5) }
+            } else if failure == "unlink" {
+                h.mapped.beforeArtifactDeletion = { _ in throw NSError(domain: NSPOSIXErrorDomain, code: 13) }
+            } else {
+                h.mapped.beforeProjectProbe = { _ in throw NSError(domain: NSPOSIXErrorDomain, code: 13) }
+            }
+            XCTAssertTrue(model.confirm { project, preview in
+                removeRegisteredProject(project, reconciler: h.category, manifestService: manifest,
+                    manifestRoot: root, platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
+                    confirmedPreview: preview, context: h.context)
+            }.hasFailures)
+            let unchanged = failure == "preparation"
+            XCTAssertEqual(h.files.isSymlink(at: h.artifact(.codex)), failure != "state write")
+            XCTAssertEqual(model.error?.contains("stopped partway"), failure == "state write")
+            XCTAssertEqual(model.error?.contains("Nothing was changed."), unchanged)
+            XCTAssertEqual(model.error?.contains("Pensieve stopped requesting this project's deploys."), failure == "unlink")
             XCTAssertTrue(model.error?.contains(". It stays registered;") == true)
+            XCTAssertTrue(model.error?.contains("retry to complete it.") == true)
             XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 2)
+            XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), unchanged ? 1 : 0)
+            XCTAssertEqual(category.projectKeys, unchanged ? [h.project.identityKey!] : [])
+            XCTAssertEqual(try manifest.read(fromRoot: root).deployIntents.count, unchanged ? 1 : 0)
+            XCTAssertEqual(try manifest.read(fromRoot: root).categories.first?.projectKeys,
+                           unchanged ? [h.project.identityKey!] : [])
         }
     }
 
-    private func confirm(_ model: ProjectRemovalModel, _ h: ProjectFolderCallerHarness) -> BatchResult {
+    private func confirm(_ model: ProjectRemovalModel, _ h: ProjectFolderCallerHarness,
+                         reconciler: CategoryReconcilerProtocol? = nil) -> BatchResult {
         model.confirm { project, plan in
-            removeRegisteredProject(project, reconciler: h.category,
+            removeRegisteredProject(project, reconciler: reconciler ?? h.category,
                 platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, confirmedPreview: plan,
                 context: h.context)
         }

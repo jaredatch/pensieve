@@ -84,11 +84,12 @@ struct ProjectRemovalPlan {
 
     func removeArtifacts(project: Project, platformVM: PlatformViewModel) -> BatchResult {
         var result = BatchResult()
+        if preview.folderIsShared { return result }
         if let failure = folderFailure(project: project, platformVM: platformVM) {
             result.operationFailures.append(failure)
             return result
         }
-        if preview.folderIsMissing || preview.folderIsShared { return result }
+        if preview.folderIsMissing { return result }
         var changed = false
         var completed: [(candidate: Candidate, deleted: Bool)] = []
         for candidate in candidates {

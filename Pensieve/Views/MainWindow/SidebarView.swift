@@ -82,14 +82,15 @@ func removeRegisteredProject(_ project: Project,
         manifestRoot: manifestRoot, logFailure: logFailure)
     let request = ProjectRemovalWithdrawalRequest(keepingSharedKey: plan.hasIdentitySibling,
         intents: intents, localMachineID: localMachineID)
+    var result = BatchResult()
     do {
-        try publication.apply(project: project, request: request, context: context)
+        result.didWithdrawProjectRequests = try publication.apply(project: project, request: request, context: context)
     } catch {
-        var result = BatchResult()
+        result.didWithdrawProjectRequests = (error as? ProjectRemovalWithdrawalFailure)?.didWithdrawRequests ?? false
         result.operationFailures.append(error.localizedDescription)
         return result
     }
-    var result = reconciler.reconcileRemovingProject(project.id, preservingProjects: plan.folderSiblingIDs, context: context)
+    result.append(reconciler.reconcileRemovingProject(project.id, preservingProjects: plan.folderSiblingIDs, context: context))
     do {
         if context.hasChanges { try context.save() }
     } catch {

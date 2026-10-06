@@ -82,6 +82,8 @@ struct BatchResult {
     var retiredPairs: Set<BatchPairKey> = []
     /// Physical cleanup can succeed before a state-record write reports failure.
     var didRemoveArtifacts = false
+    /// Project request facts can be withdrawn even when no artifact is removed.
+    var didWithdrawProjectRequests = false
 
     var successes: [BatchPairOutcome] { outcomes.filter { $0.isSuccess } }
     var failures: [BatchPairOutcome] { outcomes.filter { !$0.isSuccess && !$0.isSkipped } }
@@ -152,5 +154,6 @@ struct BatchResult {
         operationFailures.append(contentsOf: other.operationFailures)
         retiredPairs.formUnion(other.retiredPairs)
         didRemoveArtifacts = didRemoveArtifacts || other.didRemoveArtifacts
+        didWithdrawProjectRequests = didWithdrawProjectRequests || other.didWithdrawProjectRequests
     }
 }
