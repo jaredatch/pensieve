@@ -35,7 +35,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - Deploying to a project whose folder is gone now reports the missing folder instead of recreating it. Your deployment choices stay saved and apply after the folder returns, on the next launch or sync that brings changes. Add Project also refuses missing folders.
 - Folder checks when deploying, restoring saved deployments or adding a project stop waiting after about two seconds on an unresponsive network share. Saved deployments remain, and other projects continue.
 - Add Project accepts `~` paths and explains why relative paths cannot be used. Pressing Return while a folder is checking adds it when the check succeeds; editing either field cancels that request.
-- Pensieve now leaves your own Cursor rules and skill links alone when deploying or removing a skill.
+- Pensieve now leaves your own Cursor rules and skill links alone when deploying or removing a skill. Rules it writes carry a `# pensieve: managed` line so it can tell them apart. An out-of-date rule Pensieve wrote before this change now counts as yours, so delete it once and deploy again.
 - Remove Project now asks first, then removes the skill links and rules Pensieve deployed there. Your files stay.
 - Pensieve could freeze while running git on Macs with only a few cores. Several git commands at once could wait on each other forever. They don't anymore.
 - A crafted `SKILL.md` could trick Pensieve into rewriting the wrong line of its frontmatter on import or upgrade. Pensieve now only rewrites a key when it and the YAML parser agree on exactly where that key starts, and it double-checks the result. If anything looks off, the file stays as it was.
