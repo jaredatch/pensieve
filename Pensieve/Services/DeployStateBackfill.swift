@@ -142,11 +142,9 @@ struct DeployStateBackfill: DeployStateBackfilling {
         var candidates: [Candidate] = []
         for record in deployRecords where record.platform == .cursor && record.projectID == nil {
             guard seen.insert(record.targetPath).inserted,
-                  record.targetPath.hasPrefix(paths.cursorUserRulesDir + "/"),
-                  record.targetPath.hasSuffix(".mdc"),
+                  let slug = DeployPaths.slug(artifactPath: record.targetPath, platform: .cursor, projectPath: nil,
+                                              cursorUserRulesDirectory: paths.cursorUserRulesDir),
                   fileService.fileExists(at: record.targetPath) else { continue }
-            let fileName = (record.targetPath as NSString).lastPathComponent
-            let slug = String(fileName.dropLast(4))
             candidates.append(Candidate(
                 slug: slug,
                 platform: .cursor,

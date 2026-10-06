@@ -38,10 +38,13 @@ extension ScenarioHandoverTests {
             try assertOwnershipAfterBadPath(context: context, harness: harness, healthy: healthy, kind: kind)
             XCTAssertEqual(faulty.directoryChecks, 1, kind)
             XCTAssertEqual(faulty.listings, 0, "handover must probe rather than enumerate skills: " + kind)
-            XCTAssertFalse(IntentReconciler(platformVM: deploys.platformVM, machineIdentity: harness.identity,
+            let convergence = IntentReconciler(platformVM: deploys.platformVM, machineIdentity: harness.identity,
                 handoverIsComplete: { harness.defaults.bool(forKey: ScenarioHandover.doneKey) })
-                .reconcile(context: context).hasFailures, kind)
-            XCTAssertEqual(deploys.createCalls, 0, kind)
+                .reconcile(context: context)
+            // EACCES is injected only into handover's probe; the later fixture probe sees the intact link.
+            let retry = ["ENOTDIR", "ELOOP"].contains(kind)
+            XCTAssertEqual(convergence.failureCount, retry ? 1 : 0, kind)
+            XCTAssertEqual(deploys.createCalls, retry ? 1 : 0, kind)
             XCTAssertEqual(deploys.removeCalls, 0, kind)
             XCTAssertEqual(try harness.deployedFiles(), before, kind)
             XCTAssertEqual(harness.files.fileIdentity(at: parent, followingLinks: false), parentIdentity, kind)

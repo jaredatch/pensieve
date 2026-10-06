@@ -6,6 +6,10 @@ private let defaultTestWaitTimeout: Duration = .seconds(TestWait.timeoutSeconds)
 enum TestWait {
     static let timeoutSeconds: TimeInterval = 30
 
+    // Cold AppKit/SwiftUI hosts and OCR can exceed three seconds on CI. Only first-render
+    // readiness gets this bounded allowance; subsequent interaction waits keep their own deadlines.
+    static let firstRenderTimeoutSeconds: TimeInterval = 15
+
     @MainActor
     static func until(
         timeout: Duration = defaultTestWaitTimeout,

@@ -14,14 +14,17 @@ final class ProjectDeployTests: XCTestCase {
     private final class RecordingLinkService: LinkServiceProtocol {
         private(set) var lastLinkProjectPath: String?
         private(set) var lastUnlinkProjectPath: String?
+        var ownsRemovalPairs = false
 
         func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
             lastLinkProjectPath = projectPath
         }
 
-        func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
+        func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
             lastUnlinkProjectPath = projectPath
+            return false
         }
+        func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { ownsRemovalPairs }
 
         func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
 
@@ -38,7 +41,13 @@ final class ProjectDeployTests: XCTestCase {
 
     private struct StubCursorCompiler: CursorCompilerProtocol {
         func compile(skill: Skill, projectPath: String?) throws {}
-        func remove(skill: Skill, projectPath: String?) throws {}
+        func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
+        func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
+            return false
+        }
+        func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { false }
+        func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { false }
+
         func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
         func outputPath(skill: Skill, projectPath: String?) -> String {
             (projectPath ?? "/tmp/user-wide") + "/cursor/" + skill.directoryName + ".mdc"
@@ -131,13 +140,17 @@ final class ProjectDeployTests: XCTestCase {
         context.insert(project)
 
         let projectLinkService = RecordingLinkService()
+        projectLinkService.ownsRemovalPairs = true
         let projectVM = makeViewModel(linkService: projectLinkService)
-        _ = projectVM.removeBatch(skills: [skill], platforms: [.claudeCode], target: .project(project))
+        _ = projectVM.removeOwnedBatch(
+            pairs: DeployRemovalPair.expand(skills: [skill], platforms: [.claudeCode]),
+            target: .project(project))
         XCTAssertEqual(projectLinkService.lastUnlinkProjectPath, project.path)
 
         let userLinkService = RecordingLinkService()
+        userLinkService.ownsRemovalPairs = true
         let userVM = makeViewModel(linkService: userLinkService)
-        _ = userVM.removeBatch(skills: [skill], platforms: [.claudeCode], target: .userWide)
+        _ = userVM.removeOwnedBatch(pairs: DeployRemovalPair.expand(skills: [skill], platforms: [.claudeCode]), target: .userWide)
         XCTAssertNil(userLinkService.lastUnlinkProjectPath)
     }
 

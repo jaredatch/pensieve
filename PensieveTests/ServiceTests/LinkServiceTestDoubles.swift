@@ -24,7 +24,7 @@ struct LinkServiceScriptedPathState {
     static let retargetedDirectorySymlink = LinkServiceScriptedPathState(
         isSymlink: true, fileExists: false, directoryExists: true, symlinkTarget: .retargeted)
     static let brokenSymlink = LinkServiceScriptedPathState(
-        isSymlink: true, fileExists: false, directoryExists: false, symlinkTarget: .unavailable)
+        isSymlink: true, fileExists: false, directoryExists: false, symlinkTarget: .canonical)
 }
 
 enum LinkServiceScriptedError: Error {
@@ -39,6 +39,8 @@ final class LinkServiceScriptedFileService: FileServiceProtocol {
     private(set) var createSymlinkCalled = false
     private(set) var deleteFileCalled = false
     private(set) var directoryProbePaths: [String] = []
+    private(set) var entryTypeProbeCount = 0
+    var failRepeatedEntryProbe = false
 
     init(
         linkPath: String,
@@ -66,6 +68,14 @@ final class LinkServiceScriptedFileService: FileServiceProtocol {
     }
     func deleteFile(at path: String) throws { deleteFileCalled = true }
     func fileExists(at path: String) -> Bool { path == linkPath && state.fileExists }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        guard path == linkPath else { return path == canonicalDirectory ? .directory : nil }
+        entryTypeProbeCount += 1
+        if failRepeatedEntryProbe && entryTypeProbeCount > 1 { throw CocoaError(.fileReadUnknown) }
+        if state.isSymlink { return .symlink }
+        if state.directoryExists { return .directory }
+        return state.fileExists ? .regular : nil
+    }
     func isExecutableFile(at path: String) -> Bool { false }
     func isUserExecutableFile(at path: String) -> Bool {
         XCTFail("Scripted double does not support isUserExecutableFile: \(path)")
@@ -93,7 +103,7 @@ final class LinkServiceScriptedFileService: FileServiceProtocol {
         case .canonical:
             return canonicalDirectory
         case .retargeted:
-            return canonicalDirectory + "-retargeted"
+            return "/outside/retargeted"
         case .unavailable:
             throw LinkServiceScriptedError.symlinkTargetUnavailable
         }
@@ -121,7 +131,16 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     /// Checkpoints act on translated sandbox paths immediately before their real FileService operation.
     var beforeDirectoryCreation: ((String) throws -> Void)?
     var beforeArtifactCreation: ((String) throws -> Void)?
+    var beforeArtifactDeletion: ((String) throws -> Void)?
     var beforeProjectProbe: ((String) throws -> Void)?
+    var beforeRuleRead: ((String) throws -> Void)?
+    var beforeEntryTypeProbe: ((String) throws -> Void)?
+    var beforeDeployStateRead: ((String) throws -> Void)?
+    var beforeDeployStateWrite: ((String) throws -> Void)?
+    var beforeFileWrite: ((String) throws -> Void)?
+    var beforeSymlinkRead: ((String) throws -> Void)?
+    /// Physical-path consumers compare physical literals; containment still applies to every lookup.
+    var translatesSymlinkTargets = true
 
     init(
         wrapped: FileServiceProtocol,
@@ -195,13 +214,28 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     }
 
     func readFile(at path: String) throws -> String {
-        try wrapped.readFile(at: resolved(path))
+        let physical = resolved(path)
+        if physical.hasSuffix("/deploy-state.json") { try beforeDeployStateRead?(physical) }
+        return try wrapped.readFile(at: physical)
     }
     func readData(at path: String) throws -> Data {
         try wrapped.readData(at: resolved(path))
     }
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        let physical = resolved(path)
+        try beforeRuleRead?(physical)
+        return try wrapped.readRegularFileData(at: physical, maximumBytes: maximumBytes)
+    }
+    func readRegularFileHeader(at path: String, maximumBytes: Int) throws -> Data {
+        let physical = resolved(path)
+        try beforeRuleRead?(physical)
+        return try wrapped.readRegularFileHeader(at: physical, maximumBytes: maximumBytes)
+    }
     func writeFile(at path: String, content: String) throws {
-        try wrapped.writeFile(at: resolved(path), content: content)
+        let physical = resolved(path)
+        if physical.hasSuffix("/deploy-state.json") { try beforeDeployStateWrite?(physical) }
+        try beforeFileWrite?(physical)
+        try wrapped.writeFile(at: physical, content: content)
     }
     func writeExecutableFile(at path: String, content: String) throws {
         try wrapped.writeExecutableFile(at: resolved(path), content: content)
@@ -210,7 +244,9 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         try wrapped.copyFile(at: resolved(sourcePath), to: resolved(destinationPath))
     }
     func deleteFile(at path: String) throws {
-        try wrapped.deleteFile(at: resolved(path))
+        let physical = resolved(path)
+        try beforeArtifactDeletion?(physical)
+        try wrapped.deleteFile(at: physical)
     }
     func fileExists(at path: String) -> Bool {
         wrapped.fileExists(at: resolved(path))
@@ -219,7 +255,9 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         try wrapped.entryExistsWithoutFollowingLinks(at: resolved(path))
     }
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
-        try wrapped.entryTypeWithoutFollowingLinks(at: resolved(path))
+        let physical = resolved(path)
+        try beforeEntryTypeProbe?(physical)
+        return try wrapped.entryTypeWithoutFollowingLinks(at: physical)
     }
     func isExecutableFile(at path: String) -> Bool {
         wrapped.isExecutableFile(at: resolved(path))
@@ -264,8 +302,10 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
             pointingTo: resolved(targetPath))
     }
     func symlinkTarget(at path: String) throws -> String {
-        let target = try wrapped.symlinkTarget(at: resolved(path))
-        return logicalPath(for: target)
+        let physical = resolved(path)
+        try beforeSymlinkRead?(physical)
+        let target = try wrapped.symlinkTarget(at: physical)
+        return translatesSymlinkTargets ? logicalPath(for: target) : target
     }
     func isSymlink(at path: String) -> Bool {
         wrapped.isSymlink(at: resolved(path))
@@ -279,6 +319,9 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     func contentsHash(at path: String) throws -> String {
         try wrapped.contentsHash(at: resolved(path))
     }
+    func realPath(at path: String) -> String { wrapped.realPath(at: resolved(path)) }
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: resolved(path)) }
+
 }
 
 struct LinkServiceScriptedContext {

@@ -89,33 +89,30 @@ extension DeployIntentModel {
         var result = BatchResult()
         result.readFailures = reconciliation.readFailures
         let expectedTarget = BatchPairTarget(target)
+        let indexed = reconciliation.outcomesByPair
+        var removals: [DeployRemovalPair] = []
         for skill in skills {
             for platform in platforms {
-                let targetFailure = reconciliation.failures.first {
-                    $0.skillID == skill.id && $0.platform == platform
-                        && $0.target == expectedTarget
-                }
-                let targetSuccess = reconciliation.successes.first {
-                    $0.skillID == skill.id && $0.platform == platform
-                        && $0.target == expectedTarget
-                }
-                let isDeployed = platformVM.isDeployed(skill: skill, platform: platform, target: target)
-                let artifactExists = platformVM.artifactExists(skill: skill, platform: platform, target: target)
-                if let targetFailure {
-                    result.outcomes.append(targetFailure)
-                } else if (selected && isDeployed) || (!selected && !artifactExists) {
-                    if let targetSuccess { result.outcomes.append(targetSuccess) }
+                let key = BatchPairKey(skillID: skill.id, platform: platform, target: expectedTarget)
+                let outcome = indexed[key]
+                if let outcome, !outcome.isSkipped {
+                    result.outcomes.append(outcome)
+                } else if !selected, reconciliation.retiredPairs.contains(key) {
+                    continue
+                } else if !selected, let outcome {
+                    result.outcomes.append(outcome)
                 } else if selected {
-                    result.append(platformVM.deployBatch(
-                        skills: [skill], platforms: [platform], target: target, context: context
-                    ))
+                    if !platformVM.isDeployed(skill: skill, platform: platform, target: target) {
+                        result.append(platformVM.deployBatch(
+                            skills: [skill], platforms: [platform], target: target, context: context
+                        ))
+                    }
                 } else {
-                    result.append(platformVM.removeBatch(
-                        skills: [skill], platforms: [platform], target: target
-                    ))
+                    removals.append(DeployRemovalPair(skill: skill, platform: platform))
                 }
             }
         }
+        if !removals.isEmpty { result.append(platformVM.removeSelection(pairs: removals, target: target)) }
         return result
     }
 }

@@ -35,7 +35,7 @@ final class HistoryManualCheckHostTests: XCTestCase {
         window.makeKeyAndOrderFront(nil)
         defer { window.close() }
 
-        let loaded = await eventually { reads.count == 1 }
+        let loaded = await eventually(timeout: TestWait.firstRenderTimeoutSeconds) { reads.count == 1 }
         XCTAssertTrue(loaded)
         session.requestedWindow = 3
         let expanded = await eventually { reads.count == 2 }
@@ -84,7 +84,7 @@ final class HistoryManualCheckHostTests: XCTestCase {
         window.makeKeyAndOrderFront(nil)
         defer { window.close() }
 
-        let firstLoaded = await eventually { reads.count == 2 }
+        let firstLoaded = await eventually(timeout: TestWait.firstRenderTimeoutSeconds) { reads.count == 2 }
         XCTAssertTrue(firstLoaded)
         owner.invalidateForManualCheck(skillID: first.id)
         let firstRefreshed = await eventually { reads.count == 3 }
@@ -99,8 +99,13 @@ final class HistoryManualCheckHostTests: XCTestCase {
         XCTAssertEqual(owner.state, .loaded(Self.result(head: secondOrigin?.installedCommit ?? "", window: 1)))
     }
 
-    private func eventually(_ condition: @escaping @MainActor () -> Bool) async -> Bool {
-        for _ in 0 ..< 150 {
+    private func eventually(
+        timeout: TimeInterval = 3,
+        _ condition: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(timeout))
+        while clock.now < deadline {
             if condition() { return true }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }

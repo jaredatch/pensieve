@@ -199,7 +199,8 @@ struct HandoverFailingFetcher: ReconcilerStateFetching {
 }
 
 /// Uses temp agent paths for removal and existence checks. Any attempt to create a deploy fails
-/// and is counted, so transferred ownership must reconcile without repairing the test's artifacts.
+/// and is counted. Rechecking transferred ownership can fail, but never repairs the artifacts.
+/// Canonical admission reads are mapped to the fixture store, never the host's default store.
 final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
     let root: String
     let files = FileService()
@@ -208,7 +209,10 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
     var allowCreation = false
     init(root: String) { self.root = root }
     var platformVM: PlatformViewModel {
-        PlatformViewModel(fileService: files, linkService: self, cursorCompiler: self,
+        let admissions = LinkServiceCanonicalDirectoryFileService(wrapped: files,
+            pathMappings: [(Constants.pensieveSkillsDir, root + "/skills")], physicalSandbox: root)
+        admissions.translatesSymlinkTargets = false
+        return PlatformViewModel(fileService: admissions, linkService: self, cursorCompiler: self,
                           agentDetection: DeployStubDetection(installed: [.codex, .cursor]),
                           deployStateStore: .memoryBacked)
     }
@@ -218,10 +222,17 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
         try files.createSymlink(at: linkPath(skill: skill, platform: platform, projectPath: projectPath),
                                 pointingTo: targetPath(skill: skill, platform: platform, projectPath: projectPath))
     }
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
         removeCalls += 1
+        let path = linkPath(skill: skill, platform: platform, projectPath: projectPath)
+        let removed = try files.entryExistsWithoutFollowingLinks(at: path)
         try files.deleteFile(at: linkPath(skill: skill, platform: platform, projectPath: projectPath))
+        return removed
     }
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        try literalLinks.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
+    }
+
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
         literalLinks.isLinked(skill: skill, platform: platform, projectPath: projectPath)
     }
@@ -246,10 +257,24 @@ final class HandoverDeployments: LinkServiceProtocol, CursorCompilerProtocol {
         guard allowCreation else { throw DeployStubFailure() }
         try files.writeFile(at: outputPath(skill: skill, projectPath: projectPath), content: "repaired")
     }
-    func remove(skill: Skill, projectPath: String?) throws {
+    func remove(skill: Skill, projectPath: String?) throws -> Bool {
         removeCalls += 1
+        let removed = try files.entryExistsWithoutFollowingLinks(at: outputPath(skill: skill, projectPath: projectPath))
         try files.deleteFile(at: outputPath(skill: skill, projectPath: projectPath))
+        return removed
     }
+    func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
+        return try files.entryTypeWithoutFollowingLinks(at: outputPath(skill: skill, projectPath: projectPath)) == .regular
+    }
+    func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {
+        guard let text = try? files.readFile(at: outputPath(skill: skill, projectPath: projectPath)) else { return false }
+        return text == "compiled bytes" || text == "repaired"
+    }
+    func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool {
+        guard let text = try? files.readFile(at: outputPath(skill: skill, projectPath: projectPath)) else { return false }
+        return text == "compiled bytes" || text == "repaired"
+    }
+
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool {
         (try? files.readFile(at: outputPath(skill: skill, projectPath: projectPath))) == "compiled bytes"
     }

@@ -98,12 +98,21 @@ final class DeployStateStore {
         }
     }
 
-    func remove(artifactPath: String) throws {
-        try withLock {
-            guard stateFileExists else { return }
+    @discardableResult
+    func remove(artifactPath: String) throws -> Bool {
+        try remove(artifactPaths: [artifactPath])
+    }
+
+    @discardableResult
+    func remove(artifactPaths: Set<String>) throws -> Bool {
+        guard !artifactPaths.isEmpty else { return false }
+        return try withLock {
+            guard stateFileExists else { return false }
             var state = try read()
-            state.records.removeAll { $0.artifactPath == artifactPath }
+            guard state.records.contains(where: { artifactPaths.contains($0.artifactPath) }) else { return false }
+            state.records.removeAll { artifactPaths.contains($0.artifactPath) }
             try write(state)
+            return true
         }
     }
 
@@ -150,12 +159,12 @@ private extension DeployStateStore {
             || fileService.isSymlink(at: statePath)
     }
 
-    func withLock(_ body: () throws -> Void) throws {
+    func withLock<T>(_ body: () throws -> T) throws -> T {
         guard let lock = SyncLock.acquire(at: lockPath) else {
             throw DeployStateError.unreadable(lockPath)
         }
         defer { lock.release() }
-        try body()
+        return try body()
     }
 
     func write(_ state: DeployState) throws {

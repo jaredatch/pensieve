@@ -13,16 +13,26 @@ private struct RecordedLink: Hashable {
 private final class RecordingLinkService: LinkServiceProtocol {
     var linkCalls: [RecordedLink] = []
     var unlinkCalls: [RecordedLink] = []
+    private var artifacts: Set<RecordedLink> = []
 
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
-        linkCalls.append(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
+        let artifact = RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath)
+        linkCalls.append(artifact)
+        artifacts.insert(artifact)
     }
 
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
-        unlinkCalls.append(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        let artifact = RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath)
+        unlinkCalls.append(artifact)
+        return artifacts.remove(artifact) != nil
+    }
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        artifacts.contains(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
     }
 
-    func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
+    func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
+        artifacts.contains(RecordedLink(directoryName: skill.directoryName, platform: platform, projectPath: projectPath))
+    }
 
     func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
         (projectPath ?? "/tmp/user-wide") + "/links/" + platform.rawValue + "/" + skill.directoryName

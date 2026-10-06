@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 @testable import Pensieve
 
@@ -18,6 +19,10 @@ struct ConvergenceRecordingDeploy: DeployReconciling {
 
 struct ConvergenceRecordingLedger: CategoryReconcilerProtocol,
     IntentReconcilerProtocol {
+    func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
+        reconcile(context: context)
+    }
+
     let name: String
     let recorder: ConvergenceRecorder
 

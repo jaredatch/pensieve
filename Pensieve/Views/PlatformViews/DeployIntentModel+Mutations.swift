@@ -251,7 +251,7 @@ private extension DeployIntentModel {
                 skills: skills, platforms: platforms, target: target, context: context
             )
         }
-        return platformVM.removeBatch(skills: skills, platforms: platforms, target: target)
+        return platformVM.removeSelection(skills: skills, platforms: platforms, target: target)
     }
 
     func presentFailures(_ result: BatchResult) {

@@ -5,6 +5,7 @@ import SwiftData
 protocol CategoryReconcilerProtocol {
     @discardableResult
     func reconcile(context: ModelContext) -> BatchResult
+    func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult
 }
 
 /// The heart of categories: diff the desired (skill, project, agent) triples declared by the
@@ -47,6 +48,14 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
 
     @discardableResult
     func reconcile(context: ModelContext) -> BatchResult {
+        reconcile(context: context, excludingProjectIDs: [])
+    }
+
+    func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
+        reconcile(context: context, excludingProjectIDs: preservingProjects.union([projectID]))
+    }
+
+    private func reconcile(context: ModelContext, excludingProjectIDs: Set<UUID>) -> BatchResult {
         var aggregate = BatchResult()
         let intentLedger: [IntentAssignment]
         do {
@@ -56,8 +65,8 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
         }
         let state = fetchState(context: context, intentLedger: intentLedger)
         let platforms = platformVM.deployablePlatforms(forProject: true)
-        let desired = desiredTriples(from: state, platforms: platforms)
-        let current = Set(state.ledger.map {
+        let desired = desiredTriples(from: state, platforms: platforms, excludingProjectIDs: excludingProjectIDs)
+        let current = Set(state.ledger.filter { !excludingProjectIDs.contains($0.projectID) }.map {
             Triple(skillID: $0.skillID, projectID: $0.projectID, platform: $0.platform)
         })
 
@@ -100,14 +109,14 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
         )
     }
 
-    private func desiredTriples(from state: State, platforms: [PlatformTarget]) -> Set<Triple> {
+    private func desiredTriples(from state: State, platforms: [PlatformTarget], excludingProjectIDs: Set<UUID>) -> Set<Triple> {
         var desired: Set<Triple> = []
         for category in state.categories {
             for slug in category.skillSlugs {
                 guard let skill = state.skillBySlug[slug] else { continue }
                 for key in category.projectKeys {
                     guard let members = state.projectsByKey[key] else { continue }
-                    for project in members {
+                    for project in members where !excludingProjectIDs.contains(project.id) {
                         for platform in platforms {
                             desired.insert(Triple(skillID: skill.id, projectID: project.id, platform: platform))
                         }
@@ -155,41 +164,35 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
         context: ModelContext,
         aggregate: inout BatchResult
     ) {
+        var removals: [UUID: (project: Project, pairs: [DeployRemovalPair])] = [:]
+        var retired: Set<Triple> = []
         for (pair, triples) in grouped(triplesToRemove) {
-            var groupPlatforms: Set<PlatformTarget> = []
-            for triple in triples {
+            for triple in triples.sorted(by: { $0.platform.rawValue < $1.platform.rawValue }) {
                 if state.intentTriples.contains(triple) {
-                    deleteLedgerRow(matching: triple, state: state, context: context)
+                    retired.insert(triple)
+                } else if let skill = state.skillByID[pair.skillID], let project = state.projectByID[pair.projectID] {
+                    removals[project.id, default: (project, [])].pairs.append(
+                        DeployRemovalPair(skill: skill, platform: triple.platform))
                 } else {
-                    groupPlatforms.insert(triple.platform)
-                }
-            }
-            guard !groupPlatforms.isEmpty else { continue }
-            if let skill = state.skillByID[pair.skillID], let project = state.projectByID[pair.projectID] {
-                let sortedPlatforms = groupPlatforms.sorted { $0.rawValue < $1.rawValue }
-                let result = platformVM.removeBatch(skills: [skill], platforms: sortedPlatforms, target: .project(project))
-                aggregate.outcomes.append(contentsOf: result.outcomes)
-                let succeeded = Set(result.outcomes.filter { $0.error == nil }.map(\.platform))
-                for row in state.ledger
-                    where row.skillID == pair.skillID
-                        && row.projectID == pair.projectID
-                        && succeeded.contains(row.platform) {
-                    context.delete(row)
-                }
-            } else {
-                for row in state.ledger
-                    where row.skillID == pair.skillID
-                        && row.projectID == pair.projectID
-                        && groupPlatforms.contains(row.platform) {
-                    context.delete(row)
+                    retired.insert(triple)
                 }
             }
         }
+        deleteLedgerRows(matching: retired, state: state, context: context)
+        for group in removals.values.sorted(by: { $0.project.id.uuidString < $1.project.id.uuidString }) {
+            let result = platformVM.removeOwnedBatch(pairs: group.pairs, target: .project(group.project))
+            aggregate.append(result)
+            let completed = Set(result.completedPairs.map {
+                Triple(skillID: $0.skillID, projectID: group.project.id, platform: $0.platform)
+            })
+            deleteLedgerRows(matching: completed, state: state, context: context)
+        }
     }
 
-    private func deleteLedgerRow(matching triple: Triple, state: State, context: ModelContext) {
-        for row in state.ledger where row.skillID == triple.skillID
-            && row.projectID == triple.projectID && row.platform == triple.platform {
+    private func deleteLedgerRows(matching triples: Set<Triple>, state: State, context: ModelContext) {
+        guard !triples.isEmpty else { return }
+        for row in state.ledger where triples.contains(Triple(
+            skillID: row.skillID, projectID: row.projectID, platform: row.platform)) {
             context.delete(row)
         }
     }

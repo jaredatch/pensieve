@@ -57,7 +57,7 @@ final class ProjectFolderThirdFixTests: XCTestCase {
         for path in relativePaths {
             h.project.path = path
             for platform in platforms {
-                XCTAssertFalse(vm.artifactExists(skill: h.skill, platform: platform, target: .project(h.project)))
+                XCTAssertFalse(try vm.artifactIsOwned(skill: h.skill, platform: platform, target: .project(h.project)))
             }
         }
         XCTAssertEqual(files.paths, [])
@@ -72,9 +72,9 @@ final class ProjectFolderThirdFixTests: XCTestCase {
         for path in relativePaths {
             h.project.path = path
             try h.deployState.replaceAll(platforms.map { record(h, platform: $0) })
-            let result = vm.removeBatch(skills: [h.skill], platforms: platforms,
+            let result = vm.removeOwnedBatch(pairs: DeployRemovalPair.expand(skills: [h.skill], platforms: platforms),
                                         target: .project(h.project))
-            XCTAssertEqual(result.successes.count, 4)
+            XCTAssertEqual(result.completedPairs.count, 4)
             XCTAssertFalse(result.hasFailures)
             XCTAssertEqual(try h.deployState.read().records, [], "Real legacy state paths must be retired")
         }
@@ -90,7 +90,7 @@ final class ProjectFolderThirdFixTests: XCTestCase {
         for path in relativePaths {
             h.project.path = path
             try h.deployState.replaceAll(platforms.filter(\.usesSymlinks).map { record(h, platform: $0) })
-            let result = vm.removeAllDeploys(skill: h.skill, projects: [h.project])
+            let result = vm.removeAllDeploys(skill: h.skill, projects: [h.project], localDeployHistory: { _ in [] }).batch
             XCTAssertEqual(result.successes.count, 3)
             XCTAssertFalse(result.hasFailures)
             XCTAssertEqual(try h.deployState.read().records, [])
@@ -145,9 +145,10 @@ final class ProjectFolderThirdFixTests: XCTestCase {
             let outcome = BatchPairOutcome(skillID: h.skill.id, skillName: h.skill.name, platform: .codex,
                 target: .project(h.project.id), error: message)
             var logs: [String] = []
-            let result = removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(),
+            let result = removeRegisteredProject(h.otherProject,
                 reconciler: ThirdFixReconciler(result: BatchResult(outcomes: [outcome])),
-                context: h.context, logFailure: { logs.append($0) })
+                platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
+            context: h.context, logFailure: { logs.append($0) })
             XCTAssertFalse(result.hasFailures)
             XCTAssertEqual(logs, [h.project.id.uuidString + ": " + message])
         }
@@ -179,6 +180,10 @@ final class ProjectFolderThirdFixTests: XCTestCase {
 }
 
 private struct ThirdFixReconciler: CategoryReconcilerProtocol {
+    func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
+        reconcile(context: context)
+    }
+
     let result: BatchResult
     func reconcile(context: ModelContext) -> BatchResult { result }
 }

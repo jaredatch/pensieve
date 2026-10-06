@@ -107,6 +107,7 @@ targets:
       - path: Pensieve/Services/FileService+ProjectFolder.swift
       - path: Pensieve/Services/ProjectFolderError.swift
       - path: Pensieve/Services/FileService+BoundedRead.swift
+      - path: Pensieve/Services/FileService+RuleHeader.swift
       - path: Pensieve/Services/FileService+DirectoryCopy.swift
       - path: Pensieve/Services/FileService+DirectoryProbe.swift
       - path: Pensieve/Services/RemoteURLPolicy.swift
@@ -128,6 +129,8 @@ targets:
       - path: Pensieve/Services/FileService+ProjectFolder.swift
       - path: Pensieve/Services/ProjectFolderError.swift
       - path: Pensieve/Services/FileService+BoundedRead.swift
+      - path: Pensieve/Services/FileService+RuleHeader.swift
+      - path: Pensieve/Services/DeployArtifactOwnership.swift
       - path: Pensieve/Services/FileService+DirectoryCopy.swift
       - path: Pensieve/Services/FileService+DirectoryProbe.swift
       - path: Pensieve/Services/GitService.swift

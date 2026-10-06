@@ -22,6 +22,10 @@ private struct ThrowingWriteFileService: FileServiceProtocol {
 
 /// Reconciler that always succeeds with an empty batch (project-remove path needs a clean reconcile).
 private struct NoopReconciler: CategoryReconcilerProtocol {
+    func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
+        reconcile(context: context)
+    }
+
     func reconcile(context: ModelContext) -> BatchResult { BatchResult() }
 }
 
@@ -217,10 +221,12 @@ final class ManifestMaintenanceTests: XCTestCase {
 
         _ = removeRegisteredProject(
             project,
-            categoryStore: CategoryStore(),
             reconciler: NoopReconciler(),
             manifestService: manifest,
             manifestRoot: tempDir,
+            platformVM: PlatformViewModel(fileService: fileService,
+                agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked),
+            localMachineID: ProjectIntentHarness.localID,
             context: context
         )
         XCTAssertEqual(try fileService.readFile(at: tempDir + "/manifest/projects.yaml"), "projects:\n")

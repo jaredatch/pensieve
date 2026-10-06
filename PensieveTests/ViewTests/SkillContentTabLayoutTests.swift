@@ -98,7 +98,9 @@ final class SkillContentTabLayoutTests: XCTestCase {
     private func assertSourceOverflowKeepsEditorUsable(selectedFile: String) async throws {
         let fixture = sourceFixture(selectedFile: selectedFile)
         defer { fixture.window.close() }
-        let editor = try await TestWait.waitForEditor(in: fixture.host)
+        let editor = try await TestWait.waitForEditor(
+            in: fixture.host, timeout: .seconds(TestWait.firstRenderTimeoutSeconds)
+        )
         let popUp = try XCTUnwrap(Self.controls(in: fixture.host).compactMap { $0 as? NSPopUpButton }.first)
         let columnScroller = try XCTUnwrap(Self.nearestScrollView(to: popUp))
 

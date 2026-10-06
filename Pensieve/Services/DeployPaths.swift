@@ -4,8 +4,28 @@ import Foundation
 /// `LinkService.linkPath`/`targetPath` so the GUI deploy path and the daemon's reconcile share one
 /// implementation. Takes a plain `directoryName` instead of a `@Model` `Skill`.
 enum DeployPaths {
-    static func cursorPath(directoryName: String, projectPath: String?) -> String {
-        let root = projectPath.map { $0 + "/.cursor/rules" } ?? PathConstants.cursorUserRulesDir
+    /// Invert only the exact builder layout, without resolving or normalizing recorded paths.
+    static func slug(artifactPath: String, platform: PlatformTarget, projectPath: String?,
+                     cursorUserRulesDirectory: String = PathConstants.cursorUserRulesDir) -> String? {
+        guard projectPath == nil || platform.supportsProjectScope else { return nil }
+        let sentinel = "pensieve-artifact-slug"
+        let template = platform == .cursor
+            ? cursorPath(directoryName: sentinel, projectPath: projectPath, userRulesDirectory: cursorUserRulesDirectory)
+            : linkPath(directoryName: sentinel, platform: platform, projectPath: projectPath)
+        guard let slot = template.range(of: sentinel, options: .backwards) else { return nil }
+        let prefix = Array(template[..<slot.lowerBound].utf8)
+        let suffix = Array(template[slot.upperBound...].utf8)
+        let path = Array(artifactPath.utf8)
+        guard path.starts(with: prefix), path.suffix(suffix.count).elementsEqual(suffix),
+              path.count > prefix.count + suffix.count else { return nil }
+        let leaf = path.dropFirst(prefix.count).dropLast(suffix.count)
+        guard !leaf.contains(UInt8(ascii: "/")) else { return nil }
+        return String(bytes: leaf, encoding: .utf8)
+    }
+
+    static func cursorPath(directoryName: String, projectPath: String?,
+                           userRulesDirectory: String = PathConstants.cursorUserRulesDir) -> String {
+        let root = projectPath.map { $0 + "/.cursor/rules" } ?? userRulesDirectory
         return root + "/" + directoryName + ".mdc"
     }
 

@@ -16,7 +16,9 @@ struct AppRuntimePaths {
         let outputRoot: String
 
         func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
-        func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
+        func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
+        func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
+
         func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
         func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
             outputRoot + "/" + platform.rawValue + "/" + skill.directoryName
@@ -31,7 +33,13 @@ struct AppRuntimePaths {
         let outputRoot: String
 
         func compile(skill: Skill, projectPath: String?) throws {}
-        func remove(skill: Skill, projectPath: String?) throws {}
+        func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
+        func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
+            return false
+        }
+        func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { false }
+        func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { false }
+
         func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
         func outputPath(skill: Skill, projectPath: String?) -> String {
             outputRoot + "/" + skill.directoryName + ".mdc"

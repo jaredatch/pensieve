@@ -18,6 +18,38 @@ struct DeployIntentStateStub: MachineStateServicing {
 
 @MainActor
 extension DeployIntentModelTests {
+    func testPerformRemoveProjectRoutesToBatch() throws {
+        let harness = try makeHarness()
+        let skill = try insertSkill(context: harness.context)
+        let project = Project(name: "Project", path: "/tmp/project")
+        harness.context.insert(project)
+        harness.linkService.fileService.directories.insert(project.path)
+        try harness.linkService.link(skill: skill, platform: .codex, projectPath: project.path)
+        harness.context.insert(MachineDeployIntent(
+            machineID: remoteID, skillSlug: skill.directoryName, platformRaw: PlatformTarget.codex.rawValue
+        ))
+        try harness.context.save()
+
+        let outcome = try BulkDeploySheet.perform(
+            .remove, forProject: true, platformVM: harness.platformVM, intentModel: harness.model,
+            skills: [skill], platforms: [.codex], target: .project(project),
+            machineIDs: [remoteID], context: harness.context
+        )
+
+        guard case let .localDeploy(batch) = outcome else { return XCTFail("expected project batch removal") }
+        XCTAssertEqual(batch.successes.count, 1)
+        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 1)
+        XCTAssertEqual(harness.linkService.unlinkCalls.map(\.projectPath), [project.path])
+        let noOp = try BulkDeploySheet.perform(
+            .remove, forProject: true, platformVM: harness.platformVM, intentModel: harness.model,
+            skills: [skill], platforms: [.codex], target: .project(project),
+            machineIDs: [remoteID], context: harness.context
+        )
+        guard case let .localDeploy(empty) = noOp else { return XCTFail("expected project batch removal") }
+        XCTAssertTrue(empty.outcomes.isEmpty)
+        XCTAssertEqual(harness.linkService.unlinkCalls.count, 1)
+    }
+
     func testSheetReadFailureDoesNotDeleteAnyMachineIntent() throws {
         let harness = try makeHarness(fetchIntents: { _ in throw DeployStubFailure() })
         let skill = try insertSkill(context: harness.context)
@@ -110,7 +142,7 @@ extension DeployIntentModelTests {
         )
 
         XCTAssertTrue(result.failures.isEmpty)
-        XCTAssertFalse(harness.platformVM.artifactExists(skill: alpha, platform: .codex))
+        XCTAssertFalse(try harness.platformVM.artifactIsOwned(skill: alpha, platform: .codex))
         XCTAssertEqual(harness.linkService.unlinkCalls.map(\.directoryName), ["alpha"])
         XCTAssertNil(harness.model.error)
     }
@@ -136,7 +168,7 @@ extension DeployIntentModelTests {
         )
 
         XCTAssertTrue(result.failures.isEmpty)
-        XCTAssertFalse(harness.platformVM.artifactExists(skill: skill, platform: .codex))
+        XCTAssertFalse(try harness.platformVM.artifactIsOwned(skill: skill, platform: .codex))
         XCTAssertNil(harness.model.error)
     }
 
@@ -169,7 +201,7 @@ extension DeployIntentModelTests {
         _ = try harness.model.set(
             false, skill: alpha, platform: .codex, target: .userWide, context: harness.context
         )
-        XCTAssertFalse(harness.platformVM.artifactExists(skill: alpha, platform: .codex))
+        XCTAssertFalse(try harness.platformVM.artifactIsOwned(skill: alpha, platform: .codex))
         XCTAssertNil(harness.model.error)
     }
 
@@ -265,7 +297,7 @@ extension DeployIntentModelTests {
         try failedOn.context.save()
         XCTAssertEqual(try failedOn.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
         XCTAssertFalse(failedOn.manifestFileService.fileExists(at: onPath))
-        XCTAssertFalse(failedOn.platformVM.artifactExists(skill: onSkill, platform: .codex))
+        XCTAssertFalse(try failedOn.platformVM.artifactIsOwned(skill: onSkill, platform: .codex))
 
         var offSaveAttempts = 0
         let failedOff = try makeHarness(saveContext: { context in

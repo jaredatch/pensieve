@@ -95,15 +95,17 @@ final class ProjectFolderCallerTests: XCTestCase {
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 1)
-        let removed = harness.platformVM.removeBatch(
-            skills: [harness.skill], platforms: [.claudeCode, .grok, .codex, .cursor], target: .project(harness.project)
+        let removed = harness.platformVM.removeOwnedBatch(
+            pairs: DeployRemovalPair.expand(skills: [harness.skill], platforms: [.claudeCode, .grok, .codex, .cursor]),
+            target: .project(harness.project)
         )
-        XCTAssertEqual(removed.successes.count, 4)
+        XCTAssertEqual(removed.completedPairs.count, 4)
         let unregister = removeRegisteredProject(
             harness.project,
-            categoryStore: CategoryStore(manifestService: ManifestService(fileService: harness.files),
-                                         manifestRoot: harness.root + "/store"),
-            reconciler: harness.category, context: harness.context
+            reconciler: harness.category, manifestService: ManifestService(fileService: harness.files),
+            manifestRoot: harness.root + "/store", platformVM: harness.platformVM,
+            localMachineID: ProjectIntentHarness.localID,
+            context: harness.context
         )
         XCTAssertFalse(unregister.hasFailures)
         XCTAssertEqual(try harness.context.fetch(FetchDescriptor<Project>()).map(\.id), [harness.otherProject.id])

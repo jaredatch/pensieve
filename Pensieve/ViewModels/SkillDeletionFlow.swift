@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 
 enum SkillDeletionFlow {
@@ -15,7 +16,10 @@ enum SkillDeletionFlow {
             return false
         }
 
-        let cleanup = platformVM.removeAllDeploys(skill: skill, projects: projects)
+        let cleanupResult = platformVM.removeAllDeploys(skill: skill, projects: projects, localDeployHistory: { paths in
+            try localCursorDeployPaths(skill: skill, paths: paths, context: context)
+        })
+        let cleanup = cleanupResult.batch
         if cleanup.hasFailures {
             var messages = cleanup.readFailures.map(\.message)
             if !cleanup.failures.isEmpty {
@@ -23,12 +27,11 @@ enum SkillDeletionFlow {
                     .map { "\($0.platform.displayName): \($0.error ?? "unknown error")" }
                     .joined(separator: "; ")
                 messages.insert(
-                    "Couldn't finish cleaning up “\(skill.name)” on \(cleanup.failures.count) agent link(s) — "
-                        + "\(details).",
+                    "Couldn't remove agent links and rules for “\(skill.name)”: \(details).",
                     at: 0
                 )
             }
-            messages.append("Links already removed stay removed; the skill was kept so you can retry.")
+            messages.append(retainedSkillMessage(didChangeDeploys: cleanupResult.didChangeDeploys))
             library.deletionNotice = .failed(messages.joined(separator: " "))
             return false
         }
@@ -39,8 +42,8 @@ enum SkillDeletionFlow {
         } catch {
             context.rollback()
             library.deletionNotice = .failed(
-                "Unlinked “\(skill.name)” from your agents, but couldn't retire its deploy records: "
-                    + "\(error.localizedDescription). The skill was kept so you can retry.")
+                "Couldn't retire deploy records for “\(skill.name)”: \(error.localizedDescription). "
+                    + retainedSkillMessage(didChangeDeploys: cleanupResult.didChangeDeploys))
             return false
         }
 
@@ -54,6 +57,25 @@ enum SkillDeletionFlow {
         }
 
         return present(outcome, skill: skill, manifestNote: manifestNote, library: library)
+    }
+
+    private static func retainedSkillMessage(didChangeDeploys: Bool) -> String {
+        didChangeDeploys
+            ? "Agent links and rules already removed stay removed; the skill was kept so you can retry."
+            : "The skill was kept so you can retry."
+    }
+
+    private static func localCursorDeployPaths(
+        skill: Skill, paths: Set<String>, context: ModelContext
+    ) throws -> Set<String> {
+        let paths = Array(paths)
+        let skillID = skill.id
+        let predicate = #Predicate<DeployRecord> {
+            $0.skillID == skillID && $0.projectID != nil && paths.contains($0.targetPath)
+        }
+        // SwiftData cannot compare captured Codable enums; the predicate bounds Cursor paths first.
+        return Set(try context.fetch(FetchDescriptor(predicate: predicate))
+            .filter { $0.platform == .cursor }.map(\.targetPath))
     }
 
     private static func retire(skill: Skill, context: ModelContext) throws {

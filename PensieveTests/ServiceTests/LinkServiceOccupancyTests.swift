@@ -146,7 +146,12 @@ extension LinkServiceTests {
     }
 
     func testLinkReplacesRetargetedSymlink() throws {
-        try assertLinkReplacesSymlink(state: .retargetedDirectorySymlink)
+        let context = scriptedService(state: .retargetedDirectorySymlink)
+        XCTAssertThrowsError(try context.service.link(
+            skill: makeSkill(), platform: .claudeCode, projectPath: context.projectPath)) { error in
+            guard case ArtifactOwnershipError.occupiedPath = error else { return XCTFail("Expected ownership error: \(error)") }
+        }
+        XCTAssertFalse(context.fileService.createSymlinkCalled)
     }
 
     func testLinkReplacesBrokenSymlink() throws {
@@ -168,7 +173,6 @@ extension LinkServiceTests {
     func testUnlinkRemovesCorrectRetargetedAndBrokenSymlinks() {
         for state in [
             LinkServiceScriptedPathState.validDirectorySymlink,
-            .retargetedDirectorySymlink,
             .brokenSymlink
         ] {
             let context = scriptedService(state: state)
@@ -176,5 +180,9 @@ extension LinkServiceTests {
                 skill: makeSkill(), platform: .claudeCode, projectPath: context.projectPath))
             XCTAssertTrue(context.fileService.deleteFileCalled)
         }
+        let context = scriptedService(state: .retargetedDirectorySymlink)
+        XCTAssertNoThrow(try context.service.unlink(
+            skill: makeSkill(), platform: .claudeCode, projectPath: context.projectPath))
+        XCTAssertFalse(context.fileService.deleteFileCalled)
     }
 }

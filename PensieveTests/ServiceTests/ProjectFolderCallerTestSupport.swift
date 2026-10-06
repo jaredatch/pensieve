@@ -19,7 +19,8 @@ struct ProjectFolderCallerHarness {
     let project: Project
     let otherProject: Project
 
-    init(installed: [PlatformTarget] = [.claudeCode, .grok, .codex, .cursor], files: FileService = FileService()) throws {
+    init(installed: [PlatformTarget] = [.claudeCode, .grok, .codex, .cursor], files: FileService = FileService(),
+         persistent: Bool = false) throws {
         self.files = files
         root = TestTemporaryDirectory.path + "ProjectFolderCallers-\(UUID().uuidString)"
         let store = SkillStore(fileService: files, baseDir: root + "/store/skills")
@@ -30,7 +31,8 @@ struct ProjectFolderCallerHarness {
             physicalSandbox: root
         )
         context = ModelContext(try AppRuntime.makeContainer(
-            configuration: ModelConfiguration(isStoredInMemoryOnly: true)
+            configuration: persistent ? ModelConfiguration(url: URL(fileURLWithPath: root + "/removal.sqlite"))
+                : ModelConfiguration(isStoredInMemoryOnly: true)
         ))
         deployState = DeployStateStore(fileService: mapped, appSupportDir: root + "/support")
         platformVM = PlatformViewModel(

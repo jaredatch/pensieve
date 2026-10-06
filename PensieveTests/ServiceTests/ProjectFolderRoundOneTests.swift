@@ -9,22 +9,28 @@ final class ProjectFolderRoundOneTests: XCTestCase {
         let h = try ProjectFolderCallerHarness(installed: [.codex])
         defer { h.cleanup() }
         try h.files.createDirectory(at: h.project.path)
-        h.otherProject.identityKey = h.project.identityKey
-        _ = try h.addCategory()
+        let category = try h.addCategory()
+        category.projectKeys.append(h.otherProject.identityKey!)
         let links = SiblingFailureLinkService(files: h.mapped)
         let vm = PlatformViewModel(fileService: h.mapped, linkService: links,
             agentDetection: DeployStubDetection(installed: [.codex]), deployStateStore: h.deployState)
         let reconciler = CategoryReconciler(platformVM: vm)
         XCTAssertEqual(reconciler.reconcile(context: h.context).successes.count, 2)
+        // The other project already has a pending category unlink; removal must log its failure.
+        category.projectKeys.removeAll { $0 == h.project.identityKey }
+        try h.context.save()
         links.failedPath = h.project.path
         var logs: [String] = []
-        var alert: String?
-        let result = ProjectListView.removeProject(h.otherProject, removalError: &alert) {
+        let model = ProjectRemovalModel()
+        model.request(h.otherProject, platformVM: vm, context: h.context)
+        let result = model.confirm { _, plan in
             removeRegisteredProject(h.otherProject,
-                categoryStore: CategoryStore(manifestService: ManifestService(fileService: h.files),
-                    manifestRoot: h.root + "/store"),
-                reconciler: reconciler, context: h.context, logFailure: { logs.append($0) })
+                reconciler: reconciler, manifestService: ManifestService(fileService: h.files),
+                    manifestRoot: h.root + "/store", platformVM: vm, localMachineID: ProjectIntentHarness.localID,
+                    confirmedPreview: plan,
+            context: h.context, logFailure: { logs.append($0) })
         }
+        let alert = model.error
         XCTAssertNil(alert)
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(logs.count, 1, "A sibling failure must leave a log trace")
@@ -48,7 +54,7 @@ final class ProjectFolderRoundOneTests: XCTestCase {
         XCTAssertEqual(paths, [])
     }
 
-    func testForeignArtifactsAreNotRealizedAndConvergenceHealsLinksOrReportsOccupied() throws {
+    func testForeignArtifactsAreNotRealizedAndConvergenceReportsOccupied() throws {
         for categoryOwned in [false, true] {
             for platform in [PlatformTarget.claudeCode, .grok, .codex] {
                 for occupant in ["file", "directory", "foreign-link"] {
@@ -60,7 +66,8 @@ final class ProjectFolderRoundOneTests: XCTestCase {
                         categoryOwned ? h.category.reconcile(context: h.context) : h.intent.reconcile(context: h.context)
                     }
                     XCTAssertEqual(run().successes.count, 1)
-                    XCTAssertTrue(h.platformVM.artifactExists(skill: h.skill, platform: platform, target: .project(h.project)))
+                    XCTAssertTrue(try h.platformVM.artifactIsOwned(
+                        skill: h.skill, platform: platform, target: .project(h.project)))
                     let path = h.artifact(platform)
                     try h.files.deleteFile(at: path)
                     switch occupant {
@@ -70,24 +77,14 @@ final class ProjectFolderRoundOneTests: XCTestCase {
                     }
                     XCTAssertFalse(h.platformVM.isDeployed(skill: h.skill, platform: platform, target: .project(h.project)),
                                    "\(platform) / \(occupant) is not a link to the store")
-                    XCTAssertEqual(h.platformVM.artifactExists(
-                        skill: h.skill, platform: platform, target: .project(h.project)), occupant != "directory",
-                        "Removal preserves master's file/link presence check")
+                    XCTAssertFalse(try h.platformVM.artifactIsOwned(
+                        skill: h.skill, platform: platform, target: .project(h.project)))
                     let result = run()
+                    XCTAssertEqual(result.failureCount, 1, "Convergence must report the occupant")
+                    XCTAssertTrue(result.failures.first?.error?.contains("already exists") == true)
+                    XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<DeployRecord>()), 1)
                     if occupant == "foreign-link" {
-                        XCTAssertFalse(result.hasFailures, "Convergence heals the foreign link")
-                        XCTAssertEqual(result.successes.count, 1)
-                        let expected = LinkService(fileService: h.mapped).targetPath(
-                            skill: h.skill, platform: platform, projectPath: h.project.path)
-                        XCTAssertEqual(try h.mapped.symlinkTarget(at: path), expected)
-                        XCTAssertTrue(h.platformVM.artifactExists(
-                            skill: h.skill, platform: platform, target: .project(h.project)))
-                        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<DeployRecord>()), 2)
-                        XCTAssertTrue(run().outcomes.isEmpty, "The healed pair converges without another deploy")
-                    } else {
-                        XCTAssertEqual(result.failureCount, 1, "Convergence must report the occupant")
-                        XCTAssertTrue(result.failures.first?.error?.contains("already exists") == true)
-                        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<DeployRecord>()), 1)
+                        XCTAssertEqual(try h.files.symlinkTarget(at: path), h.otherProject.path)
                     }
                     let rows = categoryOwned
                         ? try h.context.fetchCount(FetchDescriptor<SkillProjectAssignment>())
@@ -100,7 +97,7 @@ final class ProjectFolderRoundOneTests: XCTestCase {
         }
     }
 
-    func testCursorExistingFileStillCountsAsRealized() throws {
+    func testCursorForeignFileFailsConvergence() throws {
         let h = try ProjectFolderCallerHarness(installed: [.cursor])
         defer { h.cleanup() }
         try h.files.createDirectory(at: h.project.path)
@@ -110,8 +107,8 @@ final class ProjectFolderRoundOneTests: XCTestCase {
             baseDir: h.root + "/store/skills"))
         let path = compiler.outputPath(skill: h.skill, projectPath: h.project.path)
         try h.files.writeFile(at: path, content: "Edited Cursor rule")
-        XCTAssertTrue(h.platformVM.artifactExists(skill: h.skill, platform: .cursor, target: .project(h.project)))
-        XCTAssertTrue(h.intent.reconcile(context: h.context).outcomes.isEmpty)
+        XCTAssertFalse(try h.platformVM.artifactIsOwned(skill: h.skill, platform: .cursor, target: .project(h.project)))
+        XCTAssertEqual(h.intent.reconcile(context: h.context).failureCount, 1)
         XCTAssertEqual(try h.files.readFile(at: path), "Edited Cursor rule")
     }
 }
@@ -123,10 +120,14 @@ private final class SiblingFailureLinkService: LinkServiceProtocol {
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
         try wrapped.link(skill: skill, platform: platform, projectPath: projectPath)
     }
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
         if projectPath == failedPath { throw SiblingUnlinkError() }
-        try wrapped.unlink(skill: skill, platform: platform, projectPath: projectPath)
+        return try wrapped.unlink(skill: skill, platform: platform, projectPath: projectPath)
     }
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        try wrapped.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
+    }
+
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
         wrapped.isLinked(skill: skill, platform: platform, projectPath: projectPath)
     }

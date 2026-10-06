@@ -13,10 +13,12 @@ struct BrokenLink: Equatable {
 protocol LinkServiceProtocol {
     /// Create symlink: platform path → ~/.pensieve/skills/{name}/
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws
-    /// Remove symlink
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws
+    /// Remove an owned link; true only after deleting it from disk.
+    @discardableResult
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool
     /// Check if symlink exists and points to correct target
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool
     /// Get the link path for a skill on a platform
     func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String
     /// Get the target path that the symlink should point to
@@ -29,9 +31,11 @@ protocol LinkServiceProtocol {
 
 final class LinkService: LinkServiceProtocol {
     private let fileService: FileServiceProtocol
+    private let ownership: DeployArtifactOwnershipChecking
 
     init(fileService: FileServiceProtocol) {
         self.fileService = fileService
+        self.ownership = DeployArtifactOwnership(fileService: fileService)
     }
 
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
@@ -60,10 +64,11 @@ final class LinkService: LinkServiceProtocol {
             throw LinkError.targetDoesNotExist(target)
         }
 
-        if !fileService.isSymlink(at: link),
-           fileService.fileExists(at: link) || fileService.directoryExists(at: link) {
-            throw LinkError.occupiedByRealPath(link)
-        }
+        let occupant = try ownership.link(
+            at: link, skillsDirectory: Constants.pensieveSkillsDir, linksFile: platform == .codex && projectPath != nil
+        )
+        if occupant == .foreignLink { throw ArtifactOwnershipError.occupiedPath(link) }
+        if occupant == .foreign { throw LinkError.occupiedByRealPath(link) }
 
         do {
             if let projectDirectory {
@@ -76,8 +81,9 @@ final class LinkService: LinkServiceProtocol {
         }
     }
 
-    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
-        guard projectPath == nil || platform.supportsProjectScope else { return }
+    @discardableResult
+    func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        guard projectPath == nil || platform.supportsProjectScope else { return false }
         // Path-component safety invariant at the remove boundary too (mirrors link()):
         // a malicious directoryName must not let a delete escape the intended deploy root.
         try Self.validatePathComponent(skill.directoryName)
@@ -85,10 +91,21 @@ final class LinkService: LinkServiceProtocol {
             try Self.validatePathComponent(Constants.hermesDefaultCategory)
         }
 
-        guard ProjectDirectory.canAccess(projectPath) else { return }
+        guard ProjectDirectory.canAccess(projectPath) else { return false }
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
-        guard platform.usesSymlinks, fileService.isSymlink(at: link) else { return }
+        guard try ownsArtifact(skill: skill, platform: platform, projectPath: projectPath) else { return false }
         try fileService.deleteFile(at: link)
+        return true
+    }
+
+    func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
+        guard platform.usesSymlinks, projectPath == nil || platform.supportsProjectScope,
+              ProjectDirectory.canAccess(projectPath) else { return false }
+        try Self.validatePathComponent(skill.directoryName)
+        return try ownership.link(
+            at: linkPath(skill: skill, platform: platform, projectPath: projectPath),
+            skillsDirectory: Constants.pensieveSkillsDir, linksFile: platform == .codex && projectPath != nil
+        ) == .owned
     }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {

@@ -30,7 +30,9 @@ final class DeployStateRecordingTests: XCTestCase {
         init(root: String) { self.root = root }
 
         func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
-        func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
+        func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
+        func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
+
         func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
         func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
             (projectPath ?? root + "/user") + "/links/" + platform.rawValue + "/" + skill.directoryName
@@ -44,7 +46,13 @@ final class DeployStateRecordingTests: XCTestCase {
     private struct RecordingCursorCompiler: CursorCompilerProtocol {
         let root: String
         func compile(skill: Skill, projectPath: String?) throws {}
-        func remove(skill: Skill, projectPath: String?) throws {}
+        func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
+        func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
+            return false
+        }
+        func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { false }
+        func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool { false }
+
         func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
         func outputPath(skill: Skill, projectPath: String?) -> String {
             (projectPath ?? root + "/user") + "/cursor/" + skill.directoryName + ".mdc"

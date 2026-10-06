@@ -28,10 +28,7 @@ protocol CategoryStoreProtocol {
                   notifier: SyncStateNotifying) -> BatchResult
     func categories(containingProjectKey key: String, context: ModelContext) -> [Category]
     func categories(containingSkillSlug slug: String, context: ModelContext) -> [Category]
-    @discardableResult
-    func reconcileAfterRemovingProject(_ project: Project,
-                                       reconciler: CategoryReconcilerProtocol, context: ModelContext,
-                                       notifier: SyncStateNotifying) -> BatchResult
+
 }
 
 extension CategoryStoreProtocol {
@@ -65,10 +62,7 @@ extension CategoryStoreProtocol {
         setSkill(skill, inCategory: category, assigned: assigned, reconciler: reconciler,
                  context: context, notifier: notifier)
     }
-    func reconcileAfterRemovingProject(_ project: Project, reconciler: CategoryReconcilerProtocol,
-                                       context: ModelContext) -> BatchResult {
-        reconcileAfterRemovingProject(project, reconciler: reconciler, context: context, notifier: notifier)
-    }
+
 }
 
 // MARK: - Implementation
@@ -186,24 +180,6 @@ struct CategoryStore: CategoryStoreProtocol {
     func categories(containingSkillSlug slug: String, context: ModelContext) -> [Category] {
         let categories = (try? context.fetch(FetchDescriptor<Category>())) ?? []
         return categories.filter { $0.skillSlugs.contains(slug) }
-    }
-
-    /// Prune a project from EVERY category it belongs to, then reconcile ONCE while the project is still a
-    /// live record (so its category-managed tuples become `toRemove` and the unlinks fire). Does NOT delete
-    /// the Project record — the caller deletes it only on a clean reconcile (§C). Returns the reconcile result. (PLAN-06 / 06.3)
-    @discardableResult
-    func reconcileAfterRemovingProject(_ project: Project,
-                                       reconciler: CategoryReconcilerProtocol, context: ModelContext,
-                                       notifier: SyncStateNotifying) -> BatchResult {
-        if let key = project.identityKey {
-            for category in categories(containingProjectKey: key, context: context) {
-                setProject(project, inCategory: category, member: false, context: context,
-                           notifier: SyncStateNotifier.suppressed)
-            }
-        }
-        let result = reconciler.reconcile(context: context)
-        notifier()
-        return result
     }
 
     /// Best-effort manifest regeneration after a category mutation. No-op without a wired service
