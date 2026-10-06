@@ -13,17 +13,14 @@ extension UpdatesViewModel {
             let loaded = try await task.value
             guard operationID == id, !Task.isCancelled else { return }
             let available = Set(loaded.map(\.id))
-            let selection = loadPhase.hasLoadedRows ? selectedSkillIDs : initialSelection ?? available
-            selectedSkillIDs = selection.intersection(available)
-            initialSelection = nil
+            selectedSkillIDs = initialSelection.map { $0.intersection(available) } ?? available
             rows = loaded
             loadPhase = .loaded
             confirmedDriftSkillIDs.formIntersection(Set(loaded.map(\.id)))
             statuses = Dictionary(uniqueKeysWithValues: loaded.map { ($0.id, .idle) })
         } catch {
             guard operationID == id, !Task.isCancelled else { return }
-            let message = Self.readable(error)
-            loadPhase = loadPhase.hasLoadedRows ? .reloadFailed(message) : .failed(message)
+            loadPhase = .failed(Self.readable(error))
         }
         finishOperation(id)
     }

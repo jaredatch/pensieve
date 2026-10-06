@@ -33,17 +33,9 @@ extension UpdateReviewRoutingTests {
         XCTAssertTrue(calls.values.isEmpty, "The window press must never run apply")
         XCTAssertNotNil(preview.selectedFile, "The window stays open after handing off")
 
-        await assertPendingHandoffs(fixture, routing, first: first, second: second.id, calls: calls)
-
-        sheet.reset()
-        routing.banner(for: first).onUpdate()
-        sheet.load(context: fixture.context)
-        XCTAssertTrue(sheet.isLoading)
-        routing.window.onUpdate()
-        await TestWait.until(failureMessage: "loading hand-off did not finish") { !sheet.isLoading }
-        XCTAssertEqual(sheet.selectedSkillIDs, [first.id, second.id],
-                       "A hand-off during loading must join the pending initial selection")
-        XCTAssertTrue(calls.values.isEmpty, "Loading hand-offs never apply")
+        await assertUnloadedHandoffsOnlyForward(fixture, routing, first: first, second: second.id, calls: calls,
+                                              forwards: { opened.filter { $0 == "main" }.count })
+        await assertReloadUsesPresentationSelection(routing, first: first, second: second.id, calls: calls)
 
         sheet.selectedSkillIDs = [first.id]
         routing.window.onUpdate()
@@ -60,35 +52,53 @@ extension UpdateReviewRoutingTests {
                                    calls: calls, sync: (started, release), forwards: { opened.filter { $0 == "main" }.count })
     }
 
-    private func assertPendingHandoffs(
+    private func assertUnloadedHandoffsOnlyForward(
         _ fixture: UpdateReviewFixture, _ routing: UpdateReviewRouting,
-        first: Skill, second: UUID, calls: UpdateReviewRecorder<UUID>
+        first: Skill, second: UUID, calls: UpdateReviewRecorder<UUID>, forwards: () -> Int
     ) async {
         let sheet = routing.updates
         sheet.reset()
         routing.banner(for: first).onUpdate()
-        XCTAssertTrue(sheet.isPresented)
-        XCTAssertFalse(sheet.isLoading)
-        XCTAssertTrue(sheet.rows.isEmpty)
+        let before = forwards()
         routing.window.onUpdate()
+        XCTAssertEqual(forwards(), before + 1, "An idle open sheet only comes forward")
         await sheet.loadAndReport(context: routing.context)
-        XCTAssertEqual(sheet.selectedSkillIDs, [first.id, second],
-                       "A hand-off before loading starts must join the pending initial selection")
-        XCTAssertTrue(calls.values.isEmpty, "Pre-load hand-offs never apply")
-        await assertLoadErrorHandoff(fixture: fixture, rows: sheet.rows, preview: routing.preview,
-                                    initialSkillID: first.id, windowSkillID: second)
-        await assertLoadedHandoffSurvivesReload(routing, first: first, second: second, calls: calls)
+        XCTAssertEqual(sheet.selectedSkillIDs, [first.id], "An idle open hand-off must not queue selection")
+        let rows = sheet.rows
+        for reload in [false, true] {
+            sheet.reset()
+            routing.banner(for: first).onUpdate()
+            if reload { await sheet.loadAndReport(context: routing.context) }
+            let selection = sheet.selectedSkillIDs
+            let seed = sheet.initialSelection
+            sheet.load(context: routing.context)
+            let load = sheet.operationTask
+            let operation = sheet.operationID
+            XCTAssertTrue(sheet.isLoading)
+            let before = forwards()
+            routing.window.onUpdate()
+            XCTAssertEqual(forwards(), before + 1, "A loading sheet only comes forward")
+            XCTAssertEqual(sheet.selectedSkillIDs, selection, "A loading hand-off must not change selection")
+            XCTAssertEqual(sheet.initialSelection, seed, "A loading hand-off must not queue selection")
+            XCTAssertEqual(sheet.operationID, operation, "A hand-off cannot replace a loading operation")
+            if let load { await TestWait.forTask(load, failureMessage: "hand-off sheet load did not finish") }
+            XCTAssertEqual(sheet.selectedSkillIDs, [first.id], "A loading hand-off must not change the next load's selection")
+            XCTAssertNotNil(routing.preview.selectedFile, "The preview stays open while the sheet loads")
+            await assertLoadErrorHandoff(fixture: fixture, rows: rows, preview: routing.preview,
+                                        initialSkillID: first.id, windowSkillID: second, reload: reload)
+        }
+        XCTAssertTrue(calls.values.isEmpty, "Unloaded hand-offs never apply")
     }
 
     private func assertLoadErrorHandoff(
         fixture: UpdateReviewFixture, rows: [UpdatesRow], preview: ViewChangesViewModel,
-        initialSkillID: UUID, windowSkillID: UUID
+        initialSkillID: UUID, windowSkillID: UUID, reload: Bool
     ) async {
         let loads = UpdateReviewRecorder<Bool>()
         let applies = UpdateReviewRecorder<UUID>()
         let sheet = UpdatesViewModel(rowLoader: { _ in
             loads.append(true)
-            if loads.values.count == 1 { throw SkillUpdateFlowError.repositoryChanged }
+            if loads.values.count == (reload ? 2 : 1) { throw SkillUpdateFlowError.repositoryChanged }
             return rows
         }, applyOperation: { id, _, _, _, _, _ in
             applies.append(id)
@@ -97,54 +107,47 @@ extension UpdateReviewRoutingTests {
         var forwards = 0
         let routing = UpdateReviewRouting(preview: preview, updates: sheet, library: fixture.library,
                                          context: fixture.context, windows: { [] }, openWindow: { _ in forwards += 1 })
-        XCTAssertNotEqual(initialSkillID, windowSkillID, "The hand-off must add a different skill")
+        XCTAssertNotEqual(initialSkillID, windowSkillID, "The hand-off targets a different skill")
         XCTAssertEqual(preview.requestedSkillID, windowSkillID)
         routing.presentUpdates(skillID: initialSkillID)
+        if reload { await sheet.loadAndReport(context: fixture.context) }
         await sheet.loadAndReport(context: fixture.context)
-        XCTAssertNotNil(sheet.loadError, "The first real sheet load must fail")
-        XCTAssertFalse(sheet.isLoading)
+        let error = sheet.loadError
+        XCTAssertNotNil(error, "The real sheet load must fail")
+        let selection = sheet.selectedSkillIDs
+        let seed = sheet.initialSelection
         let before = forwards
         routing.window.onUpdate()
-        XCTAssertEqual(forwards, before + 1, "A failed sheet is still brought forward")
+        XCTAssertEqual(forwards, before + 1, "A load-error sheet only comes forward")
+        XCTAssertEqual(sheet.selectedSkillIDs, selection, "A load-error hand-off must not change selection")
+        XCTAssertEqual(sheet.initialSelection, seed, "A load-error hand-off must not queue selection")
+        XCTAssertEqual(sheet.loadError, error, "A hand-off leaves the load error visible")
         sheet.load(context: fixture.context) // The production Retry action.
-        await TestWait.until(failureMessage: "hand-off Retry did not load rows") { !sheet.isLoading }
+        if let load = sheet.operationTask { await TestWait.forTask(load, failureMessage: "hand-off Retry did not finish") }
         XCTAssertNil(sheet.loadError)
-        XCTAssertEqual(sheet.selectedSkillIDs, [initialSkillID, windowSkillID],
-                       "A hand-off after a load error must remain selected when Retry loads rows")
+        XCTAssertEqual(sheet.selectedSkillIDs, [initialSkillID], "Retry uses the original presentation selection")
         XCTAssertTrue(applies.values.isEmpty, "A load-error hand-off and Retry never apply")
+        XCTAssertNotNil(preview.selectedFile)
     }
 
-    private func assertLoadedHandoffSurvivesReload(
+    private func assertReloadUsesPresentationSelection(
         _ routing: UpdateReviewRouting, first: Skill, second: UUID, calls: UpdateReviewRecorder<UUID>
     ) async {
         let sheet = routing.updates
         sheet.reset()
         routing.banner(for: first).onUpdate()
         await sheet.loadAndReport(context: routing.context)
-        XCTAssertEqual(sheet.selectedSkillIDs, [first.id])
         routing.window.onUpdate()
-        XCTAssertEqual(sheet.selectedSkillIDs, [first.id, second])
+        XCTAssertEqual(sheet.selectedSkillIDs, [first.id, second], "A loaded hand-off adds its row")
         await sheet.loadAndReport(context: routing.context)
-        XCTAssertEqual(sheet.selectedSkillIDs, [first.id, second],
-                       "An accepted loaded hand-off must survive a reload of the same sheet session")
-        XCTAssertTrue(calls.values.isEmpty, "A hand-off and reload never apply")
-        guard let secondRow = sheet.rows.first(where: { $0.id == second }) else {
-            XCTFail("The handed-off skill must have a row")
-            return
-        }
-        sheet.toggleSelection(secondRow)
-        await sheet.loadAndReport(context: routing.context)
-        XCTAssertEqual(sheet.selectedSkillIDs, [first.id],
-                       "A handed-off row later unchecked must stay unchecked after reload")
-
+        XCTAssertEqual(sheet.selectedSkillIDs, [first.id], "Reload uses the original presentation selection")
         sheet.reset()
-        routing.banner(for: first).onUpdate()
+        routing.presentUpdates()
         await sheet.loadAndReport(context: routing.context)
-        sheet.toggleSelection(secondRow)
+        sheet.selectedSkillIDs = [first.id]
         await sheet.loadAndReport(context: routing.context)
-        XCTAssertEqual(sheet.selectedSkillIDs, [first.id, second],
-                       "A manually checked row must stay checked after reload")
-        XCTAssertTrue(calls.values.isEmpty, "Selection changes and reloads never apply")
+        XCTAssertEqual(sheet.selectedSkillIDs, [first.id, second], "Reload without preselection selects every available row")
+        XCTAssertTrue(calls.values.isEmpty, "A loaded hand-off and reload never apply")
     }
 
     private func assertApplyingHandoff(routing: UpdateReviewRouting, first: UUID, second: UUID,
@@ -153,6 +156,7 @@ extension UpdateReviewRoutingTests {
         let sheet = routing.updates, preview = routing.preview
         sheet.selectedSkillIDs = [first]
         sheet.applySelected(context: routing.context)
+        let apply = sheet.operationTask
         let didStart = await TestWait.forSemaphore(sync.0)
         XCTAssertTrue(didStart)
         let operation = sheet.operationID
@@ -166,7 +170,8 @@ extension UpdateReviewRoutingTests {
         XCTAssertTrue(sheet.isApplying)
         XCTAssertEqual(calls.values, [first], "Only the sheet's explicit Update starts an apply")
         sync.1.open()
-        await TestWait.until(failureMessage: "hand-off sheet apply did not settle") { !sheet.isApplying }
+        if let apply { await TestWait.forTask(apply, failureMessage: "hand-off sheet apply did not settle") }
+        XCTAssertFalse(sheet.isApplying)
         XCTAssertNotNil(preview.selectedFile)
     }
 

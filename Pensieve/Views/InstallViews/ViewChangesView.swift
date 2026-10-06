@@ -47,7 +47,6 @@ struct ViewChangesView: View {
                     ViewChangesFileRow(file: file)
                         .padding(.vertical, DesignTokens.changesFileRowSpacing / 2)
                         .tag(file.path)
-                        .listRowInsets(EdgeInsets())
                         .listRowSeparator(.hidden)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(ViewChangesPresentation.accessibilityLabel(file))
@@ -56,7 +55,6 @@ struct ViewChangesView: View {
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
-            .contentMargins(.horizontal, 0, for: .scrollContent)
             .accessibilityLabel("Changed Files")
         }
         .padding(.horizontal, DesignTokens.changesSidebarInset * 2)

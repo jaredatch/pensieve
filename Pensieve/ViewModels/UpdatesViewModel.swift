@@ -16,14 +16,14 @@ final class UpdatesViewModel {
     var confirmedDriftSkillIDs: Set<UUID> = []
     var statuses: [UUID: UpdatesRowStatus] = [:]
     var loadPhase: UpdatesLoadPhase = .idle
-    var isLoading: Bool { loadPhase == .loading || loadPhase == .reloading }
+    var isLoading: Bool { loadPhase == .loading }
     var isApplying = false
     var recheckingSkillID: UUID?
     var isPresented = false
     var initialSelection: Set<UUID>?
     var loadError: String? {
         switch loadPhase {
-        case let .failed(message), let .reloadFailed(message): return message
+        case let .failed(message): return message
         default: return nil
         }
     }
@@ -99,7 +99,7 @@ final class UpdatesViewModel {
     func load(context: ModelContext) {
         guard !isLoading, !isApplying else { return }
         let id = beginOperation()
-        loadPhase = loadPhase.hasLoadedRows ? .reloading : .loading
+        loadPhase = .loading
         let container = context.container
         operationTask = Task { await performLoad(container: container, operationID: id) }
     }
@@ -107,7 +107,7 @@ final class UpdatesViewModel {
     func loadAndReport(context: ModelContext) async {
         guard !isLoading, !isApplying else { return }
         let id = beginOperation()
-        loadPhase = loadPhase.hasLoadedRows ? .reloading : .loading
+        loadPhase = .loading
         await performLoad(container: context.container, operationID: id)
     }
 
@@ -172,13 +172,8 @@ final class UpdatesViewModel {
     func present(selecting skillID: UUID? = nil, library: SkillLibraryViewModel) {
         guard !library.libraryUnavailable else { return }
         if isPresented {
-            guard !isApplying, let skillID else { return }
-            if !loadPhase.hasLoadedRows {
-                // nil means the sheet was opened with all rows selected.
-                if initialSelection != nil { initialSelection?.insert(skillID) }
-                return
-            }
-            guard rows.contains(where: { $0.id == skillID }) else { return }
+            guard !isApplying, loadPhase == .loaded, let skillID,
+                  rows.contains(where: { $0.id == skillID }) else { return }
             selectedSkillIDs.insert(skillID)
             return
         }
@@ -207,7 +202,7 @@ final class UpdatesViewModel {
         backgroundCancel?()
         operationTask = nil
         backgroundCancel = nil
-        if isLoading { loadPhase = loadPhase.hasLoadedRows ? .loaded : .idle }
+        if isLoading { loadPhase = .idle }
         isApplying = false
         recheckingSkillID = nil
     }
