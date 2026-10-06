@@ -30,7 +30,7 @@ extension UpdatesViewModelTests {
         sheet.cancel() // Cancel a first load, never an apply.
         XCTAssertTrue(sheet.rows.isEmpty, "A cancelled first load cannot expose rows")
         XCTAssertFalse(sheet.isLoading)
-        XCTAssertNil(sheet.loadError)
+        XCTAssertEqual(sheet.loadPhase, .idle)
         release.open()
         await TestWait.forTask(load, failureMessage: "Cancelled first loader must finish before the test returns")
         XCTAssertTrue(sheet.rows.isEmpty, "The cancelled loader's rows must not land")

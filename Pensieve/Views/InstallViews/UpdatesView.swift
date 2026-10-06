@@ -6,25 +6,21 @@ struct UpdatesView: View {
     @Environment(\.modelContext) private var context
     @Bindable var model: UpdatesViewModel
     let onViewChanges: (UpdatesRow) -> Void
-    @State private var maximumSheetHeight = DesignTokens.mainWindowMinimumHeight
-    private var maximumRowsHeight: CGFloat { max(0, maximumSheetHeight - DesignTokens.updatesChromeHeight) }
+    @State private var rowsHeight: CGFloat = 0
 
     var body: some View {
         let shown = UpdatesSheetPresentation(model)
         VStack(spacing: 0) {
             header(shown)
-            selection(shown)
+            if let label = shown.selectionLabel { selection(shown, label: label) }
             Divider().frame(height: DesignTokens.updatesDividerHeight)
             content(shown)
             Divider().frame(height: DesignTokens.updatesDividerHeight)
             footer(shown)
         }
         .frame(width: DesignTokens.updatesSheetWidth)
-        .background {
-            UpdatesSheetWindowSize { height in
-                if maximumSheetHeight != height { maximumSheetHeight = height }
-            }
-        }
+        .frame(maxHeight: DesignTokens.updatesMaximumHeight)
+        .fixedSize(horizontal: false, vertical: true)
         .interactiveDismissDisabled(shown.isApplying)
         .task { model.load(context: context) }
     }
@@ -44,14 +40,15 @@ struct UpdatesView: View {
         .padding(.bottom, DesignTokens.updatesHeaderBottom)
     }
 
-    private func selection(_ shown: UpdatesSheetPresentation) -> some View {
-        UpdatesSelectAllCheckbox(title: shown.selectionLabel, selection: shown.selection,
-                                 isEnabled: shown.selectionEnabled) { selected in
-            if selected { model.selectAll() } else { model.selectNone() }
-        }
-        .frame(height: DesignTokens.updatesCheckboxHeight)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(DesignTokens.updatesSelectionPadding)
+    private func selection(_ shown: UpdatesSheetPresentation, label: String) -> some View {
+        Toggle(label, sources: shown.selectionSources, isOn: \.self)
+            .toggleStyle(.checkbox)
+            .font(DesignTokens.updatesSubtitle)
+            .accessibilityIdentifier("updates-select-all")
+            .disabled(!shown.selectionEnabled)
+            .frame(height: DesignTokens.updatesCheckboxHeight)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(DesignTokens.updatesSelectionPadding)
     }
 
     @ViewBuilder
@@ -77,13 +74,11 @@ struct UpdatesView: View {
             }
             .fixedSize(horizontal: false, vertical: true)
         case .rows:
-            ViewThatFits(in: .vertical) {
+            ScrollView {
                 rows(shown)
-                ScrollView { rows(shown) }
-                    .frame(height: maximumRowsHeight)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
             }
-            .frame(maxHeight: maximumRowsHeight)
-            .fixedSize(horizontal: false, vertical: true)
+            .frame(idealHeight: rowsHeight, maxHeight: rowsHeight)
         }
     }
 

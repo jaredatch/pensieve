@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 /// The copy and control states consumed by the sheet; no file reads or operations run here.
 struct UpdatesSheetPresentation {
@@ -23,7 +23,8 @@ struct UpdatesSheetPresentation {
     let content: Content
     let rows: [Row]
     let selection: Selection
-    let selectionLabel: String
+    let selectionLabel: String?
+    let selectionSources: [Binding<Bool>]
     let selectionEnabled: Bool
     let cancelEnabled: Bool
     let updateEnabled: Bool
@@ -36,13 +37,19 @@ struct UpdatesSheetPresentation {
         case let .failed(message): content = .failed(message)
         case .loaded: content = model.rows.isEmpty ? .empty : .rows
         }
-        rows = model.loadPhase == .loaded ? model.rows.map { Row($0, model: model) } : []
-        let count = rows.filter(\.isSelected).count
-        selectionLabel = "\(count) of \(rows.count) selected"
-        selection = count == 0 ? .unchecked : count == rows.count ? .checked : .mixed
-        selectionEnabled = !model.isApplying && rows.contains { $0.selectionEnabled }
+        let selectableIDs = model.selectableSkillIDs
+        let selectedIDs = model.selectedSkillIDs.intersection(selectableIDs)
+        rows = model.loadPhase == .loaded ? model.rows.map { Row($0, model: model, selectableIDs: selectableIDs) } : []
+        let count = selectedIDs.count
+        selectionLabel = content == .rows ? "\(count) of \(selectableIDs.count) selected" : nil
+        selection = count == 0 ? .unchecked : count == selectableIDs.count ? .checked : .mixed
+        selectionEnabled = !model.isApplying && !selectableIDs.isEmpty
+        selectionSources = model.rows.filter { selectableIDs.contains($0.id) }.map { row in
+            Binding(get: { model.isSelected(row) && model.isSelectable(row) },
+                    set: { model.setSelection($0, for: row) })
+        }
         cancelEnabled = !model.isApplying
-        updateEnabled = model.canApply
+        updateEnabled = model.canApply(selectionCount: count)
         isApplying = model.isApplying
     }
 
@@ -52,7 +59,7 @@ struct UpdatesSheetPresentation {
         var name: String { row.skillName }
         var source: String { " — " + (row.repositoryDisplay.isEmpty ? "Source unavailable" : row.repositoryDisplay) }
         var commits: String { "\(row.shortInstalledCommit) → \(row.shortUpstreamCommit)" }
-        var age: String { " · \(row.updateAge)" }
+        var age: String { row.updateAge.map { " · " + $0 } ?? "" }
         let changesTitle = "View Changes"
         let replaceTitle = "Replace my local edits"
         let recheckTitle = "Re-check"
@@ -77,10 +84,11 @@ struct UpdatesSheetPresentation {
         }
 
         @MainActor
-        init(_ row: UpdatesRow, model: UpdatesViewModel) {
+        init(_ row: UpdatesRow, model: UpdatesViewModel, selectableIDs: Set<UUID>) {
             self.row = row
-            isSelected = model.isSelected(row) && model.isSelectable(row)
-            selectionEnabled = !model.isApplying && model.isSelectable(row)
+            let selectable = selectableIDs.contains(row.id)
+            isSelected = model.isSelected(row) && selectable
+            selectionEnabled = !model.isApplying && selectable
             changesEnabled = !model.isApplying && model.recheckingSkillID == nil
             localEditsCopy = row.driftedLocally ? "You have local edits to this skill. Updating replaces them." : nil
             replacementConfirmed = model.confirmedDriftSkillIDs.contains(row.id)

@@ -287,7 +287,7 @@ extension SyncNudgeTests {
     private func updateRow(id: UUID, name: String = "Updated", slug: String = "updated") -> UpdatesRow {
         UpdatesRow(
             id: id, skillName: name, slug: slug,
-            installedDate: Date(timeIntervalSince1970: 1), installedCommit: "1111111",
+            installedCommitDate: Date(timeIntervalSince1970: 1), installedCommit: "1111111",
             updateDate: Date(timeIntervalSince1970: 2), upstreamCommit: "2222222",
             upstreamTree: "tree", repositoryDisplay: "example/repo",
             repositoryPath: "skills/updated", driftedLocally: false, compareURL: nil

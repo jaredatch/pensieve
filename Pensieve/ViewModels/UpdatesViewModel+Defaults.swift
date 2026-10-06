@@ -165,7 +165,7 @@ extension UpdatesViewModel {
             id: skill.id,
             skillName: skill.name,
             slug: skill.directoryName,
-            installedDate: origin.installedAt,
+            installedCommitDate: nil,
             installedCommit: origin.installedCommit,
             updateDate: upstreamDate,
             upstreamCommit: upstreamCommit,

@@ -142,7 +142,6 @@ enum DesignTokens {
     static let updatesRowCommits = Font.system(size: 11, design: .monospaced)
     static let updatesRowAge = Font.system(size: 10)
     static let updatesChangesButton = Font.system(size: 11)
-    static let updatesCheckboxFont = NSFont.systemFont(ofSize: 13)
     static let updatesSheetWidth: CGFloat = 480
     static let updatesSheetPadding: CGFloat = 20
     static let updatesHeaderGap: CGFloat = 4
@@ -169,14 +168,9 @@ enum DesignTokens {
     static let updatesUpdateWidth: CGFloat = 78
     static let updatesButtonHeight: CGFloat = 28
     static let updatesLocalEditsFill = Color(nsColor: .systemOrange).opacity(0.12)
-    /// Fixed sheet chrome measured in the two-row frame; the native parent supplies the available height.
-    static let updatesHeaderHeight = updatesSheetPadding + updatesTitleLineHeight + updatesHeaderGap
-        + updatesSubtitleLineHeight + updatesHeaderBottom
-    static let updatesSelectionHeight = updatesSelectionPadding.top + updatesCheckboxHeight
-        + updatesSelectionPadding.bottom
-    static let updatesFooterHeight = updatesFooterPadding.top + updatesButtonHeight + updatesFooterPadding.bottom
-    static let updatesChromeHeight = updatesHeaderHeight + updatesSelectionHeight + updatesFooterHeight
-        + 2 * updatesDividerHeight
+    /// Native sheet top inset measured at the 900×600 minimum on 2026-10-06.
+    static let updatesSheetTopInset: CGFloat = 32
+    static let updatesMaximumHeight = mainWindowMinimumHeight - updatesSheetTopInset
 
     // MARK: - View Changes window
 

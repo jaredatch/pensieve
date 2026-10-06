@@ -11,7 +11,10 @@ final class UpdatesViewModel {
     ) throws -> SkillUpdateCompletion
     typealias RecheckOperation = (UUID, ModelContainer) throws -> SkillUpdateRecheckCompletion
 
-    var rows: [UpdatesRow] = []
+    var rows: [UpdatesRow] = [] {
+        didSet { rowIDs = Set(rows.map(\.id)) }
+    }
+    @ObservationIgnored private var rowIDs: Set<UUID> = []
     var selectedSkillIDs: Set<UUID> = []
     var confirmedDriftSkillIDs: Set<UUID> = []
     var statuses: [UUID: UpdatesRowStatus] = [:]
@@ -21,12 +24,6 @@ final class UpdatesViewModel {
     var recheckingSkillID: UUID?
     var isPresented = false
     var initialSelection: Set<UUID>?
-    var loadError: String? {
-        switch loadPhase {
-        case let .failed(message): return message
-        default: return nil
-        }
-    }
 
     let rowLoader: RowLoader
     let applyOperation: ApplyOperation
@@ -56,9 +53,14 @@ final class UpdatesViewModel {
     }
 
     var selectableRows: [UpdatesRow] { rows.filter { status(for: $0) != .updated } }
-    var selectedCount: Int { selectableRows.filter(isSelected).count }
+    var selectableSkillIDs: Set<UUID> { rowIDs.filter { statuses[$0] != .updated } }
+    var selectedCount: Int { selectedSkillIDs.intersection(selectableSkillIDs).count }
     var canApply: Bool {
-        loadPhase == .loaded && !isApplying && recheckingSkillID == nil && selectedCount > 0
+        canApply(selectionCount: selectedCount)
+    }
+
+    func canApply(selectionCount: Int) -> Bool {
+        loadPhase == .loaded && !isApplying && recheckingSkillID == nil && selectionCount > 0
     }
 
     private var canLoad: Bool {
@@ -70,15 +72,11 @@ final class UpdatesViewModel {
     }
 
     func isSelectable(_ row: UpdatesRow) -> Bool {
-        rows.contains(where: { $0.id == row.id }) && status(for: row) != .updated
+        rowIDs.contains(row.id) && statuses[row.id] != .updated
     }
 
     func isSelected(_ row: UpdatesRow) -> Bool {
         selectedSkillIDs.contains(row.id)
-    }
-
-    func toggleSelection(_ row: UpdatesRow) {
-        setSelection(!isSelected(row), for: row)
     }
 
     func setSelection(_ selected: Bool, for row: UpdatesRow) {
@@ -88,7 +86,7 @@ final class UpdatesViewModel {
 
     func selectAll() {
         guard !isApplying else { return }
-        selectedSkillIDs = Set(selectableRows.map(\.id))
+        selectedSkillIDs = selectableSkillIDs
     }
 
     func selectNone() {
@@ -188,7 +186,7 @@ final class UpdatesViewModel {
         guard !library.libraryUnavailable else { return }
         if isPresented {
             guard !isApplying, loadPhase == .loaded, let skillID,
-                  selectableRows.contains(where: { $0.id == skillID }) else { return }
+                  rowIDs.contains(skillID), statuses[skillID] != .updated else { return }
             selectedSkillIDs.insert(skillID)
             return
         }

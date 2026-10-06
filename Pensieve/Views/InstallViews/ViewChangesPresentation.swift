@@ -27,7 +27,8 @@ enum ViewChangesPresentation {
     }
 
     static func subtitle(_ row: UpdatesRow) -> String {
-        "\(row.repositoryDisplay) · \(row.shortInstalledCommit) → \(row.shortUpstreamCommit) · \(row.updateAge)"
+        "\(row.repositoryDisplay) · \(row.shortInstalledCommit) → \(row.shortUpstreamCommit)"
+            + (row.updateAge.map { " · " + $0 } ?? "")
     }
 
     static func summary(_ file: PinnedSkillFileDiff) -> String {

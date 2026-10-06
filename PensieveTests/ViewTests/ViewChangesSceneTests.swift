@@ -76,7 +76,7 @@ final class ViewChangesSceneTests: XCTestCase {
             XCTAssertEqual(window.frame.height, 660, accuracy: 1, "Default size includes all window chrome")
             XCTAssertEqual(window.titlebarSeparatorStyle, .none, "Full-height chrome has no title-bar strip")
             XCTAssertEqual(window.title, "Changes to Geometry", "Use the native plain-text window title")
-            XCTAssertEqual(window.subtitle, "example/repository · 1111111 → 2222222 · 3 days newer")
+            XCTAssertEqual(window.subtitle, "example/repository · 1111111 → 2222222")
             try assertVisibleHeading(in: window)
             let update = try XCTUnwrap(window.toolbar?.items.first {
                 $0.itemIdentifier.rawValue.contains("changes-update")

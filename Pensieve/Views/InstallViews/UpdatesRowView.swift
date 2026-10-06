@@ -10,31 +10,34 @@ struct UpdatesRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.updatesLocalEditsGap) {
-            HStack(alignment: .top, spacing: Spacing.sm) {
+            ZStack(alignment: .topLeading) {
                 Toggle(shown.name, isOn: Binding(
                     get: { shown.isSelected },
                     set: { model.setSelection($0, for: row) }
                 ))
                 .labelsHidden()
                 .toggleStyle(.checkbox)
-                .frame(width: DesignTokens.updatesRowBodyOffset - Spacing.sm,
-                       height: DesignTokens.updatesCheckboxHeight)
+                .fixedSize(horizontal: true, vertical: true)
+                .frame(height: DesignTokens.updatesCheckboxHeight)
                 .accessibilityIdentifier("updates-select-" + row.id.uuidString)
                 .disabled(!shown.selectionEnabled)
-                VStack(alignment: .leading, spacing: DesignTokens.updatesRowMetaGap) {
-                    nameAndSource.frame(minHeight: DesignTokens.updatesRowNameLineHeight, alignment: .leading)
-                    coordinates.frame(minHeight: DesignTokens.updatesRowCommitsLineHeight, alignment: .leading)
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    VStack(alignment: .leading, spacing: DesignTokens.updatesRowMetaGap) {
+                        nameAndSource.frame(minHeight: DesignTokens.updatesRowNameLineHeight, alignment: .leading)
+                        coordinates.frame(minHeight: DesignTokens.updatesRowCommitsLineHeight, alignment: .leading)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, DesignTokens.updatesRowBodyTop)
+                    Button(shown.changesTitle) { onViewChanges(row) }
+                        .font(DesignTokens.updatesChangesButton)
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .foregroundStyle(.tint)
+                        .accessibilityIdentifier("updates-changes-" + row.id.uuidString)
+                        .disabled(!shown.changesEnabled)
+                        .padding(.top, DesignTokens.updatesRowMetaGap)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, DesignTokens.updatesRowBodyTop)
-                Button(shown.changesTitle) { onViewChanges(row) }
-                    .font(DesignTokens.updatesChangesButton)
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .foregroundStyle(.tint)
-                    .accessibilityIdentifier("updates-changes-" + row.id.uuidString)
-                    .disabled(!shown.changesEnabled)
-                    .padding(.top, DesignTokens.updatesRowMetaGap)
+                .padding(.leading, DesignTokens.updatesRowBodyOffset)
             }
             if let copy = shown.localEditsCopy {
                 localEdits(copy).padding(.leading, DesignTokens.updatesRowBodyOffset)

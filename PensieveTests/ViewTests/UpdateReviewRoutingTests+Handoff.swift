@@ -108,8 +108,8 @@ extension UpdateReviewRoutingTests {
         XCTAssertEqual(preview.requestedSkillID, windowSkillID)
         routing.presentUpdates(skillID: initialSkillID)
         await sheet.loadAndReport(context: fixture.context)
-        let error = sheet.loadError
-        XCTAssertNotNil(error, "The real sheet load must fail")
+        let error = sheet.loadPhase
+        XCTAssertEqual(error, .failed(SkillUpdateFlowError.repositoryChanged.localizedDescription))
         let selection = sheet.selectedSkillIDs
         let seed = sheet.initialSelection
         let before = forwards
@@ -117,11 +117,11 @@ extension UpdateReviewRoutingTests {
         XCTAssertEqual(forwards, before + 1, "A load-error sheet only comes forward")
         XCTAssertEqual(sheet.selectedSkillIDs, selection, "A load-error hand-off must not change selection")
         XCTAssertEqual(sheet.initialSelection, seed, "A load-error hand-off must not queue selection")
-        XCTAssertEqual(sheet.loadError, error, "A hand-off leaves the load error visible")
+        XCTAssertEqual(sheet.loadPhase, error, "A hand-off leaves the load error visible")
         sheet.load(context: fixture.context) // The production Retry action.
         let retry = try XCTUnwrap(sheet.operationTask)
         await TestWait.forTask(retry, failureMessage: "hand-off Retry did not finish")
-        XCTAssertNil(sheet.loadError)
+        XCTAssertEqual(sheet.loadPhase, .loaded)
         XCTAssertEqual(sheet.selectedSkillIDs, [initialSkillID], "Retry uses the original presentation selection")
         XCTAssertTrue(applies.values.isEmpty, "A load-error hand-off and Retry never apply")
         XCTAssertNotNil(preview.selectedFile)
