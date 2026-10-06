@@ -91,6 +91,10 @@ enum InstalledSkillHistoryPresentation {
     static let viewEditsTitle = "View Edits"
     static let updateTitle = "Update to This"
 
+    static func shownCount(total: Int, showAllReadRows: Bool) -> Int {
+        showAllReadRows ? total : min(initiallyShown, total)
+    }
+
     static func shortHash(_ sha: String) -> String {
         String(sha.prefix(7))
     }

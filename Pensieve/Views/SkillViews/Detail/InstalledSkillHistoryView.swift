@@ -186,9 +186,7 @@ private struct InstalledHistoryLoadedTimeline: View {
     let onShowOlder: (InstalledSkillHistoryPresentation.OlderAction, Int) -> Void
 
     private var shownCount: Int {
-        showAllReadRows
-            ? result.rows.count
-            : min(InstalledSkillHistoryPresentation.initiallyShown, result.rows.count)
+        InstalledSkillHistoryPresentation.shownCount(total: result.rows.count, showAllReadRows: showAllReadRows)
     }
 
     private var upstreamRows: [InstalledSkillHistoryPresentation.UpstreamRow] {

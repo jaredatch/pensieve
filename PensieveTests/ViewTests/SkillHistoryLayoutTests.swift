@@ -105,7 +105,7 @@ final class SkillHistoryLayoutTests: XCTestCase {
         return size.height - inkBottom
     }
 
-    private func makeHost(_ tab: AnyView, height: CGFloat) -> (view: NSView, window: NSWindow) {
+    func makeHost(_ tab: AnyView, height: CGFloat) -> (view: NSView, window: NSWindow) {
         let layout = SkillDetailScrollLayout(skillID: UUID(), contentOwnsScroller: false) {
             EmptyView()
         } tabContent: {
@@ -159,7 +159,7 @@ final class SkillHistoryLayoutTests: XCTestCase {
 
 /// Reads rendered marker and content pixels in bitmap coordinates (Y increases downward).
 @MainActor
-private struct HistoryPixels {
+struct HistoryPixels {
     struct Positions: Equatable {
         let rowTops: [CGFloat]
         let inkBottoms: [CGFloat]

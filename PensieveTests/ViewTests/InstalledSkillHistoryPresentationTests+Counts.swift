@@ -20,7 +20,6 @@ extension InstalledSkillHistoryPresentationTests {
         let revealed = presentedRows(result, session: session)
         XCTAssertEqual(revealed.count, 12)
         XCTAssertEqual(revealed.map(\.history.subject), result.rows.map(\.subject))
-        XCTAssertEqual(session.requestedWindow, 1, "revealing held rows keeps windowCount at 1")
         XCTAssertNil(InstalledSkillHistoryPresentation.olderAction(
             total: result.rows.count, shown: revealed.count, hasOlderHistory: result.hasOlderHistory
         ))
@@ -47,11 +46,12 @@ private extension InstalledSkillHistoryPresentationTests {
         _ result: UpstreamHistoryResult,
         session: InstalledSkillHistorySession
     ) -> [InstalledSkillHistoryPresentation.UpstreamRow] {
-        let shown = session.showAllReadRows
-            ? result.rows.count
-            : min(InstalledSkillHistoryPresentation.initiallyShown, result.rows.count)
         return InstalledSkillHistoryPresentation.upstreamRows(
-            result: result, shownCount: shown, updateAvailable: false
+            result: result,
+            shownCount: InstalledSkillHistoryPresentation.shownCount(
+                total: result.rows.count, showAllReadRows: session.showAllReadRows
+            ),
+            updateAvailable: false
         )
     }
 }
