@@ -140,7 +140,7 @@ struct ContentView: View {
         }
 
         let sheetView = splitView
-            .frame(minWidth: 900, minHeight: 600)
+            .frame(minWidth: DesignTokens.mainWindowMinimumWidth, minHeight: DesignTokens.mainWindowMinimumHeight)
         .sheet(isPresented: $library.showCreateSheet, onDismiss: revealCreatedSkill) {
             CreateSkillSheet(library: library, onCreated: { createdSkill = $0 })
         }

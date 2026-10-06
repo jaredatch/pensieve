@@ -5,6 +5,7 @@ import XCTest
 @testable import Pensieve
 
 extension ViewChangesSceneTests {
+    private var rowRenderScale: CGFloat { 4 }
     func testLongFileRowKeepsFullCountsAcrossProposedWidthsAndMiddleTruncatesName() throws {
         let folder = "scripts-with-a-very-long-folder-name-TAIL/"
         let name = "comment-with-an-extremely-long-filename.swift"
@@ -51,7 +52,7 @@ extension ViewChangesSceneTests {
         let renderer = ImageRenderer(content: ViewChangesFileRow(file: file).frame(width: width)
             .padding(.horizontal, DesignTokens.changesSidebarWidth).background(Color.white)
             .environment(\.colorScheme, .light).environment(\.locale, Locale(identifier: "en_US")))
-        renderer.scale = 4
+        renderer.scale = rowRenderScale
         return try XCTUnwrap(renderer.cgImage)
     }
 
@@ -62,7 +63,8 @@ extension ViewChangesSceneTests {
                 let index = (y * image.width + x) * 4
                 let red = Int(pixels[index]), green = Int(pixels[index + 1]), blue = Int(pixels[index + 2])
                 let isCount = added ? green > red + 30 && green > blue + 30 : red > green + 30 && red > blue + 30
-                if isCount { bounds = bounds.union(CGRect(x: CGFloat(x) / 4, y: CGFloat(y) / 4, width: 0.25, height: 0.25)) }
+                if isCount { bounds = bounds.union(CGRect(x: CGFloat(x) / rowRenderScale, y: CGFloat(y) / rowRenderScale,
+                                                       width: 1 / rowRenderScale, height: 1 / rowRenderScale)) }
             }
         }
         XCTAssertFalse(bounds.isNull, "The row must render visible \(added ? "addition" : "deletion") count pixels")

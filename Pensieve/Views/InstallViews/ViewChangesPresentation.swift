@@ -27,9 +27,7 @@ enum ViewChangesPresentation {
     }
 
     static func subtitle(_ row: UpdatesRow) -> String {
-        let days = max(0, Int(row.updateDate.timeIntervalSince(row.installedDate) / 86_400))
-        let age = days == 1 ? "1 day newer" : "\(days) days newer"
-        return "\(row.repositoryDisplay) · \(row.shortInstalledCommit) → \(row.shortUpstreamCommit) · \(age)"
+        "\(row.repositoryDisplay) · \(row.shortInstalledCommit) → \(row.shortUpstreamCommit) · \(row.updateAge)"
     }
 
     static func summary(_ file: PinnedSkillFileDiff) -> String {

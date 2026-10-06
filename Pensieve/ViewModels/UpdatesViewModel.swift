@@ -37,6 +37,7 @@ final class UpdatesViewModel {
     let notifier: SyncStateNotifying
     let echoRegistrar: SyncWriteEchoRegistering
     let bodyWriteRegistration: SyncBodyWriteRegistration
+    @ObservationIgnored weak var editorLibrary: SkillLibraryViewModel?
 
     init(
         rowLoader: @escaping RowLoader,
@@ -54,9 +55,22 @@ final class UpdatesViewModel {
         self.bodyWriteRegistration = bodyWriteRegistration
     }
 
-    var selectedCount: Int { selectedSkillIDs.count }
+    var selectableRows: [UpdatesRow] { rows.filter { status(for: $0) != .updated } }
+    var selectedCount: Int { selectableRows.filter(isSelected).count }
     var canApply: Bool {
-        !isLoading && !isApplying && recheckingSkillID == nil && selectedCount > 0
+        loadPhase == .loaded && !isApplying && recheckingSkillID == nil && selectedCount > 0
+    }
+
+    private var canLoad: Bool {
+        guard !isApplying else { return false }
+        switch loadPhase {
+        case .idle, .failed: return true
+        case .loading, .loaded: return false
+        }
+    }
+
+    func isSelectable(_ row: UpdatesRow) -> Bool {
+        rows.contains(where: { $0.id == row.id }) && status(for: row) != .updated
     }
 
     func isSelected(_ row: UpdatesRow) -> Bool {
@@ -64,17 +78,17 @@ final class UpdatesViewModel {
     }
 
     func toggleSelection(_ row: UpdatesRow) {
-        guard !isApplying else { return }
-        if selectedSkillIDs.contains(row.id) {
-            selectedSkillIDs.remove(row.id)
-        } else {
-            selectedSkillIDs.insert(row.id)
-        }
+        setSelection(!isSelected(row), for: row)
+    }
+
+    func setSelection(_ selected: Bool, for row: UpdatesRow) {
+        guard !isApplying, isSelectable(row) else { return }
+        if selected { selectedSkillIDs.insert(row.id) } else { selectedSkillIDs.remove(row.id) }
     }
 
     func selectAll() {
         guard !isApplying else { return }
-        selectedSkillIDs = Set(rows.map(\.id))
+        selectedSkillIDs = Set(selectableRows.map(\.id))
     }
 
     func selectNone() {
@@ -83,9 +97,10 @@ final class UpdatesViewModel {
     }
 
     func setDriftConfirmation(_ confirmed: Bool, for row: UpdatesRow) {
-        guard row.driftedLocally, !isApplying else { return }
+        guard row.driftedLocally, !isApplying, isSelectable(row) else { return }
         if confirmed {
             confirmedDriftSkillIDs.insert(row.id)
+            selectedSkillIDs.insert(row.id)
             statuses[row.id] = .idle
         } else {
             confirmedDriftSkillIDs.remove(row.id)
@@ -97,7 +112,7 @@ final class UpdatesViewModel {
     }
 
     func load(context: ModelContext) {
-        guard !isLoading, !isApplying else { return }
+        guard canLoad else { return }
         let id = beginOperation()
         loadPhase = .loading
         let container = context.container
@@ -105,7 +120,7 @@ final class UpdatesViewModel {
     }
 
     func loadAndReport(context: ModelContext) async {
-        guard !isLoading, !isApplying else { return }
+        guard canLoad else { return }
         let id = beginOperation()
         loadPhase = .loading
         await performLoad(container: context.container, operationID: id)
@@ -115,7 +130,7 @@ final class UpdatesViewModel {
         guard canApply else { return }
         let id = beginOperation()
         isApplying = true
-        let selected = rows.filter { selectedSkillIDs.contains($0.id) }
+        let selected = selectableRows.filter(isSelected)
         let container = context.container
         operationTask = Task {
             await performApply(
@@ -131,7 +146,7 @@ final class UpdatesViewModel {
         guard canApply else { return }
         let id = beginOperation()
         isApplying = true
-        let selected = rows.filter { selectedSkillIDs.contains($0.id) }
+        let selected = selectableRows.filter(isSelected)
         await performApply(
             rows: selected,
             container: context.container,
@@ -173,13 +188,14 @@ final class UpdatesViewModel {
         guard !library.libraryUnavailable else { return }
         if isPresented {
             guard !isApplying, loadPhase == .loaded, let skillID,
-                  rows.contains(where: { $0.id == skillID }) else { return }
+                  selectableRows.contains(where: { $0.id == skillID }) else { return }
             selectedSkillIDs.insert(skillID)
             return
         }
         library.confirmLeavingAnyDraft { [weak self] proceed in
             guard let self, proceed else { return }
             self.reset()
+            self.editorLibrary = library
             self.initialSelection = skillID.map { [$0] }
             self.isPresented = true
         }

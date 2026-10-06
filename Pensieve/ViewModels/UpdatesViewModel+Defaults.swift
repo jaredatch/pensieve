@@ -79,9 +79,9 @@ extension UpdatesViewModel {
         container: ModelContainer
     ) throws -> SkillUpdateCompletion {
         let context = ModelContext(container)
-        guard let skill = try context.fetch(FetchDescriptor<Skill>()).first(where: {
-            $0.id == request.skillID
-        }) else { throw SkillUpdateFlowError.skillNotFound }
+        guard let skill = try findSkill(request.skillID, context: context) else {
+            throw SkillUpdateFlowError.skillNotFound
+        }
         guard skill.upstreamCommit == request.expectedCommit,
               skill.upstreamTree == request.expectedTree else {
             throw SkillUpdateFlowError.repositoryChanged
@@ -132,9 +132,7 @@ extension UpdatesViewModel {
     ) throws -> SkillUpdateRecheckCompletion {
         try service.check(skillID: skillID, context: ModelContext(container))
         let context = ModelContext(container)
-        guard let skill = try context.fetch(FetchDescriptor<Skill>()).first(where: {
-            $0.id == skillID
-        }) else { throw SkillUpdateFlowError.skillNotFound }
+        guard let skill = try findSkill(skillID, context: context) else { throw SkillUpdateFlowError.skillNotFound }
         let row: UpdatesRow?
         if isEligibleForUpdates(skill) {
             let drifted = try service.driftedLocally(skill: skill)

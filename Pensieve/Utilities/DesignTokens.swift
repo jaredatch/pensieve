@@ -129,6 +129,55 @@ enum DesignTokens {
     static let bannerTitleWeight: Font.Weight = .semibold
     static let bannerTitle = Font.system(size: bannerTitleSize, weight: bannerTitleWeight)
 
+    // MARK: - Updates sheet
+
+    static let mainWindowMinimumWidth: CGFloat = 900
+    static let mainWindowMinimumHeight: CGFloat = 600
+
+    /// Measured from the Updates sheet on 2026-10-05; stock controls keep their native appearance.
+    static let updatesTitle = Font.system(size: 16, weight: .bold)
+    static let updatesSubtitle = Font.system(size: 13)
+    static let updatesRowName = Font.system(size: 13, weight: .semibold)
+    static let updatesRowSource = Font.system(size: 13)
+    static let updatesRowCommits = Font.system(size: 11, design: .monospaced)
+    static let updatesRowAge = Font.system(size: 10)
+    static let updatesChangesButton = Font.system(size: 11)
+    static let updatesCheckboxFont = NSFont.systemFont(ofSize: 13)
+    static let updatesSheetWidth: CGFloat = 480
+    static let updatesSheetPadding: CGFloat = 20
+    static let updatesHeaderGap: CGFloat = 4
+    static let updatesHeaderBottom: CGFloat = 12
+    static let updatesTitleLineHeight: CGFloat = 20
+    static let updatesSubtitleLineHeight: CGFloat = 16
+    static let updatesCheckboxHeight: CGFloat = 24
+    static let updatesDividerHeight: CGFloat = 1
+    static let updatesRowBodyOffset: CGFloat = 21
+    static let updatesRowNameLineHeight: CGFloat = 16
+    static let updatesRowCommitsLineHeight: CGFloat = 13
+    static let updatesSelectionPadding = EdgeInsets(top: 4, leading: 20, bottom: 12, trailing: 20)
+    static let updatesRowPadding = EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20)
+    static let updatesRowMetaGap: CGFloat = 2
+    static let updatesRowBodyTop: CGFloat = 4
+    static let updatesLocalEditsGap: CGFloat = 10
+    static let updatesLocalEditsPadding = EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12)
+    static let updatesLocalEditsCornerRadius: CGFloat = 8
+    static let updatesLocalEditsContentGap: CGFloat = 8
+    static let updatesLocalEditsIconGap: CGFloat = 6
+    static let updatesLocalEditsIconSize: CGFloat = 16
+    static let updatesFooterPadding = EdgeInsets(top: 16, leading: 20, bottom: 20, trailing: 20)
+    static let updatesCancelWidth: CGFloat = 75
+    static let updatesUpdateWidth: CGFloat = 78
+    static let updatesButtonHeight: CGFloat = 28
+    static let updatesLocalEditsFill = Color(nsColor: .systemOrange).opacity(0.12)
+    /// Fixed sheet chrome measured in the two-row frame; the native parent supplies the available height.
+    static let updatesHeaderHeight = updatesSheetPadding + updatesTitleLineHeight + updatesHeaderGap
+        + updatesSubtitleLineHeight + updatesHeaderBottom
+    static let updatesSelectionHeight = updatesSelectionPadding.top + updatesCheckboxHeight
+        + updatesSelectionPadding.bottom
+    static let updatesFooterHeight = updatesFooterPadding.top + updatesButtonHeight + updatesFooterPadding.bottom
+    static let updatesChromeHeight = updatesHeaderHeight + updatesSelectionHeight + updatesFooterHeight
+        + 2 * updatesDividerHeight
+
     // MARK: - View Changes window
 
     /// Measured from the View Changes frame on 2026-10-05. Title and path use the recorded defaults.

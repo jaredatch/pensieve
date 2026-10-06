@@ -2,7 +2,7 @@ import XCTest
 @testable import Pensieve
 
 extension UpdatesViewModelTests {
-    func testCancelledReloadKeepsRowsAndDropsLateLoaderResult() async throws {
+    func testCancelledFirstLoadDropsLateRowsAndNextPresentationUsesItsSelection() async throws {
         let fixture = try UpdateReviewFixture()
         defer { try? fixture.cleanup() }
         let first = try fixture.skill("cancel-reload-first")
@@ -13,7 +13,7 @@ extension UpdatesViewModelTests {
         let release = TestWait.Gate(owner: self)
         let sheet = UpdatesViewModel(rowLoader: { _ in
             calls.append(true)
-            if calls.values.count == 2 {
+            if calls.values.count == 1 {
                 started.signal()
                 try release.wait()
                 return Array(rows.reversed())
@@ -22,19 +22,24 @@ extension UpdatesViewModelTests {
         }, applyOperation: { _, _, _, _, _, _ in throw SkillUpdateFlowError.repositoryChanged },
         recheckOperation: { _, _ in throw SkillUpdateFlowError.skillNotFound })
         sheet.present(selecting: first.id, library: fixture.library)
-        await sheet.loadAndReport(context: fixture.context)
         sheet.load(context: fixture.context)
-        let reload = try XCTUnwrap(sheet.operationTask)
+        let load = try XCTUnwrap(sheet.operationTask)
         let didStart = await TestWait.forSemaphore(started)
         XCTAssertTrue(didStart)
         XCTAssertTrue(sheet.isLoading)
-        sheet.cancel() // Cancel only the reload; apply cancellation is outside this stage.
-        XCTAssertEqual(sheet.rows, rows, "Cancelling reload must keep the rows already on screen")
+        sheet.cancel() // Cancel a first load, never an apply.
+        XCTAssertTrue(sheet.rows.isEmpty, "A cancelled first load cannot expose rows")
         XCTAssertFalse(sheet.isLoading)
         XCTAssertNil(sheet.loadError)
         release.open()
-        await TestWait.forTask(reload, failureMessage: "Cancelled reload's loader must finish before the test returns")
-        XCTAssertEqual(sheet.rows, rows, "The cancelled loader's reordered rows must not land")
-        XCTAssertEqual(sheet.selectedSkillIDs, [first.id])
+        await TestWait.forTask(load, failureMessage: "Cancelled first loader must finish before the test returns")
+        XCTAssertTrue(sheet.rows.isEmpty, "The cancelled loader's rows must not land")
+        XCTAssertTrue(sheet.selectedSkillIDs.isEmpty)
+        sheet.reset()
+        sheet.present(selecting: second.id, library: fixture.library)
+        await sheet.loadAndReport(context: fixture.context)
+        XCTAssertEqual(sheet.rows, rows)
+        XCTAssertEqual(sheet.selectedSkillIDs, [second.id])
+        XCTAssertEqual(calls.values.count, 2)
     }
 }

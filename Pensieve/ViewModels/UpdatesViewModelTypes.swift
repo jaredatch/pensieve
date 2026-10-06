@@ -23,6 +23,10 @@ struct UpdatesRow: Identifiable, Equatable {
 
     var shortInstalledCommit: String { String(installedCommit.prefix(7)) }
     var shortUpstreamCommit: String { String(upstreamCommit.prefix(7)) }
+    var updateAge: String {
+        let days = max(0, Int(updateDate.timeIntervalSince(installedDate) / 86_400))
+        return days == 1 ? "1 day newer" : "\(days) days newer"
+    }
 
     func markedDrifted() -> UpdatesRow {
         UpdatesRow(

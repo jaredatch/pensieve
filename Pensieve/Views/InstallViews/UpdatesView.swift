@@ -6,212 +6,118 @@ struct UpdatesView: View {
     @Environment(\.modelContext) private var context
     @Bindable var model: UpdatesViewModel
     let onViewChanges: (UpdatesRow) -> Void
+    @State private var maximumSheetHeight = DesignTokens.mainWindowMinimumHeight
+    private var maximumRowsHeight: CGFloat { max(0, maximumSheetHeight - DesignTokens.updatesChromeHeight) }
 
     var body: some View {
+        let shown = UpdatesSheetPresentation(model)
         VStack(spacing: 0) {
-            header
-            Divider()
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            footer
+            header(shown)
+            selection(shown)
+            Divider().frame(height: DesignTokens.updatesDividerHeight)
+            content(shown)
+            Divider().frame(height: DesignTokens.updatesDividerHeight)
+            footer(shown)
         }
-        .frame(width: 760, height: 540)
+        .frame(width: DesignTokens.updatesSheetWidth)
+        .background {
+            UpdatesSheetWindowSize { height in
+                if maximumSheetHeight != height { maximumSheetHeight = height }
+            }
+        }
+        .interactiveDismissDisabled(shown.isApplying)
         .task { model.load(context: context) }
     }
 
-    private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Skill Updates")
-                    .font(.title2)
-                Text("Review pinned changes before replacing your local copies.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("All") { model.selectAll() }
-                .disabled(model.isApplying || model.rows.isEmpty)
-            Button("None") { model.selectNone() }
-                .disabled(model.isApplying || model.rows.isEmpty)
+    private func header(_ shown: UpdatesSheetPresentation) -> some View {
+        VStack(alignment: .leading, spacing: DesignTokens.updatesHeaderGap) {
+            Text(shown.title).font(DesignTokens.updatesTitle)
+                .frame(height: DesignTokens.updatesTitleLineHeight)
+            Text(shown.subtitle)
+                .font(DesignTokens.updatesSubtitle)
+                .foregroundStyle(.secondary)
+                .frame(height: DesignTokens.updatesSubtitleLineHeight)
         }
-        .padding(Spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, DesignTokens.updatesSheetPadding)
+        .padding(.horizontal, DesignTokens.updatesSheetPadding)
+        .padding(.bottom, DesignTokens.updatesHeaderBottom)
+    }
+
+    private func selection(_ shown: UpdatesSheetPresentation) -> some View {
+        UpdatesSelectAllCheckbox(title: shown.selectionLabel, selection: shown.selection,
+                                 isEnabled: shown.selectionEnabled) { selected in
+            if selected { model.selectAll() } else { model.selectNone() }
+        }
+        .frame(height: DesignTokens.updatesCheckboxHeight)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(DesignTokens.updatesSelectionPadding)
     }
 
     @ViewBuilder
-    private var content: some View {
-        if model.isLoading {
-            ProgressView("Checking local copies…")
-        } else if let error = model.loadError {
+    private func content(_ shown: UpdatesSheetPresentation) -> some View {
+        switch shown.content {
+        case .loading:
+            ProgressView(shown.loadingTitle).padding(DesignTokens.updatesSheetPadding)
+        case let .failed(error):
             ContentUnavailableView {
-                Label("Couldn't Load Updates", systemImage: "exclamationmark.triangle")
+                Label(shown.errorTitle, systemImage: "exclamationmark.triangle")
             } description: {
                 Text(error)
             } actions: {
-                Button("Retry") { model.load(context: context) }
+                Button(shown.retryTitle) { model.load(context: context) }
+                    .accessibilityIdentifier("updates-retry")
             }
-        } else if model.rows.isEmpty {
+            .fixedSize(horizontal: false, vertical: true)
+        case .empty:
             ContentUnavailableView {
-                Label("No Updates Available", systemImage: "checkmark.circle")
+                Label(shown.emptyTitle, systemImage: "checkmark.circle")
             } description: {
-                Text("Your checked GitHub skills are current.")
+                Text(shown.emptyDescription)
             }
-        } else {
-            List(model.rows) { row in
-                UpdatesRowView(model: model, row: row, context: context, onViewChanges: onViewChanges)
+            .fixedSize(horizontal: false, vertical: true)
+        case .rows:
+            ViewThatFits(in: .vertical) {
+                rows(shown)
+                ScrollView { rows(shown) }
+                    .frame(height: maximumRowsHeight)
             }
-            .listStyle(.inset)
+            .frame(maxHeight: maximumRowsHeight)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private var footer: some View {
-        HStack {
-            Button("Cancel") { close() }
-                .keyboardShortcut(.cancelAction)
-            Text("\(model.selectedCount) selected")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            if model.isApplying {
-                ProgressView()
-                    .controlSize(.small)
+    private func rows(_ shown: UpdatesSheetPresentation) -> some View {
+        VStack(spacing: 0) {
+            ForEach(shown.rows) { row in
+                UpdatesRowView(model: model, shown: row, context: context, onViewChanges: onViewChanges)
+                if row.id != shown.rows.last?.id { Divider().frame(height: DesignTokens.updatesDividerHeight) }
             }
-            Button("Update Selected") { model.applySelected(context: context) }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func footer(_ shown: UpdatesSheetPresentation) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Spacer()
+            if shown.isApplying { ProgressView().controlSize(.small) }
+            Button(shown.cancelTitle) {
+                model.cancel()
+                dismiss()
+            }
+            .keyboardShortcut(.cancelAction)
+            .frame(width: DesignTokens.updatesCancelWidth, height: DesignTokens.updatesButtonHeight)
+            .accessibilityIdentifier("updates-cancel")
+            .disabled(!shown.cancelEnabled)
+            Button(shown.updateTitle) { model.applySelected(context: context) }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-                .disabled(!model.canApply)
+                .frame(width: DesignTokens.updatesUpdateWidth, height: DesignTokens.updatesButtonHeight)
+                .accessibilityIdentifier("updates-apply")
+                .disabled(!shown.updateEnabled)
         }
-        .padding(Spacing.md)
-    }
-
-    private func close() {
-        model.cancel()
-        dismiss()
-    }
-}
-
-private struct UpdatesRowView: View {
-    @Bindable var model: UpdatesViewModel
-    let row: UpdatesRow
-    let context: ModelContext
-    let onViewChanges: (UpdatesRow) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack(alignment: .top, spacing: Spacing.md) {
-                Toggle(isOn: Binding(
-                    get: { model.isSelected(row) },
-                    set: { _ in model.toggleSelection(row) }
-                )) {
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                        Text(row.skillName)
-                            .font(.headline)
-                        UpdateSourceView(
-                            repositoryDisplay: row.repositoryDisplay,
-                            repositoryPath: row.repositoryPath
-                        )
-                        coordinateLine(
-                            "Installed",
-                            date: row.installedDate,
-                            commit: row.shortInstalledCommit
-                        )
-                        coordinateLine(
-                            "Available",
-                            date: row.updateDate,
-                            commit: row.shortUpstreamCommit
-                        )
-                    }
-                }
-                .toggleStyle(.checkbox)
-                .disabled(model.isApplying)
-
-                Spacer()
-                Button("View Changes") { onViewChanges(row) }
-                    .accessibilityIdentifier("updates-changes-" + row.id.uuidString)
-                    .disabled(
-                        model.isApplying || model.recheckingSkillID != nil
-                    )
-            }
-
-            if row.driftedLocally {
-                Toggle(isOn: Binding(
-                    get: { model.confirmedDriftSkillIDs.contains(row.id) },
-                    set: { model.setDriftConfirmation($0, for: row) }
-                )) {
-                    Text("This skill has local edits — updating will overwrite them")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-                .toggleStyle(.checkbox)
-                .disabled(model.isApplying)
-                .padding(.leading, Spacing.xxl)
-            }
-
-            statusView
-                .padding(.leading, Spacing.xxl)
-        }
-        .padding(.vertical, Spacing.xs)
-    }
-
-    private func coordinateLine(_ label: String, date: Date, commit: String) -> some View {
-        Text("\(label) \(date.formatted(date: .abbreviated, time: .omitted)) · \(commit)")
-            .font(.caption)
-            .foregroundStyle(.tertiary)
-    }
-
-    @ViewBuilder
-    private var statusView: some View {
-        switch model.status(for: row) {
-        case .idle:
-            EmptyView()
-        case .confirmationRequired:
-            Label("Confirm the overwrite for this skill, then update again.",
-                  systemImage: "exclamationmark.triangle")
-                .font(.caption)
-                .foregroundStyle(.orange)
-        case .updating:
-            HStack(spacing: Spacing.sm) {
-                ProgressView().controlSize(.small)
-                Text("Updating…").font(.caption).foregroundStyle(.secondary)
-            }
-        case .updated:
-            Label("Updated", systemImage: "checkmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.green)
-        case let .failed(message, offersRecheck):
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Label(message, systemImage: "xmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                if offersRecheck {
-                    Button("Re-check") { model.recheck(row, context: context) }
-                        .controlSize(.small)
-                        .disabled(model.recheckingSkillID != nil)
-                }
-            }
-        }
-    }
-}
-
-private struct UpdateSourceView: View {
-    let repositoryDisplay: String
-    let repositoryPath: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-            Image(systemName: repositoryDisplay.isEmpty
-                ? "exclamationmark.triangle"
-                : "arrow.triangle.branch")
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(repositoryDisplay.isEmpty ? "Source unavailable" : repositoryDisplay)
-                    .font(.callout)
-                if !repositoryPath.isEmpty {
-                    Text(repositoryPath)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        }
-        .foregroundStyle(repositoryDisplay.isEmpty ? .secondary : .primary)
+        .font(DesignTokens.updatesSubtitle)
+        .controlSize(.large)
+        .padding(DesignTokens.updatesFooterPadding)
     }
 }

@@ -16,10 +16,14 @@ extension UpdatesViewModel {
             selectedSkillIDs = initialSelection.map { $0.intersection(available) } ?? available
             rows = loaded
             loadPhase = .loaded
-            confirmedDriftSkillIDs.formIntersection(Set(loaded.map(\.id)))
+            confirmedDriftSkillIDs.formIntersection(available)
             statuses = Dictionary(uniqueKeysWithValues: loaded.map { ($0.id, .idle) })
         } catch {
             guard operationID == id, !Task.isCancelled else { return }
+            rows = []
+            selectedSkillIDs = []
+            confirmedDriftSkillIDs = []
+            statuses = [:]
             loadPhase = .failed(Self.readable(error))
         }
         finishOperation(id)
@@ -69,7 +73,7 @@ extension UpdatesViewModel {
         backgroundCancel = { task.cancel() }
         do {
             let completion = try await task.value
-            echoRegistrar([row.slug])
+            noteAppliedBody(row)
             guard operationID == id, !Task.isCancelled else { return true }
             applyCompletion(completion, context: presentationContext)
             statuses[row.id] = .updated
@@ -77,11 +81,16 @@ extension UpdatesViewModel {
             return true
         } catch {
             let didMutate = error is SyncedStateMutationError
-            if didMutate { echoRegistrar([row.slug]) }
+            if didMutate { noteAppliedBody(row) }
             guard operationID == id, !Task.isCancelled else { return didMutate }
             applyFailure(error, to: row)
             return didMutate
         }
+    }
+
+    private func noteAppliedBody(_ row: UpdatesRow) {
+        echoRegistrar([row.slug])
+        editorLibrary?.noteEditorBodyInvalidated()
     }
 
     private func applyFailure(_ error: Error, to row: UpdatesRow) {
@@ -160,9 +169,7 @@ extension UpdatesViewModel {
 
     private func applyCompletion(_ completion: SkillUpdateCompletion,
                                  context: ModelContext) {
-        guard let skill = try? context.fetch(FetchDescriptor<Skill>()).first(where: {
-            $0.id == completion.skillID
-        }) else { return }
+        guard let skill = try? Self.findSkill(completion.skillID, context: context) else { return }
         skill.name = completion.name
         skill.skillDescription = completion.skillDescription
         skill.installedOriginData = completion.installedOriginData
@@ -172,9 +179,7 @@ extension UpdatesViewModel {
 
     static func applyRecheckCompletion(_ completion: SkillUpdateRecheckCompletion,
                                        context: ModelContext) {
-        guard let skill = try? context.fetch(FetchDescriptor<Skill>()).first(where: {
-            $0.id == completion.skillID
-        }) else { return }
+        guard let skill = try? findSkill(completion.skillID, context: context) else { return }
         skill.updateAvailable = completion.updateAvailable
         skill.lastCheckedAt = completion.lastCheckedAt
         skill.lastCheckedHead = completion.lastCheckedHead

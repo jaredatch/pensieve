@@ -1,0 +1,93 @@
+import Foundation
+
+/// The copy and control states consumed by the sheet; no file reads or operations run here.
+struct UpdatesSheetPresentation {
+    enum Content: Equatable {
+        case loading
+        case failed(String)
+        case empty
+        case rows
+    }
+
+    enum Selection: Equatable { case unchecked, mixed, checked }
+
+    let title = "Skill Updates Available"
+    let subtitle = "Review the changes before updating."
+    let cancelTitle = "Cancel"
+    let updateTitle = "Update"
+    let retryTitle = "Retry"
+    let loadingTitle = "Checking local copies…"
+    let errorTitle = "Couldn't Load Updates"
+    let emptyTitle = "No Updates Available"
+    let emptyDescription = "Your checked GitHub skills are current."
+    let content: Content
+    let rows: [Row]
+    let selection: Selection
+    let selectionLabel: String
+    let selectionEnabled: Bool
+    let cancelEnabled: Bool
+    let updateEnabled: Bool
+    let isApplying: Bool
+
+    @MainActor
+    init(_ model: UpdatesViewModel) {
+        switch model.loadPhase {
+        case .idle, .loading: content = .loading
+        case let .failed(message): content = .failed(message)
+        case .loaded: content = model.rows.isEmpty ? .empty : .rows
+        }
+        rows = model.loadPhase == .loaded ? model.rows.map { Row($0, model: model) } : []
+        let count = rows.filter(\.isSelected).count
+        selectionLabel = "\(count) of \(rows.count) selected"
+        selection = count == 0 ? .unchecked : count == rows.count ? .checked : .mixed
+        selectionEnabled = !model.isApplying && rows.contains { $0.selectionEnabled }
+        cancelEnabled = !model.isApplying
+        updateEnabled = model.canApply
+        isApplying = model.isApplying
+    }
+
+    struct Row: Identifiable {
+        let row: UpdatesRow
+        var id: UUID { row.id }
+        var name: String { row.skillName }
+        var source: String { " — " + (row.repositoryDisplay.isEmpty ? "Source unavailable" : row.repositoryDisplay) }
+        var commits: String { "\(row.shortInstalledCommit) → \(row.shortUpstreamCommit)" }
+        var age: String { " · \(row.updateAge)" }
+        let changesTitle = "View Changes"
+        let replaceTitle = "Replace my local edits"
+        let recheckTitle = "Re-check"
+        let isSelected: Bool
+        let selectionEnabled: Bool
+        let changesEnabled: Bool
+        let localEditsCopy: String?
+        let replacementConfirmed: Bool
+        let replacementEnabled: Bool
+        let status: UpdatesRowStatus
+        let showsRecheck: Bool
+        let recheckEnabled: Bool
+
+        var statusText: String? {
+            switch status {
+            case .idle: return nil
+            case .confirmationRequired: return "Confirm the overwrite for this skill, then update again."
+            case .updating: return "Updating…"
+            case .updated: return "Updated"
+            case let .failed(message, _): return message
+            }
+        }
+
+        @MainActor
+        init(_ row: UpdatesRow, model: UpdatesViewModel) {
+            self.row = row
+            isSelected = model.isSelected(row) && model.isSelectable(row)
+            selectionEnabled = !model.isApplying && model.isSelectable(row)
+            changesEnabled = !model.isApplying && model.recheckingSkillID == nil
+            localEditsCopy = row.driftedLocally ? "You have local edits to this skill. Updating replaces them." : nil
+            replacementConfirmed = model.confirmedDriftSkillIDs.contains(row.id)
+            replacementEnabled = selectionEnabled && row.driftedLocally
+            status = model.status(for: row)
+            if case let .failed(_, offersRecheck) = status { showsRecheck = offersRecheck } else { showsRecheck = false }
+            recheckEnabled = !model.isApplying && model.recheckingSkillID == nil
+        }
+    }
+}
