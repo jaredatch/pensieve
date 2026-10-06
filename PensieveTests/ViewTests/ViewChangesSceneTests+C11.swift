@@ -41,7 +41,7 @@ extension ViewChangesSceneTests {
     }
 
     private func longCountFile(path: String) throws -> PinnedSkillFileDiff {
-        try XCTUnwrap(PinnedSkillDiff(comparison: FileTreeComparison(changes: [
+        try XCTUnwrap(PinnedSkillDiff.build(comparison: FileTreeComparison(changes: [
             FileTreeChange(path: path, kind: .modified, content: .text(
                 old: String(repeating: "old\n", count: 1_234), new: String(repeating: "new\n", count: 1_234)))
         ], unreadFileCount: 0, bytesRead: 9_872)).files.first)

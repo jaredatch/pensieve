@@ -19,6 +19,8 @@ extension UpdatesViewModelTests {
         XCTAssertNotNil(window.selectedFile, "An unused drift hash failure must not replace the actual diff")
         XCTAssertTrue(hashes.values.isEmpty, "Independent preview must not hash the local folder for drift")
         let origin = try XCTUnwrap(fixture.skill.installedOrigin)
+        // Closing requests a new worker; reopening the same loaded identity now retains its preview.
+        window.close()
         window.open(skillID: fixture.skill.id, context: context)
         var moved = origin
         moved.installedCommit = String(repeating: "a", count: 40)

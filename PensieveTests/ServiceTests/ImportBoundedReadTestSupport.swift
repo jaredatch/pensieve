@@ -26,10 +26,15 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
     var readFailures: [String: Int32] = [:]
     var comparisonThreads: [Bool] = []
     var comparisonReadBytes = 0
+    var prefixReadBytes = 0
+    var entryFailure: ((String) throws -> Void)?
+    var prefixFailure: ((String) throws -> Void)?
+    var creationFailure: ((String) throws -> Void)?
     var comparisonFailure: ((String, String) throws -> Void)?
 
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
-        try files.entryTypeWithoutFollowingLinks(at: path)
+        try entryFailure?(path)
+        return try files.entryTypeWithoutFollowingLinks(at: path)
     }
 
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
@@ -51,7 +56,10 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
     func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data {
         readAttempts.append(path)
         limits[path] = maximumBytes
-        return try files.readRegularFilePrefix(at: path, maximumBytes: maximumBytes)
+        try prefixFailure?(path)
+        let data = try files.readRegularFilePrefix(at: path, maximumBytes: maximumBytes)
+        prefixReadBytes += data.count
+        return data
     }
 
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
@@ -106,7 +114,10 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
         directoryProbes.append(path)
         return files.directoryExists(at: path)
     }
-    func createDirectory(at path: String) throws { try files.createDirectory(at: path) }
+    func createDirectory(at path: String) throws {
+        try creationFailure?(path)
+        try files.createDirectory(at: path)
+    }
     func deleteDirectory(at path: String) throws { try files.deleteDirectory(at: path) }
     func createSymlink(at path: String, pointingTo target: String) throws {
         try files.createSymlink(at: path, pointingTo: target)

@@ -54,11 +54,11 @@ extension ViewChangesViewModelTests {
         }
     }
 
-    func testSidebarHeaderNeedsALoadedPreviewAndUsesSingular() {
+    func testSidebarHeaderNeedsALoadedPreviewAndUsesSingular() throws {
         for state in [ViewChangesViewModel.State.idle, .loading, .failed("offline"), .stale("changed")] {
             XCTAssertNil(ViewChangesPresentation.sidebarHeader(state), "No count exists without a preview")
         }
-        let one = PinnedSkillDiff(comparison: FileTreeComparison(changes: [
+        let one = try PinnedSkillDiff.build(comparison: FileTreeComparison(changes: [
             FileTreeChange(path: "one", kind: .modified, content: .binary)
         ], unreadFileCount: 0, bytesRead: 0))
         XCTAssertEqual(ViewChangesPresentation.sidebarHeader(.loaded(one)), "1 Changed File")

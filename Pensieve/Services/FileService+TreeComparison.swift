@@ -39,13 +39,22 @@ extension FileService {
         }
         var changes: [FileTreeChange] = []
         var processed = 0
+        guard (0...limits.maximumTotalBytes).contains(limits.bytesReadBeforeComparison()) else {
+            throw CocoaError(.fileReadTooLarge)
+        }
         let reader = ComparisonReader(limits: limits, checkpoint: checkpoint)
         for path in paths {
             if processed == limits.maximumFiles || reader.bytesRead == limits.maximumTotalBytes { break }
             do {
                 if let content = try reader.compare(before[path], after[path]) {
                     let kind: FileTreeChange.Kind = before[path] == nil ? .added : (after[path] == nil ? .removed : .modified)
-                    changes.append(FileTreeChange(path: path, kind: kind, content: content))
+                    let oldMode = before[path].map { UInt32($0.status.st_mode & 0o777) }
+                    let newMode = after[path].map { UInt32($0.status.st_mode & 0o777) }
+                    let permissions: FileTreeChange.Permissions?
+                    if let oldMode, let newMode, oldMode != newMode {
+                        permissions = .init(old: oldMode, new: newMode)
+                    } else { permissions = nil }
+                    changes.append(FileTreeChange(path: path, kind: kind, content: content, permissions: permissions))
                 }
                 processed += 1
             } catch ComparisonReader.Failure.budgetExceeded {
@@ -67,6 +76,7 @@ private final class ComparisonReader {
     init(limits: FileTreeComparisonLimits, checkpoint: @escaping (FileService.ComparisonCheckpoint) throws -> Void) {
         self.limits = limits
         self.checkpoint = checkpoint
+        bytesRead = limits.bytesReadBeforeComparison()
     }
 
     func compare(_ old: ComparisonFile?, _ new: ComparisonFile?) throws -> FileTreeChange.Content? {
@@ -86,7 +96,7 @@ private final class ComparisonReader {
         let newData = try data(after)
         if try changed(before, after) { return .tooLarge }
         if before != nil && after != nil && oldData == newData { return modeChange(before, after) }
-        guard let oldText = String(data: oldData, encoding: .utf8), let newText = String(data: newData, encoding: .utf8),
+        guard let oldText = String(validating: oldData, as: UTF8.self), let newText = String(validating: newData, as: UTF8.self),
               !oldData.contains(0), !newData.contains(0) else { return .binary }
         return .text(old: oldText, new: newText)
     }
@@ -127,20 +137,20 @@ private final class ComparisonReader {
         while offset < old.initial.st_size {
             guard remaining >= 2 else { throw Failure.budgetExceeded }
             let count = min(64 * 1_024, min(Int(old.initial.st_size - offset), remaining / 2))
-            let left = try chunk(old, maximum: count, retained: 0)
-            let right = try chunk(new, maximum: count, retained: 0)
+            let left = try chunk(old, maximum: count)
+            let right = try chunk(new, maximum: count)
             if left != right || left.isEmpty { return false }
             offset += off_t(left.count)
         }
         return true
     }
 
-    private func chunk(_ file: ComparisonOpenedFile, maximum: Int, retained: Int) throws -> Data {
+    private func chunk(_ file: ComparisonOpenedFile, maximum: Int) throws -> Data {
         guard remaining > 0 else { throw Failure.budgetExceeded }
         var buffer = Data(count: min(maximum, remaining))
         var offset = 0
         while offset < buffer.count {
-            let count = try read(file, into: &buffer, offset: offset, maximum: buffer.count - offset, retained: retained)
+            let count = try read(file, into: &buffer, offset: offset, maximum: buffer.count - offset)
             offset += count
             if count == 0 { break }
         }
@@ -150,7 +160,7 @@ private final class ComparisonReader {
 
     /// Read directly into the retained buffer; appending a copied chunk would briefly hold extra file bytes.
     private func read(_ file: ComparisonOpenedFile, into buffer: inout Data, offset: Int,
-                      maximum: Int, retained: Int = 0) throws -> Int {
+                      maximum: Int) throws -> Int {
         guard remaining > 0 else { throw Failure.budgetExceeded }
         while true {
             try Task.checkCancellation()
@@ -161,7 +171,7 @@ private final class ComparisonReader {
             if count < 0 && errno == EINTR { continue }
             guard count >= 0 else { throw DescriptorFileCopy.error("read", path: file.entry.path, code: errno) }
             bytesRead += count
-            try checkpoint(.read(path: file.entry.path, bytes: count, retained: retained + offset + count))
+            try checkpoint(.read(path: file.entry.path, bytes: count, retained: offset + count))
             return count
         }
     }

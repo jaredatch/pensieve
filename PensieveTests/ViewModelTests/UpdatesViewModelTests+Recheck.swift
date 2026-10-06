@@ -36,7 +36,7 @@ extension UpdatesViewModelTests {
         let review = UpdateReviewOperations(
             diffOperation: { row, _ in
                 diffCalls.append(row.id)
-                return PinnedSkillDiff(comparison: FileTreeComparison(changes: [
+                return try PinnedSkillDiff.build(comparison: FileTreeComparison(changes: [
                     FileTreeChange(path: "SKILL.md", kind: .modified, content: .text(old: "current", new: "upstream"))
                 ], unreadFileCount: 0, bytesRead: 0))
             }, recheckOperation: model.recheckOperation)

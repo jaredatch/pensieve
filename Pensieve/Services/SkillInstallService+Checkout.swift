@@ -43,7 +43,7 @@ extension SkillInstallService {
 
     /// Checks required nonempty name/description frontmatter and UTF-8 in the bounded prefix.
     /// Oversized bodies are not validated beyond that prefix; apply still validates the whole file.
-    func requirePreviewInstallable(_ candidate: SkillCandidate, at path: String) throws {
+    func requirePreviewInstallable(_ candidate: SkillCandidate, at path: String) throws -> Int {
         let maximum = FileTreeComparisonLimits.updatePreview.maximumFileBytes
         let bounded = try fileService.readRegularFilePrefix(at: path, maximumBytes: maximum)
         let prefix = bounded.count > maximum
@@ -62,6 +62,7 @@ extension SkillInstallService {
             treeHash: candidate.treeHash, containsSymlink: false,
             unavailableReason: parsed.hasRequiredFrontmatter ? nil : Self.invalidFrontmatterReason
         ))
+        return bounded.count
     }
 
     private func withCheckout<Result>(source: SkillFetchResult, credential: GitCredential?,

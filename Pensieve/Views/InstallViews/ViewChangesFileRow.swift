@@ -4,13 +4,13 @@ struct ViewChangesFileRow: View {
     let file: PinnedSkillFileDiff
 
     var body: some View {
-        let parent = (file.path as NSString).deletingLastPathComponent
+        let parent = (ViewChangesPresentation.filePath(file) as NSString).deletingLastPathComponent
         HStack(spacing: DesignTokens.changesFileRowGap) {
             Image(systemName: "doc.text")
                 .foregroundStyle(.secondary)
                 .frame(width: DesignTokens.changesFileGlyphWidth, height: DesignTokens.changesFileGlyphHeight)
             VStack(alignment: .leading, spacing: DesignTokens.changesFileFolderGap) {
-                Text(verbatim: (file.path as NSString).lastPathComponent)
+                Text(verbatim: (ViewChangesPresentation.filePath(file) as NSString).lastPathComponent)
                     .font(DesignTokens.changesFileName).lineLimit(1).truncationMode(.middle)
                 if !parent.isEmpty {
                     Text(verbatim: parent).font(DesignTokens.changesFileFolder)
@@ -24,12 +24,11 @@ struct ViewChangesFileRow: View {
                     let removed = counts.removed
                     if added > 0 || removed == 0 { Text("+\(added)").foregroundStyle(Color(nsColor: .systemGreen)) }
                     if removed > 0 { Text("−\(removed)").foregroundStyle(Color(nsColor: .systemRed)) }
-                } else {
-                    if case .modeOnly = file.content {
-                        Text("Mode").foregroundStyle(.secondary)
-                    } else {
-                        Text(verbatim: ViewChangesPresentation.summary(file)).foregroundStyle(.secondary).lineLimit(1)
-                    }
+                } else if ViewChangesPresentation.sidebarMarker(file) == nil {
+                    Text(verbatim: ViewChangesPresentation.summary(file)).foregroundStyle(.secondary).lineLimit(1)
+                }
+                if let marker = ViewChangesPresentation.sidebarMarker(file) {
+                    Text(verbatim: marker).foregroundStyle(.secondary)
                 }
             }
             .font(DesignTokens.changesCount)

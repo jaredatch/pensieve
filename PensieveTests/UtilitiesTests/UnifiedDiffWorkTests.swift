@@ -130,10 +130,11 @@ final class UnifiedDiffWorkTests: XCTestCase {
         let change = FileTreeChange(path: "later", kind: .modified,
                                     content: .text(old: "old\n", new: "new\n"))
         var preparations = 0
-        let file = PinnedSkillFileDiff(change: change, budget: .init(maximumWork: 0)) { old, new in
+        let preview = try PinnedSkillDiff.build(comparison: FileTreeComparison(
+            changes: [change], unreadFileCount: 0, bytesRead: 0), budget: .init(maximumWork: 0)) { _ in
             preparations += 1
-            return UnifiedDiff(old: old, new: new)
         }
+        let file = try XCTUnwrap(preview.files.first)
         XCTAssertEqual(preparations, 0, "An exhausted preview must skip the entire text preparation")
         XCTAssertEqual(file.content, .diffBudgetExhausted)
         XCTAssertNil(file.linesAdded)
@@ -194,8 +195,8 @@ final class UnifiedDiffWorkTests: XCTestCase {
             let edits = try BoundedLineDifference.compute(before: ["old\n"], after: ["new\n"],
                                                         budget: budget) { _ in }
             XCTAssertLessThanOrEqual(budget.consumed, limit, "Every charge must respect the exact remaining budget")
-            if limit < 7 { XCTAssertNil(edits, "A middle-snake search starting at the cap must refuse") }
-            if limit == 7 { XCTAssertEqual(edits?.added.count, 1, "Finishing exactly at the cap is allowed") }
+            if limit < 9 { XCTAssertNil(edits, "A middle-snake search starting at the cap must refuse") }
+            if limit == 9 { XCTAssertEqual(edits?.added.count, 1, "Finishing exactly at the cap is allowed") }
         }
     }
 

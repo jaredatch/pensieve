@@ -85,6 +85,7 @@ extension SkillInstallService {
     /// Reads both diff sides only after the fresh checkout matches the pinned commit and tree.
     /// The operation writes scratch clone data only; it never touches the store, manifest, or flags.
     func previewUpdate(_ update: PinnedSkillUpdate) throws -> PinnedSkillDiff {
+        var upstreamRoot: String?
         do {
             return try withPinnedCheckout(
                 candidate: update.candidate,
@@ -101,35 +102,55 @@ extension SkillInstallService {
                 let upstreamDirectory = update.candidate.path.isEmpty
                     ? checkout
                     : checkout + "/" + update.candidate.path
+                upstreamRoot = upstreamDirectory
                 guard fileService.isRegularFile(at: localDirectory + "/SKILL.md") else {
                     throw SkillUpdateFlowError.unsafeSkillFile(update.existingSlug)
                 }
                 guard fileService.isRegularFile(at: upstreamDirectory + "/SKILL.md") else {
                     throw SkillInstallError.unavailableCandidate("Unsafe upstream file: SKILL.md")
                 }
-                do {
-                    let comparison = try fileService.compareFileTrees(
-                        local: localDirectory, upstream: upstreamDirectory,
-                        excludingUpstreamGit: update.candidate.path.isEmpty, limits: .updatePreview,
-                        beforeReading: { try requirePreviewInstallable(update.candidate, at: upstreamDirectory + "/SKILL.md") }
-                    )
-                    return try PinnedSkillDiff.build(comparison: comparison)
-                } catch {
-                    throw previewReadError(error, local: localDirectory, upstream: upstreamDirectory)
-                }
+                var admissionBytes = 0
+                var limits = FileTreeComparisonLimits.updatePreview
+                limits.bytesReadBeforeComparison = { admissionBytes }
+                let comparison = try fileService.compareFileTrees(
+                    local: localDirectory, upstream: upstreamDirectory,
+                    excludingUpstreamGit: update.candidate.path.isEmpty, limits: limits,
+                    beforeReading: {
+                        admissionBytes = try requirePreviewInstallable(update.candidate, at: upstreamDirectory + "/SKILL.md")
+                    }
+                )
+                return try PinnedSkillDiff.build(comparison: comparison)
             }
-        } catch SkillInstallError.repositoryChanged {
-            throw SkillUpdateFlowError.repositoryChanged
+        } catch {
+            if error as? SkillInstallError == .repositoryChanged { throw SkillUpdateFlowError.repositoryChanged }
+            throw previewReadError(error, local: storeRoot + "/skills/" + update.existingSlug,
+                                   upstream: upstreamRoot ?? scratchRoot,
+                                   skillPath: upstreamRoot == nil ? update.candidate.path : nil)
         }
     }
 
-    private func previewReadError(_ error: Error, local: String, upstream: String) -> Error {
+    private func previewReadError(_ error: Error, local: String, upstream: String, skillPath: String? = nil) -> Error {
         let failure = error as NSError
-        guard let path = failure.userInfo[NSFilePathErrorKey] as? String else { return error }
+        guard let path = failure.userInfo[NSFilePathErrorKey] as? String else {
+            guard error.localizedDescription.contains(scratchRoot) else { return error }
+            return SkillInstallError.unavailableCandidate("Cannot preview upstream path .: the file or folder could not be read.")
+        }
         let isUpstream = path == upstream || path.hasPrefix(upstream + "/")
         let root = isUpstream ? upstream : local
         guard path == root || path.hasPrefix(root + "/") else { return error }
-        let relative = path == root ? "." : String(path.dropFirst(root.count + 1))
+        var relative = path == root ? "." : String(path.dropFirst(root.count + 1))
+        if isUpstream, let skillPath {
+            // Scratch/session/repository are implementation paths, not part of the skill.
+            let components = relative.split(separator: "/")
+            relative = components.count > 2 ? components.dropFirst(2).joined(separator: "/") : "."
+            if !skillPath.isEmpty {
+                if relative == skillPath || skillPath.hasPrefix(relative + "/") {
+                    relative = "."
+                } else if relative.hasPrefix(skillPath + "/") {
+                    relative = String(relative.dropFirst(skillPath.count + 1))
+                }
+            }
+        }
         let reason = previewReadReason(failure)
         let message = "Cannot preview \(isUpstream ? "upstream" : "local") path \(relative): \(reason)."
         return isUpstream ? SkillInstallError.unavailableCandidate(message) : SkillUpdateFlowError.previewReadFailed(message)

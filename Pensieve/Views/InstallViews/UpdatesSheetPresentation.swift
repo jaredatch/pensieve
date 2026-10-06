@@ -35,12 +35,11 @@ struct UpdatesSheetPresentation {
         case .loaded: content = model.rows.isEmpty ? .empty : .rows
         }
         let selectableIDs = model.selectableSkillIDs
-        let selectedIDs = model.selectedSkillIDs.intersection(selectableIDs)
         rows = model.loadPhase == .loaded ? model.rows.map { Row($0, model: model, selectableIDs: selectableIDs) } : []
-        let count = selectedIDs.count
+        let count = model.selectedCount
         selectionLabel = content == .rows ? "\(count) of \(selectableIDs.count) selected" : nil
         selectionEnabled = !model.isApplying && !selectableIDs.isEmpty
-        selectionSources = model.rows.filter { selectableIDs.contains($0.id) }.map { row in
+        selectionSources = model.selectableRows.map { row in
             Binding(get: { model.isSelected(row) },
                     set: { model.setSelection($0, for: row) })
         }
@@ -84,7 +83,7 @@ struct UpdatesSheetPresentation {
             let selectable = selectableIDs.contains(row.id)
             isSelected = model.isSelected(row) && selectable
             selectionEnabled = !model.isApplying && selectable
-            changesEnabled = !model.isApplying && model.recheckingSkillID == nil
+            changesEnabled = selectable && !model.isApplying && model.recheckingSkillID == nil
             localEditsCopy = row.driftedLocally ? "You have local edits to this skill. Updating replaces them." : nil
             replacementConfirmed = model.confirmedDriftSkillIDs.contains(row.id)
             replacementEnabled = selectionEnabled && row.driftedLocally

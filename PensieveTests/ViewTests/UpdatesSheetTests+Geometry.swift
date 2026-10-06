@@ -21,42 +21,49 @@ extension UpdatesSheetTests {
             if count == 1 { try assertRowColumns(model, fixture: fixture) }
             if count == 2 { try assertInitialTwoRowLayout(model, fixture: fixture) }
             let main = try await hostSheet(model, fixture: fixture)
-            defer { Self.closeSheetHost(main) }
-            let sheet = try await attachedSheet(to: main, model: model)
-            assertStableFrame(sheet)
-            let inset = main.frame.maxY - sheet.frame.maxY
-            let cap = main.frame.height - inset
-            let height = sheet.frame.height
-            heights[count] = height
-            XCTAssertEqual(main.frame.width, 900, accuracy: 1, "Main width=\(main.frame.width)")
-            XCTAssertEqual(main.frame.height, 600, accuracy: 1, "Main height=\(main.frame.height)")
-            XCTAssertEqual(sheet.contentView?.bounds.width ?? 0, 480, accuracy: 1, "\(count) rows: sheet=\(sheet.frame)")
-            XCTAssertTrue(main.frame.insetBy(dx: -2, dy: -2).contains(sheet.frame),
-                          "\(count) rows: whole sheet \(sheet.frame) must fit main \(main.frame), including footer")
-            if count == 2 {
-                XCTAssertEqual(height, twoRowFrameHeight, accuracy: 2,
-                               "Two-row frame measured \(height), expected \(twoRowFrameHeight)±2")
+            do {
+                let sheet = try await attachedSheet(to: main, model: model)
+                await assertStableFrame(sheet)
+                let inset = main.frame.maxY - sheet.frame.maxY
+                let cap = main.frame.height - inset
+                let height = sheet.frame.height
+                heights[count] = height
+                XCTAssertEqual(main.frame.width, 900, accuracy: 1, "Main width=\(main.frame.width)")
+                XCTAssertEqual(main.frame.height, 600, accuracy: 1, "Main height=\(main.frame.height)")
+                XCTAssertEqual(sheet.contentView?.bounds.width ?? 0, 480, accuracy: 1, "\(count) rows: sheet=\(sheet.frame)")
+                XCTAssertTrue(main.frame.insetBy(dx: -2, dy: -2).contains(sheet.frame),
+                              "\(count) rows: whole sheet \(sheet.frame) must fit main \(main.frame), including footer")
+                if count == 2 {
+                    XCTAssertEqual(height, twoRowFrameHeight, accuracy: 2,
+                                   "Two-row frame measured \(height), expected \(twoRowFrameHeight)±2")
+                }
+                if count == 12 { try assertScrollableSheet(sheet, height: height, cap: cap) }
+            } catch {
+                await Self.closeSheetHost(main, model: model)
+                throw error
             }
-            if count == 12 {
-                XCTAssertEqual(height, DesignTokens.updatesMaximumHeight, accuracy: 2,
-                               "Twelve rows measured \(height), token maximum=\(DesignTokens.updatesMaximumHeight)")
-                XCTAssertEqual(height, cap, accuracy: 2, "Twelve rows measured \(height), maximum attached height=\(cap)")
-                let scroll = try XCTUnwrap(scrollViews(in: try XCTUnwrap(sheet.contentView)).first,
-                                           "Twelve rows measured \(height): a native row scroller must exist")
-                let document = try XCTUnwrap(scroll.documentView)
-                let range = document.bounds.height - scroll.contentView.bounds.height
-                XCTAssertGreaterThan(range, 0,
-                                     "Twelve rows measured \(height): document=\(document.bounds), viewport=\(scroll.bounds)")
-                scroll.contentView.scroll(to: NSPoint(x: 0, y: range))
-                scroll.reflectScrolledClipView(scroll.contentView)
-                XCTAssertGreaterThan(scroll.contentView.bounds.minY, 0, "Twelve rows measured \(height): row scrolling must move")
-            }
+            await Self.closeSheetHost(main, model: model)
         }
         let one = try XCTUnwrap(heights[1]), two = try XCTUnwrap(heights[2])
         let three = try XCTUnwrap(heights[3]), twelve = try XCTUnwrap(heights[12])
         XCTAssertLessThan(one, two, "One=\(one), two=\(two)")
         XCTAssertLessThan(two, three, "Two=\(two), three=\(three)")
         XCTAssertLessThan(three, twelve, "Three=\(three), cap=\(twelve)")
+    }
+
+    private func assertScrollableSheet(_ sheet: NSWindow, height: CGFloat, cap: CGFloat) throws {
+        XCTAssertEqual(height, DesignTokens.updatesMaximumHeight, accuracy: 2,
+                       "Twelve rows measured \(height), token maximum=\(DesignTokens.updatesMaximumHeight)")
+        XCTAssertEqual(height, cap, accuracy: 2, "Twelve rows measured \(height), maximum attached height=\(cap)")
+        let scroll = try XCTUnwrap(scrollViews(in: try XCTUnwrap(sheet.contentView)).first,
+                                   "Twelve rows measured \(height): a native row scroller must exist")
+        let document = try XCTUnwrap(scroll.documentView)
+        let range = document.bounds.height - scroll.contentView.bounds.height
+        XCTAssertGreaterThan(range, 0,
+                             "Twelve rows measured \(height): document=\(document.bounds), viewport=\(scroll.bounds)")
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: range))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        XCTAssertGreaterThan(scroll.contentView.bounds.minY, 0, "Twelve rows measured \(height): row scrolling must move")
     }
 
     private func assertInitialTwoRowLayout(_ model: UpdatesViewModel, fixture: UpdateReviewFixture) throws {
@@ -67,15 +74,17 @@ extension UpdatesSheetTests {
                        "First two-row layout measured \(height), expected \(twoRowFrameHeight)±2 before attachment")
     }
 
-    private func assertStableFrame(_ sheet: NSWindow) {
+    private func assertStableFrame(_ sheet: NSWindow) async {
         let clock = ContinuousClock()
         var stableSince = clock.now
         var stableReads = 0
         var previous: CGRect?
-        var lastHeights: [CGFloat] = []
-        let settled = TestWait.until(poll: { sheet.contentView?.layoutSubtreeIfNeeded() }, condition: {
+        var lastFrames: [CGRect] = []
+        await TestWait.until(failureMessage: "Sheet frame did not settle across at least three reads over 50 ms",
+                             diagnostics: { "last frames=\(lastFrames)" }, {
+            sheet.contentView?.layoutSubtreeIfNeeded()
             let frame = sheet.frame
-            lastHeights = Array((lastHeights + [frame.height]).suffix(3))
+            lastFrames = Array((lastFrames + [frame]).suffix(3))
             if previous == frame {
                 stableReads += 1
             } else {
@@ -85,7 +94,6 @@ extension UpdatesSheetTests {
             previous = frame
             return stableReads >= 3 && stableSince.duration(to: clock.now) >= .milliseconds(50)
         })
-        XCTAssertTrue(settled, "Sheet frame did not settle across at least three reads over 50 ms: last heights=\(lastHeights)")
     }
 
     private func assertRowColumns(_ model: UpdatesViewModel, fixture: UpdateReviewFixture) throws {

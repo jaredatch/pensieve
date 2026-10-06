@@ -30,13 +30,20 @@ extension UpdatesSheetTests {
         main.setFrame(NSRect(x: 100, y: 100, width: 900, height: 600), display: true)
         main.orderFront(nil)
         addTeardownBlock {
-            await MainActor.run { Self.closeSheetHost(main) }
+            await Self.closeSheetHost(main, model: model)
         }
         return main
     }
 
-    static func closeSheetHost(_ main: NSWindow) {
-        if let sheet = main.attachedSheet { main.endSheet(sheet); sheet.close(); sheet.contentView = nil }
+    static func closeSheetHost(_ main: NSWindow, model: UpdatesViewModel) async {
+        guard main.contentView != nil else { return }
+        let sheet = main.attachedSheet
+        model.isPresented = false
+        await TestWait.until(failureMessage: "The dismissed sheet did not detach before host cleanup",
+                             diagnostics: { "main=\(main.frame), sheet=\(String(describing: main.attachedSheet?.frame))" }, {
+            main.attachedSheet == nil
+        })
+        sheet?.contentView = nil
         main.close()
         main.contentView = nil
         main.toolbar = nil

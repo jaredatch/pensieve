@@ -64,12 +64,17 @@ final class UpdateReviewFixture {
          ViewChangesViewModel(library: library, operations: operations(rows: rows, diff: diff)))
     }
 
-    nonisolated static func preview() -> PinnedSkillDiff {
-        PinnedSkillDiff(comparison: FileTreeComparison(changes: [
-            FileTreeChange(path: "SKILL.md", kind: .modified, content: .text(old: "old\n", new: "new\nextra\n")),
-            FileTreeChange(path: "scripts/setup.sh", kind: .added, content: .text(old: "", new: "echo setup\n"))
-        ], unreadFileCount: 3, bytesRead: 40))
-    }
+    nonisolated static func preview() -> PinnedSkillDiff { fixedPreview }
+
+    // Shared immutable fixture is built once before operations start their cancellable workers.
+    nonisolated private static let fixedPreview: PinnedSkillDiff = {
+        do {
+            return try PinnedSkillDiff.build(comparison: FileTreeComparison(changes: [
+                FileTreeChange(path: "SKILL.md", kind: .modified, content: .text(old: "old\n", new: "new\nextra\n")),
+                FileTreeChange(path: "scripts/setup.sh", kind: .added, content: .text(old: "", new: "echo setup\n"))
+            ], unreadFileCount: 3, bytesRead: 40))
+        } catch { preconditionFailure("The fixed preview fixture must build: \(error)") }
+    }()
 }
 
 /// Thread-safe recording for detached operation outcomes, without worker-thread XCTest assertions.

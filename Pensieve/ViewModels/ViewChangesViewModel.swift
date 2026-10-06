@@ -22,6 +22,7 @@ final class ViewChangesViewModel {
 
     private let library: SkillLibraryViewModel
     private let operations: UpdateReviewOperations
+    private weak var updates: UpdatesViewModel?
     private var recheckFailureIdentity: ViewChangesIdentity?
     private var offersRecheck = false
     private let skillLookup: (UUID, ModelContext) throws -> Skill?
@@ -30,10 +31,11 @@ final class ViewChangesViewModel {
     @ObservationIgnored private var previewTask: Task<Void, Never>?
     @ObservationIgnored private var cancelWorker: (() -> Void)?
 
-    init(library: SkillLibraryViewModel, operations: UpdateReviewOperations,
+    init(library: SkillLibraryViewModel, operations: UpdateReviewOperations, updates: UpdatesViewModel? = nil,
          skillLookup: @escaping (UUID, ModelContext) throws -> Skill? = UpdatesViewModel.findSkill) {
         self.library = library
         self.operations = operations
+        self.updates = updates
         self.skillLookup = skillLookup
     }
 
@@ -60,9 +62,15 @@ final class ViewChangesViewModel {
 
     func open(skillID: UUID, context: ModelContext, folderRevision: UInt64? = nil,
               folderRevisions: [String: UInt64] = [:]) {
-        close()
-        requestedSkillID = skillID
         do {
+            if requestedSkillID == skillID, case .loaded = state,
+               let skill = try skillLookup(skillID, context),
+               identity == ViewChangesIdentity(skill: skill,
+                   folderRevision: folderRevision ?? folderRevisions[skill.directoryName, default: 0]) {
+                return
+            }
+            close()
+            requestedSkillID = skillID
             guard let skill = try skillLookup(skillID, context) else {
                 state = .stale("This skill was deleted.")
                 return
@@ -175,6 +183,26 @@ final class ViewChangesViewModel {
 }
 
 extension ViewChangesViewModel {
+    private func waitForSheet(skillID: UUID, context: ModelContext, session: UUID) async -> Bool {
+        var waited = false
+        while let updates, updates.recheckingSkillID == skillID
+            || (updates.isApplying && (updates.selectedSkillIDs.contains(skillID) || updates.statuses[skillID] == .updating)) {
+            waited = true
+            do { try await Task.sleep(for: .milliseconds(20)) } catch { return true }
+            guard sessionID == session, !Task.isCancelled else { return true }
+        }
+        guard sessionID == session, !Task.isCancelled else { return true }
+        guard waited else { return false }
+        // A sheet check or apply is authoritative. Reopen its current pin without checking again.
+        isRechecking = false
+        if let skill = try? skillLookup(skillID, context), !UpdatesViewModel.isEligibleForUpdates(skill) {
+            validate(skills: [skill], folderRevisions: library.folderChangeRevisions, context: context)
+            if case .stale = state { return true }
+        }
+        open(skillID: skillID, context: context, folderRevisions: library.folderChangeRevisions)
+        return true
+    }
+
     func recheck(context: ModelContext) {
         guard canRecheck, let requestedSkillID else { return }
         retirePreview()
@@ -185,6 +213,7 @@ extension ViewChangesViewModel {
         let container = context.container
         previewTask = Task {
             guard self.sessionID == session, !Task.isCancelled else { return }
+            if await self.waitForSheet(skillID: requestedSkillID, context: context, session: session) { return }
             let worker = Task.detached(priority: .userInitiated) {
                 try UpdatesViewModel.performUnlessCancelled { try operation(requestedSkillID, container) }
             }

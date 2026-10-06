@@ -91,8 +91,14 @@ enum BoundedLineDifference {
                 left = left.lowerBound..<(left.upperBound - 1)
                 right = right.lowerBound..<(right.upperBound - 1)
             }
-            if left.isEmpty { edits.added.formUnion(right); return }
-            if right.isEmpty { edits.removed.formUnion(left); return }
+            if left.isEmpty {
+                for index in right { try charge(); edits.added.insert(index) }
+                return
+            }
+            if right.isEmpty {
+                for index in left { try charge(); edits.removed.insert(index) }
+                return
+            }
             let point = try middle(left, right)
             try match(left.lowerBound..<point.0, right.lowerBound..<point.1)
             try match(point.0..<left.upperBound, point.1..<right.upperBound)

@@ -52,7 +52,7 @@ final class ViewChangesViewModelTests: XCTestCase {
                 try gate.wait()
                 cancelled.append(Task.isCancelled)
                 finished.signal()
-                return PinnedSkillDiff(comparison: FileTreeComparison(changes: [
+                return try PinnedSkillDiff.build(comparison: FileTreeComparison(changes: [
                     FileTreeChange(path: "late-first", kind: .modified, content: .binary)
                 ], unreadFileCount: 0, bytesRead: 0))
             }
@@ -119,22 +119,41 @@ final class ViewChangesViewModelTests: XCTestCase {
     func testPreviewFailuresHaveRetryAndReloadTheSamePin() async throws {
         let skill = try fixture.skill("retry")
         let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
-        for message in ["Authentication failed", "Network offline", "Repository moved", "Refused scripts/link"] {
+        let errors: [(Error, Bool)] = [(SkillInstallError.authenticationFailed, false),
+                                      (SkillInstallError.networkUnavailable, false),
+                                      (SkillInstallError.unavailableCandidate("Refused scripts/link"), false),
+                                      (SkillUpdateFlowError.repositoryChanged, true),
+                                      (SkillUpdateFlowError.missingPinnedUpdate, true)]
+        for (error, moved) in errors {
             let calls = UpdateReviewRecorder<String>()
+            let checks = UpdateReviewRecorder<UUID>()
+            let newCommit = String(repeating: "3", count: 40)
+            skill.upstreamCommit = row.upstreamCommit
+            skill.upstreamTree = row.upstreamTree
+            skill.upstreamCommitDate = row.updateDate
             let model = ViewChangesViewModel(library: fixture.library,
                 operations: fixture.operations(rows: [row], diff: { request, _ in
-                calls.append(request.upstreamCommit + ":" + request.upstreamTree)
-                if calls.values.count == 1 { throw PreviewFailure(message: message) }
-                return UpdateReviewFixture.preview()
-            }))
+                    calls.append(request.upstreamCommit + ":" + request.upstreamTree)
+                    if calls.values.count == 1 { throw error }
+                    return UpdateReviewFixture.preview()
+                }, recheck: { id, _ in
+                    checks.append(id)
+                    return SkillUpdateRecheckCompletion(row: row, skillID: id, updateAvailable: true,
+                        lastCheckedAt: Date(), lastCheckedHead: newCommit, upstreamTree: "current-tree",
+                        upstreamCommit: newCommit, upstreamCommitDate: row.updateDate, checkError: nil)
+                }))
             model.open(skillID: skill.id, context: fixture.context)
             await loaded(model)
-            XCTAssertEqual(model.state, .failed(message))
+            XCTAssertEqual(model.state, .failed(UpdatesViewModel.readable(error)))
             XCTAssertFalse(model.canUpdate)
-            model.retry(context: fixture.context)
+            XCTAssertEqual(model.canRecheck, moved, "Real pin errors need Re-check; auth, network and path errors need Retry")
+            if moved { model.recheck(context: fixture.context) } else { model.retry(context: fixture.context) }
             await loaded(model)
             XCTAssertNotNil(model.selectedFile)
-            XCTAssertEqual(calls.values, Array(repeating: row.upstreamCommit + ":" + row.upstreamTree, count: 2))
+            XCTAssertEqual(checks.values, moved ? [skill.id] : [])
+            XCTAssertEqual(calls.values, [row.upstreamCommit + ":" + row.upstreamTree,
+                                         moved ? newCommit + ":current-tree" : row.upstreamCommit + ":" + row.upstreamTree],
+                           "Retry reloads the same pin; Re-check loads the pin returned by the upstream check")
         }
     }
 
@@ -157,13 +176,15 @@ final class ViewChangesViewModelTests: XCTestCase {
         XCTAssertEqual(sheet.status(for: rows[0]), .idle)
     }
 
-    func testPresentationReasonsDistinguishBinarySizeBudgetAndModeWithoutInventingCounts() {
+    func testPresentationReasonsDistinguishBinarySizeBudgetAndModeWithoutInventingCounts() throws {
         let cases: [(FileTreeChange.Content, String)] = [
             (.binary, "binary"), (.tooLarge, "too large"), (.diffBudgetExhausted, "diff budget"),
             (.modeOnly(old: 0, new: 0o100), "off to on")
         ]
         for (content, expected) in cases {
-            let file = PinnedSkillFileDiff(change: FileTreeChange(path: "file", kind: .modified, content: content))
+            let file = try XCTUnwrap(PinnedSkillDiff.build(comparison: FileTreeComparison(changes: [
+                FileTreeChange(path: "file", kind: .modified, content: content)
+            ], unreadFileCount: 0, bytesRead: 0)).files.first)
             XCTAssertTrue(ViewChangesPresentation.unavailableReason(file)?.contains(expected) == true)
             if case .modeOnly = content {
                 XCTAssertNil(ViewChangesPresentation.sidebarCounts(file), "Mode changes have no line counts")
@@ -175,17 +196,12 @@ final class ViewChangesViewModelTests: XCTestCase {
             }
         }
         let line = UnifiedDiffLine(kind: .added, text: "keep\r\n", oldLineNumber: nil, newLineNumber: 1)
-        XCTAssertEqual(ViewChangesPresentation.lineText(line), "keep")
+        XCTAssertEqual(ViewChangesPresentation.lineText(line), "keep␍")
         XCTAssertEqual(ViewChangesPresentation.lineText(UnifiedDiffLine(
-            kind: .context, text: "lone\rinside", oldLineNumber: 1, newLineNumber: 1)), "lone\rinside")
+            kind: .context, text: "lone\rinside", oldLineNumber: 1, newLineNumber: 1)), "lone␍inside")
     }
 
     private func loaded(_ model: ViewChangesViewModel) async {
         await TestWait.until(failureMessage: "preview did not finish") { model.state != .loading }
     }
-}
-
-private struct PreviewFailure: LocalizedError {
-    let message: String
-    var errorDescription: String? { message }
 }

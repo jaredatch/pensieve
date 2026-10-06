@@ -8,10 +8,12 @@ struct UnifiedDiffView: View {
         GeometryReader { geometry in
             ScrollView([.horizontal, .vertical]) {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(diff.hunks.enumerated()), id: \.offset) { _, hunk in
+                    ForEach(diff.hunks.indices, id: \.self) { index in
+                        let hunk = diff.hunks[index]
                         diffRow(old: nil, new: nil, marker: "", text: hunk.header,
                                 fill: DesignTokens.diffHunkFill, kind: nil)
-                        ForEach(Array(hunk.lines.enumerated()), id: \.offset) { _, line in
+                        ForEach(hunk.lines.indices, id: \.self) { index in
+                            let line = hunk.lines[index]
                             diffRow(old: line.oldLineNumber, new: line.newLineNumber,
                                     marker: marker(line.kind), text: ViewChangesPresentation.lineText(line),
                                     fill: fill(line.kind), kind: line.kind)

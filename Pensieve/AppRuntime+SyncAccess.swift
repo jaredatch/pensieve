@@ -13,7 +13,7 @@ extension AppRuntime {
         ViewChangesViewModel(library: library, operations: UpdateReviewOperations(
             diffOperation: updatesViewModelOperations.diffOperation,
             recheckOperation: updatesViewModelOperations.recheckOperation
-        ))
+        ), updates: updates)
     }
 
     func mainWindowAppeared() async {

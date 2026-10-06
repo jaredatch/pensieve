@@ -4,78 +4,64 @@ struct PinnedSkillFileDiff: Equatable {
     let path: String
     let kind: FileTreeChange.Kind
     let content: FileTreeChange.Content
+    let permissions: FileTreeChange.Permissions?
     let diff: UnifiedDiff?
     var linesAdded: Int? { if case .modeOnly = content { return 0 }; return diff?.linesAdded }
     var linesRemoved: Int? { if case .modeOnly = content { return 0 }; return diff?.linesRemoved }
 
-    init(change: FileTreeChange) {
-        let budget = BoundedLineDifference.WorkBudget(maximumWork: PinnedSkillDiff.maximumDiffWork)
-        self.init(change: change, budget: budget) { UnifiedDiff(old: $0, new: $1, budget: budget) }
-    }
-
-    init(change: FileTreeChange,
-         budget: BoundedLineDifference.WorkBudget = .init(maximumWork: PinnedSkillDiff.maximumDiffWork),
-         makeDiff: (String, String) throws -> UnifiedDiff) rethrows {
-        let sharedBudgetLimitsSearch = budget.remaining < BoundedLineDifference.maximumWork
-        let result: UnifiedDiff?
-        if case let .text(old, new) = change.content {
-            guard !budget.isExhausted else {
-                self.init(change: change, result: nil, diffBudgetExhausted: true)
-                return
-            }
-            result = try makeDiff(old, new)
-        } else { result = nil }
-        self.init(change: change, result: result,
-                  diffBudgetExhausted: result?.isTooLarge == true && sharedBudgetLimitsSearch)
-    }
-
-    init(change: FileTreeChange, result: UnifiedDiff?, diffBudgetExhausted: Bool = false) {
+    init(change: FileTreeChange, result: UnifiedDiff?, unavailableContent: FileTreeChange.Content? = nil) {
         path = change.path
         kind = change.kind
-        content = diffBudgetExhausted ? .diffBudgetExhausted : (result?.isTooLarge == true ? .tooLarge : change.content)
-        diff = diffBudgetExhausted || result?.isTooLarge == true ? nil : result
+        content = unavailableContent ?? change.content
+        permissions = change.permissions
+        diff = unavailableContent == nil ? result : nil
     }
-
 }
 
 struct PinnedSkillDiff: Equatable {
     static let maximumDiffWork = 64 * 1_024 * 1_024
+    static let maximumDiffOutputLines = 65_536
 
     let files: [PinnedSkillFileDiff]
     let unreadFileCount: Int
     let bytesRead: Int
     var isIncomplete: Bool { unreadFileCount > 0 }
 
-    init(comparison: FileTreeComparison) {
-        let budget = BoundedLineDifference.WorkBudget(maximumWork: Self.maximumDiffWork)
-        self.init(comparison: comparison) { change in
-            PinnedSkillFileDiff(change: change, budget: budget) { UnifiedDiff(old: $0, new: $1, budget: budget) }
-        }
-    }
-
-    /// Throwing preview builder exposes diff progress so cancellation can stop inside the work.
+    /// All files share both budgets. Unavailable files retain paths and kinds, never their text buffers.
     static func build(comparison: FileTreeComparison,
                       budget: BoundedLineDifference.WorkBudget = .init(maximumWork: maximumDiffWork),
                       checkpoint: (Int) throws -> Void = { _ in }) throws -> PinnedSkillDiff {
         try Task.checkCancellation()
-        return try PinnedSkillDiff(comparison: comparison) { change in
+        var remainingOutput = maximumDiffOutputLines
+        let files = try comparison.changes.map { change -> PinnedSkillFileDiff in
             try Task.checkCancellation()
-            let file = try PinnedSkillFileDiff(change: change, budget: budget) { old, new in
-                try UnifiedDiff(old: old, new: new, budget: budget) { work in
-                    try Task.checkCancellation()
-                    try checkpoint(work)
-                    try Task.checkCancellation()
-                }
+            guard case let .text(old, new) = change.content else {
+                return PinnedSkillFileDiff(change: change, result: nil)
+            }
+            guard remainingOutput > 0 else {
+                return PinnedSkillFileDiff(change: change, result: nil, unavailableContent: .diffOutputBoundReached)
+            }
+            guard !budget.isExhausted else {
+                return PinnedSkillFileDiff(change: change, result: nil, unavailableContent: .diffBudgetExhausted)
+            }
+            let sharedBudgetLimitsSearch = budget.remaining < BoundedLineDifference.maximumWork
+            let result = try UnifiedDiff(old: old, new: new, budget: budget, maximumOutputLines: remainingOutput) { work in
+                try Task.checkCancellation()
+                try checkpoint(work)
+                try Task.checkCancellation()
             }
             try Task.checkCancellation()
-            return file
+            if result.isOutputBoundReached {
+                remainingOutput = 0
+                return PinnedSkillFileDiff(change: change, result: nil, unavailableContent: .diffOutputBoundReached)
+            }
+            if result.isTooLarge {
+                return PinnedSkillFileDiff(change: change, result: nil,
+                                          unavailableContent: sharedBudgetLimitsSearch ? .diffBudgetExhausted : .tooLarge)
+            }
+            remainingOutput -= result.hunks.reduce(0) { $0 + $1.lines.count }
+            return PinnedSkillFileDiff(change: change, result: result)
         }
+        return PinnedSkillDiff(files: files, unreadFileCount: comparison.unreadFileCount, bytesRead: comparison.bytesRead)
     }
-
-    private init(comparison: FileTreeComparison, makeFile: (FileTreeChange) throws -> PinnedSkillFileDiff) rethrows {
-        files = try comparison.changes.map(makeFile)
-        unreadFileCount = comparison.unreadFileCount
-        bytesRead = comparison.bytesRead
-    }
-
 }

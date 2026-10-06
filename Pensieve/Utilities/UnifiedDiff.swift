@@ -24,28 +24,38 @@ struct UnifiedDiff: Equatable {
     let linesRemoved: Int
 
     let isTooLarge: Bool
+    let isOutputBoundReached: Bool
 
-    init(old: String, new: String, budget: BoundedLineDifference.WorkBudget = .init()) {
-        self = (try? Self.compute(old: old, new: new, budget: budget, checkpoint: { _ in })) ?? Self.exceeded
+    init(old: String, new: String, budget: BoundedLineDifference.WorkBudget = .init(), maximumOutputLines: Int = .max) {
+        self = (try? Self.compute(old: old, new: new, budget: budget,
+                                 maximumOutputLines: maximumOutputLines, checkpoint: { _ in })) ?? Self.exceeded
     }
 
-    init(old: String, new: String, budget: BoundedLineDifference.WorkBudget = .init(), checkpoint: (Int) throws -> Void) throws {
-        self = try Self.compute(old: old, new: new, budget: budget, checkpoint: checkpoint)
+    init(old: String, new: String, budget: BoundedLineDifference.WorkBudget = .init(),
+         maximumOutputLines: Int = .max, checkpoint: (Int) throws -> Void) throws {
+        self = try Self.compute(old: old, new: new, budget: budget,
+                                maximumOutputLines: maximumOutputLines, checkpoint: checkpoint)
     }
 
-    private init(hunks: [UnifiedDiffHunk], linesAdded: Int, linesRemoved: Int, isTooLarge: Bool) {
+    private init(hunks: [UnifiedDiffHunk], linesAdded: Int, linesRemoved: Int,
+                 isTooLarge: Bool, isOutputBoundReached: Bool = false) {
         self.hunks = hunks
         self.linesAdded = linesAdded
         self.linesRemoved = linesRemoved
         self.isTooLarge = isTooLarge
+        self.isOutputBoundReached = isOutputBoundReached
     }
 
     private static var exceeded: UnifiedDiff {
         UnifiedDiff(hunks: [], linesAdded: 0, linesRemoved: 0, isTooLarge: true)
     }
 
+    private static var outputExceeded: UnifiedDiff {
+        UnifiedDiff(hunks: [], linesAdded: 0, linesRemoved: 0, isTooLarge: false, isOutputBoundReached: true)
+    }
+
     private static func compute(old: String, new: String, budget: BoundedLineDifference.WorkBudget,
-                                checkpoint: (Int) throws -> Void) throws -> UnifiedDiff {
+                                maximumOutputLines: Int, checkpoint: (Int) throws -> Void) throws -> UnifiedDiff {
         try checkpoint(0)
         guard !budget.isExhausted else { return exceeded }
         let before = Self.lines(old)
@@ -55,9 +65,24 @@ struct UnifiedDiff: Equatable {
                                                                   budget: budget, checkpoint: checkpoint) else {
             return exceeded
         }
+        guard difference.removed.count + difference.added.count <= maximumOutputLines else { return outputExceeded }
+        // Row construction, hunk scanning and position tracking share the preview's work budget too.
+        let rowCount = before.count + difference.added.count
+        guard rowCount <= budget.remaining / 3 else {
+            budget.spend(budget.remaining)
+            return exceeded
+        }
+        budget.spend(rowCount * 3)
         let rows = Self.rows(before: before, after: after, removed: difference.removed, added: difference.added)
         try checkpoint(0)
-        return UnifiedDiff(hunks: Self.hunks(rows), linesAdded: difference.added.count,
+        guard let hunks = Self.hunks(rows, maximumOutputLines: maximumOutputLines) else { return outputExceeded }
+        let emitted = hunks.reduce(0) { $0 + $1.lines.count }
+        guard emitted <= budget.remaining / 3 else {
+            budget.spend(budget.remaining)
+            return exceeded
+        }
+        budget.spend(emitted * 3)
+        return UnifiedDiff(hunks: hunks, linesAdded: difference.added.count,
                            linesRemoved: difference.removed.count, isTooLarge: false)
     }
 
@@ -68,10 +93,10 @@ struct UnifiedDiff: Equatable {
         var result: [String] = []
         var start = 0
         for index in bytes.indices where bytes[index] == 10 {
-            result.append(String(bytes: bytes[start...index], encoding: .utf8) ?? "")
+            result.append(String(validating: bytes[start...index], as: UTF8.self) ?? "")
             start = index + 1
         }
-        if start < bytes.count { result.append(String(bytes: bytes[start...], encoding: .utf8) ?? "") }
+        if start < bytes.count { result.append(String(validating: bytes[start...], as: UTF8.self) ?? "") }
         return result
     }
 
@@ -95,7 +120,7 @@ struct UnifiedDiff: Equatable {
         return result
     }
 
-    private static func hunks(_ rows: [UnifiedDiffLine]) -> [UnifiedDiffHunk] {
+    private static func hunks(_ rows: [UnifiedDiffLine], maximumOutputLines: Int) -> [UnifiedDiffHunk]? {
         var ranges: [Range<Int>] = []
         for index in rows.indices where rows[index].kind != .context {
             let range = max(0, index - 3)..<min(rows.count, index + 4)
@@ -105,6 +130,7 @@ struct UnifiedDiff: Equatable {
                 ranges.append(range)
             }
         }
+        guard ranges.reduce(0, { $0 + $1.count }) <= maximumOutputLines else { return nil }
         var oldPosition = 0
         var newPosition = 0
         var positions: [(Int, Int)] = []

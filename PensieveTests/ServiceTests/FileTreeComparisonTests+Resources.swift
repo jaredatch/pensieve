@@ -71,7 +71,7 @@ extension FileTreeComparisonTests {
             }
             XCTAssertEqual(chmod(old + "/mode", 0o644), 0)
             XCTAssertEqual(chmod(new + "/mode", 0o751), 0)
-            let preview = PinnedSkillDiff(comparison: try compare())
+            let preview = try PinnedSkillDiff.build(comparison: try compare())
             XCTAssertEqual(preview.files.first?.kind, .modified)
             XCTAssertEqual(preview.files.first?.content, .modeOnly(old: 0o644, new: 0o751))
             XCTAssertNil(preview.files.first?.diff)

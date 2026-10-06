@@ -132,10 +132,11 @@ struct ViewChangesView: View {
             }
             if let file = model.selectedFile {
                 HStack {
-                    Text(verbatim: file.path).font(DesignTokens.changesFilePath).lineLimit(1)
+                    Text(verbatim: ViewChangesPresentation.filePath(file)).font(DesignTokens.changesFilePath).lineLimit(1)
                     Spacer()
                     Text(verbatim: ViewChangesPresentation.summary(file))
                         .font(DesignTokens.changesSummary).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: true, vertical: false).layoutPriority(1)
                 }
                 .padding(.horizontal, DesignTokens.changesToolbarInset)
                 .frame(height: DesignTokens.changesFileHeaderHeight)

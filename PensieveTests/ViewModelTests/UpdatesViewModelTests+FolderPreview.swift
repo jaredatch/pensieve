@@ -37,6 +37,26 @@ extension UpdatesViewModelTests {
         }
     }
 
+    func testWholePreviewIncludesAdmissionInTheThirtyTwoMiBReadBound() throws {
+        let fixture = try prepareRealPinnedUpdate()
+        let data = Data(repeating: 65, count: 1_024 * 1_024)
+        for index in 0..<17 {
+            for directory in [fixture.repository + "/skills/vendor", fixture.storeRoot + "/skills/vendor"] {
+                try fileService.writeData(at: directory + "/file\(index)", data: data)
+            }
+        }
+        fixture.skill.upstreamCommit = try commit(fixture.repository, message: "whole-preview budget")
+        fixture.skill.upstreamTree = try GitService().treeHash(at: fixture.repository, path: "skills/vendor")
+        let spy = ImportBoundedReadSpy()
+        let preview = try makePreviewService(fixture: fixture, spy: spy).previewUpdate(PinnedSkillUpdate(skill: fixture.skill))
+        let actual = spy.prefixReadBytes + spy.comparisonReadBytes
+        XCTAssertGreaterThan(spy.prefixReadBytes, 0)
+        XCTAssertLessThanOrEqual(actual, 32 * 1_024 * 1_024, "The whole preview, admission included, must obey 32 MiB")
+        XCTAssertEqual(preview.bytesRead, actual, "Reported bytes must include the admission read")
+        XCTAssertTrue(preview.isIncomplete)
+        XCTAssertEqual(preview.unreadFileCount, 2)
+    }
+
     func testOversizedSkillMarkdownPreviewSkipsDiscoveryWholeFileRead() throws {
         let fixture = try prepareRealPinnedUpdate()
         let huge = "---\nname: Huge\ndescription: Huge skill\n---\n" + String(repeating: "a", count: 2 * 1_024 * 1_024)
@@ -48,7 +68,7 @@ extension UpdatesViewModelTests {
         let preview = try service.previewUpdate(PinnedSkillUpdate(skill: fixture.skill))
         XCTAssertEqual(preview.files.map(\.path), ["SKILL.md"])
         XCTAssertEqual(preview.files.first?.content, .tooLarge)
-        XCTAssertEqual(preview.bytesRead, 0, "different sizes establish oversized inequality")
+        XCTAssertEqual(preview.bytesRead, spy.prefixReadBytes, "Different sizes need only the counted admission read")
         XCTAssertTrue(spy.textReads.isEmpty, "preview admission must not parse SKILL.md through an unbounded read")
     }
 

@@ -114,7 +114,7 @@ final class UnifiedDiffTests: XCTestCase {
             process.waitUntilExit()
             XCTAssertEqual(process.terminationStatus, 1)
             let fields = try XCTUnwrap(String(data: data, encoding: .utf8)).split(separator: "\t")
-            let preview = PinnedSkillDiff(comparison: FileTreeComparison(changes: [FileTreeChange(
+            let preview = try PinnedSkillDiff.build(comparison: FileTreeComparison(changes: [FileTreeChange(
                 path: "SKILL.md", kind: old.isEmpty ? .added : .modified, content: .text(old: old, new: new)
             )], unreadFileCount: 0, bytesRead: 0))
             let file = try XCTUnwrap(preview.files.first)

@@ -39,7 +39,7 @@ final class FileTreeComparisonTests: XCTestCase {
         for side in [old, new] { try files.writeFile(at: side + "/same.txt", content: "unchanged\n") }
         try files.writeFile(at: old + "/.git/config", content: "local metadata\n")
         try files.writeFile(at: new + "/.git/config", content: "clone metadata\n")
-        let preview = PinnedSkillDiff(comparison: try compare())
+        let preview = try PinnedSkillDiff.build(comparison: try compare())
         XCTAssertEqual(preview.files.map(\.path), [".git/config", "add.txt", "nested/change.txt", "remove.txt"])
         XCTAssertEqual(preview.files.map(\.kind), [.removed, .added, .modified, .removed])
         XCTAssertEqual(preview.files.map(\.linesAdded), [0, 1, 2, 0])
@@ -52,7 +52,7 @@ final class FileTreeComparisonTests: XCTestCase {
     func testInvalidUTF8AndNulAreBinaryWithNoLines() throws {
         try files.writeData(at: new + "/invalid", data: Data([0xff]))
         try files.writeData(at: new + "/nul", data: Data([65, 0]))
-        let preview = PinnedSkillDiff(comparison: try compare())
+        let preview = try PinnedSkillDiff.build(comparison: try compare())
         XCTAssertEqual(preview.files.map(\.content), [.binary, .binary])
         XCTAssertTrue(preview.files.allSatisfy { $0.diff == nil && $0.linesAdded == nil && $0.linesRemoved == nil })
     }
@@ -87,7 +87,7 @@ final class FileTreeComparisonTests: XCTestCase {
         try files.writeData(at: new + "/empty", data: Data())
         for side in [old, new] { try files.writeFile(at: side + "/mode", content: "same\n") }
         XCTAssertEqual(chmod(new + "/mode", 0o755), 0)
-        let preview = PinnedSkillDiff(comparison: try compare())
+        let preview = try PinnedSkillDiff.build(comparison: try compare())
         XCTAssertEqual(preview.files.map(\.path), ["empty", "mode"])
         XCTAssertEqual(preview.files.map(\.linesAdded), [0, 0])
         XCTAssertEqual(preview.files.map(\.linesRemoved), [0, 0])

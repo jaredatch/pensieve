@@ -71,7 +71,7 @@ final class UpdateReviewRoutingTests: XCTestCase {
                 try gate.wait()
                 cancelled.append(Task.isCancelled)
                 finished.signal()
-                return PinnedSkillDiff(comparison: FileTreeComparison(changes: [
+                return try PinnedSkillDiff.build(comparison: FileTreeComparison(changes: [
                     FileTreeChange(path: "late-first", kind: .modified, content: .binary)
                 ], unreadFileCount: 0, bytesRead: 0))
             }

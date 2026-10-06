@@ -5,6 +5,7 @@ struct FileTreeComparisonLimits {
                                                        maximumFiles: 1_000, maximumTotalBytes: 32 * 1_024 * 1_024)
     static let maximumInventoryEntries = 20_000
     static let maximumDirectoryDepth = 64
+    var bytesReadBeforeComparison: () -> Int = { 0 }
     let maximumEntries: Int
     let maximumDepth: Int
     let maximumFileBytes: Int
@@ -33,10 +34,24 @@ struct FileTreeChange: Equatable {
         case binary
         case tooLarge
         case diffBudgetExhausted
+        case diffOutputBoundReached
     }
     let path: String
     let kind: Kind
     let content: Content
+    let permissions: Permissions?
+
+    struct Permissions: Equatable {
+        let old: UInt32
+        let new: UInt32
+    }
+
+    init(path: String, kind: Kind, content: Content, permissions: Permissions? = nil) {
+        self.path = path
+        self.kind = kind
+        self.content = content
+        self.permissions = permissions
+    }
 }
 
 struct FileTreeComparison: Equatable {

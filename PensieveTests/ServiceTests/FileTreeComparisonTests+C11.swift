@@ -11,7 +11,7 @@ extension FileTreeComparisonTests {
             for side in [old, new] { try files.writeFile(at: side + "/mode", content: "same") }
             XCTAssertEqual(chmod(old + "/mode", mode_t(before)), 0)
             XCTAssertEqual(chmod(new + "/mode", mode_t(after)), 0)
-            let preview = PinnedSkillDiff(comparison: try compare())
+            let preview = try PinnedSkillDiff.build(comparison: try compare())
             let file = try XCTUnwrap(preview.files.first)
             XCTAssertEqual(file.content, .modeOnly(old: UInt32(before), new: UInt32(after)))
             XCTAssertEqual(ViewChangesPresentation.unavailableReason(file), reason,
