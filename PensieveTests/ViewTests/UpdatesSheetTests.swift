@@ -18,17 +18,17 @@ final class UpdatesSheetTests: XCTestCase {
         await model.loadAndReport(context: fixture.context)
         var shown = UpdatesSheetPresentation(model)
         assertFrameCopy(shown)
-        assertCommitDatesAndSelectionBindings(model, rows: rows)
-        model.selectAll()
-        XCTAssertEqual(UpdatesSheetPresentation(model).selection, .checked)
-        model.selectNone()
-        XCTAssertEqual(UpdatesSheetPresentation(model).selection, .unchecked)
+        assertSelectionBindings(model, rows: rows, library: fixture.library)
+        UpdatesSheetPresentation(model).selectionSources.forEach { $0.wrappedValue = true }
+        XCTAssertEqual(UpdatesSheetPresentation(model).selectionSources.map(\.wrappedValue), [true, true])
+        UpdatesSheetPresentation(model).selectionSources.forEach { $0.wrappedValue = false }
+        XCTAssertEqual(UpdatesSheetPresentation(model).selectionSources.map(\.wrappedValue), [false, false])
         model.setSelection(true, for: rows[1])
         await model.applySelectedAndReport(context: fixture.context)
         shown = UpdatesSheetPresentation(model)
         XCTAssertTrue(applies.values.isEmpty)
         XCTAssertEqual(shown.rows[1].statusText, "Confirm the overwrite for this skill, then update again.")
-        model.selectNone()
+        UpdatesSheetPresentation(model).selectionSources.forEach { $0.wrappedValue = false }
         model.setDriftConfirmation(true, for: rows[1])
         shown = UpdatesSheetPresentation(model)
         XCTAssertTrue(shown.rows[1].isSelected, "Checking Replace also selects the row")
@@ -43,10 +43,10 @@ final class UpdatesSheetTests: XCTestCase {
         XCTAssertFalse(shown.rows[1].selectionEnabled)
         XCTAssertFalse(shown.rows[1].replacementEnabled)
         XCTAssertEqual(shown.selectionLabel, "0 of 1 selected", "Updated rows leave the selectable count")
-        model.selectAll()
+        UpdatesSheetPresentation(model).selectionSources.forEach { $0.wrappedValue = true }
         shown = UpdatesSheetPresentation(model)
         XCTAssertEqual(shown.selectionLabel, "1 of 1 selected")
-        XCTAssertEqual(shown.selection, .checked, "Select-all can reach checked after an update")
+        XCTAssertEqual(shown.selectionSources.map(\.wrappedValue), [true], "Select-all can reach checked after an update")
     }
 
     func testPresentationDisablesCancelForBatchAndShowsSelectedRowResults() async throws {
@@ -88,7 +88,7 @@ final class UpdatesSheetTests: XCTestCase {
         XCTAssertNil(shown.rows[2].statusText)
         XCTAssertTrue(shown.cancelEnabled)
         XCTAssertFalse(shown.rows[1].selectionEnabled)
-        model.selectAll()
+        UpdatesSheetPresentation(model).selectionSources.forEach { $0.wrappedValue = true }
         XCTAssertEqual(model.selectedSkillIDs, [first.id, third.id])
     }
 

@@ -21,9 +21,9 @@ extension UpdatesViewModelTests {
         XCTAssertEqual(model.status(for: rows[0]), .updated)
         model.setSelection(true, for: rows[0])
         XCTAssertFalse(model.isSelected(rows[0]), "The row checkbox cannot reselect an updated row")
-        model.selectAll()
+        UpdatesSheetPresentation(model).selectionSources.forEach { $0.wrappedValue = true }
         XCTAssertEqual(model.selectedSkillIDs, [second.id], "Select-all excludes rows updated in this session")
-        model.selectNone()
+        UpdatesSheetPresentation(model).selectionSources.forEach { $0.wrappedValue = false }
         model.present(selecting: first.id, library: library)
         XCTAssertTrue(model.selectedSkillIDs.isEmpty, "A window hand-off cannot reselect an updated row")
         model.setDriftConfirmation(true, for: rows[0])

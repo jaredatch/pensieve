@@ -11,7 +11,6 @@ struct UpdatesRow: Identifiable, Equatable {
     let id: UUID
     let skillName: String
     let slug: String
-    let installedCommitDate: Date?
     let installedCommit: String
     let updateDate: Date
     let upstreamCommit: String
@@ -23,18 +22,11 @@ struct UpdatesRow: Identifiable, Equatable {
 
     var shortInstalledCommit: String { String(installedCommit.prefix(7)) }
     var shortUpstreamCommit: String { String(upstreamCommit.prefix(7)) }
-    var updateAge: String? {
-        guard let installedCommitDate else { return nil }
-        let days = max(0, Int(updateDate.timeIntervalSince(installedCommitDate) / 86_400))
-        return days == 1 ? "1 day newer" : "\(days) days newer"
-    }
-
     func markedDrifted() -> UpdatesRow {
         UpdatesRow(
             id: id,
             skillName: skillName,
             slug: slug,
-            installedCommitDate: installedCommitDate,
             installedCommit: installedCommit,
             updateDate: updateDate,
             upstreamCommit: upstreamCommit,

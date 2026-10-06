@@ -10,7 +10,7 @@ struct UpdatesRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.updatesLocalEditsGap) {
-            ZStack(alignment: .topLeading) {
+            HStack(alignment: .top, spacing: 0) {
                 Toggle(shown.name, isOn: Binding(
                     get: { shown.isSelected },
                     set: { model.setSelection($0, for: row) }
@@ -18,7 +18,8 @@ struct UpdatesRowView: View {
                 .labelsHidden()
                 .toggleStyle(.checkbox)
                 .fixedSize(horizontal: true, vertical: true)
-                .frame(height: DesignTokens.updatesCheckboxHeight)
+                .frame(minWidth: DesignTokens.updatesRowBodyOffset,
+                       minHeight: DesignTokens.updatesCheckboxHeight, alignment: .leading)
                 .accessibilityIdentifier("updates-select-" + row.id.uuidString)
                 .disabled(!shown.selectionEnabled)
                 HStack(alignment: .top, spacing: Spacing.sm) {
@@ -37,7 +38,6 @@ struct UpdatesRowView: View {
                         .disabled(!shown.changesEnabled)
                         .padding(.top, DesignTokens.updatesRowMetaGap)
                 }
-                .padding(.leading, DesignTokens.updatesRowBodyOffset)
             }
             if let copy = shown.localEditsCopy {
                 localEdits(copy).padding(.leading, DesignTokens.updatesRowBodyOffset)
@@ -56,7 +56,6 @@ struct UpdatesRowView: View {
     private var coordinates: Text {
         Text(shown.commits)
             .font(DesignTokens.updatesRowCommits).foregroundColor(.secondary)
-            + Text(shown.age).font(DesignTokens.updatesRowAge).foregroundColor(.secondary)
     }
 
     private func localEdits(_ copy: String) -> some View {

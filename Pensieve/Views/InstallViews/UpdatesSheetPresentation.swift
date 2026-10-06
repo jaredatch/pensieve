@@ -9,8 +9,6 @@ struct UpdatesSheetPresentation {
         case rows
     }
 
-    enum Selection: Equatable { case unchecked, mixed, checked }
-
     let title = "Skill Updates Available"
     let subtitle = "Review the changes before updating."
     let cancelTitle = "Cancel"
@@ -22,7 +20,6 @@ struct UpdatesSheetPresentation {
     let emptyDescription = "Your checked GitHub skills are current."
     let content: Content
     let rows: [Row]
-    let selection: Selection
     let selectionLabel: String?
     let selectionSources: [Binding<Bool>]
     let selectionEnabled: Bool
@@ -42,14 +39,13 @@ struct UpdatesSheetPresentation {
         rows = model.loadPhase == .loaded ? model.rows.map { Row($0, model: model, selectableIDs: selectableIDs) } : []
         let count = selectedIDs.count
         selectionLabel = content == .rows ? "\(count) of \(selectableIDs.count) selected" : nil
-        selection = count == 0 ? .unchecked : count == selectableIDs.count ? .checked : .mixed
         selectionEnabled = !model.isApplying && !selectableIDs.isEmpty
         selectionSources = model.rows.filter { selectableIDs.contains($0.id) }.map { row in
-            Binding(get: { model.isSelected(row) && model.isSelectable(row) },
+            Binding(get: { model.isSelected(row) },
                     set: { model.setSelection($0, for: row) })
         }
         cancelEnabled = !model.isApplying
-        updateEnabled = model.canApply(selectionCount: count)
+        updateEnabled = model.canApply
         isApplying = model.isApplying
     }
 
@@ -59,7 +55,6 @@ struct UpdatesSheetPresentation {
         var name: String { row.skillName }
         var source: String { " — " + (row.repositoryDisplay.isEmpty ? "Source unavailable" : row.repositoryDisplay) }
         var commits: String { "\(row.shortInstalledCommit) → \(row.shortUpstreamCommit)" }
-        var age: String { row.updateAge.map { " · " + $0 } ?? "" }
         let changesTitle = "View Changes"
         let replaceTitle = "Replace my local edits"
         let recheckTitle = "Re-check"

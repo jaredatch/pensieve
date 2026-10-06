@@ -16,13 +16,15 @@ extension UpdatesSheetTests {
             let model = fixture.sheet(rows: rows)
             model.present(library: fixture.library)
             await model.loadAndReport(context: fixture.context)
-            let main = hostSheet(model, fixture: fixture)
+            if count == 1 { try assertRowColumns(model, fixture: fixture) }
+            let initialHeight = firstLayoutHeight(model, fixture: fixture, count: count)
+            let main = try await hostSheet(model, fixture: fixture)
             defer { main.close() }
             let sheet = try await attachedSheet(to: main, model: model)
-            let cap = min(600, main.contentLayoutRect.height)
-            await TestWait.until(failureMessage: "\(count) rows: sheet measured \(sheet.frame.height), cap=\(cap)") {
-                sheet.frame.height <= cap + 2
-            }
+            let inset = main.frame.maxY - sheet.frame.maxY
+            let cap = main.frame.height - inset
+            print("Updates sheet \(count) rows: first=\(initialHeight), attached=\(sheet.frame.height), "
+                  + "inset=\(inset), cap=\(cap)")
             sheet.contentView?.layoutSubtreeIfNeeded()
             let height = sheet.frame.height
             heights[count] = height
@@ -50,6 +52,40 @@ extension UpdatesSheetTests {
         XCTAssertLessThan(one, two, "One=\(one), two=\(two)")
         XCTAssertLessThan(two, three, "Two=\(two), three=\(three)")
         XCTAssertLessThan(three, twelve, "Three=\(three), cap=\(twelve)")
+    }
+
+    private func firstLayoutHeight(_ model: UpdatesViewModel, fixture: UpdateReviewFixture, count: Int) -> CGFloat {
+        let host = NSHostingView(rootView: UpdatesView(model: model, onViewChanges: { _ in })
+            .modelContainer(fixture.container))
+        let height = host.fittingSize.height
+        if count == 2 {
+            XCTAssertEqual(height, 375, accuracy: 2,
+                           "First two-row layout measured \(height), expected 375±2 before attachment")
+        }
+        return height
+    }
+
+    private func assertRowColumns(_ model: UpdatesViewModel, fixture: UpdateReviewFixture) throws {
+        if #available(macOS 26, *) {
+            let shown = try XCTUnwrap(UpdatesSheetPresentation(model).rows.first)
+            let checkbox = NSHostingView(rootView: Toggle(shown.name, isOn: .constant(true))
+                .labelsHidden().toggleStyle(.checkbox).controlSize(.extraLarge)).fittingSize.width
+            let name = Text(shown.name).font(DesignTokens.updatesRowName)
+                + Text(shown.source).font(DesignTokens.updatesRowSource)
+            let textWidth = max(NSHostingView(rootView: name).fittingSize.width,
+                                NSHostingView(rootView: Text(shown.commits).font(DesignTokens.updatesRowCommits))
+                                    .fittingSize.width)
+            let changes = NSHostingView(rootView: Button(shown.changesTitle, action: {})
+                .font(DesignTokens.updatesChangesButton).buttonStyle(.borderless).controlSize(.small)).fittingSize.width
+            let host = NSHostingView(rootView: UpdatesRowView(model: model, shown: shown, context: fixture.context,
+                                                             onViewChanges: { _ in }).controlSize(.extraLarge))
+            let width = host.fittingSize.width
+            let minimum = max(DesignTokens.updatesRowBodyOffset, checkbox) + textWidth + Spacing.sm + changes
+                + DesignTokens.updatesRowPadding.leading + DesignTokens.updatesRowPadding.trailing
+            print("Updates row: width=\(width), checkbox=\(checkbox), body=\(textWidth), minimum=\(minimum)")
+            XCTAssertGreaterThanOrEqual(width, minimum - 1,
+                "Row width=\(width), checkbox=\(checkbox), body=\(textWidth), minimum=\(minimum): columns cannot overlap")
+        }
     }
 
     private func scrollViews(in view: NSView) -> [NSScrollView] {

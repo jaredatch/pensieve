@@ -252,7 +252,7 @@ extension SyncNudgeTests {
         try context.save()
         let row = UpdatesRow(
             id: skill.id, skillName: "Updated", slug: "updated",
-            installedCommitDate: Date(timeIntervalSince1970: 1), installedCommit: "1111111",
+            installedCommit: "1111111",
             updateDate: Date(timeIntervalSince1970: 2), upstreamCommit: "2222222",
             upstreamTree: "tree", repositoryDisplay: "example/repo",
             repositoryPath: "skills/updated", driftedLocally: false, compareURL: nil

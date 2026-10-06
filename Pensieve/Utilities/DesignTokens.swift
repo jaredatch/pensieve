@@ -140,7 +140,6 @@ enum DesignTokens {
     static let updatesRowName = Font.system(size: 13, weight: .semibold)
     static let updatesRowSource = Font.system(size: 13)
     static let updatesRowCommits = Font.system(size: 11, design: .monospaced)
-    static let updatesRowAge = Font.system(size: 10)
     static let updatesChangesButton = Font.system(size: 11)
     static let updatesSheetWidth: CGFloat = 480
     static let updatesSheetPadding: CGFloat = 20
@@ -168,8 +167,8 @@ enum DesignTokens {
     static let updatesUpdateWidth: CGFloat = 78
     static let updatesButtonHeight: CGFloat = 28
     static let updatesLocalEditsFill = Color(nsColor: .systemOrange).opacity(0.12)
-    /// Native sheet top inset measured at the 900×600 minimum on 2026-10-06.
-    static let updatesSheetTopInset: CGFloat = 32
+    /// Native sheet frame inset under the unified main toolbar, measured at 900×600 on 2026-10-06.
+    static let updatesSheetTopInset: CGFloat = 52
     static let updatesMaximumHeight = mainWindowMinimumHeight - updatesSheetTopInset
 
     // MARK: - View Changes window

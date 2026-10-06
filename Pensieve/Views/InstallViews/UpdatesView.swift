@@ -6,7 +6,6 @@ struct UpdatesView: View {
     @Environment(\.modelContext) private var context
     @Bindable var model: UpdatesViewModel
     let onViewChanges: (UpdatesRow) -> Void
-    @State private var rowsHeight: CGFloat = 0
 
     var body: some View {
         let shown = UpdatesSheetPresentation(model)
@@ -74,11 +73,10 @@ struct UpdatesView: View {
             }
             .fixedSize(horizontal: false, vertical: true)
         case .rows:
-            ScrollView {
+            ViewThatFits(in: .vertical) {
                 rows(shown)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
+                ScrollView { rows(shown) }
             }
-            .frame(idealHeight: rowsHeight, maxHeight: rowsHeight)
         }
     }
 

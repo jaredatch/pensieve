@@ -75,9 +75,9 @@ final class UpdatesViewModelTests: XCTestCase {
                 + "1111111111111111111111111111111111111111"
                 + "...2222222222222222222222222222222222222222"
         )
-        model.selectNone()
+        UpdatesSheetPresentation(model).selectionSources.forEach { $0.wrappedValue = false }
         XCTAssertEqual(model.selectedCount, 0)
-        model.selectAll()
+        UpdatesSheetPresentation(model).selectionSources.forEach { $0.wrappedValue = true }
         XCTAssertEqual(model.selectedCount, 1)
     }
 
