@@ -29,7 +29,8 @@ protocol CategoryStoreProtocol {
     func categories(containingProjectKey key: String, context: ModelContext) -> [Category]
     func categories(containingSkillSlug slug: String, context: ModelContext) -> [Category]
     @discardableResult
-    func reconcileAfterRemovingProject(_ project: Project,
+    func reconcileAfterRemovingProject(_ project: Project, request: ProjectRemovalWithdrawalRequest,
+                                       publication: ProjectRemovalWithdrawal,
                                        reconciler: CategoryReconcilerProtocol, context: ModelContext,
                                        notifier: SyncStateNotifying) -> BatchResult
 }
@@ -65,10 +66,7 @@ extension CategoryStoreProtocol {
         setSkill(skill, inCategory: category, assigned: assigned, reconciler: reconciler,
                  context: context, notifier: notifier)
     }
-    func reconcileAfterRemovingProject(_ project: Project, reconciler: CategoryReconcilerProtocol,
-                                       context: ModelContext) -> BatchResult {
-        reconcileAfterRemovingProject(project, reconciler: reconciler, context: context, notifier: notifier)
-    }
+
 }
 
 // MARK: - Implementation
@@ -188,36 +186,30 @@ struct CategoryStore: CategoryStoreProtocol {
         return categories.filter { $0.skillSlugs.contains(slug) }
     }
 
-    /// Prune a project from EVERY category it belongs to, then reconcile ONCE while the project is still a
-    /// live record (so its category-managed tuples become `toRemove` and the unlinks fire). Does NOT delete
-    /// the Project record — the caller deletes it only on a clean reconcile (§C). Returns the reconcile result. (PLAN-06 / 06.3)
+    /// Withdraw category and direct requests together, then reconcile while the project is live.
+    /// The prepared removal owns this project's artifact cleanup; the reconciler handles other work.
     @discardableResult
-    func reconcileAfterRemovingProject(_ project: Project,
+    func reconcileAfterRemovingProject(_ project: Project, request: ProjectRemovalWithdrawalRequest,
+                                       publication: ProjectRemovalWithdrawal,
                                        reconciler: CategoryReconcilerProtocol, context: ModelContext,
                                        notifier: SyncStateNotifying) -> BatchResult {
         defer { notifier() }
+        let withdrawal = ProjectRemovalWithdrawal(manifestService: publication.manifestService ?? self.manifestService,
+            manifestRoot: publication.manifestService == nil ? self.manifestRoot : publication.manifestRoot,
+            logFailure: publication.logFailure)
         do {
-            let projects = try context.fetch(FetchDescriptor<Project>())
-            if let key = project.identityKey,
-               !projects.contains(where: { $0.id != project.id && $0.identityKey == key }) {
-                let categories = try context.fetch(FetchDescriptor<Category>())
-                for category in categories { category.projectKeys.removeAll { $0 == key } }
-                try context.save()
-                if let manifestService {
-                    try manifestService.write(manifestService.snapshot(from: context), toRoot: manifestRoot)
-                }
-            }
+            try withdrawal.apply(project: project, request: request, context: context)
         } catch {
-            context.rollback()
             var result = BatchResult()
-            result.operationFailures.append("Couldn't prepare project category removal: " + error.localizedDescription)
+            result.operationFailures.append(error.localizedDescription)
             return result
         }
         var result = reconciler.reconcileRemovingProject(project.id, context: context)
         do {
-            try context.save()
+            if context.hasChanges { try withdrawal.save(context: context) }
         } catch {
             context.rollback()
+            withdrawal.repairManifest(context: context)
             result.operationFailures.append("Couldn't save project category removal: " + error.localizedDescription)
         }
         return result

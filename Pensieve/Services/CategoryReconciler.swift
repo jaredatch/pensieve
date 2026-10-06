@@ -8,12 +8,6 @@ protocol CategoryReconcilerProtocol {
     func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult
 }
 
-extension CategoryReconcilerProtocol {
-    func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult {
-        reconcile(context: context)
-    }
-}
-
 /// The heart of categories: diff the desired (skill, project, agent) triples declared by the
 /// rules against the realized ledger, and drive the resilient batch engine to close the gap.
 /// Ledger only successful deploys; drop ledger rows only for successful unlinks. It passes
@@ -72,7 +66,7 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
         let state = fetchState(context: context, intentLedger: intentLedger)
         let platforms = platformVM.deployablePlatforms(forProject: true)
         let desired = desiredTriples(from: state, platforms: platforms, excludingProjectID: removingProjectID)
-        let current = Set(state.ledger.map {
+        let current = Set(state.ledger.filter { $0.projectID != removingProjectID }.map {
             Triple(skillID: $0.skillID, projectID: $0.projectID, platform: $0.platform)
         })
 

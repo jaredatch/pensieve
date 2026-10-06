@@ -44,17 +44,8 @@ struct ProjectListView: View {
             return "Removal stopped because Pensieve couldn't read its deploy records. "
                 + "“\(projectName)” stays registered so you can retry. " + details
         }
-        return "Couldn't remove “\(projectName)”: " + details + " It stays registered so you can retry."
-    }
-
-    @discardableResult
-    static func removeProject(_ project: Project, removalError: inout String?, perform: () -> BatchResult) -> BatchResult {
-        let name = project.name
-        let result = perform()
-        if result.hasFailures {
-            removalError = removalFailureMessage(projectName: name, result: result)
-        }
-        return result
+        return "Removal of “\(projectName)” stopped partway: " + details
+            + " It stays registered; retry to complete it."
     }
 
     var body: some View {
@@ -100,10 +91,11 @@ struct ProjectListView: View {
             isPresented: $confirmingRemoval,
             titleVisibility: .visible) {
                 Button("Remove Project", role: .destructive) {
-                    removal.confirm { project in
+                    removal.confirm { project, plan in
                         removeRegisteredProject(project, categoryStore: categoryStore,
                             reconciler: CategoryReconciler(platformVM: platformVM), manifestService: ManifestService(),
-                            platformVM: platformVM, localMachineID: localMachineID, context: context, notifier: notifier)
+                            platformVM: platformVM, localMachineID: localMachineID, preparedPlan: plan,
+                            context: context, notifier: notifier)
                     }
                 }
                 Button("Cancel", role: .cancel) { removal.cancel() }

@@ -18,84 +18,179 @@ struct ProjectRemovalPreview {
 }
 
 /// Candidates come from this Mac's records, never a directory scan. The same preparation feeds
-/// confirmation and execution; execution prepares again and the leaf removal rechecks ownership.
+/// confirmation and execution; only the folder admission and the leaf ownership check repeat.
 @MainActor
 struct ProjectRemovalPlan {
     let preview: ProjectRemovalPreview
-    let pairs: [DeployRemovalPair]
+    let candidates: [Candidate]
+    let hasIdentitySibling: Bool
+
+    struct Candidate {
+        let pair: DeployRemovalPair
+        let path: String
+        let isOwned: Bool
+    }
 
     static func prepare(project: Project, platformVM: PlatformViewModel, context: ModelContext,
                         stateFetcher: ReconcilerStateFetching = ReconcilerStateFetcher()) throws -> ProjectRemovalPlan {
+        let projects = try stateFetcher.projects(context: context)
+        let hasSibling = projects.contains {
+            $0.id != project.id && project.identityKey != nil && $0.identityKey == project.identityKey
+        }
         do {
             try platformVM.projectReconcilePolicy.requireDirectory(project)
         } catch ProjectFolderError.missing {
             return ProjectRemovalPlan(preview: ProjectRemovalPreview(
-                projectName: project.name, artifactCount: 0, folderIsMissing: true), pairs: [])
+                projectName: project.name, artifactCount: 0, folderIsMissing: true),
+                candidates: [], hasIdentitySibling: hasSibling)
         }
         let skills = try stateFetcher.skills(context: context)
-        let byID = Dictionary(skills.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let bySlug = Dictionary(skills.map { ($0.directoryName, $0) }, uniquingKeysWith: { first, _ in first })
-        var candidates: [String: DeployRemovalPair] = [:]
-        for row in try stateFetcher.categoryAssignments(context: context) where row.projectID == project.id {
-            if let skill = byID[row.skillID] {
-                try admit(skill: skill, platform: row.platform, project: project, platformVM: platformVM, into: &candidates)
+        let evidence = Evidence(
+            byID: Dictionary(skills.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }),
+            bySlug: Dictionary(skills.map { ($0.directoryName, $0) }, uniquingKeysWith: { first, _ in first }),
+            categoryRows: try stateFetcher.categoryAssignments(context: context),
+            intentRows: try stateFetcher.intentAssignments(context: context))
+        let candidates = try localCandidates(project: project, platformVM: platformVM, evidence: evidence, context: context)
+        let claimed = try siblingClaims(project: project, projects: projects, platformVM: platformVM,
+                                        evidence: evidence, context: context)
+        var prepared: [Candidate] = []
+        for path in candidates.keys.sorted() {
+            guard let pair = candidates[path], !claimed.contains(claim(pair.skill.directoryName, pair.platform)) else {
+                continue
             }
+            let owned = try platformVM.artifactIsOwned(skill: pair.skill, platform: pair.platform, target: .project(project))
+            prepared.append(Candidate(pair: pair, path: path, isOwned: owned))
         }
-        for row in try stateFetcher.intentAssignments(context: context) where row.projectID == project.id {
-            if let skill = byID[row.skillID], let platform = PlatformTarget(rawValue: row.platformRaw) {
-                try admit(skill: skill, platform: platform, project: project, platformVM: platformVM, into: &candidates)
-            }
-        }
-        let state = try platformVM.deployStateStore.read()
-        for row in state.records where row.scope == "project" && row.artifactPath.hasPrefix(project.path + "/") {
-            guard let platform = PlatformTarget(rawValue: row.platform) else { continue }
-            let skill = bySlug[row.slug] ?? Skill(name: row.slug, directoryName: row.slug)
-            try admit(skill: skill, platform: platform, project: project, platformVM: platformVM,
-                      recordedPath: row.artifactPath, into: &candidates)
-        }
-        let projectID = project.id
-        let history = try context.fetch(FetchDescriptor<DeployRecord>(predicate: #Predicate { $0.projectID == projectID }))
-        for row in history where row.targetPath.hasPrefix(project.path + "/") {
-            let skill = byID[row.skillID] ?? historicalSkill(path: row.targetPath, platform: row.platform)
-            try admit(skill: skill, platform: row.platform, project: project, platformVM: platformVM,
-                      recordedPath: row.targetPath, into: &candidates)
-        }
-        let pairs = candidates.keys.sorted().compactMap { candidates[$0] }
-        var count = 0
-        for pair in pairs where try platformVM.artifactIsOwned(
-            skill: pair.skill, platform: pair.platform, target: .project(project)) { count += 1 }
+        let count = prepared.filter(\.isOwned).count
         return ProjectRemovalPlan(preview: ProjectRemovalPreview(
-            projectName: project.name, artifactCount: count, folderIsMissing: false), pairs: pairs)
+            projectName: project.name, artifactCount: count, folderIsMissing: false),
+            candidates: prepared, hasIdentitySibling: hasSibling)
     }
 
     func removeArtifacts(project: Project, platformVM: PlatformViewModel) -> BatchResult {
         var result = BatchResult()
+        do {
+            try platformVM.projectReconcilePolicy.requireDirectory(project)
+        } catch ProjectFolderError.missing {
+            return result
+        } catch {
+            result.operationFailures.append("Couldn't check the project folder at \(project.path): " + error.localizedDescription)
+            return result
+        }
+        if preview.folderIsMissing { return result }
         var changed = false
-        for pair in pairs {
-            let target = DeployTarget.project(project)
-            let path = platformVM.artifactPath(skill: pair.skill, platform: pair.platform, target: target)
+        var completed: [(candidate: Candidate, deleted: Bool)] = []
+        for candidate in candidates {
+            let pair = candidate.pair
             do {
-                let owned = try platformVM.artifactIsOwned(skill: pair.skill, platform: pair.platform, target: target)
-                let deleted = owned
-                    ? try platformVM.removeArtifact(skill: pair.skill, platform: pair.platform, target: target) : false
+                let deleted = candidate.isOwned ? try platformVM.removeArtifact(
+                    skill: pair.skill, platform: pair.platform, target: .project(project)) : false
                 changed = deleted || changed
-                let retired = try platformVM.deployStateStore.remove(artifactPath: path)
-                changed = retired || changed
-                if deleted {
+                completed.append((candidate, deleted))
+            } catch {
+                result.outcomes.append(failure(candidate, project: project, error: error))
+            }
+        }
+        do {
+            let retired = try platformVM.deployStateStore.remove(artifactPaths: Set(completed.map { $0.candidate.path }))
+            changed = retired || changed
+            for item in completed {
+                let pair = item.candidate.pair
+                if item.deleted {
                     result.outcomes.append(BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
                         platform: pair.platform, target: .project(project.id), error: nil))
                 } else {
                     result.retiredPairs.insert(BatchPairKey(skillID: pair.skill.id,
                         platform: pair.platform, target: .project(project.id)))
                 }
-            } catch {
-                result.outcomes.append(BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
-                    platform: pair.platform, target: .project(project.id),
-                    error: "\(pair.skill.name) (\(pair.platform.displayName)) at \(path): \(error.localizedDescription)"))
             }
+        } catch {
+            for item in completed { result.outcomes.append(failure(item.candidate, project: project, error: error)) }
         }
         if changed { platformVM.noteDeployStateChanged() }
         return result
+    }
+
+    private func failure(_ candidate: Candidate, project: Project, error: Error) -> BatchPairOutcome {
+        let pair = candidate.pair
+        return BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
+            platform: pair.platform, target: .project(project.id),
+            error: "\(pair.skill.name) (\(pair.platform.displayName)) at \(candidate.path): \(error.localizedDescription)")
+    }
+
+    private static func claim(_ slug: String, _ platform: PlatformTarget) -> String { platform.rawValue + "|" + slug }
+
+    private struct Evidence {
+        let byID: [UUID: Skill]
+        let bySlug: [String: Skill]
+        let categoryRows: [SkillProjectAssignment]
+        let intentRows: [IntentAssignment]
+    }
+
+    private static func localCandidates(project: Project, platformVM: PlatformViewModel,
+                                        evidence: Evidence, context: ModelContext) throws -> [String: DeployRemovalPair] {
+        var candidates: [String: DeployRemovalPair] = [:]
+        for row in evidence.categoryRows where row.projectID == project.id {
+            if let skill = evidence.byID[row.skillID] {
+                try admit(skill: skill, platform: row.platform, project: project, platformVM: platformVM, into: &candidates)
+            }
+        }
+        for row in evidence.intentRows where row.projectID == project.id {
+            if let skill = evidence.byID[row.skillID], let platform = PlatformTarget(rawValue: row.platformRaw) {
+                try admit(skill: skill, platform: platform, project: project, platformVM: platformVM, into: &candidates)
+            }
+        }
+        let state = try platformVM.deployStateStore.read()
+        for row in state.records where row.scope == "project" && row.artifactPath.hasPrefix(project.path + "/") {
+            guard let platform = PlatformTarget(rawValue: row.platform) else { continue }
+            let skill = evidence.bySlug[row.slug] ?? Skill(name: row.slug, directoryName: row.slug)
+            try admit(skill: skill, platform: platform, project: project, platformVM: platformVM,
+                      recordedPath: row.artifactPath, into: &candidates)
+        }
+        let projectID = project.id
+        let history = try context.fetch(FetchDescriptor<DeployRecord>(predicate: #Predicate { $0.projectID == projectID }))
+        for row in history where row.targetPath.hasPrefix(project.path + "/") {
+            let skill = evidence.byID[row.skillID] ?? historicalSkill(path: row.targetPath, platform: row.platform)
+            try admit(skill: skill, platform: row.platform, project: project, platformVM: platformVM,
+                      recordedPath: row.targetPath, into: &candidates)
+        }
+        return candidates
+    }
+
+    private static func siblingClaims(project: Project, projects: [Project], platformVM: PlatformViewModel,
+                                      evidence: Evidence, context: ModelContext) throws -> Set<String> {
+        let directory = platformVM.projectReconcilePolicy.resolvedDirectory(project)
+        let siblings = projects.filter {
+            $0.id != project.id && platformVM.projectReconcilePolicy.resolvedDirectory($0) == directory
+        }
+        let siblingIDs = Set(siblings.map(\.id))
+        let siblingKeys = Set(siblings.compactMap(\.identityKey))
+        var claimed: Set<String> = []
+        for row in evidence.categoryRows where siblingIDs.contains(row.projectID) {
+            if let skill = evidence.byID[row.skillID] { claimed.insert(claim(skill.directoryName, row.platform)) }
+        }
+        for row in evidence.intentRows where row.projectID.map(siblingIDs.contains) == true {
+            if let skill = evidence.byID[row.skillID], let platform = PlatformTarget(rawValue: row.platformRaw) {
+                claimed.insert(claim(skill.directoryName, platform))
+            }
+        }
+        if !siblings.isEmpty {
+            for category in try context.fetch(FetchDescriptor<Category>())
+                where !siblingKeys.isDisjoint(with: category.projectKeys) {
+                for slug in category.skillSlugs {
+                    for platform in PlatformTarget.allCases where platform.supportsProjectScope {
+                        claimed.insert(claim(slug, platform))
+                    }
+                }
+            }
+            for intent in try context.fetch(FetchDescriptor<MachineDeployIntent>())
+                where intent.projectKey.map(siblingKeys.contains) == true {
+                if let platform = PlatformTarget(rawValue: intent.platformRaw) {
+                    claimed.insert(claim(intent.skillSlug, platform))
+                }
+            }
+        }
+        return claimed
     }
 
     private static func admit(skill: Skill, platform: PlatformTarget, project: Project,

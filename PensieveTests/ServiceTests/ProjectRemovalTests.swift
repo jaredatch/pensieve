@@ -118,9 +118,98 @@ final class ProjectRemovalTests: XCTestCase {
         XCTAssertFalse(h.files.isSymlink(at: h.artifact(.claudeCode)))
         XCTAssertTrue(try h.context.fetch(FetchDescriptor<IntentAssignment>()).contains { $0.platformRaw == "codex" })
         XCTAssertTrue(ProjectListView.removalFailureMessage(projectName: h.project.name, result: result).contains(failedPath))
+        let message = ProjectListView.removalFailureMessage(projectName: h.project.name, result: result)
+        XCTAssertTrue(message.contains("stopped partway"))
+        XCTAssertTrue(message.contains("retry"))
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
+        _ = h.intent.reconcile(context: h.context)
+        XCTAssertFalse(h.files.isSymlink(at: h.artifact(.claudeCode)), "Convergence must not redeploy a removed link")
         h.mapped.beforeArtifactDeletion = nil
         XCTAssertFalse(remove(h).hasFailures)
         XCTAssertFalse(h.files.isSymlink(at: failedPath))
+    }
+
+    func testSameFolderRegistrationsPreserveSiblingArtifactsAndRecords() throws {
+        for alias in [false, true] {
+            let h = try ProjectFolderCallerHarness()
+            defer { h.cleanup() }
+            try h.files.createDirectory(at: h.project.path)
+            let folder = h.project.path
+            if alias {
+                let link = h.root + "/project-alias"
+                try h.files.createSymlink(at: link, pointingTo: folder)
+                h.otherProject.path = link
+            } else { h.otherProject.path = folder }
+            h.otherProject.identityKey = h.project.identityKey
+            let category = try h.addCategory()
+            try h.addIntent(platform: .cursor)
+            XCTAssertFalse(h.category.reconcile(context: h.context).hasFailures)
+            XCTAssertFalse(h.intent.reconcile(context: h.context).hasFailures)
+            let state = try h.deployState.read()
+            let rows = Set(try h.context.fetch(FetchDescriptor<SkillProjectAssignment>())
+                .filter { $0.projectID == h.otherProject.id }.map(\.id))
+            let intents = try h.context.fetch(FetchDescriptor<IntentAssignment>())
+                .filter { $0.projectID == h.otherProject.id }.map(\.key)
+            let plan = try ProjectRemovalPlan.prepare(project: h.project, platformVM: h.platformVM, context: h.context)
+            XCTAssertEqual(plan.preview.artifactCount, 0)
+            XCTAssertFalse(remove(h).hasFailures)
+            XCTAssertEqual(try h.deployState.read(), state, "Both spellings of a shared path remain recorded")
+            XCTAssertEqual(Set(try h.context.fetch(FetchDescriptor<SkillProjectAssignment>()).map(\.id)), rows)
+            XCTAssertEqual(try h.context.fetch(FetchDescriptor<IntentAssignment>()).map(\.key), intents)
+            XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 1)
+            XCTAssertEqual(category.projectKeys, [h.otherProject.identityKey!])
+            for platform in [PlatformTarget.claudeCode, .grok, .codex, .cursor] {
+                XCTAssertTrue(try h.files.entryExistsWithoutFollowingLinks(at: h.platformVM.artifactPath(
+                    skill: h.skill, platform: platform, target: .project(h.otherProject))))
+            }
+        }
+    }
+
+    func testPartialRemovalWithSameKeySiblingConvergesAndRetryKeepsSibling() throws {
+        for categoryOwned in [false, true] {
+            let h = try ProjectFolderCallerHarness(installed: [.claudeCode, .codex])
+            defer { h.cleanup() }
+            try h.files.createDirectory(at: h.project.path)
+            h.otherProject.identityKey = h.project.identityKey
+            let category = categoryOwned ? try h.addCategory() : nil
+            if !categoryOwned {
+                try h.addIntent(platform: .claudeCode)
+                try h.addIntent(platform: .codex)
+            }
+            let converge = { categoryOwned ? h.category.reconcile(context: h.context) : h.intent.reconcile(context: h.context) }
+            XCTAssertFalse(converge().hasFailures)
+            let siblingCategoryIDs = Set(try h.context.fetch(FetchDescriptor<SkillProjectAssignment>())
+                .filter { $0.projectID == h.otherProject.id }.map(\.id))
+            let siblingIntentKeys = Set(try h.context.fetch(FetchDescriptor<IntentAssignment>())
+                .filter { $0.projectID == h.otherProject.id }.map(\.key))
+            let sharedIntentKeys = Set(try h.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.key))
+            let memberships = category?.projectKeys
+            let siblingState = try h.deployState.read().records.filter { $0.artifactPath.hasPrefix(h.otherProject.path + "/") }
+            let removedPath = h.artifact(.claudeCode)
+            let failedPath = h.artifact(.codex)
+            h.mapped.beforeArtifactDeletion = { path in
+                if path == failedPath { throw NSError(domain: NSPOSIXErrorDomain, code: 13) }
+            }
+            XCTAssertTrue(remove(h).hasFailures)
+            XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 2)
+            XCTAssertFalse(h.files.isSymlink(at: removedPath), "The first cleanup actually removes this link")
+            XCTAssertTrue(h.files.isSymlink(at: h.artifact(.claudeCode, project: h.otherProject)))
+            XCTAssertFalse(converge().hasFailures)
+            XCTAssertTrue(h.files.isSymlink(at: removedPath), "A sibling keeps the identity-key requests live")
+            h.mapped.beforeArtifactDeletion = nil
+            XCTAssertFalse(remove(h).hasFailures)
+            XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.otherProject.id])
+            XCTAssertFalse(h.files.isSymlink(at: removedPath))
+            XCTAssertFalse(h.files.isSymlink(at: failedPath))
+            for platform in [PlatformTarget.claudeCode, .codex] {
+                XCTAssertTrue(h.files.isSymlink(at: h.artifact(platform, project: h.otherProject)))
+            }
+            XCTAssertEqual(Set(try h.context.fetch(FetchDescriptor<SkillProjectAssignment>()).map(\.id)), siblingCategoryIDs)
+            XCTAssertEqual(Set(try h.context.fetch(FetchDescriptor<IntentAssignment>()).map(\.key)), siblingIntentKeys)
+            XCTAssertEqual(Set(try h.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.key)), sharedIntentKeys)
+            XCTAssertEqual(category?.projectKeys, memberships)
+            XCTAssertEqual(try h.deployState.read().records, siblingState)
+        }
     }
 
     private func plant(_ h: ProjectFolderCallerHarness, platform: PlatformTarget) throws -> String {

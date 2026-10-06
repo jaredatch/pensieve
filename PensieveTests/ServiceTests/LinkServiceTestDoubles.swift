@@ -319,6 +319,9 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     func contentsHash(at path: String) throws -> String {
         try wrapped.contentsHash(at: resolved(path))
     }
+    func realPath(at path: String) -> String { wrapped.realPath(at: resolved(path)) }
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: resolved(path)) }
+
 }
 
 struct LinkServiceScriptedContext {

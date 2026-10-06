@@ -375,6 +375,10 @@ private struct FixedImportScanner: ImportScannerProtocol {
 }
 
 private struct ResultReconciler: CategoryReconcilerProtocol {
+    func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult {
+        reconcile(context: context)
+    }
+
     var fails = false
 
     func reconcile(context: ModelContext) -> BatchResult {

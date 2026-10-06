@@ -21,14 +21,16 @@ final class ProjectFolderRoundOneTests: XCTestCase {
         try h.context.save()
         links.failedPath = h.project.path
         var logs: [String] = []
-        var alert: String?
-        let result = ProjectListView.removeProject(h.otherProject, removalError: &alert) {
+        let model = ProjectRemovalModel()
+        model.request(h.otherProject, platformVM: vm, context: h.context)
+        let result = model.confirm { _, plan in
             removeRegisteredProject(h.otherProject,
                 categoryStore: CategoryStore(manifestService: ManifestService(fileService: h.files),
                     manifestRoot: h.root + "/store"),
-                reconciler: reconciler, platformVM: vm, localMachineID: ProjectIntentHarness.localID,
+                reconciler: reconciler, platformVM: vm, localMachineID: ProjectIntentHarness.localID, preparedPlan: plan,
             context: h.context, logFailure: { logs.append($0) })
         }
+        let alert = model.error
         XCTAssertNil(alert)
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(logs.count, 1, "A sibling failure must leave a log trace")

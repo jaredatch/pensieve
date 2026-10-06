@@ -39,11 +39,19 @@ final class AppRuntimeTests: XCTestCase {
 
     private struct NoopLedgerReconciler: CategoryReconcilerProtocol,
         IntentReconcilerProtocol {
+        func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult {
+            reconcile(context: context)
+        }
+
         func reconcile(context: ModelContext) -> BatchResult { BatchResult() }
     }
 
     private final class RecordingLedgerReconciler: CategoryReconcilerProtocol,
         IntentReconcilerProtocol {
+        func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult {
+            reconcile(context: context)
+        }
+
         private(set) var calls = 0
 
         func reconcile(context: ModelContext) -> BatchResult {

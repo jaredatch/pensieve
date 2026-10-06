@@ -17,6 +17,10 @@ struct ProjectReconcilePolicy {
         try fileService.requireProjectDirectory(at: project.path)
     }
 
+    func resolvedDirectory(_ project: Project) -> String {
+        fileService.realPath(at: project.path)
+    }
+
     struct Work<Triple: ProjectReconcileTriple> {
         let deploy: Set<Triple>
         let remove: Set<Triple>

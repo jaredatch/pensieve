@@ -6,7 +6,38 @@ extension CursorOwnershipTests {
         let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().path
         let products = checkout + "/DerivedData/Build/Products/Debug"
-        let fixtures = [
+        for (index, fixture) in serviceConformerFixtures.enumerated() {
+            let ownership: String
+            let requiredMethod: String
+            switch index {
+            case 0:
+                ownership = "func ownsArtifact(skill: Skill, platform: PlatformTarget, "
+                    + "projectPath: String?) throws -> Bool { true }"
+                requiredMethod = "ownsArtifact"
+            case 1:
+                ownership = "func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { true }"
+                requiredMethod = "ownsArtifact"
+            default:
+                ownership = "func reconcileRemovingProject(_ projectID: UUID, "
+                    + "context: ModelContext) -> BatchResult { BatchResult() }"
+                requiredMethod = "reconcileRemovingProject"
+            }
+            for explicit in [true, false] {
+                let source = root + "/protocol-probe.swift"
+                try files.writeFile(at: source, content: "import Foundation\nimport SwiftData\n@testable import Pensieve\n"
+                    + fixture.replacingOccurrences(of: "OWNERSHIP", with: explicit ? ownership : ""))
+                let (status, diagnostics) = try typecheckOwnershipProbe(source, products: products, checkout: checkout)
+                if explicit {
+                    XCTAssertEqual(status, 0, diagnostics)
+                } else {
+                    XCTAssertNotEqual(status, 0, "A conformer omitted \(requiredMethod) and still compiled")
+                    XCTAssertTrue(diagnostics.contains(requiredMethod), diagnostics)
+                }
+            }
+        }
+    }
+    private var serviceConformerFixtures: [String] {
+        [
             """
             struct Probe: LinkServiceProtocol {
                 func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
@@ -28,26 +59,16 @@ extension CursorOwnershipTests {
                 func outputPath(skill: Skill, projectPath: String?) -> String { "" }
                 OWNERSHIP
             }
+            """,
+            """
+            struct Probe: CategoryReconcilerProtocol {
+                func reconcile(context: ModelContext) -> BatchResult { BatchResult() }
+                OWNERSHIP
+            }
             """
         ]
-        for (index, fixture) in fixtures.enumerated() {
-            let ownership = index == 0
-                ? "func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { true }"
-                : "func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { true }"
-            for explicit in [true, false] {
-                let source = root + "/protocol-probe.swift"
-                try files.writeFile(at: source, content: "@testable import Pensieve\n"
-                    + fixture.replacingOccurrences(of: "OWNERSHIP", with: explicit ? ownership : ""))
-                let (status, diagnostics) = try typecheckOwnershipProbe(source, products: products, checkout: checkout)
-                if explicit {
-                    XCTAssertEqual(status, 0, diagnostics)
-                } else {
-                    XCTAssertNotEqual(status, 0, "A conformer omitted ownership and still compiled")
-                    XCTAssertTrue(diagnostics.contains("ownsArtifact"), diagnostics)
-                }
-            }
-        }
     }
+
     func testRealizationKeepsCompilerBehindPlatformViewModel() throws {
         let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().path

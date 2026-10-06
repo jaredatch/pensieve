@@ -42,7 +42,7 @@ final class ProjectRemovalConfirmationTests: XCTestCase {
         XCTAssertEqual(Set(try h.context.fetch(FetchDescriptor<IntentAssignment>()).map(\.key)), ledgerKeys)
         XCTAssertEqual(try h.files.readFile(at: h.root + "/support/deploy-state.json"), stateBytes)
         XCTAssertEqual(try h.files.readFile(at: manifestPath), manifestBytes)
-        model.confirm { _ in XCTFail("Cancel must prevent a later confirm from invoking removal"); return BatchResult() }
+        model.confirm { _, _ in XCTFail("Cancel must prevent a later confirm from invoking removal"); return BatchResult() }
     }
 
     func testZeroAndMissingFolderConfirmationsAndUncheckableFolderRetention() throws {
@@ -82,10 +82,11 @@ final class ProjectRemovalConfirmationTests: XCTestCase {
                 XCTAssertEqual(preview.folderIsMissing, status == "missing")
                 XCTAssertTrue(preview.message.contains(status == "missing"
                     ? "can't reach this folder" : "No skill links or rules will be removed"))
-                model.confirm { project in
+                model.confirm { project, plan in
                     removeRegisteredProject(project, categoryStore: CategoryStore(), reconciler: h.category,
                         manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/sync",
-                        platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, context: h.context)
+                        platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, preparedPlan: plan,
+                        context: h.context)
                 }
                 XCTAssertNil(model.error)
                 XCTAssertFalse(try h.context.fetch(FetchDescriptor<Project>()).contains { $0.id == id })

@@ -180,6 +180,10 @@ final class ProjectFolderThirdFixTests: XCTestCase {
 }
 
 private struct ThirdFixReconciler: CategoryReconcilerProtocol {
+    func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult {
+        reconcile(context: context)
+    }
+
     let result: BatchResult
     func reconcile(context: ModelContext) -> BatchResult { result }
 }

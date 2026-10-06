@@ -19,12 +19,18 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         guard result.hasFailures else { return }
         XCTAssertTrue(ProjectListView.removalFailureMessage(projectName: name, result: result)
             .contains("stays registered"))
+        XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").deployIntents.count, 2,
+                       "A refused save must leave the manifest agreeing with the registered project's intents")
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 2)
         try relaunchAndRetry(h, projectID: projectID)
     }
 
     func testFailedManifestWriteKeepsRegistrationAndRelaunchRetryWithdrawsIntent() throws {
         let h = try fixture()
         defer { h.cleanup() }
+        let category = try h.addCategory()
+        try manifest(h).write(try manifest(h).snapshot(from: h.context), toRoot: h.root + "/sync")
+        let keys = category.projectKeys
         var faulted = false
         h.mapped.beforeFileWrite = { path in
             if path.contains(".manifest-build-") && path.hasSuffix("/manifest.yaml") {
@@ -40,6 +46,9 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
             .contains("stays registered"))
         XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").deployIntents.count, 2,
                        "The previous atomic manifest remains intact")
+        XCTAssertEqual(category.projectKeys, keys, "Failed withdrawal publication must restore the saved prune")
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 2)
+        XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").categories.first?.projectKeys, keys)
         h.mapped.beforeFileWrite = nil
         try relaunchAndRetry(h, projectID: projectID)
     }

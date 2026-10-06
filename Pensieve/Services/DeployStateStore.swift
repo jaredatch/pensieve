@@ -100,11 +100,17 @@ final class DeployStateStore {
 
     @discardableResult
     func remove(artifactPath: String) throws -> Bool {
-        try withLock {
+        try remove(artifactPaths: [artifactPath])
+    }
+
+    @discardableResult
+    func remove(artifactPaths: Set<String>) throws -> Bool {
+        guard !artifactPaths.isEmpty else { return false }
+        return try withLock {
             guard stateFileExists else { return false }
             var state = try read()
-            guard state.records.contains(where: { $0.artifactPath == artifactPath }) else { return false }
-            state.records.removeAll { $0.artifactPath == artifactPath }
+            guard state.records.contains(where: { artifactPaths.contains($0.artifactPath) }) else { return false }
+            state.records.removeAll { artifactPaths.contains($0.artifactPath) }
             try write(state)
             return true
         }
