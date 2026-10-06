@@ -22,25 +22,25 @@ struct UpdatesRowView: View {
                        minHeight: DesignTokens.updatesCheckboxHeight, alignment: .leading)
                 .accessibilityIdentifier("updates-select-" + row.id.uuidString)
                 .disabled(!shown.selectionEnabled)
-                HStack(alignment: .top, spacing: Spacing.sm) {
-                    VStack(alignment: .leading, spacing: DesignTokens.updatesRowMetaGap) {
-                        nameAndSource.frame(minHeight: DesignTokens.updatesRowNameLineHeight, alignment: .leading)
-                        coordinates.frame(minHeight: DesignTokens.updatesRowCommitsLineHeight, alignment: .leading)
+                VStack(alignment: .leading, spacing: DesignTokens.updatesLocalEditsGap) {
+                    HStack(alignment: .top, spacing: Spacing.sm) {
+                        VStack(alignment: .leading, spacing: DesignTokens.updatesRowMetaGap) {
+                            nameAndSource.frame(minHeight: DesignTokens.updatesRowNameLineHeight, alignment: .leading)
+                            coordinates.frame(minHeight: DesignTokens.updatesRowCommitsLineHeight, alignment: .leading)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, DesignTokens.updatesRowBodyTop)
+                        Button(shown.changesTitle) { onViewChanges(row) }
+                            .font(DesignTokens.updatesChangesButton)
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                            .foregroundStyle(.tint)
+                            .accessibilityIdentifier("updates-changes-" + row.id.uuidString)
+                            .disabled(!shown.changesEnabled)
+                            .padding(.top, DesignTokens.updatesRowMetaGap)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, DesignTokens.updatesRowBodyTop)
-                    Button(shown.changesTitle) { onViewChanges(row) }
-                        .font(DesignTokens.updatesChangesButton)
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
-                        .foregroundStyle(.tint)
-                        .accessibilityIdentifier("updates-changes-" + row.id.uuidString)
-                        .disabled(!shown.changesEnabled)
-                        .padding(.top, DesignTokens.updatesRowMetaGap)
+                    if let copy = shown.localEditsCopy { localEdits(copy) }
                 }
-            }
-            if let copy = shown.localEditsCopy {
-                localEdits(copy).padding(.leading, DesignTokens.updatesRowBodyOffset)
             }
             statusView
         }

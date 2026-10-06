@@ -6,54 +6,37 @@ import XCTest
 
 extension UpdatesSheetTests {
     func hostSheet(_ model: UpdatesViewModel, fixture: UpdateReviewFixture) async throws -> NSWindow {
-        if #available(macOS 26, *) { return try await hostMainScene(model, fixture: fixture) }
-        let root = Color.clear.sheet(isPresented: Binding(get: { model.isPresented }, set: { model.isPresented = $0 })) {
+        let root = NavigationSplitView {
+            Color.clear.navigationSplitViewColumnWidth(180)
+        } content: {
+            Color.clear.navigationSplitViewColumnWidth(280)
+        } detail: {
+            Color.clear.toolbar {
+                ToolbarItem(placement: .primaryAction) { Button("New Skill", systemImage: "plus", action: {}) }
+            }
+        }
+        .sheet(isPresented: Binding(get: { model.isPresented }, set: { model.isPresented = $0 })) {
             UpdatesView(model: model, onViewChanges: { _ in })
-        }.modelContainer(fixture.container)
+        }
+        .modelContainer(fixture.container)
         let main = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
                             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                             backing: .buffered, defer: false)
         main.toolbarStyle = .unified
-        let toolbar = NSToolbar(identifier: "updates-main-" + UUID().uuidString)
-        toolbar.displayMode = .iconOnly
-        main.toolbar = toolbar
-        toolbar.insertItem(withItemIdentifier: .toggleSidebar, at: 0)
         main.isReleasedWhenClosed = false
-        main.contentView = NSHostingView(rootView: root)
+        let host = NSHostingView(rootView: root)
+        host.sceneBridgingOptions = .all
+        main.contentView = host
         main.setFrame(NSRect(x: 100, y: 100, width: 900, height: 600), display: true)
         main.orderFront(nil)
-        return main
-    }
-
-    @available(macOS 26, *)
-    private func hostMainScene(_ model: UpdatesViewModel, fixture: UpdateReviewFixture) async throws -> NSWindow {
-        let title = "Updates geometry " + UUID().uuidString
-        let representation = NSHostingSceneRepresentation {
-            Window(title, id: title) {
-                NavigationSplitView {
-                    Color.clear.navigationSplitViewColumnWidth(180)
-                } content: {
-                    Color.clear.navigationSplitViewColumnWidth(280)
-                } detail: {
-                    Color.clear.toolbar {
-                        ToolbarItem(placement: .primaryAction) { Button("New Skill", systemImage: "plus", action: {}) }
-                    }
-                }
-                .sheet(isPresented: Binding(get: { model.isPresented }, set: { model.isPresented = $0 })) {
-                    UpdatesView(model: model, onViewChanges: { _ in })
-                }
-                .modelContainer(fixture.container)
+        addTeardownBlock {
+            await MainActor.run {
+                if let sheet = main.attachedSheet { main.endSheet(sheet); sheet.close(); sheet.contentView = nil }
+                main.close()
+                main.contentView = nil
+                main.toolbar = nil
             }
-            .windowToolbarStyle(.unified)
-            .defaultSize(width: 900, height: 600)
         }
-        NSApp.addSceneRepresentation(representation)
-        representation.environment.openWindow(id: title)
-        await TestWait.until(failureMessage: "The unified-toolbar main scene did not open") {
-            NSApp.windows.contains { $0.isVisible && $0.title == title }
-        }
-        let main = try XCTUnwrap(NSApp.windows.first { $0.isVisible && $0.title == title })
-        main.setFrame(NSRect(x: 100, y: 100, width: 900, height: 600), display: true)
         return main
     }
 
