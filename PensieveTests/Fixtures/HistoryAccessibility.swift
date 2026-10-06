@@ -5,10 +5,9 @@ import Vision
 enum HistoryAccessibility {
     static func pressButton(titled title: String, in root: NSView) async -> Bool {
         var button: NSAccessibilityProtocol?
-        var renderedTitles: [ObjectIdentifier: String] = [:]
         await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
                              failureMessage: "The rendered '\(title)' button must be found") {
-            button = findButton(titled: title, in: root, renderedTitles: &renderedTitles)
+            button = findButton(titled: title, in: root)
             return button != nil
         }
         guard let button else { return false }
@@ -18,8 +17,7 @@ enum HistoryAccessibility {
     /// A missing native control permits the retry host's existing rendered-click fallback.
     /// False from AX after finding the control never permits that fallback.
     static func pressButtonIfFound(titled title: String, in root: NSView) -> Bool {
-        var renderedTitles: [ObjectIdentifier: String] = [:]
-        guard let button = findButton(titled: title, in: root, renderedTitles: &renderedTitles) else { return false }
+        guard let button = findButton(titled: title, in: root) else { return false }
         return press(button)
     }
 
@@ -30,7 +28,7 @@ enum HistoryAccessibility {
     }
 
     private static func findButton(
-        titled title: String, in root: NSView, renderedTitles: inout [ObjectIdentifier: String]
+        titled title: String, in root: NSView
     ) -> NSAccessibilityProtocol? {
         root.layoutSubtreeIfNeeded()
         var pending: [Any] = [root]
@@ -44,15 +42,9 @@ enum HistoryAccessibility {
                [element.accessibilityTitle(), element.accessibilityLabel()].contains(title) {
                 return element
             }
-            // Read each native caption once during this locate step. The caller has already
-            // waited for History's rows or error state, so its rendered caption is ready.
-            if let button = candidate as? NSButton {
-                let identity = ObjectIdentifier(button)
-                if renderedTitles[identity] == nil {
-                    renderedTitles[identity] = renderedTitle(of: button) ?? ""
-                }
-                if renderedTitles[identity] == title { return button }
-            }
+            // The visited set reads each live native button once per poll. A later layout
+            // or caption change gets a fresh OCR read rather than retaining a stale miss.
+            if let button = candidate as? NSButton, renderedTitle(of: button) == title { return button }
             pending.append(contentsOf: element.accessibilityChildren() ?? [])
             pending.append(contentsOf: element.accessibilityChildrenInNavigationOrder() ?? [])
             if let view = candidate as? NSView { pending.append(contentsOf: view.subviews) }

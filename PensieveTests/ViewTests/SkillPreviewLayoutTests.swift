@@ -103,9 +103,9 @@ final class SkillPreviewLayoutTests: XCTestCase {
 
     func testFailedImageInListKeepsPlaceholderLayout() async throws {
         let alt = Array(repeating: "Missing diagram with a long description", count: 8).joined(separator: " ")
-        // The list's 26 pt indent leaves both real placeholders the same content width.
+        // Compensate for the list indent so both real placeholders receive the same content width.
         let outside = host("![\(alt)](https://preview.example/missing.png)", width: 300)
-        let inside = host("- ![\(alt)](https://preview.example/missing.png)", width: 326)
+        let inside = host("- ![\(alt)](https://preview.example/missing.png)", width: 300 + DesignTokens.markdownListIndent)
         defer { outside.window.close(); inside.window.close() }
         let outsideText = try await text(alt, in: outside.host)
         let insideText = try await text(alt, in: inside.host)
@@ -113,24 +113,71 @@ final class SkillPreviewLayoutTests: XCTestCase {
                        "At equal content width, a list must preserve the placeholder's wrapping and height")
     }
 
-    func testWideNumberedMarkersStayInsideColumn() async throws {
-        let fixture = host("Paragraph.\n\n999. Three digits\n1000. Four digits\n1001. Next")
+    func testWrappedBulletSitsInsideFirstLine() async throws {
+        let content = "A list item whose text wraps across three lines in a deliberately narrow column."
+        let fixture = host("- \(content)", width: 240)
         defer { fixture.window.close() }
-        let leading = try await text("Paragraph.", in: fixture.host).accessibilityFrame().minX
-        for (marker, item) in [("999.", "Three digits"), ("1,000.", "Four digits"), ("1,001.", "Next")] {
-            let markerText = try await text(marker, in: fixture.host)
-            let itemFrame = try await text(item, in: fixture.host).accessibilityFrame()
-            let font = NSFont.monospacedDigitSystemFont(ofSize: try fontSize(of: markerText), weight: .regular)
-            let intrinsicWidth = NSAttributedString(string: marker, attributes: [.font: font]).size().width
-            // AX reports the allocated marker frame, even if its glyphs spill outside it.
-            // Independent font metrics prove that the full glyph run fits before the text.
-            XCTAssertGreaterThanOrEqual(itemFrame.minX - leading + 0.5, intrinsicWidth + 4,
-                                        "Wide numbered markers need their full intrinsic width inside the column")
+        fixture.host.appearance = NSAppearance(named: .aqua)
+        let item = try await text(content, in: fixture.host)
+        let firstLine = item.accessibilityFrame(for: NSRange(location: 0, length: 1))
+        XCTAssertGreaterThan(firstLine.height, 0, "The rendered first line must expose its vertical bounds")
+        XCTAssertGreaterThan(item.accessibilityRange(forLine: 2).length, 0, "The hosted item must have a third line")
+        XCTAssertEqual(item.accessibilityRange(forLine: 3).length, 0, "The hosted item must wrap to exactly three lines")
+        let center = try bulletCenter(in: fixture.host, window: fixture.window, itemFrame: item.accessibilityFrame())
+        XCTAssertGreaterThanOrEqual(center, firstLine.minY, "The bullet center must be inside the first line")
+        XCTAssertLessThanOrEqual(center, firstLine.maxY, "The bullet center must be inside the first line")
+    }
+
+    private func bulletCenter(in host: NSView, window: NSWindow, itemFrame: CGRect) throws -> CGFloat {
+        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let screen = window.convertToScreen(host.convert(host.bounds, to: nil))
+        let scaleX = CGFloat(bitmap.pixelsWide) / host.bounds.width
+        let scaleY = CGFloat(bitmap.pixelsHigh) / host.bounds.height
+        // Only the bullet occupies the gutter before the item's text; bitmap Y increases downward.
+        let gutter = 0..<Int((itemFrame.minX - screen.minX - 4) * scaleX)
+        let top = max(0, Int((screen.maxY - itemFrame.maxY) * scaleY))
+        let bottom = min(bitmap.pixelsHigh, Int((screen.maxY - itemFrame.minY) * scaleY))
+        var rows: [Int] = []
+        for y in top..<bottom {
+            for x in gutter {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                      color.alphaComponent > 0.5 else { continue }
+                if max(color.redComponent, color.greenComponent, color.blueComponent) < 0.5 {
+                    rows.append(y)
+                    break
+                }
+            }
+        }
+        let first = try XCTUnwrap(rows.first, "The real bullet must produce visible gutter pixels")
+        let last = try XCTUnwrap(rows.last)
+        return screen.maxY - CGFloat(first + last + 1) / (2 * scaleY)
+    }
+
+    func testWideNumberedMarkersStayInsideColumn() async throws {
+        for locale in ["en_US", "de_DE", "ar_EG"] {
+            let fixture = host("Paragraph.\n\n999. Three digits\n1000. Four digits\n1001. Next",
+                               locale: Locale(identifier: locale))
+            defer { fixture.window.close() }
+            let leading = try await text("Paragraph.", in: fixture.host).accessibilityFrame().minX
+            for (marker, item) in [("999.", "Three digits"), ("1000.", "Four digits"), ("1001.", "Next")] {
+                let markerText = try await text(marker, in: fixture.host)
+                let itemFrame = try await text(item, in: fixture.host).accessibilityFrame()
+                let font = NSFont.monospacedDigitSystemFont(ofSize: try fontSize(of: markerText), weight: .regular)
+                let intrinsicWidth = NSAttributedString(string: marker, attributes: [.font: font]).size().width
+                // AX reports the allocated marker frame, even if its glyphs spill outside it.
+                // Independent font metrics prove that the full glyph run fits before the text.
+                XCTAssertGreaterThanOrEqual(itemFrame.minX - leading + 0.5, intrinsicWidth + 4,
+                                            "Wide numbered markers need their full intrinsic width inside the column")
+            }
         }
     }
 
-    private func host(_ markdown: String, width: CGFloat = 600) -> (host: NSHostingView<SkillPreviewView>, window: NSWindow) {
-        let host = NSHostingView(rootView: SkillPreviewView(markdownBody: markdown, scrolls: false))
+    private func host(
+        _ markdown: String, width: CGFloat = 600, locale: Locale = .current
+    ) -> (host: NSHostingView<AnyView>, window: NSWindow) {
+        let host = NSHostingView(rootView: AnyView(SkillPreviewView(markdownBody: markdown, scrolls: false)
+            .environment(\.locale, locale)))
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: 700),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

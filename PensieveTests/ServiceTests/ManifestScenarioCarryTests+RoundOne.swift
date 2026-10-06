@@ -15,7 +15,9 @@ extension ManifestScenarioCarryTests {
         let first = ScenarioCarryFileService()
         first.afterDirectoryCheck = {
             firstOpened.signal()
-            if releaseFirst.wait(timeout: .now() + 5) != .success { errors.record(DeployStubFailure()) }
+            if releaseFirst.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds) != .success {
+                errors.record(DeployStubFailure())
+            }
         }
         let second = ScenarioCarryFileService()
         second.afterDirectoryCheck = {
@@ -29,7 +31,7 @@ extension ManifestScenarioCarryTests {
             defer { finished.leave() }
             do { try ManifestService(fileService: first).write(snapshot, toRoot: root) } catch { errors.record(error) }
         }
-        XCTAssertEqual(firstOpened.wait(timeout: .now() + 5), .success)
+        XCTAssertEqual(firstOpened.wait(timeout: .now() + TestWait.hostedActionTimeoutSeconds), .success)
         finished.enter()
         DispatchQueue.global().async {
             defer { finished.leave() }
@@ -40,14 +42,14 @@ extension ManifestScenarioCarryTests {
                 }).write(snapshot, toRoot: root)
             } catch { errors.record(error) }
         }
-        XCTAssertEqual(secondAttempted.wait(timeout: .now() + 5), .success)
+        XCTAssertEqual(secondAttempted.wait(timeout: .now() + TestWait.hostedActionTimeoutSeconds), .success)
         XCTAssertEqual(order.values, ["second blocked"], "second writer must encounter the held process lock")
-        XCTAssertEqual(secondOpened.wait(timeout: .now() + 0.5), .timedOut,
+        XCTAssertEqual(secondOpened.wait(timeout: .now() + 0.5), .timedOut, // upper-bound: Observe held-lock exclusion.
                        "second writer entered the locked region before the first writer was released")
         order.record("first released")
         releaseFirst.signal()
-        XCTAssertEqual(secondOpened.wait(timeout: .now() + 5), .success)
-        XCTAssertEqual(finished.wait(timeout: .now() + 5), .success)
+        XCTAssertEqual(secondOpened.wait(timeout: .now() + TestWait.hostedActionTimeoutSeconds), .success)
+        XCTAssertEqual(finished.wait(timeout: .now() + TestWait.hostedActionTimeoutSeconds), .success)
         XCTAssertTrue(errors.values.isEmpty, "\(errors.values)")
         XCTAssertEqual(order.values, ["second blocked", "first released", "second opened"])
         XCTAssertEqual(try files.readFile(at: root + "/manifest/scenarios/legacy.yaml"), "keep")

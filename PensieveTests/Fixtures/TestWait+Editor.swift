@@ -5,7 +5,7 @@ import XCTest
 extension TestWait {
     @MainActor
     static func waitForEditor(in host: NSView, minimumHeight: CGFloat = 0,
-                              timeout: Duration = .seconds(3)) async throws -> WKWebView {
+                              timeout: Duration = .seconds(TestWait.hostedActionTimeoutSeconds)) async throws -> WKWebView {
         var editor: WKWebView?
         await until(timeout: timeout, failureMessage: "Source editor must finish layout") {
             host.layoutSubtreeIfNeeded()

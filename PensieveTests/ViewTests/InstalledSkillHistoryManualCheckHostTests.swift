@@ -63,7 +63,7 @@ final class HistoryManualCheckHostTests: XCTestCase {
             head: { origin in
                 if origin.installedCommit == second.installedOrigin?.installedCommit {
                     secondProbeStarted.signal()
-                    _ = releaseSecondProbe.wait(timeout: .now() + 3)
+                    _ = releaseSecondProbe.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds)
                 }
                 return origin.installedCommit
             }
@@ -100,7 +100,7 @@ final class HistoryManualCheckHostTests: XCTestCase {
     }
 
     private func eventually(
-        timeout: TimeInterval = 3,
+        timeout: TimeInterval = TestWait.hostedActionTimeoutSeconds,
         _ condition: @escaping @MainActor () -> Bool
     ) async -> Bool {
         let clock = ContinuousClock()

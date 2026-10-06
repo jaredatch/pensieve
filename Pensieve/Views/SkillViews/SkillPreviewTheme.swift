@@ -40,7 +40,7 @@ enum SkillPreviewTheme {
                 .frame(minWidth: DesignTokens.markdownListIndent - Spacing.sm, alignment: .trailing)
         }
         .numberedListMarker { configuration in
-            Text("\(configuration.itemNumber).")
+            Text(verbatim: "\(configuration.itemNumber).")
                 .monospacedDigit()
                 .fixedSize()
                 .frame(minWidth: DesignTokens.markdownListIndent - Spacing.sm, alignment: .trailing)

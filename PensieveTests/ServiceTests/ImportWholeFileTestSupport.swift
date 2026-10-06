@@ -2,7 +2,7 @@ import Darwin
 import XCTest
 @testable import Pensieve
 
-/// Runs fixture scans off the test thread with a two-second deadline. Holding a FIFO writer
+/// Runs fixture scans off the test thread with the shared positive-wait deadline. Holding a FIFO writer
 /// lets a blocking reader open, but keeps it waiting for EOF. On timeout, closing that writer
 /// releases the read and fails the test. This bounds the fixture's open/read failures, not
 /// arbitrary deadlocks. All ordinary file I/O still goes through the injected FileService.
@@ -15,12 +15,12 @@ func boundedImportScan(fifo: String, scan: @escaping () -> [DiscoveredSkill]) th
         result.skills = scan()
         done.signal()
     }
-    let finished = done.wait(timeout: .now() + 2) == .success
+    let finished = done.wait(timeout: .now() + TestWait.hostedActionTimeoutSeconds) == .success
     close(writer)
     guard finished else {
         // Release a blocked fixture reader before teardown, without an unbounded join.
-        _ = done.wait(timeout: .now() + 2)
-        XCTFail("Import scan blocked on the FIFO beyond its two-second deadline")
+        _ = done.wait(timeout: .now() + 2) // upper-bound: Bound cleanup after releasing a blocked FIFO reader.
+        XCTFail("Import scan blocked on the FIFO beyond the shared wait bound")
         throw CocoaError(.fileReadUnknown)
     }
     return result.skills

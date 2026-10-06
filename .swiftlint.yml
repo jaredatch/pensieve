@@ -36,8 +36,8 @@ custom_rules:
   short_test_timeout:
     included: 'PensieveTests/.*\.swift$'
     name: "Shared positive wait bound"
-    # Match the argument itself, including nested calls and duration units. Milliseconds below
+    # Match arguments and typed defaults, including DispatchTime offsets. Milliseconds below
     # 15000 and seconds below 15 require the shared bound or an intentional-limit explanation.
-    regex: '(?-s)\btimeout:\s*(?:\.seconds\(\s*(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?\s*\)|\.milliseconds\(\s*(?:0_?)*(?:[0-9](?:_?[0-9]){0,3}|1_?[0-4](?:_?[0-9]){3})(?:\.[0-9](?:_?[0-9])*)?\s*\)|(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?(?=\s*(?:[,)]|//|/\*)))(?![^\n]*//\s*upper-bound:)'
+    regex: '(?-s)\btimeout:\s*(?:[A-Za-z_][A-Za-z0-9_.<>?]*\s*=\s*)?(?:\.seconds\(\s*(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?\s*\)|\.milliseconds\(\s*(?:0_?)*(?:[0-9](?:_?[0-9]){0,3}|1_?[0-4](?:_?[0-9]){3})(?:\.[0-9](?:_?[0-9])*)?\s*\)|(?:\.now\(\)\s*\+\s*)?(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?(?=\s*(?:[,)]|//|/\*)))(?![^\n]*//\s*upper-bound:)'
     message: "Use TestWait.hostedActionTimeoutSeconds, or explain the intentional limit with // upper-bound: on this line."
     severity: error

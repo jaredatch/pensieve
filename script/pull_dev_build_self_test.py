@@ -1,6 +1,7 @@
 """Host selection and local signing through fake tools; all writes stay in a temp dir."""
 import json
 import os
+import shutil
 from pathlib import Path
 import struct
 import subprocess
@@ -48,7 +49,8 @@ elif tool == 'codesign':
     target = Path(args[-1])
     if '-d' in args:
         framework_version = target.parent.name == 'Versions' and target.parent.parent.suffix == '.framework'
-        sys.exit(0 if framework_version or target.suffix in ('.app', '.framework', '.xpc', '.bundle') else 1)
+        sys.exit(0 if framework_version or target.suffix in ('.app', '.framework', '.xpc', '.bundle', '.systemextension',
+                                                     '.qlgenerator', '.mdimporter', '.saver', '.kext') else 1)
     state = json.loads(state_path.read_text())
     if '--sign' in args:
         relative = str(target.relative_to(app))
@@ -256,6 +258,7 @@ class PullDevSigningTests(unittest.TestCase):
         signed = [str(Path(args[-1]).relative_to(self.app)) for args in signatures]
         expected = set(self.nested) | {
             'Contents/Frameworks/Fixture.framework',
+            'Contents/Frameworks/Fixture.framework/Versions/A',
             'Contents/Frameworks/Fixture.framework/Versions/A/XPCServices/Worker.xpc',
             'Contents/Helpers/Updater.app', 'Contents/PlugIns/Plugin.bundle', '.'}
         self.assertEqual(set(signed), expected)
@@ -323,7 +326,8 @@ class PullDevSigningTests(unittest.TestCase):
         framework = self.app / 'Contents/Frameworks/Fixture.framework'
         framework_signs = [Path(args[-1]) for args in self.signatures()
                            if Path(args[-1]) == framework or Path(args[-1]).parent == framework / 'Versions']
-        self.assertEqual(framework_signs, [framework], 'Sign the framework once through its canonical bundle')
+        self.assertEqual(framework_signs, [framework / 'Versions/A', framework],
+                         'Seal the real version once before its canonical framework root')
 
     def test_only_likely_code_is_probed_and_symlinks_are_skipped(self):
         macho = (self.source / self.nested[0]).read_bytes()
@@ -345,7 +349,44 @@ class PullDevSigningTests(unittest.TestCase):
         self.assertCountEqual(signed_files, self.nested + extra_code)
         inspected_bundles = [Path(args[-1]) for args in self.calls('codesign') if '-d' in args]
         self.assertTrue(all(path.suffix in ('.app', '.framework', '.xpc', '.bundle')
+                            or (path.parent.name == 'Versions' and path.parent.parent.suffix == '.framework')
                             for path in inspected_bundles), 'Ordinary directories need no codesign probe')
+
+    def test_all_real_framework_versions_are_signed_before_root(self):
+        framework = self.source / 'Contents/Frameworks/Fixture.framework'
+        shutil.copytree(framework / 'Versions/A', framework / 'Versions/B', symlinks=True)
+        self.run_script('--no-open')
+        signed = [Path(args[-1]) for args in self.signatures()]
+        root = self.app / framework.relative_to(self.source)
+        versions = [root / 'Versions/A', root / 'Versions/B']
+        seals = [path for path in signed if path == root or path.parent == root / 'Versions']
+        self.assertCountEqual(seals, [*versions, root], 'Seal every real version once, including the non-current version')
+        for version in versions:
+            self.assertLess(signed.index(version), signed.index(root))
+            for child in signed:
+                if child != version and version in child.parents:
+                    self.assertLess(signed.index(child), signed.index(version), 'Seal nested code before its real version')
+        self.assertFalse(any('Current' in path.parts for path in signed), 'Never sign through the Current link')
+
+    def test_extension_bundles_and_node_modules_are_signed(self):
+        macho = (self.source / self.nested[0]).read_bytes()
+        bundles = ['Contents/Resources/' + name for name in (
+            'Extension.systemextension', 'Preview.qlgenerator', 'Metadata.mdimporter', 'Screen.saver', 'Kernel.kext')]
+        for bundle in bundles:
+            executable = self.source / bundle / 'Contents/MacOS/Fixture'
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(macho)
+        module = 'Contents/Resources/addon.node'
+        (self.source / module).write_bytes(macho)
+        self.run_script('--no-open')
+        signed = [str(Path(args[-1]).relative_to(self.app)) for args in self.signatures()]
+        with self.subTest(module=module):
+            self.assertIn(module, signed, 'A non-executable Mach-O node module must be signed')
+        for bundle in bundles:
+            with self.subTest(bundle=bundle):
+                self.assertIn(bundle, signed, 'Seal the additional code-bundle type')
+                self.assertLess(signed.index(bundle + '/Contents/MacOS/Fixture'), signed.index(bundle))
+                self.assertLess(signed.index(bundle), signed.index('.'))
 
     def test_sandbox_receives_the_signed_app(self):
         result = self.run_script('--sandbox', '--offline')

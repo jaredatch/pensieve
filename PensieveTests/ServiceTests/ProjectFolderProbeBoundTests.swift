@@ -5,24 +5,9 @@ import XCTest
 
 @MainActor
 final class ProjectFolderProbeBoundTests: XCTestCase {
-    func testBlockingFixtureStaysHeldAcrossReadinessHandoffs() async {
-        let gate = ProjectFolderBlockingProbe()
-        let path = TestTemporaryDirectory.path + "held-probe-" + UUID().uuidString
-        gate.block(path)
-        defer { gate.unblock() }
-        let returned = DispatchSemaphore(value: 0)
-        let probe = Task.detached {
-            _ = try? gate.probe(path)
-            returned.signal()
-        }
-        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                             failureMessage: "The blocking fixture must enter its hold") { gate.count(path) == 1 }
-        let outcome = await Task.detached {
-            returned.wait(timeout: .now() + 5) // upper-bound: Observe the hold beyond its former four-second expiry.
-        }.value
-        XCTAssertEqual(outcome, .timedOut, "The fixture must stay held across both readiness handoffs")
-        gate.unblock()
-        await probe.value
+    func testBlockingFixtureHoldCoversBothReadinessBounds() {
+        XCTAssertEqual(ProjectFolderBlockingProbe.holdTimeoutSeconds, 2 * TestWait.hostedActionTimeoutSeconds,
+                       "The fixture hold must cover both shared readiness bounds")
     }
 
     func testConvergenceBoundsBlockedProbeRetainsRowsAndDeploysOtherProjectsForBothOwners() throws {

@@ -227,7 +227,7 @@ final class DeployStateStoreTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(group.wait(timeout: .now() + 5), .success)
+        XCTAssertEqual(group.wait(timeout: .now() + TestWait.hostedActionTimeoutSeconds), .success)
         XCTAssertTrue(errors.isEmpty, "unexpected upsert errors: \(errors)")
         XCTAssertEqual(try store.read().records.map { $0.artifactPath },
                        (0..<count).map { "/tmp/artifact-\($0)" }.sorted())

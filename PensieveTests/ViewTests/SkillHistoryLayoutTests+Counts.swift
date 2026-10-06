@@ -4,6 +4,25 @@ import XCTest
 @testable import Pensieve
 
 extension SkillHistoryLayoutTests {
+    func testUnlabeledButtonCaptionCanBecomeReadyAfterFirstPoll() async {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+        let button = ChangingHistoryCaptionButton(frame: NSRect(x: 20, y: 20, width: 180, height: 40))
+        button.title = "Loading"
+        button.bezelStyle = .rounded
+        root.addSubview(button)
+        let window = NSWindow(contentRect: root.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        window.orderFront(nil)
+        defer { window.close() }
+
+        let pressed = await HistoryAccessibility.pressButton(titled: "Ready", in: root)
+        XCTAssertTrue(pressed,
+                      "A later poll must locate the newly rendered caption; title=\(button.title), reads=\(button.captures)")
+        XCTAssertGreaterThan(button.captures, 1, "A stale OCR miss must be read again")
+        XCTAssertEqual(button.presses, 1, "A caption becoming ready must still cause only one press")
+    }
+
     func testLabeledButtonReportsPressWhenAccessibilityReturnsFalse() async {
         let root = NSView()
         let button = FalseReturningHistoryButton()
@@ -40,6 +59,29 @@ private final class FalseReturningHistoryButton: NSAccessibilityElement {
     override func accessibilityPerformPress() -> Bool {
         presses += 1
         return false
+    }
+}
+
+private final class ChangingHistoryCaptionButton: NSButton {
+    private(set) var captures = 0
+    private(set) var presses = 0
+
+    override func accessibilityTitle() -> String? { nil }
+    override func accessibilityLabel() -> String? { nil }
+    override func accessibilityPerformPress() -> Bool { presses += 1; return false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // Render real glyphs in a plain button: native bezel compositing can omit its caption from cacheDisplay.
+        NSColor.white.setFill()
+        dirtyRect.fill()
+        (title as NSString).draw(at: NSPoint(x: 16, y: 10),
+                                 withAttributes: [.font: NSFont.systemFont(ofSize: 20), .foregroundColor: NSColor.black])
+    }
+
+    override func cacheDisplay(in rect: NSRect, to bitmapImageRep: NSBitmapImageRep) {
+        super.cacheDisplay(in: rect, to: bitmapImageRep)
+        captures += 1
+        if captures == 1 { DispatchQueue.main.async { self.title = "Ready" } }
     }
 }
 

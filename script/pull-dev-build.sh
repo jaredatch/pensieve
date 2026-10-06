@@ -133,12 +133,18 @@ resign_dev_app() (
     while IFS= read -r -d '' code; do
       [ ! -L "$code" ] || continue
       if [ -d "$code" ]; then
-        # Framework versions are sealed through the framework root, once.
-        case "$code" in *.app|*.framework|*.xpc|*.bundle|*.appex|*.plugin) ;; *) continue ;; esac
+        # Seal each physical framework version before its root; Current remains a skipped alias.
+        case "${code%/*}" in
+          *.framework/Versions) ;;
+          *) case "$code" in
+            *.app|*.framework|*.xpc|*.bundle|*.appex|*.plugin|*.systemextension|*.qlgenerator|*.mdimporter|*.saver|*.kext) ;;
+            *) continue ;;
+          esac ;;
+        esac
         codesign -d "$code" >/dev/null 2>&1 || continue
       else
         case "$code" in
-          *.dylib|*.so|*/MacOS/*|*/Frameworks/*|*/Helpers/*|*/XPCServices/*|*/PlugIns/*|*/Library/LoginItems/*) ;;
+          *.dylib|*.so|*.node|*/MacOS/*|*/Frameworks/*|*/Helpers/*|*/XPCServices/*|*/PlugIns/*|*/Library/LoginItems/*) ;;
           *) [ -x "$code" ] || continue ;;
         esac
         kind="$(file -b "$code")" || return 1
