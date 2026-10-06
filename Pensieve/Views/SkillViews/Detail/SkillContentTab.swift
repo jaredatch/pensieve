@@ -43,35 +43,40 @@ struct SkillContentTab: View {
                 content
             }
             .onChange(of: file) { _, newFile in
-                if pendingLinkScroll == newFile {
-                    proxy.scrollTo(fileRowAnchor, anchor: .top)
+                if pendingLinkScroll != newFile {
+                    pendingLinkScroll = nil
+                    return
                 }
-                pendingLinkScroll = nil
+                if choice.isSkillFile {
+                    proxy.scrollTo(fileRowAnchor, anchor: .top)
+                    pendingLinkScroll = nil
+                }
+            }
+            // A bundle file's change reaches the app as a watcher event, so its sequence is keyed
+            // beside the two SKILL.md signals.
+            .task(id: otherFileKey) {
+                guard !choice.isSkillFile else {
+                    loadedOtherFile = nil
+                    return
+                }
+                loadedOtherFile = SkillContentFileText(
+                    skillID: skill.id,
+                    relativePath: choice.relativePath,
+                    text: library.bundleFileText(skill, relativePath: choice.relativePath) ?? ""
+                )
+                if pendingLinkScroll == file {
+                    await Task.yield()
+                    proxy.scrollTo(fileRowAnchor, anchor: .top)
+                    pendingLinkScroll = nil
+                }
             }
         }
         .onChange(of: skill.id) { _, _ in pendingLinkScroll = nil }
-        .onChange(of: shownMode) { _, _ in pendingLinkScroll = nil }
-        // A bundle file's change reaches the app only as a watcher event (the library reads SKILL.md's body as
-        // an echo), so the sequence is in the key beside the two SKILL.md signals.
-        .task(id: otherFileKey) {
-            guard !choice.isSkillFile else {
-                loadedOtherFile = nil
-                return
-            }
-            loadedOtherFile = SkillContentFileText(
-                skillID: skill.id,
-                relativePath: choice.relativePath,
-                text: library.bundleFileText(skill, relativePath: choice.relativePath) ?? ""
-            )
-        }
     }
 
     private var fileRow: some View {
         HStack(spacing: Spacing.sm) {
-            Picker("File", selection: Binding(get: { file }, set: {
-                pendingLinkScroll = nil
-                onSelectFile($0)
-            })) {
+            Picker("File", selection: Binding(get: { file }, set: { onSelectFile($0) })) {
                 ForEach(presentation.choices) { Text($0.relativePath).tag($0.relativePath) }
             }
             .labelsHidden()
@@ -91,10 +96,7 @@ struct SkillContentTab: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
             }
-            Picker("View", selection: Binding(get: { shownMode }, set: {
-                pendingLinkScroll = nil
-                onSelectMode($0)
-            })) {
+            Picker("View", selection: Binding(get: { shownMode }, set: { onSelectMode($0) })) {
                 Image(systemName: "doc.text")
                     .tag(SkillContentPresentation.Mode.rendered)
                     .help("Rendered")
@@ -117,6 +119,7 @@ struct SkillContentTab: View {
                          imageRevision: folderRevision,
                          imageLoader: PreviewImageLoader(fileService: library.fileService),
                          files: presentation.choices.map(\.relativePath), onSelectFile: { path in
+                             guard path != file else { return }
                              pendingLinkScroll = path
                              onSelectFile(path)
                          })

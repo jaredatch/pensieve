@@ -161,7 +161,7 @@ final class SkillHistoryLayoutTests: XCTestCase {
         var previous: HistoryAccessibility.Node?
         repeat {
             window.contentView?.layoutSubtreeIfNeeded()
-            last = await HistoryAccessibility.snapshot(windowTitle: window.title)
+            last = HistoryAccessibility.snapshot(windowTitle: window.title)
             // SwiftUI can expose the labels before their screen positions have settled.
             if let last, last == previous,
                last.descendants.contains(where: { $0.label == expected }) { return last }
@@ -209,8 +209,9 @@ private enum HistoryAccessibility {
         var descendants: [Node] { children.flatMap { [$0] + $0.descendants } }
     }
 
-    static func snapshot(windowTitle: String) async -> Node? {
-        // Reads run on the main actor because a process may read its own tree without Accessibility permission.
+    static func snapshot(windowTitle: String) -> Node? {
+        // HistoryAccessibility is @MainActor because AppKit expects main-actor reads.
+        // Reading this process's own accessibility tree needs no Accessibility permission.
         guard let window = window(titled: windowTitle) else { return nil }
         return node(window)
     }

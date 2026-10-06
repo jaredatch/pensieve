@@ -106,6 +106,45 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         }
     }
 
+    func testScriptFileLinkPutsFileRowAtViewportTopWithTallChrome() async throws {
+        let selection = PreviewFileSelection()
+        let fixture = hostTab(markdown: paragraphs + "\n\n[Script](./scripts/x.sh)",
+                              onSelectFile: { _ in }, openURL: { _ in XCTFail("Script link escaped") },
+                              selection: selection, geometry: .init(height: 260, chromeHeight: 400))
+        defer { fixture.window.close() }
+        let link = try await findLink("Script", in: fixture.host)
+        let scroller = try pageScroller(in: fixture.host)
+        let screenViewport = viewport(of: scroller, in: fixture.window)
+        scroller.contentView.scroll(to: NSPoint(x: 0, y: scrollRange(of: scroller)))
+        scroller.reflectScrolledClipView(scroller.contentView)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Script link must finish scrolling into view") {
+            fixture.host.layoutSubtreeIfNeeded()
+            return screenViewport.contains(link.accessibilityFrame())
+        }
+        try click(link, in: fixture.window)
+        let editor = try await waitForEditor(in: fixture.host)
+        var text: String?
+        let contentScript = "window.Editor && window.Editor.getContent ? window.Editor.getContent() : null"
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Script source must load into its read-only editor") {
+            editor.evaluateJavaScript(contentScript) { result, _ in
+                text = result as? String
+            }
+            return text == "echo hi"
+        }
+        fixture.host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(selection.file, "scripts/x.sh")
+        let mode = try XCTUnwrap(views(fixture.host).compactMap { $0 as? NSSegmentedControl }.first)
+        XCTAssertEqual(mode.selectedSegment, 1, "A script must open in source mode")
+        XCTAssertFalse(mode.isEnabled, "A script cannot switch to rendered mode")
+        XCTAssertGreaterThan(scrollRange(of: scroller), 300, "Tall chrome must make the page scroll")
+        let row = try filePicker(in: fixture.host)
+        let rowTop = screenViewport.maxY - row.accessibilityFrame().maxY
+        XCTAssertEqual(rowTop, 0, accuracy: 1, "Linked script must put its file row at the viewport top")
+    }
+
+}
+
+extension SkillPreviewLinkHostTests {
     private var paragraphs: String {
         (1...40).map { "Paragraph \($0). Filling the document." }.joined(separator: "\n\n")
     }
@@ -131,6 +170,12 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         }
         try click(link, in: fixture.window)
         await waitForReference(in: fixture.host, selection: selection)
+        // Loading the text precedes the yielded scroll; wait for the link's visible result too.
+        let row = try filePicker(in: fixture.host)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Linked file row must finish scrolling into view") {
+            fixture.host.layoutSubtreeIfNeeded()
+            return screenViewport.intersects(row.accessibilityFrame())
+        }
     }
 
     private func waitForReference(in host: NSView, selection: PreviewFileSelection) async {
@@ -199,7 +244,8 @@ final class SkillPreviewLinkHostTests: XCTestCase {
     }
 
     private func hostTab(markdown: String, onSelectFile: @escaping (String) -> Void, openURL: @escaping (URL) -> Void,
-                         selection: PreviewFileSelection? = nil, otherMarkdown: String = "# Reference")
+                         selection: PreviewFileSelection? = nil, otherMarkdown: String = "# Reference",
+                         geometry: PreviewHostGeometry = PreviewHostGeometry())
         -> (host: NSHostingView<AnyView>, window: NSWindow) {
         let base = NSTemporaryDirectory() + "PreviewLinkHost-" + UUID().uuidString
         let files = DeployRecordingFileService()
@@ -213,13 +259,14 @@ final class SkillPreviewLinkHostTests: XCTestCase {
             .init(relativePath: $0, bytes: 20, tokens: 5)
         }
         let tab = PreviewContentHarness(skill: skill, snapshot: snapshot, library: library,
-                                        selection: selection ?? PreviewFileSelection(), onSelectFile: { path in
+                                        selection: selection ?? PreviewFileSelection(), chromeHeight: geometry.chromeHeight,
+                                        onSelectFile: { path in
                                             onSelectFile(path)
                                             selection?.file = path
                                         })
-        let host = NSHostingView(rootView: AnyView(tab.frame(width: 640, height: 480)
+        let host = NSHostingView(rootView: AnyView(tab.frame(width: 640, height: geometry.height)
             .environment(\.openURL, OpenURLAction { openURL($0); return .handled })))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: geometry.height),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
@@ -275,6 +322,11 @@ final class SkillPreviewLinkHostTests: XCTestCase {
     }
 }
 
+private struct PreviewHostGeometry {
+    var height: CGFloat = 480
+    var chromeHeight: CGFloat?
+}
+
 @Observable
 private final class PreviewFileSelection {
     var file = "SKILL.md"
@@ -286,6 +338,7 @@ private struct PreviewContentHarness: View {
     let snapshot: DetailContentSnapshot
     let library: SkillLibraryViewModel
     let selection: PreviewFileSelection
+    let chromeHeight: CGFloat?
     let onSelectFile: (String) -> Void
 
     var body: some View {
@@ -293,7 +346,7 @@ private struct PreviewContentHarness: View {
                                                              inventory: snapshot.inventory)
         SkillDetailScrollLayout(skillID: skill.id,
                               contentOwnsScroller: DetailView.contentOwnsScroller(tab: .content, presentation: presentation)) {
-            Text("Detail header")
+            Text("Detail header").frame(height: chromeHeight)
         } tabContent: {
             SkillContentTab(skill: skill, snapshot: snapshot, library: library, presentation: presentation,
                             onSelectFile: onSelectFile, onSelectMode: { selection.mode = $0 })

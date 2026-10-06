@@ -194,7 +194,7 @@ struct MarkdownEditorWebView: NSViewRepresentable {
                      createWebViewWith configuration: WKWebViewConfiguration,
                      for action: WKNavigationAction,
                      windowFeatures: WKWindowFeatures) -> WKWebView? {
-            if let url = action.request.url, EditorNavigationPolicy.popupDecision(for: url) == .openExternally {
+            if let url = action.request.url, WebLinkPolicy.isWebURL(url) {
                 NSWorkspace.shared.open(url)
             }
             return nil

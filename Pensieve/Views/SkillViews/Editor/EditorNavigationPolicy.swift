@@ -12,8 +12,4 @@ enum EditorNavigationPolicy {
         }
         return .cancel   // file:, data:, javascript:, mailto:, other schemes, any non-initial scheme load
     }
-
-    static func popupDecision(for url: URL) -> Decision {
-        WebLinkPolicy.isWebURL(url) ? .openExternally : .cancel
-    }
 }
