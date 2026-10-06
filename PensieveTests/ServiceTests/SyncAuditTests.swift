@@ -8,7 +8,7 @@ final class SyncAuditTests: XCTestCase {
     private var tempDir = ""
 
     override func setUpWithError() throws {
-        tempDir = FileManager.default.temporaryDirectory
+        tempDir = TestTemporaryDirectory.url
             .appendingPathComponent("pensieve-sync-audit-\(UUID().uuidString)").path
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
     }

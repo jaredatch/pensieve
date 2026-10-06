@@ -22,7 +22,7 @@ struct ProjectFolderCallerHarness {
     init(installed: [PlatformTarget] = [.claudeCode, .grok, .codex, .cursor], files: FileService = FileService(),
          persistent: Bool = false) throws {
         self.files = files
-        root = NSTemporaryDirectory() + "ProjectFolderCallers-\(UUID().uuidString)"
+        root = TestTemporaryDirectory.path + "ProjectFolderCallers-\(UUID().uuidString)"
         let store = SkillStore(fileService: files, baseDir: root + "/store/skills")
         let slug = try store.createSkill(name: "Caller Skill", description: "Caller", body: "# Body")
         mapped = LinkServiceCanonicalDirectoryFileService(

@@ -59,7 +59,7 @@ final class CursorMDCTests: XCTestCase {
         )
         let compiler = CursorCompiler(
             fileService: FileService(),
-            skillStore: SkillStore(fileService: FileService(), baseDir: NSTemporaryDirectory())
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestTemporaryDirectory.path)
         )
         let body = "# TS Rules"
 

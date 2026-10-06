@@ -14,7 +14,7 @@ final class UpdateMetadataTests: XCTestCase {
     private var manifest: ManifestService!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveUpdateMetadata-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveUpdateMetadata-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         manifest = ManifestService(fileService: fileService)

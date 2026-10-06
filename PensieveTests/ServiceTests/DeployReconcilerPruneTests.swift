@@ -21,7 +21,7 @@ final class DeployReconcilerPruneTests: XCTestCase {
     }
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveDeployReconcilerPruneTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveDeployReconcilerPruneTests-\(UUID().uuidString)"
         storeSkillsDir = tempDir + "/store/skills"
         agentDir = tempDir + "/agent/skills"
         deployStateStore = DeployStateStore(fileService: fileService, appSupportDir: tempDir + "/app-support")

@@ -8,7 +8,7 @@ final class SkillInstallViewModelTests: XCTestCase {
     var fileService: FileService!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveSkillInstallViewModelTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveSkillInstallViewModelTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
     }

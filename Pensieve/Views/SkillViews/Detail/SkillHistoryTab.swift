@@ -212,16 +212,8 @@ private struct SkillHistoryRowView: View {
     let onRestore: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: Spacing.lg) {
-            VStack(spacing: 0) {
-                Rectangle().fill(DesignTokens.timelineRule).frame(width: 1, height: 4)
-                    .opacity(row.connectsUp ? 1 : 0)
-                Circle().fill(row.isCurrent ? Color.green : Color(nsColor: .quaternaryLabelColor))
-                    .frame(width: 10, height: 10)
-                Rectangle().fill(DesignTokens.timelineRule).frame(width: 1).frame(maxHeight: .infinity)
-                    .opacity(row.connectsDown ? 1 : 0)
-            }
-            .frame(width: 12)
+        SkillHistoryTimelineRow(dotColor: row.isCurrent ? Color.green : Color(nsColor: .quaternaryLabelColor),
+                                connectsUp: row.connectsUp, connectsDown: row.connectsDown) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: Spacing.sm) {
                     Text(SkillHistoryTimeline.meta(for: row.version))
@@ -248,9 +240,7 @@ private struct SkillHistoryRowView: View {
                     .padding(.top, 6)
                 }
             }
-            .padding(.bottom, Spacing.xxl)
         }
-        .accessibilityElement(children: .contain)
     }
 }
 

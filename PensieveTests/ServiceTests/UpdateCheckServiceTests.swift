@@ -11,7 +11,7 @@ final class UpdateCheckServiceTests: XCTestCase {
     let checkedAt = Date(timeIntervalSince1970: 1_800_000_000)
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveUpdateCheckServiceTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveUpdateCheckServiceTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         git = RecordingUpdateGitService()

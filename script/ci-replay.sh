@@ -10,7 +10,7 @@
 #   ci-replay.sh <base>..<head>     replay every commit in the range; run it in CI before the suite
 #   ci-replay.sh --self-test
 #
-# Per commit it checks: the docs-commit rules (stage claim, LOG forms), skip markers, secrets, tmp/ cites (against that
+# Per commit it checks: the docs-commit rules (stage claim, LOG forms), skip markers, secrets, conflict markers, tmp/ cites (against that
 # commit's own PLAN.md; on a merge, only a cite new against every parent), the acceptance hashes (from the commit's own
 # ledger, plans and extractor), the refreeze trace (against the parent's ledger), that a builder commit leaves an
 # unstamped plan's Validation and Acceptance unchanged (a merge is judged through its branch's commits), and the close's
@@ -96,6 +96,8 @@ replay_commit() {   # $1 = commit, $2 = 1 to exempt the MESSAGE rule only (a PR-
   fi
   # secrets (added/modified files only)
   secret_scan "$present" "$whole" || { echo "ci-replay: $c: a secret-shaped file or line" >&2; return 1; }
+  local cm=0; conflict_scan "$whole" || cm=$?
+  [ "$cm" -eq 0 ] || { [ "$cm" -eq 1 ] && echo "ci-replay: $c: a file still holds conflict markers (resolve the conflict; an example in a doc indents its markers)" >&2; return "$cm"; }
   # the project's own check over the commit's first-parent diff (none on the records side)
   if [ "$RATCHET_SIDE" != records ]; then
     local pr=0; project_check "$whole" || pr=$?
@@ -285,6 +287,10 @@ if [ "${1:-}" = "--self-test" ]; then
   git checkout -q "$c0" -- docs/LOG.md; printf 'k\n' > docs/sample.txt; cs="$(mk "$c0" "note: sample")"
   git mv -q docs/sample.txt docs/dev.p12 2>/dev/null || mv docs/sample.txt docs/dev.p12
   replay_commit "$(mk "$cs" "note: rename")" >/dev/null 2>&1 && fail "a rename into a .p12 passed the secret scan"; rm -f docs/dev.p12
+  # a file committed with its conflict markers still in is refused
+  git checkout -q "$c0" -- docs/LOG.md; printf '<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> plan-02\n' > docs/MARKED.md
+  out="$(replay_commit "$(mk "$c0" "note: a botched resolution")" 2>&1)" && fail "a file with conflict markers replayed clean"
+  grep -qF 'conflict markers' <<< "$out" || fail "the conflict-marker refusal was not named: $out"; rm -f docs/MARKED.md
   # a merge's tmp/ cites: new only if new against EVERY parent — the lines a closed plan's branch wrote while it was open are
   # inherited (the branch flipped the row); a stale cite first written in the merge itself is refused
   git checkout -q "$c0" -- docs/LOG.md PLAN.md; rm -f docs/OTHER.md

@@ -245,7 +245,7 @@ final class DeployIntentModelTests: XCTestCase {
     }
 
     func testExistingStoreOpensUnderExtendedSchema() throws {
-        let directory = NSTemporaryDirectory() + "PensieveSchemaMigration-" + UUID().uuidString
+        let directory = TestTemporaryDirectory.path + "PensieveSchemaMigration-" + UUID().uuidString
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: directory) }
         let url = URL(fileURLWithPath: directory + "/default.store")
@@ -311,7 +311,7 @@ extension DeployIntentModelTests {
             agentDetection: DeployStubDetection(installed: [.codex]),
             deployStateStore: DeployStateStore.memoryBacked
         )
-        let root = NSTemporaryDirectory() + "PensieveDeployIntent-" + UUID().uuidString
+        let root = TestTemporaryDirectory.path + "PensieveDeployIntent-" + UUID().uuidString
         let manifestFileService = FileService()
         let manifestService = ManifestService(fileService: manifestFileService)
         let resolvedWriteManifest = writeManifest ?? { context in

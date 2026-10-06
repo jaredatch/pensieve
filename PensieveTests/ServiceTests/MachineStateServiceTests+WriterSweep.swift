@@ -9,7 +9,7 @@ final class MachineStateWriterSweepTests: XCTestCase {
     private var tempDir = ""
 
     override func setUpWithError() throws {
-        tempDir = FileManager.default.temporaryDirectory
+        tempDir = TestTemporaryDirectory.url
             .appendingPathComponent("MachineStateWriterSweepTests-\(UUID().uuidString)").path
         try fileService.createDirectory(at: tempDir)
     }

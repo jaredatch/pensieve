@@ -8,7 +8,7 @@ final class StoreUnreadableFenceTests: XCTestCase {
     private var library: SkillLibraryViewModel!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveFenceTests-" + UUID().uuidString
+        tempDir = TestTemporaryDirectory.path + "PensieveFenceTests-" + UUID().uuidString
         try FileService().createDirectory(at: tempDir)
         library = SkillLibraryViewModel(
             skillStore: SkillStore(fileService: FileService(), baseDir: tempDir)

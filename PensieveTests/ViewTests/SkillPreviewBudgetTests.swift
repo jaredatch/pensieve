@@ -22,7 +22,7 @@ final class SkillPreviewBudgetTests: XCTestCase {
 
     private func assertBudget(shape: Shape, rebuild: Bool = false) async throws {
         let files = FileService()
-        let root = files.realPath(at: NSTemporaryDirectory()) + "/PreviewBudget-" + UUID().uuidString
+        let root = files.realPath(at: TestTemporaryDirectory.path) + "/PreviewBudget-" + UUID().uuidString
         defer { try? files.deleteDirectory(at: root) }
         let bytes = try PreviewImagePolicyFixtures.png(width: 1_000, height: 1_000)
         try files.writeData(at: root + "/small.png", data: bytes)

@@ -28,15 +28,19 @@ struct SkillContentTab: View {
     private var otherFileText: String? {
         loadedOtherFile?.text(for: skill.id, relativePath: file)
     }
+    private var fileRowAnchor: FileRowAnchor { FileRowAnchor(skillID: skill.id) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            fileRow
-                .padding(.horizontal, Spacing.lg)
-                .padding(.top, DesignTokens.contentRowTop)
-                .padding(.bottom, Spacing.sm)
-            Divider()
-            content
+        // The header scrolls with the page, so no rule sets the file row off: the gap below it matches the
+        // gap above. The rendered preview pads its own top by the same 16, the source editor takes it here.
+        ScrollViewReader { proxy in
+            VStack(spacing: 0) {
+                fileRow
+                    .overlay(alignment: .top) { Color.clear.frame(height: 1).id(fileRowAnchor) }
+                    .padding(.horizontal, Spacing.lg)
+                    .padding(.top, DesignTokens.contentRowTop)
+                content(proxy: proxy)
+            }
         }
         // A bundle file's change reaches the app only as a watcher event (the library reads SKILL.md's body as
         // an echo), so the sequence is in the key beside the two SKILL.md signals.
@@ -91,36 +95,51 @@ struct SkillContentTab: View {
         }
     }
 
-    func preview(markdownBody: String, skillsBase: String) -> SkillPreviewView {
+    private func followLink(_ path: String, proxy: ScrollViewProxy) {
+        proxy.scrollTo(fileRowAnchor, anchor: .top)
+        DispatchQueue.main.async { onSelectFile(path) }
+    }
+
+    func preview(markdownBody: String, skillsBase: String, onSelectFile: @escaping (String) -> Void) -> SkillPreviewView {
         SkillPreviewView(markdownBody: markdownBody, scrolls: false,
                          skillDirectory: SkillStore.skillDirectoryPath(slug: skill.directoryName, base: skillsBase),
                          documentRelativePath: file,
                          imageRevision: folderRevision,
-                         imageLoader: PreviewImageLoader(fileService: library.fileService))
+                         imageLoader: PreviewImageLoader(fileService: library.fileService),
+                         files: presentation.choices.map(\.relativePath), onSelectFile: onSelectFile)
     }
 
-    @ViewBuilder private var content: some View {
+    @ViewBuilder private func content(proxy: ScrollViewProxy) -> some View {
         if choice.isSkillFile {
             if shownMode == .rendered {
-                preview(markdownBody: snapshot.body, skillsBase: Constants.pensieveSkillsDir)
+                preview(markdownBody: snapshot.body, skillsBase: Constants.pensieveSkillsDir,
+                        onSelectFile: { followLink($0, proxy: proxy) })
             } else {
                 SkillEditorView(skill: skill, library: library)
                     // One editor per skill: switching skills tears the prior WKWebView down, so a late
                     // contentDidChange from the old skill can never reach the new skill's draft (PLAN-03 / 03.4).
                     .id(skill.id)
                     .frame(minHeight: Self.sourceEditorMinimumHeight, maxHeight: .infinity)
+                    .padding(.top, DesignTokens.contentRowTop)
             }
         } else if shownMode == .rendered {
-            preview(markdownBody: otherFileText ?? "", skillsBase: Constants.pensieveSkillsDir)
+            preview(markdownBody: otherFileText ?? "", skillsBase: Constants.pensieveSkillsDir,
+                    onSelectFile: { followLink($0, proxy: proxy) })
         } else if let otherFileText {
             MarkdownEditorWebView(bodyToLoad: otherFileText, loadVersion: otherFileText.hashValue, readOnly: true)
                 .id(file)
                 .frame(minHeight: Self.sourceEditorMinimumHeight, maxHeight: .infinity)
                 .background(Color(.textBackgroundColor))
+                .padding(.top, DesignTokens.contentRowTop)
         } else {
             Color(.textBackgroundColor)
                 .frame(minHeight: Self.sourceEditorMinimumHeight, maxHeight: .infinity)
+                .padding(.top, DesignTokens.contentRowTop)
         }
+    }
+
+    private struct FileRowAnchor: Hashable {
+        let skillID: UUID
     }
 }
 

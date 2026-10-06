@@ -10,7 +10,7 @@ final class PreviewImageLoaderTests: XCTestCase {
 
     override func setUpWithError() throws {
         spy = PreviewImageFileSpy()
-        root = spy.files.realPath(at: NSTemporaryDirectory()) + "/preview-images-" + UUID().uuidString
+        root = spy.files.realPath(at: TestTemporaryDirectory.path) + "/preview-images-" + UUID().uuidString
         skillDirectory = root + "/skill"
         try spy.files.createDirectory(at: skillDirectory + "/assets")
         png = try PreviewImageFixture.png()

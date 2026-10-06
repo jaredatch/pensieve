@@ -73,6 +73,33 @@ func historyResult(
     )
 }
 
+/// The History layout fixture includes a multiline subject and a row without readable Markdown.
+func historyTimelineResult(rowCount: Int, hasOlderHistory: Bool = false) -> UpstreamHistoryResult {
+    let rows: [UpstreamHistoryRow] = (0..<rowCount).map { index in
+        let subject = index == 1 ? "Version 11\nA second subject line" : "Version \(12 - index)"
+        let date = Date(timeIntervalSince1970: TimeInterval(1_700_000_000 - index))
+        return UpstreamHistoryRow(
+            sha: String(format: "%040x", index + 1),
+            author: "Author",
+            date: date,
+            subject: subject,
+            filesChanged: 1,
+            linesAdded: 2,
+            linesRemoved: 1,
+            skillMarkdown: index == 1 ? nil : .text("# Version \(index)")
+        )
+    }
+    return UpstreamHistoryResult(
+        headCommit: rows[0].sha,
+        rows: rows,
+        installedPosition: .at(sha: rows[0].sha),
+        hasOlderHistory: hasOlderHistory,
+        installedBaseline: .files([]),
+        localEdits: .none,
+        windowCount: 1
+    )
+}
+
 @MainActor
 func historyOwner(
     read: @escaping UpstreamHistoryViewModel.ReadOperation,

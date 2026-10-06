@@ -10,7 +10,7 @@ final class SyncCoordinatorTests: XCTestCase {
     private var tempDir = ""
 
     override func setUpWithError() throws {
-        let base = FileManager.default.temporaryDirectory
+        let base = TestTemporaryDirectory.url
         tempDir = base.appendingPathComponent("pensieve-sync-coordinator-\(UUID().uuidString)").path
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
     }

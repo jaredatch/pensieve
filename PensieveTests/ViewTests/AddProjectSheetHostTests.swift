@@ -8,7 +8,7 @@ import XCTest
 @MainActor
 final class AddProjectSheetHostTests: XCTestCase {
     func testSheetRefusesMissingPathAndAddsCorrectedDirectoryWithoutRemounting() async throws {
-        let root = NSTemporaryDirectory() + "AddProjectSheetHost-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "AddProjectSheetHost-\(UUID().uuidString)"
         let files = FileService()
         defer { try? files.deleteDirectory(at: root) }
         try files.createDirectory(at: root)
@@ -52,7 +52,7 @@ final class AddProjectSheetHostTests: XCTestCase {
     }
 
     func testFailedAddCanRetrySamePathAfterFinderRestoresFolder() async throws {
-        let root = NSTemporaryDirectory() + "AddProjectRetry-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "AddProjectRetry-\(UUID().uuidString)"
         let files = FileService()
         defer { try? files.deleteDirectory(at: root) }
         try files.createDirectory(at: root + "/project")

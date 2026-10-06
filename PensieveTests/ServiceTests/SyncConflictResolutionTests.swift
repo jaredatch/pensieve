@@ -9,7 +9,7 @@ final class SyncConflictResolutionTests: XCTestCase {
     private var tempDir: String!; private var lockPath: String { tempDir + "-sync.lock" }
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveSyncConflictTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveSyncConflictTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
     }
 

@@ -13,7 +13,7 @@ final class PreservedFrontmatterExternalChangeTests: XCTestCase {
     private var fileService: FileService!
 
     override func setUpWithError() throws {
-        tempRoot = NSTemporaryDirectory() + "PensievePreservedExternalTests-\(UUID().uuidString)"
+        tempRoot = TestTemporaryDirectory.path + "PensievePreservedExternalTests-\(UUID().uuidString)"
         fileService = FileService()
         try fileService.createDirectory(at: tempRoot + "/preserved")
     }

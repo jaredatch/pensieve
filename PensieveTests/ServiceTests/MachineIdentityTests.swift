@@ -7,7 +7,7 @@ final class MachineIdentityTests: XCTestCase {
     private let fileService = FileService()
 
     override func setUpWithError() throws {
-        tempDir = FileManager.default.temporaryDirectory
+        tempDir = TestTemporaryDirectory.url
             .appendingPathComponent("MachineIdentityTests-\(UUID().uuidString)").path
         try fileService.createDirectory(at: tempDir)
     }

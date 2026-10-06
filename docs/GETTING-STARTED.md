@@ -187,7 +187,7 @@ You need to be able to create a private repo and (for HTTPS) mint a token. That'
 Delete `Pensieve.app`. Your skills remain in `~/.pensieve/skills/` as plain files, and any deployed symlinks keep working since their target still exists. If you want the agent directories cleaned too, remove the deploys in the app first, or delete the symlinks by hand. Nothing about your setup is held hostage.
 
 **What macOS version do I need?**
-macOS 14 or later.
+macOS 26 or later.
 
 **Where do I report bugs?**
 [Open an issue](https://github.com/jaredatch/pensieve/issues) on the public repo. Notes on what confused you are as valuable as crashes.

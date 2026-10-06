@@ -21,7 +21,7 @@ final class ExternalChangeTests: XCTestCase {
     private var tempRoot: String!
 
     override func setUpWithError() throws {
-        tempRoot = NSTemporaryDirectory() + "PensieveExternalChangeTests-\(UUID().uuidString)"
+        tempRoot = TestTemporaryDirectory.path + "PensieveExternalChangeTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempRoot, withIntermediateDirectories: true)
     }
 

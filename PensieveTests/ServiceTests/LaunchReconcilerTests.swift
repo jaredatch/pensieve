@@ -106,7 +106,7 @@ final class LaunchReconcilerTests: XCTestCase {
     private var reconciler: LaunchReconciler!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveLaunchReconcilerTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveLaunchReconcilerTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         manifest = ManifestService(fileService: fileService)

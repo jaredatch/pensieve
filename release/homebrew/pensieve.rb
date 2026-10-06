@@ -10,6 +10,8 @@ cask "pensieve" do
   desc "Manage and sync AI skills across agents and machines"
   homepage "https://github.com/jaredatch/pensieve"
 
+  depends_on macos: :tahoe
+
   livecheck do
     url "https://raw.githubusercontent.com/jaredatch/pensieve/master/appcast.xml"
     strategy :sparkle

@@ -12,7 +12,7 @@ final class MachineStateServiceTests: XCTestCase {
     private let machineID = "5A9C2E31-8F04-4D2B-9C61-0B7A43F1D002"
 
     override func setUpWithError() throws {
-        tempDir = FileManager.default.temporaryDirectory
+        tempDir = TestTemporaryDirectory.url
             .appendingPathComponent("MachineStateServiceTests-\(UUID().uuidString)").path
         try fileService.createDirectory(at: tempDir)
         suiteName = isolatedDefaultsSuite()
@@ -223,7 +223,8 @@ final class MachineStateServiceTests: XCTestCase {
         warn: @escaping (String) -> Void = { _ in }
     ) -> MachineStateService {
         MachineStateService(fileService: fileService, agentDetection: FixedMachineDetection(installed: installed),
-                            defaults: defaults, deployState: { deployState }, hostName: { hostName },
+                            defaults: defaults, deployState: { deployState }, homeDirectory: tempDir + "/home",
+                            hostName: { hostName },
                             appVersion: { "0.12.0" }, warn: warn)
     }
 

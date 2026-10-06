@@ -53,7 +53,7 @@ final class SkillExportPanelTests: XCTestCase {
     private var destination: String { root + "/export.md" }
 
     override func setUpWithError() throws {
-        root = NSTemporaryDirectory() + "SkillExportPanelTests-" + UUID().uuidString
+        root = TestTemporaryDirectory.path + "SkillExportPanelTests-" + UUID().uuidString
         try fileService.writeFile(at: source, content: "Stored bytes")
     }
 

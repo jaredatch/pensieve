@@ -242,7 +242,7 @@ extension SkillPreviewImageTests {
 
     private func imageFixture() throws -> (files: FileService, root: String) {
         let files = FileService()
-        let root = files.realPath(at: NSTemporaryDirectory()) + "/preview-render-" + UUID().uuidString
+        let root = files.realPath(at: TestTemporaryDirectory.path) + "/preview-render-" + UUID().uuidString
         try files.createDirectory(at: root)
         try files.writeData(at: root + "/red.png", data: PreviewImageFixture.png())
         return (files, root)

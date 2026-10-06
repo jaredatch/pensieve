@@ -55,7 +55,7 @@ final class HandoverHarness {
 
     init(defaults: UserDefaults) throws {
         self.defaults = defaults
-        root = NSTemporaryDirectory() + "ScenarioHandover-" + UUID().uuidString
+        root = TestTemporaryDirectory.path + "ScenarioHandover-" + UUID().uuidString
         container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         context = ModelContext(container)
         context.autosaveEnabled = false

@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 extension DeployIntentModelTests {
     func testCriterionDLaunchAndSyncNeverAdoptIntentlessDeploys() throws {
-        let lockPath = NSTemporaryDirectory() + "PensieveIntentless-" + UUID().uuidString + ".lock"
+        let lockPath = TestTemporaryDirectory.path + "PensieveIntentless-" + UUID().uuidString + ".lock"
         defer { try? FileManager.default.removeItem(atPath: lockPath) }
         let harness = try makeHarness(lockPath: lockPath)
         let skill = try insertSkill(context: harness.context)
@@ -42,7 +42,7 @@ extension DeployIntentModelTests {
     }
 
     func testCriterionOSyncLockRefusesMidCycleFlipThenLaterCyclesPreserveIt() throws {
-        let lockPath = NSTemporaryDirectory() + "PensieveIntentCycle-" + UUID().uuidString + ".lock"
+        let lockPath = TestTemporaryDirectory.path + "PensieveIntentCycle-" + UUID().uuidString + ".lock"
         defer { try? FileManager.default.removeItem(atPath: lockPath) }
         let harness = try makeHarness(lockPath: lockPath)
         let skill = try insertSkill(context: harness.context)

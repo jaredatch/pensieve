@@ -79,7 +79,7 @@ final class LaunchReconcilerHeadRetryTests: XCTestCase {
     private var migrationService: StoreMigrationService!
 
     override func setUpWithError() throws {
-        tempDir = NSTemporaryDirectory() + "PensieveLaunchHeadRetryTests-\(UUID().uuidString)"
+        tempDir = TestTemporaryDirectory.path + "PensieveLaunchHeadRetryTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         manifest = ManifestService(fileService: fileService)

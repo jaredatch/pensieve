@@ -196,7 +196,7 @@ final class SyncSetupModelTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    private let root = NSTemporaryDirectory() + "pensieve-sync-setup-test-\(UUID().uuidString)"
+    private let root = TestTemporaryDirectory.path + "pensieve-sync-setup-test-\(UUID().uuidString)"
 
     override func tearDownWithError() throws {
         for path in [root, root + "-fixtures"] where FileManager.default.fileExists(atPath: path) {

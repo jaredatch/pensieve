@@ -139,7 +139,7 @@ final class AddProjectModelTests: XCTestCase {
     }
 
     func testInvalidPathsRefuseRegistrationAndCorrectedPathAddsInSameModel() async throws {
-        let root = NSTemporaryDirectory() + "AddProjectModel-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "AddProjectModel-\(UUID().uuidString)"
         let files = FileService()
         defer { try? files.deleteDirectory(at: root) }
         try files.createDirectory(at: root)
@@ -177,7 +177,7 @@ final class AddProjectModelTests: XCTestCase {
     }
 
     func testLookupFailureExplainsReasonAndLinkedDirectoryIsAcceptedAfterCorrection() async throws {
-        let root = NSTemporaryDirectory() + "AddProjectLookup-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "AddProjectLookup-\(UUID().uuidString)"
         let files = FileService()
         defer { try? files.deleteDirectory(at: root) }
         try files.createDirectory(at: root + "/directory")
@@ -201,7 +201,7 @@ final class AddProjectModelTests: XCTestCase {
     }
 
     func testDeletionBeforeSubmitKeepsModelAvailableForCorrectedPath() async throws {
-        let root = NSTemporaryDirectory() + "AddProjectDeletion-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "AddProjectDeletion-\(UUID().uuidString)"
         let files = FileService()
         defer { try? files.deleteDirectory(at: root) }
         try files.createDirectory(at: root + "/project")

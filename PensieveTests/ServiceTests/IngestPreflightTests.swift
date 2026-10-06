@@ -31,7 +31,7 @@ final class IngestPreflightTests: XCTestCase {
     var tempDir = ""
 
     override func setUpWithError() throws {
-        tempDir = FileManager.default.temporaryDirectory
+        tempDir = TestTemporaryDirectory.url
             .appendingPathComponent("PensieveIngestPreflight-\(UUID().uuidString)").path
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
     }

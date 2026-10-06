@@ -5,7 +5,7 @@ import XCTest
 final class GitServiceConcurrencyTests: XCTestCase {
     func testBothPipesDrainBeyondTheirBufferCapacity() throws {
         let files = FileService()
-        let directory = NSTemporaryDirectory() + "GitPipeDrainTest-" + UUID().uuidString
+        let directory = TestTemporaryDirectory.path + "GitPipeDrainTest-" + UUID().uuidString
         try files.createDirectory(at: directory)
         defer { try? files.deleteDirectory(at: directory) }
         let executable = directory + "/git"
@@ -31,7 +31,7 @@ final class GitServiceConcurrencyTests: XCTestCase {
 
     func testPipeReadFailuresThrowAndReapTheChild() throws {
         let files = FileService()
-        let directory = NSTemporaryDirectory() + "GitReadFailureTest-" + UUID().uuidString
+        let directory = TestTemporaryDirectory.path + "GitReadFailureTest-" + UUID().uuidString
         try files.createDirectory(at: directory)
         defer { try? files.deleteDirectory(at: directory) }
         let executable = directory + "/git"

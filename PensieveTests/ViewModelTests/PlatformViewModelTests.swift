@@ -200,7 +200,7 @@ final class PlatformViewModelTests: XCTestCase {
     }
 
     private func deletionRoot() throws -> String {
-        let root = NSTemporaryDirectory() + "PlatformDelete-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "PlatformDelete-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(atPath: root) }
         return root

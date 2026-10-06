@@ -153,7 +153,7 @@ final class InstalledSkillHistoryPresentationTests: XCTestCase {
 
     func testOlderActionRevealsHeldRowsBeforeReadingAnotherWindow() {
         XCTAssertEqual(
-            InstalledSkillHistoryPresentation.olderAction(total: 20, shown: 3, hasOlderHistory: true),
+            InstalledSkillHistoryPresentation.olderAction(total: 20, shown: 10, hasOlderHistory: true),
             .revealReadRows
         )
         XCTAssertEqual(

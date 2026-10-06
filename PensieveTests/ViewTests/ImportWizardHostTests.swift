@@ -25,7 +25,7 @@ final class ImportWizardHostTests: XCTestCase {
     }
 
     func testImportedFallbackNamesHaveSeparateRowsAndScrollWithinSheet() throws {
-        let root = NSTemporaryDirectory() + "ImportWizardHostTests-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "ImportWizardHostTests-\(UUID().uuidString)"
         let files = FileService()
         defer { try? files.deleteDirectory(at: root) }
         let names = (0..<30).map { "Skill \($0) with a long descriptive name" }

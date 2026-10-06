@@ -12,7 +12,7 @@ final class ProjectFolderDeployTests: XCTestCase {
     let platforms: [PlatformTarget] = [.claudeCode, .grok, .codex, .cursor]
 
     override func setUpWithError() throws {
-        root = NSTemporaryDirectory() + "ProjectFolderDeployTests-\(UUID().uuidString)"
+        root = TestTemporaryDirectory.path + "ProjectFolderDeployTests-\(UUID().uuidString)"
         let store = SkillStore(fileService: files, baseDir: root + "/store")
         let slug = try store.createSkill(name: "test-skill", description: "Test", body: "# Body")
         skill = Skill(name: "Test", directoryName: slug)

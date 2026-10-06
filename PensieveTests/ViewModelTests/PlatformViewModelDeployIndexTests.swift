@@ -101,7 +101,7 @@ final class PlatformViewModelDeployIndexTests: XCTestCase {
     }
 
     private func tempRoot() throws -> String {
-        let root = NSTemporaryDirectory() + "PlatformDeployIndex-\(UUID().uuidString)"
+        let root = TestTemporaryDirectory.path + "PlatformDeployIndex-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(atPath: root) }
         return root

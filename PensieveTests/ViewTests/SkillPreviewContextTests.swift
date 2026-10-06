@@ -8,13 +8,14 @@ import XCTest
 final class SkillPreviewContextTests: XCTestCase {
     func testBundlePreviewUsesDocumentFolderAndLibraryFileServiceWithinSkillRoot() async throws {
         let files = PreviewImageFileSpy()
-        let base = files.files.realPath(at: NSTemporaryDirectory()) + "/PreviewContext-" + UUID().uuidString
+        let base = files.files.realPath(at: TestTemporaryDirectory.path) + "/PreviewContext-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: base) }
         let root = base + "/skill"
         try files.files.writeData(at: root + "/references/diagram.png", data: PreviewImageFixture.png())
         try files.files.writeData(at: base + "/outside.png", data: PreviewImageFixture.png())
         let library = SkillLibraryViewModel(fileService: files, manifestRoot: base)
-        let preview = tab(library, file: "references/guide.md").preview(markdownBody: "", skillsBase: base)
+        let preview = tab(library, file: "references/guide.md")
+            .preview(markdownBody: "", skillsBase: base, onSelectFile: { _ in })
         let provider = preview.imageProvider(budget: PreviewImageDecodeBudget(), colorScheme: .light)
         let loaded = await provider.loadImage(url: URL(string: "diagram.png"))
         XCTAssertEqual(try XCTUnwrap(loaded).width, 32)
@@ -28,7 +29,7 @@ final class SkillPreviewContextTests: XCTestCase {
 
     func testHistoryPreviewRefusesCurrentLocalImagesButLoadsEmbeddedData() async throws {
         let files = PreviewImageFileSpy()
-        let base = files.files.realPath(at: NSTemporaryDirectory()) + "/HistoryPreview-" + UUID().uuidString
+        let base = files.files.realPath(at: TestTemporaryDirectory.path) + "/HistoryPreview-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: base) }
         try files.files.writeData(at: base + "/skills/skill/diagram.png", data: PreviewImageFixture.png())
         let skill = Skill(name: "Skill", directoryName: "skill")
@@ -49,7 +50,7 @@ final class SkillPreviewContextTests: XCTestCase {
 
     func testWatcherEventReloadsMountedLocalImagesWithoutReselectingSkill() async throws {
         let files = PreviewImageFileSpy()
-        let base = files.files.realPath(at: NSTemporaryDirectory()) + "/ImageRefresh-" + UUID().uuidString
+        let base = files.files.realPath(at: TestTemporaryDirectory.path) + "/ImageRefresh-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: base) }
         let store = SkillStore(fileService: files, baseDir: base)
         let slug = try store.createSkill(name: "Skill", description: "D", body: "Body")
@@ -80,7 +81,7 @@ final class SkillPreviewContextTests: XCTestCase {
             files.finishedReads == 4
         }
         XCTAssertEqual(files.bytesRead - before, changed.count * 2)
-        let preview = tab(library, file: "SKILL.md").preview(markdownBody: "", skillsBase: base)
+        let preview = tab(library, file: "SKILL.md").preview(markdownBody: "", skillsBase: base, onSelectFile: { _ in })
         let provider = preview.imageProvider(budget: PreviewImageDecodeBudget(), colorScheme: .light)
         let decoded = await provider.loadImage(url: URL(string: "diagram.png"))
         XCTAssertEqual(try XCTUnwrap(decoded).width, 16)
@@ -115,6 +116,7 @@ private struct RefreshHarness: View {
         let tab = SkillContentTab(skill: skill, snapshot: DetailContentSnapshot(),
                                   library: library, presentation: .init(choices: [choice], choice: choice, shownMode: .rendered),
                                   onSelectFile: { _ in }, onSelectMode: { _ in })
-        tab.preview(markdownBody: "![Block](diagram.png)\n\nText ![Inline](diagram.png) neighbor.", skillsBase: base)
+        tab.preview(markdownBody: "![Block](diagram.png)\n\nText ![Inline](diagram.png) neighbor.",
+                    skillsBase: base, onSelectFile: { _ in })
     }
 }

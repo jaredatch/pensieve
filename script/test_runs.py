@@ -47,6 +47,8 @@ def prune(directory):
                 print(f"TestRuns pruning preserved {path}: {error}", file=sys.stderr)
         for _, path in sorted(idle, reverse=True)[5:]:
             try:
+                # A killed host may leave mode-0 fixtures. Physical traversal preserves linked targets.
+                subprocess.run(["/bin/chmod", "-R", "-P", "u+rwx", str(path)], check=False, stderr=subprocess.DEVNULL)
                 shutil.rmtree(path)
             except OSError as error:
                 print(f"TestRuns pruning preserved {path}: {error}", file=sys.stderr)

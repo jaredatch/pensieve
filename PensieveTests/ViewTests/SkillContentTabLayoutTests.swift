@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import WebKit
 import XCTest
 @testable import Pensieve
 
@@ -13,7 +12,7 @@ final class SkillContentTabLayoutTests: XCTestCase {
         var snapshot = DetailContentSnapshot()
         snapshot.inventory.files = [SkillBundleInventory.File(relativePath: "SKILL.md", bytes: 10, tokens: 3),
                                     SkillBundleInventory.File(relativePath: long, bytes: 10, tokens: 3)]
-        let base = NSTemporaryDirectory() + "SkillContentTabLayoutTests-\(UUID().uuidString)"
+        let base = TestTemporaryDirectory.path + "SkillContentTabLayoutTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: FileService(), baseDir: base))
         let presentation = SkillContentPresentation.resolve(
             selectedFile: "SKILL.md", requestedMode: .rendered, inventory: snapshot.inventory
@@ -40,7 +39,7 @@ final class SkillContentTabLayoutTests: XCTestCase {
     }
 
     func testThePulldownWidensWhenTheListArrives() throws {
-        let base = NSTemporaryDirectory() + "SkillContentTabLayoutTests-\(UUID().uuidString)"
+        let base = TestTemporaryDirectory.path + "SkillContentTabLayoutTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: FileService(), baseDir: base))
         let skill = Skill(name: "Example", directoryName: "example")
         func tab(_ paths: [String]) -> AnyView {
@@ -73,20 +72,41 @@ final class SkillContentTabLayoutTests: XCTestCase {
         _ = (grownWindow, freshWindow)
     }
 
-    func testSourceOverflowKeepsTheProductionEditorUsable() throws {
-        try assertSourceOverflowKeepsEditorUsable(selectedFile: "SKILL.md")
-        try assertSourceOverflowKeepsEditorUsable(selectedFile: "scripts/x.sh")
+    /// The file row sits in equal gaps: the tab strip above it, the file's content below it, and no rule
+    /// between the row and the content (the header scrolls, so nothing needs setting off).
+    @MainActor
+    func testTheFileRowGapBelowMatchesTheGapAbove() async throws {
+        let fixture = sourceFixture(selectedFile: "SKILL.md", description: nil, height: 600)
+        defer { fixture.window.close() }
+        let editor = try await TestWait.waitForEditor(in: fixture.host)
+        let popUp = try XCTUnwrap(Self.controls(in: fixture.host).compactMap { $0 as? NSPopUpButton }.first)
+        let column = try XCTUnwrap(Self.nearestScrollView(to: popUp)?.documentView)
+        let rowFrame = Self.flipped(popUp, in: column)
+        let editorFrame = Self.flipped(editor, in: column)
+
+        XCTAssertEqual(rowFrame.minY, DesignTokens.contentRowTop, accuracy: 1)
+        XCTAssertEqual(editorFrame.minY - rowFrame.maxY, rowFrame.minY, accuracy: 1)
     }
 
-    private func assertSourceOverflowKeepsEditorUsable(selectedFile: String) throws {
+    @MainActor
+    func testSourceOverflowKeepsTheProductionEditorUsable() async throws {
+        try await assertSourceOverflowKeepsEditorUsable(selectedFile: "SKILL.md")
+        try await assertSourceOverflowKeepsEditorUsable(selectedFile: "scripts/x.sh")
+    }
+
+    @MainActor
+    private func assertSourceOverflowKeepsEditorUsable(selectedFile: String) async throws {
         let fixture = sourceFixture(selectedFile: selectedFile)
         defer { fixture.window.close() }
-        let editor = try XCTUnwrap(waitForEditor(in: fixture.host, timeout: TestWait.firstRenderTimeoutSeconds), selectedFile)
+        let editor = try await TestWait.waitForEditor(
+            in: fixture.host, timeout: .seconds(TestWait.firstRenderTimeoutSeconds)
+        )
         let popUp = try XCTUnwrap(Self.controls(in: fixture.host).compactMap { $0 as? NSPopUpButton }.first)
         let columnScroller = try XCTUnwrap(Self.nearestScrollView(to: popUp))
 
         if selectedFile == "scripts/x.sh" {
-            XCTAssertEqual(waitForEditorText("echo hi", in: editor, timeout: 3), "echo hi")
+            let text = await TestWait.waitForEditorText("echo hi", in: editor, timeout: .seconds(3))
+            XCTAssertEqual(text, "echo hi")
         }
         XCTAssertGreaterThan(Self.scrollRange(of: columnScroller), 100, selectedFile)
         XCTAssertFalse(Self.isVisible(popUp, in: columnScroller), selectedFile)
@@ -96,11 +116,15 @@ final class SkillContentTabLayoutTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(editor.frame.height, SkillContentTab.sourceEditorMinimumHeight, selectedFile)
     }
 
-    private func sourceFixture(selectedFile: String) -> (host: NSHostingView<AnyView>, window: NSWindow) {
+    private func sourceFixture(
+        selectedFile: String,
+        description: String? = SkillContentTabLayoutTests.longDescription,
+        height: CGFloat = 480
+    ) -> (host: NSHostingView<AnyView>, window: NSWindow) {
         let skill = Skill(name: "Example", directoryName: "example")
         let fileService = DeployRecordingFileService()
         fileService.contents[Constants.pensieveSkillsDir + "/example/scripts/x.sh"] = "echo hi"
-        let base = NSTemporaryDirectory() + "SkillContentTabLayoutTests-\(UUID().uuidString)"
+        let base = TestTemporaryDirectory.path + "SkillContentTabLayoutTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(
             skillStore: SkillStore(fileService: fileService, baseDir: base),
             fileService: fileService
@@ -125,14 +149,16 @@ final class SkillContentTabLayoutTests: XCTestCase {
             onSelectMode: { _ in }
         )
         let layout = SkillDetailScrollLayout(skillID: skill.id, contentOwnsScroller: contentOwnsScroller) {
-            SkillDescriptionText(text: Self.longDescription, expanded: true)
-                .padding(.horizontal, Spacing.lg)
+            if let description {
+                SkillDescriptionText(text: description, expanded: true)
+                    .padding(.horizontal, Spacing.lg)
+            }
         } tabContent: {
             tab
         }
-        let host = NSHostingView(rootView: AnyView(layout.frame(width: 640, height: 480)))
+        let host = NSHostingView(rootView: AnyView(layout.frame(width: 640, height: height)))
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: height),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -148,45 +174,9 @@ final class SkillContentTabLayoutTests: XCTestCase {
             .joined(separator: "\n")
     }
 
-    private func waitForEditor(in host: NSView, timeout: TimeInterval) -> WKWebView? {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            host.layoutSubtreeIfNeeded()
-            if let editor = Self.views(in: host).compactMap({ $0 as? WKWebView }).first {
-                return editor
-            }
-            RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.01)))
-        } while Date() < deadline
-        return nil
-    }
-
-    private func waitForEditorText(_ expected: String, in editor: WKWebView, timeout: TimeInterval) -> String? {
-        let deadline = Date().addingTimeInterval(timeout)
-        var lastText: String?
-        repeat {
-            var evaluationFinished = false
-            editor.evaluateJavaScript(
-                "window.Editor && window.Editor.getContent ? window.Editor.getContent() : null"
-            ) { result, _ in
-                lastText = result as? String
-                evaluationFinished = true
-            }
-            while !evaluationFinished, Date() < deadline {
-                RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.01)))
-            }
-            if lastText == expected { return lastText }
-            RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.01)))
-        } while Date() < deadline
-        return lastText
-    }
-
     private static func controls(in view: NSView) -> [NSControl] {
         let own = [view].compactMap { $0 as? NSControl }.filter { $0 is NSPopUpButton || $0 is NSSegmentedControl }
         return own + view.subviews.flatMap { controls(in: $0) }
-    }
-
-    private static func views(in view: NSView) -> [NSView] {
-        [view] + view.subviews.flatMap { views(in: $0) }
     }
 
     private static func nearestScrollView(to view: NSView) -> NSScrollView? {
@@ -206,6 +196,13 @@ final class SkillContentTabLayoutTests: XCTestCase {
         let origin = scrollView.contentView.bounds.origin
         scrollView.contentView.scroll(to: NSPoint(x: origin.x, y: scrollRange(of: scrollView)))
         scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    /// A view's frame in a container's coordinates, measured from the container's top.
+    private static func flipped(_ view: NSView, in container: NSView) -> CGRect {
+        let frame = view.convert(view.bounds, to: container)
+        guard !container.isFlipped else { return frame }
+        return CGRect(x: frame.minX, y: container.bounds.height - frame.maxY, width: frame.width, height: frame.height)
     }
 
     private static func isVisible(_ view: NSView, in scrollView: NSScrollView) -> Bool {

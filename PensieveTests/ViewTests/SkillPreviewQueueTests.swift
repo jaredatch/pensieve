@@ -91,7 +91,6 @@ final class SkillPreviewQueueTests: XCTestCase {
     }
 
     func testCancelledQueuedImageLoadsNeverReachTheDecoder() async throws {
-        guard #available(macOS 15.0, *) else { return XCTFail("Queue observation requires the supported modern test host") }
         let loader = try PausedPreviewImageLoader()
         defer { loader.release() }
         let provider = PreviewImageProvider(loader: loader, skillDirectory: nil, budget: PreviewImageDecodeBudget())
@@ -115,7 +114,6 @@ final class SkillPreviewQueueTests: XCTestCase {
     }
 
     func testRebuiltAndRemovedDocumentsCancelTheirPendingImageLoads() async throws {
-        guard #available(macOS 15.0, *) else { return XCTFail("Queue observation requires the supported modern test host") }
         for rebuild in [true, false] {
             let loader = try PausedPreviewImageLoader()
             defer { loader.release() }
@@ -259,7 +257,6 @@ private final class PreviewQueueProgress {
 /// runs provider tasks until they suspend; after every request starts and no runnable job or
 /// completed request remains, their only suspension is the real budget's queued continuation.
 /// It never replaces the budget, its queue, cancellation, reads or decoding.
-@available(macOS 15.0, *)
 private final class PreviewSubmissionExecutor: TaskExecutor, @unchecked Sendable {
     private let queue = DispatchQueue(label: "PreviewSubmissionExecutor")
     private let lock = NSLock()
