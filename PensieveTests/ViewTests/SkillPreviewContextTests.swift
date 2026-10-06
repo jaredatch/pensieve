@@ -14,7 +14,8 @@ final class SkillPreviewContextTests: XCTestCase {
         try files.files.writeData(at: root + "/references/diagram.png", data: PreviewImageFixture.png())
         try files.files.writeData(at: base + "/outside.png", data: PreviewImageFixture.png())
         let library = SkillLibraryViewModel(fileService: files, manifestRoot: base)
-        let preview = tab(library, file: "references/guide.md").preview(markdownBody: "", skillsBase: base)
+        let preview = tab(library, file: "references/guide.md")
+            .preview(markdownBody: "", skillsBase: base, onSelectFile: { _ in })
         let provider = preview.imageProvider(budget: PreviewImageDecodeBudget(), colorScheme: .light)
         let loaded = await provider.loadImage(url: URL(string: "diagram.png"))
         XCTAssertEqual(try XCTUnwrap(loaded).width, 32)
@@ -80,7 +81,7 @@ final class SkillPreviewContextTests: XCTestCase {
             files.finishedReads == 4
         }
         XCTAssertEqual(files.bytesRead - before, changed.count * 2)
-        let preview = tab(library, file: "SKILL.md").preview(markdownBody: "", skillsBase: base)
+        let preview = tab(library, file: "SKILL.md").preview(markdownBody: "", skillsBase: base, onSelectFile: { _ in })
         let provider = preview.imageProvider(budget: PreviewImageDecodeBudget(), colorScheme: .light)
         let decoded = await provider.loadImage(url: URL(string: "diagram.png"))
         XCTAssertEqual(try XCTUnwrap(decoded).width, 16)
@@ -115,6 +116,7 @@ private struct RefreshHarness: View {
         let tab = SkillContentTab(skill: skill, snapshot: DetailContentSnapshot(),
                                   library: library, presentation: .init(choices: [choice], choice: choice, shownMode: .rendered),
                                   onSelectFile: { _ in }, onSelectMode: { _ in })
-        tab.preview(markdownBody: "![Block](diagram.png)\n\nText ![Inline](diagram.png) neighbor.", skillsBase: base)
+        tab.preview(markdownBody: "![Block](diagram.png)\n\nText ![Inline](diagram.png) neighbor.",
+                    skillsBase: base, onSelectFile: { _ in })
     }
 }

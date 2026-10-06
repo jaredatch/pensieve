@@ -17,15 +17,20 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- History now shows the latest 10 commits for an installed skill and 10 saved versions for a skill you wrote before offering to show older ones.
 - Pensieve now needs macOS 26 or later.
 - Running `pensieve-daemon` with no command now shows its help instead of syncing; `pensieve-daemon run` still syncs.
 - Empty lists, searches that find nothing, and a detail pane with nothing selected now look the way Mail does it: a large, quiet title ("No Skill Selected") in place of the big icon.
 - The skill preview stays offline. An image a skill links from the web shows its alt text instead of loading, so opening a skill never pings someone else's server. Images in the skill's own folder, and images embedded in the file, still show.
 - Import from Folder skips linked files, pipes and anything over 4 MiB, and tells you how many it skipped and why. The "kept as text" notice now lists each skill on its own line.
+- A skill's Content tab drops the line under the file picker, and the picker now has the same space above and below it.
 - Frontmatter has to start on a skill's first line, the way your agents read it. If there are blank lines above the opening `---`, Pensieve reads the whole file as text. Skills already in your library stay put either way.
 
 ### Fixed
 
+- Short rendered skills now line up with the file row in Content and stay aligned to the left in History.
+- Links in rendered skills now open web pages, jump to headings or select another skill file without showing a system error.
+- History rows keep the same spacing when you make the window taller.
 - History's line counts for your local edits now match what `git diff` reports.
 - Deploying to a project whose folder is gone now reports the missing folder instead of recreating it. Your deployment choices stay saved and apply after the folder returns, on the next launch or sync that brings changes. Add Project also refuses missing folders.
 - Folder checks when deploying, restoring saved deployments or adding a project stop waiting after about two seconds on an unresponsive network share. Saved deployments remain, and other projects continue.

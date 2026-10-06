@@ -70,7 +70,7 @@ final class PreviewContextRevisionTests: XCTestCase {
         let tab = SkillContentTab(skill: skill, snapshot: DetailContentSnapshot(), library: library,
                                   presentation: .init(choices: [choice], choice: choice, shownMode: .rendered),
                                   onSelectFile: { _ in }, onSelectMode: { _ in })
-        return tab.preview(markdownBody: "Body", skillsBase: base)
+        return tab.preview(markdownBody: "Body", skillsBase: base, onSelectFile: { _ in })
     }
 
     private func sourceFile(_ relativePath: String) throws -> String {

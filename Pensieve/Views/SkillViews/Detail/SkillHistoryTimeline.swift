@@ -35,7 +35,7 @@ struct SkillHistorySnapshot: Equatable {
 }
 
 /// The rows the tab draws (the frame `Skills / Details — History (authored)`): the newest is Current; the
-/// connector runs from the first dot to the last; three rows show until "Show older versions".
+/// connector runs from the first dot to the last; up to ten rows show until "Show older versions".
 enum SkillHistoryTimeline {
     struct Row: Equatable, Identifiable {
         let version: SkillHistoryVersion
@@ -45,7 +45,7 @@ enum SkillHistoryTimeline {
         var id: String { version.sha }
     }
 
-    static let initiallyShown = 3
+    static let initiallyShown = 10
 
     static func rows(_ versions: [SkillHistoryVersion], showAll: Bool) -> [Row] {
         let shown = showAll ? versions : Array(versions.prefix(initiallyShown))

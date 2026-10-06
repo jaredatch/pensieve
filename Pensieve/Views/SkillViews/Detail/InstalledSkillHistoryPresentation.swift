@@ -81,7 +81,7 @@ enum InstalledSkillHistoryPresentation {
         }
     }
 
-    static let initiallyShown = 3
+    static let initiallyShown = 10
     static let loadingTitle = "Loading upstream history…"
     static let updatingTitle = "Updating…"
     static let localCaption = "Your local edits · not yet saved to a version"

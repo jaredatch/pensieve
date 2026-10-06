@@ -7,7 +7,7 @@ enum EditorNavigationPolicy {
 
     static func decision(for url: URL, navigationType: WKNavigationType, scheme: String) -> Decision {
         if navigationType == .other, url.scheme == scheme { return .allowInitialLoad }
-        if navigationType == .linkActivated, let s = url.scheme?.lowercased(), s == "http" || s == "https" {
+        if navigationType == .linkActivated, WebLinkPolicy.isWebURL(url) {
             return .openExternally
         }
         return .cancel   // file:, data:, javascript:, mailto:, other schemes, any non-initial scheme load
