@@ -85,8 +85,6 @@ enum SkillDeletionFlow {
         for row in ledger where row.skillID == skill.id { context.delete(row) }
         let categoryLedger = try context.fetch(FetchDescriptor<SkillProjectAssignment>())
         for row in categoryLedger where row.skillID == skill.id { context.delete(row) }
-        let scenarioLedger = try context.fetch(FetchDescriptor<ScenarioAssignment>())
-        for row in scenarioLedger where row.skillID == skill.id { context.delete(row) }
         for category in try context.fetch(FetchDescriptor<Category>())
             where category.skillSlugs.contains(skill.directoryName) {
             category.skillSlugs.removeAll { $0 == skill.directoryName }

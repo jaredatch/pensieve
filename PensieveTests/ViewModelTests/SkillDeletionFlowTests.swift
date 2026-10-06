@@ -64,7 +64,6 @@ final class SkillDeletionFlowTests: XCTestCase {
         f.context.insert(IntentAssignment(skillID: f.skill.id, platformRaw: "codex"))
         f.context.insert(SkillProjectAssignment(skillID: f.skill.id, projectID: f.project.id,
                                                 platform: .claudeCode))
-        f.context.insert(ScenarioAssignment(skillID: f.skill.id, platform: .cursor))
         let category = Category(name: "Category")
         category.skillSlugs = [f.skill.directoryName]
         let scenario = Scenario(name: "Scenario")
@@ -115,7 +114,6 @@ final class SkillDeletionFlowTests: XCTestCase {
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<MachineDeployIntent>()).count, 2)
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<IntentAssignment>()).count, 1)
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<SkillProjectAssignment>()).count, 1)
-        XCTAssertEqual(try f.context.fetch(FetchDescriptor<ScenarioAssignment>()).count, 1)
         XCTAssertTrue(f.manifest.snapshots.isEmpty); XCTAssertTrue(f.store.entries.contains("alpha"))
     }
 
@@ -268,18 +266,18 @@ extension SkillDeletionFlowTests {
 
     func testDeleteLeavesOtherSkillsStaleLedgerRowsAlone() throws {
         let f = try fixture(); let other = Skill(name: "Other", directoryName: "other")
-        f.context.insert(other); f.context.insert(ScenarioAssignment(skillID: other.id, platform: .claudeCode))
+        f.context.insert(other)
         f.context.insert(SkillProjectAssignment(
             skillID: other.id, projectID: f.project.id, platform: .cursor))
         try f.context.save()
-        XCTAssertTrue(delete(f)); XCTAssertEqual(try f.context.fetch(FetchDescriptor<ScenarioAssignment>()).count, 1)
+        XCTAssertTrue(delete(f))
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<SkillProjectAssignment>()).count, 1)
         XCTAssertTrue(f.cursor.removeProjectPaths.isEmpty); XCTAssertTrue(f.links.unlinkCalls.isEmpty)
         XCTAssertEqual(f.counter.value, 1)
     }
 
     func testDeleteRemovesOwnCursorArtifact() throws {
-        let f = try fixture(); f.context.insert(ScenarioAssignment(skillID: f.skill.id, platform: .cursor)); try f.context.save()
+        let f = try fixture()
         f.cursor.ownedProjectPaths = [nil]
         XCTAssertTrue(delete(f)); XCTAssertEqual(f.cursor.removeProjectPaths.count, 1)
         XCTAssertNil(f.cursor.removeProjectPaths[0])

@@ -89,14 +89,12 @@ final class StoreRebuildScenarioTests: XCTestCase {
     }
 
     @MainActor
-    func testRebuildLeavesLocalNameAndActiveReferenceAlone() throws {
+    func testRebuildLeavesLocalNameAlone() throws {
         let context = try makeContext()
         let id = UUID()
         let scenario = Scenario(id: id, name: "Local Name")
         context.insert(scenario)
         try context.save()
-        let defaults = try isolatedDefaults()
-        defaults.set(id.uuidString, forKey: ScenarioHandover.activeKey)
 
         try writeManifest(scenarios: [
             LegacyScenarioDefinition(id: id.uuidString, name: "Remote Rename", skillSlugs: [], agents: ["cursor"])
@@ -107,7 +105,6 @@ final class StoreRebuildScenarioTests: XCTestCase {
         XCTAssertEqual(try context.fetch(FetchDescriptor<Scenario>()).count, 1)
         XCTAssertEqual(scenario.id, id)
         XCTAssertEqual(scenario.name, "Local Name")
-        XCTAssertEqual(defaults.string(forKey: ScenarioHandover.activeKey), id.uuidString)
     }
 
     @MainActor

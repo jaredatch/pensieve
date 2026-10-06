@@ -223,7 +223,7 @@ private extension IntentEndToEndTests {
                 },
                 notifier: {},
                 reconcile: { context in
-                    IntentReconciler(platformVM: platformVM, machineIdentity: identity, handoverIsComplete: { false })
+                    IntentReconciler(platformVM: platformVM, machineIdentity: identity)
                         .reconcile(context: context)
                 },
                 lockPath: tempDir + "/cloneA-sync.lock"
@@ -242,7 +242,7 @@ private extension IntentEndToEndTests {
         ).makeConvergence(
             container: container,
             platformVM: platformVM,
-            intentReconciler: IntentReconciler(platformVM: platformVM, machineIdentity: identity, handoverIsComplete: { false })
+            intentReconciler: IntentReconciler(platformVM: platformVM, machineIdentity: identity)
         )
     }
 

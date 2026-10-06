@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-/// Legacy per-agent ownership retained until this Mac completes the one-time handover.
+/// Legacy per-agent ownership retained for SwiftData store compatibility.
 @Model
 final class ScenarioAssignment {
     @Attribute(.unique) var id: UUID

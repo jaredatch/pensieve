@@ -164,7 +164,7 @@ final class IntentReconcilerProjectTests: XCTestCase {
         let installedVM = harness.makePlatformVM(installed: [.codex])
         let launchReconciler = IntentReconciler(
             platformVM: installedVM,
-            machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID), handoverIsComplete: { false }
+            machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID)
         )
         let result = launchReconciler.reconcile(context: harness.context)
 

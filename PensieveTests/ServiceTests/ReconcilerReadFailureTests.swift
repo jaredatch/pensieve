@@ -7,7 +7,6 @@ private enum ReconcileRead: CaseIterable {
     case intents
     case skills
     case intentLedger
-    case scenarioLedger
     case categoryLedger
     case projects
 }
@@ -31,11 +30,6 @@ private struct FailingReconcilerStateFetcher: ReconcilerStateFetching {
     func intentAssignments(context: ModelContext) throws -> [IntentAssignment] {
         if failedRead == .intentLedger { throw ReconcileReadFailure() }
         return try live.intentAssignments(context: context)
-    }
-
-    func scenarioAssignments(context: ModelContext) throws -> [ScenarioAssignment] {
-        if failedRead == .scenarioLedger { throw ReconcileReadFailure() }
-        return try live.scenarioAssignments(context: context)
     }
 
     func categoryAssignments(context: ModelContext) throws -> [SkillProjectAssignment] {

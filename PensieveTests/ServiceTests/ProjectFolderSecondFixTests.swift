@@ -16,7 +16,7 @@ final class ProjectFolderSecondFixTests: XCTestCase {
         let vm = PlatformViewModel(fileService: mapped,
             agentDetection: DeployStubDetection(installed: [.codex]), deployStateStore: h.deployState)
         let intent = IntentReconciler(platformVM: vm,
-            machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID), handoverIsComplete: { true })
+            machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID))
         h.context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.localID,
             skillSlug: h.skill.directoryName, platformRaw: PlatformTarget.codex.rawValue))
         try h.context.save()

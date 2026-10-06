@@ -40,8 +40,6 @@ protocol FileServiceProtocol {
     func isSymlink(at path: String) -> Bool
     func isRegularFile(at path: String) -> Bool
     func listDirectory(at path: String) throws -> [String]
-    /// Proves read and search access to a folder without enumerating its entries.
-    func checkDirectoryReadable(at path: String) throws
     func contentsHash(at path: String) throws -> String
     /// The file system's identity for a path — device and inode: the link itself when
     /// `followingLinks` is false, what it reaches when true; nil when nothing is there. Two spellings
@@ -73,9 +71,6 @@ struct RegularFileMetadata: Equatable {
 // MARK: - Default implementations
 
 extension FileServiceProtocol {
-    /// Inert default: an unmodeled directory probe is unknown and never accesses the host.
-    func checkDirectoryReadable(at path: String) throws { throw CocoaError(.fileReadUnknown) }
-
     /// Existing doubles refuse byte writes unless they explicitly support them; never fall through to host I/O.
     func writeData(at path: String, data: Data) throws {
         throw CocoaError(.featureUnsupported)
