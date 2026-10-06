@@ -23,7 +23,7 @@ final class AddProjectSheetHostTests: XCTestCase {
         ).modelContainer(container).background(Color(nsColor: .windowBackgroundColor)))
         let window = mount(host)
         defer { window.close() }
-        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "The sheet must render the missing-folder reason") {
             (try? self.renderedText(in: host).contains { $0.text.contains("Project folder is missing") }) == true
         }
@@ -37,14 +37,17 @@ final class AddProjectSheetHostTests: XCTestCase {
         let pathField = try XCTUnwrap(textFields(in: host).first { $0.stringValue == model.path })
         pathField.stringValue = root + "/valid"
         pathField.delegate?.controlTextDidChange?(Notification(name: NSTextField.textDidChangeNotification, object: pathField))
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Editing the sheet's path must update its binding") {
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                            failureMessage: "Editing the sheet's path must update its binding") {
             model.path == root + "/valid"
         }
-        await TestWait.until(timeout: .seconds(3), failureMessage: "The same sheet must render its corrected status") {
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                            failureMessage: "The same sheet must render its corrected status") {
             (try? self.renderedText(in: host).contains { $0.text.contains("Marker will be created on Add") }) == true
         }
         try clickAdd(in: host, window: window)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Add must create the corrected project") { created.count == 1 }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                            failureMessage: "Add must create the corrected project") { created.count == 1 }
         XCTAssertEqual(try container.mainContext.fetchCount(FetchDescriptor<Project>()), 1)
         XCTAssertEqual(created.first?.path, root + "/valid")
         XCTAssertTrue(files.fileExists(at: root + "/valid/.pensieve-project"))
@@ -67,15 +70,17 @@ final class AddProjectSheetHostTests: XCTestCase {
             .background(Color(nsColor: .windowBackgroundColor)))
         let window = mount(host)
         defer { window.close() }
-        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "Initial folder preview") { model.isValid }
         try files.deleteDirectory(at: model.path)
         try clickAdd(in: host, window: window)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Failed Add reason") { model.hasIdentityError }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                            failureMessage: "Failed Add reason") { model.hasIdentityError }
         XCTAssertTrue(created.isEmpty)
         try files.createDirectory(at: model.path)
         try clickAdd(in: host, window: window)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Retry same path must add") { created.count == 1 }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                            failureMessage: "Retry same path must add") { created.count == 1 }
         XCTAssertEqual(try container.mainContext.fetchCount(FetchDescriptor<Project>()), 1)
     }
 
@@ -94,7 +99,7 @@ final class AddProjectSheetHostTests: XCTestCase {
             .background(Color(nsColor: .windowBackgroundColor)))
         let window = mount(host)
         defer { window.close() }
-        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "Initial caption") {
             (try? self.renderedText(in: host).contains { $0.text.contains("Marker will be created") }) == true
         }
@@ -105,11 +110,13 @@ final class AddProjectSheetHostTests: XCTestCase {
         h.mapped.beforeProjectProbe = { _ in
             guard !Thread.isMainThread else { return }
             started.fulfill()
-            _ = release.wait(timeout: .now() + 5)
+            // Keep the probe pending through both the start handoff and the hosted render wait.
+            _ = release.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds)
         }
         model.path = h.project.path
-        await fulfillment(of: [started], timeout: 3)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Current path shows neutral checking text") {
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                            failureMessage: "Current path shows neutral checking text") {
             (try? self.renderedText(in: host).contains { $0.text.contains("Checking project folder") }) == true
         }
         XCTAssertEqual(host.fittingSize.height, initialHeight, accuracy: 1,
@@ -119,10 +126,12 @@ final class AddProjectSheetHostTests: XCTestCase {
         XCTAssertTrue(created.isEmpty, "The pending sheet cannot add a project")
         XCTAssertEqual(try container.mainContext.fetchCount(FetchDescriptor<Project>()), 0)
         release.signal()
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Latest path replaces checking text") { model.isValid }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                            failureMessage: "Latest path replaces checking text") { model.isValid }
         XCTAssertEqual(model.identityMessage, "Marker will be created on Add")
         try clickAdd(in: host, window: window)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Completed preview permits Add") { created.count == 1 }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                            failureMessage: "Completed preview permits Add") { created.count == 1 }
     }
 
     func testReturnFromEitherFieldDuringDebounceRegistersOnceAndDismissesSheet() async throws {
@@ -142,7 +151,7 @@ final class AddProjectSheetHostTests: XCTestCase {
                     onCreated: { created.append($0) }).modelContainer(h.context.container)))
             let window = mount(host)
             defer { window.close() }
-            await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+            await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                                 failureMessage: "Native sheet presents") {
                 window.attachedSheet?.contentView != nil
             }
@@ -156,16 +165,21 @@ final class AddProjectSheetHostTests: XCTestCase {
                 isARepeat: false, keyCode: 36))
             sheet.sendEvent(event)
             XCTAssertTrue(created.isEmpty)
-            await TestWait.until(timeout: .seconds(1), failureMessage: "Injected debounce scheduled") { delay.scheduled == 1 }
+            await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                                failureMessage: "Injected debounce scheduled") { delay.scheduled == 1 }
             delay.advance()
-            await TestWait.until(timeout: .seconds(3), failureMessage: "Return creates exactly one project") {
+            await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                                failureMessage: "Return creates exactly one project") {
                 created.count == 1
             }
-            await TestWait.until(timeout: .seconds(3), failureMessage: "Successful queued Return dismisses") {
+            // A failed creation wait already reports the cause; avoid a cascading dismissal timeout.
+            guard created.count == 1 else { return }
+            await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                                failureMessage: "Successful queued Return dismisses") {
                 !presentation.presented && window.attachedSheet == nil
             }
+            XCTAssertEqual(created.count, 1, "Return creates exactly one project")
             XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 3)
-            XCTAssertEqual(created.count, 1)
         }
     }
 
