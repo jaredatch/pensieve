@@ -84,7 +84,7 @@ final class RemoteRetractionStoreTests: XCTestCase {
 
         store.observe([state()])
 
-        wait(for: [invalidated], timeout: 0.01)
+        wait(for: [invalidated], timeout: 0.01) // upper-bound: Inverted expectation observes no invalidation.
     }
 
     private var wholeMacKey: RemoteDeployKey {

@@ -13,7 +13,7 @@ final class MarkdownEditorHostTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = webView
-        wait(for: [ready], timeout: 10)
+        wait(for: [ready], timeout: TestWait.hostedActionTimeoutSeconds)
         return (coordinator, window)
     }
 
@@ -24,7 +24,7 @@ final class MarkdownEditorHostTests: XCTestCase {
             value = "\(result ?? "")"
             done.fulfill()
         }
-        wait(for: [done], timeout: 10)
+        wait(for: [done], timeout: TestWait.hostedActionTimeoutSeconds)
         return value
     }
 
@@ -36,7 +36,7 @@ final class MarkdownEditorHostTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = webView
-        wait(for: [navigated], timeout: 10)
+        wait(for: [navigated], timeout: TestWait.hostedActionTimeoutSeconds)
 
         let probed = expectation(description: "style probe")
         coordinator.evaluateJavaScript(
@@ -46,7 +46,7 @@ final class MarkdownEditorHostTests: XCTestCase {
                           "editor should render a styled .cm-content; got \(String(describing: result))")
             probed.fulfill()
         }
-        wait(for: [probed], timeout: 10)
+        wait(for: [probed], timeout: TestWait.hostedActionTimeoutSeconds)
     }
 
     /// MarkEdit's metrics (PLAN-34 / 34.1): 12 px on 18 px lines.

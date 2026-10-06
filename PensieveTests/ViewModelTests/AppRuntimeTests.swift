@@ -345,7 +345,7 @@ extension AppRuntimeTests {
         XCTAssertEqual(launchCalls, 1, "an interleaved install must delay the retry rebuild")
         XCTAssertEqual(deploy.calls, 0, "an unvalidated retry outcome must not be accepted")
         installLock.release()
-        await fulfillment(of: [retryRan], timeout: 1)
+        await fulfillment(of: [retryRan], timeout: TestWait.hostedActionTimeoutSeconds)
 
         XCTAssertEqual(launchCalls, 2)
         XCTAssertEqual(deploy.calls, 1)

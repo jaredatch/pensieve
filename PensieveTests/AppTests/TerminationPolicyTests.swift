@@ -35,7 +35,7 @@ final class TerminationPolicyTests: XCTestCase {
 
         XCTAssertEqual(reply, .terminateLater)
         XCTAssertNil(continuation)                        // not yet: the delegate has to return first
-        wait(for: [asked], timeout: 2)
+        wait(for: [asked], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertTrue(replies.isEmpty)
         continuation?(true)
         XCTAssertEqual(replies, [true])
@@ -47,7 +47,7 @@ final class TerminationPolicyTests: XCTestCase {
             confirm: { second = $0; askedAgain.fulfill() },
             reply: { replies.append($0) }
         )
-        wait(for: [askedAgain], timeout: 2)
+        wait(for: [askedAgain], timeout: TestWait.hostedActionTimeoutSeconds)
         second?(false)
         XCTAssertEqual(replies, [true, false])
     }

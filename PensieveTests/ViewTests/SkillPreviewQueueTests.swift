@@ -36,9 +36,11 @@ final class SkillPreviewQueueTests: XCTestCase {
         await TestWait.until(failureMessage: "The reappearing paragraph probe must report its own budget") {
             !state.appearingBudgets.isEmpty
         }
-        await TestWait.until(timeout: .seconds(2), failureMessage: "Retained preview state must load after reappearing") {
-            loader.finished == 2
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Retained preview state must load after reappearing") {
+            loader.finished >= 2
         }
+        XCTAssertEqual(loader.finished, 2, "Reappearance must finish exactly one replacement load")
         XCTAssertEqual(loader.decoded.count, 2, "A reappearing preview must decode its image again")
         await TestWait.until(failureMessage: "The paragraph probe must report the replacement document budget") {
             state.appearingBudgets.last?.isCancelled == false

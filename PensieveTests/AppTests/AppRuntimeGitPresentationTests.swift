@@ -97,7 +97,7 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
                 return older
             }
             let oldTask = Task { await runtime.refreshGitUsability() }
-            await fulfillment(of: [started], timeout: 2)
+            await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
             let newer: GitUsability = older == .usable ? .developerToolsMissing : .usable
             probe.set { newer }
             await runtime.refreshGitUsability()

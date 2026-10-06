@@ -62,6 +62,6 @@ final class FileWatchServiceTests: XCTestCase {
 
         XCTAssertTrue(watcher.start())
 
-        wait(for: [quiet], timeout: 1.0)
+        wait(for: [quiet], timeout: 1.0) // upper-bound: Inverted expectation observes no file changes.
     }
 }

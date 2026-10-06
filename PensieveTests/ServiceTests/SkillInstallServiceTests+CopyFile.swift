@@ -22,7 +22,7 @@ extension SkillInstallServiceTests {
         // Bounded on purpose: if O_NONBLOCK regresses, the open blocks forever — this wait FAILS
         // the test at 5s instead of wedging the whole suite, and the writer-open below releases
         // the blocked reader so the leaked thread unwinds.
-        let outcome = XCTWaiter().wait(for: [done], timeout: 5)
+        let outcome = XCTWaiter().wait(for: [done], timeout: 5) // upper-bound: Five-second FIFO deadlock limit.
         guard outcome == .completed else {
             let writerFD = open(fifoPath, O_WRONLY | O_NONBLOCK)
             if writerFD >= 0 { close(writerFD) }

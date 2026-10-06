@@ -41,7 +41,7 @@ final class UnsavedChangesAlertTests: XCTestCase {
         }
         guard let sheet = window.attachedSheet else { return XCTFail("the sheet did not attach") }
         window.endSheet(sheet, returnCode: .alertFirstButtonReturn)
-        wait(for: [answered], timeout: 5)
+        wait(for: [answered], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertEqual(answer, .save)
         XCTAssertEqual(sheetStillAttached, false)
     }
@@ -62,7 +62,7 @@ final class UnsavedChangesAlertTests: XCTestCase {
 
         window.close()
 
-        wait(for: [answered], timeout: 5)
+        wait(for: [answered], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertEqual(answer, .cancel)
     }
 }

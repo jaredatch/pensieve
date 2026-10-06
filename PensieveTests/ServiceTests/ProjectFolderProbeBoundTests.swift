@@ -54,7 +54,8 @@ final class ProjectFolderProbeBoundTests: XCTestCase {
         model.name = "App"
         let start = Date()
         model.path = h.otherProject.path
-        await TestWait.until(timeout: .seconds(5), failureMessage: "Preview must finish checking a stalled folder") {
+        await TestWait.until(timeout: .seconds(5), // upper-bound: Three-second elapsed assertion below.
+                             failureMessage: "Preview must finish checking a stalled folder") {
             !model.isCheckingIdentity
         }
         XCTAssertLessThan(Date().timeIntervalSince(start), 3)

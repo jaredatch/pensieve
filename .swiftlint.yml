@@ -31,3 +31,17 @@ function_parameter_count:
   # Skill creation carries the six user-entered fields through one UI boundary.
   warning: 6
   error: 6
+
+custom_rules:
+  short_positive_poll_wait:
+    included: 'PensieveTests/.*\.swift$'
+    name: "Shared positive wait bound"
+    regex: '(?-s)\bTestWait\.until\(\s*timeout:\s*\.seconds\(\s*(?:[0-9]|1[0-4])(?:\.[0-9]+)?\s*\)(?![^\n]*//\s*upper-bound:)'
+    message: "Use TestWait.hostedActionTimeoutSeconds, or explain the intentional limit with // upper-bound: on this line."
+    severity: error
+  short_positive_expectation_wait:
+    included: 'PensieveTests/.*\.swift$'
+    name: "Shared expectation wait bound"
+    regex: '(?-s)\b(?:fulfillment|wait)\(\s*(?:of|for):[^)]*?timeout:\s*(?:[0-9]|1[0-4])(?:\.[0-9]+)?\s*[,)](?![^\n]*//\s*upper-bound:)'
+    message: "Use TestWait.hostedActionTimeoutSeconds, or explain an upper bound or inverted observation with // upper-bound:."
+    severity: error

@@ -54,7 +54,7 @@ final class AppRuntimeStatusOrderTests: XCTestCase {
         let release = DispatchSemaphore(value: 0)
         git.remoteRead = { reading.fulfill(); release.wait(); return "https://fixture.test/store.git" }
         let cycle = Task { await model.syncNowAndReport() }
-        await fulfillment(of: [reading], timeout: 2)
+        await fulfillment(of: [reading], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertEqual(model.state, .syncing)
         XCTAssertTrue(model.isCycleInFlight)
         var resolutions = 0
@@ -91,7 +91,7 @@ final class AppRuntimeStatusOrderTests: XCTestCase {
             })
         await runtime.bootstrapTask.value
         let cycle = Task { await runtime.syncModel.syncNowAndReport() }
-        await fulfillment(of: [started], timeout: 2)
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         probe.set { .developerToolsMissing }
         await runtime.refreshGitUsability()
         XCTAssertEqual(runtime.syncModel.state, .syncing)

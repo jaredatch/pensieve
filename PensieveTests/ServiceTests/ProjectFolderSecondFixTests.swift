@@ -129,7 +129,8 @@ final class ProjectFolderSecondFixTests: XCTestCase {
         let model = AddProjectModel(fileService: h.mapped, previewDelay: {})
         model.name = "App"
         model.path = h.otherProject.path
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Preview finishes") { !model.isCheckingIdentity }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Preview finishes") { !model.isCheckingIdentity }
         XCTAssertNotNil(model.makeProject())
         XCTAssertEqual(mainProbes, 1, "The bounded marker writer reuses identity admission")
         try h.files.deleteDirectory(at: h.otherProject.path)

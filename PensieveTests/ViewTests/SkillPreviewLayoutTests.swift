@@ -18,7 +18,8 @@ final class SkillPreviewLayoutTests: XCTestCase {
             window.orderFront(nil)
 
             var heading: NSAccessibilityProtocol?
-            await TestWait.until(timeout: .seconds(3), failureMessage: "Short heading must finish hosted layout") {
+            await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                                 failureMessage: "Short heading must finish hosted layout") {
                 host.layoutSubtreeIfNeeded()
                 heading = self.elements(in: host).first {
                     ($0.accessibilityValue() as? String) == "Short" && $0.accessibilityFrame().width > 0

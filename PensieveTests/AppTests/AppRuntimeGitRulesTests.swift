@@ -16,7 +16,7 @@ final class AppRuntimeGitRulesTests: XCTestCase {
         let release = DispatchSemaphore(value: 0)
         probe.set { started.fulfill(); release.wait(); return .licenseNotAccepted }
         let real = Task { await runtime.refreshGitUsability() }
-        await fulfillment(of: [started], timeout: 2)
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         await runtime.refreshGitConfiguration(probingGit: false)
         release.signal()
         await real.value

@@ -16,7 +16,8 @@ final class AddProjectModelTests: XCTestCase {
         let model = AddProjectModel(fileService: h.mapped, previewDelay: {})
         model.name = "Project"
         model.path = h.otherProject.path
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Initial preview") { model.isValid }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Initial preview") { model.isValid }
         XCTAssertEqual(model.identityMessage, "Git remote: github.com/owner/previous")
         let started = expectation(description: "Old probe started")
         let finished = expectation(description: "Old probe released")
@@ -27,7 +28,7 @@ final class AddProjectModelTests: XCTestCase {
         h.mapped.beforeProjectProbe = { path in
             guard path == pendingPath else { return }
             started.fulfill()
-            _ = release.wait(timeout: .now() + 3)
+            _ = release.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds)
             cancellation.record(Task.isCancelled)
             finished.fulfill()
         }
@@ -35,14 +36,15 @@ final class AddProjectModelTests: XCTestCase {
         XCTAssertEqual(model.identityMessage, "Checking project folder…",
                        "Pending text describes the current path, never the previous path's identity")
         XCTAssertFalse(model.hasExistingIdentity, "Checking uses the line's neutral existing style")
-        await fulfillment(of: [started], timeout: 3)
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         model.path = h.root + "/latest"
         XCTAssertEqual(model.identityMessage, "Checking project folder…",
                        "The current path has neutral text until its own probe finishes")
         release.signal()
-        await fulfillment(of: [finished], timeout: 3)
+        await fulfillment(of: [finished], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertTrue(cancellation.wasCancelled, "Replacing a path cancels its previous disk probe")
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Latest preview") { model.isValid }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Latest preview") { model.isValid }
         XCTAssertEqual(model.identityMessage, "Marker will be created on Add")
     }
 
@@ -57,15 +59,20 @@ final class AddProjectModelTests: XCTestCase {
         model.name = "Project"
         for (index, suffix) in ["p", "pr", "pro", "proj"].enumerated() {
             model.path = h.root + "/" + suffix
-            await TestWait.until(timeout: .seconds(1), failureMessage: "Injected debounce scheduled") {
-                delay.scheduled == index + 1
+            await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                                 failureMessage: "Injected debounce scheduled") {
+                delay.scheduled >= index + 1
             }
+            XCTAssertEqual(delay.scheduled, index + 1, "Debounce must schedule once per changed path")
         }
         model.path = h.otherProject.path
-        await TestWait.until(timeout: .seconds(1), failureMessage: "Final debounce scheduled") { delay.scheduled == 5 }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Final debounce scheduled") { delay.scheduled >= 5 }
+        XCTAssertEqual(delay.scheduled, 5, "Debounce must schedule once per changed path")
         XCTAssertEqual(probes.paths, [], "Typing starts no probe until a short pause")
         delay.advance()
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Debounced preview") { model.isValid }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Debounced preview") { model.isValid }
         XCTAssertEqual(probes.paths, [h.otherProject.path], "A burst starts only the latest path's probe")
     }
 
@@ -82,17 +89,18 @@ final class AddProjectModelTests: XCTestCase {
         h.mapped.beforeProjectProbe = { path in
             if Thread.isMainThread { mainProbes.record(path) } else {
                 started.fulfill()
-                _ = release.wait(timeout: .now() + 3)
+                _ = release.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds)
             }
         }
         model.path = h.project.path
-        await fulfillment(of: [started], timeout: 3)
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertTrue(model.isCheckingIdentity)
         XCTAssertFalse(model.canSubmit, "Add is disabled while the current path's probe is pending")
         XCTAssertNil(model.makeProject(), "Return cannot submit during the current probe")
         XCTAssertEqual(mainProbes.paths, [], "Pending submission never probes the disk on the main actor")
         release.signal()
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Current preview completed") { !model.isCheckingIdentity }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Current preview completed") { !model.isCheckingIdentity }
         XCTAssertTrue(model.canSubmit, "A completed probe permits Add")
         try h.files.deleteDirectory(at: model.path)
         XCTAssertNil(model.makeProject())
@@ -111,7 +119,7 @@ final class AddProjectModelTests: XCTestCase {
         h.mapped.beforeProjectProbe = { path in
             if path == h.project.path {
                 started.fulfill()
-                _ = release.wait(timeout: .now() + 3)
+                _ = release.wait(timeout: .now() + 2 * TestWait.hostedActionTimeoutSeconds)
                 finished.fulfill()
             }
         }
@@ -120,11 +128,12 @@ final class AddProjectModelTests: XCTestCase {
         let start = Date()
         model.path = h.project.path
         XCTAssertLessThan(Date().timeIntervalSince(start), 0.1, "Typing must not wait for a slow mount")
-        await fulfillment(of: [started], timeout: 3)
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         model.path = h.otherProject.path
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Latest preview must be accepted") { model.isValid }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Latest preview must be accepted") { model.isValid }
         release.signal()
-        await fulfillment(of: [finished], timeout: 3)
+        await fulfillment(of: [finished], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertTrue(model.isValid, "An old missing result must not replace the latest preview")
         XCTAssertEqual(model.identityMessage, "Marker will be created on Add")
     }
@@ -152,7 +161,8 @@ final class AddProjectModelTests: XCTestCase {
         let before = try files.listDirectory(at: root).sorted()
         for suffix in ["missing/parent/project", "file", "dangling", "file-link"] {
             model.path = root + "/" + suffix
-            await TestWait.until(timeout: .seconds(3), failureMessage: "Missing preview") { !model.isCheckingIdentity }
+            await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                                 failureMessage: "Missing preview") { !model.isCheckingIdentity }
             XCTAssertFalse(model.isValid)
             XCTAssertTrue(model.hasIdentityError)
             XCTAssertTrue(model.identityMessage?.contains("folder is missing") == true)
@@ -163,7 +173,8 @@ final class AddProjectModelTests: XCTestCase {
         let valid = root + "/valid"
         try files.createDirectory(at: valid)
         model.path = valid
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Corrected preview") { !model.isCheckingIdentity }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Corrected preview") { !model.isCheckingIdentity }
         XCTAssertTrue(model.isValid)
         XCTAssertFalse(model.hasIdentityError)
         XCTAssertEqual(model.identityMessage, "Marker will be created on Add")
@@ -187,14 +198,16 @@ final class AddProjectModelTests: XCTestCase {
         let model = AddProjectModel(fileService: mapped, previewDelay: {})
         model.name = "Linked"
         model.path = root + "/linked"
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Lookup preview") { !model.isCheckingIdentity }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Lookup preview") { !model.isCheckingIdentity }
         XCTAssertFalse(model.isValid)
         XCTAssertTrue(model.identityMessage?.contains("couldn't be checked") == true)
         XCTAssertNil(model.makeProject())
         XCTAssertEqual(try files.listDirectory(at: root + "/directory"), [])
         mapped.beforeProjectProbe = nil
         model.refreshIdentityStatus()
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Linked preview") { !model.isCheckingIdentity }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Linked preview") { !model.isCheckingIdentity }
         XCTAssertTrue(model.isValid)
         XCTAssertNotNil(model.makeProject())
         XCTAssertTrue(files.fileExists(at: root + "/directory/.pensieve-project"))
@@ -208,7 +221,8 @@ final class AddProjectModelTests: XCTestCase {
         let model = AddProjectModel(fileService: files, previewDelay: {})
         model.name = "Deleted"
         model.path = root + "/project"
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Initial preview") { !model.isCheckingIdentity }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Initial preview") { !model.isCheckingIdentity }
         XCTAssertTrue(model.isValid)
         try files.deleteDirectory(at: model.path)
         XCTAssertNil(model.makeProject())
@@ -217,7 +231,8 @@ final class AddProjectModelTests: XCTestCase {
         XCTAssertEqual(try files.listDirectory(at: root), [])
         try files.createDirectory(at: root + "/corrected")
         model.path = root + "/corrected"
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Replacement preview") { !model.isCheckingIdentity }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Replacement preview") { !model.isCheckingIdentity }
         XCTAssertTrue(model.isValid)
         XCTAssertNotNil(model.makeProject())
     }

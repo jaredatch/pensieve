@@ -30,14 +30,14 @@ final class ProjectDirectoryConcurrencyTests: XCTestCase {
                 completed.fulfill()
             }
             DispatchQueue.global(qos: .userInitiated).async { check() }
-            await fulfillment(of: [started], timeout: 2)
+            await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
             DispatchQueue.global(qos: .userInitiated).async { secondStarted.fulfill(); check() }
-            await fulfillment(of: [secondStarted], timeout: 2)
+            await fulfillment(of: [secondStarted], timeout: TestWait.hostedActionTimeoutSeconds)
             // A short bounded observation keeps the first lookup in flight while the second joins.
             try await Task.sleep(for: .milliseconds(100))
             XCTAssertTrue(lock.withLock { errors.isEmpty }, "A healthy concurrent check must wait")
             release.signal()
-            await fulfillment(of: [completed], timeout: 3)
+            await fulfillment(of: [completed], timeout: TestWait.hostedActionTimeoutSeconds)
             XCTAssertTrue(lock.withLock { errors.isEmpty })
             XCTAssertEqual(lock.withLock { answers }, [answer, answer])
             XCTAssertEqual(lock.withLock { probes }, 1)
@@ -65,19 +65,19 @@ final class ProjectDirectoryConcurrencyTests: XCTestCase {
             flight.recordReturn()
             returned.fulfill()
         }
-        await fulfillment(of: [started, waiting], timeout: 10)
+        await fulfillment(of: [started, waiting], timeout: TestWait.hostedActionTimeoutSeconds)
         flight.advanceToJoin()
         assertControlledTimeout(probes, path: path, lookup: lookup)
         flight.recordReturn()
         flight.resume.signal()
-        await fulfillment(of: [returned], timeout: 10)
+        await fulfillment(of: [returned], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertEqual(flight.deadlines, [flight.deadline, flight.deadline],
                        "Both callers must wait using the same flight deadline")
         XCTAssertEqual(flight.budgets, [2_000_000_000, 500_000_000], "The joiner waits only the remaining half second")
         XCTAssertEqual(flight.returns, [flight.deadline, flight.deadline],
                        "Both waits give up at the exact injected flight deadline")
         release.leave()
-        await fulfillment(of: [finished], timeout: 10)
+        await fulfillment(of: [finished], timeout: TestWait.hostedActionTimeoutSeconds)
     }
 
     private func assertControlledTimeout(_ probes: ProjectDirectoryProbes, path: String,
@@ -113,7 +113,7 @@ final class ProjectDirectoryConcurrencyTests: XCTestCase {
             return true
         }
         XCTAssertThrowsError(try probes.check(at: path, probe: lookup))
-        await fulfillment(of: [started], timeout: 2)
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         clock = origin + 3
         XCTAssertThrowsError(try probes.check(at: path, probe: lookup)) { error in
             XCTAssertEqual((error as NSError).code, Int(ETIMEDOUT))
@@ -121,7 +121,7 @@ final class ProjectDirectoryConcurrencyTests: XCTestCase {
         }
         XCTAssertEqual(waits, 1, "An expired flight must refuse without another wait or worker")
         release.signal()
-        await fulfillment(of: [finished], timeout: 2)
+        await fulfillment(of: [finished], timeout: TestWait.hostedActionTimeoutSeconds)
     }
 
     func testProbeRunsAtUserInitiatedPriorityOrHigher() throws {
