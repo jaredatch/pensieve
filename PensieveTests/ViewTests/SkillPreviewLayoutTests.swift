@@ -121,10 +121,10 @@ final class SkillPreviewLayoutTests: XCTestCase {
         let item = try await text(content, in: fixture.host)
         let firstLine = item.accessibilityFrame(for: NSRange(location: 0, length: 1))
         XCTAssertGreaterThan(firstLine.height, 0, "The rendered first line must expose its vertical bounds")
-        XCTAssertGreaterThan(item.accessibilityRange(forLine: 1).length, 0, "The hosted item must wrap to at least two lines")
+        XCTAssertGreaterThan(item.accessibilityRange(forLine: 2).length, 0, "The hosted item must wrap to at least three lines")
         let center = try bulletCenter(in: fixture.host, window: fixture.window, itemFrame: item.accessibilityFrame())
-        XCTAssertGreaterThanOrEqual(center, firstLine.minY, "The bullet center must be inside the first line")
-        XCTAssertLessThanOrEqual(center, firstLine.maxY, "The bullet center must be inside the first line")
+        XCTAssertGreaterThanOrEqual(center, firstLine.midY, "The bullet center must be in the top half of the first line")
+        XCTAssertLessThanOrEqual(center, firstLine.maxY, "The bullet center must be in the top half of the first line")
     }
 
     private func bulletCenter(in host: NSView, window: NSWindow, itemFrame: CGRect) throws -> CGFloat {

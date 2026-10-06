@@ -29,19 +29,22 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
         let window = makeWindow(model: model, history: owner, session: session)
         defer { window.close() }
 
-        let loadedFirst = await eventually(timeout: TestWait.firstRenderTimeoutSeconds) {
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                             failureMessage: "The first mounted skill must finish its initial history read") {
             readProbe.contains(commit: first.installedOrigin?.installedCommit)
         }
-        XCTAssertTrue(loadedFirst)
+        XCTAssertTrue(readProbe.contains(commit: first.installedOrigin?.installedCommit))
         try await presentSheet(owner: owner, session: session, window: window)
 
         model.skill = second
 
-        let changedSkill = await eventually {
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Changing skill must dismiss the sheet and read window one") {
             window.attachedSheet == nil
                 && readProbe.contains(commit: second.installedOrigin?.installedCommit, windowCount: 1)
         }
-        XCTAssertTrue(changedSkill)
+        XCTAssertTrue(window.attachedSheet == nil
+                && readProbe.contains(commit: second.installedOrigin?.installedCommit, windowCount: 1))
         XCTAssertFalse(session.showAllReadRows)
         XCTAssertEqual(session.requestedWindow, 1)
         XCTAssertNil(session.diff)
@@ -55,8 +58,11 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
             watcherEventSequence: 0
         )
 
-        let refreshedLocal = await eventually { localProbe.calls == 1 }
-        XCTAssertTrue(refreshedLocal)
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Changing local revision must refresh local edits once") {
+            localProbe.calls == 1
+        }
+        XCTAssertTrue(localProbe.calls == 1)
         XCTAssertEqual(readProbe.count, readCount)
         XCTAssertEqual(owner.currentRequest?.key, question)
         XCTAssertEqual(owner.currentSkillID, second.id)
@@ -110,21 +116,11 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
         session.showAllReadRows = true
         session.requestedWindow = 4
         session.presentDiff(row)
-        let sheetPresented = await eventually { window.attachedSheet != nil }
-        XCTAssertTrue(sheetPresented)
-    }
-
-    private func eventually(
-        timeout: TimeInterval = TestWait.hostedActionTimeoutSeconds,
-        _ condition: @escaping @MainActor () -> Bool
-    ) async -> Bool {
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: .seconds(timeout))
-        while clock.now < deadline {
-            if condition() { return true }
-            try? await Task.sleep(nanoseconds: 20_000_000)
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Presenting history diff must mount its sheet") {
+            window.attachedSheet != nil
         }
-        return condition()
+        XCTAssertTrue(window.attachedSheet != nil)
     }
 
     private func sendClick(at point: NSPoint, to window: NSWindow) -> Bool {
@@ -192,10 +188,11 @@ extension InstalledSkillHistoryHostTests {
         let fixture = makeFixture(model: model, history: owner, session: InstalledSkillHistorySession())
         defer { fixture.window.close() }
 
-        let failedInitially = await eventually(timeout: TestWait.firstRenderTimeoutSeconds) {
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                             failureMessage: "The mounted history must display its initial read failure") {
             reads.count == 1 && owner.state == .failed("The repository couldn't be reached.")
         }
-        XCTAssertTrue(failedInitially)
+        XCTAssertTrue(reads.count == 1 && owner.state == .failed("The repository couldn't be reached."))
         XCTAssertEqual(intents.values, [.appearance])
 
         fixture.unmount()
@@ -204,8 +201,11 @@ extension InstalledSkillHistoryHostTests {
         XCTAssertEqual(reads.count, 1)
         fixture.mount()
 
-        let retriedOnAppearance = await eventually { reads.count == 2 }
-        XCTAssertTrue(retriedOnAppearance)
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Remounting history must retry its read on appearance") {
+            reads.count == 2
+        }
+        XCTAssertTrue(reads.count == 2)
         XCTAssertEqual(reads.count, 2)
         XCTAssertEqual(intents.values, [.appearance, .appearance])
     }
@@ -225,10 +225,11 @@ extension InstalledSkillHistoryHostTests {
         let fixture = makeFixture(model: model, history: owner, session: InstalledSkillHistorySession())
         defer { fixture.window.close() }
 
-        let failedInitially = await eventually(timeout: TestWait.firstRenderTimeoutSeconds) {
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                             failureMessage: "The mounted history must display its initial read failure") {
             reads.count == 1 && owner.state == .failed("The repository couldn't be reached.")
         }
-        XCTAssertTrue(failedInitially)
+        XCTAssertTrue(reads.count == 1 && owner.state == .failed("The repository couldn't be reached."))
         var pressed = HistoryAccessibility.pressButtonIfFound(
             titled: InstalledSkillHistoryPresentation.tryAgainTitle,
             in: fixture.host
@@ -238,8 +239,11 @@ extension InstalledSkillHistoryHostTests {
         }
         XCTAssertTrue(pressed)
 
-        let retried = await eventually { reads.count == 2 }
-        XCTAssertTrue(retried)
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "The rendered Try again action must start its retry read") {
+            reads.count == 2
+        }
+        XCTAssertTrue(reads.count == 2)
         XCTAssertEqual(reads.count, 2)
         XCTAssertEqual(intents.values, [.appearance, .retry])
     }
@@ -258,14 +262,18 @@ extension InstalledSkillHistoryHostTests {
         let fixture = makeFixture(model: model, history: owner, session: InstalledSkillHistorySession())
         defer { fixture.window.close() }
 
-        let failedInitially = await eventually(timeout: TestWait.firstRenderTimeoutSeconds) {
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                             failureMessage: "The mounted history must display its initial read failure") {
             reads.count == 1 && owner.state == .failed("The repository couldn't be reached.")
         }
-        XCTAssertTrue(failedInitially)
+        XCTAssertTrue(reads.count == 1 && owner.state == .failed("The repository couldn't be reached."))
         model.localRevision = UpstreamHistoryLocalRevision(appWriteRevision: 1, watcherEventSequence: 0)
 
-        let refreshed = await eventually { intents.values.count == 2 }
-        XCTAssertTrue(refreshed)
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Mounted local revision must send its refresh intent") {
+            intents.values.count == 2
+        }
+        XCTAssertTrue(intents.values.count == 2)
         XCTAssertEqual(reads.count, 1)
         XCTAssertEqual(intents.values, [.appearance, .mountedRefresh])
     }

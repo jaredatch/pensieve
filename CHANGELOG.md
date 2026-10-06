@@ -29,6 +29,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- List bullets sit higher on the first line of wrapped items.
 - Lists in rendered skills keep image placeholders aligned and leave room for wide numbers.
 
 - Short rendered skills now line up with the file row in Content and stay aligned to the left in History.

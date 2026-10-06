@@ -44,7 +44,7 @@ final class UpstreamHistorySequenceHarness {
     var cleanupFailed = false
     var scenario = "unnamed"
     var cleanupTimeout: Duration = .seconds(TestWait.hostedActionTimeoutSeconds)
-    var frontierTimeout: Duration = .seconds(30)
+    var frontierTimeout: Duration = .seconds(TestWait.timeoutSeconds)
     var frontierChecks = 0
     var frontierWaits = 0
     var gateAttempts = 0

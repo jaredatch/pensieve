@@ -38,6 +38,8 @@ enum SkillPreviewTheme {
             Image(systemName: symbols[min(configuration.listLevel, symbols.count) - 1])
                 .font(.system(size: (DesignTokens.markdownBodySize / 3).rounded()))
                 .frame(minWidth: DesignTokens.markdownListIndent - Spacing.sm, alignment: .trailing)
+                // Native Label supplies spacing; lift only the marker by half the body font's descender.
+                .offset(y: NSFont.systemFont(ofSize: DesignTokens.markdownBodySize).descender / 2)
         }
         .numberedListMarker { configuration in
             Text(verbatim: "\(configuration.itemNumber).")

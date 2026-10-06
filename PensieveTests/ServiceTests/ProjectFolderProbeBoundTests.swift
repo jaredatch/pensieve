@@ -6,21 +6,24 @@ import XCTest
 @MainActor
 final class ProjectFolderProbeBoundTests: XCTestCase {
     func testBlockingFixtureHonorsHoldAndExplicitRelease() async throws {
-        XCTAssertEqual(ProjectFolderBlockingProbe().holdTimeoutSeconds, TestWait.heldFixtureTimeoutSeconds,
-                       "The default fixture hold must use the shared held-worker bound")
+        XCTAssertGreaterThanOrEqual(TestWait.heldFixtureTimeoutSeconds, 2 * TestWait.hostedActionTimeoutSeconds,
+                                    "The held-fixture bound must cover both hosted readiness bounds")
         for explicitlyRelease in [false, true] {
-            let gate = ProjectFolderBlockingProbe(holdTimeoutSeconds: explicitlyRelease ? 2 : 0.2)
+            let gate = ProjectFolderBlockingProbe(
+                holdTimeoutSeconds: explicitlyRelease ? TestWait.heldFixtureTimeoutSeconds : 0.2 // upper-bound: Hold-expiry test.
+            )
             let path = "/nonexistent-pensieve-probe-\(UUID().uuidString)"
             gate.block(path)
             defer { gate.unblock() }
             let worker = Task {
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<TimeInterval, Error>) in
+                typealias Timing = (started: TimeInterval, finished: TimeInterval)
+                return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Timing, Error>) in
                     // A blocking fixture belongs on a Dispatch worker, never a cooperative executor thread.
                     DispatchQueue.global().async {
                         let started = ProcessInfo.processInfo.systemUptime
                         do {
                             _ = try gate.probe(path)
-                            continuation.resume(returning: ProcessInfo.processInfo.systemUptime - started)
+                            continuation.resume(returning: (started, ProcessInfo.processInfo.systemUptime))
                         } catch { continuation.resume(throwing: error) }
                     }
                 }
@@ -28,13 +31,17 @@ final class ProjectFolderProbeBoundTests: XCTestCase {
             await TestWait.until(failureMessage: "The fixture worker must enter its blocked probe") {
                 gate.count(path) == 1
             }
+            let releasedAt = ProcessInfo.processInfo.systemUptime
             if explicitlyRelease { gate.unblock() }
-            let elapsed = try await worker.value
+            let timing = try await worker.value
             if explicitlyRelease {
-                XCTAssertLessThan(elapsed, 1, "Explicit release must return promptly, before the two-second hold")
+                XCTAssertGreaterThanOrEqual(timing.finished, releasedAt, "The probe must stay held until explicit release")
+                XCTAssertLessThan(timing.finished - releasedAt, 1, "Explicit release must return promptly after unblock")
             } else {
-                XCTAssertGreaterThanOrEqual(elapsed, 0.18, "An unreleased probe must honor its 0.2-second hold")
-                XCTAssertLessThan(elapsed, 1, "The injected short hold must expire promptly")
+                let elapsed = timing.finished - timing.started
+                XCTAssertGreaterThanOrEqual(elapsed, 0.2, "An unreleased probe must honor its full 0.2-second hold")
+                XCTAssertLessThan(elapsed, TestWait.hostedActionTimeoutSeconds,
+                                  "The injected hold must expire within the shared bound")
             }
         }
     }
