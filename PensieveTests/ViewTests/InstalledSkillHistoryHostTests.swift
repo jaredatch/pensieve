@@ -127,26 +127,6 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
         return condition()
     }
 
-    private func pressButton(titled title: String, in root: NSView) -> Bool {
-        root.layoutSubtreeIfNeeded()
-        var pending: [Any] = [root]
-        pending.append(contentsOf: NSAccessibility.unignoredChildrenForOnlyChild(from: root))
-        var visited: Set<ObjectIdentifier> = []
-        while let candidate = pending.popLast() {
-            guard let object = candidate as? NSObject,
-                  visited.insert(ObjectIdentifier(object)).inserted else { continue }
-            guard let element = candidate as? NSAccessibilityProtocol else { continue }
-            if element.accessibilityRole() == .button,
-               [element.accessibilityTitle(), element.accessibilityLabel()].contains(title) {
-                return element.accessibilityPerformPress()
-            }
-            pending.append(contentsOf: element.accessibilityChildren() ?? [])
-            pending.append(contentsOf: element.accessibilityChildrenInNavigationOrder() ?? [])
-            if let view = candidate as? NSView { pending.append(contentsOf: view.subviews) }
-        }
-        return false
-    }
-
     private func sendClick(at point: NSPoint, to window: NSWindow) -> Bool {
         window.makeKey()
         let eventTypes: [NSEvent.EventType] = [.leftMouseDown, .leftMouseUp]
@@ -249,7 +229,7 @@ extension InstalledSkillHistoryHostTests {
             reads.count == 1 && owner.state == .failed("The repository couldn't be reached.")
         }
         XCTAssertTrue(failedInitially)
-        var pressed = pressButton(
+        var pressed = HistoryAccessibility.pressButton(
             titled: InstalledSkillHistoryPresentation.tryAgainTitle,
             in: fixture.host
         )
