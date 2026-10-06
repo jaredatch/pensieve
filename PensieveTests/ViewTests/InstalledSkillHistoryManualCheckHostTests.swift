@@ -19,32 +19,25 @@ final class HistoryManualCheckHostTests: XCTestCase {
         let skill = installedHistorySkill()
         let session = InstalledSkillHistorySession()
         let model = ManualCheckHostModel(skill: skill)
-        let host = NSHostingView(rootView: ManualCheckHostHarness(
-            model: model,
-            history: owner,
-            session: session
-        ))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
-            styleMask: [.titled],
-            backing: .buffered,
-            defer: false
-        )
-        window.isReleasedWhenClosed = false
-        window.contentView = host
-        window.makeKeyAndOrderFront(nil)
+        let window = makeWindow(model: model, history: owner, session: session)
         defer { window.close() }
 
         await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
-                             failureMessage: "The visible history must perform its initial read") { reads.count == 1 }
+                             failureMessage: "The visible history must perform its initial read") {
+            reads.count == 1 && owner.state == .loaded(Self.result(head: skill.installedOrigin?.installedCommit ?? "", window: 1))
+        }
         XCTAssertEqual(reads.count, 1)
         session.requestedWindow = 3
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                             failureMessage: "Expanding history must read the requested window") { reads.count == 2 }
+                             failureMessage: "Expanding history must read the requested window") {
+            reads.count == 2 && owner.state == .loaded(Self.result(head: skill.installedOrigin?.installedCommit ?? "", window: 3))
+        }
         XCTAssertEqual(reads.count, 2)
         owner.invalidateForManualCheck(skillID: skill.id)
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                             failureMessage: "Manual check must refire the visible history read") { reads.count == 3 }
+                             failureMessage: "Manual check must refire the visible history read") {
+            reads.count == 3 && owner.state == .loaded(Self.result(head: skill.installedOrigin?.installedCommit ?? "", window: 3))
+        }
         XCTAssertEqual(reads.count, 3)
         XCTAssertEqual(reads.windows, [1, 3, 3])
         XCTAssertEqual(intents, [.appearance, .mountedRefresh, .retry])
@@ -73,26 +66,19 @@ final class HistoryManualCheckHostTests: XCTestCase {
         )
         await owner.request(skill: second)
         let model = ManualCheckHostModel(skill: first)
-        let host = NSHostingView(rootView: ManualCheckHostHarness(
-            model: model, history: owner, session: InstalledSkillHistorySession()
-        ))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
-            styleMask: [.titled],
-            backing: .buffered,
-            defer: false
-        )
-        window.isReleasedWhenClosed = false
-        window.contentView = host
-        window.makeKeyAndOrderFront(nil)
+        let window = makeWindow(model: model, history: owner, session: InstalledSkillHistorySession())
         defer { window.close() }
 
         await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
-                             failureMessage: "The first skill must load after the kept second result") { reads.count == 2 }
+                             failureMessage: "The first skill must load after the kept second result") {
+            reads.count == 2 && owner.state == .loaded(Self.result(head: first.installedOrigin?.installedCommit ?? "", window: 1))
+        }
         XCTAssertEqual(reads.count, 2)
         owner.invalidateForManualCheck(skillID: first.id)
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                             failureMessage: "Manual check must refresh the first skill before switching") { reads.count == 3 }
+                             failureMessage: "Manual check must refresh the first skill before switching") {
+            reads.count == 3 && owner.state == .loaded(Self.result(head: first.installedOrigin?.installedCommit ?? "", window: 1))
+        }
         XCTAssertEqual(reads.count, 3)
         owner.probedSkillIDs.remove(second.id)
         model.skill = second
@@ -102,6 +88,24 @@ final class HistoryManualCheckHostTests: XCTestCase {
         XCTAssertEqual(reads.count, 3)
         let secondOrigin = try? XCTUnwrap(second.installedOrigin)
         XCTAssertEqual(owner.state, .loaded(Self.result(head: secondOrigin?.installedCommit ?? "", window: 1)))
+    }
+
+    private func makeWindow(
+        model: ManualCheckHostModel,
+        history: UpstreamHistoryViewModel,
+        session: InstalledSkillHistorySession
+    ) -> NSWindow {
+        let host = NSHostingView(rootView: ManualCheckHostHarness(model: model, history: history, session: session))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        return window
     }
 
     private static func result(head: String, window: Int) -> UpstreamHistoryResult {

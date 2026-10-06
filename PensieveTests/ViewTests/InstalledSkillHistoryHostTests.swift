@@ -31,7 +31,9 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
 
         await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
                              failureMessage: "The first mounted skill must finish its initial history read") {
-            readProbe.contains(commit: first.installedOrigin?.installedCommit)
+            guard case let .loaded(result) = owner.state else { return false }
+            return readProbe.contains(commit: first.installedOrigin?.installedCommit)
+                && result.headCommit == first.installedOrigin?.installedCommit
         }
         try await presentSheet(owner: owner, session: session, window: window)
 
@@ -39,8 +41,11 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
 
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                              failureMessage: "Changing skill must dismiss the sheet and read window one") {
-            window.attachedSheet == nil
+            guard case let .loaded(result) = owner.state else { return false }
+            return window.attachedSheet == nil
                 && readProbe.contains(commit: second.installedOrigin?.installedCommit, windowCount: 1)
+                && result.headCommit == second.installedOrigin?.installedCommit
+                && result.windowCount == 1
         }
         XCTAssertFalse(session.showAllReadRows)
         XCTAssertEqual(session.requestedWindow, 1)
@@ -198,7 +203,7 @@ extension InstalledSkillHistoryHostTests {
 
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                              failureMessage: "Remounting history must retry its read on appearance") {
-            reads.count == 2
+            reads.count == 2 && owner.state == .loaded(historyResult())
         }
         XCTAssertEqual(reads.count, 2)
         XCTAssertEqual(intents.values, [.appearance, .appearance])
@@ -234,7 +239,7 @@ extension InstalledSkillHistoryHostTests {
 
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                              failureMessage: "The rendered Try again action must start its retry read") {
-            reads.count == 2
+            reads.count == 2 && owner.state == .loaded(historyResult())
         }
         XCTAssertEqual(reads.count, 2)
         XCTAssertEqual(intents.values, [.appearance, .retry])
