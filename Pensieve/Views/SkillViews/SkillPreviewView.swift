@@ -80,18 +80,14 @@ private struct RenderedSkillMarkdown: View {
     private var markdown: some View {
         let imageProvider = preview.imageProvider(budget: budget, colorScheme: colorScheme)
         return Markdown(preview.markdownBody)
-            .markdownBlockStyle(\.heading1) { SkillPreviewHeading(configuration: $0, size: 2) }
-            .markdownBlockStyle(\.heading2) { SkillPreviewHeading(configuration: $0, size: 1.5) }
-            .markdownBlockStyle(\.heading3) { SkillPreviewHeading(configuration: $0, size: 1.17) }
-            .markdownBlockStyle(\.heading4) { SkillPreviewHeading(configuration: $0, size: 1) }
-            .markdownBlockStyle(\.heading5) { SkillPreviewHeading(configuration: $0, size: 0.83) }
-            .markdownBlockStyle(\.heading6) { SkillPreviewHeading(configuration: $0, size: 0.67) }
             .markdownImageProvider(imageProvider)
             .markdownInlineImageProvider(imageProvider)
             // The block provider's API has no alt-text parameter; the image theme supplies it.
             .markdownBlockStyle(\.image) { configuration in
                 configuration.label.environment(\.previewImageAlt, configuration.content.renderPlainText())
             }
+            // Keep the image override inside the theme's scope so replacing the theme cannot erase alt text.
+            .markdownTheme(SkillPreviewTheme.theme)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(Spacing.lg)

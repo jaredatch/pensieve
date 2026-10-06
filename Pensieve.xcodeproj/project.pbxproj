@@ -249,6 +249,7 @@
 		5B434C5ABB8203511465A123 /* ProjectRemovalFreshnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74DCC7E0DE92C517C0826B71 /* ProjectRemovalFreshnessTests.swift */; };
 		5B7F6D082A44877E146AF611 /* FileService+ProjectFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C6D929775D207F3C4218359 /* FileService+ProjectFolder.swift */; };
 		5B8B919991A292035FB906E5 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 359492315E952B2C9EF5A2AE /* CredentialStore.swift */; };
+		5C14973EEF3423CA0AAE8D1C /* SkillPreviewTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F2684F6C92371E5B3C3F9B /* SkillPreviewTheme.swift */; };
 		5C22676865266599E94465AE /* SyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39A6881788BC4629D6FEF6BB /* SyncSettingsView.swift */; };
 		5C5D0EDFAE20F9A9077FC85F /* DeployIntentModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30CD0E5D7069B91C28AE9DD /* DeployIntentModelTests.swift */; };
 		5C65738CC036C5DFA5D6294F /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 36D0F172C08D3CB7B286F49E /* Sparkle */; };
@@ -1389,6 +1390,7 @@
 		D429BEFED332748FAECE969B /* SkillInstallServiceProtocol+Defaults.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillInstallServiceProtocol+Defaults.swift"; sourceTree = "<group>"; };
 		D45D83BF52D23EA99AF928DF /* ProjectFolderPresentationContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFolderPresentationContractTests.swift; sourceTree = "<group>"; };
 		D4C1318B97E7B62568FBBD01 /* Category.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Category.swift; sourceTree = "<group>"; };
+		D4F2684F6C92371E5B3C3F9B /* SkillPreviewTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillPreviewTheme.swift; sourceTree = "<group>"; };
 		D4F98CA86E03A170CA64FFC2 /* GitReviewRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitReviewRegressionTests.swift; sourceTree = "<group>"; };
 		D513DD8A69389B9DE4984022 /* sample-claude-skill.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "sample-claude-skill.md"; sourceTree = "<group>"; };
 		D5FD9805722802DD7022586E /* WindowCloseGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowCloseGuard.swift; sourceTree = "<group>"; };
@@ -1714,6 +1716,7 @@
 				B577FC8ECFD56344C61961EB /* SkillHistoryView.swift */,
 				78A3A3624A37B0AC56A61E70 /* SkillPreviewHeading.swift */,
 				4C66D2171375B9FFB59C15FB /* SkillPreviewLinkPolicy.swift */,
+				D4F2684F6C92371E5B3C3F9B /* SkillPreviewTheme.swift */,
 				3EB11B3B995579BE9DE142B3 /* SkillPreviewView.swift */,
 				35ADB395538779DCA23FC565 /* SkillUpdatesBanner.swift */,
 				8E4DCE60F7D5E81EE53E94E3 /* TagTokenField.swift */,
@@ -3371,6 +3374,7 @@
 				AD9009F9ACD30DCB74843080 /* SkillParser.swift in Sources */,
 				08B659657CB071BF73BC1E34 /* SkillPreviewHeading.swift in Sources */,
 				34B4D67CEFC2345B1D4D188C /* SkillPreviewLinkPolicy.swift in Sources */,
+				5C14973EEF3423CA0AAE8D1C /* SkillPreviewTheme.swift in Sources */,
 				93D5639E6DAB8ED9617E29BE /* SkillPreviewView.swift in Sources */,
 				450DCC09EC953973E7F37F12 /* SkillProjectAssignment.swift in Sources */,
 				01F22B5D19F6C67A8BC6F61F /* SkillProvenanceViewModel.swift in Sources */,

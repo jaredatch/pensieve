@@ -3,17 +3,35 @@ import SwiftUI
 
 struct SkillPreviewHeading: View {
     let configuration: BlockConfiguration
-    let size: Double
+    let size: CGFloat
+    var hasRule = false
+    var isSecondary = false
     @State private var targetID = UUID()
 
     var body: some View {
-        // MarkdownUI 2.4.1's default Theme.basic uses these exact margins, weight and em sizes.
-        configuration.label
-            .markdownMargin(top: .rem(1.5), bottom: .rem(1))
-            .markdownTextStyle {
-                FontWeight(.semibold)
-                FontSize(.em(size))
+        VStack(alignment: .leading, spacing: 0) {
+            configuration.label
+                .fixedSize(horizontal: false, vertical: true)
+                .lineHeight(.multiple(factor: DesignTokens.markdownHeadingLineHeight))
+                .markdownTextStyle {
+                    FontWeight(.semibold)
+                    FontSize(.em(size))
+                    ForegroundColor(isSecondary ? .secondary : .primary)
+                }
+                // Primer keeps inline code in headings at the heading's own size.
+                .markdownTextStyle(\.code) {
+                    FontFamilyVariant(.monospaced)
+                    FontSize(.em(1))
+                    BackgroundColor(DesignTokens.markdownCodeFill)
+                }
+                .padding(.bottom, hasRule ? DesignTokens.markdownHeadingRulePadding *
+                         DesignTokens.markdownBodySize * size : 0)
+            if hasRule {
+                DesignTokens.markdownSeparator
+                    .frame(height: DesignTokens.markdownRuleThickness)
             }
+        }
+            .markdownMargin(top: DesignTokens.markdownHeadingTop, bottom: DesignTokens.markdownBlockGap)
             .background {
                 GeometryReader { geometry in
                     Color.clear.preference(key: SkillPreviewHeadingPreference.self, value: [
