@@ -1,5 +1,12 @@
 import Foundation
 
+enum UpdatesLoadPhase: Equatable {
+    case idle
+    case loading
+    case loaded
+    case failed(String)
+}
+
 struct UpdatesRow: Identifiable, Equatable {
     let id: UUID
     let skillName: String

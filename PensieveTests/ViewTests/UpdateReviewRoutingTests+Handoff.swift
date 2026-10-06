@@ -75,11 +75,16 @@ extension UpdateReviewRoutingTests {
         XCTAssertEqual(sheet.selectedSkillIDs, [first.id, second],
                        "A hand-off before loading starts must join the pending initial selection")
         XCTAssertTrue(calls.values.isEmpty, "Pre-load hand-offs never apply")
-        await assertLoadErrorHandoff(fixture: fixture, rows: sheet.rows, preview: routing.preview)
+        for rows in [sheet.rows, Array(sheet.rows.reversed())] {
+            await assertLoadErrorHandoff(fixture: fixture, rows: rows, preview: routing.preview,
+                                        initialSkillID: first.id, windowSkillID: second)
+        }
+        await assertLoadedHandoffSurvivesReload(routing, first: first, second: second, calls: calls)
     }
 
     private func assertLoadErrorHandoff(
-        fixture: UpdateReviewFixture, rows: [UpdatesRow], preview: ViewChangesViewModel
+        fixture: UpdateReviewFixture, rows: [UpdatesRow], preview: ViewChangesViewModel,
+        initialSkillID: UUID, windowSkillID: UUID
     ) async {
         let loads = UpdateReviewRecorder<Bool>()
         let applies = UpdateReviewRecorder<UUID>()
@@ -94,7 +99,9 @@ extension UpdateReviewRoutingTests {
         var forwards = 0
         let routing = UpdateReviewRouting(preview: preview, updates: sheet, library: fixture.library,
                                          context: fixture.context, windows: { [] }, openWindow: { _ in forwards += 1 })
-        routing.presentUpdates(skillID: rows[0].id)
+        XCTAssertNotEqual(initialSkillID, windowSkillID, "The hand-off must add a different skill")
+        XCTAssertEqual(preview.requestedSkillID, windowSkillID)
+        routing.presentUpdates(skillID: initialSkillID)
         await sheet.loadAndReport(context: fixture.context)
         XCTAssertNotNil(sheet.loadError, "The first real sheet load must fail")
         XCTAssertFalse(sheet.isLoading)
@@ -104,9 +111,25 @@ extension UpdateReviewRoutingTests {
         sheet.load(context: fixture.context) // The production Retry action.
         await TestWait.until(failureMessage: "hand-off Retry did not load rows") { !sheet.isLoading }
         XCTAssertNil(sheet.loadError)
-        XCTAssertEqual(sheet.selectedSkillIDs, Set(rows.map(\.id)),
+        XCTAssertEqual(sheet.selectedSkillIDs, [initialSkillID, windowSkillID],
                        "A hand-off after a load error must remain selected when Retry loads rows")
         XCTAssertTrue(applies.values.isEmpty, "A load-error hand-off and Retry never apply")
+    }
+
+    private func assertLoadedHandoffSurvivesReload(
+        _ routing: UpdateReviewRouting, first: Skill, second: UUID, calls: UpdateReviewRecorder<UUID>
+    ) async {
+        let sheet = routing.updates
+        sheet.reset()
+        routing.banner(for: first).onUpdate()
+        await sheet.loadAndReport(context: routing.context)
+        XCTAssertEqual(sheet.selectedSkillIDs, [first.id])
+        routing.window.onUpdate()
+        XCTAssertEqual(sheet.selectedSkillIDs, [first.id, second])
+        await sheet.loadAndReport(context: routing.context)
+        XCTAssertEqual(sheet.selectedSkillIDs, [first.id, second],
+                       "An accepted loaded hand-off must survive a reload of the same sheet session")
+        XCTAssertTrue(calls.values.isEmpty, "A hand-off and reload never apply")
     }
 
     private func assertApplyingHandoff(routing: UpdateReviewRouting, first: UUID, second: UUID,

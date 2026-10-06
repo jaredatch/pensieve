@@ -45,9 +45,6 @@ struct ViewChangesView: View {
             })) {
                 ForEach(model.files, id: \.path) { file in
                     ViewChangesFileRow(file: file, selected: file.path == model.selectedFilePath)
-                        .background {
-                            if file.path == model.files.first?.path { ViewChangesListAppearance() }
-                        }
                         .padding(.vertical, DesignTokens.changesFileRowSpacing / 2)
                         .tag(file.path)
                         .listRowInsets(EdgeInsets())
@@ -57,8 +54,10 @@ struct ViewChangesView: View {
                         .accessibilityIdentifier("changes-file-" + file.path)
                 }
             }
-            .listStyle(.sidebar)
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .contentMargins(.horizontal, 0, for: .scrollContent)
+            .background(ViewChangesListAppearance(selection: model.selectedFilePath))
         }
         .padding(.horizontal, DesignTokens.changesSidebarInset * 2)
         .accessibilityIdentifier("changes-files")

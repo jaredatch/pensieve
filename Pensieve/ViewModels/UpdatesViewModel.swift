@@ -15,13 +15,16 @@ final class UpdatesViewModel {
     var selectedSkillIDs: Set<UUID> = []
     var confirmedDriftSkillIDs: Set<UUID> = []
     var statuses: [UUID: UpdatesRowStatus] = [:]
-    var isLoading = false
-    var hasLoadedRows = false
+    var loadPhase: UpdatesLoadPhase = .idle
+    var isLoading: Bool { loadPhase == .loading }
     var isApplying = false
     var recheckingSkillID: UUID?
     var isPresented = false
     var initialSelection: Set<UUID>?
-    var loadError: String?
+    var loadError: String? {
+        if case let .failed(message) = loadPhase { return message }
+        return nil
+    }
 
     let rowLoader: RowLoader
     let applyOperation: ApplyOperation
@@ -94,7 +97,7 @@ final class UpdatesViewModel {
     func load(context: ModelContext) {
         guard !isLoading, !isApplying else { return }
         let id = beginOperation()
-        isLoading = true
+        loadPhase = .loading
         let container = context.container
         operationTask = Task { await performLoad(container: container, operationID: id) }
     }
@@ -102,7 +105,7 @@ final class UpdatesViewModel {
     func loadAndReport(context: ModelContext) async {
         guard !isLoading, !isApplying else { return }
         let id = beginOperation()
-        isLoading = true
+        loadPhase = .loading
         await performLoad(container: context.container, operationID: id)
     }
 
@@ -168,13 +171,14 @@ final class UpdatesViewModel {
         guard !library.libraryUnavailable else { return }
         if isPresented {
             guard !isApplying, let skillID else { return }
-            if isLoading || !hasLoadedRows || loadError != nil {
+            if loadPhase != .loaded {
                 // nil means the sheet was opened with all rows selected.
                 if initialSelection != nil { initialSelection?.insert(skillID) }
                 return
             }
             guard rows.contains(where: { $0.id == skillID }) else { return }
             selectedSkillIDs.insert(skillID)
+            initialSelection?.insert(skillID)
             return
         }
         library.confirmLeavingAnyDraft { [weak self] proceed in
@@ -188,13 +192,12 @@ final class UpdatesViewModel {
     func reset() {
         cancel()
         rows = []
-        hasLoadedRows = false
+        loadPhase = .idle
         selectedSkillIDs = []
         confirmedDriftSkillIDs = []
         statuses = [:]
         initialSelection = nil
         isPresented = false
-        loadError = nil
     }
 
     func cancel() {
@@ -203,7 +206,7 @@ final class UpdatesViewModel {
         backgroundCancel?()
         operationTask = nil
         backgroundCancel = nil
-        isLoading = false
+        if isLoading { loadPhase = .idle }
         isApplying = false
         recheckingSkillID = nil
     }

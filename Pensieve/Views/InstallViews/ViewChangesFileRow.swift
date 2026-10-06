@@ -11,12 +11,14 @@ struct ViewChangesFileRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: DesignTokens.changesFileGlyphWidth, height: DesignTokens.changesFileGlyphHeight)
             VStack(alignment: .leading, spacing: DesignTokens.changesFileFolderGap) {
-                Text(verbatim: (file.path as NSString).lastPathComponent).font(DesignTokens.changesFileName).lineLimit(1)
+                Text(verbatim: (file.path as NSString).lastPathComponent)
+                    .font(DesignTokens.changesFileName).lineLimit(1).truncationMode(.middle)
                 if !parent.isEmpty {
-                    Text(verbatim: parent).font(DesignTokens.changesFileFolder).foregroundStyle(.secondary).lineLimit(1)
+                    Text(verbatim: parent).font(DesignTokens.changesFileFolder)
+                        .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 }
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: DesignTokens.changesCountGap) {
                 if let counts = ViewChangesPresentation.sidebarCounts(file) {
                     let added = counts.added
@@ -32,8 +34,11 @@ struct ViewChangesFileRow: View {
                 }
             }
             .font(DesignTokens.changesCount)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
         }
         .padding(.horizontal, DesignTokens.changesFileRowHorizontalPadding)
+        .frame(maxWidth: .infinity)
         .frame(height: parent.isEmpty ? DesignTokens.changesFileRowHeight : DesignTokens.changesNestedFileRowHeight)
         .background(selected ? DesignTokens.changesFileRowSelectedFill : .clear,
                     in: RoundedRectangle(cornerRadius: DesignTokens.changesFileRowCornerRadius))
