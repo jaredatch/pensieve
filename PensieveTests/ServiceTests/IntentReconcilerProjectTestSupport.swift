@@ -118,7 +118,7 @@ struct ProjectIntentHarness {
 }
 
 struct NoopProjectCategoryReconciler: CategoryReconcilerProtocol {
-    func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult {
+    func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
         reconcile(context: context)
     }
 

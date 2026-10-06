@@ -12,18 +12,20 @@ final class ProjectRemovalExecutionTests: XCTestCase {
         try h.addIntent()
         XCTAssertFalse(h.intent.reconcile(context: h.context).hasFailures)
         let before = try h.deployState.read()
-        let reconciler = RemovalCheckpointReconciler {
-            do {
-                try h.files.replaceItem(at: h.root + "/offline", with: h.project.path)
-            } catch { XCTFail("Couldn't stage the missing folder: \(error)") }
-            return BatchResult()
+        let model = ProjectRemovalModel()
+        model.request(h.project, platformVM: h.platformVM, context: h.context)
+        try h.files.replaceItem(at: h.root + "/offline", with: h.project.path)
+        let result = model.confirm { project, plan in
+            removeRegisteredProject(project, reconciler: h.category,
+                platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
+                confirmedPreview: plan, context: h.context)
         }
-        let result = removeRegisteredProject(h.project, categoryStore: CategoryStore(), reconciler: reconciler,
-            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, context: h.context)
-        XCTAssertFalse(result.hasFailures)
+        XCTAssertTrue(result.hasFailures)
+        XCTAssertTrue(model.error?.contains("changed") == true)
         XCTAssertEqual(try h.deployState.read(), before)
         XCTAssertTrue(h.files.isSymlink(at: h.root + "/offline/agents/" + h.skill.directoryName + ".md"))
-        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 1)
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 2)
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 1)
     }
 
     func testExecutionFolderCheckFailureNamesFolderAndKeepsRegistration() throws {
@@ -36,7 +38,7 @@ final class ProjectRemovalExecutionTests: XCTestCase {
         h.mapped.beforeProjectProbe = { path in
             if path == h.project.path { throw NSError(domain: NSPOSIXErrorDomain, code: 13) }
         }
-        let result = removeRegisteredProject(h.project, categoryStore: CategoryStore(), reconciler: h.category,
+        let result = removeRegisteredProject(h.project, reconciler: h.category,
             platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, context: h.context)
         let message = ProjectListView.removalFailureMessage(projectName: h.project.name, result: result)
         XCTAssertTrue(result.hasFailures)
@@ -46,7 +48,7 @@ final class ProjectRemovalExecutionTests: XCTestCase {
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 2)
     }
 
-    func testConfirmationPreparationIsReusedAndStateRetirementIsBatched() throws {
+    func testConfirmationPreparationIsRefreshedAndStateRetirementIsBatched() throws {
         let h = try ProjectFolderCallerHarness(installed: [.claudeCode, .grok, .codex])
         defer { h.cleanup() }
         try h.files.createDirectory(at: h.project.path)
@@ -58,16 +60,17 @@ final class ProjectRemovalExecutionTests: XCTestCase {
         let model = ProjectRemovalModel()
         model.request(h.project, platformVM: h.platformVM, context: h.context)
         model.confirm { project, plan in
-            removeRegisteredProject(project, categoryStore: CategoryStore(), reconciler: h.category,
-                platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, preparedPlan: plan, context: h.context)
+            removeRegisteredProject(project, reconciler: h.category,
+                platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, confirmedPreview: plan,
+                context: h.context)
         }
         XCTAssertNil(model.error)
-        XCTAssertEqual(targetReads, 6, "One confirmation classification and one protective leaf check per link")
+        XCTAssertEqual(targetReads, 9, "Confirmation, current execution classification and the protective leaf check")
         XCTAssertEqual(stateWrites, 1, "The three records retire in one durable batch")
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 1)
     }
 
-    func testNoWithdrawalChangesNeedNoManifestWrite() throws {
+    func testUnchangedWithdrawalPublishesBeforeUnregistering() throws {
         let h = try ProjectFolderCallerHarness()
         defer { h.cleanup() }
         try h.files.createDirectory(at: h.project.path)
@@ -76,17 +79,18 @@ final class ProjectRemovalExecutionTests: XCTestCase {
             if path.contains(".manifest-build-") && path.hasSuffix("/manifest.yaml") { writes += 1 }
         }
         let manifest = ManifestService(fileService: h.mapped)
-        XCTAssertFalse(removeRegisteredProject(h.project, categoryStore: CategoryStore(manifestService: manifest,
-            manifestRoot: h.root + "/sync"), reconciler: h.category, manifestService: manifest,
+        XCTAssertFalse(removeRegisteredProject(h.project, reconciler: h.category, manifestService: manifest,
             manifestRoot: h.root + "/sync", platformVM: h.platformVM,
             localMachineID: ProjectIntentHarness.localID, context: h.context).hasFailures)
-        XCTAssertEqual(writes, 0)
+        XCTAssertEqual(writes, 1)
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 1)
     }
 }
 
-private struct RemovalCheckpointReconciler: CategoryReconcilerProtocol {
+struct RemovalCheckpointReconciler: CategoryReconcilerProtocol {
     let run: () -> BatchResult
     func reconcile(context: ModelContext) -> BatchResult { run() }
-    func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult { run() }
+    func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
+        run()
+    }
 }

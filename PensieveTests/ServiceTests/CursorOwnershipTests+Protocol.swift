@@ -2,6 +2,41 @@ import XCTest
 @testable import Pensieve
 
 extension CursorOwnershipTests {
+    func testCategoryStoreConformanceRequiresOnlyCategoryCRUD() throws {
+        let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().path
+        let source = root + "/category-crud-probe.swift"
+        try files.writeFile(at: source,
+            content: "import Foundation\nimport SwiftData\n@testable import Pensieve\n" + categoryCRUDProbe)
+        let (status, diagnostics) = try typecheckOwnershipProbe(source,
+            products: checkout + "/DerivedData/Build/Products/Debug", checkout: checkout)
+        XCTAssertEqual(status, 0, "CategoryStoreProtocol must not require project-removal orchestration: " + diagnostics)
+    }
+
+    private var categoryCRUDProbe: String {
+        """
+        struct Probe: CategoryStoreProtocol {
+            func create(name: String, context: ModelContext, notifier: SyncStateNotifying) -> Pensieve.Category? { nil }
+            func rename(_ category: Pensieve.Category, to name: String, context: ModelContext, notifier: SyncStateNotifying) {}
+            func delete(_ category: Pensieve.Category, context: ModelContext, notifier: SyncStateNotifying) {}
+            func delete(_ category: Pensieve.Category, reconciler: CategoryReconcilerProtocol,
+                context: ModelContext, notifier: SyncStateNotifying) -> BatchResult { BatchResult() }
+            func setProject(_ project: Project, inCategory category: Pensieve.Category, member: Bool,
+                context: ModelContext, notifier: SyncStateNotifying) {}
+            func setProject(_ project: Project, inCategory category: Pensieve.Category, member: Bool,
+                reconciler: CategoryReconcilerProtocol, context: ModelContext,
+                notifier: SyncStateNotifying) -> BatchResult { BatchResult() }
+            func setSkill(_ skill: Skill, inCategory category: Pensieve.Category, assigned: Bool,
+                context: ModelContext, notifier: SyncStateNotifying) {}
+            func setSkill(_ skill: Skill, inCategory category: Pensieve.Category, assigned: Bool,
+                reconciler: CategoryReconcilerProtocol, context: ModelContext,
+                notifier: SyncStateNotifying) -> BatchResult { BatchResult() }
+            func categories(containingProjectKey key: String, context: ModelContext) -> [Pensieve.Category] { [] }
+            func categories(containingSkillSlug slug: String, context: ModelContext) -> [Pensieve.Category] { [] }
+        }
+        """
+    }
+
     func testServiceConformersMustChooseOwnershipExplicitly() throws {
         let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().path
@@ -19,7 +54,7 @@ extension CursorOwnershipTests {
                 requiredMethod = "ownsArtifact"
             default:
                 ownership = "func reconcileRemovingProject(_ projectID: UUID, "
-                    + "context: ModelContext) -> BatchResult { BatchResult() }"
+                    + "preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult { BatchResult() }"
                 requiredMethod = "reconcileRemovingProject"
             }
             for explicit in [true, false] {

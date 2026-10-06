@@ -145,7 +145,7 @@ final class ProjectFolderThirdFixTests: XCTestCase {
             let outcome = BatchPairOutcome(skillID: h.skill.id, skillName: h.skill.name, platform: .codex,
                 target: .project(h.project.id), error: message)
             var logs: [String] = []
-            let result = removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(),
+            let result = removeRegisteredProject(h.otherProject,
                 reconciler: ThirdFixReconciler(result: BatchResult(outcomes: [outcome])),
                 platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
             context: h.context, logFailure: { logs.append($0) })
@@ -180,7 +180,7 @@ final class ProjectFolderThirdFixTests: XCTestCase {
 }
 
 private struct ThirdFixReconciler: CategoryReconcilerProtocol {
-    func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult {
+    func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
         reconcile(context: context)
     }
 

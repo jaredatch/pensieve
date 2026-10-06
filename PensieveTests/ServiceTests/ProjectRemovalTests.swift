@@ -117,6 +117,8 @@ final class ProjectRemovalTests: XCTestCase {
         XCTAssertTrue(h.files.isSymlink(at: failedPath))
         XCTAssertFalse(h.files.isSymlink(at: h.artifact(.claudeCode)))
         XCTAssertTrue(try h.context.fetch(FetchDescriptor<IntentAssignment>()).contains { $0.platformRaw == "codex" })
+        XCTAssertFalse(try h.context.fetch(FetchDescriptor<IntentAssignment>()).contains { $0.platformRaw == "claudeCode" },
+                       "A completed direct pair retires its ledger just like a category pair")
         XCTAssertTrue(ProjectListView.removalFailureMessage(projectName: h.project.name, result: result).contains(failedPath))
         let message = ProjectListView.removalFailureMessage(projectName: h.project.name, result: result)
         XCTAssertTrue(message.contains("stopped partway"))
@@ -238,7 +240,7 @@ final class ProjectRemovalTests: XCTestCase {
     }
 
     private func remove(_ h: ProjectFolderCallerHarness, manifest: ManifestSnapshotting? = nil) -> BatchResult {
-        removeRegisteredProject(h.project, categoryStore: CategoryStore(), reconciler: h.category,
+        removeRegisteredProject(h.project, reconciler: h.category,
             manifestService: manifest, manifestRoot: h.root + "/sync",
             platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
             context: h.context)

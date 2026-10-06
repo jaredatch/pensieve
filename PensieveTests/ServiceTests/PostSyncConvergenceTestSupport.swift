@@ -19,7 +19,7 @@ struct ConvergenceRecordingDeploy: DeployReconciling {
 
 struct ConvergenceRecordingLedger: CategoryReconcilerProtocol,
     IntentReconcilerProtocol {
-    func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult {
+    func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
         reconcile(context: context)
     }
 

@@ -64,7 +64,6 @@ final class IntentReconcilerOwnershipLifecycleTests: XCTestCase {
 
         let result = removeRegisteredProject(
             first,
-            categoryStore: CategoryStore(),
             reconciler: NoopProjectCategoryReconciler(),
             platformVM: harness.platformVM, localMachineID: ProjectIntentHarness.localID,
             context: harness.context

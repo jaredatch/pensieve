@@ -47,10 +47,10 @@ final class ProjectFolderReviewTests: XCTestCase {
         let model = ProjectRemovalModel()
         model.request(h.otherProject, platformVM: h.platformVM, context: h.context)
         let result = model.confirm { _, plan in
-            removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
-                manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
-                reconciler: h.category, platformVM: h.platformVM,
-                localMachineID: ProjectIntentHarness.localID, preparedPlan: plan,
+            removeRegisteredProject(h.otherProject,
+                reconciler: h.category, manifestService: ManifestService(fileService: h.files),
+                manifestRoot: h.root + "/store", platformVM: h.platformVM,
+                localMachineID: ProjectIntentHarness.localID, confirmedPreview: plan,
             context: h.context)
         }
         let removalError = model.error
@@ -72,10 +72,10 @@ final class ProjectFolderReviewTests: XCTestCase {
             let model = ProjectRemovalModel()
             model.request(h.otherProject, platformVM: h.platformVM, context: h.context)
             let result = model.confirm { _, plan in
-                removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
-                    manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
-                    reconciler: reconciler, platformVM: h.platformVM,
-                    localMachineID: ProjectIntentHarness.localID, preparedPlan: plan,
+                removeRegisteredProject(h.otherProject,
+                    reconciler: reconciler, manifestService: ManifestService(fileService: h.files),
+                    manifestRoot: h.root + "/store", platformVM: h.platformVM,
+                    localMachineID: ProjectIntentHarness.localID, confirmedPreview: plan,
             context: h.context)
             }
             let removalError = model.error
@@ -168,9 +168,9 @@ final class ProjectFolderReviewTests: XCTestCase {
         h.mapped.beforeProjectProbe = { path in
             if path == h.project.path { throw ProjectFolderError.couldNotCheck(path: path, reason: "Offline") }
         }
-        let result = removeRegisteredProject(h.otherProject, categoryStore: CategoryStore(
-            manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
-            reconciler: h.category, platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
+        let result = removeRegisteredProject(h.otherProject,
+            reconciler: h.category, manifestService: ManifestService(fileService: h.files),
+            manifestRoot: h.root + "/store", platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
             context: h.context)
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.project.id])
@@ -203,7 +203,7 @@ final class ProjectFolderReviewTests: XCTestCase {
 }
 
 private struct ProjectListFailureReconciler: CategoryReconcilerProtocol {
-    func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult {
+    func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
         reconcile(context: context)
     }
 

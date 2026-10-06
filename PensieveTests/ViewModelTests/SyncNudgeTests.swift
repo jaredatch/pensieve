@@ -192,7 +192,7 @@ final class SyncNudgeTests: XCTestCase {
         counter.reset()
 
         _ = removeRegisteredProject(
-            project, categoryStore: store, reconciler: ResultReconciler(),
+            project, reconciler: ResultReconciler(),
             platformVM: PlatformViewModel(fileService: FileService(),
                 agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked),
             localMachineID: ProjectIntentHarness.localID,
@@ -236,7 +236,7 @@ final class SyncNudgeTests: XCTestCase {
         counter.reset()
 
         let result = removeRegisteredProject(
-            project, categoryStore: store, reconciler: ResultReconciler(fails: true),
+            project, reconciler: ResultReconciler(fails: true),
             platformVM: PlatformViewModel(fileService: FileService(),
                 agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked),
             localMachineID: ProjectIntentHarness.localID,
@@ -375,7 +375,7 @@ private struct FixedImportScanner: ImportScannerProtocol {
 }
 
 private struct ResultReconciler: CategoryReconcilerProtocol {
-    func reconcileRemovingProject(_ projectID: UUID, context: ModelContext) -> BatchResult {
+    func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
         reconcile(context: context)
     }
 

@@ -101,9 +101,9 @@ final class ProjectFolderCallerTests: XCTestCase {
         XCTAssertEqual(removed.successes.count, 4)
         let unregister = removeRegisteredProject(
             harness.project,
-            categoryStore: CategoryStore(manifestService: ManifestService(fileService: harness.files),
-                                         manifestRoot: harness.root + "/store"),
-            reconciler: harness.category, platformVM: harness.platformVM, localMachineID: ProjectIntentHarness.localID,
+            reconciler: harness.category, manifestService: ManifestService(fileService: harness.files),
+            manifestRoot: harness.root + "/store", platformVM: harness.platformVM,
+            localMachineID: ProjectIntentHarness.localID,
             context: harness.context
         )
         XCTAssertFalse(unregister.hasFailures)

@@ -83,9 +83,9 @@ final class ProjectRemovalConfirmationTests: XCTestCase {
                 XCTAssertTrue(preview.message.contains(status == "missing"
                     ? "can't reach this folder" : "No skill links or rules will be removed"))
                 model.confirm { project, plan in
-                    removeRegisteredProject(project, categoryStore: CategoryStore(), reconciler: h.category,
+                    removeRegisteredProject(project, reconciler: h.category,
                         manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/sync",
-                        platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, preparedPlan: plan,
+                        platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, confirmedPreview: plan,
                         context: h.context)
                 }
                 XCTAssertNil(model.error)

@@ -241,7 +241,6 @@ final class CategoryReconcileWiringTests: XCTestCase {
 
         let result = removeRegisteredProject(
             seed.project,
-            categoryStore: CategoryStore(),
             reconciler: reconciler,
             platformVM: reconciler.platformVM, localMachineID: ProjectIntentHarness.localID,
             context: context
@@ -267,7 +266,6 @@ final class CategoryReconcileWiringTests: XCTestCase {
 
         let result = removeRegisteredProject(
             seed.project,
-            categoryStore: CategoryStore(),
             reconciler: reconciler,
             platformVM: reconciler.platformVM, localMachineID: ProjectIntentHarness.localID,
             context: context

@@ -28,11 +28,7 @@ protocol CategoryStoreProtocol {
                   notifier: SyncStateNotifying) -> BatchResult
     func categories(containingProjectKey key: String, context: ModelContext) -> [Category]
     func categories(containingSkillSlug slug: String, context: ModelContext) -> [Category]
-    @discardableResult
-    func reconcileAfterRemovingProject(_ project: Project, request: ProjectRemovalWithdrawalRequest,
-                                       publication: ProjectRemovalWithdrawal,
-                                       reconciler: CategoryReconcilerProtocol, context: ModelContext,
-                                       notifier: SyncStateNotifying) -> BatchResult
+
 }
 
 extension CategoryStoreProtocol {
@@ -184,35 +180,6 @@ struct CategoryStore: CategoryStoreProtocol {
     func categories(containingSkillSlug slug: String, context: ModelContext) -> [Category] {
         let categories = (try? context.fetch(FetchDescriptor<Category>())) ?? []
         return categories.filter { $0.skillSlugs.contains(slug) }
-    }
-
-    /// Withdraw category and direct requests together, then reconcile while the project is live.
-    /// The prepared removal owns this project's artifact cleanup; the reconciler handles other work.
-    @discardableResult
-    func reconcileAfterRemovingProject(_ project: Project, request: ProjectRemovalWithdrawalRequest,
-                                       publication: ProjectRemovalWithdrawal,
-                                       reconciler: CategoryReconcilerProtocol, context: ModelContext,
-                                       notifier: SyncStateNotifying) -> BatchResult {
-        defer { notifier() }
-        let withdrawal = ProjectRemovalWithdrawal(manifestService: publication.manifestService ?? self.manifestService,
-            manifestRoot: publication.manifestService == nil ? self.manifestRoot : publication.manifestRoot,
-            logFailure: publication.logFailure)
-        do {
-            try withdrawal.apply(project: project, request: request, context: context)
-        } catch {
-            var result = BatchResult()
-            result.operationFailures.append(error.localizedDescription)
-            return result
-        }
-        var result = reconciler.reconcileRemovingProject(project.id, context: context)
-        do {
-            if context.hasChanges { try withdrawal.save(context: context) }
-        } catch {
-            context.rollback()
-            withdrawal.repairManifest(context: context)
-            result.operationFailures.append("Couldn't save project category removal: " + error.localizedDescription)
-        }
-        return result
     }
 
     /// Best-effort manifest regeneration after a category mutation. No-op without a wired service

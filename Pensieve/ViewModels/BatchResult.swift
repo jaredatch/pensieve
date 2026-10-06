@@ -80,6 +80,8 @@ struct BatchResult {
     /// Save and manifest failures can follow physical cleanup; they never claim no deploy changed.
     var operationFailures: [String] = []
     var retiredPairs: Set<BatchPairKey> = []
+    /// Physical cleanup can succeed before a state-record write reports failure.
+    var didRemoveArtifacts = false
 
     var successes: [BatchPairOutcome] { outcomes.filter { $0.isSuccess } }
     var failures: [BatchPairOutcome] { outcomes.filter { !$0.isSuccess && !$0.isSkipped } }
@@ -149,5 +151,6 @@ struct BatchResult {
         readFailures.append(contentsOf: other.readFailures)
         operationFailures.append(contentsOf: other.operationFailures)
         retiredPairs.formUnion(other.retiredPairs)
+        didRemoveArtifacts = didRemoveArtifacts || other.didRemoveArtifacts
     }
 }

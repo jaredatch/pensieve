@@ -25,9 +25,9 @@ final class ProjectFolderRoundOneTests: XCTestCase {
         model.request(h.otherProject, platformVM: vm, context: h.context)
         let result = model.confirm { _, plan in
             removeRegisteredProject(h.otherProject,
-                categoryStore: CategoryStore(manifestService: ManifestService(fileService: h.files),
-                    manifestRoot: h.root + "/store"),
-                reconciler: reconciler, platformVM: vm, localMachineID: ProjectIntentHarness.localID, preparedPlan: plan,
+                reconciler: reconciler, manifestService: ManifestService(fileService: h.files),
+                    manifestRoot: h.root + "/store", platformVM: vm, localMachineID: ProjectIntentHarness.localID,
+                    confirmedPreview: plan,
             context: h.context, logFailure: { logs.append($0) })
         }
         let alert = model.error

@@ -48,13 +48,13 @@ private func regenerateProjectManifest(manifestService: ManifestSnapshotting?,
 /// then unregister. Failures retain registration and allow a retry to finish partial cleanup.
 @discardableResult
 @MainActor
-func removeRegisteredProject(_ project: Project, categoryStore: CategoryStoreProtocol,
+func removeRegisteredProject(_ project: Project,
                              reconciler: CategoryReconcilerProtocol,
                              manifestService: ManifestSnapshotting? = nil,
                              manifestRoot: String = Constants.pensieveBaseDir,
                              stateFetcher: ReconcilerStateFetching = ReconcilerStateFetcher(),
                              platformVM: PlatformViewModel, localMachineID: String? = nil,
-                             preparedPlan: ProjectRemovalPlan? = nil,
+                             confirmedPreview: ProjectRemovalPreview? = nil,
                              context: ModelContext,
                              notifier: SyncStateNotifying = SyncStateNotifier.suppressed,
                              logFailure: @escaping (String) -> Void = logProjectRemovalFailure) -> BatchResult {
@@ -65,27 +65,37 @@ func removeRegisteredProject(_ project: Project, categoryStore: CategoryStorePro
     do {
         intentRows = try stateFetcher.intentAssignments(context: context)
         intents = try stateFetcher.deployIntents(context: context)
-        plan = try preparedPlan ?? ProjectRemovalPlan.prepare(project: project, platformVM: platformVM,
-                                                              context: context, stateFetcher: stateFetcher)
-        if !plan.hasIdentitySibling, let key = project.identityKey, localMachineID == nil,
-           intents.contains(where: { $0.projectKey == key }) {
+        plan = try ProjectRemovalPlan.prepare(project: project, platformVM: platformVM,
+                                               context: context, stateFetcher: stateFetcher)
+        if let failure = projectRemovalAdmissionFailure(project: project, plan: plan,
+            confirmedPreview: confirmedPreview, intents: intents, localMachineID: localMachineID) {
             var result = BatchResult()
-            result.operationFailures.append("Couldn't identify this Mac to withdraw its project intents. Try again.")
+            result.operationFailures.append(failure)
             return result
         }
     } catch let error as ProjectFolderError {
         var result = BatchResult()
         result.operationFailures.append("Couldn't check the project folder: " + error.localizedDescription)
         return result
-    } catch {
-        return BatchResult.readFailure("project deploy records", error: error)
-    }
+    } catch { return BatchResult.readFailure("project deploy records", error: error) }
     let publication = ProjectRemovalWithdrawal(manifestService: manifestService,
         manifestRoot: manifestRoot, logFailure: logFailure)
     let request = ProjectRemovalWithdrawalRequest(keepingSharedKey: plan.hasIdentitySibling,
         intents: intents, localMachineID: localMachineID)
-    var result = categoryStore.reconcileAfterRemovingProject(project, request: request, publication: publication,
-        reconciler: reconciler, context: context, notifier: SyncStateNotifier.suppressed)
+    do {
+        try publication.apply(project: project, request: request, context: context)
+    } catch {
+        var result = BatchResult()
+        result.operationFailures.append(error.localizedDescription)
+        return result
+    }
+    var result = reconciler.reconcileRemovingProject(project.id, preservingProjects: plan.folderSiblingIDs, context: context)
+    do {
+        if context.hasChanges { try context.save() }
+    } catch {
+        context.rollback()
+        result.operationFailures.append("Couldn't save project reconciliation: " + error.localizedDescription)
+    }
     logUnrelatedProjectFailures(result, removing: project, logFailure: logFailure)
     result.outcomes.removeAll { outcome in
         guard case .project(let id)? = outcome.target else { return false }
@@ -95,13 +105,29 @@ func removeRegisteredProject(_ project: Project, categoryStore: CategoryStorePro
     let cleanup = plan.removeArtifacts(project: project, platformVM: platformVM)
     result.append(cleanup)
     result.append(completeProjectRemoval(project, intentRows: intentRows, cleanup: cleanup,
-        priorFailed: result.hasFailures, publication: publication, context: context))
+        priorFailed: result.hasFailures, context: context))
     return result
+}
+
+private func projectRemovalAdmissionFailure(project: Project, plan: ProjectRemovalPlan,
+                                            confirmedPreview: ProjectRemovalPreview?,
+                                            intents: [MachineDeployIntent], localMachineID: String?) -> String? {
+    if let confirmedPreview,
+       confirmedPreview.artifactCount != plan.preview.artifactCount
+        || confirmedPreview.folderIsMissing != plan.preview.folderIsMissing
+        || confirmedPreview.folderIsShared != plan.preview.folderIsShared {
+        return "The project changed while confirmation was open. Please review removal again."
+    }
+    if !plan.hasIdentitySibling, let key = project.identityKey, localMachineID == nil,
+       intents.contains(where: { $0.projectKey == key }) {
+        return "Couldn't identify this Mac to withdraw its project intents. Try again."
+    }
+    return nil
 }
 
 @MainActor
 private func completeProjectRemoval(_ project: Project, intentRows: [IntentAssignment], cleanup: BatchResult,
-                                    priorFailed: Bool, publication: ProjectRemovalWithdrawal,
+                                    priorFailed: Bool,
                                     context: ModelContext) -> BatchResult {
     var result = BatchResult()
     let projectID = project.id, completed = cleanup.completedPairs
@@ -110,14 +136,16 @@ private func completeProjectRemoval(_ project: Project, intentRows: [IntentAssig
             let pair = BatchPairKey(skillID: row.skillID, platform: row.platform, target: .project(projectID))
             if !priorFailed || completed.contains(pair) { context.delete(row) }
         }
-        if !priorFailed {
-            for row in intentRows where row.projectID == projectID { context.delete(row) }
-            context.delete(project)
+        for row in intentRows where row.projectID == projectID {
+            let completedDirect = PlatformTarget(rawValue: row.platformRaw).map {
+                completed.contains(BatchPairKey(skillID: row.skillID, platform: $0, target: .project(projectID)))
+            } ?? false
+            if !priorFailed || completedDirect { context.delete(row) }
         }
-        if context.hasChanges { try publication.save(context: context) }
+        if !priorFailed { context.delete(project) }
+        if context.hasChanges { try context.save() }
     } catch {
         context.rollback()
-        publication.repairManifest(context: context)
         result.operationFailures.append("Couldn't save project removal: " + error.localizedDescription)
     }
     return result

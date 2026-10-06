@@ -5,25 +5,35 @@ struct ProjectRemovalPreview {
     let projectName: String
     let artifactCount: Int
     let folderIsMissing: Bool
+    let folderIsShared: Bool
+
+    init(projectName: String, artifactCount: Int, folderIsMissing: Bool, folderIsShared: Bool = false) {
+        self.projectName = projectName
+        self.artifactCount = artifactCount
+        self.folderIsMissing = folderIsMissing
+        self.folderIsShared = folderIsShared
+    }
 
     var title: String { "Remove “\(projectName)”?" }
     var message: String {
         if folderIsMissing {
             return "Pensieve can't reach this folder, so the links and rules it added there stay. Your files stay."
         }
+        if folderIsShared { return "The other registration keeps the links and rules in this folder. Your files stay." }
         if artifactCount == 0 { return "No skill links or rules will be removed. Your files stay." }
         let artifacts = artifactCount == 1 ? "skill link or rule" : "skill links and rules"
         return "Removes \(artifactCount) \(artifacts) Pensieve added to this project. Your files stay."
     }
 }
 
-/// Candidates come from this Mac's records, never a directory scan. The same preparation feeds
-/// confirmation and execution; only the folder admission and the leaf ownership check repeat.
+/// Candidates come from this Mac's records, never a directory scan. Execution prepares from
+/// current state and compares its preview with confirmation before withdrawing requests.
 @MainActor
 struct ProjectRemovalPlan {
     let preview: ProjectRemovalPreview
     let candidates: [Candidate]
     let hasIdentitySibling: Bool
+    let folderSiblingIDs: Set<UUID>
 
     struct Candidate {
         let pair: DeployRemovalPair
@@ -42,7 +52,16 @@ struct ProjectRemovalPlan {
         } catch ProjectFolderError.missing {
             return ProjectRemovalPlan(preview: ProjectRemovalPreview(
                 projectName: project.name, artifactCount: 0, folderIsMissing: true),
-                candidates: [], hasIdentitySibling: hasSibling)
+                candidates: [], hasIdentitySibling: hasSibling, folderSiblingIDs: [])
+        }
+        let directory = platformVM.projectReconcilePolicy.resolvedDirectory(project)
+        let folderSiblingIDs = Set(projects.filter {
+            $0.id != project.id && platformVM.projectReconcilePolicy.resolvedDirectory($0) == directory
+        }.map(\.id))
+        if !folderSiblingIDs.isEmpty {
+            return ProjectRemovalPlan(preview: ProjectRemovalPreview(projectName: project.name,
+                artifactCount: 0, folderIsMissing: false, folderIsShared: true),
+                candidates: [], hasIdentitySibling: hasSibling, folderSiblingIDs: folderSiblingIDs)
         }
         let skills = try stateFetcher.skills(context: context)
         let evidence = Evidence(
@@ -51,33 +70,25 @@ struct ProjectRemovalPlan {
             categoryRows: try stateFetcher.categoryAssignments(context: context),
             intentRows: try stateFetcher.intentAssignments(context: context))
         let candidates = try localCandidates(project: project, platformVM: platformVM, evidence: evidence, context: context)
-        let claimed = try siblingClaims(project: project, projects: projects, platformVM: platformVM,
-                                        evidence: evidence, context: context)
         var prepared: [Candidate] = []
         for path in candidates.keys.sorted() {
-            guard let pair = candidates[path], !claimed.contains(claim(pair.skill.directoryName, pair.platform)) else {
-                continue
-            }
+            guard let pair = candidates[path] else { continue }
             let owned = try platformVM.artifactIsOwned(skill: pair.skill, platform: pair.platform, target: .project(project))
             prepared.append(Candidate(pair: pair, path: path, isOwned: owned))
         }
         let count = prepared.filter(\.isOwned).count
         return ProjectRemovalPlan(preview: ProjectRemovalPreview(
             projectName: project.name, artifactCount: count, folderIsMissing: false),
-            candidates: prepared, hasIdentitySibling: hasSibling)
+            candidates: prepared, hasIdentitySibling: hasSibling, folderSiblingIDs: [])
     }
 
     func removeArtifacts(project: Project, platformVM: PlatformViewModel) -> BatchResult {
         var result = BatchResult()
-        do {
-            try platformVM.projectReconcilePolicy.requireDirectory(project)
-        } catch ProjectFolderError.missing {
-            return result
-        } catch {
-            result.operationFailures.append("Couldn't check the project folder at \(project.path): " + error.localizedDescription)
+        if let failure = folderFailure(project: project, platformVM: platformVM) {
+            result.operationFailures.append(failure)
             return result
         }
-        if preview.folderIsMissing { return result }
+        if preview.folderIsMissing || preview.folderIsShared { return result }
         var changed = false
         var completed: [(candidate: Candidate, deleted: Bool)] = []
         for candidate in candidates {
@@ -85,6 +96,7 @@ struct ProjectRemovalPlan {
             do {
                 let deleted = candidate.isOwned ? try platformVM.removeArtifact(
                     skill: pair.skill, platform: pair.platform, target: .project(project)) : false
+                result.didRemoveArtifacts = deleted || result.didRemoveArtifacts
                 changed = deleted || changed
                 completed.append((candidate, deleted))
             } catch {
@@ -111,14 +123,23 @@ struct ProjectRemovalPlan {
         return result
     }
 
+    private func folderFailure(project: Project, platformVM: PlatformViewModel) -> String? {
+        do {
+            try platformVM.projectReconcilePolicy.requireDirectory(project)
+            return nil
+        } catch ProjectFolderError.missing {
+            return preview.folderIsMissing ? nil : "The project folder changed. Please review removal again."
+        } catch {
+            return "Couldn't check the project folder at \(project.path): " + error.localizedDescription
+        }
+    }
+
     private func failure(_ candidate: Candidate, project: Project, error: Error) -> BatchPairOutcome {
         let pair = candidate.pair
         return BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
             platform: pair.platform, target: .project(project.id),
             error: "\(pair.skill.name) (\(pair.platform.displayName)) at \(candidate.path): \(error.localizedDescription)")
     }
-
-    private static func claim(_ slug: String, _ platform: PlatformTarget) -> String { platform.rawValue + "|" + slug }
 
     private struct Evidence {
         let byID: [UUID: Skill]
@@ -155,42 +176,6 @@ struct ProjectRemovalPlan {
                       recordedPath: row.targetPath, into: &candidates)
         }
         return candidates
-    }
-
-    private static func siblingClaims(project: Project, projects: [Project], platformVM: PlatformViewModel,
-                                      evidence: Evidence, context: ModelContext) throws -> Set<String> {
-        let directory = platformVM.projectReconcilePolicy.resolvedDirectory(project)
-        let siblings = projects.filter {
-            $0.id != project.id && platformVM.projectReconcilePolicy.resolvedDirectory($0) == directory
-        }
-        let siblingIDs = Set(siblings.map(\.id))
-        let siblingKeys = Set(siblings.compactMap(\.identityKey))
-        var claimed: Set<String> = []
-        for row in evidence.categoryRows where siblingIDs.contains(row.projectID) {
-            if let skill = evidence.byID[row.skillID] { claimed.insert(claim(skill.directoryName, row.platform)) }
-        }
-        for row in evidence.intentRows where row.projectID.map(siblingIDs.contains) == true {
-            if let skill = evidence.byID[row.skillID], let platform = PlatformTarget(rawValue: row.platformRaw) {
-                claimed.insert(claim(skill.directoryName, platform))
-            }
-        }
-        if !siblings.isEmpty {
-            for category in try context.fetch(FetchDescriptor<Category>())
-                where !siblingKeys.isDisjoint(with: category.projectKeys) {
-                for slug in category.skillSlugs {
-                    for platform in PlatformTarget.allCases where platform.supportsProjectScope {
-                        claimed.insert(claim(slug, platform))
-                    }
-                }
-            }
-            for intent in try context.fetch(FetchDescriptor<MachineDeployIntent>())
-                where intent.projectKey.map(siblingKeys.contains) == true {
-                if let platform = PlatformTarget(rawValue: intent.platformRaw) {
-                    claimed.insert(claim(intent.skillSlug, platform))
-                }
-            }
-        }
-        return claimed
     }
 
     private static func admit(skill: Skill, platform: PlatformTarget, project: Project,

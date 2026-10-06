@@ -12,7 +12,6 @@ struct ProjectListView: View {
     @State private var confirmingRemoval = false
     @AppStorage(ListPreferenceKeys.showsLine2(.projects)) private var showsLine2 = true
     @AppStorage(ListPreferenceKeys.showsLine3(.projects)) private var showsLine3 = true
-    private let categoryStore: CategoryStoreProtocol
     private let notifier: SyncStateNotifying
     let onAdd: () -> Void
     let addsFenced: Bool
@@ -26,7 +25,6 @@ struct ProjectListView: View {
         self.platformVM = platformVM
         self.localMachineID = localMachineID
         self.notifier = notifier
-        self.categoryStore = CategoryStore(manifestService: ManifestService(), notifier: notifier)
         self.onAdd = onAdd
         self.addsFenced = addsFenced
     }
@@ -44,8 +42,10 @@ struct ProjectListView: View {
             return "Removal stopped because Pensieve couldn't read its deploy records. "
                 + "“\(projectName)” stays registered so you can retry. " + details
         }
-        return "Removal of “\(projectName)” stopped partway: " + details
-            + " It stays registered; retry to complete it."
+        let progress = result.didRemoveArtifacts || !result.successes.isEmpty
+            ? "Removal of “\(projectName)” stopped partway. " : "Couldn't remove “\(projectName)”. Nothing was changed. "
+        let reason = details.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+        return progress + reason + ". It stays registered; retry to complete it."
     }
 
     var body: some View {
@@ -91,10 +91,10 @@ struct ProjectListView: View {
             isPresented: $confirmingRemoval,
             titleVisibility: .visible) {
                 Button("Remove Project", role: .destructive) {
-                    removal.confirm { project, plan in
-                        removeRegisteredProject(project, categoryStore: categoryStore,
+                    removal.confirm { project, preview in
+                        removeRegisteredProject(project,
                             reconciler: CategoryReconciler(platformVM: platformVM), manifestService: ManifestService(),
-                            platformVM: platformVM, localMachineID: localMachineID, preparedPlan: plan,
+                            platformVM: platformVM, localMachineID: localMachineID, confirmedPreview: preview,
                             context: context, notifier: notifier)
                     }
                 }
