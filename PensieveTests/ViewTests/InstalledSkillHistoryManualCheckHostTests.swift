@@ -6,7 +6,7 @@ import XCTest
 
 @MainActor
 final class HistoryManualCheckHostTests: XCTestCase {
-    func testVisibleManualCheckRefiresAtCurrentWindowWithRetryIntent() async {
+    func testVisibleManualCheckRefiresAtCurrentWindowWithRetryIntent() async throws {
         let reads = ManualCheckHostReadProbe()
         var intents: [UpstreamHistoryViewModel.RequestIntent] = []
         let owner = historyOwner(
@@ -17,37 +17,36 @@ final class HistoryManualCheckHostTests: XCTestCase {
             onRequest: { intents.append($0) }
         )
         let skill = installedHistorySkill()
+        let head = try XCTUnwrap(skill.installedOrigin?.installedCommit)
         let session = InstalledSkillHistorySession()
         let model = ManualCheckHostModel(skill: skill)
         let window = makeWindow(model: model, history: owner, session: session)
         defer { window.close() }
 
-        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
-                             failureMessage: "The visible history must perform its initial read") {
-            reads.count == 1 && owner.state == .loaded(Self.result(head: skill.installedOrigin?.installedCommit ?? "", window: 1))
-        }
+        await waitForSettledHistory(owner: owner, expected: .loaded(Self.result(head: head, window: 1)),
+                                    timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                                    failureMessage: "The visible history must perform its initial read")
         XCTAssertEqual(reads.count, 1)
         session.requestedWindow = 3
-        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                             failureMessage: "Expanding history must read the requested window") {
-            reads.count == 2 && owner.state == .loaded(Self.result(head: skill.installedOrigin?.installedCommit ?? "", window: 3))
-        }
+        await waitForSettledHistory(owner: owner, expected: .loaded(Self.result(head: head, window: 3)),
+                                    failureMessage: "Expanding history must read the requested window")
         XCTAssertEqual(reads.count, 2)
         owner.invalidateForManualCheck(skillID: skill.id)
-        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                             failureMessage: "Manual check must refire the visible history read") {
-            reads.count == 3 && owner.state == .loaded(Self.result(head: skill.installedOrigin?.installedCommit ?? "", window: 3))
-        }
+        await waitForSettledHistory(owner: owner, expected: .loaded(Self.result(head: head, window: 3)),
+                                    failureMessage: "Manual check must refire the visible history read",
+                                    ready: { intents.count == 3 })
         XCTAssertEqual(reads.count, 3)
         XCTAssertEqual(reads.windows, [1, 3, 3])
         XCTAssertEqual(intents, [.appearance, .mountedRefresh, .retry])
     }
 
     /// Protects 39.2-b: the observed manual-check count belongs to the skill currently in the view.
-    func testSwitchAfterManualCheckDoesNotRefreshTheNextSkillsKeptResult() async {
+    func testSwitchAfterManualCheckDoesNotRefreshTheNextSkillsKeptResult() async throws {
         let reads = ManualCheckHostReadProbe()
         let first = installedHistorySkill(name: "First")
         let second = installedHistorySkill(name: "Second", commit: String(repeating: "c", count: 40))
+        let head = try XCTUnwrap(first.installedOrigin?.installedCommit)
+        let secondHead = try XCTUnwrap(second.installedOrigin?.installedCommit)
         let secondProbeStarted = DispatchSemaphore(value: 0)
         let releaseSecondProbe = DispatchSemaphore(value: 0)
         defer { releaseSecondProbe.signal() }
@@ -57,7 +56,7 @@ final class HistoryManualCheckHostTests: XCTestCase {
                 return Self.result(head: origin.installedCommit, window: window)
             },
             head: { origin in
-                if origin.installedCommit == second.installedOrigin?.installedCommit {
+                if origin.installedCommit == secondHead {
                     secondProbeStarted.signal()
                     _ = releaseSecondProbe.wait(timeout: .now() + TestWait.heldFixtureTimeoutSeconds)
                 }
@@ -69,25 +68,30 @@ final class HistoryManualCheckHostTests: XCTestCase {
         let window = makeWindow(model: model, history: owner, session: InstalledSkillHistorySession())
         defer { window.close() }
 
-        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
-                             failureMessage: "The first skill must load after the kept second result") {
-            reads.count == 2 && owner.state == .loaded(Self.result(head: first.installedOrigin?.installedCommit ?? "", window: 1))
-        }
+        await waitForSettledHistory(owner: owner, expected: .loaded(Self.result(head: head, window: 1)),
+                                    timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                                    failureMessage: "The first skill must load after the kept second result")
         XCTAssertEqual(reads.count, 2)
+        let requestBeforeCheck = owner.currentRequest?.id
         owner.invalidateForManualCheck(skillID: first.id)
-        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                             failureMessage: "Manual check must refresh the first skill before switching") {
-            reads.count == 3 && owner.state == .loaded(Self.result(head: first.installedOrigin?.installedCommit ?? "", window: 1))
-        }
+        await waitForSettledHistory(owner: owner, expected: .loaded(Self.result(head: head, window: 1)),
+                                    failureMessage: "Manual check must refresh the first skill before switching",
+                                    ready: { owner.currentRequest?.id != requestBeforeCheck })
         XCTAssertEqual(reads.count, 3)
         owner.probedSkillIDs.remove(second.id)
         model.skill = second
-        let secondProbeDidStart = await waitForHistorySemaphore(secondProbeStarted)
+        var secondProbeDidStart = false
+        await waitForSettledHistory(owner: owner, expected: .loaded(Self.result(head: secondHead, window: 1)),
+                                    failureMessage: "Switching must keep the next skill's settled history",
+                                    ready: {
+                                        secondProbeDidStart = secondProbeDidStart
+                                            || secondProbeStarted.wait(timeout: .now()) == .success
+                                        return secondProbeDidStart
+                                    })
         XCTAssertTrue(secondProbeDidStart)
 
         XCTAssertEqual(reads.count, 3)
-        let secondOrigin = try? XCTUnwrap(second.installedOrigin)
-        XCTAssertEqual(owner.state, .loaded(Self.result(head: secondOrigin?.installedCommit ?? "", window: 1)))
+        XCTAssertEqual(owner.state, .loaded(Self.result(head: secondHead, window: 1)))
     }
 
     private func makeWindow(
