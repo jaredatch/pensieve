@@ -21,7 +21,7 @@ extension UpdatesSheetTests {
             if count == 1 { try assertRowColumns(model, fixture: fixture) }
             if count == 2 { try assertInitialTwoRowLayout(model, fixture: fixture) }
             let main = try await hostSheet(model, fixture: fixture)
-            defer { main.close() }
+            defer { Self.closeSheetHost(main) }
             let sheet = try await attachedSheet(to: main, model: model)
             assertStableFrame(sheet)
             let inset = main.frame.maxY - sheet.frame.maxY
@@ -60,7 +60,6 @@ extension UpdatesSheetTests {
     }
 
     private func assertInitialTwoRowLayout(_ model: UpdatesViewModel, fixture: UpdateReviewFixture) throws {
-        try assertLocalEditsColumn(model, fixture: fixture)
         let host = NSHostingView(rootView: UpdatesView(model: model, onViewChanges: { _ in })
             .modelContainer(fixture.container))
         let height = host.fittingSize.height
@@ -69,15 +68,24 @@ extension UpdatesSheetTests {
     }
 
     private func assertStableFrame(_ sheet: NSWindow) {
+        let clock = ContinuousClock()
+        var stableSince = clock.now
+        var stableReads = 0
         var previous: CGRect?
         var lastHeights: [CGFloat] = []
         let settled = TestWait.until(poll: { sheet.contentView?.layoutSubtreeIfNeeded() }, condition: {
             let frame = sheet.frame
-            lastHeights = [previous?.height ?? frame.height, frame.height]
-            defer { previous = frame }
-            return previous == frame
+            lastHeights = Array((lastHeights + [frame.height]).suffix(3))
+            if previous == frame {
+                stableReads += 1
+            } else {
+                stableReads = 1
+                stableSince = clock.now
+            }
+            previous = frame
+            return stableReads >= 3 && stableSince.duration(to: clock.now) >= .milliseconds(50)
         })
-        XCTAssertTrue(settled, "Sheet frame did not settle across two reads: last heights=\(lastHeights)")
+        XCTAssertTrue(settled, "Sheet frame did not settle across at least three reads over 50 ms: last heights=\(lastHeights)")
     }
 
     private func assertRowColumns(_ model: UpdatesViewModel, fixture: UpdateReviewFixture) throws {

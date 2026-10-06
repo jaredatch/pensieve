@@ -30,14 +30,16 @@ extension UpdatesSheetTests {
         main.setFrame(NSRect(x: 100, y: 100, width: 900, height: 600), display: true)
         main.orderFront(nil)
         addTeardownBlock {
-            await MainActor.run {
-                if let sheet = main.attachedSheet { main.endSheet(sheet); sheet.close(); sheet.contentView = nil }
-                main.close()
-                main.contentView = nil
-                main.toolbar = nil
-            }
+            await MainActor.run { Self.closeSheetHost(main) }
         }
         return main
+    }
+
+    static func closeSheetHost(_ main: NSWindow) {
+        if let sheet = main.attachedSheet { main.endSheet(sheet); sheet.close(); sheet.contentView = nil }
+        main.close()
+        main.contentView = nil
+        main.toolbar = nil
     }
 
     func attachedSheet(to main: NSWindow, model: UpdatesViewModel) async throws -> NSWindow {
