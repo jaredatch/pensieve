@@ -2,7 +2,7 @@ import XCTest
 @testable import Pensieve
 
 final class WebLinkPolicyTests: XCTestCase {
-    func testEditorNavigationPopupAndPreviewAgreeOnExternalURLs() throws {
+    func testEditorNavigationAndPreviewAgreeOnExternalURLs() throws {
         let cases = [
             ("http://example.com", true), ("HTTPS://example.com", true),
             ("file:///tmp/skill.md", false), ("mailto:a@example.com", false),
@@ -12,11 +12,10 @@ final class WebLinkPolicyTests: XCTestCase {
             let url = try XCTUnwrap(URL(string: link))
             let navigation = EditorNavigationPolicy.decision(for: url, navigationType: .linkActivated,
                                                              scheme: "pensieve-editor")
-            let popup = WebLinkPolicy.isWebURL(url)
             let preview = SkillPreviewLinkPolicy.decision(for: url, documentRelativePath: "SKILL.md",
                                                            files: ["SKILL.md", "references/x.md"])
-            XCTAssertEqual([navigation == .openExternally, popup, preview == .openWeb],
-                           [expected, expected, expected], "navigation, popup, preview: \(link)")
+            XCTAssertEqual([navigation == .openExternally, preview == .openWeb],
+                           [expected, expected], "navigation, preview: \(link)")
         }
     }
 }

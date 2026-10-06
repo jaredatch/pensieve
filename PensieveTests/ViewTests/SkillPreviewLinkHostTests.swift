@@ -14,6 +14,9 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         defer { fixture.window.close() }
         let link = try await findLink("Reference", in: fixture.host)
         try click(link, in: fixture.window)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Resolved file link must reach its owner") {
+            !selections.isEmpty
+        }
         XCTAssertEqual(selections, ["references/x.md"])
         XCTAssertTrue(external.isEmpty)
     }
@@ -123,14 +126,8 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         }
         try click(link, in: fixture.window)
         let editor = try await waitForEditor(in: fixture.host)
-        var text: String?
-        let contentScript = "window.Editor && window.Editor.getContent ? window.Editor.getContent() : null"
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Script source must load into its read-only editor") {
-            editor.evaluateJavaScript(contentScript) { result, _ in
-                text = result as? String
-            }
-            return text == "echo hi"
-        }
+        let text = await waitForEditorText("echo hi", in: editor, timeout: 3)
+        XCTAssertEqual(text, "echo hi", "Script source must load into its read-only editor")
         fixture.host.layoutSubtreeIfNeeded()
         XCTAssertEqual(selection.file, "scripts/x.sh")
         let mode = try XCTUnwrap(views(fixture.host).compactMap { $0 as? NSSegmentedControl }.first)
@@ -142,6 +139,60 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         XCTAssertEqual(rowTop, 0, accuracy: 1, "Linked script must put its file row at the viewport top")
     }
 
+    func testShortBundleLinkBackToSkillKeepsFileRowVisibleWithTallChrome() async throws {
+        let selection = PreviewFileSelection()
+        selection.file = "references/x.md"
+        let fixture = hostTab(markdown: "# Skill\n\n" + paragraphs,
+                              onSelectFile: { _ in }, openURL: { _ in XCTFail("Return link escaped") },
+                              selection: selection, otherMarkdown: "# Reference\n\n[Skill](../SKILL.md)",
+                              geometry: .init(height: 260, chromeHeight: 400))
+        defer { fixture.window.close() }
+        let link = try await findLink("Skill", in: fixture.host)
+        let scroller = try pageScroller(in: fixture.host)
+        let screenViewport = viewport(of: scroller, in: fixture.window)
+        scroller.contentView.scroll(to: NSPoint(x: 0, y: scrollRange(of: scroller)))
+        scroller.reflectScrolledClipView(scroller.contentView)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Return link must finish scrolling into view") {
+            fixture.host.layoutSubtreeIfNeeded()
+            return screenViewport.contains(link.accessibilityFrame())
+        }
+        XCTAssertGreaterThan(scroller.contentView.bounds.minY, 100, "Tall chrome must make the short file scroll")
+        try click(link, in: fixture.window)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Return link must load SKILL.md's long body") {
+            fixture.host.layoutSubtreeIfNeeded()
+            return selection.file == "SKILL.md" && self.elements(fixture.host).contains {
+                ($0.accessibilityValue() as? String) == "Skill"
+            }
+        }
+        let row = try filePicker(in: fixture.host)
+        // From a page too short to scroll the row to the top, scrolling clamps and the row stays visible.
+        XCTAssertTrue(screenViewport.insetBy(dx: 0, dy: -1).contains(row.accessibilityFrame()))
+    }
+
+    func testAnchorReaderScrollsEnclosingDetailPageToFirstDuplicate() async throws {
+        let paragraphs = (1...40).map { "Paragraph \($0). Filling the document." }.joined(separator: "\n\n")
+        let markdown = "[Jump](./SKILL.md#authoring-gate) [Missing](#missing)\n\n" + paragraphs
+            + "\n\n## Authoring gate\n\nFirst target\n\n" + paragraphs + "\n\n## Authoring gate\n\nSecond target"
+        let fixture = hostTab(markdown: markdown, onSelectFile: { _ in }, openURL: { _ in XCTFail("Anchor escaped") })
+        defer { fixture.window.close() }
+        let jump = try await findLink("Jump", in: fixture.host)
+        let scrollView = try XCTUnwrap(views(fixture.host).compactMap { $0 as? NSScrollView }.first)
+        XCTAssertEqual(scrollView.contentView.bounds.minY, 0, accuracy: 1)
+        let origin = scrollView.contentView.bounds.origin
+        try click(try await findLink("Missing", in: fixture.host), in: fixture.window)
+        fixture.host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(scrollView.contentView.bounds.origin, origin, "Missing anchors do not move the page")
+        try click(jump, in: fixture.window)
+        await TestWait.until(timeout: .seconds(3), failureMessage: "Anchor must move the enclosing detail scroller") {
+            scrollView.contentView.bounds.minY > 100
+        }
+        XCTAssertGreaterThan(scrollView.contentView.bounds.minY, 100, "Same-document file fragment must scroll")
+        let first = try XCTUnwrap(elements(fixture.host).first { ($0.accessibilityValue() as? String) == "First target" })
+        let frame = first.accessibilityFrame()
+        let viewport = scrollView.convert(scrollView.bounds, to: nil)
+        let screenViewport = fixture.window.convertToScreen(viewport)
+        XCTAssertTrue(screenViewport.intersects(frame), "First duplicate must be visible after jumping")
+    }
 }
 
 extension SkillPreviewLinkHostTests {
@@ -170,7 +221,7 @@ extension SkillPreviewLinkHostTests {
         }
         try click(link, in: fixture.window)
         await waitForReference(in: fixture.host, selection: selection)
-        // Loading the text precedes the yielded scroll; wait for the link's visible result too.
+        // Wait for the link's visible result as well as the selected document.
         let row = try filePicker(in: fixture.host)
         await TestWait.until(timeout: .seconds(3), failureMessage: "Linked file row must finish scrolling into view") {
             fixture.host.layoutSubtreeIfNeeded()
@@ -196,6 +247,25 @@ extension SkillPreviewLinkHostTests {
         return try XCTUnwrap(editor)
     }
 
+    private func waitForEditorText(_ expected: String, in editor: WKWebView, timeout: TimeInterval) async -> String? {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            var evaluationFinished = false
+            var text: String?
+            editor.evaluateJavaScript(
+                "window.Editor && window.Editor.getContent ? window.Editor.getContent() : null"
+            ) { result, _ in
+                text = result as? String
+                evaluationFinished = true
+            }
+            while !evaluationFinished, Date() < deadline { try? await Task.sleep(for: .milliseconds(10)) }
+            guard evaluationFinished else { return nil }
+            if text == expected { return text }
+            try? await Task.sleep(for: .milliseconds(10))
+        } while Date() < deadline
+        return nil
+    }
+
     private func pickFile(_ file: String, in host: NSView) throws {
         let menu = try XCTUnwrap(filePicker(in: host).menu)
         let item = try XCTUnwrap(menu.items.firstIndex { $0.title == file })
@@ -216,31 +286,6 @@ extension SkillPreviewLinkHostTests {
 
     private func viewport(of scroller: NSScrollView, in window: NSWindow) -> CGRect {
         window.convertToScreen(scroller.convert(scroller.bounds, to: nil))
-    }
-
-    func testAnchorReaderScrollsEnclosingDetailPageToFirstDuplicate() async throws {
-        let paragraphs = (1...40).map { "Paragraph \($0). Filling the document." }.joined(separator: "\n\n")
-        let markdown = "[Jump](./SKILL.md#authoring-gate) [Missing](#missing)\n\n" + paragraphs
-            + "\n\n## Authoring gate\n\nFirst target\n\n" + paragraphs + "\n\n## Authoring gate\n\nSecond target"
-        let fixture = hostTab(markdown: markdown, onSelectFile: { _ in }, openURL: { _ in XCTFail("Anchor escaped") })
-        defer { fixture.window.close() }
-        let jump = try await findLink("Jump", in: fixture.host)
-        let scrollView = try XCTUnwrap(views(fixture.host).compactMap { $0 as? NSScrollView }.first)
-        XCTAssertEqual(scrollView.contentView.bounds.minY, 0, accuracy: 1)
-        let origin = scrollView.contentView.bounds.origin
-        try click(try await findLink("Missing", in: fixture.host), in: fixture.window)
-        fixture.host.layoutSubtreeIfNeeded()
-        XCTAssertEqual(scrollView.contentView.bounds.origin, origin, "Missing anchors do not move the page")
-        try click(jump, in: fixture.window)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Anchor must move the enclosing detail scroller") {
-            scrollView.contentView.bounds.minY > 100
-        }
-        XCTAssertGreaterThan(scrollView.contentView.bounds.minY, 100, "Same-document file fragment must scroll")
-        let first = try XCTUnwrap(elements(fixture.host).first { ($0.accessibilityValue() as? String) == "First target" })
-        let frame = first.accessibilityFrame()
-        let viewport = scrollView.convert(scrollView.bounds, to: nil)
-        let screenViewport = fixture.window.convertToScreen(viewport)
-        XCTAssertTrue(screenViewport.intersects(frame), "First duplicate must be visible after jumping")
     }
 
     private func hostTab(markdown: String, onSelectFile: @escaping (String) -> Void, openURL: @escaping (URL) -> Void,

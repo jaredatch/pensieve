@@ -210,7 +210,6 @@ private enum HistoryAccessibility {
     }
 
     static func snapshot(windowTitle: String) -> Node? {
-        // HistoryAccessibility is @MainActor because AppKit expects main-actor reads.
         // Reading this process's own accessibility tree needs no Accessibility permission.
         guard let window = window(titled: windowTitle) else { return nil }
         return node(window)
