@@ -12,12 +12,9 @@ enum DeployPaths {
         let template = platform == .cursor
             ? cursorPath(directoryName: sentinel, projectPath: projectPath, userRulesDirectory: cursorUserRulesDirectory)
             : linkPath(directoryName: sentinel, platform: platform, projectPath: projectPath)
-        let bytes = Array(template.utf8)
-        guard let slot = bytes.indices.reversed().first(where: { bytes[$0...].starts(with: sentinel.utf8) }) else {
-            return nil
-        }
-        let prefix = bytes[..<slot]
-        let suffix = bytes[(slot + sentinel.utf8.count)...]
+        guard let slot = template.range(of: sentinel, options: .backwards) else { return nil }
+        let prefix = Array(template[..<slot.lowerBound].utf8)
+        let suffix = Array(template[slot.upperBound...].utf8)
         let path = Array(artifactPath.utf8)
         guard path.starts(with: prefix), path.suffix(suffix.count).elementsEqual(suffix),
               path.count > prefix.count + suffix.count else { return nil }

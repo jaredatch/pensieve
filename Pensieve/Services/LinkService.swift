@@ -115,7 +115,7 @@ final class LinkService: LinkServiceProtocol {
         guard platform.usesSymlinks, fileService.isSymlink(at: link) else { return false }
         let expected = targetPath(skill: skill, platform: platform, projectPath: projectPath)
         guard let actual = try? fileService.symlinkTarget(at: link) else { return false }
-        return actual.utf8.elementsEqual(expected.utf8)
+        return actual == expected
     }
 
     func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
@@ -136,7 +136,7 @@ final class LinkService: LinkServiceProtocol {
                 if fileService.isSymlink(at: link) {
                     let expected = targetPath(skill: skill, platform: platform, projectPath: nil)
                     let actual = try? fileService.symlinkTarget(at: link)
-                    if actual?.utf8.elementsEqual(expected.utf8) != true {
+                    if actual != expected {
                         broken.append(BrokenLink(
                             linkPath: link,
                             expectedTarget: expected,
@@ -153,11 +153,13 @@ final class LinkService: LinkServiceProtocol {
     /// Rejects a path component that could escape the intended skill root.
     /// Pure (no filesystem) so it is unit-testable hermetically; enforced in `link()`.
     static func validatePathComponent(_ component: String) throws {
-        guard !component.isEmpty,
+        guard let first = component.unicodeScalars.first,
+              ![.nonspacingMark, .spacingMark, .enclosingMark].contains(first.properties.generalCategory),
+              !component.unicodeScalars.contains(where: { $0.value == 0 }),
               component != ".",
               component != "..",
-              !component.utf8.contains(UInt8(ascii: "/")),
-              component.utf8.first != UInt8(ascii: "~") else {
+              !component.contains("/"),
+              !component.hasPrefix("~") else {
             throw LinkError.invalidPathComponent(component)
         }
     }

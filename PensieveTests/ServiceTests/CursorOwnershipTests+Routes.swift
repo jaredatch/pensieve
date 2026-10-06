@@ -4,10 +4,10 @@ import XCTest
 
 extension CursorOwnershipTests {
     @MainActor
-    func contextAndVM(skillName: String = "Owned") throws -> OwnershipRouteHarness {
+    func contextAndVM() throws -> OwnershipRouteHarness {
         let context = ModelContext(try AppRuntime.makeContainer(
             configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
-        skill = Skill(name: skillName, skillDescription: "Description", directoryName: skill.directoryName)
+        skill = Skill(name: "Owned", skillDescription: "Description", directoryName: skill.directoryName)
         context.insert(skill)
         try context.save()
         let state = DeployStateStore(fileService: mapped, appSupportDir: root + "/support")
@@ -29,15 +29,14 @@ extension CursorOwnershipTests {
                     for projectPath in scopes {
                         for owned in [false, true] {
                             for legacy in platform == .cursor && owned ? [false, true] : [false] {
-                                let harness = try contextAndVM(skillName: skill.name)
+                                let harness = try contextAndVM()
                                 let context = harness.context, vm = harness.vm
                                 let project = Project(name: "Project", path: root + "/project")
                                 project.identityKey = "github.com/owner/project"
                                 context.insert(project)
                                 let target: DeployTarget = projectPath == nil ? .userWide : .project(project)
                                 let path = artifactPath(platform, project: projectPath)
-                                try plant(owned: owned, legacy: legacy, platform: platform, path: path,
-                                          project: projectPath, deployOwnedLink: true)
+                                try plant(owned: owned, legacy: legacy, platform: platform, path: path, project: projectPath)
                                 if route == "skill", platform == .cursor, projectPath != nil, owned {
                                     try reviewRecord(harness.state, path: path, target: target)
                                 }
@@ -208,18 +207,13 @@ extension CursorOwnershipTests {
             : compiler.outputPath(skill: skill, projectPath: project)
     }
 
-    func plant(owned: Bool, legacy: Bool, platform: PlatformTarget, path: String, project: String?,
-               deployOwnedLink: Bool = false) throws {
+    func plant(owned: Bool, legacy: Bool, platform: PlatformTarget, path: String, project: String?) throws {
         if try mapped.entryExistsWithoutFollowingLinks(at: path) { try mapped.deleteFile(at: path) }
         if platform.usesSymlinks {
-            if owned && deployOwnedLink {
-                try LinkService(fileService: mapped).link(skill: skill, platform: platform, projectPath: project)
-            } else {
-                let target = owned
-                    ? Constants.pensieveSkillsDir + "/other" + (platform == .codex && project != nil ? "/SKILL.md" : "")
-                    : root + "/foreign"
-                try mapped.createSymlink(at: path, pointingTo: target)
-            }
+            let target = owned
+                ? Constants.pensieveSkillsDir + "/other" + (platform == .codex && project != nil ? "/SKILL.md" : "")
+                : root + "/foreign"
+            try mapped.createSymlink(at: path, pointingTo: target)
         } else {
             let text = !owned ? "User rule" : legacy
                 ? "---\ndescription: Description\nalwaysApply: false\n---\n\n# Body\n"

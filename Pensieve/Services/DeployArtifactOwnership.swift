@@ -43,14 +43,12 @@ struct DeployArtifactOwnership: DeployArtifactOwnershipChecking {
     }
 
     static func ownsLinkTarget(_ target: String, skillsDirectory: String, linksFile: Bool) -> Bool {
-        let prefix = (skillsDirectory + "/").utf8
-        guard skillsDirectory.utf8.first == UInt8(ascii: "/"), target.utf8.starts(with: prefix) else { return false }
-        let components = target.utf8.dropFirst(prefix.count).split(
-            separator: UInt8(ascii: "/"), omittingEmptySubsequences: false)
+        let prefix = skillsDirectory + "/"
+        guard skillsDirectory.hasPrefix("/"), target.hasPrefix(prefix) else { return false }
+        let components = target.dropFirst(prefix.count).split(separator: "/", omittingEmptySubsequences: false)
         guard components.count == (linksFile ? 2 : 1),
-              let name = components.first, !name.isEmpty,
-              !name.elementsEqual(".".utf8), !name.elementsEqual("..".utf8) else { return false }
-        return !linksFile || components.last?.elementsEqual("SKILL.md".utf8) == true
+              let name = components.first, !name.isEmpty, name != ".", name != ".." else { return false }
+        return !linksFile || components.last == "SKILL.md"
     }
 
     /// Metadata only: an absent or non-regular entry cannot need Cursor deployment history.
