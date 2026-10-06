@@ -158,22 +158,24 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         physicalSandbox: String? = nil
     ) {
         self.wrapped = wrapped
-        self.pathMappings = pathMappings.sorted { $0.logical.count > $1.logical.count }
+        self.pathMappings = pathMappings.sorted { $0.logical.utf8.count > $1.logical.utf8.count }
         self.physicalSandbox = physicalSandbox
     }
 
     private func physicalPath(for logicalPath: String) -> String {
         for mapping in pathMappings
-        where logicalPath == mapping.logical || logicalPath.hasPrefix(mapping.logical + "/") {
-            return mapping.physical + logicalPath.dropFirst(mapping.logical.count)
+        where logicalPath.utf8.elementsEqual(mapping.logical.utf8)
+            || logicalPath.utf8.starts(with: (mapping.logical + "/").utf8) {
+            return mapping.physical + String(bytes: logicalPath.utf8.dropFirst(mapping.logical.utf8.count), encoding: .utf8)!
         }
         return logicalPath
     }
 
     private func logicalPath(for physicalPath: String) -> String {
         for mapping in pathMappings
-        where physicalPath == mapping.physical || physicalPath.hasPrefix(mapping.physical + "/") {
-            return mapping.logical + physicalPath.dropFirst(mapping.physical.count)
+        where physicalPath.utf8.elementsEqual(mapping.physical.utf8)
+            || physicalPath.utf8.starts(with: (mapping.physical + "/").utf8) {
+            return mapping.logical + String(bytes: physicalPath.utf8.dropFirst(mapping.physical.utf8.count), encoding: .utf8)!
         }
         return physicalPath
     }
@@ -198,7 +200,7 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         guard let sandbox = physicalSandbox else {
             return physical
         }
-        let lexicalLeaf = physical.split(separator: "/", omittingEmptySubsequences: true).last
+        let lexicalLeaf = physical.utf8.split(separator: UInt8(ascii: "/")).last.flatMap { String(bytes: $0, encoding: .utf8) }
         let containmentPhysical = containmentSpelling(physical)
         let resolvedSandbox = (sandbox as NSString).resolvingSymlinksInPath
         guard lexicalLeaf != ".", lexicalLeaf != ".." else {
@@ -206,7 +208,7 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
             return resolvedSandbox + "/hermeticity-quarantine"
         }
         guard containmentPhysical != resolvedSandbox,
-              !containmentPhysical.hasPrefix(resolvedSandbox + "/") else {
+              !containmentPhysical.utf8.starts(with: (resolvedSandbox + "/").utf8) else {
             return physical
         }
         XCTFail("Hermeticity violation: unmapped path escaped the test sandbox: \(path) -> \(physical)")

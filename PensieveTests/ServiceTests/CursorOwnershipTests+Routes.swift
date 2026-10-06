@@ -4,10 +4,10 @@ import XCTest
 
 extension CursorOwnershipTests {
     @MainActor
-    func contextAndVM() throws -> OwnershipRouteHarness {
+    func contextAndVM(skillName: String = "Owned") throws -> OwnershipRouteHarness {
         let context = ModelContext(try AppRuntime.makeContainer(
             configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
-        skill = Skill(name: "Owned", skillDescription: "Description", directoryName: skill.directoryName)
+        skill = Skill(name: skillName, skillDescription: "Description", directoryName: skill.directoryName)
         context.insert(skill)
         try context.save()
         let state = DeployStateStore(fileService: mapped, appSupportDir: root + "/support")
@@ -19,35 +19,39 @@ extension CursorOwnershipTests {
     @MainActor
     func testAllRemovalRoutesPreserveForeignAndRemoveOwnedArtifacts() throws {
         var cases = 0
-        for route in ["single", "bulk", "category", "intent", "skill"] {
-            for platform in [PlatformTarget.claudeCode, .grok, .codex, .cursor, .openClaw, .hermes] {
-                let scopes: [String?] = platform.supportsProjectScope && route != "category"
-                    ? [nil, root + "/project"] : [route == "category" ? root + "/project" : nil]
-                if route == "category" && !platform.supportsProjectScope { continue }
-                for projectPath in scopes {
-                    for owned in [false, true] {
-                        for legacy in platform == .cursor && owned ? [false, true] : [false] {
-                            let harness = try contextAndVM()
-                            let context = harness.context, vm = harness.vm
-                            let project = Project(name: "Project", path: root + "/project")
-                            project.identityKey = "github.com/owner/project"
-                            context.insert(project)
-                            let target: DeployTarget = projectPath == nil ? .userWide : .project(project)
-                            let path = artifactPath(platform, project: projectPath)
-                            try plant(owned: owned, legacy: legacy, platform: platform, path: path, project: projectPath)
-                            if route == "skill", platform == .cursor, projectPath != nil, owned {
-                                try reviewRecord(harness.state, path: path, target: target)
+        for name in Self.ownershipSkillNames {
+            try useOwnershipSkill(named: name)
+            for route in ["single", "bulk", "category", "intent", "skill"] {
+                for platform in [PlatformTarget.claudeCode, .grok, .codex, .cursor, .openClaw, .hermes] {
+                    let scopes: [String?] = platform.supportsProjectScope && route != "category"
+                        ? [nil, root + "/project"] : [route == "category" ? root + "/project" : nil]
+                    if route == "category" && !platform.supportsProjectScope { continue }
+                    for projectPath in scopes {
+                        for owned in [false, true] {
+                            for legacy in platform == .cursor && owned ? [false, true] : [false] {
+                                let harness = try contextAndVM(skillName: skill.name)
+                                let context = harness.context, vm = harness.vm
+                                let project = Project(name: "Project", path: root + "/project")
+                                project.identityKey = "github.com/owner/project"
+                                context.insert(project)
+                                let target: DeployTarget = projectPath == nil ? .userWide : .project(project)
+                                let path = artifactPath(platform, project: projectPath)
+                                try plant(owned: owned, legacy: legacy, platform: platform, path: path,
+                                          project: projectPath, deployOwnedLink: true)
+                                if route == "skill", platform == .cursor, projectPath != nil, owned {
+                                    try reviewRecord(harness.state, path: path, target: target)
+                                }
+                                XCTAssertEqual(try vm.artifactIsOwned(skill: skill, platform: platform, target: target), owned)
+                                try removeByRoute(route, harness: harness, platform: platform, project: project, target: target)
+                                try verifyRemoval(owned: owned, platform: platform, path: path)
+                                cases += 1
                             }
-                            XCTAssertEqual(try vm.artifactIsOwned(skill: skill, platform: platform, target: target), owned)
-                            try removeByRoute(route, harness: harness, platform: platform, project: project, target: target)
-                            try verifyRemoval(owned: owned, platform: platform, path: path)
-                            cases += 1
                         }
                     }
                 }
             }
         }
-        XCTAssertEqual(cases, 97)
+        XCTAssertEqual(cases, 97 * Self.ownershipSkillNames.count)
     }
 
     @MainActor
@@ -204,13 +208,18 @@ extension CursorOwnershipTests {
             : compiler.outputPath(skill: skill, projectPath: project)
     }
 
-    func plant(owned: Bool, legacy: Bool, platform: PlatformTarget, path: String, project: String?) throws {
+    func plant(owned: Bool, legacy: Bool, platform: PlatformTarget, path: String, project: String?,
+               deployOwnedLink: Bool = false) throws {
         if try mapped.entryExistsWithoutFollowingLinks(at: path) { try mapped.deleteFile(at: path) }
         if platform.usesSymlinks {
-            let target = owned
-                ? Constants.pensieveSkillsDir + "/other" + (platform == .codex && project != nil ? "/SKILL.md" : "")
-                : root + "/foreign"
-            try mapped.createSymlink(at: path, pointingTo: target)
+            if owned && deployOwnedLink {
+                try LinkService(fileService: mapped).link(skill: skill, platform: platform, projectPath: project)
+            } else {
+                let target = owned
+                    ? Constants.pensieveSkillsDir + "/other" + (platform == .codex && project != nil ? "/SKILL.md" : "")
+                    : root + "/foreign"
+                try mapped.createSymlink(at: path, pointingTo: target)
+            }
         } else {
             let text = !owned ? "User rule" : legacy
                 ? "---\ndescription: Description\nalwaysApply: false\n---\n\n# Body\n"

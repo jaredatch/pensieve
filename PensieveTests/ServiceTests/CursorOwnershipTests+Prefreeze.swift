@@ -193,3 +193,104 @@ extension CursorOwnershipTests {
         }
     }
 }
+
+extension CursorOwnershipTests {
+    @MainActor
+    func testProjectRemovalCountsAndRemovesUnicodeLinkAndRuleFromLocalEvidence() throws {
+        for name in Self.ownershipSkillNames {
+            for evidence in ["state", "history"] {
+                try useOwnershipSkill(named: name)
+                let harness = try contextAndVM()
+                let project = Project(name: "Unicode project", path: root + "/\u{0301}project")
+                project.identityKey = "github.com/owner/unicode"
+                try files.createDirectory(at: project.path)
+                harness.context.insert(project)
+                for platform in [PlatformTarget.codex, .cursor] {
+                    harness.vm.deploy(skill: skill, platform: platform, target: .project(project), context: harness.context)
+                    XCTAssertNil(harness.vm.error, name.debugDescription)
+                }
+                if evidence == "history" {
+                    try harness.state.replaceAll([])
+                } else {
+                    for record in try harness.context.fetch(FetchDescriptor<DeployRecord>()) {
+                        harness.context.delete(record)
+                    }
+                }
+                try harness.context.save()
+                let paths = [PlatformTarget.codex, .cursor].map { artifactPath($0, project: project.path) }
+                let model = ProjectRemovalModel()
+                model.request(project, platformVM: harness.vm, context: harness.context)
+                XCTAssertNil(model.error)
+                XCTAssertEqual(model.preview?.artifactCount, 2, "\(name.debugDescription) / \(evidence)")
+                let result = model.confirm { project, preview in
+                    removeRegisteredProject(project, reconciler: CategoryReconciler(platformVM: harness.vm),
+                        manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest",
+                        platformVM: harness.vm, localMachineID: ProjectIntentHarness.localID,
+                        confirmedPreview: preview, context: harness.context)
+                }
+                XCTAssertFalse(result.hasFailures)
+                for path in paths { XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path)) }
+                XCTAssertTrue(try harness.state.read().records.isEmpty)
+                XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<Project>()), 0)
+            }
+        }
+    }
+
+    func testLiteralUnicodeStoreTargetsPreserveLookalikesAndPruneOwnedLinks() throws {
+        let storeRoot = root + "/caf\u{00e9}/skills"
+        let lookalike = root + "/cafe\u{0301}/skills"
+        let agentRoot = root + "/unicode-agent"
+        try files.createDirectory(at: storeRoot)
+        try files.createDirectory(at: agentRoot)
+        let foreign = agentRoot + "/foreign"
+        let owned = agentRoot + "/\u{0301}accent"
+        let foreignTarget = lookalike + "/gone"
+        try files.createSymlink(at: foreign, pointingTo: foreignTarget)
+        try files.createSymlink(at: owned, pointingTo: storeRoot + "/\u{0301}accent")
+        XCTAssertEqual(Data(try files.symlinkTarget(at: foreign).utf8), Data(foreignTarget.utf8))
+        let reconciler = DeployReconciler(fileService: files,
+            deployState: DeployStateStore(fileService: files, appSupportDir: root + "/unicode-support"),
+            pensieveSkillsDir: storeRoot, agentSkillDirs: [agentRoot], cursorRulesDir: root + "/unicode-rules")
+        XCTAssertEqual(reconciler.pruneDangling().removed, [owned])
+        XCTAssertFalse(try files.entryExistsWithoutFollowingLinks(at: owned))
+        XCTAssertEqual(Data(try files.symlinkTarget(at: foreign).utf8), Data(foreignTarget.utf8))
+    }
+
+    func testProjectWritersUseLiteralUnicodeComponentsAndRejectSlashBearingNames() throws {
+        let project = root + "/caf\u{00e9}"
+        try files.createDirectory(at: project)
+        let rule = project + "/\u{0301}interior/\u{0301}rule"
+        try files.writeFileInProject(at: rule, content: "Rule bytes", projectPath: project)
+        XCTAssertEqual(try files.readFile(at: rule), "Rule bytes")
+        let link = project + "/\u{0301}interior/\u{0301}link"
+        try files.createSymlinkInProject(at: link, pointingTo: rule, projectPath: project)
+        XCTAssertEqual(Data(try files.symlinkTarget(at: link).utf8), Data(rule.utf8))
+        let foreign = root + "/cafe\u{0301}/foreign"
+        XCTAssertThrowsError(try files.writeFileInProject(at: foreign, content: "Foreign", projectPath: project))
+        XCTAssertFalse(try files.entryExistsWithoutFollowingLinks(at: foreign))
+        XCTAssertTrue(ProjectDirectory.canAccess("/\u{0301}absolute"))
+        for invalid in ["", ".", "..", "a/b", "a/\u{0301}b", "~\u{0301}home"] {
+            let unsafe = Skill(name: "Unsafe", directoryName: invalid)
+            XCTAssertThrowsError(try LinkService(fileService: mapped).link(
+                skill: unsafe, platform: .codex, projectPath: project), invalid.debugDescription) { error in
+                guard case LinkError.invalidPathComponent = error else {
+                    return XCTFail("Expected invalid component, got \(error)")
+                }
+            }
+        }
+        try useOwnershipSkill(named: "caf\u{00e9}")
+        let links = LinkService(fileService: mapped)
+        let path = links.linkPath(skill: skill, platform: .claudeCode, projectPath: nil)
+        let expected = Constants.pensieveSkillsDir + "/caf\u{00e9}"
+        try links.link(skill: skill, platform: .claudeCode, projectPath: nil)
+        XCTAssertEqual(Data(try mapped.symlinkTarget(at: path).utf8), Data(expected.utf8))
+        XCTAssertTrue(links.isLinked(skill: skill, platform: .claudeCode, projectPath: nil))
+        XCTAssertTrue(links.validateAll(skills: [skill]).isEmpty)
+        try mapped.createSymlink(at: path, pointingTo: Constants.pensieveSkillsDir + "/cafe\u{0301}")
+        XCTAssertFalse(links.isLinked(skill: skill, platform: .claudeCode, projectPath: nil))
+        XCTAssertEqual(links.validateAll(skills: [skill]).map(\.linkPath), [path])
+        try links.link(skill: skill, platform: .claudeCode, projectPath: nil)
+        XCTAssertEqual(Data(try mapped.symlinkTarget(at: path).utf8), Data(expected.utf8))
+        XCTAssertTrue(try links.unlink(skill: skill, platform: .claudeCode, projectPath: nil))
+    }
+}

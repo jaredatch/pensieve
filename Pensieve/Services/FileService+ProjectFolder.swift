@@ -9,7 +9,7 @@ struct ProjectDirectory {
 
     /// User-wide operations are admitted; saved project paths must be absolute before disk access.
     static func canAccess(_ projectPath: String?) -> Bool {
-        projectPath?.hasPrefix("/") ?? true
+        projectPath.map { $0.utf8.first == UInt8(ascii: "/") } ?? true
     }
 }
 
@@ -58,9 +58,10 @@ extension FileServiceProtocol {
     /// The supplied writer stays private; callers pass content or a target to the bounded methods.
     private func writeInProject(at artifactPath: String, project: ProjectDirectory, write: () throws -> Void) throws {
         let projectPath = project.path
-        let prefix = projectPath.hasSuffix("/") ? projectPath : projectPath + "/"
-        guard artifactPath.hasPrefix(prefix) else { throw CocoaError(.fileWriteInvalidFileName) }
-        let components = artifactPath.dropFirst(prefix.count).split(separator: "/")
+        let prefix = (projectPath.utf8.last == UInt8(ascii: "/") ? projectPath : projectPath + "/").utf8
+        guard artifactPath.utf8.starts(with: prefix) else { throw CocoaError(.fileWriteInvalidFileName) }
+        let components = artifactPath.utf8.dropFirst(prefix.count).split(separator: UInt8(ascii: "/"))
+            .compactMap { String(bytes: $0, encoding: .utf8) }
         guard !components.isEmpty, components.allSatisfy({ $0 != "." && $0 != ".." }) else {
             throw CocoaError(.fileWriteInvalidFileName)
         }
@@ -120,7 +121,6 @@ extension FileService {
     }
 
     func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws {
-        let manager = FileManager.default
         let existing = try entryTypeWithoutFollowingLinks(at: linkPath)
         if let existing, existing != .symlink {
             throw SymlinkCreationError.occupiedPath(linkPath)
@@ -132,7 +132,10 @@ extension FileService {
                     throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [NSFilePathErrorKey: linkPath])
                 }
             }
-            try manager.createSymbolicLink(atPath: linkPath, withDestinationPath: targetPath)
+            // Foundation decomposes the destination's Unicode spelling. Ownership needs the literal target bytes.
+            if symlink(targetPath, linkPath) != 0 {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [NSFilePathErrorKey: linkPath])
+            }
         } catch {
             // Classify a non-link that won the create race; inconclusive lookup preserves the write error.
             if let occupant = try? entryTypeWithoutFollowingLinks(at: linkPath), occupant != .symlink {
@@ -165,7 +168,7 @@ final class ProjectDirectoryProbes: @unchecked Sendable {
         init(deadline: DispatchTime) { self.deadline = deadline; ready.enter() }
     }
     private let lock = NSLock()
-    private var flights: [String: Flight] = [:]
+    private var flights: [Data: Flight] = [:]
     private let now: () -> DispatchTime
     private let wait: (DispatchGroup, DispatchTime) -> DispatchTimeoutResult
 
@@ -178,7 +181,7 @@ final class ProjectDirectoryProbes: @unchecked Sendable {
     }
 
     func check(at path: String, probe: @escaping (String) throws -> Bool) throws -> Bool {
-        let key = path.split(separator: "/").joined(separator: "/")
+        let key = Data(path.utf8.split(separator: UInt8(ascii: "/")).joined(separator: [UInt8(ascii: "/")]))
         lock.lock()
         let flight: Flight
         let startsProbe: Bool

@@ -27,6 +27,14 @@ final class CursorOwnershipTests: XCTestCase {
 
     override func tearDownWithError() throws { try files.deleteDirectory(at: root) }
 
+    static let ownershipSkillNames = ["owned", "\u{0301}accent", "caf\u{00e9}", "cafe\u{0301}"]
+
+    func useOwnershipSkill(named name: String) throws {
+        skill = Skill(name: name.precomposedStringWithCanonicalMapping,
+                      skillDescription: "Description", directoryName: name)
+        try store.writeBody(directoryName: name, body: "# Body")
+    }
+
     func testForeignRuleDeployAndRemovalPreserveBytesInBothScopes() throws {
         for project: String? in [nil, root + "/project"] {
             let path = compiler.outputPath(skill: skill, projectPath: project)

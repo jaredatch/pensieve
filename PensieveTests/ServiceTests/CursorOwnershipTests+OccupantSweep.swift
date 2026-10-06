@@ -13,15 +13,18 @@ extension CursorOwnershipTests {
             [(platform, nil)] + (platform.supportsProjectScope ? [(platform, root + "/project")] : [])
         }
         var cases = 0
-        for (platform, project) in targets {
-            for occupant in Occupant.allCases {
-                for removing in [false, true] {
-                    try runOccupantCase(platform: platform, project: project, occupant: occupant, removing: removing)
-                    cases += 1
+        for name in Self.ownershipSkillNames {
+            try useOwnershipSkill(named: name)
+            for (platform, project) in targets {
+                for occupant in Occupant.allCases {
+                    for removing in [false, true] {
+                        try runOccupantCase(platform: platform, project: project, occupant: occupant, removing: removing)
+                        cases += 1
+                    }
                 }
             }
         }
-        XCTAssertEqual(cases, 320)
+        XCTAssertEqual(cases, 320 * Self.ownershipSkillNames.count)
         XCTAssertEqual(try files.readFile(at: root + "/marked-target.mdc"), "---\n# pensieve: managed\n---\nTarget")
     }
 
@@ -35,7 +38,11 @@ extension CursorOwnershipTests {
                 + "/" + skill.directoryName + (platform == .cursor ? ".mdc" : "")
             : path
         if try files.entryExistsWithoutFollowingLinks(at: physical) { try files.deleteFile(at: physical) }
-        try install(occupant, at: physical, linksFile: platform == .codex && project != nil)
+        if occupant == .ownedLink, platform.usesSymlinks {
+            try operate(platform: platform, project: project, removing: false)
+        } else {
+            try install(occupant, at: physical, linksFile: platform == .codex && project != nil)
+        }
         let before = try snapshot(physical)
         mapped.beforeRuleRead = occupant == .unreadable ? { _ in throw CocoaError(.fileReadNoPermission) } : nil
         let problem = try boundedArtifactOperation(fifo: occupant == .fifo ? physical : nil) {
@@ -46,7 +53,8 @@ extension CursorOwnershipTests {
             ? [.ownedLink, .brokenOwnedLink, .otherSkillLink].contains(occupant)
             : [.marked, .legacy].contains(occupant)
         let unknown = platform == .cursor && occupant == .unreadable
-        let label = "\(platform) / project=\(project != nil) / \(occupant) / removing=\(removing)"
+        let label = "\(skill.directoryName.debugDescription) / \(platform) / project=\(project != nil)"
+            + " / \(occupant) / removing=\(removing)"
         if unknown { assertCouldNotCheck(problem, path: path) } else if removing || owned || occupant == .absent {
             XCTAssertNil(problem, label)
         } else {
@@ -103,8 +111,9 @@ extension CursorOwnershipTests {
         case .ownedLink: return store + "/" + skill.directoryName + suffix
         case .brokenOwnedLink: return store + "/gone" + suffix
         case .otherSkillLink:
-            try files.writeFile(at: store + "/other/SKILL.md", content: "Other sentinel")
-            return store + "/other" + suffix
+            let other = skill.directoryName.decomposedStringWithCanonicalMapping + "-other"
+            try files.writeFile(at: store + "/" + other + "/SKILL.md", content: "Other sentinel")
+            return store + "/" + other + suffix
         case .foreignLink: return root + "/outside/skill"
         case .relativeLink: return "../relative"
         case .traversalLink: return store + "/alias/../outside" + suffix

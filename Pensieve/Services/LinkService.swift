@@ -115,7 +115,7 @@ final class LinkService: LinkServiceProtocol {
         guard platform.usesSymlinks, fileService.isSymlink(at: link) else { return false }
         let expected = targetPath(skill: skill, platform: platform, projectPath: projectPath)
         guard let actual = try? fileService.symlinkTarget(at: link) else { return false }
-        return actual == expected
+        return actual.utf8.elementsEqual(expected.utf8)
     }
 
     func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
@@ -136,7 +136,7 @@ final class LinkService: LinkServiceProtocol {
                 if fileService.isSymlink(at: link) {
                     let expected = targetPath(skill: skill, platform: platform, projectPath: nil)
                     let actual = try? fileService.symlinkTarget(at: link)
-                    if actual != expected {
+                    if actual?.utf8.elementsEqual(expected.utf8) != true {
                         broken.append(BrokenLink(
                             linkPath: link,
                             expectedTarget: expected,
@@ -156,8 +156,8 @@ final class LinkService: LinkServiceProtocol {
         guard !component.isEmpty,
               component != ".",
               component != "..",
-              !component.contains("/"),
-              !component.hasPrefix("~") else {
+              !component.utf8.contains(UInt8(ascii: "/")),
+              component.utf8.first != UInt8(ascii: "~") else {
             throw LinkError.invalidPathComponent(component)
         }
     }

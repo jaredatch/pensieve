@@ -79,7 +79,7 @@ final class DeployReconciler: DeployReconciling {
         let records = (try? deployState.read())?.records ?? []
         guard fileService.directoryExists(at: cursorRulesDir),
               let entries = try? fileService.listDirectory(at: cursorRulesDir) else { return result }
-        for entry in entries where entry.hasSuffix(".mdc") {
+        for entry in entries where entry.utf8.suffix(4).elementsEqual(".mdc".utf8) {
             let mdcPath = cursorRulesDir + "/" + entry
             guard let slug = DeployPaths.slug(artifactPath: mdcPath, platform: .cursor, projectPath: nil,
                                               cursorUserRulesDirectory: cursorRulesDir) else { continue }
