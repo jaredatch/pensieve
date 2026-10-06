@@ -16,6 +16,7 @@ final class UpdatesViewModel {
     var confirmedDriftSkillIDs: Set<UUID> = []
     var statuses: [UUID: UpdatesRowStatus] = [:]
     var isLoading = false
+    var hasLoadedRows = false
     var isApplying = false
     var recheckingSkillID: UUID?
     var isPresented = false
@@ -167,7 +168,7 @@ final class UpdatesViewModel {
         guard !library.libraryUnavailable else { return }
         if isPresented {
             guard !isApplying, let skillID else { return }
-            if isLoading {
+            if isLoading || !hasLoadedRows || loadError != nil {
                 // nil means the sheet was opened with all rows selected.
                 if initialSelection != nil { initialSelection?.insert(skillID) }
                 return
@@ -187,6 +188,7 @@ final class UpdatesViewModel {
     func reset() {
         cancel()
         rows = []
+        hasLoadedRows = false
         selectedSkillIDs = []
         confirmedDriftSkillIDs = []
         statuses = [:]

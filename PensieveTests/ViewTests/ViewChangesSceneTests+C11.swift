@@ -4,6 +4,41 @@ import XCTest
 @testable import Pensieve
 
 extension ViewChangesSceneTests {
+    func testListAppearanceStylesOnlyItsOwnTableOnce() async {
+        let window = makeWindow(id: "view-changes-own-table")
+        let root = NSView(frame: window.contentView?.bounds ?? .zero)
+        let unrelated = NSTableView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        let own = NSTableView(frame: NSRect(x: 220, y: 0, width: 200, height: 200))
+        unrelated.selectionHighlightStyle = .sourceList
+        own.selectionHighlightStyle = .sourceList
+        root.addSubview(unrelated) // Earlier in the window tree than the sidebar's table.
+        root.addSubview(own)
+        let row = NSView(frame: own.bounds)
+        own.addSubview(row)
+        row.addSubview(ViewChangesListAppearanceView(frame: .zero))
+        window.contentView = root
+        window.orderFront(nil)
+        defer { window.close() }
+        await drainAppearanceQueue()
+        XCTAssertEqual(own.selectionHighlightStyle, .none, "The hook must style its ancestor table")
+        XCTAssertEqual(unrelated.selectionHighlightStyle, .sourceList,
+                       "A different table earlier in the window tree must keep its own appearance")
+
+        own.selectionHighlightStyle = .regular
+        own.removeFromSuperview()
+        root.addSubview(own)
+        await drainAppearanceQueue()
+        XCTAssertEqual(own.selectionHighlightStyle, .regular,
+                       "Reattaching the same table must not repeat appearance configuration")
+        XCTAssertEqual(unrelated.selectionHighlightStyle, .sourceList)
+    }
+
+    private func drainAppearanceQueue() async {
+        let drained = expectation(description: "appearance queue drained")
+        DispatchQueue.main.async { drained.fulfill() }
+        await fulfillment(of: [drained], timeout: 5)
+    }
+
     func testNativeFileListSelectionUsesOnlyTheFrameHighlight() async throws {
         let fixture = try UpdateReviewFixture()
         defer { try? fixture.cleanup() }

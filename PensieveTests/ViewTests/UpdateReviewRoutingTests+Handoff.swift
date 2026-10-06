@@ -33,6 +33,8 @@ extension UpdateReviewRoutingTests {
         XCTAssertTrue(calls.values.isEmpty, "The window press must never run apply")
         XCTAssertNotNil(preview.selectedFile, "The window stays open after handing off")
 
+        await assertPendingHandoffs(fixture, routing, first: first, second: second.id, calls: calls)
+
         sheet.reset()
         routing.banner(for: first).onUpdate()
         sheet.load(context: fixture.context)
@@ -56,6 +58,55 @@ extension UpdateReviewRoutingTests {
 
         await assertApplyingHandoff(routing: routing, first: first.id, second: second.id,
                                    calls: calls, sync: (started, release), forwards: { opened.filter { $0 == "main" }.count })
+    }
+
+    private func assertPendingHandoffs(
+        _ fixture: UpdateReviewFixture, _ routing: UpdateReviewRouting,
+        first: Skill, second: UUID, calls: UpdateReviewRecorder<UUID>
+    ) async {
+        let sheet = routing.updates
+        sheet.reset()
+        routing.banner(for: first).onUpdate()
+        XCTAssertTrue(sheet.isPresented)
+        XCTAssertFalse(sheet.isLoading)
+        XCTAssertTrue(sheet.rows.isEmpty)
+        routing.window.onUpdate()
+        await sheet.loadAndReport(context: routing.context)
+        XCTAssertEqual(sheet.selectedSkillIDs, [first.id, second],
+                       "A hand-off before loading starts must join the pending initial selection")
+        XCTAssertTrue(calls.values.isEmpty, "Pre-load hand-offs never apply")
+        await assertLoadErrorHandoff(fixture: fixture, rows: sheet.rows, preview: routing.preview)
+    }
+
+    private func assertLoadErrorHandoff(
+        fixture: UpdateReviewFixture, rows: [UpdatesRow], preview: ViewChangesViewModel
+    ) async {
+        let loads = UpdateReviewRecorder<Bool>()
+        let applies = UpdateReviewRecorder<UUID>()
+        let sheet = UpdatesViewModel(rowLoader: { _ in
+            loads.append(true)
+            if loads.values.count == 1 { throw SkillUpdateFlowError.repositoryChanged }
+            return rows
+        }, applyOperation: { id, _, _, _, _, _ in
+            applies.append(id)
+            throw SkillUpdateFlowError.repositoryChanged
+        }, recheckOperation: { _, _ in throw SkillUpdateFlowError.skillNotFound })
+        var forwards = 0
+        let routing = UpdateReviewRouting(preview: preview, updates: sheet, library: fixture.library,
+                                         context: fixture.context, windows: { [] }, openWindow: { _ in forwards += 1 })
+        routing.presentUpdates(skillID: rows[0].id)
+        await sheet.loadAndReport(context: fixture.context)
+        XCTAssertNotNil(sheet.loadError, "The first real sheet load must fail")
+        XCTAssertFalse(sheet.isLoading)
+        let before = forwards
+        routing.window.onUpdate()
+        XCTAssertEqual(forwards, before + 1, "A failed sheet is still brought forward")
+        sheet.load(context: fixture.context) // The production Retry action.
+        await TestWait.until(failureMessage: "hand-off Retry did not load rows") { !sheet.isLoading }
+        XCTAssertNil(sheet.loadError)
+        XCTAssertEqual(sheet.selectedSkillIDs, Set(rows.map(\.id)),
+                       "A hand-off after a load error must remain selected when Retry loads rows")
+        XCTAssertTrue(applies.values.isEmpty, "A load-error hand-off and Retry never apply")
     }
 
     private func assertApplyingHandoff(routing: UpdateReviewRouting, first: UUID, second: UUID,
