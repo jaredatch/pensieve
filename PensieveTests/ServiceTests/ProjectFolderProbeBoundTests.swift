@@ -6,15 +6,15 @@ import XCTest
 @MainActor
 final class ProjectFolderProbeBoundTests: XCTestCase {
     func testBlockingFixtureHonorsHoldAndExplicitRelease() async throws {
-        XCTAssertGreaterThanOrEqual(TestWait.heldFixtureTimeoutSeconds, 2 * TestWait.hostedActionTimeoutSeconds,
-                                    "The held-fixture bound must cover both hosted readiness bounds")
+        XCTAssertGreaterThanOrEqual(ProjectFolderBlockingProbe().holdTimeoutSeconds, 2 * TestWait.hostedActionTimeoutSeconds,
+                                    "The default fixture hold must cover both hosted readiness bounds")
         for explicitlyRelease in [false, true] {
-            let gate = ProjectFolderBlockingProbe(
-                holdTimeoutSeconds: explicitlyRelease ? TestWait.heldFixtureTimeoutSeconds : 0.2 // upper-bound: Hold-expiry test.
-            )
+            let holdSeconds = explicitlyRelease ? TestWait.heldFixtureTimeoutSeconds : 0.2 // upper-bound: Hold-expiry test.
+            let gate = ProjectFolderBlockingProbe(holdTimeoutSeconds: holdSeconds)
             let path = "/nonexistent-pensieve-probe-\(UUID().uuidString)"
             gate.block(path)
             defer { gate.unblock() }
+            let completion = ProbeCompletion()
             let worker = Task {
                 typealias Timing = (started: TimeInterval, finished: TimeInterval)
                 return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Timing, Error>) in
@@ -23,7 +23,9 @@ final class ProjectFolderProbeBoundTests: XCTestCase {
                         let started = ProcessInfo.processInfo.systemUptime
                         do {
                             _ = try gate.probe(path)
-                            continuation.resume(returning: (started, ProcessInfo.processInfo.systemUptime))
+                            let finished = ProcessInfo.processInfo.systemUptime
+                            completion.record(finished)
+                            continuation.resume(returning: (started, finished))
                         } catch { continuation.resume(throwing: error) }
                     }
                 }
@@ -31,17 +33,22 @@ final class ProjectFolderProbeBoundTests: XCTestCase {
             await TestWait.until(failureMessage: "The fixture worker must enter its blocked probe") {
                 gate.count(path) == 1
             }
+            if explicitlyRelease {
+                // A negative observation window proves the worker stays held before release.
+                try await Task.sleep(for: .milliseconds(300))
+                XCTAssertNil(completion.finished, "The fixture worker must remain held before unblock")
+            }
             let releasedAt = ProcessInfo.processInfo.systemUptime
             if explicitlyRelease { gate.unblock() }
             let timing = try await worker.value
             if explicitlyRelease {
-                XCTAssertGreaterThanOrEqual(timing.finished, releasedAt, "The probe must stay held until explicit release")
                 XCTAssertLessThan(timing.finished - releasedAt, 1, "Explicit release must return promptly after unblock")
             } else {
                 let elapsed = timing.finished - timing.started
-                XCTAssertGreaterThanOrEqual(elapsed, 0.2, "An unreleased probe must honor its full 0.2-second hold")
-                XCTAssertLessThan(elapsed, TestWait.hostedActionTimeoutSeconds,
-                                  "The injected hold must expire within the shared bound")
+                XCTAssertGreaterThanOrEqual(elapsed, holdSeconds - 0.02,
+                                            "An unreleased probe must honor its hold within timer rounding")
+                XCTAssertLessThanOrEqual(elapsed, holdSeconds + 1,
+                                         "The injected hold must expire within one second of its deadline")
             }
         }
     }
@@ -110,4 +117,13 @@ final class ProjectFolderProbeBoundTests: XCTestCase {
         XCTAssertEqual(gate.count(h.otherProject.path), 1)
         XCTAssertFalse(files.fileExists(at: h.otherProject.path + "/.pensieve-project"))
     }
+}
+
+/// Worker completion is visible during the observation window without waiting on the main actor.
+private final class ProbeCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedFinish: TimeInterval?
+
+    var finished: TimeInterval? { lock.withLock { recordedFinish } }
+    func record(_ time: TimeInterval) { lock.withLock { recordedFinish = time } }
 }

@@ -33,7 +33,6 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
                              failureMessage: "The first mounted skill must finish its initial history read") {
             readProbe.contains(commit: first.installedOrigin?.installedCommit)
         }
-        XCTAssertTrue(readProbe.contains(commit: first.installedOrigin?.installedCommit))
         try await presentSheet(owner: owner, session: session, window: window)
 
         model.skill = second
@@ -43,8 +42,6 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
             window.attachedSheet == nil
                 && readProbe.contains(commit: second.installedOrigin?.installedCommit, windowCount: 1)
         }
-        XCTAssertTrue(window.attachedSheet == nil
-                && readProbe.contains(commit: second.installedOrigin?.installedCommit, windowCount: 1))
         XCTAssertFalse(session.showAllReadRows)
         XCTAssertEqual(session.requestedWindow, 1)
         XCTAssertNil(session.diff)
@@ -62,7 +59,7 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
                              failureMessage: "Changing local revision must refresh local edits once") {
             localProbe.calls == 1
         }
-        XCTAssertTrue(localProbe.calls == 1)
+        XCTAssertEqual(localProbe.calls, 1)
         XCTAssertEqual(readProbe.count, readCount)
         XCTAssertEqual(owner.currentRequest?.key, question)
         XCTAssertEqual(owner.currentSkillID, second.id)
@@ -120,7 +117,6 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
                              failureMessage: "Presenting history diff must mount its sheet") {
             window.attachedSheet != nil
         }
-        XCTAssertTrue(window.attachedSheet != nil)
     }
 
     private func sendClick(at point: NSPoint, to window: NSWindow) -> Bool {
@@ -192,7 +188,6 @@ extension InstalledSkillHistoryHostTests {
                              failureMessage: "The mounted history must display its initial read failure") {
             reads.count == 1 && owner.state == .failed("The repository couldn't be reached.")
         }
-        XCTAssertTrue(reads.count == 1 && owner.state == .failed("The repository couldn't be reached."))
         XCTAssertEqual(intents.values, [.appearance])
 
         fixture.unmount()
@@ -205,7 +200,6 @@ extension InstalledSkillHistoryHostTests {
                              failureMessage: "Remounting history must retry its read on appearance") {
             reads.count == 2
         }
-        XCTAssertTrue(reads.count == 2)
         XCTAssertEqual(reads.count, 2)
         XCTAssertEqual(intents.values, [.appearance, .appearance])
     }
@@ -229,7 +223,6 @@ extension InstalledSkillHistoryHostTests {
                              failureMessage: "The mounted history must display its initial read failure") {
             reads.count == 1 && owner.state == .failed("The repository couldn't be reached.")
         }
-        XCTAssertTrue(reads.count == 1 && owner.state == .failed("The repository couldn't be reached."))
         var pressed = HistoryAccessibility.pressButtonIfFound(
             titled: InstalledSkillHistoryPresentation.tryAgainTitle,
             in: fixture.host
@@ -243,7 +236,6 @@ extension InstalledSkillHistoryHostTests {
                              failureMessage: "The rendered Try again action must start its retry read") {
             reads.count == 2
         }
-        XCTAssertTrue(reads.count == 2)
         XCTAssertEqual(reads.count, 2)
         XCTAssertEqual(intents.values, [.appearance, .retry])
     }
@@ -266,14 +258,12 @@ extension InstalledSkillHistoryHostTests {
                              failureMessage: "The mounted history must display its initial read failure") {
             reads.count == 1 && owner.state == .failed("The repository couldn't be reached.")
         }
-        XCTAssertTrue(reads.count == 1 && owner.state == .failed("The repository couldn't be reached."))
         model.localRevision = UpstreamHistoryLocalRevision(appWriteRevision: 1, watcherEventSequence: 0)
 
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                              failureMessage: "Mounted local revision must send its refresh intent") {
             intents.values.count == 2
         }
-        XCTAssertTrue(intents.values.count == 2)
         XCTAssertEqual(reads.count, 1)
         XCTAssertEqual(intents.values, [.appearance, .mountedRefresh])
     }

@@ -123,7 +123,8 @@ final class SkillPreviewLayoutTests: XCTestCase {
         XCTAssertGreaterThan(firstLine.height, 0, "The rendered first line must expose its vertical bounds")
         XCTAssertGreaterThan(item.accessibilityRange(forLine: 2).length, 0, "The hosted item must wrap to at least three lines")
         let center = try bulletCenter(in: fixture.host, window: fixture.window, itemFrame: item.accessibilityFrame())
-        XCTAssertGreaterThanOrEqual(center, firstLine.midY, "The bullet center must be in the top half of the first line")
+        XCTAssertGreaterThanOrEqual(center, firstLine.midY + 0.5,
+                                    "The bullet center must sit at least 0.5 pt above the first line midpoint")
         XCTAssertLessThanOrEqual(center, firstLine.maxY, "The bullet center must be in the top half of the first line")
     }
 
