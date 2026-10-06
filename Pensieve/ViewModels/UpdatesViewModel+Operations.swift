@@ -2,9 +2,8 @@ import Foundation
 import SwiftData
 
 extension UpdatesViewModel {
-    func performLoad(context: ModelContext, operationID id: UUID) async {
+    func performLoad(container: ModelContainer, operationID id: UUID) async {
         guard operationID == id, !Task.isCancelled else { return }
-        let container = context.container
         let loader = rowLoader
         let task = Task.detached(priority: .userInitiated) {
             try Self.performUnlessCancelled { try loader(container) }
@@ -15,8 +14,6 @@ extension UpdatesViewModel {
             guard operationID == id, !Task.isCancelled else { return }
             rows = loaded
             let available = Set(loaded.map(\.id))
-            let skills = try context.fetch(FetchDescriptor<Skill>()).filter { available.contains($0.id) }
-            presentationSkills = Dictionary(uniqueKeysWithValues: skills.map { ($0.id, $0) })
             selectedSkillIDs = initialSelection.map { $0.intersection(available) } ?? available
             confirmedDriftSkillIDs.formIntersection(Set(loaded.map(\.id)))
             statuses = Dictionary(uniqueKeysWithValues: loaded.map { ($0.id, .idle) })
@@ -33,46 +30,77 @@ extension UpdatesViewModel {
                       presentationContext: ModelContext,
                       operationID id: UUID) async {
         var didMutate = false
-        defer { if didMutate { notifier() } }
+        defer { notifyAfterApplyIfNeeded(didMutate) }
         guard operationID == id, !Task.isCancelled else { return }
         for row in selectedRows {
             guard operationID == id, !Task.isCancelled else { return }
-            guard canSelect(row) else { continue }
             let confirmed = confirmedDriftSkillIDs.contains(row.id)
             guard !row.driftedLocally || confirmed else {
                 statuses[row.id] = .confirmationRequired
                 continue
             }
-            await performApply(row: row, confirmed: confirmed, container: container,
-                               presentationContext: presentationContext, operationID: id, onMutation: { didMutate = true })
+            if await performApply(
+                row: row,
+                confirmed: confirmed,
+                container: container,
+                presentationContext: presentationContext,
+                operationID: id
+            ) {
+                didMutate = true
+            }
         }
         guard operationID == id else { return }
-        isApplyingBatch = false
+        isApplying = false
         finishOperation(id)
     }
 
     private func performApply(row: UpdatesRow, confirmed: Bool, container: ModelContainer,
-                              presentationContext: ModelContext, operationID id: UUID, onMutation: @escaping () -> Void) async {
-        guard applyCoordinator.begin(row.id) else { return }
+                              presentationContext: ModelContext, operationID id: UUID) async -> Bool {
         statuses[row.id] = .updating
         let apply = applyOperation
         let bodyWriteRegistration = bodyWriteRegistration
         let task = Task.detached(priority: .userInitiated) {
             try Self.performUnlessCancelled {
-                try apply(row.id, row.upstreamCommit, row.upstreamTree, confirmed, bodyWriteRegistration, container)
+                try apply(
+                    row.id, row.upstreamCommit, row.upstreamTree, confirmed,
+                    bodyWriteRegistration, container
+                )
             }
         }
         backgroundCancel = { task.cancel() }
-        let result = await task.result
-        let status = UpdateReviewResult.apply(result).resolve(
-            row: row, context: presentationContext,
-            effects: UpdateReviewEffects(echo: echoRegistrar, notify: onMutation, invalidateEditorBody: invalidateEditorBody)
-        )
-        // Canonical-write effects still run after cancellation, but a retired session cannot publish a failure.
-        let retired = operationID != id || Task.isCancelled
-        let published: UpdatesRowStatus?
-        if case .success = result { published = status } else { published = retired || status == .idle ? nil : status }
-        applyCoordinator.finish(row: row, status: published, context: presentationContext)
+        do {
+            let completion = try await task.value
+            echoRegistrar([row.slug])
+            guard operationID == id, !Task.isCancelled else { return true }
+            applyCompletion(completion, context: presentationContext)
+            statuses[row.id] = .updated
+            selectedSkillIDs.remove(row.id)
+            return true
+        } catch {
+            let didMutate = error is SyncedStateMutationError
+            if didMutate { echoRegistrar([row.slug]) }
+            guard operationID == id, !Task.isCancelled else { return didMutate }
+            applyFailure(error, to: row)
+            return didMutate
+        }
+    }
+
+    private func applyFailure(_ error: Error, to row: UpdatesRow) {
+        if error as? SkillUpdateFlowError == .localEditsRequireConfirmation {
+            confirmedDriftSkillIDs.remove(row.id)
+            if let index = rows.firstIndex(where: { $0.id == row.id }),
+               !rows[index].driftedLocally {
+                rows[index] = rows[index].markedDrifted()
+            }
+            statuses[row.id] = .confirmationRequired
+        } else {
+            statuses[row.id] = .failed(message: Self.readable(error),
+                                       offersRecheck: Self.offersRecheck(error))
+        }
+    }
+
+    private func notifyAfterApplyIfNeeded(_ didMutate: Bool) {
+        if didMutate { notifier() }
     }
 
     func performRecheck(row: UpdatesRow, container: ModelContainer,
@@ -90,22 +118,25 @@ extension UpdatesViewModel {
             try Self.performUnlessCancelled { try recheck(row.id, container) }
         }
         backgroundCancel = { task.cancel() }
-        let result = await task.result
-        guard operationID == id, !Task.isCancelled else { return }
-        let status = UpdateReviewResult.recheck(result).resolve(
-            row: row, context: presentationContext,
-            effects: UpdateReviewEffects(echo: echoRegistrar, notify: notifier, invalidateEditorBody: invalidateEditorBody)
-        )
-        statuses[row.id] = status
-        if case .idle = status, case let .success(completion) = result {
-            if let refreshed = completion.row, let index = rows.firstIndex(where: { $0.id == row.id }) {
+        do {
+            let completion = try await task.value
+            guard operationID == id, !Task.isCancelled else { return }
+            Self.applyRecheckCompletion(completion, context: presentationContext)
+            if let checkError = completion.checkError {
+                statuses[row.id] = .failed(message: checkError, offersRecheck: true)
+            } else if let refreshed = completion.row,
+               let index = rows.firstIndex(where: { $0.id == row.id }) {
                 rows[index] = refreshed
+                statuses[row.id] = .idle
             } else {
                 rows.removeAll { $0.id == row.id }
                 selectedSkillIDs.remove(row.id)
                 confirmedDriftSkillIDs.remove(row.id)
                 statuses[row.id] = nil
             }
+        } catch {
+            guard operationID == id, !Task.isCancelled else { return }
+            statuses[row.id] = .failed(message: Self.readable(error), offersRecheck: true)
         }
         finishOperation(id)
     }
@@ -128,8 +159,11 @@ extension UpdatesViewModel {
         backgroundCancel = nil
     }
 
-    static func applyCompletion(_ completion: SkillUpdateCompletion, context: ModelContext) {
-        guard let skill = try? Self.findSkill(completion.skillID, context: context) else { return }
+    private func applyCompletion(_ completion: SkillUpdateCompletion,
+                                 context: ModelContext) {
+        guard let skill = try? context.fetch(FetchDescriptor<Skill>()).first(where: {
+            $0.id == completion.skillID
+        }) else { return }
         skill.name = completion.name
         skill.skillDescription = completion.skillDescription
         skill.installedOriginData = completion.installedOriginData
@@ -137,8 +171,11 @@ extension UpdatesViewModel {
         skill.resetUpdateCheckState()
     }
 
-    static func applyRecheckCompletion(_ completion: SkillUpdateRecheckCompletion, context: ModelContext) {
-        guard let skill = try? Self.findSkill(completion.skillID, context: context) else { return }
+    static func applyRecheckCompletion(_ completion: SkillUpdateRecheckCompletion,
+                                       context: ModelContext) {
+        guard let skill = try? context.fetch(FetchDescriptor<Skill>()).first(where: {
+            $0.id == completion.skillID
+        }) else { return }
         skill.updateAvailable = completion.updateAvailable
         skill.lastCheckedAt = completion.lastCheckedAt
         skill.lastCheckedHead = completion.lastCheckedHead

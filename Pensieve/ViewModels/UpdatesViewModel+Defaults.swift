@@ -10,15 +10,6 @@ extension UpdatesViewModel {
             { try UpdatesViewModel.defaultRowLoader(service: updateCheckService, container: $0) }
         }
 
-        var previewRowLoader: UpdateReviewOperations.PreviewRowLoader {
-            { id, container in
-                let context = ModelContext(container)
-                guard let skill = try UpdatesViewModel.findSkill(id, context: context),
-                      UpdatesViewModel.isEligibleForUpdates(skill) else { return nil }
-                return try UpdatesViewModel.makeRow(skill: skill, driftedLocally: updateCheckService.driftedLocally(skill: skill))
-            }
-        }
-
         var applyOperation: ApplyOperation {
             { skillID, expectedCommit, expectedTree, allowOverwrite, registration, container in
                 try UpdatesViewModel.defaultApplyOperation(
@@ -36,15 +27,10 @@ extension UpdatesViewModel {
             }
         }
 
-        var diffOperation: DiffOperation {
-            { skillID, expectedCommit, expectedTree, container in
-                try UpdatesViewModel.defaultDiffOperation(
-                    skillInstallService: skillInstallService,
-                    skillID: skillID,
-                    expectedCommit: expectedCommit,
-                    expectedTree: expectedTree,
-                    container: container
-                )
+        var diffOperation: UpdateReviewOperations.DiffOperation {
+            { row, container in
+                try UpdatesViewModel.defaultDiffOperation(skillInstallService: skillInstallService,
+                                                          row: row, container: container)
             }
         }
 
@@ -93,7 +79,9 @@ extension UpdatesViewModel {
         container: ModelContainer
     ) throws -> SkillUpdateCompletion {
         let context = ModelContext(container)
-        guard let skill = try findSkill(request.skillID, context: context) else { throw SkillUpdateFlowError.skillNotFound }
+        guard let skill = try context.fetch(FetchDescriptor<Skill>()).first(where: {
+            $0.id == request.skillID
+        }) else { throw SkillUpdateFlowError.skillNotFound }
         guard skill.upstreamCommit == request.expectedCommit,
               skill.upstreamTree == request.expectedTree else {
             throw SkillUpdateFlowError.repositoryChanged
@@ -123,17 +111,17 @@ extension UpdatesViewModel {
 
     nonisolated static func defaultDiffOperation(
         skillInstallService: SkillInstallService,
-        skillID: UUID,
-        expectedCommit: String,
-        expectedTree: String,
+        row: UpdatesRow,
         container: ModelContainer
     ) throws -> PinnedSkillDiff {
         let context = ModelContext(container)
-        guard let skill = try findSkill(skillID, context: context) else { throw SkillUpdateFlowError.skillNotFound }
-        guard skill.upstreamCommit == expectedCommit,
-              skill.upstreamTree == expectedTree else {
+        guard let skill = try findSkill(row.id, context: context) else { throw SkillUpdateFlowError.skillNotFound }
+        guard skill.installedOrigin?.installedCommit == row.installedCommit,
+              skill.upstreamCommit == row.upstreamCommit,
+              skill.upstreamTree == row.upstreamTree else {
             throw SkillUpdateFlowError.repositoryChanged
         }
+        guard isEligibleForUpdates(skill) else { throw SkillUpdateFlowError.missingPinnedUpdate }
         return try skillInstallService.previewUpdate(PinnedSkillUpdate(skill: skill))
     }
 
@@ -144,7 +132,9 @@ extension UpdatesViewModel {
     ) throws -> SkillUpdateRecheckCompletion {
         try service.check(skillID: skillID, context: ModelContext(container))
         let context = ModelContext(container)
-        guard let skill = try findSkill(skillID, context: context) else { throw SkillUpdateFlowError.skillNotFound }
+        guard let skill = try context.fetch(FetchDescriptor<Skill>()).first(where: {
+            $0.id == skillID
+        }) else { throw SkillUpdateFlowError.skillNotFound }
         let row: UpdatesRow?
         if isEligibleForUpdates(skill) {
             let drifted = try service.driftedLocally(skill: skill)

@@ -93,8 +93,8 @@ private final class ComparisonReader {
 
     private func modeChange(_ old: ComparisonOpenedFile?, _ new: ComparisonOpenedFile?) -> FileTreeChange.Content? {
         guard let old, let new else { return nil }
-        let before = UInt32(old.initial.st_mode & 0o7777)
-        let after = UInt32(new.initial.st_mode & 0o7777)
+        let before = UInt32(old.initial.st_mode & 0o777)
+        let after = UInt32(new.initial.st_mode & 0o777)
         return before == after ? nil : .modeOnly(old: before, new: after)
     }
 

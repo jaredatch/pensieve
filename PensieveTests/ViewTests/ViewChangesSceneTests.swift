@@ -16,7 +16,7 @@ final class ViewChangesSceneTests: XCTestCase {
         let gate = TestWait.Gate(owner: self)
         let cancellation = UpdateReviewRecorder<Bool>()
         let model = ViewChangesViewModel(library: fixture.library,
-            operations: fixture.operations(rows: [row], diff: { _, _, _, _ in
+            operations: fixture.operations(rows: [row], diff: { _, _ in
             started.signal()
             try gate.wait()
             cancellation.append(Task.isCancelled)
@@ -26,7 +26,7 @@ final class ViewChangesSceneTests: XCTestCase {
         // The production lifecycle bridge observes AppKit's actual close, also on the macOS 14 fallback.
         let window = makeWindow(id: "closing")
         window.contentView = NSHostingView(rootView: ViewChangesView(model: model, library: fixture.library,
-                                                                    onClose: { window.performClose(nil) })
+                                                                    onUpdate: {})
             .modelContainer(fixture.container))
         window.orderFront(nil)
         defer { window.close() }
@@ -54,7 +54,8 @@ final class ViewChangesSceneTests: XCTestCase {
             model.open(skillID: skill.id, context: fixture.context)
             await TestWait.until(failureMessage: "geometry preview did not load") { model.state != .loading }
             let representation = NSHostingSceneRepresentation {
-                ViewChangesScene(model: model, library: fixture.library, container: fixture.container)
+                ViewChangesScene(model: model, library: fixture.library,
+                                 updates: fixture.sheet(rows: [row]), container: fixture.container)
             }
             NSApp.addSceneRepresentation(representation)
             representation.environment.openWindow(id: WindowPolicy.changesWindowID)

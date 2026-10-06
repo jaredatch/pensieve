@@ -140,7 +140,6 @@ final class SyncNudgeTests: XCTestCase {
                     }
                 }
             },
-            diffOperation: { _, _, _, _ in throw SkillUpdateFlowError.skillNotFound },
             recheckOperation: { _, _ in throw SkillUpdateFlowError.skillNotFound },
             notifier: fixture.counter.notify,
             echoRegistrar: { fixture.library.noteAppAuthoredBodies(directoryNames: $0) },

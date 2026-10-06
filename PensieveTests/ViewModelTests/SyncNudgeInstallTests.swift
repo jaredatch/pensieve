@@ -271,7 +271,6 @@ extension SyncNudgeTests {
                     installedOriginData: Data("canceled-origin".utf8), updatedAt: Date()
                 )
             },
-            diffOperation: { _, _, _, _ in throw SkillUpdateFlowError.skillNotFound },
             recheckOperation: { _, _ in throw SkillUpdateFlowError.skillNotFound },
             notifier: {
                 nudgeCount += 1

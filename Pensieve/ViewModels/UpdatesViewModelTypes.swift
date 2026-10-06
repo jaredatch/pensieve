@@ -41,7 +41,6 @@ enum UpdatesRowStatus: Equatable {
     case updating
     case updated
     case failed(message: String, offersRecheck: Bool)
-    case failedAfterReplacement(message: String)
 }
 
 struct SkillUpdateCompletion: Equatable {

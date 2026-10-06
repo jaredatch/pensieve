@@ -4,7 +4,7 @@ import SwiftUI
 struct ViewChangesView: View {
     @Bindable var model: ViewChangesViewModel
     @Bindable var library: SkillLibraryViewModel
-    let onClose: () -> Void
+    let onUpdate: () -> Void
     @Environment(\.modelContext) private var context
     @Environment(\.openURL) private var openURL
 
@@ -15,17 +15,6 @@ struct ViewChangesView: View {
         } detail: {
             VStack(spacing: 0) {
                 separator
-                if let message = model.applyMessage {
-                    Label(message, systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .padding(Spacing.sm)
-                }
-                if model.canRecheck && model.applyMessage != nil {
-                    Button("Re-check") { model.recheck(context: context, library: library) }
-                        .accessibilityIdentifier("changes-recheck")
-                        .padding(Spacing.sm)
-                }
                 content
             }
             .navigationTitle(model.row.map { "Changes to \($0.skillName)" } ?? "View Changes")
@@ -38,14 +27,7 @@ struct ViewChangesView: View {
         .frame(minWidth: DesignTokens.changesWindowWidth,
                minHeight: DesignTokens.changesWindowHeight - DesignTokens.changesToolbarHeight)
         .background(ViewChangesWindowLifecycle(onClose: model.close))
-        .alert("Replace your local edits?", isPresented: $model.asksToReplaceLocalEdits) {
-            Button("Cancel", role: .cancel) { replaceLocalEdits(false) }
-                .accessibilityIdentifier("changes-replacement-cancel")
-            Button("Replace and Update", role: .destructive) { replaceLocalEdits(true) }
-                .accessibilityIdentifier("changes-replace")
-        } message: {
-            Text("Updating replaces your local copy of this skill, including its local edits.")
-        }
+
     }
 
     private var sidebar: some View {
@@ -58,18 +40,23 @@ struct ViewChangesView: View {
                 .padding(.top, DesignTokens.changesSidebarHeaderTop)
                 .padding(.bottom, DesignTokens.changesSidebarHeaderBottom)
             }
-            ScrollView {
-                LazyVStack(spacing: DesignTokens.changesFileRowSpacing) {
-                    ForEach(model.files, id: \.path) { file in
-                        ViewChangesFileButton(file: file, selected: file.path == model.selectedFilePath,
-                                              action: { model.selectFile(path: file.path) },
-                                              moveSelection: model.moveFileSelection)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: (file.path as NSString).deletingLastPathComponent.isEmpty
-                                ? DesignTokens.changesFileRowHeight : DesignTokens.changesNestedFileRowHeight)
-                    }
+            List(selection: Binding(get: { model.selectedFilePath }, set: { path in
+                if let path { model.selectFile(path: path) }
+            })) {
+                ForEach(model.files, id: \.path) { file in
+                    ViewChangesFileRow(file: file, selected: file.path == model.selectedFilePath)
+                        .padding(.vertical, DesignTokens.changesFileRowSpacing / 2)
+                        .tag(file.path)
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(ViewChangesPresentation.accessibilityLabel(file))
+                        .accessibilityIdentifier("changes-file-" + file.path)
                 }
             }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(ViewChangesListAppearance())
         }
         .padding(.horizontal, DesignTokens.changesSidebarInset * 2)
         .accessibilityIdentifier("changes-files")
@@ -90,11 +77,8 @@ struct ViewChangesView: View {
             .disabled(model.row?.compareURL == nil)
             .accessibilityIdentifier("changes-github")
         }
-        if model.isApplying {
-            ToolbarItem(id: "changes-progress", placement: .primaryAction) { ProgressView().controlSize(.small) }
-        }
         ToolbarItem(id: "changes-update", placement: .primaryAction) {
-            Button("Update") { model.requestUpdate(library: library, context: context, onSuccess: onClose) }
+            Button("Update", action: onUpdate)
                 .controlSize(.large)
                 .font(DesignTokens.changesButton)
                 .buttonStyle(.borderedProminent)
@@ -132,7 +116,7 @@ struct ViewChangesView: View {
         case let .failed(message):
             EmptyStateView("Couldn't Load Changes", description: message) {
                 if model.canRecheck {
-                    Button("Re-check") { model.recheck(context: context, library: library) }
+                    Button("Re-check") { model.recheck(context: context) }
                         .accessibilityIdentifier("changes-recheck")
                 } else {
                     Button("Retry") { retry() }.accessibilityIdentifier("changes-retry")
@@ -173,7 +157,4 @@ struct ViewChangesView: View {
         model.retry(context: context, folderRevisions: library.folderChangeRevisions)
     }
 
-    private func replaceLocalEdits(_ replace: Bool) {
-        model.confirmReplacement(replace, library: library, context: context, onSuccess: onClose)
-    }
 }

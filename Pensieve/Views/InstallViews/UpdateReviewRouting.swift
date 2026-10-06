@@ -24,7 +24,18 @@ struct UpdateReviewRouting {
         UpdatesView(model: updates, onViewChanges: { presentChanges(skillID: $0.id) })
     }
 
+    var window: ViewChangesView {
+        ViewChangesView(model: preview, library: library, onUpdate: {
+            guard preview.canUpdate, let skillID = preview.requestedSkillID else { return }
+            presentUpdates(skillID: skillID)
+        })
+    }
+
     func presentUpdates(skillID: UUID? = nil) {
+        let currentWindows = windows()
+        let main = WindowPolicy.mainWindow(among: currentWindows)
+        WindowPolicy.showMainWindow(among: currentWindows) { openWindow("main") }
+        guard updates.isPresented || main?.attachedSheet == nil else { return }
         updates.present(selecting: skillID, library: library)
     }
 

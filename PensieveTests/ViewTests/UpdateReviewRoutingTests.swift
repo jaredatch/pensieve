@@ -65,8 +65,8 @@ final class UpdateReviewRoutingTests: XCTestCase {
         let started = DispatchSemaphore(value: 0)
         let finished = DispatchSemaphore(value: 0)
         let cancelled = UpdateReviewRecorder<Bool>()
-        let (sheet, preview) = fixture.review(rows: rows, diff: { id, _, _, _ in
-            if id == first.id {
+        let (sheet, preview) = fixture.review(rows: rows, diff: { request, _ in
+            if request.id == first.id {
                 started.signal()
                 try gate.wait()
                 cancelled.append(Task.isCancelled)

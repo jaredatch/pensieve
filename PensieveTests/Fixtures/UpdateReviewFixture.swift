@@ -40,34 +40,28 @@ final class UpdateReviewFixture {
     }
 
     func operations(rows: [UpdatesRow], preview: PinnedSkillDiff = preview(),
-                    diff: UpdatesViewModel.DiffOperation? = nil,
-                    apply: UpdatesViewModel.ApplyOperation? = nil,
+                    diff: UpdateReviewOperations.DiffOperation? = nil,
                     recheck: UpdatesViewModel.RecheckOperation? = nil) -> UpdateReviewOperations {
-        UpdateReviewOperations(rowLoader: { _ in rows }, previewRowLoader: { id, _ in rows.first { $0.id == id } },
-                               applyOperation: apply ?? { _, _, _, _, _, _ in
-            throw SkillUpdateFlowError.repositoryChanged
-        }, diffOperation: diff ?? { _, _, _, _ in preview }, recheckOperation: recheck ?? { _, _ in
+        UpdateReviewOperations(diffOperation: { row, container in
+            guard rows.contains(where: { $0.id == row.id }) else { throw SkillUpdateFlowError.missingPinnedUpdate }
+            return try diff?(row, container) ?? preview
+        }, recheckOperation: recheck ?? { _, _ in
             throw SkillUpdateFlowError.skillNotFound
         })
     }
 
-    func sheet(rows: [UpdatesRow], diff: UpdatesViewModel.DiffOperation? = nil,
-               apply: UpdatesViewModel.ApplyOperation? = nil) -> UpdatesViewModel {
-        sheet(operations: operations(rows: rows, diff: diff, apply: apply), coordinator: SkillUpdateApplyCoordinator())
+    func sheet(rows: [UpdatesRow], apply: UpdatesViewModel.ApplyOperation? = nil) -> UpdatesViewModel {
+        UpdatesViewModel(rowLoader: { _ in rows }, applyOperation: apply ?? { _, _, _, _, _, _ in
+            throw SkillUpdateFlowError.repositoryChanged
+        }, recheckOperation: { _, _ in
+            throw SkillUpdateFlowError.skillNotFound
+        })
     }
 
-    func review(rows: [UpdatesRow], diff: UpdatesViewModel.DiffOperation? = nil,
+    func review(rows: [UpdatesRow], diff: UpdateReviewOperations.DiffOperation? = nil,
                 apply: UpdatesViewModel.ApplyOperation? = nil) -> (UpdatesViewModel, ViewChangesViewModel) {
-        let operations = operations(rows: rows, diff: diff, apply: apply)
-        let coordinator = SkillUpdateApplyCoordinator()
-        return (sheet(operations: operations, coordinator: coordinator),
-                ViewChangesViewModel(library: library, operations: operations, applyCoordinator: coordinator))
-    }
-
-    private func sheet(operations: UpdateReviewOperations, coordinator: SkillUpdateApplyCoordinator) -> UpdatesViewModel {
-        UpdatesViewModel(rowLoader: operations.rowLoader, applyOperation: operations.applyOperation,
-                         diffOperation: operations.diffOperation, recheckOperation: operations.recheckOperation,
-                         applyCoordinator: coordinator)
+        (sheet(rows: rows, apply: apply),
+         ViewChangesViewModel(library: library, operations: operations(rows: rows, diff: diff)))
     }
 
     nonisolated static func preview() -> PinnedSkillDiff {

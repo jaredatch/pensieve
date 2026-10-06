@@ -62,8 +62,7 @@ extension UpdatesViewModelTests {
             skillInstallService: service
         )
         let row = try UpdatesViewModel.makeRow(skill: fixture.skill, driftedLocally: false)
-        let review = UpdateReviewOperations(rowLoader: operations.rowLoader, previewRowLoader: operations.previewRowLoader,
-            applyOperation: operations.applyOperation, diffOperation: operations.diffOperation,
+        let review = UpdateReviewOperations(diffOperation: operations.diffOperation,
             recheckOperation: operations.recheckOperation)
         let (_, library) = makeRealReviewOperations(fixture: fixture, service: service)
         let window = ViewChangesViewModel(library: library, operations: review)

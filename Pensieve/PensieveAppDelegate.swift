@@ -67,7 +67,7 @@ final class PensieveAppDelegate: NSObject, NSApplicationDelegate {
     ) -> Bool {
         // A minimized main window is not "visible" to AppKit; restore it rather than open a second one.
         WindowPolicy.showMainWindow(among: sender.windows) {
-            if !flag { runtime?.openMainWindow() }
+            runtime?.openMainWindow()
         }
         sender.activate(ignoringOtherApps: true)
         return true

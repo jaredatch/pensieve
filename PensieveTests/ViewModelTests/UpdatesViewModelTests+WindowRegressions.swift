@@ -19,30 +19,4 @@ extension UpdatesViewModelTests {
         XCTAssertTrue(window.canUpdate, "An unrelated broken folder must never enter this preview's drift check")
     }
 
-    func testSheetFailureAfterReplacementInvalidatesTheEditorBody() async throws {
-        let fixture = try prepareRealPinnedUpdate()
-        let failingManifest = CrashManifest(wrapped: ManifestService(fileService: fileService), failurePoint: .beforeUpsert)
-        let service = SkillInstallService(
-            gitService: GitService(fileService: fileService), credentialStore: InMemoryCredentialStore(),
-            fileService: fileService, scratchRoot: tempDir + "/sheet-failure", storeRoot: fixture.storeRoot,
-            manifestService: failingManifest, lockPath: tempDir + "/sync.lock",
-            remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) }
-        )
-        let (operations, library) = makeRealReviewOperations(fixture: fixture, service: service)
-        let row = try UpdatesViewModel.makeRow(skill: fixture.skill, driftedLocally: false)
-        let sheet = UpdatesViewModel(rowLoader: operations.rowLoader, applyOperation: operations.applyOperation,
-                                    diffOperation: operations.diffOperation, recheckOperation: operations.recheckOperation,
-                                    bodyWriteRegistration: operations.bodyWriteRegistration)
-        let routing = UpdateReviewRouting(
-            preview: ViewChangesViewModel(library: library,
-                operations: operations, applyCoordinator: sheet.applyCoordinator), updates: sheet,
-                                          library: library, context: context, openWindow: { _ in })
-        routing.presentUpdates(skillID: fixture.skill.id)
-        await sheet.loadAndReport(context: context)
-        let before = library.reloadToken
-        await sheet.applySelectedAndReport(context: context)
-        guard case .failedAfterReplacement = sheet.status(for: row) else { return XCTFail("Expected post-write failure") }
-        XCTAssertTrue(library.readBody(fixture.skill).contains("fresh body"), "Replacement actually happened")
-        XCTAssertGreaterThan(library.reloadToken, before, "The sheet must invalidate Detail's body after replacement failure")
-    }
 }

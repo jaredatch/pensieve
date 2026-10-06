@@ -39,11 +39,10 @@ struct ContentView: View {
     }
     init(
         installService: SkillInstallServiceProtocol,
-        updatesOperations: UpdatesViewModel.DefaultOperations,
         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
         echoRegistrar: @escaping SyncWriteEchoRegistering = SyncWriteEchoRegistrar.suppressed,
         bodyWriteRegistration: SyncBodyWriteRegistration = .suppressed,
-        applyCoordinator: SkillUpdateApplyCoordinator? = nil,
+        updatesModel: UpdatesViewModel,
         machineDependencies: MachineObservabilityDependencies = .live
     ) {
         self.notifier = notifier
@@ -54,13 +53,7 @@ struct ContentView: View {
         _installVM = State(initialValue: SkillInstallViewModel(
             service: installService, notifier: notifier,
             echoRegistrar: echoRegistrar, bodyWriteRegistration: bodyWriteRegistration))
-        _updatesVM = State(initialValue: UpdatesViewModel(
-            rowLoader: updatesOperations.rowLoader,
-            applyOperation: updatesOperations.applyOperation,
-            diffOperation: updatesOperations.diffOperation,
-            recheckOperation: updatesOperations.recheckOperation,
-            notifier: notifier, echoRegistrar: echoRegistrar, bodyWriteRegistration: bodyWriteRegistration,
-            applyCoordinator: applyCoordinator))
+        _updatesVM = State(initialValue: updatesModel)
     }
     @Query private var skills: [Skill]
     @Query(sort: \Project.name) private var projects: [Project]

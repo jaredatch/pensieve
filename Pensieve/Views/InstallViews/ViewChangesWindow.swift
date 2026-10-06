@@ -5,6 +5,7 @@ import SwiftUI
 struct ViewChangesScene: Scene {
     let model: ViewChangesViewModel
     let library: SkillLibraryViewModel
+    let updates: UpdatesViewModel
     let container: ModelContainer
 
     var body: some Scene { configuredWindow }
@@ -22,7 +23,7 @@ struct ViewChangesScene: Scene {
 
     private var window: some Scene {
         Window("View Changes", id: WindowPolicy.changesWindowID) {
-            ViewChangesWindow(model: model, library: library)
+            ViewChangesWindow(model: model, library: library, updates: updates)
         }
         .modelContainer(container)
         .windowStyle(.hiddenTitleBar)
@@ -34,10 +35,10 @@ struct ViewChangesScene: Scene {
 struct ViewChangesWindow: View {
     @Bindable var model: ViewChangesViewModel
     @Bindable var library: SkillLibraryViewModel
-    @Environment(\.dismiss) private var dismiss
+    let updates: UpdatesViewModel
 
     var body: some View {
-        ViewChangesWindowContent(skillID: model.requestedSkillID, model: model, library: library, onClose: { dismiss() })
+        ViewChangesWindowContent(skillID: model.requestedSkillID, model: model, library: library, updates: updates)
     }
 
     /// Opening a preview looks up this skill once and leaves draft and sheet state alone.
@@ -53,12 +54,13 @@ private struct ViewChangesWindowContent: View {
     @Bindable var library: SkillLibraryViewModel
     @Environment(\.modelContext) private var context
     @Query private var skills: [Skill]
-    let onClose: () -> Void
+    let updates: UpdatesViewModel
+    @Environment(\.openWindow) private var openWindow
 
-    init(skillID: UUID?, model: ViewChangesViewModel, library: SkillLibraryViewModel, onClose: @escaping () -> Void) {
+    init(skillID: UUID?, model: ViewChangesViewModel, library: SkillLibraryViewModel, updates: UpdatesViewModel) {
         self.model = model
         self.library = library
-        self.onClose = onClose
+        self.updates = updates
         if let skillID {
             _skills = Query(filter: #Predicate<Skill> { $0.id == skillID })
         } else {
@@ -73,7 +75,8 @@ private struct ViewChangesWindowContent: View {
     }
 
     var body: some View {
-        ViewChangesView(model: model, library: library, onClose: onClose)
+        UpdateReviewRouting(preview: model, updates: updates, library: library, context: context,
+                            openWindow: { openWindow(id: $0) }).window
             .onAppear { validate() }
             .onChange(of: identities) { _, _ in validate() }
     }

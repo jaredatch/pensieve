@@ -46,8 +46,8 @@ final class ViewChangesViewModelTests: XCTestCase {
         let finished = DispatchSemaphore(value: 0)
         let cancelled = UpdateReviewRecorder<Bool>()
         let model = ViewChangesViewModel(library: fixture.library,
-            operations: fixture.operations(rows: rows, diff: { id, _, _, _ in
-            if id == first.id {
+            operations: fixture.operations(rows: rows, diff: { request, _ in
+            if request.id == first.id {
                 started.signal()
                 try gate.wait()
                 cancelled.append(Task.isCancelled)
@@ -122,8 +122,8 @@ final class ViewChangesViewModelTests: XCTestCase {
         for message in ["Authentication failed", "Network offline", "Repository moved", "Refused scripts/link"] {
             let calls = UpdateReviewRecorder<String>()
             let model = ViewChangesViewModel(library: fixture.library,
-                operations: fixture.operations(rows: [row], diff: { _, commit, tree, _ in
-                calls.append(commit + ":" + tree)
+                operations: fixture.operations(rows: [row], diff: { request, _ in
+                calls.append(request.upstreamCommit + ":" + request.upstreamTree)
                 if calls.values.count == 1 { throw PreviewFailure(message: message) }
                 return UpdateReviewFixture.preview()
             }))
@@ -155,65 +155,6 @@ final class ViewChangesViewModelTests: XCTestCase {
         XCTAssertTrue(calls.values.isEmpty)
         XCTAssertEqual(sheet.status(for: rows[1]), .confirmationRequired)
         XCTAssertEqual(sheet.status(for: rows[0]), .idle)
-    }
-
-    func testDraftCancellationPrecedesAnyReplacementQuestionOrApply() async throws {
-        for drifted in [true, false] {
-            let skill = try fixture.skill(drifted ? "draft-drifted" : "draft-clean")
-            let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: drifted)
-            let calls = UpdateReviewRecorder<UUID>()
-            let model = ViewChangesViewModel(library: fixture.library,
-                operations: fixture.operations(rows: [row], apply: { id, _, _, _, _, _ in
-                calls.append(id)
-                throw SkillUpdateFlowError.repositoryChanged
-            }))
-            fixture.library.setLastWrittenBody("old body\n", directoryName: skill.directoryName)
-            fixture.library.noteEditorChanged(skill, body: "unsaved draft")
-            var answer: ((UnsavedChangesChoice) -> Void)?
-            fixture.library.unsavedChangesPresenter = { _, resolve in answer = resolve }
-            model.open(skillID: skill.id, context: fixture.context)
-            await loaded(model)
-            XCTAssertTrue(fixture.library.hasUnsavedChanges)
-            XCTAssertNil(answer, "opening a preview must not leave the draft")
-            model.requestUpdate(library: fixture.library, context: fixture.context,
-                                onSuccess: { XCTFail("Cancelled update closed") })
-            XCTAssertNotNil(answer)
-            XCTAssertTrue(calls.values.isEmpty)
-            XCTAssertFalse(model.asksToReplaceLocalEdits)
-            answer?(.cancel)
-            XCTAssertFalse(model.asksToReplaceLocalEdits, "Cancel must not ask to replace local edits")
-            await Task.yield()
-            XCTAssertFalse(model.isPreparingUpdate)
-            XCTAssertFalse(model.isApplying, "Cancel must never reserve an apply")
-            XCTAssertTrue(fixture.library.hasUnsavedChanges)
-            XCTAssertTrue(calls.values.isEmpty)
-        }
-    }
-
-    func testDriftConfirmationDeclinePreservesBytesAndConfirmationAllowsApply() async throws {
-        let skill = try fixture.skill("drift")
-        let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: true)
-        let flags = UpdateReviewRecorder<Bool>()
-        let model = ViewChangesViewModel(library: fixture.library,
-            operations: fixture.operations(rows: [row], apply: { _, _, _, flag, _, _ in
-            flags.append(flag)
-            throw SkillUpdateFlowError.repositoryChanged
-        }))
-        model.open(skillID: skill.id, context: fixture.context)
-        await loaded(model)
-        model.requestUpdate(library: fixture.library, context: fixture.context, onSuccess: {})
-        XCTAssertTrue(model.asksToReplaceLocalEdits)
-        XCTAssertTrue(flags.values.isEmpty)
-        model.confirmReplacement(false, library: fixture.library, context: fixture.context, onSuccess: {})
-        XCTAssertTrue(flags.values.isEmpty)
-        XCTAssertEqual(try fixture.files.readFile(at: fixture.root + "/skills/drift/SKILL.md"), "old body\n")
-        model.requestUpdate(library: fixture.library, context: fixture.context, onSuccess: {})
-        model.asksToReplaceLocalEdits = false // SwiftUI dismisses an alert's binding before its button action.
-        model.confirmReplacement(true, library: fixture.library, context: fixture.context, onSuccess: {})
-        await TestWait.until(failureMessage: "confirmed apply did not finish") { !model.isApplying }
-        XCTAssertEqual(flags.values, [true])
-        XCTAssertEqual(model.applyMessage, SkillUpdateFlowError.repositoryChangedMessage)
-        XCTAssertTrue(model.canUpdate)
     }
 
     func testPresentationReasonsDistinguishBinarySizeBudgetAndModeWithoutInventingCounts() {

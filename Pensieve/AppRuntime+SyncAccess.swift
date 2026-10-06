@@ -1,16 +1,19 @@
 import SwiftData
 
 extension AppRuntime {
+    func makeUpdatesModel() -> UpdatesViewModel {
+        UpdatesViewModel(rowLoader: updatesViewModelOperations.rowLoader,
+                        applyOperation: updatesViewModelOperations.applyOperation,
+                        recheckOperation: updatesViewModelOperations.recheckOperation,
+                        notifier: syncStateNotifier, echoRegistrar: syncWriteEchoRegistrar,
+                        bodyWriteRegistration: syncBodyWriteRegistration)
+    }
+
     func makeViewChangesModel() -> ViewChangesViewModel {
         ViewChangesViewModel(library: library, operations: UpdateReviewOperations(
-            rowLoader: updatesViewModelOperations.rowLoader,
-            previewRowLoader: updatesViewModelOperations.previewRowLoader,
-            applyOperation: updatesViewModelOperations.applyOperation,
             diffOperation: updatesViewModelOperations.diffOperation,
-            recheckOperation: updatesViewModelOperations.recheckOperation,
-            notifier: syncStateNotifier, echoRegistrar: syncWriteEchoRegistrar,
-            bodyWriteRegistration: syncBodyWriteRegistration
-        ), applyCoordinator: updateApplyCoordinator)
+            recheckOperation: updatesViewModelOperations.recheckOperation
+        ))
     }
 
     func mainWindowAppeared() async {

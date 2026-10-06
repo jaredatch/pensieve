@@ -92,8 +92,9 @@ final class ScenarioRemovalTests: XCTestCase {
                           onLaunchRendered: @escaping () -> Void) -> NSHostingView<AnyView> {
         let content = ContentView(
             installService: runtime.updatesViewModelOperations.skillInstallService,
-            updatesOperations: runtime.updatesViewModelOperations, notifier: runtime.syncStateNotifier,
+            notifier: runtime.syncStateNotifier,
             echoRegistrar: runtime.syncWriteEchoRegistrar, bodyWriteRegistration: runtime.syncBodyWriteRegistration,
+            updatesModel: runtime.updates,
             machineDependencies: MachineObservabilityDependencies(
                 stateService: MachineStateService(), identity: MachineIdentity(appSupportDir: paths.appSupportDir),
                 root: paths.storeRoot, now: Date.init))

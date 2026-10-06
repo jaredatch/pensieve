@@ -15,12 +15,6 @@ extension UpdatesViewModelTests {
         let applyCalls = LockedCallRecorder()
         let model = makeModel(
             rows: rows,
-            diff: { id, _, _, _ in
-                diffCalls.append(id)
-                return PinnedSkillDiff(comparison: FileTreeComparison(changes: [
-                    FileTreeChange(path: "SKILL.md", kind: .modified, content: .text(old: "current", new: "upstream"))
-                ], unreadFileCount: 0, bytesRead: 0))
-            },
             recheck: { id, _ in
                 started.signal()
                 try gate.wait()
@@ -39,10 +33,14 @@ extension UpdatesViewModelTests {
         XCTAssertEqual(model.recheckingSkillID, rows[0].id)
         XCTAssertEqual(model.status(for: rows[0]), .updating)
 
-        let review = UpdateReviewOperations(rowLoader: model.rowLoader,
-            previewRowLoader: { id, _ in rows.first { $0.id == id } }, applyOperation: model.applyOperation,
-            diffOperation: model.diffOperation, recheckOperation: model.recheckOperation)
-        let window = ViewChangesViewModel(library: library, operations: review, applyCoordinator: model.applyCoordinator)
+        let review = UpdateReviewOperations(
+            diffOperation: { row, _ in
+                diffCalls.append(row.id)
+                return PinnedSkillDiff(comparison: FileTreeComparison(changes: [
+                    FileTreeChange(path: "SKILL.md", kind: .modified, content: .text(old: "current", new: "upstream"))
+                ], unreadFileCount: 0, bytesRead: 0))
+            }, recheckOperation: model.recheckOperation)
+        let window = ViewChangesViewModel(library: library, operations: review)
         window.open(skillID: rows[1].id, context: context)
         await TestWait.until(failureMessage: "independent window preview did not finish") { window.state != .loading }
         await model.applySelectedAndReport(context: context)

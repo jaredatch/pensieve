@@ -147,13 +147,11 @@ enum DesignTokens {
     static let changesWindowHeight: CGFloat = 660
     static let changesSidebarWidth: CGFloat = 240
     static let changesSidebarInset: CGFloat = 8
-    static let changesSidebarCornerRadius: CGFloat = 17
     static let changesSidebarHeaderTop: CGFloat = 4
     static let changesSidebarHeaderBottom: CGFloat = 6
     static let changesFileRowHeight: CGFloat = 28
     static let changesNestedFileRowHeight: CGFloat = 42
     static let changesFileRowCornerRadius: CGFloat = 10
-    static let changesFileRowVerticalPadding: CGFloat = 6
     static let changesFileRowHorizontalPadding: CGFloat = 10
     static let changesFileRowGap: CGFloat = 8
     static let changesFileRowSpacing: CGFloat = 2
@@ -163,7 +161,6 @@ enum DesignTokens {
     static let changesFileGlyphHeight: CGFloat = 16
     static let changesToolbarHeight: CGFloat = 59
     static let changesToolbarInset: CGFloat = 16
-    static let changesToolbarGap: CGFloat = 8
     static let changesTitleGap: CGFloat = 2
     static let changesGitHubButtonWidth: CGFloat = 128
     static let changesUpdateButtonWidth: CGFloat = 78

@@ -19,7 +19,6 @@ final class AppRuntime {
     let syncModel: SyncModel
     let scheduler: SyncScheduler
     let provenanceVM: SkillProvenanceViewModel
-    let updateApplyCoordinator = SkillUpdateApplyCoordinator()
     let updatesViewModelOperations: UpdatesViewModel.DefaultOperations
     let reconcileIntent: @MainActor (ModelContext) -> BatchResult
 
@@ -61,6 +60,7 @@ final class AppRuntime {
     @ObservationIgnored private var launchIngestRetryTask: Task<Void, Never>?
     @ObservationIgnored private var openMainWindowAction: (() -> Void)?
     @ObservationIgnored private(set) lazy var viewChanges = makeViewChangesModel()
+    @ObservationIgnored private(set) lazy var updates = makeUpdatesModel()
     @ObservationIgnored private(set) lazy var upstreamHistory = paths.makeUpstreamHistoryViewModel()
     @ObservationIgnored
     private(set) lazy var bootstrapTask: Task<Void, Never> = {

@@ -52,9 +52,21 @@ enum ViewChangesPresentation {
         case .tooLarge: return "This file is too large to show within the preview limits. View the change on GitHub."
         case .diffBudgetExhausted:
             return "The preview's shared diff budget ran out before this file could be shown. View the change on GitHub."
-        case let .modeOnly(oldExecutable, newExecutable):
-            return "File contents are unchanged. Executable permission changed from "
-                + "\(oldExecutable & 0o100 != 0 ? "on" : "off") to \(newExecutable & 0o100 != 0 ? "on" : "off")."
+        case let .modeOnly(before, after):
+            let difference = before ^ after
+            let executable: (UInt32, String)?
+            switch difference {
+            case 0o100: executable = (0o100, "Executable")
+            case 0o010: executable = (0o010, "Group executable")
+            case 0o001: executable = (0o001, "Other executable")
+            default: executable = nil
+            }
+            if let (bit, name) = executable {
+                return "File contents are unchanged. \(name) permission changed from "
+                    + "\(before & bit != 0 ? "on" : "off") to \(after & bit != 0 ? "on" : "off")."
+            }
+            return "File contents are unchanged. Permissions changed from "
+                + String(format: "%04o", before) + " to " + String(format: "%04o", after) + "."
         }
     }
 

@@ -3,72 +3,14 @@ import XCTest
 @testable import Pensieve
 
 extension ViewChangesViewModelTests {
-    func testOneApplyPerSkillSurvivesReopenAndIsVisibleToBothSurfaces() async throws {
-        for source in 0..<3 { try await exerciseSharedApply(source: source) }
-    }
-
-    private func exerciseSharedApply(source: Int) async throws {
-        let skill = try fixture.skill("shared-\(source)")
-        let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
-        let calls = UpdateReviewRecorder<UUID>()
-        let started = DispatchSemaphore(value: 0)
-        let finished = DispatchSemaphore(value: 0)
-        let gate = TestWait.Gate(owner: self)
-        let (sheet, window) = fixture.review(rows: [row], apply: { id, _, _, _, _, _ in
-            calls.append(id)
-            if calls.values.count == 1 {
-                started.signal()
-                try gate.wait()
-                finished.signal()
-            }
-            throw SkillUpdateFlowError.repositoryChanged
-        })
-        sheet.rows = [row]
-        sheet.selectedSkillIDs = [row.id]
-        window.open(skillID: skill.id, context: fixture.context)
-        await settled(window)
-        startApply(source: source, sheet: sheet, window: window)
-        let didStart = await TestWait.forSemaphore(started)
-        XCTAssertTrue(didStart)
-        XCTAssertEqual(sheet.status(for: row), .updating, "Either surface must show the running apply")
-        XCTAssertFalse(sheet.canApply)
-        XCTAssertTrue(window.isApplying)
-        XCTAssertFalse(window.canUpdate)
-        await sheet.applySelectedAndReport(context: fixture.context)
-        window.open(skillID: skill.id, context: fixture.context)
-        await settled(window)
-        XCTAssertTrue(window.isApplying, "Reopening must retain the shared apply")
-        let preview = window.state
-        sheet.reset()
-        XCTAssertEqual(window.state, preview)
-        XCTAssertTrue(window.isApplying, "Reset cannot release a worker still writing")
-        sheet.present(selecting: skill.id, library: fixture.library)
-        await sheet.loadAndReport(context: fixture.context)
-        XCTAssertEqual(sheet.status(for: row), .updating)
-        XCTAssertFalse(sheet.canApply)
-        window.requestUpdate(library: fixture.library, context: fixture.context, onSuccess: {})
-        gate.open()
-        let didFinish = await TestWait.forSemaphore(finished)
-        XCTAssertTrue(didFinish)
-        await TestWait.until(failureMessage: "shared apply did not settle") { !window.isApplying }
-        XCTAssertEqual(calls.values, [skill.id], "Only one operation may touch the vendored folder")
-    }
-
-    private func startApply(source: Int, sheet: UpdatesViewModel, window: ViewChangesViewModel) {
-        if source != 0 { sheet.applySelected(context: fixture.context) }
-        if source != 1 {
-            window.requestUpdate(library: fixture.library, context: fixture.context, onSuccess: {})
-        }
-    }
-
     func testRetiredSessionNeverStartsItsDetachedPreview() async throws {
         let first = try fixture.skill("retired")
         let second = try fixture.skill("current")
         let rows = try [first, second].map { try UpdatesViewModel.makeRow(skill: $0, driftedLocally: false) }
         let calls = UpdateReviewRecorder<UUID>()
         let model = ViewChangesViewModel(library: fixture.library,
-            operations: fixture.operations(rows: rows, diff: { id, _, _, _ in
-            calls.append(id)
+            operations: fixture.operations(rows: rows, diff: { request, _ in
+            calls.append(request.id)
             return UpdateReviewFixture.preview()
         }))
         model.open(skillID: first.id, context: fixture.context)
@@ -77,34 +19,6 @@ extension ViewChangesViewModelTests {
         // A main-actor barrier also lets the cancelled session finish its cleanup.
         await Task.yield()
         XCTAssertEqual(calls.values, [second.id], "Retired sessions must not start orphaned workers")
-    }
-
-    func testApplyFailureAndConfirmationRevalidateChangesMadeWhileApplying() async throws {
-        for confirmation in [false, true] {
-            let skill = try fixture.skill(confirmation ? "confirmation" : "failure")
-            let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
-            let started = DispatchSemaphore(value: 0)
-            let gate = TestWait.Gate(owner: self)
-            let model = ViewChangesViewModel(library: fixture.library,
-                operations: fixture.operations(rows: [row], apply: { _, _, _, _, _, _ in
-                started.signal()
-                try gate.wait()
-                throw confirmation ? SkillUpdateFlowError.localEditsRequireConfirmation : .repositoryChanged
-            }))
-            model.open(skillID: skill.id, context: fixture.context)
-            await settled(model)
-            model.requestUpdate(library: fixture.library, context: fixture.context, onSuccess: {})
-            let didStart = await TestWait.forSemaphore(started)
-            XCTAssertTrue(didStart)
-            skill.updatedAt = skill.updatedAt.addingTimeInterval(1)
-            model.validate(skills: [skill], folderRevisions: [skill.directoryName: 1], context: fixture.context)
-            gate.open()
-            await TestWait.until(failureMessage: "apply did not settle") { !model.isApplying }
-            guard case .stale = model.state else {
-                return XCTFail("A change during apply must retire the preview after it settles")
-            }
-            XCTAssertFalse(model.canUpdate)
-        }
     }
 
     func testRetryAfterFirstSkillFetchFails() async throws {
@@ -127,38 +41,16 @@ extension ViewChangesViewModelTests {
         XCTAssertNotNil(model.selectedFile, "Retry must remember the requested skill before its first fetch succeeds")
     }
 
-    func testUpdateUsesTheSkillAlreadyLoadedByOpen() async throws {
-        let skill = try fixture.skill("lookup-once")
-        let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
-        var fetches = 0
-        let model = ViewChangesViewModel(library: fixture.library,
-            operations: fixture.operations(rows: [row]), skillLookup: { _, _ in
-            fetches += 1
-            return skill
-        })
-        model.open(skillID: skill.id, context: fixture.context)
-        await settled(model)
-        model.requestUpdate(library: fixture.library, context: fixture.context, onSuccess: {})
-        XCTAssertEqual(fetches, 1, "Opening and requesting Update share one lookup before the settlement phase")
-        await TestWait.until(failureMessage: "apply did not settle") { !model.isApplying }
-    }
-
-    func testMovedOrMissingPinsOfferRecheckForPreviewAndApply() async throws {
+    func testMovedOrMissingPinsOfferRecheckForPreview() async throws {
         let skill = try fixture.skill("recheck")
         let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
         for error in [SkillUpdateFlowError.repositoryChanged, .missingPinnedUpdate] {
             let model = ViewChangesViewModel(library: fixture.library,
-                operations: fixture.operations(rows: [row], diff: { _, _, _, _ in throw error }))
+                operations: fixture.operations(rows: [row], diff: { _, _ in throw error }))
             model.open(skillID: skill.id, context: fixture.context)
             await settled(model)
             XCTAssertTrue(model.canRecheck, "Moved and missing pins need a fresh check")
-            let applying = ViewChangesViewModel(library: fixture.library, operations: fixture.operations(rows: [row],
-                apply: { _, _, _, _, _, _ in throw error }))
-            applying.open(skillID: skill.id, context: fixture.context)
-            await settled(applying)
-            applying.requestUpdate(library: fixture.library, context: fixture.context, onSuccess: {})
-            await TestWait.until(failureMessage: "apply refusal did not settle") { !applying.isApplying }
-            XCTAssertTrue(applying.canRecheck, "Apply refusals need the same Re-check action")
+
         }
     }
 

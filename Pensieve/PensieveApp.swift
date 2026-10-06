@@ -77,11 +77,10 @@ struct PensieveApp: App {
     static func makeContentView(runtime: AppRuntime) -> ContentView {
         ContentView(
             installService: runtime.updatesViewModelOperations.skillInstallService,
-            updatesOperations: runtime.updatesViewModelOperations,
             notifier: runtime.syncStateNotifier,
             echoRegistrar: runtime.syncWriteEchoRegistrar,
             bodyWriteRegistration: runtime.syncBodyWriteRegistration,
-            applyCoordinator: runtime.updateApplyCoordinator
+            updatesModel: runtime.updates
         )
     }
 
@@ -124,7 +123,8 @@ struct PensieveApp: App {
             }
         }
 
-        ViewChangesScene(model: runtime.viewChanges, library: runtime.library, container: runtime.container)
+        ViewChangesScene(model: runtime.viewChanges, library: runtime.library,
+                         updates: runtime.updates, container: runtime.container)
 
         Settings {
             SettingsView()

@@ -18,7 +18,6 @@ struct UpdatesView: View {
         }
         .frame(width: 760, height: 540)
         .task { model.load(context: context) }
-        .onDisappear { model.reset() }
     }
 
     private var header: some View {
@@ -86,7 +85,7 @@ struct UpdatesView: View {
     }
 
     private func close() {
-        model.reset()
+        model.cancel()
         dismiss()
     }
 }
@@ -173,16 +172,12 @@ private struct UpdatesRowView: View {
         case .updating:
             HStack(spacing: Spacing.sm) {
                 ProgressView().controlSize(.small)
-                Text(model.updatingLabel)
-                    .font(.caption).foregroundStyle(.secondary)
+                Text("Updating…").font(.caption).foregroundStyle(.secondary)
             }
         case .updated:
             Label("Updated", systemImage: "checkmark.circle.fill")
                 .font(.caption)
                 .foregroundStyle(.green)
-        case let .failedAfterReplacement(message):
-            Label("Files were replaced, but the update couldn't finish: " + message, systemImage: "exclamationmark.triangle")
-                .font(.caption).foregroundStyle(.red)
         case let .failed(message, offersRecheck):
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 Label(message, systemImage: "xmark.circle")
