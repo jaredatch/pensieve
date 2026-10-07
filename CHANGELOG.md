@@ -8,7 +8,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 - Pensieve is open source. The code lives at [github.com/jaredatch/pensieve](https://github.com/jaredatch/pensieve), and that's the place to report a bug or ask for something.
 - Pensieve has its own app icon at last, and its own glyph in the menu bar in place of the stock brain symbol.
-- A skill that's close to or over a platform's token budget now says so on its Overview tab.
+- Overview warns when a deployed skill's instructions are near or over one shared budget, set to 5,000 tokens by default.
 - About Pensieve now credits the open-source code Pensieve ships with, and shows each project's license.
 - View Changes opens its own window. It lists every file an update would change, with lines added and removed, and shows each one as an inline diff. Open it from a skill's update banner or from any row in the Updates sheet. Invisible characters show up as visible marks, so nothing can hide in a diff.
 

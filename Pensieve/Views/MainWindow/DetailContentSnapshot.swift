@@ -1,12 +1,12 @@
 import Foundation
 
 /// Every disk read the skill detail needs, loaded ONCE off the render path (PLAN-26 / 26.1): the body the
-/// Content tab renders, the raw-file token estimate, the bundle inventory (PLAN-34), and the deploy status
+/// Content tab renders, its token estimate, the bundle inventory (PLAN-34), and the deploy status
 /// of every installed platform for This Mac and for each registered project — the Deployments tab's
 /// switches and the Overview's Deployed stat. `body` reads this value and nothing else.
 struct DetailContentSnapshot: Equatable {
     var body: String = ""
-    /// Raw-file estimate (frontmatter included), exactly what `library.estimatedTokens` returns.
+    /// Body-only estimate (frontmatter excluded), exactly what `library.estimatedTokens` returns.
     var tokenCount: Int = 0
     var inventory: SkillBundleInventory = .empty
     /// Per installed platform (`deployablePlatforms(forProject: false)`), from `PlatformViewModel.isDeployed`.

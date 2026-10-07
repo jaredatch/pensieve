@@ -14,7 +14,7 @@ extension SkillLibraryViewModel {
     }
 
     func estimatedTokens(_ skill: Skill) -> Int {
-        skill.estimatedTokens(using: fileService)
+        TokenCounter.estimate(readBody(skill))
     }
 
     func noteAppAuthoredBody(_ skill: Skill, body: String) {

@@ -25,9 +25,9 @@ final class AddProjectSheetHostTests: XCTestCase {
         defer { window.close() }
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "The sheet must render the missing-folder reason",
-                            diagnostics: { self.sheetDiagnostics(host, model) }) {
+                            diagnostics: { self.sheetDiagnostics(host, model) }, {
             (try? self.renderedText(in: host).contains { $0.text.contains("Project folder is missing") }) == true
-        }
+        })
         try clickAdd(in: host, window: window)
         try await Task.sleep(for: .milliseconds(50))
         XCTAssertTrue(created.isEmpty)
@@ -44,9 +44,9 @@ final class AddProjectSheetHostTests: XCTestCase {
         }
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "The same sheet must render its corrected status",
-                            diagnostics: { self.sheetDiagnostics(host, model) }) {
+                            diagnostics: { self.sheetDiagnostics(host, model) }, {
             (try? self.renderedText(in: host).contains { $0.text.contains("Marker will be created on Add") }) == true
-        }
+        })
         try clickAdd(in: host, window: window)
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "Add must create the corrected project") { created.count == 1 }
@@ -103,9 +103,9 @@ final class AddProjectSheetHostTests: XCTestCase {
         defer { window.close() }
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "Initial caption",
-                            diagnostics: { self.sheetDiagnostics(host, model) }) {
+                            diagnostics: { self.sheetDiagnostics(host, model) }, {
             (try? self.renderedText(in: host).contains { $0.text.contains("Marker will be created") }) == true
-        }
+        })
         let initialHeight = host.fittingSize.height
         let started = expectation(description: "Pending disk probe")
         let release = DispatchSemaphore(value: 0)
@@ -120,9 +120,9 @@ final class AddProjectSheetHostTests: XCTestCase {
         await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "Current path shows neutral checking text",
-                            diagnostics: { self.sheetDiagnostics(host, model) }) {
+                            diagnostics: { self.sheetDiagnostics(host, model) }, {
             (try? self.renderedText(in: host).contains { $0.text.contains("Checking project folder") }) == true
-        }
+        })
         XCTAssertEqual(host.fittingSize.height, initialHeight, accuracy: 1,
                        "Pending and completed captions reserve the same status-line height")
         XCTAssertFalse(model.canSubmit, "The real sheet's Add binding is disabled while the current probe is pending")

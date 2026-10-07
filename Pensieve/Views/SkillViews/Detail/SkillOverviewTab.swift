@@ -9,10 +9,11 @@ struct SkillOverviewTab: View {
     let installedCount: Int
     let now: Date
     @State private var showsAllFiles = false
+    @AppStorage(SkillSizeBudgetSetting.storageKey) private var budget = SkillSizeBudgetSetting.value()
 
     var body: some View {
         let stats = SkillOverviewPresentation.stats(snapshot: snapshot, installedCount: installedCount,
-                                                    budgets: PlatformTokenBudgetSetting.values())
+                                                    budget: budget)
         let source = SkillOverviewPresentation.sourceRows(
             skill: skill, provenance: provenance, origin: skill.installedOrigin,
             homeDirectory: Constants.homeDirectory, now: now)

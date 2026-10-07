@@ -107,10 +107,4 @@ final class Skill {
         checkError = nil
     }
 
-    func estimatedTokens(using fileService: FileServiceProtocol) -> Int {
-        guard let path = SkillStore.safeSkillFile(
-                slug: directoryName, base: Constants.pensieveSkillsDir, fileService: fileService),
-              let body = try? fileService.readFile(at: path) else { return 0 }
-        return body.count / Constants.charsPerToken
-    }
 }

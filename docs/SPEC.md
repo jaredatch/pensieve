@@ -92,7 +92,6 @@ Claude Code, Grok, Cursor, Codex, OpenClaw, and Hermes ship today. Grok (`~/.gro
 | User-wide path | `~/.claude/skills/{name}/` → symlink → `~/.pensieve/skills/{name}/` |
 | Project-level path | `{project}/.claude/skills/{name}/` → symlink → `~/.pensieve/skills/{name}/` |
 | Format | Standard markdown (SKILL.md inside directory) |
-| Token budget | Advisory, default 2,500 tokens |
 
 Edits to the canonical SKILL.md are visible instantly — the symlink points to the same file.
 
@@ -104,7 +103,6 @@ Edits to the canonical SKILL.md are visible instantly — the symlink points to 
 | User-wide path | `~/.cursor/rules/{name}.mdc` |
 | Project-level path | `{project}/.cursor/rules/{name}.mdc` |
 | Format | `.mdc` with YAML-like frontmatter |
-| Token budget | Advisory, default 5,000 tokens |
 
 Generated `.mdc` format:
 ```
@@ -130,7 +128,6 @@ Freshness is checked by comparing the full generated output against the existing
 | User-wide path | `~/.codex/skills/{name}` → symlink → `~/.pensieve/skills/{name}` (whole directory) |
 | Project-level path | `{project}/agents/{name}.md` → symlink → `~/.pensieve/skills/{name}/SKILL.md` |
 | Format | Standard markdown |
-| Token budget | Unlimited |
 
 Codex deploys both user-wide and project-level. User-wide deploy is a whole-directory symlink at `~/.codex/skills/{name}` pointing at the canonical skill directory; project-level deploy writes a `{project}/agents/{name}.md` file symlink to the canonical `SKILL.md` when the user registers a project in Pensieve. The symlink target is scope-aware (directory vs. file).
 
@@ -226,7 +223,7 @@ Pensieve never auto-installs skill updates. Scheduled work detects and reports t
 
 ## Token Budget Validation
 
-Token counting uses **char/4 heuristic** (1 token ≈ 4 characters). Advisory, not enforced.
+One skill-size budget applies to every platform. It defaults to **5,000 tokens** and is configurable in Settings › Platforms › Skill Size. The estimate counts the `SKILL.md` body without frontmatter: characters divided by 4. Warnings are advisory and never block a deploy.
 
 | Status | Condition | UI |
 |--------|-----------|-----|
@@ -234,11 +231,9 @@ Token counting uses **char/4 heuristic** (1 token ≈ 4 characters). Advisory, n
 | Warning | > 80% through 100% of budget | Yellow triangle |
 | Exceeded | > 100% of budget | Red triangle and text |
 
-Default budgets: Claude Code 2,500, Grok 2,500, Cursor 5,000, Codex unlimited. User-configurable in Settings.
+The Overview tab's Context cost card warns only for skills deployed on this Mac, user-wide or in a registered project, on any platform. It says “near the 5,000-token budget” or “over the 5,000-token budget”, using the configured number and locale. Undeployed skills show no warning. A budget of 0 or less turns warnings off.
 
-The Overview tab's Context cost card shows a warning beside the raw-file token estimate. It compares the estimate with each platform's budget when the skill is deployed user-wide or in a registered project on this Mac. Undeployed skills and unlimited budgets show no warning.
-
-The card names the worst platform: Exceeded before Warning, then the smaller budget, then Settings order if budgets tie.
+A custom Claude Code budget carries over unless it is the old 2,500 default. Old Grok and Cursor budgets do not carry over. Once the user sets the shared budget, that value wins.
 
 ---
 
@@ -372,7 +367,7 @@ Add Skill from GitHub…, Check All Skills for Updates, and Check for Updates…
 - **Skill Updates:** Off, Daily, or Weekly (default Weekly) schedules detection on launch/foreground. Check Now runs against every installed skill immediately, even when the schedule is Off; File › Check All Skills for Updates does the same. Detection never applies an update.
 
 **Platforms tab:**
-- Token budgets per platform (Claude Code, Grok, Cursor, Codex)
+- One skill-size budget, default 5,000 tokens, for the `SKILL.md` body. Overview warnings apply only to local deployments and never block a deploy.
 - Platform path display for Claude Code, Grok, and Cursor (read-only)
 
 **GitHub tab:**

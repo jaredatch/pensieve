@@ -112,7 +112,9 @@ Multi-select skills and deploy, remove, or recompile in one pass. One failing it
 
 ### Token counts
 
-Every skill shows an estimated token count (a chars/4 heuristic) against a per-agent budget: 2,500 for Claude Code and Grok, 5,000 for Cursor, unlimited for Codex, all configurable in Settings › Platforms. It's advisory only. Nothing is ever blocked, you just get a yellow or red indicator when a skill is getting heavy. Handy once your library grows past what you can eyeball.
+The Overview tab shows the skill body's estimated token count: characters divided by 4, without frontmatter. One budget applies to every agent, defaulting to 5,000 tokens. Change it in Settings › Platforms › Skill Size.
+
+Skills deployed on this Mac, user-wide or in a registered project, show a yellow warning past 80% and a red warning past 100%. Undeployed skills never warn. Set the budget to 0 or less to turn warnings off. The budget never blocks a deploy.
 
 ### Installing from GitHub
 

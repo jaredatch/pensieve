@@ -152,7 +152,7 @@ final class DetailContentSnapshotTests: XCTestCase {
         let snapshot = DetailContentSnapshot.load(skill: skill, projects: [], library: library, platformVM: platformVM)
 
         XCTAssertEqual(snapshot.body, "# Body\n\nSnapshot text.")
-        XCTAssertEqual(snapshot.tokenCount, skill.estimatedTokens(using: fileService))
+        XCTAssertEqual(snapshot.tokenCount, 5)
 
         let revisionBefore = library.appWriteRevision
         library.noteAppAuthoredBody(skill, body: snapshot.body)
