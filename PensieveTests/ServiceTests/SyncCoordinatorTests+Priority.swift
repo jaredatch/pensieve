@@ -6,12 +6,17 @@ import XCTest
 extension SyncCoordinatorTests {
     func testRuntimeSyncPriorities() async throws {
         let fixture = try GitFailureFixture()
+        var cleanupRegistered = false
+        defer { if !cleanupRegistered { try? fixture.remove() } }
         try fixture.seedRepository()
         let release = TestWait.Gate(owner: self)
         let engine = BlockingEngine(release: release)
         let scheduler = SyncScheduler(debounceSeconds: 0, startAutomatically: false,
                                       backgroundSyncEnabled: { true })
-        let runtime = try AppRuntime(library: priorityLibrary(fixture), scheduler: scheduler,
+        let watcher = RecordingWatcher()
+        let notifications = Counter()
+        let library = priorityLibrary(fixture, watcher: watcher, notifier: notifications.notify)
+        let runtime = try AppRuntime(library: library, scheduler: scheduler,
                                      launchBackfill: { _ in }, postSyncConvergence: PriorityConvergence(),
                                      paths: fixture.paths, gitUsabilityProbe: { .usable },
                                      coordinatorConfigure: { coordinator in
@@ -20,12 +25,16 @@ extension SyncCoordinatorTests {
                                         machineStateService: InertMachineStateService())
         })
         registerPriorityCleanup(fixture: fixture, runtime: runtime, release: release)
+        cleanupRegistered = true
         await runtime.bootstrapTask.value
-        try await assertScheduledPriorities(runtime: runtime, fixture: fixture, engine: engine, release: release)
+        library.startWatching()
+        try await assertScheduledPriorities(runtime: runtime, fixture: fixture, engine: engine, release: release,
+                                            watcher: watcher, notifications: notifications)
     }
 
     private func assertScheduledPriorities(runtime: AppRuntime, fixture: GitFailureFixture,
-                                           engine: BlockingEngine, release: TestWait.Gate) async throws {
+                                           engine: BlockingEngine, release: TestWait.Gate,
+                                           watcher: RecordingWatcher, notifications: Counter) async throws {
         let scheduler = runtime.scheduler
         let triggers: [(String, () -> Void)] = [
             ("startup", { scheduler.launchIngestCompleted() }),
@@ -41,6 +50,8 @@ extension SyncCoordinatorTests {
             XCTAssertEqual(engine.qosClasses.last, QOS_CLASS_DEFAULT, "\(trigger.0) must retain default QoS")
             if trigger.0 == "startup" {
                 try fixture.files.writeFile(at: fixture.root + "/skills/example/SKILL.md", content: "changed during sync\n")
+                watcher.emit("example")
+                XCTAssertEqual(runtime.library.folderChangeRevisions["example"], 1, "watcher must deliver the store edit")
             }
             if trigger.0 == "nudge" {
                 await runtime.syncModel.syncNowAndReport()
@@ -49,16 +60,35 @@ extension SyncCoordinatorTests {
             }
             release.open()
             if trigger.0 == "startup" {
-                await TestWait.until(failureMessage: "startup did not settle") {
-                    engine.qosClasses.count > 1 || !scheduler.isSyncing
-                }
-                XCTAssertEqual(engine.qosClasses.count, 1, "incidental store notification must not add a fixture cycle")
+                await assertIncidentalNotificationDoesNotStartCycle(runtime: runtime, engine: engine,
+                                                                    notifications: notifications)
                 guard engine.qosClasses.count == 1 else { return }
             } else if trigger.0 != "nudge" {
                 await TestWait.until(failureMessage: "\(trigger.0) did not finish") { !scheduler.isSyncing }
             }
         }
         await assertManualPriorities(runtime: runtime, engine: engine, release: release)
+    }
+
+    private func assertIncidentalNotificationDoesNotStartCycle(
+        runtime: AppRuntime, engine: BlockingEngine, notifications: Counter
+    ) async {
+        await TestWait.until(failureMessage: "startup did not settle") {
+            engine.qosClasses.count > 1 || !runtime.scheduler.isSyncing
+        }
+        XCTAssertEqual(notifications.value, 1, "the watcher edit must produce an incidental store notification")
+        let extraCycle = expectation(description: "incidental notification starts a fixture cycle")
+        extraCycle.isInverted = true
+        let monitor = Task { @MainActor in
+            while !Task.isCancelled {
+                if engine.qosClasses.count > 1 { extraCycle.fulfill(); return }
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        await fulfillment(of: [extraCycle], timeout: 1) // upper-bound: Observe queued zero-delay nudges after startup finishes.
+        monitor.cancel()
+        await monitor.value
+        XCTAssertEqual(engine.qosClasses.count, 1, "incidental store notification must not add a fixture cycle")
     }
 
     private func assertManualPriorities(runtime: AppRuntime, engine: BlockingEngine, release: TestWait.Gate) async {
@@ -86,6 +116,8 @@ extension SyncCoordinatorTests {
     func testForcedLaunchPreflightKeepsDefaultPriority() async throws {
         for quarantined in [true, false] {
             let fixture = try GitFailureFixture()
+            var cleanupRegistered = false
+            defer { if !cleanupRegistered { try? fixture.remove() } }
             try fixture.seedRepository()
             let release = TestWait.Gate(owner: self)
             let engine = BlockingEngine(release: release)
@@ -105,6 +137,7 @@ extension SyncCoordinatorTests {
                                                 machineStateService: InertMachineStateService())
                 })
             registerPriorityCleanup(fixture: fixture, runtime: runtime, release: release)
+            cleanupRegistered = true
             await runtime.bootstrapTask.value
             runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext)
             await TestWait.until(failureMessage: "forced launch preflight did not enter the engine") {
@@ -122,10 +155,11 @@ extension SyncCoordinatorTests {
         }
     }
 
-    private func priorityLibrary(_ fixture: GitFailureFixture) -> SkillLibraryViewModel {
+    private func priorityLibrary(_ fixture: GitFailureFixture, watcher: RecordingWatcher = RecordingWatcher(),
+                                 notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed) -> SkillLibraryViewModel {
         SkillLibraryViewModel(skillStore: SkillStore(fileService: fixture.files, baseDir: fixture.paths.skillsDir),
-                              fileService: fixture.files, fileWatchService: PriorityWatcher(), manifestRoot: fixture.root,
-                              notifier: SyncStateNotifier.suppressed)
+                              fileService: fixture.files, fileWatchService: watcher, manifestRoot: fixture.root,
+                              notifier: notifier)
     }
 
     private func priorityRuntimeIsIdle(_ runtime: AppRuntime) -> Bool {
@@ -192,10 +226,4 @@ final class BlockingEngine: SyncEngineProtocol, @unchecked Sendable {
                           context: ModelContext) throws -> SyncOutcome {
         fatalError("unused")
     }
-}
-
-private final class PriorityWatcher: FileWatchServiceProtocol {
-    var onChange: (String) -> Void = { _ in }
-    func start() -> Bool { true }
-    func stop() {}
 }

@@ -37,8 +37,8 @@ struct SyncedStateMutationError: LocalizedError {
     }
 }
 
-/// Main-actor trigger coordinator. One Boolean carries all queued work, so any number of triggers while
-/// a cycle is running collapse into exactly one follow-up cycle.
+/// Main-actor trigger coordinator. Triggers coalesce into one follow-up cycle; pending manual and
+/// launch-preflight flags retain the priority and preference bypass needed when that work is admitted.
 @MainActor
 @Observable
 final class SyncScheduler {

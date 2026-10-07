@@ -77,7 +77,7 @@ final class AddProjectModel {
             guard !Task.isCancelled else { return }
             do { try await delay() } catch { return }
             guard !Task.isCancelled else { return }
-            let probe = BlockingWork.task {
+            let preview = await BlockingWork.run {
                 do {
                     try Task.checkCancellation()
                     try files.requireProjectDirectory(at: path)
@@ -86,11 +86,6 @@ final class AddProjectModel {
                 } catch {
                     return (Optional<ProjectIdentity>.none, Optional(error.localizedDescription))
                 }
-            }
-            let preview = await withTaskCancellationHandler {
-                await probe.value
-            } onCancel: {
-                probe.cancel()
             }
             guard !Task.isCancelled, let self, self.previewGeneration == generation else { return }
             self.applyPreview(preview.0, error: preview.1)

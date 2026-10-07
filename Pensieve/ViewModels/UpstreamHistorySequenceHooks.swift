@@ -39,7 +39,7 @@ extension UpstreamHistoryViewModel {
     ) -> Task<Value, Never> {
         sequenceHooks?.scheduled(work, priority)
         guard let hooks = sequenceHooks else {
-            return BlockingWork.task(priority: priority) { operation() }
+            return BlockingWork.task(priority: priority, operation: operation)
         }
         hooks.started(work, id)
         return Task.detached(priority: priority) {

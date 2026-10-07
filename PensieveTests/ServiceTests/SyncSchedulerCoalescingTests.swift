@@ -2,6 +2,34 @@ import XCTest
 @testable import Pensieve
 
 extension SyncCoordinatorTests {
+    func testLaunchPreflightBypassEndsAfterAdmissionOrRefusal() async {
+        for (scenario, remote, conflicted) in [("started", true, false), ("no remote", false, false),
+                                              ("conflicted", true, true)] {
+            var hasRemote = remote
+            var isConflicted = conflicted
+            var cycles = 0
+            let scheduler = SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false })
+            scheduler.installDrain(hasRemote: { hasRemote }, isConflicted: { isConflicted }, action: { cycles += 1 })
+            scheduler.coordinatorBecameReady()
+            scheduler.launchIngestCompleted()
+            scheduler.enqueueLaunchPreflight()
+            await TestWait.until(failureMessage: "\(scenario): preflight did not finish") { !scheduler.isSyncing }
+            let expectedCycles = remote && !conflicted ? 1 : 0
+            XCTAssertEqual(cycles, expectedCycles, scenario)
+            XCTAssertFalse(scheduler.hasPendingTrigger, scenario)
+
+            hasRemote = true
+            isConflicted = false
+            scheduler.tick()
+            scheduler.wake()
+            XCTAssertFalse(scheduler.isSyncing, "\(scenario): later background work must respect background sync off")
+            await TestWait.until(failureMessage: "\(scenario): unexpected background cycle did not finish") {
+                !scheduler.isSyncing
+            }
+            XCTAssertEqual(cycles, expectedCycles, "\(scenario): preflight must not leave a preference bypass")
+        }
+    }
+
     func testTriggersCoalesce() async {
         let firstStarted = expectation(description: "first started")
         let followupFinished = expectation(description: "one follow-up")

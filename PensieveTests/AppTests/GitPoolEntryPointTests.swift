@@ -22,14 +22,22 @@ final class GitPoolEntryPointTests: XCTestCase {
     func testGeneratedEntryPointSweepMakesProgressDuringBlockedGit() async throws {
         for entry in Entry.allCases {
             let block = try GitBlockingFixture()
+            defer { block.release(); try? block.cleanup() }
             let fixture = try UpdateReviewFixture()
-            let task = try await start(entry, block: block, fixture: fixture)
-            let progress = await block.progress(priority: entry.priority)
-            await task.value
-            XCTAssertTrue(progress.blocked, "\(entry.rawValue): git must announce readiness and remain alive")
-            XCTAssertTrue(progress.completed, "\(entry.rawValue): same-priority heartbeat must complete while git is blocked")
-            try block.cleanup()
-            try fixture.cleanup()
+            defer { try? fixture.cleanup() }
+            var worker: Task<Void, Never>?
+            do {
+                let task = try await start(entry, block: block, fixture: fixture)
+                worker = task
+                let progress = await block.progress(priority: entry.priority)
+                await task.value
+                XCTAssertTrue(progress.blocked, "\(entry.rawValue): git must announce readiness and remain alive")
+                XCTAssertTrue(progress.completed, "\(entry.rawValue): same-priority heartbeat must complete while git is blocked")
+            } catch {
+                block.release()
+                await worker?.value
+                throw error
+            }
         }
     }
 
