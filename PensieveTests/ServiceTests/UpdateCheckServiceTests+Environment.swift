@@ -3,6 +3,26 @@ import XCTest
 @testable import Pensieve
 
 extension UpdateCheckServiceTests {
+    func testOutputReadFailureDuringHeadOrCloneReportsPensieveFailureWithoutAuthOrHostClassification() throws {
+        let skill = seededCheck(slug: "one", repo: "fixture://repo")
+        let failure = GitError.outputReadFailed(detail: "Authentication failed; HTTP 403; Xcode license not accepted")
+        let message = "Pensieve couldn’t read git’s output: Authentication failed; HTTP 403; Xcode license not accepted"
+        try context.save()
+        for stage in ["head", "clone"] {
+            git.remoteHeadErrors = stage == "head" ? ["fixture://repo": failure] : [:]
+            git.cloneErrors = stage == "clone" ? ["fixture://repo": failure] : [:]
+            git.heads["fixture://repo"] = "new-head"
+            let before = git.probeCalls
+            // A local pipe failure must not be reclassified by a subsequent host diagnostic.
+            git.onProbe = { self.git.probeCalls == before + 1 ? .usable : .licenseNotAccepted }
+            let report = try makeService().checkAll(context: context)
+            XCTAssertNil(report.environmentError)
+            XCTAssertEqual(git.probeCalls, before + 1)
+            XCTAssertEqual(try persistedSkill(id: skill.id).checkError, message)
+            XCTAssertTrue(try persistedSkill(id: skill.id).updateAvailable)
+        }
+    }
+
     func testUnusableGitPreservesPreviousSkillChecksAndReportsOneRunError() throws {
         let first = seededCheck(slug: "first", repo: "fixture://first")
         let second = seededCheck(slug: "second", repo: "fixture://second")

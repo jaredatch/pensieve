@@ -19,7 +19,7 @@ extension SkillInstallService {
     static func mappedRepositoryError(_ error: Error) -> Error {
         guard let gitError = error as? GitError else { return error }
         switch gitError {
-        case .unusable, .repositoryUnreadable:
+        case .unusable, .repositoryUnreadable, .outputReadFailed:
             return error
         case .authenticationFailed:
             return SkillInstallError.authenticationFailed

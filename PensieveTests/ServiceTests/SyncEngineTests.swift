@@ -26,6 +26,7 @@ final class SyncEngineTests: XCTestCase {
         private(set) var calls: [String] = []
         var remote: String? = "https://fixture.test/x.git"
         var pullResult: PullResult = .merged
+        var pullError: Error?
         /// Simulates a pull mutating the working tree before rebuild sees it.
         var pullSideEffect: ((String) -> Void)?
         var hasLocalBranchesResult: Result<Bool, Error> = .success(true)
@@ -46,6 +47,7 @@ final class SyncEngineTests: XCTestCase {
 
         func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
             calls.append("pull")
+            if let pullError { throw pullError }
             pullSideEffect?(path)
             return pullResult
         }

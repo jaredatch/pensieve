@@ -158,21 +158,28 @@ final class SyncConflictResolutionTests: XCTestCase {
         try assertUnsafePath("skills//SKILL.md", root: root, escapedPath: root + "/skills/SKILL.md")
     }
 
-    /// inspectConflicts must NEVER leave a mid-rebase tree at rest: if pullRebase throws after starting a
-    /// rebase (e.g. a clean-applying replay that fails at commit-sign, with no unmerged paths), inspect
-    /// must abort. Proven with a stub whose pullRebase throws; the abort runs via the outer catch.
-    func testInspectConflictsAbortsWhenPullRebaseThrows() throws {
+    /// Inspection aborts a started rebase on either a git rejection or a local pipe failure.
+    @MainActor
+    func testInspectConflictsAbortsWhenPullRebaseThrows() async throws {
         let root = tempDir + "/inspectAbort"
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
-        let git = StubGit(conflictPath: "skills/x/SKILL.md",
-                          pullError: GitError.commandFailed(args: ["rebase"], exitCode: 1, stderr: "boom"))
-        let engine = SyncEngine(gitService: git, manifestService: ManifestService(),
-                                storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)
-        XCTAssertThrowsError(try engine.inspectConflicts(root: root, credential: nil, context: makeContext()))
-        XCTAssertEqual(git.abortsAfterPull, 1, "inspect must abort the rebase when pullRebase throws")
+        let failures: [(GitError, String)] = [
+            (.commandFailed(args: ["rebase"], exitCode: 1, stderr: "boom"), "git rebase failed (exit 1): boom"),
+            (.outputReadFailed(detail: "Authentication failed; CONFLICT; Xcode license not accepted"),
+             "Pensieve couldn’t read git’s output: Authentication failed; CONFLICT; Xcode license not accepted")
+        ]
+        for (failure, expectedMessage) in failures {
+            let git = StubGit(conflictPath: "skills/x/SKILL.md", pullError: failure)
+            let engine = SyncEngine(gitService: git, manifestService: ManifestService(),
+                                    storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)
+            let model = ConflictResolutionModel(engine: engine, git: git, credentials: InMemoryCredentialStore(), root: root)
+            await model.loadAndReport(context: try makeContext())
+            guard case let .error(message) = model.phase else { return XCTFail("must report failure, never conflicts") }
+            XCTAssertEqual(message, expectedMessage)
+            XCTAssertEqual(git.abortsAfterPull, 1, "inspect must abort the rebase when pullRebase throws")
+        }
     }
 }
-
 // MARK: - Conflict fixtures
 
 extension SyncConflictResolutionTests {
@@ -262,7 +269,6 @@ extension SyncConflictResolutionTests {
         try context.save()
     }
 }
-
 // MARK: - Path-safety stubs
 extension SyncConflictResolutionTests {
     private final class StubGit: GitServiceProtocol {
@@ -389,11 +395,5 @@ extension SyncConflictResolutionTests {
 
     private func readSkill(root: String) throws -> String {
         try String(contentsOfFile: root + "/" + Self.skillPath, encoding: .utf8)
-    }
-
-    private func writeSyncControlFiles(at root: String) throws {
-        let attrs = "manifest/categories/*.yaml merge=union\nmanifest/projects.yaml merge=union\n"
-        try attrs.write(toFile: root + "/.gitattributes", atomically: true, encoding: .utf8)
-        try ".DS_Store\n".write(toFile: root + "/.gitignore", atomically: true, encoding: .utf8)
     }
 }

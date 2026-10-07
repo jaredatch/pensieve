@@ -87,6 +87,7 @@ extension GitService {
             }
         } catch {
             if case GitError.unusable = error { throw error }
+            if case GitError.outputReadFailed = error { throw error }
             try probeUsability().requireUsable()
             if case GitError.repositoryUnreadable = error { throw error }
             throw GitError.repositoryUnreadable(path: path, detail: error.localizedDescription)

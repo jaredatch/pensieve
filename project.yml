@@ -102,6 +102,7 @@ targets:
       - path: Pensieve/Utilities/BlockingWork.swift
       - path: Pensieve/Services/GitService.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
+      - path: Pensieve/Services/GitProcess.swift
       - path: Pensieve/Services/GitService+Usability.swift
       - path: Pensieve/Services/GitServiceConflict.swift
       - path: Pensieve/Services/FileService.swift
@@ -120,6 +121,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: GitProcessProbe
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) GIT_PROCESS_PROBE"
         SWIFT_VERSION: "5.10"
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGNING_REQUIRED: NO
@@ -143,6 +145,7 @@ targets:
       - path: Pensieve/Services/FileService+TreeComparison.swift
       - path: Pensieve/Services/GitService.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
+      - path: Pensieve/Services/GitProcess.swift
       - path: Pensieve/Services/GitService+Usability.swift
       - path: Pensieve/Services/GitService+FastForward.swift
       - path: Pensieve/Services/GitServiceConflict.swift

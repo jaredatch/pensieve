@@ -3,6 +3,18 @@ import XCTest
 @testable import Pensieve
 
 final class GitServiceConcurrencyTests: XCTestCase {
+    func testGitExitReturnsItsOutputWhileDetachedPipeHoldersRemainAlive() throws {
+        for pipe in ["stdout", "stderr"] {
+            for behavior in ["sleeping", "writing"] {
+                let result = try GitProcessProbeRunner.run("holder-\(pipe)-\(behavior)",
+                                                           timeout: TestWait.hostedActionTimeoutSeconds, noteTimeout: false)
+                XCTAssertFalse(result.timedOut, "git exit must bound the call: \(pipe), \(behavior)")
+                XCTAssertEqual(result.status, 0, result.report)
+                XCTAssertEqual(result.report, "OK output, status; holder alive")
+            }
+        }
+    }
+
     func testBlockedCallsBeyondCoreCountAllowAnotherSamePriorityGitCall() throws {
         let result = try GitProcessProbeRunner.run("blocking", timeout: 45, strictPool: true)
         XCTAssertFalse(result.timedOut, "The off-pool watchdog must judge progress and clean up")
@@ -48,7 +60,25 @@ final class GitServiceConcurrencyTests: XCTestCase {
             XCTAssertFalse(result.timedOut, "Read failure must terminate and join: \(pipe)")
             XCTAssertEqual(result.status, 0, "\(pipe): \(result.report)")
             XCTAssertEqual(result.report, "OK read error; child reaped")
+            let group = try GitProcessProbeRunner.run("group-\(pipe)",
+                                                       timeout: TestWait.hostedActionTimeoutSeconds, noteTimeout: false)
+            XCTAssertFalse(group.timedOut, "Read failure must stop git and its helper: \(pipe)")
+            XCTAssertEqual(group.status, 0, group.report)
+            XCTAssertEqual(group.report, "OK read error; git and helper stopped; git reaped")
         }
+        let conflict = try GitProcessProbeRunner.run("conflict-read",
+                                                  timeout: TestWait.hostedActionTimeoutSeconds, noteTimeout: false)
+        XCTAssertFalse(conflict.timedOut)
+        XCTAssertEqual(conflict.status, 0, conflict.report)
+        XCTAssertEqual(conflict.report, "OK read error; child reaped", "Best-effort conflict blobs must propagate pipe failures")
+    }
+
+    func testReadFailureAfterGitExitReturnsWhileDetachedStderrHolderLives() throws {
+        let result = try GitProcessProbeRunner.run("holder-after-exit-failure",
+                                                timeout: TestWait.hostedActionTimeoutSeconds, noteTimeout: false)
+        XCTAssertFalse(result.timedOut, "The failed stdout read must not join the inherited stderr pipe")
+        XCTAssertEqual(result.status, 0, result.report)
+        XCTAssertEqual(result.report, "OK read error after exit; holder alive")
     }
 
     func testPipeDrainUsesItsCallersQoS() throws {

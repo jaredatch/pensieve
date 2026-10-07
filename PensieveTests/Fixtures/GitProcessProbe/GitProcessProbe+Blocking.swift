@@ -22,7 +22,7 @@ extension GitProcessProbe {
         let state = BlockingProbeResults()
         let workers = (0..<count).map { _ in
             BlockingWork.task(priority: .utility) {
-                state.record(GitService(executablePath: fakeGit, processStarted: record).probeUsability() == .usable)
+                state.record(git(fakeGit).probeUsability() == .usable)
             }
         }
         let deadline = ProcessInfo.processInfo.systemUptime + 15
@@ -34,7 +34,7 @@ extension GitProcessProbe {
         let extra = DispatchSemaphore(value: 0)
         if blocked {
             BlockingWork.task(priority: .utility) {
-                if GitService(executablePath: executable, processStarted: record).probeUsability() == .usable {
+                if git(executable).probeUsability() == .usable {
                     extra.signal()
                 }
             }

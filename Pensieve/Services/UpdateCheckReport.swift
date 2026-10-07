@@ -20,6 +20,9 @@ struct ClassifiedUpdateFailure {
     let usability: GitUsability?
 
     static func classify(_ error: Error, probe: () -> GitUsability? = { nil }) -> Self {
+        if case GitError.outputReadFailed = error {
+            return Self(error: error, environment: false, usability: nil)
+        }
         if case let GitError.unusable(value) = error {
             return Self(error: error, environment: true, usability: value)
         }

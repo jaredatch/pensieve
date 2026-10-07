@@ -15,6 +15,7 @@ enum GitError: LocalizedError, Equatable {
     case authenticationFailed(remote: String, detail: String)
     case unusable(GitUsability)
     case repositoryUnreadable(path: String, detail: String)
+    case outputReadFailed(detail: String)
 
     var errorDescription: String? {
         switch self {
@@ -22,6 +23,8 @@ enum GitError: LocalizedError, Equatable {
             return usability.message
         case let .repositoryUnreadable(path, detail):
             return "Couldn’t read the store’s git repository at \(path): \(detail)"
+        case let .outputReadFailed(detail):
+            return "Pensieve couldn’t read git’s output: \(detail)"
         case let .commandFailed(args, exitCode, stderr, _):
             return "git \(args.joined(separator: " ")) failed (exit \(exitCode)): \(stderr)"
         case let .authenticationFailed(remote, detail):
@@ -31,10 +34,13 @@ enum GitError: LocalizedError, Equatable {
 }
 
 extension GitError {
-    /// Best-effort reads swallow ordinary failures, but a confirmed host failure must reach the caller.
+    /// Best-effort reads swallow git rejections, but host and local output-read failures reach the caller.
     static func preservingUnusability<T>(_ operation: () throws -> T) throws -> T? {
         do { return try operation() } catch let error as GitError {
-            if case .unusable = error { throw error }
+            switch error {
+            case .unusable, .outputReadFailed: throw error
+            default: break
+            }
             return nil
         } catch { return nil }
     }
@@ -122,8 +128,9 @@ extension GitServiceProtocol {
 /// treat `--upload-pack=<cmd>` as an option and EXECUTE it. The Process boundary is the one sanctioned
 /// exception to "all filesystem I/O goes through FileService": git owns `.git` and its writes.
 struct GitService: GitServiceProtocol {
-    /// Failure tests register the child's identity before either pipe read can throw.
-    private let processStarted: ((Process) -> Void)?
+    #if GIT_PROCESS_PROBE
+    var probeHooks: GitProcessProbeHooks?
+    #endif
     private let gitPath: String
     let fileService: FileServiceProtocol
     typealias UpstreamHistoryNetworkRunner = ([String], GitCredential?) throws -> GitOutput
@@ -134,10 +141,8 @@ struct GitService: GitServiceProtocol {
     init(
         fileService: FileServiceProtocol = FileService(),
         upstreamHistoryNetworkRunner: UpstreamHistoryNetworkRunner? = nil,
-        executablePath: String = "/usr/bin/git",
-        processStarted: ((Process) -> Void)? = nil
+        executablePath: String = "/usr/bin/git"
     ) {
-        self.processStarted = processStarted
         self.gitPath = executablePath
         self.fileService = fileService
         self.upstreamHistoryNetworkRunner = upstreamHistoryNetworkRunner
@@ -262,34 +267,33 @@ struct GitService: GitServiceProtocol {
 
     @discardableResult
     func runData(
-        _ args: [String], in workingDir: String?, credential: GitCredential? = nil, io: ProcessIO = ProcessIO()
+        _ args: [String], in workingDir: String?, credential: GitCredential? = nil
     ) throws
         -> GitDataOutput {
-        let p = io.process
-        p.executableURL = URL(fileURLWithPath: gitPath)
-        p.arguments = args                                   // ARRAY — no shell, no injection
-        if let workingDir { p.currentDirectoryURL = URL(fileURLWithPath: workingDir) }
-        p.environment = try childEnvironment(credential: credential)
-        let out = io.stdout; let err = io.stderr
-        p.standardOutput = out; p.standardError = err
-        try p.run()
-        processStarted?(p)
-        let (outData, errData) = try readOutput(io, args: args)
+        let child = try GitProcess(executable: gitPath, arguments: args, workingDirectory: workingDir,
+                                   environment: childEnvironment(credential: credential))
+        #if GIT_PROCESS_PROBE
+        child.probeHooks = probeHooks
+        probeHooks?.started(child.pid)
+        #endif
+        let output = try child.readOutput()
+        let outData = output.stdout
+        let errData = output.stderr
         // Command output is only a hint: repository-controlled text can resemble a broken shim.
         // Confirm at the shared runner so clone, fetch, conflict and install callers agree.
         // The diagnostic command bypasses this branch, preventing recursive probes.
         let stderr = String(bytes: errData, encoding: .utf8) ?? ""
         let detail = stderr.isEmpty ? (String(bytes: outData, encoding: .utf8) ?? "") : stderr
         var confirmingProbe: GitUsability?
-        if args != ["--version"], GitUsability.environmentFailure(exit: p.terminationStatus, output: detail) != nil {
+        if args != ["--version"], GitUsability.environmentFailure(exit: output.exit, output: detail) != nil {
             let answer = probeUsability()
             try answer.requireUsable()
             confirmingProbe = answer
         }
-        return GitDataOutput(stdout: outData, stderr: errData, exit: p.terminationStatus, confirmingProbe: confirmingProbe)
+        return GitDataOutput(stdout: outData, stderr: errData, exit: output.exit, confirmingProbe: confirmingProbe)
     }
 
-    /// Optional reads retain their historical fallback, except a confirmed host failure must reach the caller.
+    /// Optional reads retain their fallback for git rejections; host and local output-read failures propagate.
     func runBestEffort(_ args: [String], in workingDir: String?) throws -> GitOutput? {
         try GitError.preservingUnusability { try run(args, in: workingDir) }
     }
