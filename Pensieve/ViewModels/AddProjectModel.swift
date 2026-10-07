@@ -77,7 +77,7 @@ final class AddProjectModel {
             guard !Task.isCancelled else { return }
             do { try await delay() } catch { return }
             guard !Task.isCancelled else { return }
-            let probe = Task.detached {
+            let probe = BlockingWork.task {
                 do {
                     try Task.checkCancellation()
                     try files.requireProjectDirectory(at: path)

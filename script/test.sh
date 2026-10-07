@@ -60,6 +60,9 @@ export XDG_CACHE_HOME="$DERIVED_DATA/XDGCache"
 SCHEME="Pensieve"
 # Only failing timeout tests create this directory; TEST_RUNNER_ forwards it into each host.
 export TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR="${TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR:-$DERIVED_DATA/TestDiagnostics}"
+# These scheduling guards must also catch pool starvation in the normal suite, hooks and CI.
+# Set this before xcodebuild launches the hosts; changing it in a running host is too late.
+export TEST_RUNNER_LIBDISPATCH_COOPERATIVE_POOL_STRICT=1
 
 usage() {
   echo "usage: $0 [--filter TEST_IDENTIFIER] | --self-test" >&2
@@ -137,6 +140,7 @@ set +e
   -destination "$DESTINATION" \
   -derivedDataPath "$DERIVED_DATA" \
   -parallel-testing-enabled YES \
+  -parallel-testing-worker-count 3 \
   -test-timeouts-enabled YES \
   -default-test-execution-time-allowance 180 \
   -maximum-test-execution-time-allowance 180 \

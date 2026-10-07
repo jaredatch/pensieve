@@ -27,12 +27,12 @@ enum BlockingWork {
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
     }
 
-    fileprivate static func qos(_ priority: JobPriority) -> QualityOfService {
+    fileprivate static func qos(_ priority: JobPriority) -> (thread: QualityOfService, dispatch: DispatchQoS) {
         switch priority.rawValue {
-        case TaskPriority.high.rawValue...: .userInitiated
-        case TaskPriority.medium.rawValue...: .default
-        case TaskPriority.low.rawValue...: .utility
-        default: .background
+        case TaskPriority.high.rawValue...: (.userInitiated, .userInitiated)
+        case TaskPriority.medium.rawValue...: (.default, .default)
+        case TaskPriority.low.rawValue...: (.utility, .utility)
+        default: (.background, .background)
         }
     }
 }
@@ -45,7 +45,7 @@ private final class BlockingTaskExecutor: TaskExecutor, @unchecked Sendable {
         let job = UnownedJob(job)
         let thread = Thread { job.runSynchronously(on: self.asUnownedTaskExecutor()) }
         thread.name = "Pensieve blocking work"
-        thread.qualityOfService = BlockingWork.qos(job.priority)
+        thread.qualityOfService = BlockingWork.qos(job.priority).thread
         thread.start()
     }
 }
@@ -53,11 +53,13 @@ private final class BlockingTaskExecutor: TaskExecutor, @unchecked Sendable {
 /// Serial actor jobs run on an owned dispatch queue outside Swift's cooperative pool. Dispatch
 /// serializes enqueue's only shared state. A synchronous cycle creates, uses and drops its context
 /// within one job, without hopping executors while git or SwiftData holds mutable state.
+/// Each work item's QoS follows the Swift job instead of imposing a utility queue on user work.
 final class BlockingSerialExecutor: SerialExecutor, @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.jaredatch.pensieve.sync-coordinator", qos: .utility)
+    private let queue = DispatchQueue(label: "com.jaredatch.pensieve.sync-coordinator")
 
     func enqueue(_ job: consuming ExecutorJob) {
+        let qos = BlockingWork.qos(job.priority).dispatch
         let job = UnownedJob(job)
-        queue.async { job.runSynchronously(on: self.asUnownedSerialExecutor()) }
+        queue.async(qos: qos, flags: .enforceQoS) { job.runSynchronously(on: self.asUnownedSerialExecutor()) }
     }
 }

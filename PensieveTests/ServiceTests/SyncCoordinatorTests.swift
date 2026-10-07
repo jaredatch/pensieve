@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import SwiftData
 import XCTest
 @testable import Pensieve
@@ -160,19 +161,21 @@ final class SyncCoordinatorTests: XCTestCase {
 
 extension SyncCoordinatorTests {
     func testMainActorHeartbeatDuringBlockedSync() async throws {
-        let engine = BlockingEngine()
-        let coordinator = await configuredCoordinator(container: try inMemoryContainer(), engine: engine, root: tempDir)
-        let cycle = Task.detached {
-            _ = await coordinator.runCycle()
+        for (priority, expectedQoS) in [(TaskPriority.medium, QOS_CLASS_DEFAULT), (.userInitiated, QOS_CLASS_USER_INITIATED)] {
+            let engine = BlockingEngine()
+            let coordinator = await configuredCoordinator(container: try inMemoryContainer(), engine: engine, root: tempDir)
+            let cycle = Task.detached(priority: priority) { _ = await coordinator.runCycle() }
+            await TestWait.until(failureMessage: "the sync engine did not start") { engine.qosClass != nil }
+            let heartbeat = Task { @MainActor in
+                try await Task.sleep(nanoseconds: 20_000_000)
+                return Date()
+            }
+            let beat = try await heartbeat.value
+            await cycle.value
+            let engineFinished = try XCTUnwrap(engine.finishedAt)
+            XCTAssertLessThan(beat, engineFinished, "the main actor heartbeat must advance before the blocking engine returns")
+            XCTAssertEqual(engine.qosClass, expectedQoS, "the sync cycle must run at its caller's \(priority) QoS")
         }
-        let heartbeat = Task { @MainActor in
-            try await Task.sleep(nanoseconds: 20_000_000)
-            return Date()
-        }
-        let beat = try await heartbeat.value
-        await cycle.value
-        let engineFinished = try XCTUnwrap(engine.finishedAt)
-        XCTAssertLessThan(beat, engineFinished, "the main actor heartbeat must advance before the blocking engine returns")
     }
 
     func testRegisteredObjectFieldChangeVisibleToFreshMainContext() async throws {
@@ -327,6 +330,12 @@ private struct NullAudit: SyncAuditWriting {
 private final class BlockingEngine: SyncEngineProtocol, @unchecked Sendable {
     private let stateLock = NSLock()
     private var recordedFinishedAt: Date?
+    private var recordedQoSClass: qos_class_t?
+    var qosClass: qos_class_t? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return recordedQoSClass
+    }
     var finishedAt: Date? {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -334,6 +343,9 @@ private final class BlockingEngine: SyncEngineProtocol, @unchecked Sendable {
     }
     func sync(root: String, message: String, credential: GitCredential?, context: ModelContext,
               prepare: ((ModelContext) throws -> Void)?) throws -> SyncOutcome {
+        stateLock.lock()
+        recordedQoSClass = qos_class_self()
+        stateLock.unlock()
         try prepare?(context)
         Thread.sleep(forTimeInterval: 0.3)
         stateLock.lock()
