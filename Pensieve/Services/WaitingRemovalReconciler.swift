@@ -16,16 +16,19 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
 
     func reconcile(context: ModelContext, machineID: String? = nil) -> BatchResult {
         let waiting: [WaitingRemoval]
+        let reachable: [WaitingRemoval]
         let desired: Set<String>
         do {
             waiting = try store.read()
             guard !waiting.isEmpty else { return BatchResult() }
+            reachable = reachableEntries(waiting)
+            guard !reachable.isEmpty else { return BatchResult() }
             desired = try desiredPaths(context: context, machineID: machineID ?? machineIdentity.identifier())
         } catch { return BatchResult.readFailure("waiting removals", error: error) }
 
         var retire: Set<UUID> = []
         var work: [(entry: WaitingRemoval, candidate: DeployRemovalCandidate)] = []
-        for entry in waiting {
+        for entry in reachable {
             let path: String
             do {
                 try fileService.requireProjectDirectory(at: entry.projectPath)
@@ -43,11 +46,16 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
             }
         }
         let removal = platformVM.removalService.remove(work.map(\.candidate))
+        return finish(removal, entries: work.map(\.entry), retiring: retire)
+    }
+
+    private func finish(_ removal: DeployRemovalResult, entries: [WaitingRemoval], retiring: Set<UUID>) -> BatchResult {
+        var retire = retiring
         var result = BatchResult()
-        for (item, outcome) in zip(work, removal.outcomes) {
+        for (entry, outcome) in zip(entries, removal.outcomes) {
             if let error = outcome.failure ?? (outcome.completed ? removal.stateWriteFailure : nil) {
-                result.operationFailures.append("\(item.entry.artifactPath): \(error.localizedDescription)")
-            } else if outcome.completed { retire.insert(item.entry.id) }
+                result.operationFailures.append("\(entry.artifactPath): \(error.localizedDescription)")
+            } else if outcome.completed { retire.insert(entry.id) }
         }
         do { try store.retire(ids: retire) } catch {
             result.operationFailures.append(error.localizedDescription)
@@ -57,6 +65,16 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
         return result
     }
 
+    private func reachableEntries(_ waiting: [WaitingRemoval]) -> [WaitingRemoval] {
+        var checked: [String: Bool] = [:]
+        return waiting.filter { entry in
+            if let available = checked[entry.projectPath] { return available }
+            let available = (try? fileService.requireProjectDirectory(at: entry.projectPath)) != nil
+            checked[entry.projectPath] = available
+            return available
+        }
+    }
+
     private func desiredPaths(context: ModelContext, machineID: String) throws -> Set<String> {
         let projects = try stateFetcher.projects(context: context)
         let skills = try stateFetcher.skills(context: context)
@@ -64,12 +82,28 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
         let categories = try stateFetcher.categories(context: context)
         let bySlug = Dictionary(skills.map { ($0.directoryName, $0) }, uniquingKeysWith: { first, _ in first })
         var paths: Set<String> = []
+        var checkedProjects: [UUID: Bool] = [:]
+        func request(_ skill: Skill, _ platform: PlatformTarget, _ project: Project) throws {
+            let available: Bool
+            if let checked = checkedProjects[project.id] { available = checked } else {
+                do {
+                    try fileService.requireProjectDirectory(at: project.path)
+                    available = true
+                } catch let error as ProjectFolderError {
+                    guard case .missing = error else { throw error }
+                    available = false
+                }
+                checkedProjects[project.id] = available
+            }
+            guard available else { return }
+            let path = platformVM.artifactPath(skill: skill, platform: platform, target: .project(project))
+            paths.insert(try entryPath(path))
+        }
         for intent in intents where intent.machineID == machineID {
             guard let key = intent.projectKey, let skill = bySlug[intent.skillSlug],
                   let platform = PlatformTarget(rawValue: intent.platformRaw), platform.supportsProjectScope else { continue }
             for project in projects where project.identityKey == key {
-                let path = platformVM.artifactPath(skill: skill, platform: platform, target: .project(project))
-                paths.insert(try entryPath(path))
+                try request(skill, platform, project)
             }
         }
         for category in categories {
@@ -77,8 +111,7 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
                 for slug in category.skillSlugs {
                     guard let skill = bySlug[slug] else { continue }
                     for platform in platformVM.deployablePlatforms(forProject: true) {
-                        let path = platformVM.artifactPath(skill: skill, platform: platform, target: .project(project))
-                        paths.insert(try entryPath(path))
+                        try request(skill, platform, project)
                     }
                 }
             }

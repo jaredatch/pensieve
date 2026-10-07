@@ -75,6 +75,28 @@ final class WaitingRemovalProjectTests: XCTestCase {
         XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty)
     }
 
+    func testRelativeSavedProjectUnregistersWithoutWaitingRemovals() throws {
+        let h = try WaitingRemovalHarness()
+        defer { h.base.cleanup() }
+        h.base.project.path = "old/relative/project"
+        h.base.context.insert(IntentAssignment(skillID: h.base.skill.id, platformRaw: "codex", projectID: h.base.project.id))
+        try h.base.context.save()
+        // Map the historical relative spelling into the sandbox, including preparation's resolver.
+        let mapped = LinkServiceCanonicalDirectoryFileService(wrapped: h.base.files,
+            pathMappings: [(Constants.pensieveSkillsDir, h.base.root + "/store/skills"),
+                           (h.base.project.path, h.base.root + "/legacy-relative")], physicalSandbox: h.base.root)
+        let vm = PlatformViewModel(fileService: mapped, agentDetection: DeployStubDetection(installed: [.codex]),
+            deployStateStore: h.base.deployState)
+        let model = ProjectRemovalModel()
+        model.request(h.base.project, platformVM: vm, context: h.base.context)
+        XCTAssertEqual(model.preview?.artifactCount, 0)
+        let result = removeRegisteredProject(h.base.project, reconciler: h.base.category,
+            platformVM: vm, localMachineID: ProjectIntentHarness.localID, context: h.base.context)
+        XCTAssertFalse(result.hasFailures)
+        XCTAssertEqual(try h.base.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.base.otherProject.id])
+        XCTAssertTrue(try vm.waitingRemovalStore.read().isEmpty)
+    }
+
     private func seed(_ source: String, platform: PlatformTarget, path: String, harness h: WaitingRemovalHarness) throws {
         switch source {
         case "category": h.base.context.insert(SkillProjectAssignment(

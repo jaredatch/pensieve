@@ -16,9 +16,13 @@ enum SkillDeletionFlow {
             return false
         }
 
-        let cleanupResult = platformVM.removeAllDeploys(skill: skill, projects: projects, localDeployHistory: { paths in
+        let cleanupResult = platformVM.removeAllDeploys(skill: skill, projects: projects, localProjectDeployPaths: {
+            try platformVM.localSkillProjectDeployPaths(skill: skill, projects: projects, context: context)
+        }, localDeployHistory: { paths in
             try localCursorDeployPaths(skill: skill, paths: paths, context: context)
         })
+        var deleted = false
+        defer { settleWaitingCleanup(cleanupResult, deleted: deleted, skill: skill, library: library, platformVM: platformVM) }
         let cleanup = cleanupResult.batch
         if cleanup.hasFailures {
             var messages = cleanup.readFailures.map(\.message)
@@ -48,6 +52,14 @@ enum SkillDeletionFlow {
         }
 
         let outcome = library.deleteSkillEntry(skill, context: context, persist: persist)
+        let manifestNote = updateManifest(library: library, context: context, waitingProjects: cleanupResult.waitingProjects)
+        deleted = present(outcome, skill: skill, manifestNote: manifestNote, library: library)
+        return deleted
+    }
+
+    private static func updateManifest(
+        library: SkillLibraryViewModel, context: ModelContext, waitingProjects: [String]
+    ) -> String {
         var manifestNote = ""
         do {
             try library.writeManifest(context: context)
@@ -56,11 +68,27 @@ enum SkillDeletionFlow {
             manifestNote = " The sync manifest couldn't be updated and will regenerate on the next change."
         }
 
-        if !cleanupResult.waitingProjects.isEmpty {
-            manifestNote += " Links and rules in \(cleanupResult.waitingProjects.joined(separator: ", ")) "
+        if !waitingProjects.isEmpty {
+            manifestNote += " Links and rules in \(waitingProjects.joined(separator: ", ")) "
                 + "will be removed when the folder is back and can be checked."
         }
-        return present(outcome, skill: skill, manifestNote: manifestNote, library: library)
+        return manifestNote
+    }
+
+    private static func settleWaitingCleanup(_ cleanup: SkillCleanupResult, deleted: Bool, skill: Skill,
+                                             library: SkillLibraryViewModel, platformVM: PlatformViewModel) {
+        if deleted {
+            if let error = platformVM.finishWaitingSkillCleanup(cleanup) {
+                library.deletionNotice = .warning("Deleted “\(skill.name)”. Waiting cleanup was saved, "
+                    + "but its deployment records couldn't be retired: \(error).")
+            }
+        } else {
+            do { try platformVM.abandonWaitingSkillCleanup(cleanup) } catch {
+                let message = library.deletionNotice?.message ?? "The skill was kept."
+                library.deletionNotice = .failed(message + " Couldn't withdraw this attempt's waiting cleanup: "
+                    + error.localizedDescription)
+            }
+        }
     }
 
     private static func retainedSkillMessage(didChangeDeploys: Bool) -> String {

@@ -31,18 +31,24 @@ final class WaitingRemovalRequestTests: XCTestCase {
 
     func testDifferentRegistrationRequestsSamePathThroughIntentOrCategory() throws {
         for owner in ["intent", "category"] {
-            for alias in [false, true] {
+            for alias in ["none", "requester", "removed"] {
                 let h = try WaitingRemovalHarness()
                 defer { h.base.cleanup() }
+                let realPath = h.base.project.path
+                let aliasPath = h.base.root + "/alias"
+                if alias == "removed" {
+                    try h.base.files.createDirectory(at: realPath)
+                    try h.base.files.createSymlink(at: aliasPath, pointingTo: realPath)
+                    h.base.project.path = aliasPath
+                }
                 try h.deploy([.codex])
-                try h.hideFolder()
+                try h.base.files.replaceItem(at: h.offlinePath, with: realPath)
                 XCTAssertFalse(h.removeProject().hasFailures)
-                try h.restoreFolder()
-                h.base.otherProject.path = h.base.project.path
-                if alias {
-                    let path = h.base.root + "/alias"
-                    try h.base.files.createSymlink(at: path, pointingTo: h.base.project.path)
-                    h.base.otherProject.path = path
+                try h.base.files.replaceItem(at: realPath, with: h.offlinePath)
+                h.base.otherProject.path = realPath
+                if alias == "requester" {
+                    try h.base.files.createSymlink(at: aliasPath, pointingTo: realPath)
+                    h.base.otherProject.path = aliasPath
                 }
                 if owner == "intent" { try h.base.addIntent(platform: .codex, project: h.base.otherProject) } else {
                     let category = Pensieve.Category(name: "Surviving owner")

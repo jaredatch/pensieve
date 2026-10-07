@@ -118,7 +118,12 @@ private func projectRemovalAdmissionFailure(project: Project, plan: ProjectRemov
         || confirmedPreview.folderIsMissing != plan.preview.folderIsMissing
         || confirmedPreview.folderIsUncheckable != plan.preview.folderIsUncheckable
         || confirmedPreview.folderIsShared != plan.preview.folderIsShared {
-        return "The project folder changed at \(project.path) while confirmation was open. Please review removal again."
+        if confirmedPreview.folderIsMissing != plan.preview.folderIsMissing
+            || confirmedPreview.folderIsUncheckable != plan.preview.folderIsUncheckable
+            || confirmedPreview.folderIsShared != plan.preview.folderIsShared {
+            return "The project folder changed at \(project.path) while confirmation was open. Please review removal again."
+        }
+        return "The project changed while confirmation was open. Please review removal again."
     }
     if !plan.hasIdentitySibling, let key = project.identityKey, localMachineID == nil,
        intents.contains(where: { $0.projectKey == key }) {

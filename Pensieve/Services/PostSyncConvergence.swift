@@ -63,8 +63,10 @@ final class PostSyncConvergence: PostSyncConverging {
 
         guard runLedgerReconcilers else { return }
         let context = contextFactory()
-        record(categoryReconciler.reconcile(context: context), name: "category")
-        record(intentReconciler.reconcile(context: context), name: "intent")
+        record(categoryReconciler.reconcileDeployments(context: context), name: "category")
+        var intents = intentReconciler.reconcileDeployments(context: context)
+        intents.append(intentReconciler.reconcileWaitingRemovals(context: context))
+        record(intents, name: "intent")
     }
 
     private func record(_ result: BatchResult, name: String) {

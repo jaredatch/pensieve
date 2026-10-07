@@ -31,6 +31,8 @@ final class ProjectRemovalFreshnessTests: XCTestCase {
             let ledgerKeys = Set(try h.context.fetch(FetchDescriptor<IntentAssignment>()).map(\.key))
             let result = confirm(model, h)
             XCTAssertTrue(result.hasFailures, "Changed confirmation must stop before withdrawing or unlinking")
+            XCTAssertTrue(model.error?.contains("The project changed while confirmation was open.") == true)
+            XCTAssertFalse(model.error?.contains("project folder changed") == true)
             XCTAssertTrue(model.error?.contains("changed") == true)
             XCTAssertTrue(model.error?.contains("review") == true)
             XCTAssertTrue(h.files.isSymlink(at: h.artifact(.codex)))

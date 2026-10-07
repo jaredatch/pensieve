@@ -1,9 +1,12 @@
 import Foundation
 import SwiftData
 
-protocol IntentReconcilerProtocol {
-    @discardableResult
-    func reconcile(context: ModelContext) -> BatchResult
+protocol IntentReconcilerProtocol: DeploymentLedgerReconciling {
+    func reconcileWaitingRemovals(context: ModelContext) -> BatchResult
+}
+
+extension IntentReconcilerProtocol {
+    func reconcileWaitingRemovals(context: ModelContext) -> BatchResult { BatchResult() }
 }
 
 /// Reconciles this machine's user-wide and project-scoped intent against its private realization ledger.
@@ -46,6 +49,16 @@ struct IntentReconciler: IntentReconcilerProtocol {
 
     @discardableResult
     func reconcile(context: ModelContext) -> BatchResult {
+        var result = reconcileDeployments(context: context)
+        result.append(reconcileWaitingRemovals(context: context))
+        return result
+    }
+
+    func reconcileWaitingRemovals(context: ModelContext) -> BatchResult {
+        platformVM.reconcileWaitingRemovals(context: context, identity: machineIdentity)
+    }
+
+    func reconcileDeployments(context: ModelContext) -> BatchResult {
         guard let machineID = try? machineIdentity.identifier() else { return BatchResult() }
         let state: State
         do {
@@ -64,7 +77,6 @@ struct IntentReconciler: IntentReconcilerProtocol {
             context: context, aggregate: &aggregate
         )
         try? context.save()
-        aggregate.append(platformVM.reconcileWaitingRemovals(context: context, machineID: machineID))
         return aggregate
     }
 

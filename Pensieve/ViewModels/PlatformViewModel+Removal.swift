@@ -4,6 +4,8 @@ struct SkillCleanupResult {
     var batch = BatchResult()
     var didChangeDeploys = false
     var waitingProjects: [String] = []
+    var waitingRemovalIDs: Set<UUID> = []
+    var deferredRemovals: [DeployRemovalCandidate] = []
 }
 
 extension PlatformViewModel {
@@ -37,7 +39,8 @@ extension PlatformViewModel {
     /// Remove owned deploys using one state snapshot and history only for unrecorded project rules.
     /// An unreadable snapshot fences owned artifacts; absent and foreign occupants remain no-ops.
     func removeAllDeploys(
-        skill: Skill, projects: [Project], localDeployHistory: (Set<String>) throws -> Set<String>
+        skill: Skill, projects: [Project], localProjectDeployPaths: () throws -> Set<String> = { [] },
+        localDeployHistory: (Set<String>) throws -> Set<String>
     ) -> SkillCleanupResult {
         var result = SkillCleanupResult()
         do {
@@ -47,15 +50,24 @@ extension PlatformViewModel {
             return result
         }
         let (recorded, stateProblem) = skillCleanupState()
+        let localPaths: Set<String>
+        do { localPaths = try localProjectDeployPaths() } catch {
+            result.batch.recordReadFailure("local deploy history and assignments for “\(skill.name)”", error: error)
+            return result
+        }
+        let admittedPaths = (recorded ?? []).union(localPaths)
         let unavailable = Set(projects.filter { project in
-            guard ProjectDirectory.canAccess(project.path) else { return false }
+            guard ProjectDirectory.canAccess(project.path), deployablePlatforms(forProject: true).contains(where: {
+                admittedPaths.contains(artifactPath(skill: skill, platform: $0, target: .project(project)))
+            }) else { return false }
             do { try projectReconcilePolicy.requireDirectory(project); return false } catch { return true }
         }.map(\.id))
         if !unavailable.isEmpty, recorded == nil {
             result.batch.recordReadFailure("deploys for “\(skill.name)”", error: SkillCleanupStateFailure(message: stateProblem))
             return result
         }
-        let evidence = skillCleanupEvidence(skill: skill, projects: projects, recorded: recorded, unavailable: unavailable)
+        let evidence = skillCleanupEvidence(skill: skill, projects: projects, recorded: recorded,
+            localPaths: localPaths, unavailable: unavailable)
         let locallyDeployed: Set<String>
         do {
             locallyDeployed = evidence.historyPaths.isEmpty ? [] : try localDeployHistory(evidence.historyPaths)
@@ -66,12 +78,22 @@ extension PlatformViewModel {
         let candidates = skillCleanupCandidates(skill: skill, evidence: evidence, locallyDeployed: locallyDeployed,
             recorded: recorded, stateProblem: stateProblem, unavailable: unavailable)
         do {
-            result.waitingProjects = try saveWaitingSkillCleanup(skill: skill, candidates: candidates, unavailable: unavailable)
+            try saveWaitingSkillCleanup(skill: skill, candidates: candidates, unavailable: unavailable, result: &result)
         } catch {
             result.batch.recordReadFailure("waiting removals for “\(skill.name)”", error: error)
             return result
         }
-        let removal = removalService.remove(candidates.map(\.removal))
+        let available = candidates.filter { item in
+            item.location.target.project.map { !unavailable.contains($0.id) } ?? true
+        }
+        let removal = removalService.remove(available.map(\.removal))
+        applySkillCleanupReport(removal, skill: skill, candidates: available, result: &result)
+        return result
+    }
+
+    private func applySkillCleanupReport(
+        _ removal: DeployRemovalResult, skill: Skill,
+        candidates: [(location: SkillCleanupLocation, removal: DeployRemovalCandidate)], result: inout SkillCleanupResult) {
         for (location, report) in removal.orderedOutcomes(for: candidates.map(\.location)) {
             let outcome = report.outcome
             let reportsCleanupCompletion = outcome.completed || report.absentAfterRemoval
@@ -82,7 +104,6 @@ extension PlatformViewModel {
         }
         result.didChangeDeploys = removal.didRemoveArtifacts
         if result.didChangeDeploys || removal.didChangeRecords { noteDeployStateChanged() }
-        return result
     }
 
     private func skillCleanupState() -> (paths: Set<String>?, problem: String) {
@@ -92,14 +113,19 @@ extension PlatformViewModel {
     }
 
     private func saveWaitingSkillCleanup(
-        skill: Skill, candidates: [(location: SkillCleanupLocation, removal: DeployRemovalCandidate)], unavailable: Set<UUID>
-    ) throws -> [String] {
+        skill: Skill, candidates: [(location: SkillCleanupLocation, removal: DeployRemovalCandidate)],
+        unavailable: Set<UUID>, result: inout SkillCleanupResult
+    ) throws {
         let waiting = candidates.compactMap { item -> WaitingRemoval? in
             guard let project = item.location.target.project, unavailable.contains(project.id) else { return nil }
             return waitingRemoval(skill: skill, platform: item.location.platform, project: project, source: "skill:\(skill.id)")
         }
         try waitingRemovalStore.add(waiting)
-        return Array(Set(waiting.map { "\($0.projectName) (\($0.projectPath))" })).sorted()
+        result.waitingProjects = Array(Set(waiting.map { "\($0.projectName) (\($0.projectPath))" })).sorted()
+        result.waitingRemovalIDs = Set(waiting.map(\.id))
+        result.deferredRemovals = candidates.filter { item in
+            item.location.target.project.map { unavailable.contains($0.id) } ?? false
+        }.map(\.removal)
     }
 
     private func skillCleanupCandidates(
@@ -134,7 +160,7 @@ extension PlatformViewModel {
     }
 
     private func skillCleanupEvidence(
-        skill: Skill, projects: [Project], recorded: Set<String>?, unavailable: Set<UUID>
+        skill: Skill, projects: [Project], recorded: Set<String>?, localPaths: Set<String>, unavailable: Set<UUID>
     ) -> SkillCleanupEvidence {
         var evidence = SkillCleanupEvidence()
         for target in [DeployTarget.userWide] + projects.map({ .project($0) }) {
@@ -151,8 +177,10 @@ extension PlatformViewModel {
                         // A failed metadata probe matters only if local history admits this path.
                         evidence.probeFailures[path] = error
                     }
-                    evidence.historyPaths.insert(path)
+                    if !unavailable.contains(project.id) || !localPaths.contains(path) { evidence.historyPaths.insert(path) }
                 }
+                if let project = target.project, unavailable.contains(project.id),
+                   recorded?.contains(path) != true, !localPaths.contains(path) { continue }
                 evidence.locations.append(SkillCleanupLocation(platform: platform, target: target, path: path))
             }
         }

@@ -1,0 +1,72 @@
+import Foundation
+import SwiftData
+import XCTest
+@testable import Pensieve
+
+@MainActor
+final class WaitingRemovalConvergenceTests: XCTestCase {
+    func testLaunchAndSyncRunOnlyOneWaitingPassAndUserReconciliationStillRuns() throws {
+        for trigger in ["launch", "sync", "user"] {
+            let h = try WaitingRemovalHarness()
+            defer { h.base.cleanup() }
+            try h.deploy([.codex])
+            try h.hideFolder()
+            XCTAssertTrue(h.deleteSkill())
+            try h.restoreFolder()
+            let newer = h.entry(source: "newer during pass")
+            h.base.mapped.beforeArtifactDeletion = { path in
+                if path == newer.artifactPath { try h.vm.waitingRemovalStore.add([newer]) }
+            }
+            if trigger == "user" { _ = h.base.intent.reconcile(context: h.base.context) } else {
+                let convergence = h.base.convergence { _, _ in }
+                if trigger == "launch" { convergence.runAfterLaunchIngest() } else {
+                    convergence.run(after: .synced(pushed: false, warnings: [], completedAt: Date(), headAdvanced: true))
+                }
+            }
+            XCTAssertFalse(h.base.files.isSymlink(at: newer.artifactPath))
+            XCTAssertEqual(try h.vm.waitingRemovalStore.read(), [newer], trigger)
+        }
+    }
+
+    func testNoReachableEntrySkipsDesiredReadsAndResolution() throws {
+        let h = try WaitingRemovalHarness()
+        defer { h.base.cleanup() }
+        try h.deploy([.codex])
+        try h.hideFolder()
+        XCTAssertTrue(h.deleteSkill())
+        let before = try h.base.files.readData(at: h.storePath)
+        h.mapped.beforePathResolution = { _ in XCTFail("No reachable work must resolve no paths") }
+        let reconciler = WaitingRemovalReconciler(store: h.vm.waitingRemovalStore, fileService: h.mapped,
+            platformVM: h.vm, machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID),
+            stateFetcher: WaitingDesiredReadFault(failing: "categories"))
+        XCTAssertFalse(reconciler.reconcile(context: h.base.context).hasFailures)
+        XCTAssertEqual(try h.base.files.readData(at: h.storePath), before)
+    }
+
+    func testDesiredProjectProbeSkipsMissingPathsAndUncheckablePausesReadyWork() throws {
+        for unavailable in ["missing", "uncheckable"] {
+            let h = try WaitingRemovalHarness()
+            defer { h.base.cleanup() }
+            try h.deploy([.codex])
+            try h.hideFolder()
+            XCTAssertFalse(h.removeProject().hasFailures)
+            try h.restoreFolder()
+            try h.base.addIntent(platform: .codex, project: h.base.otherProject)
+            if unavailable == "missing" { try h.base.files.deleteDirectory(at: h.base.otherProject.path) } else {
+                h.mapped.beforeProjectProbe = { path in
+                    if path == h.base.otherProject.path { throw CocoaError(.fileReadNoPermission) }
+                }
+            }
+            h.mapped.beforePathResolution = { path in
+                XCTAssertFalse(path.hasPrefix(h.base.otherProject.path), "Unavailable desired paths must stay unresolved")
+            }
+            let before = try h.base.files.readData(at: h.storePath)
+            let result = h.vm.reconcileWaitingRemovals(context: h.base.context)
+            XCTAssertEqual(result.hasFailures, unavailable == "uncheckable")
+            XCTAssertEqual(h.base.files.isSymlink(at: h.base.artifact(.codex)), unavailable == "uncheckable")
+            if unavailable == "uncheckable" {
+                XCTAssertEqual(try h.base.files.readData(at: h.storePath), before)
+            } else { XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty) }
+        }
+    }
+}

@@ -2,9 +2,17 @@ import Foundation
 import SwiftData
 
 /// Reconciles category-managed deployments to the declared category rules. PLAN-06 / 06.2.
-protocol CategoryReconcilerProtocol {
+protocol DeploymentLedgerReconciling {
     @discardableResult
     func reconcile(context: ModelContext) -> BatchResult
+    func reconcileDeployments(context: ModelContext) -> BatchResult
+}
+
+extension DeploymentLedgerReconciling {
+    func reconcileDeployments(context: ModelContext) -> BatchResult { reconcile(context: context) }
+}
+
+protocol CategoryReconcilerProtocol: DeploymentLedgerReconciling {
     func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult
 }
 
@@ -48,9 +56,13 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
 
     @discardableResult
     func reconcile(context: ModelContext) -> BatchResult {
-        var result = reconcile(context: context, excludingProjectIDs: [])
+        var result = reconcileDeployments(context: context)
         result.append(platformVM.reconcileWaitingRemovals(context: context))
         return result
+    }
+
+    func reconcileDeployments(context: ModelContext) -> BatchResult {
+        reconcile(context: context, excludingProjectIDs: [])
     }
 
     func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {

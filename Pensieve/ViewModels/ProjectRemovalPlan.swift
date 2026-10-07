@@ -53,6 +53,10 @@ struct ProjectRemovalPlan {
         let hasSibling = projects.contains {
             $0.id != project.id && project.identityKey != nil && $0.identityKey == project.identityKey
         }
+        guard ProjectDirectory.canAccess(project.path) else {
+            return ProjectRemovalPlan(preview: ProjectRemovalPreview(projectName: project.name,
+                artifactCount: 0, folderIsMissing: true), candidates: [], hasIdentitySibling: hasSibling, folderSiblingIDs: [])
+        }
         var folderProblem: ProjectFolderError?
         do {
             try platformVM.projectReconcilePolicy.requireDirectory(project)
