@@ -176,6 +176,7 @@ extension SyncCoordinatorTests {
             XCTAssertLessThan(beat, engineFinished, "the main actor heartbeat must advance before the blocking engine returns")
             XCTAssertEqual(engine.qosClass, expectedQoS, "the sync cycle must run at its caller's \(priority) QoS")
         }
+        try await assertRuntimeSyncPriorities()
     }
 
     func testRegisteredObjectFieldChangeVisibleToFreshMainContext() async throws {
@@ -326,40 +327,6 @@ private struct EmptyCredentialStore: CredentialStoreProtocol {
 }
 private struct NullAudit: SyncAuditWriting {
     func record(category: String, detail: String) {}
-}
-private final class BlockingEngine: SyncEngineProtocol, @unchecked Sendable {
-    private let stateLock = NSLock()
-    private var recordedFinishedAt: Date?
-    private var recordedQoSClass: qos_class_t?
-    var qosClass: qos_class_t? {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return recordedQoSClass
-    }
-    var finishedAt: Date? {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return recordedFinishedAt
-    }
-    func sync(root: String, message: String, credential: GitCredential?, context: ModelContext,
-              prepare: ((ModelContext) throws -> Void)?) throws -> SyncOutcome {
-        stateLock.lock()
-        recordedQoSClass = qos_class_self()
-        stateLock.unlock()
-        try prepare?(context)
-        Thread.sleep(forTimeInterval: 0.3)
-        stateLock.lock()
-        recordedFinishedAt = Date()
-        stateLock.unlock()
-        return .synced(pushed: false, warnings: [])
-    }
-    func inspectConflicts(root: String, credential: GitCredential?, context: ModelContext) throws -> ConflictInspection {
-        fatalError("unused")
-    }
-    func resolveConflicts(root: String, picks: [String: ResolutionPick], credential: GitCredential?,
-                          context: ModelContext) throws -> SyncOutcome {
-        fatalError("unused")
-    }
 }
 private struct CategoryMutatingEngine: SyncEngineProtocol {
     let newName: String?

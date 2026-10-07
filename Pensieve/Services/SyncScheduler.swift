@@ -174,10 +174,13 @@ final class SyncScheduler {
         // cancellation, the delayed nudge would launch a redundant third cycle.
         debounceTask?.cancel()
         debounceTask = nil
+        // Main-actor callbacks inherit UI priority. Background cycles retain the previous default QoS;
+        // a queued Sync Now keeps its manual priority even when background triggers coalesce with it.
+        let priority: TaskPriority = hasPendingManualTrigger ? .userInitiated : .medium
         hasPendingTrigger = false
         hasPendingManualTrigger = false
         isSyncing = true
-        Task { [weak self] in
+        Task(priority: priority) { [weak self] in
             await syncAction()
             guard let self else { return }
             self.isSyncing = false
