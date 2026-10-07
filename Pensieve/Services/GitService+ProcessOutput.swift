@@ -91,11 +91,20 @@ private final class GitOutputEvents {
             try change(ident: UInt(child.stdout), filter: Int16(EVFILT_READ), flags: UInt16(EV_ADD))
             try change(ident: UInt(child.stderr), filter: Int16(EVFILT_READ), flags: UInt16(EV_ADD))
             do {
+                #if GIT_PROCESS_PROBE
+                try child.probeHooks?.beforeExitWatch?(child.pid)
+                #endif
                 try change(ident: UInt(child.pid), filter: Int16(EVFILT_PROC),
                            flags: UInt16(EV_ADD | EV_ONESHOT), notes: UInt32(NOTE_EXIT))
             } catch {
-                // A fast child may be a zombie before registration; waitid still owns its exit.
-                guard (error as NSError).code == Int(ESRCH), try child.hasExited() else { throw error }
+                // ESRCH can precede a waitable exit. We still own this unreaped pid, so the child
+                // is exiting; wait for that exit without relying on a watch or a fixed sleep.
+                guard (error as NSError).code == Int(ESRCH) else { throw error }
+                let exited = try child.hasExited()
+                #if GIT_PROCESS_PROBE
+                try child.probeHooks?.exitWatchFailed?(child.pid, error, exited)
+                #endif
+                if !exited { try child.waitForExit() }
                 exitNotified = true
             }
         } catch {

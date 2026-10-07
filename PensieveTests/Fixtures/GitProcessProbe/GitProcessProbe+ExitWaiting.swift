@@ -2,6 +2,57 @@ import Darwin
 import Foundation
 
 extension GitProcessProbe {
+    /// Hold the real child alive until the registration failure has observed it as not waitable.
+    /// Then allow exit. The injected kernel error is deterministic; output and lifetime are real.
+    static func exitingChildWithoutWatch() -> String {
+        let root = (CommandLine.arguments[3] as NSString).deletingLastPathComponent
+        let files = FileService()
+        let executable = root + "/exiting-git"
+        do {
+            try files.writeExecutableFile(at: executable, content: """
+            #!/usr/bin/python3
+            import os, time
+            child = os.fork()
+            if child == 0:
+                os.setsid()
+                os.close(1)
+                with open('\(root)/children/' + str(os.getpid()), 'w') as f: f.write('holder')
+                with open('\(root)/holder', 'w') as f: f.write(str(os.getpid()))
+                while True: time.sleep(1)
+            os.write(1, b'O' * 128)
+            os.write(2, b'E' * 128)
+            while not os.path.exists('\(root)/exit'): time.sleep(0.0001)
+            os._exit(23)
+            """)
+            var child: pid_t = 0
+            var holder: pid_t = 0
+            var admitted = false
+            var finalReads = 0
+            let service = git(executable, started: { child = $0 }, beforeExitWatch: { _ in
+                holder = try readPID(at: root + "/holder")
+                throw GitProcess.posixError(ESRCH)
+            }, exitWatchFailed: { _, error, exited in
+                guard (error as NSError).code == Int(ESRCH), !exited else {
+                    throw GitProcess.posixError(EINVAL)
+                }
+                admitted = true
+                try files.writeFile(at: root + "/exit", content: "exit")
+            }, beforeRead: { pid, _, _, exited in
+                var info = siginfo_t()
+                guard exited, waitid(P_PID, id_t(pid), &info, WEXITED | WNOHANG | WNOWAIT) == 0,
+                      info.si_pid == pid else { throw GitProcess.posixError(ECHILD) }
+                finalReads += 1
+            })
+            let output = try service.runData(["--version"], in: nil)
+            var status: Int32 = 0
+            let reaped = waitpid(child, &status, WNOHANG) == -1 && errno == ECHILD
+            let intact = output.stdout == Data(repeating: 79, count: 128)
+                && output.stderr == Data(repeating: 69, count: 128) && output.exit == 23
+            return admitted && finalReads == 2 && reaped && intact && kill(holder, 0) == 0
+                ? "OK exiting child; output, status; holder alive; git reaped" : "FAIL exit-watch lifetime or output"
+        } catch { return "FAIL exit-watch ESRCH: \(error)" }
+    }
+
     /// Force EOF before exit, and exit during the last read. Measure from waitid's exit observation,
     /// independently of the runner. A median admits isolated scheduling delays, not a fixed idle wait.
     static func exitLatency() -> String {

@@ -20,6 +20,11 @@ final class GitServiceConcurrencyTests: XCTestCase {
             XCTAssertEqual(result.report, mode == "exit-latency" ? "OK exit wake; empty output, status"
                            : "OK output, status; holder alive")
         }
+        let exiting = try GitProcessProbeRunner.run("exit-watch-esrch",
+                                                   timeout: TestWait.hostedActionTimeoutSeconds, noteTimeout: false)
+        XCTAssertFalse(exiting.timedOut, "An exiting child must finish without an exit watch")
+        XCTAssertEqual(exiting.status, 0, exiting.report)
+        XCTAssertEqual(exiting.report, "OK exiting child; output, status; holder alive; git reaped")
     }
 
     func testBlockedCallsBeyondCoreCountAllowAnotherSamePriorityGitCall() throws {

@@ -42,35 +42,26 @@ enum GitProcessProbe {
     }
 
     static func git(_ executable: String = "/usr/bin/git", started: ((pid_t) -> Void)? = nil,
+                    beforeExitWatch: ((pid_t) throws -> Void)? = nil,
+                    exitWatchFailed: GitProcessProbeHooks.ExitWatchFailed? = nil,
                     beforeRead: GitProcessProbeHooks.BeforeRead? = nil) -> GitService {
         var service = GitService(executablePath: executable)
         service.probeHooks = GitProcessProbeHooks(started: { pid in record(pid); started?(pid) },
-                                                 beforeRead: beforeRead ?? { _, _, _, _ in })
+                                                 beforeRead: beforeRead ?? { _, _, _, _ in },
+                                                 beforeExitWatch: beforeExitWatch,
+                                                 exitWatchFailed: exitWatchFailed)
         return service
     }
 
     static func run(_ mode: String, executable: String) -> String {
         if mode == "spawn-signals" { return spawnSignals() }
         if mode == "exit-latency" { return exitLatency() }
+        if mode == "exit-watch-esrch" { return exitingChildWithoutWatch() }
         if mode == "usability-read" || mode == "confirmation-read" { return usabilityRead(mode) }
         if mode.hasPrefix("holder-") { return holder(mode) }
         if mode.hasPrefix("group-") { return groupFailure(mode) }
         if mode == "blocking" { return blocking(executable: executable) }
-        if mode == "concurrency" {
-            let count = max(64, ProcessInfo.processInfo.activeProcessorCount * 4)
-            let state = ProbeResults()
-            let completed = DispatchGroup()
-            for _ in 0..<count {
-                completed.enter()
-                BlockingWork.task(priority: .utility) {
-                    // Exact production probe path, including its default executable and pipe reader.
-                    state.record((try? git().probeUsability()) == .usable)
-                    completed.leave()
-                }
-            }
-            completed.wait()
-            return state.successes == count ? "OK probes=\(count)" : "FAIL probes=\(state.successes)/\(count)"
-        }
+        if mode == "concurrency" { return concurrency() }
         if mode == "pipes" {
             do {
                 let output = try git(executable).runData(["--version"], in: nil)
@@ -80,6 +71,33 @@ enum GitProcessProbe {
             } catch { return "FAIL \(error)" }
         }
         return fault(mode, executable: executable)
+    }
+
+    static func concurrency() -> String {
+        let count = max(64, ProcessInfo.processInfo.activeProcessorCount * 4)
+        let state = ProbeResults()
+        let completed = DispatchGroup()
+        for index in 0..<count {
+            completed.enter()
+            BlockingWork.task(priority: .utility) {
+                // Exact production probe path, including its default executable and pipe reader.
+                var registration = ""
+                let service = git(exitWatchFailed: { pid, error, exited in
+                    let error = error as NSError
+                    registration = "exit-watch registration pid=\(pid) \(error.domain)/\(error.code), waitable=\(exited)"
+                })
+                do {
+                    let usability = try service.probeUsability()
+                    state.record(usability == .usable, failure: "call \(index): \(usability)")
+                } catch {
+                    state.record(false, failure: "call \(index): \(error); \(registration)")
+                }
+                completed.leave()
+            }
+        }
+        completed.wait()
+        return state.successes == count ? "OK probes=\(count)"
+            : "FAIL probes=\(state.successes)/\(count)\n" + state.failureDetails.joined(separator: "\n")
     }
 
     static func fault(_ mode: String, executable: String) -> String {
@@ -129,10 +147,15 @@ private final class ProbeResults: @unchecked Sendable {
     private let lock = NSLock()
     private var count = 0
     private var failed = 0
+    private var errors: [String] = []
     var successes: Int { lock.lock(); defer { lock.unlock() }; return count }
     var failures: Int { lock.lock(); defer { lock.unlock() }; return failed }
-    func record(_ success: Bool) {
+    var failureDetails: [String] { lock.lock(); defer { lock.unlock() }; return errors }
+    func record(_ success: Bool, failure: String? = nil) {
         lock.lock(); defer { lock.unlock() }
-        if success { count += 1 } else { failed += 1 }
+        if success { count += 1 } else {
+            failed += 1
+            if let failure { errors.append(failure) }
+        }
     }
 }

@@ -110,6 +110,15 @@ final class GitProcess {
         return info.si_pid == pid
     }
 
+    /// An ESRCH exit-watch registration means our unreaped child is exiting. Wait for its status
+    /// to become observable without a polling delay, retaining its identity for the final reads.
+    func waitForExit() throws {
+        var info = siginfo_t()
+        while waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT) != 0 {
+            guard errno == EINTR else { throw Self.posixError() }
+        }
+    }
+
     func reap() throws -> Int32 {
         var status: Int32 = 0
         while waitpid(pid, &status, 0) == -1 {
