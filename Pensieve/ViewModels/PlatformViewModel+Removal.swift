@@ -39,7 +39,7 @@ extension PlatformViewModel {
     /// Remove owned deploys using one state snapshot and history only for unrecorded project rules.
     /// An unreadable snapshot fences owned artifacts; absent and foreign occupants remain no-ops.
     func removeAllDeploys(
-        skill: Skill, projects: [Project], localProjectDeployPaths: () throws -> Set<String> = { [] },
+        skill: Skill, projects: [Project], localProjectEvidence: (() throws -> SkillProjectDeployEvidence)? = nil,
         localDeployHistory: (Set<String>) throws -> Set<String>
     ) -> SkillCleanupResult {
         var result = SkillCleanupResult()
@@ -50,22 +50,34 @@ extension PlatformViewModel {
             return result
         }
         let (recorded, stateProblem) = skillCleanupState()
-        let unavailable = unavailableSkillCleanupProjects(projects)
+        let localEvidence: SkillProjectDeployEvidence?
+        do { localEvidence = try localProjectEvidence?() } catch {
+            result.batch.recordReadFailure("local deploy history and assignments for “\(skill.name)”", error: error)
+            return result
+        }
+        let folders = skillCleanupFolderProbe()
+        let localPaths = localEvidence?.paths ?? []
+        // A caller without the local snapshot cannot assert that the evidence is complete.
+        let incomplete = recorded == nil || localEvidence == nil || localEvidence?.historyFailure != nil
+        let selected = skillCleanupProjects(skill: skill, projects: projects,
+            paths: (recorded ?? []).union(localPaths), includeAll: incomplete)
+        let unavailable = unavailableSkillCleanupProjects(selected, folders: folders)
         if !unavailable.isEmpty, recorded == nil {
             result.batch.recordReadFailure("deploys for “\(skill.name)”", error: SkillCleanupStateFailure(message: stateProblem))
             return result
         }
-        let localPaths: Set<String>
-        do { localPaths = try localProjectDeployPaths() } catch {
-            result.batch.recordReadFailure("local deploy history and assignments for “\(skill.name)”", error: error)
+        if let error = localEvidence?.historyFailure,
+           !unavailable.isEmpty || skillCleanupNeedsCursorHistory(skill: skill, projects: selected) {
+            result.batch.recordReadFailure("local deploy history for “\(skill.name)”", error: error)
             return result
         }
         let evidence = skillCleanupEvidence(skill: skill, projects: projects, recorded: recorded,
-            localPaths: localPaths, unavailable: unavailable)
+            localPaths: localPaths, unavailable: unavailable, probedProjects: Set(selected.map(\.id)))
         let locallyDeployed: Set<String>
         do {
             locallyDeployed = evidence.historyPaths.isEmpty ? [] : try localDeployHistory(evidence.historyPaths)
         } catch {
+            _ = unavailableSkillCleanupProjects(projects, folders: folders)
             result.batch.recordReadFailure("local deploy history for “\(skill.name)”", error: error)
             return result
         }
@@ -82,15 +94,27 @@ extension PlatformViewModel {
         return result
     }
 
-    private func unavailableSkillCleanupProjects(_ projects: [Project]) -> Set<UUID> {
-        var available: [String: Bool] = [:]
+    private func skillCleanupProjects(skill: Skill, projects: [Project], paths: Set<String>, includeAll: Bool) -> [Project] {
+        guard !includeAll else { return projects }
+        return projects.filter { project in
+            deployablePlatforms(forProject: true).contains {
+                paths.contains(artifactPath(skill: skill, platform: $0, target: .project(project)))
+            }
+        }
+    }
+
+    private func unavailableSkillCleanupProjects(_ projects: [Project], folders: ProjectFolderProbe) -> Set<UUID> {
         return Set(projects.filter { project in
             guard ProjectDirectory.canAccess(project.path) else { return false }
-            if let checked = available[project.path] { return !checked }
-            let checked = (try? projectReconcilePolicy.requireDirectory(project)) != nil
-            available[project.path] = checked
-            return !checked
+            return !folders.isAvailable(project.path)
         }.map(\.id))
+    }
+
+    private func skillCleanupNeedsCursorHistory(skill: Skill, projects: [Project]) -> Bool {
+        for project in projects where ProjectDirectory.canAccess(project.path) {
+            do { if try projectCursorRuleMayExist(skill: skill, project: project) { return true } } catch { return true }
+        }
+        return false
     }
 
     private func applySkillCleanupReport(
@@ -160,7 +184,8 @@ extension PlatformViewModel {
     }
 
     private func skillCleanupEvidence(
-        skill: Skill, projects: [Project], recorded: Set<String>?, localPaths: Set<String>, unavailable: Set<UUID>
+        skill: Skill, projects: [Project], recorded: Set<String>?, localPaths: Set<String>,
+        unavailable: Set<UUID>, probedProjects: Set<UUID>
     ) -> SkillCleanupEvidence {
         var evidence = SkillCleanupEvidence()
         for target in [DeployTarget.userWide] + projects.map({ .project($0) }) {
@@ -168,6 +193,11 @@ extension PlatformViewModel {
             for platform in deployablePlatforms(forProject: target.project != nil) {
                 let path = artifactPath(skill: skill, platform: platform, target: target)
                 if isDeferred, recorded?.contains(path) != true, !localPaths.contains(path) { continue }
+                if let project = target.project, ProjectDirectory.canAccess(project.path), !probedProjects.contains(project.id) {
+                    // Preserve cleanup of available unrecorded links. An unadmitted path with no
+                    // readable leaf supplies no candidate or deferred evidence; do not inspect it.
+                    guard unrecordedArtifactMayExist(at: path, platform: platform) else { continue }
+                }
                 // A rule's mark can arrive through git from another Mac. Check this Mac's evidence
                 // before opening it. Metadata avoids a history fetch for known absent/foreign shapes.
                 if platform == .cursor, let project = target.project, let recorded, !recorded.contains(path) {

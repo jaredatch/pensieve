@@ -16,13 +16,16 @@ enum SkillDeletionFlow {
             return false
         }
 
-        let cleanupResult = platformVM.removeAllDeploys(skill: skill, projects: projects, localProjectDeployPaths: {
-            try platformVM.localSkillProjectDeployPaths(skill: skill, projects: projects, context: context)
+        let cleanupResult = platformVM.removeAllDeploys(skill: skill, projects: projects, localProjectEvidence: {
+            try platformVM.localSkillProjectDeployEvidence(skill: skill, projects: projects, context: context)
         }, localDeployHistory: { paths in
             try localCursorDeployPaths(skill: skill, paths: paths, context: context)
         })
         var retirementSaved = false
-        defer { settleWaitingCleanup(cleanupResult, retirementSaved: retirementSaved, library: library, platformVM: platformVM) }
+        defer {
+            settleWaitingCleanup(cleanupResult, retirementSaved: retirementSaved,
+                skill: skill, library: library, platformVM: platformVM)
+        }
         let cleanup = cleanupResult.batch
         if cleanup.hasFailures {
             var messages = cleanup.readFailures.map(\.message)
@@ -75,12 +78,14 @@ enum SkillDeletionFlow {
         return manifestNote
     }
 
-    private static func settleWaitingCleanup(_ cleanup: SkillCleanupResult, retirementSaved: Bool,
+    private static func settleWaitingCleanup(_ cleanup: SkillCleanupResult, retirementSaved: Bool, skill: Skill,
                                              library: SkillLibraryViewModel, platformVM: PlatformViewModel) {
         if retirementSaved {
             if let error = platformVM.finishWaitingSkillCleanup(cleanup) {
                 let message = library.deletionNotice?.message ?? ""
-                let warning = message + " Waiting cleanup was saved, "
+                let prefix = "Deleted “\(skill.name)”."
+                let namedMessage = message.hasPrefix(prefix) ? message : prefix + (message.isEmpty ? "" : " " + message)
+                let warning = namedMessage + " Waiting cleanup was saved, "
                     + "but its deployment records couldn't be retired: \(error)."
                 switch library.deletionNotice {
                 case .failed: library.deletionNotice = .failed(warning)

@@ -149,11 +149,16 @@ extension CursorOwnershipTests {
         let database = root + "/history.sqlite"
         try renameHistoryTable(at: database, broken: true)
         defer { try? renameHistoryTable(at: database, broken: false) }
-        XCTAssertThrowsError(try harness.context.fetch(FetchDescriptor<DeployRecord>()))
+        var historyMessage = ""
+        XCTAssertThrowsError(try harness.context.fetch(FetchDescriptor<DeployRecord>())) {
+            historyMessage = $0.localizedDescription
+        }
         let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
             manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
         XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project], context: harness.context))
+        XCTAssertFalse(historyMessage.isEmpty)
+        XCTAssertTrue(library.deletionNotice?.message.contains(historyMessage) == true)
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<Skill>()), 1)
         XCTAssertTrue(files.fileExists(at: root + "/store/skills/" + skill.directoryName + "/SKILL.md"))
         let hiddenRule = hidden + String(path.dropFirst(project.path.count))

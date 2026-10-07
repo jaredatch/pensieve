@@ -331,6 +331,15 @@ extension PlatformViewModel {
         try cursorCompiler.ruleMayExist(skill: skill, projectPath: project.path)
     }
 
+    func skillCleanupFolderProbe() -> ProjectFolderProbe {
+        ProjectFolderProbe(fileService: fileService)
+    }
+
+    /// Discovery alone admits no deferred cleanup and performs no ownership check.
+    func unrecordedArtifactMayExist(at path: String, platform: PlatformTarget) -> Bool {
+        platform.usesSymlinks ? fileService.isSymlink(at: path) : fileService.fileExists(at: path)
+    }
+
     /// Direct unselection waits quietly for a missing project, before reading or retiring its artifacts.
     func removeSelection(skills: [Skill], platforms: [PlatformTarget], target: DeployTarget) -> BatchResult {
         removeSelection(pairs: DeployRemovalPair.expand(skills: skills, platforms: platforms), target: target)

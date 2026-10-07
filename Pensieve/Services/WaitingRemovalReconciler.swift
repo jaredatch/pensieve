@@ -18,13 +18,13 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
         let waiting: [WaitingRemoval]
         let reachable: [WaitingRemoval]
         let desired: Set<String>
-        var folders: [String: Result<Void, Error>] = [:]
+        let folders = ProjectFolderProbe(fileService: fileService)
         do {
             waiting = try store.read()
             guard !waiting.isEmpty else { return BatchResult() }
-            reachable = reachableEntries(waiting, folders: &folders)
+            reachable = reachableEntries(waiting, folders: folders)
             guard !reachable.isEmpty else { return BatchResult() }
-            desired = try desiredPaths(context: context, machineID: machineIdentity.identifier(), folders: &folders)
+            desired = try desiredPaths(context: context, machineID: machineIdentity.identifier(), folders: folders)
         } catch { return BatchResult.readFailure("waiting removals", error: error) }
 
         var retire: Set<UUID> = []
@@ -52,7 +52,12 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
     private func finish(_ removal: DeployRemovalResult, entries: [WaitingRemoval], retiring: Set<UUID>) -> BatchResult {
         var retire = retiring
         var result = BatchResult()
+        // Admission can precede classification by seconds. Only uncertain completions need
+        // this fresh phase, after every occupant was judged; share its answer within a folder.
+        let finalFolders = ProjectFolderProbe(fileService: fileService)
         for (entry, outcome) in zip(entries, removal.outcomes) {
+            if outcome.foundAbsent || outcome.failure != nil,
+               !finalFolders.isAvailable(entry.projectPath) { continue }
             if let error = outcome.failure ?? (outcome.completed ? removal.stateWriteFailure : nil) {
                 result.operationFailures.append("\(entry.artifactPath): \(error.localizedDescription)")
             } else if outcome.completed { retire.insert(entry.id) }
@@ -65,23 +70,14 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
         return result
     }
 
-    private func reachableEntries(_ waiting: [WaitingRemoval], folders: inout [String: Result<Void, Error>]) -> [WaitingRemoval] {
+    private func reachableEntries(_ waiting: [WaitingRemoval], folders: ProjectFolderProbe) -> [WaitingRemoval] {
         return waiting.filter { entry in
-            (try? requireFolder(entry.projectPath, folders: &folders)) != nil
+            folders.isAvailable(entry.projectPath)
         }
-    }
-
-    private func requireFolder(_ path: String, folders: inout [String: Result<Void, Error>]) throws {
-        let check: Result<Void, Error>
-        if let cached = folders[path] { check = cached } else {
-            check = Result { try fileService.requireProjectDirectory(at: path) }
-            folders[path] = check
-        }
-        try check.get()
     }
 
     private func desiredPaths(context: ModelContext, machineID: String,
-                              folders: inout [String: Result<Void, Error>]) throws -> Set<String> {
+                              folders: ProjectFolderProbe) throws -> Set<String> {
         let projects = try stateFetcher.projects(context: context)
         let skills = try stateFetcher.skills(context: context)
         let intents = try stateFetcher.deployIntents(context: context)
@@ -90,7 +86,7 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
         var paths: Set<String> = []
         func request(_ skill: Skill, _ platform: PlatformTarget, _ project: Project) throws {
             do {
-                try requireFolder(project.path, folders: &folders)
+                try folders.require(project.path)
             } catch let error as ProjectFolderError {
                 guard case .missing = error else { throw error }
                 return

@@ -14,8 +14,7 @@ final class WaitingRemovalSkillAdmissionTests: XCTestCase {
         XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty)
         XCTAssertFalse(h.library.deletionNotice?.message.contains(h.base.project.name) == true)
         XCTAssertFalse(h.library.deletionNotice?.message.contains(h.base.project.path) == true)
-        XCTAssertEqual(Set(probes), [h.base.project.path, h.base.otherProject.path])
-        XCTAssertEqual(probes.count, 2)
+        XCTAssertTrue(probes.isEmpty)
     }
 
     func testUnreadableStateWithUnavailableRegistrationKeepsPossibleStateOnlyDeploy() throws {
@@ -77,8 +76,7 @@ final class WaitingRemovalSkillAdmissionTests: XCTestCase {
                 XCTAssertTrue(h.deleteSkill(), "\(source)/\(platform)")
                 let admitted = source != "remote request" && (platform != .cursor || source == "state" || source == "history")
                 XCTAssertEqual(try h.vm.waitingRemovalStore.read().map(\.artifactPath), admitted ? [path] : [])
-                XCTAssertEqual(Set(probes), [h.base.project.path, h.base.otherProject.path])
-                XCTAssertEqual(probes.count, 2)
+                XCTAssertEqual(probes, admitted ? [h.base.project.path] : [])
                 XCTAssertEqual(h.library.deletionNotice?.message.contains(h.base.project.path) == true, admitted)
                 XCTAssertFalse(h.library.deletionNotice?.message.contains(h.base.otherProject.path) == true)
             }

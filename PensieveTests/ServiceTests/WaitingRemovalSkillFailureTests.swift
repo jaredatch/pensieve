@@ -85,23 +85,31 @@ final class WaitingRemovalSkillFailureTests: XCTestCase {
     }
 
     func testFinalRecordRetirementWarningPreservesWaitingAndManifestNotice() throws {
-        let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
-        try h.deploy([.codex])
-        try h.hideFolder()
-        h.base.mapped.beforeDeployStateWrite = { _ in throw CocoaError(.fileWriteNoPermission) }
-        let manifest = RecordingDeletionManifest()
-        manifest.failingWrites = [1, 2]
-        let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: h.mapped), fileService: h.mapped,
-            manifestService: manifest, manifestRoot: h.base.root + "/store", notifier: {})
-        XCTAssertTrue(SkillDeletionFlow.delete(skill: h.base.skill, library: library, platformVM: h.vm,
-            projects: [h.base.project, h.base.otherProject], context: h.base.context))
-        let message = try XCTUnwrap(library.deletionNotice?.message)
-        XCTAssertTrue(message.contains(h.base.project.name))
-        XCTAssertTrue(message.contains(h.base.project.path))
-        XCTAssertTrue(message.contains("will be removed when the folder is back"))
-        XCTAssertTrue(message.contains("sync manifest couldn't be updated"))
-        XCTAssertTrue(message.contains("records couldn't be retired"))
-        XCTAssertEqual(try h.vm.waitingRemovalStore.read().count, 1)
+        for clearNotice in [false, true] {
+            let h = try WaitingRemovalHarness()
+            defer { h.base.cleanup() }
+            try h.deploy([.codex])
+            try h.hideFolder()
+            let manifest = RecordingDeletionManifest()
+            manifest.failingWrites = [1, 2]
+            let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: h.mapped), fileService: h.mapped,
+                manifestService: manifest, manifestRoot: h.base.root + "/store", notifier: {})
+            h.base.mapped.beforeDeployStateWrite = { _ in
+                if clearNotice { library.deletionNotice = nil }
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            XCTAssertTrue(SkillDeletionFlow.delete(skill: h.base.skill, library: library, platformVM: h.vm,
+                projects: [h.base.project, h.base.otherProject], context: h.base.context))
+            let message = try XCTUnwrap(library.deletionNotice?.message)
+            XCTAssertTrue(message.hasPrefix("Deleted “\(h.base.skill.name)”."), "clearNotice=\(clearNotice)")
+            if !clearNotice {
+                XCTAssertTrue(message.contains(h.base.project.name))
+                XCTAssertTrue(message.contains(h.base.project.path))
+                XCTAssertTrue(message.contains("will be removed when the folder is back"))
+                XCTAssertTrue(message.contains("sync manifest couldn't be updated"))
+            }
+            XCTAssertTrue(message.contains("records couldn't be retired"))
+            XCTAssertEqual(try h.vm.waitingRemovalStore.read().count, 1)
+        }
     }
 }

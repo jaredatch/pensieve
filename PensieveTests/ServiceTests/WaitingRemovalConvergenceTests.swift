@@ -28,6 +28,45 @@ final class WaitingRemovalConvergenceTests: XCTestCase {
         }
     }
 
+    func testFolderLostAfterAdmissionKeepsAllEntriesQuietlyUntilRestored() throws {
+        for loss in ["missing", "uncheckable"] {
+            let h = try WaitingRemovalHarness(platforms: [.claudeCode, .codex])
+            defer { h.base.cleanup() }
+            try h.deploy([.claudeCode, .codex])
+            try h.hideFolder()
+            XCTAssertTrue(h.deleteSkill())
+            try h.restoreFolder()
+            let waiting = try h.vm.waitingRemovalStore.read()
+            var probes: [String] = []
+            var judged = 0
+            var lost = false
+            h.mapped.beforeProjectProbe = { path in
+                probes.append(path)
+                if loss == "uncheckable", lost { throw CocoaError(.fileReadNoPermission) }
+            }
+            h.mapped.beforePathResolution = { _ in
+                if !lost { try h.hideFolder(); lost = true }
+            }
+            h.mapped.beforeEntryTypeProbe = { path in
+                if waiting.contains(where: { $0.artifactPath == path }) {
+                    judged += 1
+                    if loss == "uncheckable" { throw CocoaError(.fileReadNoPermission) }
+                }
+            }
+            XCTAssertFalse(h.vm.reconcileWaitingRemovals(context: h.base.context).hasFailures, loss)
+            XCTAssertEqual(try h.vm.waitingRemovalStore.read(), waiting, loss)
+            XCTAssertEqual(judged, 2)
+            XCTAssertEqual(probes, [h.base.project.path, h.base.project.path], loss)
+            h.mapped.beforePathResolution = nil
+            h.mapped.beforeEntryTypeProbe = nil
+            h.mapped.beforeProjectProbe = nil
+            try h.restoreFolder()
+            XCTAssertFalse(h.vm.reconcileWaitingRemovals(context: h.base.context).hasFailures)
+            for entry in waiting { XCTAssertFalse(try h.base.files.entryExistsWithoutFollowingLinks(at: entry.artifactPath)) }
+            XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty)
+        }
+    }
+
     func testNoReachableEntrySkipsDesiredReadsAndResolution() throws {
         let h = try WaitingRemovalHarness()
         defer { h.base.cleanup() }
