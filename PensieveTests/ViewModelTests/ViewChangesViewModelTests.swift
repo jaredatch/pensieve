@@ -89,7 +89,7 @@ final class ViewChangesViewModelTests: XCTestCase {
     }
 
     func testDeletedUpdatedAndNoUpdateStatesRetirePreviewAndDisableApply() async throws {
-        for mutation in 0..<4 {
+        for mutation in 0..<5 {
             let skill = try fixture.skill("stale-\(mutation)")
             let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
             let model = ViewChangesViewModel(library: fixture.library, operations: fixture.operations(rows: [row]))
@@ -105,7 +105,8 @@ final class ViewChangesViewModelTests: XCTestCase {
                 skills = []
             case 1: skill.updatedAt = skill.updatedAt.addingTimeInterval(1)
             case 2: skill.updateAvailable = false
-            default: revisions[skill.directoryName] = 1
+            case 3: revisions[skill.directoryName] = 1
+            default: skill.installedOrigin = nil
             }
             model.validate(skills: skills, folderRevisions: revisions, context: fixture.context)
             guard case let .stale(message) = model.state else { return XCTFail("Expected stale state for \(mutation)") }
@@ -113,6 +114,13 @@ final class ViewChangesViewModelTests: XCTestCase {
             XCTAssertNil(model.selectedFile)
             XCTAssertTrue(model.files.isEmpty)
             XCTAssertFalse(model.canUpdate)
+            XCTAssertEqual(model.canRecheck, mutation == 2,
+                           "Only a stale state recoverable by an upstream check may offer Re-check")
+            if mutation == 2 || mutation == 4 {
+                model.open(skillID: skill.id, context: fixture.context)
+                XCTAssertEqual(model.canRecheck, mutation == 2,
+                               "No-update recovery must be the same on open and validate; an unlinked skill cannot Re-check")
+            }
         }
     }
 

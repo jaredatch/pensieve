@@ -13,7 +13,7 @@ extension ViewChangesSceneTests {
                                 new: String(repeating: "new\n", count: 5_678)))
         let width = DesignTokens.changesWindowWidth - DesignTokens.changesSidebarWidth - 1
         let renderer = ImageRenderer(content: ViewChangesFileHeader(file: file).frame(width: width)
-            .padding(.horizontal, 100).background(Color.white).environment(\.colorScheme, .light))
+            .padding(.horizontal, 100).padding(.vertical, 40).background(Color.white).environment(\.colorScheme, .light))
         renderer.scale = rowRenderScale
         let image = try XCTUnwrap(renderer.cgImage)
         let pixels = try rowPixels(image)
@@ -39,13 +39,17 @@ extension ViewChangesSceneTests {
         XCTAssertFalse(inkBounds.isNull, "A rendered-size check must contain visible text")
         XCTAssertGreaterThanOrEqual(inkBounds.minX, 100, "The file header must not overflow its detail column")
         XCTAssertLessThanOrEqual(inkBounds.maxX, 100 + width, "The file header must not overflow its detail column")
+        XCTAssertGreaterThanOrEqual(inkBounds.minY, 40, "The header frame must contain both summary lines")
+        XCTAssertLessThanOrEqual(inkBounds.maxY, CGFloat(image.height) / rowRenderScale - 40,
+                                 "The header frame must contain both summary lines")
         XCTAssertFalse(pathBounds.isNull, "The file path must remain visible")
         XCTAssertGreaterThanOrEqual(pathBounds.width, 120, "The path must keep a readable minimum beside the permission suffix")
+        try assertGrowingHeaderContainsItsText(file: file, width: width)
         let renamed = PinnedSkillFileDiff(change: FileTreeChange(
             path: String(repeating: "long-folder/", count: 12) + "renamed.zzzzz",
             kind: .modified, content: file.content, permissions: file.permissions), result: file.diff)
         let renamedRenderer = ImageRenderer(content: ViewChangesFileHeader(file: renamed).frame(width: width)
-            .padding(.horizontal, 100).background(Color.white).environment(\.colorScheme, .light))
+            .padding(.horizontal, 100).padding(.vertical, 40).background(Color.white).environment(\.colorScheme, .light))
         renamedRenderer.scale = rowRenderScale
         let renamedImage = try XCTUnwrap(renamedRenderer.cgImage)
         XCTAssertEqual(renamedImage.width, image.width)
@@ -53,6 +57,36 @@ extension ViewChangesSceneTests {
         let renamedPixels = try rowPixels(renamedImage)
         XCTAssertTrue(zip(pixels, renamedPixels).contains { abs(Int($0) - Int($1)) > 4 },
                       "The long path's filename must stay readable beside its permission suffix")
+    }
+
+    private func assertGrowingHeaderContainsItsText(file: PinnedSkillFileDiff, width: CGFloat) throws {
+        let single = ImageRenderer(content: ViewChangesFileHeader(file: PinnedSkillFileDiff(
+            change: FileTreeChange(path: "short", kind: .added, content: .binary), result: nil)).frame(width: width))
+        single.scale = rowRenderScale
+        XCTAssertEqual(CGFloat(try XCTUnwrap(single.cgImage).height) / rowRenderScale, 29,
+                       "A single-line file header keeps the 29-point height")
+        // A narrower detail column and inherited text spacing make both summary lines exceed 29 points.
+        let wrapped = ImageRenderer(content: ViewChangesFileHeader(file: file)
+            .frame(width: width - DesignTokens.changesSidebarWidth).lineSpacing(8)
+            .padding(.vertical, 40).background(Color.white).environment(\.colorScheme, .light))
+        wrapped.scale = rowRenderScale
+        let wrappedImage = try XCTUnwrap(wrapped.cgImage)
+        let wrappedPixels = try rowPixels(wrappedImage)
+        var wrappedBounds = CGRect.null
+        for y in 0..<wrappedImage.height {
+            for x in 0..<wrappedImage.width {
+                let offset = (y * wrappedImage.width + x) * 4
+                if max(wrappedPixels[offset], wrappedPixels[offset + 1], wrappedPixels[offset + 2]) < 220 {
+                    wrappedBounds = wrappedBounds.union(CGRect(x: CGFloat(x) / rowRenderScale,
+                        y: CGFloat(y) / rowRenderScale, width: 1 / rowRenderScale, height: 1 / rowRenderScale))
+                }
+            }
+        }
+        XCTAssertFalse(wrappedBounds.isNull, "The wrapped header must render visible text")
+        XCTAssertGreaterThanOrEqual(wrappedBounds.minY, 40, "The header frame must contain both summary lines")
+        XCTAssertLessThanOrEqual(wrappedBounds.maxY, CGFloat(wrappedImage.height) / rowRenderScale - 40,
+                                 "The header frame must contain both summary lines")
+        XCTAssertTrue(try recognizedText(wrappedImage).contains("Permissions changed from 0644 to 0755"))
     }
 
     func testBinaryModeSidebarKeepsNameFolderAndMarkerAtMinimumWidth() throws {

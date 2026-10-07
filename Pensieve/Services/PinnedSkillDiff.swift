@@ -45,7 +45,7 @@ struct PinnedSkillDiff: Equatable {
                 return PinnedSkillFileDiff(change: change, result: nil, unavailableContent: .diffBudgetExhausted)
             }
             let sharedBudgetLimitsSearch = budget.remaining < BoundedLineDifference.maximumWork
-            let result = try UnifiedDiff(old: old, new: new, budget: budget, maximumOutputLines: remainingOutput) { work in
+            let result = try UnifiedDiff(old: old, new: new, budget: budget, maximumOutputLines: maximumDiffOutputLines) { work in
                 try Task.checkCancellation()
                 try checkpoint(work)
                 try Task.checkCancellation()
@@ -58,7 +58,11 @@ struct PinnedSkillDiff: Equatable {
                 return PinnedSkillFileDiff(change: change, result: nil,
                                           unavailableContent: sharedBudgetLimitsSearch ? .diffBudgetExhausted : .tooLarge)
             }
-            remainingOutput -= result.hunks.reduce(0) { $0 + $1.lines.count }
+            let emitted = result.hunks.reduce(0) { $0 + $1.lines.count }
+            guard emitted <= remainingOutput else {
+                return PinnedSkillFileDiff(change: change, result: nil, unavailableContent: .diffOutputBoundReached)
+            }
+            remainingOutput -= emitted
             return PinnedSkillFileDiff(change: change, result: result)
         }
         return PinnedSkillDiff(files: files, unreadFileCount: comparison.unreadFileCount, bytesRead: comparison.bytesRead)

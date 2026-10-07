@@ -9,7 +9,7 @@ extension ViewChangesViewModelTests {
         let categories: Set<Unicode.GeneralCategory> = [.control, .format, .lineSeparator, .paragraphSeparator]
         for value in UInt32(0)...0x10FFFF {
             guard let scalar = Unicode.Scalar(value), categories.contains(scalar.properties.generalCategory),
-                  value != 9, value != 10 else { continue }
+                  value != 9, value != 10, value != 0x200C, value != 0x200D else { continue }
             let mark = value == 13 ? "␍" : String(format: "⟨U+%04X⟩", value)
             let line = UnifiedDiffLine(kind: .added, text: "before" + String(scalar) + "after\n",
                                        oldLineNumber: nil, newLineNumber: 1)
@@ -17,6 +17,9 @@ extension ViewChangesViewModelTests {
             XCTAssertEqual(String(shown.characters), "before" + mark + "after", "Hidden scalars must remain visible")
             XCTAssertEqual(shown.runs.filter { $0.foregroundColor != nil }.count, 1,
                            "Each hidden scalar needs a distinctly styled mark")
+            XCTAssertTrue(shown.runs.filter { $0.foregroundColor != nil }.allSatisfy {
+                $0.foregroundColor == DesignTokens.diffHiddenCharacter
+            }, "Marks must use the semantic hidden-character color")
             let name = ViewChangesPresentation.styledText("name" + String(scalar) + ".txt", filename: true)
             XCTAssertEqual(String(name.characters), "name" + mark + ".txt", "Names use the same category rule")
             XCTAssertEqual(name.runs.filter { $0.foregroundColor != nil }.count, 1)
@@ -32,12 +35,19 @@ extension ViewChangesViewModelTests {
         let tab = UnifiedDiffLine(kind: .context, text: "a\tb\n", oldLineNumber: 1, newLineNumber: 1)
         XCTAssertEqual(String(ViewChangesPresentation.lineText(tab).characters), "a\tb", "Tabs remain literal")
         for (path, visible) in [("folder/evil\u{202E}.txt", "evil⟨U+202E⟩.txt"),
-                                ("folder/first\nlast", "first⟨U+000A⟩last"), ("folder/tab\tname", "tab\tname")] {
+                                ("folder/first\nlast", "first⟨U+000A⟩last"), ("folder/tab\tname", "tab⟨U+0009⟩name")] {
             let file = try XCTUnwrap(PinnedSkillDiff.build(comparison: FileTreeComparison(changes: [
                 FileTreeChange(path: path, kind: .added, content: .binary)
             ], unreadFileCount: 0, bytesRead: 0)).files.first)
-            XCTAssertEqual(ViewChangesPresentation.filePath(file), "folder/" + visible)
+            XCTAssertEqual(String(ViewChangesPresentation.styledText(file.path, filename: true).characters), "folder/" + visible)
             XCTAssertEqual(ViewChangesPresentation.accessibilityLabel(file), visible + ", folder, Binary file")
+        }
+        for text in ["👩‍💻", "می\u{200C}روم"] {
+            let joined = UnifiedDiffLine(kind: .added, text: text + "\n", oldLineNumber: nil, newLineNumber: 1)
+            let shown = ViewChangesPresentation.lineText(joined)
+            XCTAssertEqual(String(shown.characters), text, "Emoji and word joiners must stay unmarked")
+            XCTAssertTrue(shown.runs.allSatisfy { $0.foregroundColor == nil })
+            XCTAssertEqual(String(ViewChangesPresentation.styledText(text, filename: true).characters), text)
         }
         try assertLineEndingNotes()
     }
@@ -50,6 +60,12 @@ extension ViewChangesViewModelTests {
         XCTAssertEqual(ViewChangesPresentation.lineNotes(lines), [2: ["Line ending changed: CRLF → LF"],
                                                                 3: ["\\ No newline at end of file"]],
                        "Line-ending facts must be separate note rows after their affected lines")
+        for (old, new, note) in [("end\n", "end", "Line ending changed: LF → no newline"),
+                                 ("end", "end\n", "Line ending changed: no newline → LF")] {
+            let ending = try XCTUnwrap(UnifiedDiff(old: old, new: new).hunks.first).lines
+            XCTAssertEqual(ViewChangesPresentation.lineNotes(ending), [1: [note]],
+                           "One ending change must produce exactly one note row")
+        }
         XCTAssertEqual(lines.map { String(ViewChangesPresentation.lineText($0).characters) },
                        ["context", "ending", "ending", "tail"], "Note text must never enter diff lines")
     }
@@ -138,15 +154,25 @@ extension ViewChangesViewModelTests {
             await TestWait.forTask(task, failureMessage: "sheet worker did not finish")
             window.validate(skills: [skill], folderRevisions: [:], context: fixture.context)
             assertSheetResult(window, skill: skill, row: row, outcome: outcome, checks: checks, commit: commit)
+            await reopenChangedPreview(window, skill: skill)
             window.recheck(context: fixture.context)
             await TestWait.until(failureMessage: "explicit window check did not settle") { !window.isRechecking }
             XCTAssertEqual(checks.values, [skill.id], "Only a new explicit Re-check may start a window worker")
         }
     }
 
+    private func reopenChangedPreview(_ window: ViewChangesViewModel, skill: Skill) async {
+        if !window.canRecheck {
+            window.open(skillID: skill.id, context: fixture.context)
+            await TestWait.until(failureMessage: "reopened preview did not settle") { window.state != .loading }
+            XCTAssertTrue(window.canRecheck, "A reopened moved-pin failure may offer Re-check")
+        }
+    }
+
     private func assertSheetResult(_ window: ViewChangesViewModel, skill: Skill, row: UpdatesRow, outcome: String,
                                    checks: UpdateReviewRecorder<UUID>, commit: String) {
-        XCTAssertTrue(window.canRecheck, "Re-check must become available after sheet completion and identity changes")
+        XCTAssertEqual(window.canRecheck, outcome == "other",
+                       "A changed preview asking to reopen must offer no Re-check; unchanged pin failures may recheck")
         XCTAssertEqual(checks.values, [], "No deferred window check may overwrite the sheet's result")
         XCTAssertEqual(skill.updateAvailable, outcome != "applied")
         XCTAssertEqual(skill.upstreamCommit,
@@ -175,7 +201,7 @@ extension ViewChangesViewModelTests {
         })
     }
 
-    private func appliedCompletion(skill: Skill, row: UpdatesRow) throws -> SkillUpdateCompletion {
+    func appliedCompletion(skill: Skill, row: UpdatesRow) throws -> SkillUpdateCompletion {
         var origin = try XCTUnwrap(skill.installedOrigin)
         origin.installedCommit = row.upstreamCommit
         origin.installedTree = row.upstreamTree

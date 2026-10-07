@@ -18,13 +18,14 @@ final class ViewChangesViewModel {
     private(set) var row: UpdatesRow?
     private(set) var selectedFilePath: String?
     private(set) var isRechecking = false
+    private(set) var lineNotes: [String: [[Int: [String]]]] = [:]
     private(set) var requestedSkillID: UUID?
 
     private let library: SkillLibraryViewModel
     private let operations: UpdateReviewOperations
     private weak var updates: UpdatesViewModel?
     private var recheckFailureIdentity: ViewChangesIdentity?
-    private var offersRecheck = false
+    private(set) var offersRecheck = false
     private let skillLookup: (UUID, ModelContext) throws -> Skill?
     private var identity: ViewChangesIdentity?
     private var sessionID = UUID()
@@ -37,9 +38,13 @@ final class ViewChangesViewModel {
         self.operations = operations
         self.updates = updates
         self.skillLookup = skillLookup
+        updates?.viewChanges = self
     }
 
-    var needsRecheck: Bool { offersRecheck }
+    /// The window owns admission for its active same-skill Re-check.
+    func isBusy(affecting skillID: UUID) -> Bool {
+        isRechecking && requestedSkillID == skillID
+    }
 
     var canRecheck: Bool {
         guard offersRecheck, let requestedSkillID, !isRechecking else { return false }
@@ -77,13 +82,13 @@ final class ViewChangesViewModel {
             close()
             requestedSkillID = skillID
             guard let skill = try skillLookup(skillID, context) else {
-                state = .stale("This skill was deleted.")
+                markStale("This skill was deleted.", allowsRecheck: false)
                 return
             }
             identity = ViewChangesIdentity(skill: skill,
                                            folderRevision: folderRevision ?? folderRevisions[skill.directoryName, default: 0])
             guard UpdatesViewModel.isEligibleForUpdates(skill) else {
-                state = .stale("This skill no longer has an update.")
+                markStale("This skill no longer has an update.", allowsRecheck: skill.hasLinkedOrigin)
                 return
             }
             row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
@@ -109,10 +114,12 @@ final class ViewChangesViewModel {
             skill = try skills.first(where: { $0.modelContext != nil && !$0.isDeleted && $0.id == identity.skillID })
                 ?? skillLookup(identity.skillID, context)
         } catch {
-            markStale("Couldn't verify whether this preview is current: " + UpdatesViewModel.readable(error))
+            markStale("Couldn't verify whether this preview is current: " + UpdatesViewModel.readable(error),
+                      allowsRecheck: true)
             return
         }
         let message: String?
+        var allowsRecheck = false
         if let skill, skill.modelContext != nil, !skill.isDeleted {
             // A retired preview keeps its failure reason until reopened; deletion still takes precedence below.
             if case .stale = state { return }
@@ -121,17 +128,19 @@ final class ViewChangesViewModel {
             if let row, let origin = skill.installedOrigin,
                origin.installedCommit == row.upstreamCommit, origin.installedTree == row.upstreamTree {
                 message = "This skill was updated."
+                allowsRecheck = true
             } else if !UpdatesViewModel.isEligibleForUpdates(skill) {
                 message = "This skill no longer has an update."
+                allowsRecheck = skill.hasLinkedOrigin
             } else if current != identity {
                 message = "This skill changed since you opened its preview. Open View Changes again to review the current update."
             } else { message = nil }
         } else { message = "This skill was deleted." }
         guard let message else { return }
-        markStale(message, allowsRecheck: skill?.modelContext != nil && skill?.isDeleted == false)
+        markStale(message, allowsRecheck: allowsRecheck)
     }
 
-    private func markStale(_ message: String, allowsRecheck: Bool = true) {
+    private func markStale(_ message: String, allowsRecheck: Bool) {
         offersRecheck = allowsRecheck
         isRechecking = false
         retirePreview()
@@ -152,6 +161,7 @@ final class ViewChangesViewModel {
     }
 
     private func retirePreview() {
+        lineNotes = [:]
         sessionID = UUID()
         previewTask?.cancel()
         cancelWorker?()
@@ -173,6 +183,9 @@ final class ViewChangesViewModel {
                 try await worker.value
             } onCancel: { worker.cancel() }
             guard sessionID == session, !Task.isCancelled else { return }
+            lineNotes = Dictionary(uniqueKeysWithValues: preview.files.map { file in
+                (file.path, file.diff?.hunks.map { ViewChangesPresentation.lineNotes($0.lines) } ?? [])
+            })
             selectedFilePath = preview.files.first?.path
             state = .loaded(preview)
         } catch {

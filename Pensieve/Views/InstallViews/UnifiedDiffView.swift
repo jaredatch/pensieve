@@ -3,6 +3,7 @@ import SwiftUI
 /// Inert line rendering of the worker's bounded hunks. Long lines scroll horizontally without wrapping.
 struct UnifiedDiffView: View {
     let diff: UnifiedDiff
+    let notes: [[Int: [String]]]
 
     var body: some View {
         GeometryReader { geometry in
@@ -10,7 +11,7 @@ struct UnifiedDiffView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(diff.hunks.indices, id: \.self) { index in
                         let hunk = diff.hunks[index]
-                        let notes = ViewChangesPresentation.lineNotes(hunk.lines)
+                        let hunkNotes = notes[index]
                         diffRow(old: nil, new: nil, marker: "", text: AttributedString(hunk.header),
                                 fill: DesignTokens.diffHunkFill, kind: nil)
                         ForEach(hunk.lines.indices, id: \.self) { index in
@@ -18,7 +19,7 @@ struct UnifiedDiffView: View {
                             diffRow(old: line.oldLineNumber, new: line.newLineNumber,
                                     marker: marker(line.kind), text: ViewChangesPresentation.lineText(line),
                                     fill: fill(line.kind), kind: line.kind)
-                            ForEach(notes[index] ?? [], id: \.self) { note in
+                            ForEach(hunkNotes[index] ?? [], id: \.self) { note in
                                 Text(verbatim: note)
                                     .font(DesignTokens.diffLineNumber).foregroundStyle(.secondary)
                                     .padding(.leading,

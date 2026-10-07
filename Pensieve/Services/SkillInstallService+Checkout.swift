@@ -95,6 +95,9 @@ extension SkillInstallService {
             guard enabled else { throw error }
             if error is CancellationError { throw error }
             let classified = Self.mappedRepositoryError(error)
+            if case GitError.unusable = classified {
+                throw SkillUpdateFlowError.previewReadFailed(classified.localizedDescription)
+            }
             if let failure = classified as? SkillInstallError {
                 switch failure {
                 case .authenticationFailed, .networkUnavailable, .repositoryNotFound, .repositoryChanged:

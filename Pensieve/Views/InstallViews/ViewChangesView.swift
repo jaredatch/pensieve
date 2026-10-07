@@ -114,7 +114,7 @@ struct ViewChangesView: View {
             ProgressView("Loading changes…").frame(maxWidth: .infinity, maxHeight: .infinity)
         case let .failed(message):
             EmptyStateView("Couldn't Load Changes", description: message) {
-                if model.needsRecheck {
+                if model.offersRecheck {
                     Button("Re-check") { model.recheck(context: context) }
                         .disabled(!model.canRecheck)
                         .accessibilityIdentifier("changes-recheck")
@@ -124,7 +124,7 @@ struct ViewChangesView: View {
             }
         case let .stale(message):
             EmptyStateView("Preview No Longer Current", description: message) {
-                if model.needsRecheck {
+                if model.offersRecheck {
                     Button("Re-check") { model.recheck(context: context) }
                         .disabled(!model.canRecheck)
                         .accessibilityIdentifier("changes-recheck")
@@ -142,7 +142,7 @@ struct ViewChangesView: View {
                 if let reason = ViewChangesPresentation.unavailableReason(file) {
                     EmptyStateView(ViewChangesPresentation.unavailableTitle(file), description: reason)
                 } else if let diff = file.diff {
-                    UnifiedDiffView(diff: diff).id(file.path)
+                    UnifiedDiffView(diff: diff, notes: model.lineNotes[file.path] ?? []).id(file.path)
                 }
             } else {
                 EmptyStateView("No File Changes", description: preview.isIncomplete

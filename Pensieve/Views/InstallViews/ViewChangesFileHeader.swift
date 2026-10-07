@@ -15,6 +15,6 @@ struct ViewChangesFileHeader: View {
                 .frame(minWidth: DesignTokens.changesFileSummaryMinimumWidth, maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, DesignTokens.changesToolbarInset)
-        .frame(height: DesignTokens.changesFileHeaderHeight)
+        .frame(minHeight: DesignTokens.changesFileHeaderHeight)
     }
 }

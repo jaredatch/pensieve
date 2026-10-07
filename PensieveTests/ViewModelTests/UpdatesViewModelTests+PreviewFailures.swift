@@ -6,7 +6,7 @@ extension UpdatesViewModelTests {
         let fixture = try prepareRealPinnedUpdate()
         let scratch = tempDir + "/preview-scratch"
         let steps = ["scratch", "session", "clone", "head", "skills", "vendor", "tree", "admission",
-                     "comparison", "comparison-raw"]
+                     "comparison", "comparison-raw", "unusable-clone", "unusable-head", "unusable-tree"]
         for step in steps {
             let spy = ImportBoundedReadSpy()
             func failure(_ path: String) -> NSError {
@@ -56,6 +56,12 @@ extension UpdatesViewModelTests {
             XCTAssertEqual(error.localizedDescription, "Couldn't compare the skill's files.",
                            "An unclassified comparison error must name only its operation")
         }
+        if step.hasPrefix("unusable-") {
+            XCTAssertEqual(error.localizedDescription,
+                           "Git isn't working on this Mac. Install the Command Line Tools "
+                            + "by running xcode-select --install in Terminal.",
+                           "Unusable git must show the same recovery message as install")
+        }
         if ["clone", "head", "tree"].contains(step) {
             let expected = step == "clone" ? "Couldn't fetch the upstream repository."
                 : step == "head" ? "Couldn't verify the pinned commit." : "Couldn't check the upstream tree hash."
@@ -70,15 +76,18 @@ private struct PreviewFailingGit: SkillInstallGitServing {
     let step: String
     let git = GitService()
     func cloneShallow(remote: String, branch: String?, into path: String, credential: GitCredential?) throws {
+        if step == "unusable-clone" { throw GitError.unusable(.developerToolsMissing) }
         if step == "clone" { throw GitError.repositoryUnreadable(path: path, detail: "remote: untrusted clone text " + path) }
         try git.cloneShallow(remote: remote, branch: branch, into: path, credential: credential)
     }
     func commitSHA(at path: String) throws -> String {
+        if step == "unusable-head" { throw GitError.unusable(.developerToolsMissing) }
         if step == "head" { throw GitError.repositoryUnreadable(path: path, detail: "remote: untrusted HEAD text " + path) }
         return try git.commitSHA(at: path)
     }
     func currentBranch(at path: String) throws -> String { try git.currentBranch(at: path) }
     func treeHash(at repositoryPath: String, path: String) throws -> String {
+        if step == "unusable-tree" { throw GitError.unusable(.developerToolsMissing) }
         if step == "tree" {
             throw GitError.commandFailed(args: ["-C", repositoryPath, "rev-parse", "HEAD:" + path],
                                          exitCode: 1, stderr: "remote: untrusted tree text " + repositoryPath)

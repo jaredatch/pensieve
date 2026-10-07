@@ -89,7 +89,7 @@ struct UpdatesSheetPresentation {
             replacementEnabled = selectionEnabled && row.driftedLocally
             status = model.status(for: row)
             if case let .failed(_, offersRecheck) = status { showsRecheck = offersRecheck } else { showsRecheck = false }
-            recheckEnabled = !model.isApplying && model.recheckingSkillID == nil
+            recheckEnabled = model.canRecheck(row)
         }
     }
 }

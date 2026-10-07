@@ -116,8 +116,6 @@ enum ViewChangesPresentation {
         styledText(lineBody(line.text))
     }
 
-    static func filePath(_ file: PinnedSkillFileDiff) -> String { visibleText(file.path, filename: true) }
-
     static func visibleText(_ text: String, filename: Bool = false) -> String {
         String(styledText(text, filename: filename).characters)
     }
@@ -128,13 +126,14 @@ enum ViewChangesPresentation {
         var literal = ""
         for scalar in text.unicodeScalars {
             let category = scalar.properties.generalCategory
-            let hidden = (category == .control && scalar.value != 9 && (filename || scalar.value != 10))
-                || category == .format || category == .lineSeparator || category == .paragraphSeparator
+            let hidden = (category == .control && (filename || (scalar.value != 9 && scalar.value != 10)))
+                || (category == .format && scalar.value != 0x200C && scalar.value != 0x200D)
+                || category == .lineSeparator || category == .paragraphSeparator
             guard hidden else { literal.unicodeScalars.append(scalar); continue }
             result.append(AttributedString(literal))
             literal = ""
             var mark = AttributedString(scalar.value == 13 ? "␍" : String(format: "⟨U+%04X⟩", scalar.value))
-            mark.foregroundColor = .orange
+            mark.foregroundColor = DesignTokens.diffHiddenCharacter
             result.append(mark)
         }
         result.append(AttributedString(literal))
@@ -160,7 +159,10 @@ enum ViewChangesPresentation {
                 let old = matches[offset]
                 consumed[body] = offset + 1
                 let before = lineEnding(lines[old].text), after = lineEnding(line.text)
-                if before != after { notes[index, default: []].append("Line ending changed: \(before) → \(after)") }
+                if before != after {
+                    notes.removeValue(forKey: old)
+                    notes[index] = ["Line ending changed: \(before) → \(after)"]
+                }
             }
         }
         return notes

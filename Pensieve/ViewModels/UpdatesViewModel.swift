@@ -31,6 +31,7 @@ final class UpdatesViewModel {
     let notifier: SyncStateNotifying
     let echoRegistrar: SyncWriteEchoRegistering
     let bodyWriteRegistration: SyncBodyWriteRegistration
+    weak var viewChanges: ViewChangesViewModel?
     @ObservationIgnored weak var editorLibrary: SkillLibraryViewModel?
 
     init(
@@ -66,6 +67,11 @@ final class UpdatesViewModel {
     var selectedCount: Int { selectedSkillIDs.intersection(selectableSkillIDs).count }
     var canApply: Bool {
         loadPhase == .loaded && !isApplying && recheckingSkillID == nil && selectedCount > 0
+            && selectedSkillIDs.allSatisfy { viewChanges?.isBusy(affecting: $0) != true }
+    }
+
+    func canRecheck(_ row: UpdatesRow) -> Bool {
+        !isApplying && recheckingSkillID == nil && viewChanges?.isBusy(affecting: row.id) != true
     }
 
     private var canLoad: Bool {
@@ -149,7 +155,7 @@ final class UpdatesViewModel {
     }
 
     func recheck(_ row: UpdatesRow, context: ModelContext) {
-        guard !isApplying, recheckingSkillID == nil else { return }
+        guard canRecheck(row) else { return }
         let id = beginOperation()
         statuses[row.id] = .updating
         recheckingSkillID = row.id
@@ -165,7 +171,7 @@ final class UpdatesViewModel {
     }
 
     func recheckAndReport(_ row: UpdatesRow, context: ModelContext) async {
-        guard !isApplying, recheckingSkillID == nil else { return }
+        guard canRecheck(row) else { return }
         let id = beginOperation()
         statuses[row.id] = .updating
         recheckingSkillID = row.id
