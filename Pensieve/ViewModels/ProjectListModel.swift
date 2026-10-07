@@ -24,7 +24,8 @@ struct ProjectListModel {
                 presentation: ListRows.project(project, deployIndex: deployIndex, homeDirectory: homeDirectory),
                 localProject: project, sortKey: "0|" + project.id.uuidString)
         }
-        let remote = remoteProjects.map { project in
+        let keys = Set(projects.compactMap(\.identityKey))
+        let remote = RemoteProjectModel.excludingLocalProjects(remoteProjects, localProjectIdentityKeys: keys).map { project in
             Row(selection: .remoteProject(project.identityKey), presentation: ListRows.remoteProject(project),
                 localProject: nil, sortKey: "1|" + project.identityKey)
         }

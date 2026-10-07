@@ -26,7 +26,7 @@ final class ProjectListModelTests: XCTestCase {
     }
 
     func testRemoteRowsMergeByIdentityAndCountDistinctProjectSkills() throws {
-        let mini = Fixture.machine(projects: [Fixture.project(), Fixture.project()], deploys: [
+        let mini = Fixture.machine(id: "a-mini", projects: [Fixture.project(), Fixture.project()], deploys: [
             Fixture.deploy("alpha"), Fixture.deploy("alpha", platform: "cursor"),
             Fixture.deploy("unrelated", key: "other")
         ])
@@ -75,6 +75,29 @@ final class ProjectListModelTests: XCTestCase {
                 XCTAssertEqual(list(projects: projects, states: states).rows.map(\.selection), expected)
             }
         }
+    }
+
+    func testCachedRemoteRowsHideNewLocalRegistrationBeforeRefresh() {
+        var cache = RemoteProjectsModel()
+        cache.refresh(.init(machineStates: [Fixture.machine()], localProjectIdentityKeys: [],
+                            localMachineID: InertMachineIdentity.value), now: { Fixture.publishedAt })
+        let local = Project(name: "Registered name", path: "/Users/test/Projects/workspace")
+        local.identityKey = Fixture.key
+        local.identityKind = "remote"
+        let registered = ProjectListModel(projects: [local], remoteProjects: cache.projects, deployIndex: .empty,
+                                          homeDirectory: "/Users/test", searchText: "")
+
+        XCTAssertEqual(cache.projects.map(\.identityKey), [Fixture.key], "The cache still has the now-local key")
+        XCTAssertEqual(registered.rows.map(\.selection), [.project(local.id)])
+        XCTAssertEqual(registered.subtitle, "1 project")
+        XCTAssertTrue(registered.rows.first?.localProject === local)
+        let search = ProjectListModel(projects: [local], remoteProjects: cache.projects, deployIndex: .empty,
+                                      homeDirectory: "/Users/test", searchText: "Workspace")
+        XCTAssertTrue(search.rows.isEmpty, "The cached remote name must also leave search immediately")
+        XCTAssertEqual(search.subtitle, "0 of 1 project")
+        let unregistered = ProjectListModel(projects: [], remoteProjects: cache.projects, deployIndex: .empty,
+                                            homeDirectory: "/Users/test", searchText: "")
+        XCTAssertEqual(unregistered.rows.map(\.selection), [.remoteProject(Fixture.key)])
     }
 
     func testLocalIdentityAndOwnStateExcludeRemoteRows() {

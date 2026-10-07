@@ -4,39 +4,37 @@ import XCTest
 final class RemoteProjectModelTests: XCTestCase {
     private typealias Fixture = RemoteProjectTestSupport
 
-    func testNewestPublishSuppliesNameAndKindWithStableTies() throws {
-        let old = Fixture.machine(id: "air", name: "Air", projects: [Fixture.project(name: "OldName")])
-        let recentDate = Fixture.publishedAt.addingTimeInterval(86_400)
-        let recent = Fixture.machine(id: "studio", name: "Studio", projects: [
-            Fixture.project(name: "NewName", kind: "marker")
-        ], publishedAt: recentDate)
-        let middle = Fixture.machine(id: "mini", name: "Mini", projects: [Fixture.project(name: "MiddleName")],
-                                     publishedAt: Fixture.publishedAt.addingTimeInterval(3_600))
-        for states in [[old, middle, recent], [recent, middle, old]] {
-            let project = try XCTUnwrap(RemoteProjectModel.onlyOnOtherMacs(
-                states: states, localProjectIdentityKeys: [], localMachineID: InertMachineIdentity.value
-            ).first)
-            XCTAssertEqual(project.name, "NewName")
-            XCTAssertEqual(project.kind, "marker")
-            XCTAssertEqual(project.machines.map { $0.detail.name }, ["Air", "Mini", "Studio"])
-        }
-        let newestAir = Fixture.machine(id: "air", name: "Air", projects: [Fixture.project(name: "NewestAir")],
-                                        publishedAt: recentDate.addingTimeInterval(3_600))
-        for states in [[newestAir, recent], [recent, newestAir]] {
-            let project = try XCTUnwrap(RemoteProjectModel.onlyOnOtherMacs(
-                states: states, localProjectIdentityKeys: [], localMachineID: InertMachineIdentity.value
-            ).first)
-            XCTAssertEqual(project.name, "NewestAir")
-            XCTAssertEqual(project.kind, "remote")
-        }
-        let tied = Fixture.machine(id: "air", name: "Air", projects: [Fixture.project(name: "TieName")],
-                                   publishedAt: recentDate)
-        for states in [[recent, tied], [tied, recent]] {
-            let project = try XCTUnwrap(RemoteProjectModel.onlyOnOtherMacs(
-                states: states, localProjectIdentityKeys: [], localMachineID: InertMachineIdentity.value
-            ).first)
-            XCTAssertEqual(project.name, "TieName")
-            XCTAssertEqual(project.kind, "remote")
+    func testLowestMachineIDSuppliesNameAndKindAcrossPublishesAndRenames() throws {
+        let owner = Fixture.machine(id: "a", name: "Zulu", projects: [
+            Fixture.project(name: "Canonical", kind: "marker")
+        ])
+        let other = Fixture.machine(id: "b", name: "Alpha", projects: [Fixture.project(name: "Other")])
+        let republishedOwner = Fixture.machine(id: "a", name: "Aardvark", projects: owner.projects,
+                                              deploys: [Fixture.deploy("unrelated", key: "elsewhere")],
+                                              publishedAt: Fixture.publishedAt.addingTimeInterval(3_600))
+        let republishedOther = Fixture.machine(id: "b", name: "Before Zulu", projects: other.projects,
+                                              deploys: [Fixture.deploy("another", key: "elsewhere")],
+                                              publishedAt: Fixture.publishedAt.addingTimeInterval(7_200))
+        let renamedProject = Fixture.machine(id: "a", name: "Zulu", projects: [
+            Fixture.project(name: "Renamed", kind: "remote")
+        ])
+        let removedProject = Fixture.machine(id: "a", name: "Zulu", projects: [])
+        let cases: [([MachineState], (name: String, kind: String))] = [
+            ([owner, other], ("Canonical", "marker")),
+            ([republishedOwner, other], ("Canonical", "marker")),
+            ([owner, republishedOther], ("Canonical", "marker")),
+            ([republishedOwner, republishedOther], ("Canonical", "marker")),
+            ([renamedProject, republishedOther], ("Renamed", "remote")),
+            ([removedProject, republishedOther], ("Other", "remote"))
+        ]
+        for (states, expected) in cases {
+            for orderedStates in [states, Array(states.reversed())] {
+                let project = try XCTUnwrap(RemoteProjectModel.onlyOnOtherMacs(
+                    states: orderedStates, localProjectIdentityKeys: [], localMachineID: InertMachineIdentity.value
+                ).first)
+                XCTAssertEqual(project.name, expected.name)
+                XCTAssertEqual(project.kind, expected.kind)
+            }
         }
     }
 

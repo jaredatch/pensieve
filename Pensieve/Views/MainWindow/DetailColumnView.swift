@@ -185,7 +185,10 @@ struct DetailColumnView: View {
 
     @ViewBuilder
     private func remoteProjectDetail(_ key: String) -> some View {
-        if let project = remoteProjects.first(where: { $0.identityKey == key }) {
+        let visibleProjects = RemoteProjectModel.excludingLocalProjects(
+            remoteProjects, localProjectIdentityKeys: Set(projects.compactMap(\.identityKey))
+        )
+        if let project = visibleProjects.first(where: { $0.identityKey == key }) {
             RemoteProjectDetailView(model: project)
                 .id(key)
         } else {

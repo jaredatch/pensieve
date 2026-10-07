@@ -13,7 +13,6 @@ struct RemoteProjectModel: Identifiable {
     let identityKey: String
     let kind: String
     let name: String
-    let publishedAt: Date
     let machines: [Machine]
 
     var id: String { identityKey }
@@ -27,16 +26,22 @@ struct RemoteProjectModel: Identifiable {
     }
     var skillCount: Int { Set(machines.flatMap { $0.deploys.map(\.skillSlug) }).count }
 
+    /// A local registration takes precedence even while the window's remote snapshot is stale.
+    static func excludingLocalProjects(_ cachedProjects: [Self], localProjectIdentityKeys: Set<String>) -> [Self] {
+        cachedProjects.filter { !localProjectIdentityKeys.contains($0.identityKey) }
+    }
+
     static func onlyOnOtherMacs(
         states: [MachineState], localProjectIdentityKeys: Set<String>, localMachineID: String?,
         now: @escaping () -> Date = Date.init
     ) -> [Self] {
         // Without this Mac's identity, its old publication cannot safely be classified as remote.
         guard let localMachineID else { return [] }
-        let otherMacs = states.filter { $0.machineID != localMachineID }.map { state in
+        // A stable machine ID supplies metadata regardless of unrelated publishes or Mac renames.
+        let otherMacs = states.filter { $0.machineID != localMachineID }.sorted { $0.machineID < $1.machineID }.map { state in
             (state, MachineDetailModel(state: state, localProjectIdentityKeys: localProjectIdentityKeys,
                                       localMachineID: localMachineID, now: now))
-        }.sorted { ($0.1.name, $0.1.machineID) < ($1.1.name, $1.1.machineID) }
+        }
         var projects: [String: Self] = [:]
         for (state, detail) in otherMacs {
             for project in detail.onlyOnMachineProjects {
@@ -47,15 +52,16 @@ struct RemoteProjectModel: Identifiable {
                     deploys: detail.projectDeploys.filter { $0.projectKey == project.identityKey }
                 )
                 let existing = projects[project.identityKey]
-                // Macs are ordered by name and ID, so equal publish dates keep a deterministic first choice.
-                let metadata = existing.flatMap { $0.publishedAt >= state.publishedAt ? $0 : nil }
                 projects[project.identityKey] = Self(
-                    identityKey: project.identityKey, kind: metadata?.kind ?? project.kind,
-                    name: metadata?.name ?? project.name, publishedAt: metadata?.publishedAt ?? state.publishedAt,
+                    identityKey: project.identityKey, kind: existing?.kind ?? project.kind,
+                    name: existing?.name ?? project.name,
                     machines: (existing?.machines ?? []) + [machine]
                 )
             }
         }
-        return projects.values.sorted { ($0.name, $0.identityKey) < ($1.name, $1.identityKey) }
+        return projects.values.map { project in
+            Self(identityKey: project.identityKey, kind: project.kind, name: project.name,
+                 machines: project.machines.sorted { ($0.detail.name, $0.id) < ($1.detail.name, $1.id) })
+        }.sorted { ($0.name, $0.identityKey) < ($1.name, $1.identityKey) }
     }
 }

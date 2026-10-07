@@ -39,6 +39,12 @@ struct ListRowModel: Equatable {
 /// tested apart from SwiftUI and SwiftData. Names lists are joined with ", " and left for the view
 /// to truncate to one line.
 enum ListRows {
+    private static let remoteMachineListFormatter: ListFormatter = {
+        let formatter = ListFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
+
     static func skill(_ skill: Skill, deployIndex: DeployIndex, sortKey: SkillSortKey,
                       isConflicted: Bool, dates: ListDates) -> ListRowModel {
         let glyph: ListRowModel.Glyph?
@@ -90,13 +96,11 @@ enum ListRows {
     }
 
     static func remoteProject(_ project: RemoteProjectModel) -> ListRowModel {
-        let formatter = ListFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
         let names = project.machines.map { $0.detail.name }
         return ListRowModel(
             title: project.name,
             trailingText: counted(project.skillCount, "skill"),
-            line2: "On " + (formatter.string(from: names) ?? names.joined(separator: ", ")),
+            line2: "On " + (remoteMachineListFormatter.string(from: names) ?? names.joined(separator: ", ")),
             line3: project.identityLine
         )
     }
