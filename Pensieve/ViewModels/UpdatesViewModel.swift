@@ -53,7 +53,9 @@ final class UpdatesViewModel {
     /// Admission for another surface: the sheet owns the meaning of its active work.
     func isBusy(affecting skillID: UUID) -> Bool {
         recheckingSkillID == skillID
-            || (isApplying && (selectedSkillIDs.contains(skillID) || statuses[skillID] == .updating))
+            || (isApplying && (statuses[skillID] == .updating || selectableRows.contains {
+                $0.id == skillID && isSelected($0) && (!$0.driftedLocally || confirmedDriftSkillIDs.contains($0.id))
+            }))
     }
 
     var selectableSkillIDs: Set<UUID> {

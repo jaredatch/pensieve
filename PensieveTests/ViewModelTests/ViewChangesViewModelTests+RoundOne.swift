@@ -5,19 +5,19 @@ import XCTest
 
 extension ViewChangesViewModelTests {
     func testPresentationMakesHiddenLineAndFilenameScalarsVisible() throws {
-        // Sweep hiding categories and default-ignorables; names have no joining/presentation exemption.
+        // Sweep hiding categories and default-ignorables; lines and names have no joining/presentation exemption.
         let categories: Set<Unicode.GeneralCategory> = [.control, .format, .lineSeparator, .paragraphSeparator]
         for value in UInt32(0)...0x10FFFF {
             guard let scalar = Unicode.Scalar(value), categories.contains(scalar.properties.generalCategory)
                   || scalar.properties.isDefaultIgnorableCodePoint else { continue }
             let mark = value == 13 ? "␍" : String(format: "⟨U+%04X⟩", value)
-            let unmarked = [9, 10, 0x200C, 0x200D].contains(value) || scalar.properties.isVariationSelector
+            let unmarked = [9, 10].contains(value)
             let line = UnifiedDiffLine(kind: .added, text: "before" + String(scalar) + "after\n",
                                        oldLineNumber: nil, newLineNumber: 1)
             let shown = ViewChangesPresentation.lineText(line)
             let literalLine = "before" + (value == 10 ? "\n" : String(scalar)) + "after"
             XCTAssertEqual(String(shown.characters), unmarked ? literalLine : "before" + mark + "after",
-                           "Hidden scalars must remain visible with only line joining/presentation exemptions")
+                           "Hidden scalars must remain visible without joiner or selector exemptions")
             XCTAssertEqual(shown.runs.filter { $0.foregroundColor != nil }.count, unmarked ? 0 : 1,
                            "Each hidden scalar needs a distinctly styled mark")
             XCTAssertTrue(shown.runs.filter { $0.foregroundColor != nil }.allSatisfy {
@@ -45,11 +45,11 @@ extension ViewChangesViewModelTests {
             XCTAssertEqual(String(ViewChangesPresentation.styledText(file.path, filename: true).characters), "folder/" + visible)
             XCTAssertEqual(ViewChangesPresentation.accessibilityLabel(file), visible + ", folder, Binary file")
         }
-        for text in ["👩‍💻", "می\u{200C}روم"] {
+        for (text, marked) in [("👩‍💻", "👩⟨U+200D⟩💻"), ("می\u{200C}روم", "می⟨U+200C⟩روم")] {
             let joined = UnifiedDiffLine(kind: .added, text: text + "\n", oldLineNumber: nil, newLineNumber: 1)
             let shown = ViewChangesPresentation.lineText(joined)
-            XCTAssertEqual(String(shown.characters), text, "Emoji and word joiners must stay unmarked")
-            XCTAssertTrue(shown.runs.allSatisfy { $0.foregroundColor == nil })
+            XCTAssertEqual(String(shown.characters), marked, "Emoji and word joiners must show hidden-character marks")
+            XCTAssertEqual(shown.runs.filter { $0.foregroundColor != nil }.count, 1)
         }
         try assertDefaultIgnorableNamesAndLines()
         try assertLineEndingNotes()
@@ -63,14 +63,19 @@ extension ViewChangesViewModelTests {
                            "scripts/inst" + mark + "all.sh", "Invisible filename marks must prevent path impersonation")
             let line = UnifiedDiffLine(kind: .added, text: String(scalar) + "base\n", oldLineNumber: nil, newLineNumber: 1)
             XCTAssertEqual(String(ViewChangesPresentation.lineText(line).characters),
-                           (value == 0x200C || value == 0x200D ? String(scalar) : mark) + "base",
+                           mark + "base",
                            "Default-ignorables without a visible base must be marked in lines")
         }
-        for text in ["❤️", "👩‍💻", "一\u{E0100}"] {
+        for (text, marked, count) in [("❤️", "❤⟨U+FE0F⟩", 1), ("👩‍💻", "👩⟨U+200D⟩💻", 1),
+                                     ("一\u{E0100}", "一⟨U+E0100⟩", 1),
+                                     ("H\u{FE00}e\u{FE01}l\u{FE02}l\u{FE03}o\u{FE04}",
+                                      "H⟨U+FE00⟩e⟨U+FE01⟩l⟨U+FE02⟩l⟨U+FE03⟩o⟨U+FE04⟩", 5),
+                                     ("\u{200C}\u{200D}\u{200C}\u{200D}",
+                                      "⟨U+200C⟩⟨U+200D⟩⟨U+200C⟩⟨U+200D⟩", 1)] {
             let line = UnifiedDiffLine(kind: .added, text: text + "\n", oldLineNumber: nil, newLineNumber: 1)
             let shown = ViewChangesPresentation.lineText(line)
-            XCTAssertEqual(String(shown.characters), text, "Emoji joiners and selectors following a visible base stay literal")
-            XCTAssertTrue(shown.runs.allSatisfy { $0.foregroundColor == nil })
+            XCTAssertEqual(String(shown.characters), marked, "Visible bases and joiner runs must not conceal hidden data")
+            XCTAssertEqual(shown.runs.filter { $0.foregroundColor != nil }.count, count)
         }
     }
 
@@ -119,13 +124,13 @@ extension ViewChangesViewModelTests {
             }))
         model.open(skillID: skill.id, context: fixture.context)
         await TestWait.until(failureMessage: "initial preview did not finish") { model.state != .loading }
-        model.selectFile(path: "scripts/setup.sh")
+        model.selectFile(id: 1)
         let loaded = model.state
         model.open(skillID: skill.id, context: fixture.context)
         XCTAssertEqual(model.state, loaded, "Opening a loaded unchanged identity must only bring its window forward")
         await TestWait.until(failureMessage: "reopened preview did not finish") { model.state != .loading }
         XCTAssertEqual(calls.values, [skill.id], "A loaded unchanged preview must not clone again")
-        XCTAssertEqual(model.selectedFilePath, "scripts/setup.sh")
+        XCTAssertEqual(model.selectedFile?.path, "scripts/setup.sh")
         skill.updatedAt = skill.updatedAt.addingTimeInterval(1)
         model.open(skillID: skill.id, context: fixture.context)
         await TestWait.until(failureMessage: "changed preview did not finish") { model.state != .loading }

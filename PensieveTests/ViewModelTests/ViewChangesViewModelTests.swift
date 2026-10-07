@@ -28,10 +28,10 @@ final class ViewChangesViewModelTests: XCTestCase {
         XCTAssertEqual(model.selectedFile?.linesRemoved, 1)
         XCTAssertEqual(model.selectedFile?.diff?.hunks.first?.header, "@@ -1,1 +1,2 @@")
         XCTAssertEqual(model.state, .loaded(preview))
-        model.selectFile(path: "scripts/setup.sh")
+        model.selectFile(id: 1)
         XCTAssertEqual(model.selectedFile, preview.files[1])
         XCTAssertEqual(model.selectedFile?.diff?.hunks.first?.lines.first?.newLineNumber, 1)
-        model.selectFile(path: "missing")
+        model.selectFile(id: 99)
         XCTAssertEqual(model.selectedFile, preview.files[1])
         XCTAssertEqual(ViewChangesPresentation.incompleteNote(preview.unreadFileCount),
                        "Preview incomplete: 3 files weren't read. View the remaining changes on GitHub.")
@@ -80,11 +80,11 @@ final class ViewChangesViewModelTests: XCTestCase {
         let (sheet, model) = fixture.review(rows: [row])
         model.open(skillID: skill.id, context: fixture.context)
         await loaded(model)
-        model.selectFile(path: "scripts/setup.sh")
+        model.selectFile(id: 1)
         let state = model.state
         sheet.reset()
         XCTAssertEqual(model.state, state)
-        XCTAssertEqual(model.selectedFilePath, "scripts/setup.sh")
+        XCTAssertEqual(model.selectedFile?.path, "scripts/setup.sh")
         XCTAssertTrue(model.canUpdate)
     }
 

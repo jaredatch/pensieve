@@ -43,7 +43,6 @@ extension ViewChangesViewModelTests {
         await sheet.applySelectedAndReport(context: fixture.context)
         XCTAssertEqual(checked.values, [other.id])
         XCTAssertEqual(applied.values, [other.id])
-        assertStaleSelectionDoesNotBlock(sheet, busy: skill.id, selectable: other.id)
         release.open()
         await TestWait.until(failureMessage: "window check did not finish") { !window.isRechecking }
         sheet.selectedSkillIDs = [skill.id]
@@ -59,14 +58,6 @@ extension ViewChangesViewModelTests {
         XCTAssertFalse(presentation.updateEnabled)
         XCTAssertFalse(try XCTUnwrap(presentation.rows.first).recheckEnabled,
                        "The sheet's same-skill Re-check control must be unavailable")
-    }
-
-    private func assertStaleSelectionDoesNotBlock(_ sheet: UpdatesViewModel, busy: UUID, selectable: UUID) {
-        sheet.selectedSkillIDs = [selectable, busy]
-        sheet.statuses[busy] = .updated
-        sheet.statuses[selectable] = .idle
-        XCTAssertTrue(sheet.canApply, "A stale updated selection must not block another row's Update during window work")
-        sheet.statuses[busy] = .idle
     }
 
     private func assertSameSkillSheetIntentsAreBlocked(

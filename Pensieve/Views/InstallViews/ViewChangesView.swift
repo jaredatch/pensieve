@@ -40,17 +40,18 @@ struct ViewChangesView: View {
                 .padding(.top, DesignTokens.changesSidebarHeaderTop)
                 .padding(.bottom, DesignTokens.changesSidebarHeaderBottom)
             }
-            List(selection: Binding(get: { model.selectedFilePath }, set: { path in
-                if let path { model.selectFile(path: path) }
+            List(selection: Binding(get: { model.selectedFileID }, set: { id in
+                if let id { model.selectFile(id: id) }
             })) {
-                ForEach(model.files, id: \.path) { file in
+                ForEach(model.files.indices, id: \.self) { id in
+                    let file = model.files[id]
                     ViewChangesFileRow(file: file)
                         .padding(.vertical, DesignTokens.changesFileRowSpacing / 2)
-                        .tag(file.path)
+                        .tag(id)
                         .listRowSeparator(.hidden)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(ViewChangesPresentation.accessibilityLabel(file))
-                        .accessibilityIdentifier("changes-file-" + file.path)
+                        .accessibilityIdentifier("changes-file-\(id)")
                 }
             }
             .listStyle(.sidebar)
@@ -142,7 +143,7 @@ struct ViewChangesView: View {
                 if let reason = ViewChangesPresentation.unavailableReason(file) {
                     EmptyStateView(ViewChangesPresentation.unavailableTitle(file), description: reason)
                 } else if let diff = file.diff {
-                    UnifiedDiffView(diff: diff, notes: model.lineNotes[file.path] ?? []).id(file.path)
+                    UnifiedDiffView(diff: diff, notes: model.selectedFileNotes).id(model.selectedFileID)
                 }
             } else {
                 EmptyStateView("No File Changes", description: preview.isIncomplete

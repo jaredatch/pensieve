@@ -46,12 +46,12 @@ final class UpdateReviewRoutingTests: XCTestCase {
         await loaded(preview)
         XCTAssertEqual(preview.row?.id, second.id)
         XCTAssertTrue(sheet.isPresented)
-        preview.selectFile(path: "scripts/setup.sh")
+        preview.selectFile(id: 1)
         let selected = preview.selectedFile
         sheet.isPresented = false
         sheet.reset()
         XCTAssertEqual(preview.selectedFile, selected)
-        XCTAssertEqual(preview.selectedFilePath, "scripts/setup.sh")
+        XCTAssertEqual(preview.selectedFile?.path, "scripts/setup.sh")
         XCTAssertEqual(preview.row?.id, second.id)
     }
 

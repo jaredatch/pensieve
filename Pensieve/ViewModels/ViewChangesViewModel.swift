@@ -16,9 +16,9 @@ final class ViewChangesViewModel {
 
     private(set) var state: State = .idle
     private(set) var row: UpdatesRow?
-    private(set) var selectedFilePath: String?
+    private(set) var selectedFileID: Int?
     private(set) var isRechecking = false
-    private(set) var lineNotes: [String: [[Int: [String]]]] = [:]
+    private(set) var lineNotes: [[[Int: [String]]]] = []
     private(set) var requestedSkillID: UUID?
 
     private let library: SkillLibraryViewModel
@@ -57,7 +57,8 @@ final class ViewChangesViewModel {
     }
 
     var selectedFile: PinnedSkillFileDiff? {
-        files.first { $0.path == selectedFilePath }
+        guard let selectedFileID, files.indices.contains(selectedFileID) else { return nil }
+        return files[selectedFileID]
     }
 
     var canUpdate: Bool {
@@ -65,9 +66,14 @@ final class ViewChangesViewModel {
         return row != nil && !isRechecking
     }
 
-    func selectFile(path: String) {
-        guard files.contains(where: { $0.path == path }) else { return }
-        selectedFilePath = path
+    var selectedFileNotes: [[Int: [String]]] {
+        guard let selectedFileID, lineNotes.indices.contains(selectedFileID) else { return [] }
+        return lineNotes[selectedFileID]
+    }
+
+    func selectFile(id: Int) {
+        guard files.indices.contains(id) else { return }
+        selectedFileID = id
     }
 
     func open(skillID: UUID, context: ModelContext, folderRevision: UInt64? = nil,
@@ -145,7 +151,7 @@ final class ViewChangesViewModel {
         isRechecking = false
         retirePreview()
         state = .stale(message)
-        selectedFilePath = nil
+        selectedFileID = nil
     }
 
     func close() {
@@ -156,12 +162,12 @@ final class ViewChangesViewModel {
         recheckFailureIdentity = nil
         isRechecking = false
         row = nil
-        selectedFilePath = nil
+        selectedFileID = nil
         state = .idle
     }
 
     private func retirePreview() {
-        lineNotes = [:]
+        lineNotes = []
         sessionID = UUID()
         previewTask?.cancel()
         cancelWorker?()
@@ -176,9 +182,9 @@ final class ViewChangesViewModel {
         let worker = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             let preview = try diff(requested, container)
-            let notes = Dictionary(preview.files.map { file in
-                (file.path, file.diff?.hunks.map { ViewChangesPresentation.lineNotes($0.lines) } ?? [])
-            }, uniquingKeysWith: { first, _ in first })
+            let notes = preview.files.map { file in
+                file.diff?.hunks.map { ViewChangesPresentation.lineNotes($0.lines) } ?? []
+            }
             try Task.checkCancellation()
             return (preview, notes)
         }
@@ -189,7 +195,7 @@ final class ViewChangesViewModel {
             } onCancel: { worker.cancel() }
             guard sessionID == session, !Task.isCancelled else { return }
             lineNotes = notes
-            selectedFilePath = preview.files.first?.path
+            selectedFileID = preview.files.indices.first
             state = .loaded(preview)
         } catch {
             guard sessionID == session, !Task.isCancelled else { return }

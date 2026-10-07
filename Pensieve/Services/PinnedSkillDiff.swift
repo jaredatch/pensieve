@@ -59,8 +59,7 @@ struct PinnedSkillDiff: Equatable {
                 return PinnedSkillFileDiff(change: change, result: nil,
                                           unavailableContent: sharedBudgetLimitsSearch ? .diffBudgetExhausted : .tooLarge)
             }
-            let emitted = result.hunks.reduce(0) { $0 + $1.lines.count }
-            remainingOutput -= emitted
+            remainingOutput -= result.requiredOutputLines
             return PinnedSkillFileDiff(change: change, result: result)
         }
         return PinnedSkillDiff(files: files, unreadFileCount: comparison.unreadFileCount, bytesRead: comparison.bytesRead)
