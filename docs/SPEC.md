@@ -208,8 +208,8 @@ Update checks are manual or run when the foreground schedule is due. Pensieve ba
 
 1. Run **Check for Updates** for one skill, or let the Off/Daily/Weekly foreground schedule check when due.
 2. A quiet notice appears when checked, non-error skills have updates. Open it to see the update list and select rows. Each row shows the source repository (`owner/name`, from the validated parse — or a "Source unavailable" indicator when the stored origin no longer parses) and the in-repo path, so a repointed origin is visible before applying.
-3. **View Changes** verifies the row's pinned commit and tree, then shows a read-only `SKILL.md` diff. A GitHub compare link covers the complete upstream change.
-4. **Update Selected** re-fetches and verifies the same pinned commit before using any bytes. If the branch moved, Pensieve refuses the apply and asks for a re-check.
+3. **View Changes**, on a row or on the skill's update banner, opens the one View Changes window on that skill. It verifies the pinned commit and tree, then lists every file the update would change, with its added and removed lines, and shows each as a read-only unified diff with invisible characters marked. View on GitHub opens the compare link. The window's Update hands the skill to the update list, the only place updates apply.
+4. **Update** re-fetches and verifies the same pinned commit before using any bytes. If the branch moved, Pensieve refuses the apply and asks for a re-check.
 5. If the canonical copy has local edits, that row requires explicit overwrite confirmation. A confirmed update atomically replaces the complete vendored directory, refreshes `InstalledOrigin`, and clears its local update flags. One failed row does not abort the rest.
 
 Pensieve never auto-installs skill updates. Scheduled work detects and reports them; applying third-party content is always a user action.

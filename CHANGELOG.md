@@ -10,6 +10,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - Pensieve has its own app icon at last, and its own glyph in the menu bar in place of the stock brain symbol.
 - A skill that's close to or over a platform's token budget now says so on its Overview tab.
 - About Pensieve now credits the open-source code Pensieve ships with, and shows each project's license.
+- View Changes opens its own window. It lists every file an update would change, with lines added and removed, and shows each one as an inline diff. Open it from a skill's update banner or from any row in the Updates sheet. Invisible characters show up as visible marks, so nothing can hide in a diff.
 
 ### Removed
 
@@ -17,6 +18,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- The Updates sheet is simpler: one row per skill, with its old and new commit and a View Changes button. A skill you've edited locally gets a "Replace my local edits" checkbox, and Update leaves it alone until you check it.
 - Rendered skills now look like GitHub's Markdown, at a size that fits the window.
 - History now shows the latest 10 commits for an installed skill and 10 saved versions for a skill you wrote before offering to show older ones.
 - Pensieve now needs macOS 26 or later.
