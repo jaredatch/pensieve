@@ -55,8 +55,8 @@ extension CursorOwnershipTests {
                 for row in try context.fetch(FetchDescriptor<SkillProjectAssignment>()) { context.delete(row) }
                 try context.save()
                 XCTAssertEqual(IntentReconciler(platformVM: vm,
-                    machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID),
-                    handoverIsComplete: { true }).reconcile(context: context).failureCount, 1)
+                    machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID))
+                    .reconcile(context: context).failureCount, 1)
             default:
                 let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
                     manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")

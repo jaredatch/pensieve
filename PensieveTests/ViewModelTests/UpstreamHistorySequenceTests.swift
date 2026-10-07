@@ -34,7 +34,8 @@ final class UpstreamHistorySequenceTests: UpstreamHistoryCacheTestCase {
         options.isStrict = true
         options.issueMatcher = { $0.compactDescription.contains("Unreleased probe") }
         XCTExpectFailure("An omitted release must fail the wall-clock wait", options: options)
-        await TestWait.until(timeout: .milliseconds(50), failureMessage: "Unreleased probe") {
+        await TestWait.until(timeout: .milliseconds(50), // upper-bound: An omitted release must time out.
+                             failureMessage: "Unreleased probe") {
             fixture.flow.finished
         }
         XCTAssertTrue(fixture.calls.values.isEmpty)

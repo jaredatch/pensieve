@@ -37,7 +37,7 @@ final class GitServiceConcurrencyTests: XCTestCase {
         let executable = directory + "/git"
         try files.writeExecutableFile(at: executable, content: "#!/bin/sh\nexec /bin/sleep 60\n")
         for pipe in ["stdout", "stderr"] {
-            let result = try GitProcessProbeRunner.run(pipe, executable: executable, timeout: 5)
+            let result = try GitProcessProbeRunner.run(pipe, executable: executable, timeout: TestWait.hostedActionTimeoutSeconds)
             XCTAssertFalse(result.timedOut, "Read failure must terminate and join: \(pipe)")
             XCTAssertEqual(result.status, 0, "\(pipe): \(result.report)")
             XCTAssertEqual(result.report, "OK read error; child reaped")
@@ -51,7 +51,8 @@ final class GitServiceConcurrencyTests: XCTestCase {
     }
 
     func testTimedOutProbeDoesNotPoisonNextProbe() throws {
-        let result = try GitProcessProbeRunner.run("hold", timeout: 0.2, waitForReady: true, noteTimeout: false)
+        let result = try GitProcessProbeRunner.run("hold", timeout: 0.2, // upper-bound: Exercise timed-out child cleanup.
+                                                   waitForReady: true, noteTimeout: false)
         XCTAssertTrue(result.ready, "The child must be running before the timeout starts")
         XCTAssertTrue(result.timedOut)
         var status: Int32 = 0

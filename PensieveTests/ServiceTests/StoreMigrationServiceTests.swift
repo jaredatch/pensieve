@@ -345,20 +345,27 @@ extension StoreMigrationServiceTests {
     @MainActor
     func testMigrateSkipsRealpathEscapingSlugDirReturningFalse() throws {
         let context = try makeContext()
-        seedSkill(context, name: "Original", description: "orig", dir: "victim")
-        // A real sibling slug dir the symlink points at — in-store, but not victim's canonical dir.
-        try writeRawFile(dir: "decoy",
-                         content: SkillSerializer.serialize(name: "Decoy", description: "d", body: "# d"))
-        try FileManager.default.createSymbolicLink(
-            atPath: tempDir + "/skills/victim", withDestinationPath: tempDir + "/skills/decoy")
+        let victim = seedSkill(context, name: "Original", description: "orig", dir: "victim",
+                               importedFrom: "claude-code")
+        try writeRawFile(dir: "victim", content: "# Original body")
+        let outside = tempDir + "/outside"
+        let evil = SkillSerializer.serialize(name: "Evil", description: "pwned", body: "# evil")
+        try fileService.writeFile(at: outside + "/SKILL.md", content: evil)
+        let swapping = StoreDirectorySwapFileService(
+            wrapped: fileService, directory: tempDir + "/skills/victim", outsideDirectory: outside)
+        let service = StoreMigrationService(
+            fileService: swapping, manifestService: manifest,
+            skillStore: SkillStore(fileService: swapping, baseDir: tempDir + "/skills"))
 
         let result = service.migrateIfNeeded(fromRoot: tempDir, context: context)
 
-        // migrateSkill returned false (skipped) — never threw, so the count stays 0 and it warns.
-        XCTAssertEqual(result.skillsMigrated, 0)
+        XCTAssertNil(swapping.swapError)
+        XCTAssertGreaterThan(swapping.swapCount, 0, "The fixture must swap a real directory after its type probe")
+        XCTAssertEqual(result.skillsMigrated, 0, "A realpath escape must be skipped, not migrated")
         XCTAssertTrue(result.warnings.contains { $0.contains("victim") && $0.contains("symlink") })
-        let skills = try context.fetch(FetchDescriptor<Skill>())
-        let victim = try XCTUnwrap(skills.first { $0.directoryName == "victim" })
-        XCTAssertEqual(victim.name, "Original")   // NOT read through to the sibling "Decoy"
+        XCTAssertEqual(victim.name, "Original", "Migration must not adopt the outside skill's identity")
+        XCTAssertEqual(victim.skillDescription, "orig")
+        XCTAssertEqual(try fileService.readFile(at: outside + "/SKILL.md"), evil,
+                       "Migration must not rewrite the outside skill")
     }
 }

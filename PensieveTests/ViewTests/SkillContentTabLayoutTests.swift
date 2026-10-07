@@ -105,7 +105,8 @@ final class SkillContentTabLayoutTests: XCTestCase {
         let columnScroller = try XCTUnwrap(Self.nearestScrollView(to: popUp))
 
         if selectedFile == "scripts/x.sh" {
-            let text = await TestWait.waitForEditorText("echo hi", in: editor, timeout: .seconds(3))
+            let text = await TestWait.waitForEditorText("echo hi", in: editor,
+                                                      timeout: .seconds(TestWait.hostedActionTimeoutSeconds))
             XCTAssertEqual(text, "echo hi")
         }
         XCTAssertGreaterThan(Self.scrollRange(of: columnScroller), 100, selectedFile)

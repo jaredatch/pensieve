@@ -10,6 +10,7 @@ struct GitFailureFixture {
     var support: String { base + "/support" }
     var script: String { base + "/git" }
     var trace: String { base + "/calls" }
+    var credentialTrace: String { base + "/credentials" }
     var failureSwitch: String { base + "/fail" }
     var paths: AppRuntimePaths { AppRuntimePaths(storeRoot: root, appSupportDir: support) }
 
@@ -20,9 +21,40 @@ struct GitFailureFixture {
 
     func remove() throws { try files.deleteDirectory(at: base) }
 
-    func executable(_ body: String) throws -> GitService {
+    func executable(_ body: String, fileService: FileServiceProtocol = FileService()) throws -> GitService {
         try files.writeExecutableFile(at: script, content: "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '\(trace)'\n" + body + "\n")
-        return GitService(executablePath: script)
+        return GitService(fileService: fileService, executablePath: script)
+    }
+
+    /// Records each subprocess's actual argv and whether its password environment variable matches
+    /// the expected test token. The receipt contains only a marker, never the environment's token.
+    /// Responses exercise history's branch, missing-branch/tag fallback and missing-object fetches;
+    /// no command delegates to real git. Askpass writes are mapped into this temporary tree.
+    func credentialRecordingExecutable(expectedToken: String) throws -> GitService {
+        let fileService = LinkServiceCanonicalDirectoryFileService(
+            wrapped: files,
+            pathMappings: [(PathConstants.gitAskpassHelperPath, support + "/askpass")],
+            physicalSandbox: base
+        )
+        return try executable("""
+            marker=missing
+            if [ "$PENSIEVE_GIT_PASSWORD" = '\(expectedToken)' ]; then marker=received; fi
+            printf '%s\\t%s\\n' "$marker" "$*" >> '\(credentialTrace)'
+            if [ "$1" = '-c' ]; then shift 2; fi
+            if [ "$1" = '-C' ]; then shift 2; fi
+            case "$1 $2" in
+              'ls-remote --symref') printf 'ref: refs/heads/main\\tHEAD\\n' ;;
+              ls-remote*) printf '%s\\trefs/heads/main\\n' '\(String(repeating: "a", count: 40))' ;;
+              'rev-parse --is-shallow-repository') printf 'true\\n' ;;
+              rev-parse*|rev-list*) printf '%s\\n' '\(String(repeating: "a", count: 40))' ;;
+              'cat-file -e') exit 1 ;;
+              fetch*)
+                case "$*" in
+                  *refs/heads/v1*) printf "fatal: couldn't find remote ref refs/heads/v1\\n" >&2; exit 128 ;;
+                esac ;;
+            esac
+            exit 0
+            """, fileService: fileService)
     }
 
     func broken(_ state: GitUsability) throws -> GitService {

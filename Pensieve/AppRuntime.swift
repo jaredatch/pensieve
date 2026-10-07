@@ -134,7 +134,7 @@ final class AppRuntime {
         let resolvedPlatformVM = platformVM ?? paths.makePlatformViewModel()
         let resolvedProvenanceVM = provenanceVM ?? paths.makeSkillProvenanceViewModel()
         let resolvedIntentReconciler = Self.makeLaunchIntentReconciler(
-            platformVM: resolvedPlatformVM, paths: paths, defaults: resolvedDefaults)
+            platformVM: resolvedPlatformVM, paths: paths)
         let resolvedConvergence = postSyncConvergence ?? paths.makeConvergence(
             container: resolvedContainer,
             platformVM: resolvedPlatformVM,
@@ -153,8 +153,7 @@ final class AppRuntime {
         MachineDisplayName.seedIfNeeded(defaults: resolvedDefaults, hostName: hostName)
         self.defaults = resolvedDefaults
         self.paths = paths
-        self.launchReconcile = launchReconcile ?? paths.makeLaunchReconcile(
-            defaults: resolvedDefaults, platformVM: resolvedPlatformVM, notifier: notifier)
+        self.launchReconcile = launchReconcile ?? paths.makeLaunchReconcile()
         self.launchBackfill = Self.backfillRefreshingIndex(
             launchBackfill ?? paths.makeLaunchBackfill(), platformVM: resolvedPlatformVM
         )

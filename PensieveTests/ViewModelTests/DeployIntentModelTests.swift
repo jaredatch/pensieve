@@ -331,7 +331,7 @@ extension DeployIntentModelTests {
                 onReconcile?()
                 return IntentReconciler(
                     platformVM: platformVM,
-                    machineIdentity: DeployIntentIdentityStub(id: self.localID), handoverIsComplete: { false }
+                    machineIdentity: DeployIntentIdentityStub(id: self.localID)
                 ).reconcile(context: context)
             },
             lockPath: lockPath ?? root + "-sync.lock",

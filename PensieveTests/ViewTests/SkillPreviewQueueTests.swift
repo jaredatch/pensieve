@@ -36,9 +36,11 @@ final class SkillPreviewQueueTests: XCTestCase {
         await TestWait.until(failureMessage: "The reappearing paragraph probe must report its own budget") {
             !state.appearingBudgets.isEmpty
         }
-        await TestWait.until(timeout: .seconds(2), failureMessage: "Retained preview state must load after reappearing") {
-            loader.finished == 2
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Retained preview state must load after reappearing") {
+            loader.finished >= 2
         }
+        XCTAssertEqual(loader.finished, 2, "Reappearance must finish exactly one replacement load")
         XCTAssertEqual(loader.decoded.count, 2, "A reappearing preview must decode its image again")
         await TestWait.until(failureMessage: "The paragraph probe must report the replacement document budget") {
             state.appearingBudgets.last?.isCancelled == false
@@ -214,9 +216,7 @@ private struct PreviewTabHarness: View {
     var body: some View {
         TabView(selection: $state.selection) {
             SkillPreviewView(markdownBody: markdown, scrolls: false, imageLoader: loader)
-                .markdownBlockStyle(\.paragraph) { configuration in
-                    PreviewBudgetAppearanceProbe(label: configuration.label, state: state)
-                }
+                .labelStyle(PreviewBudgetLabelStyle(state: state))
                 .onAppear { state.appearances += 1 }
                 .onDisappear { state.disappearances += 1 }
                 .tabItem { Text("Preview") }.tag(0)
@@ -225,8 +225,16 @@ private struct PreviewTabHarness: View {
     }
 }
 
-/// Reads the provider installed inside the rendered document. It preserves the paragraph label
-/// and does not intercept loading.
+/// The placeholder's native label inherits the mounted document's provider without replacing
+/// a Markdown block style. It preserves the label and does not intercept loading.
+private struct PreviewBudgetLabelStyle: LabelStyle {
+    let state: PreviewTabState
+
+    func makeBody(configuration: Configuration) -> some View {
+        PreviewBudgetAppearanceProbe(label: Label(configuration).labelStyle(.titleAndIcon), state: state)
+    }
+}
+
 private struct PreviewBudgetAppearanceProbe<Label: View>: View {
     @Environment(\.inlineImageProvider) private var provider
     let label: Label

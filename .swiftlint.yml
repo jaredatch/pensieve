@@ -31,3 +31,14 @@ function_parameter_count:
   # Skill creation carries the six user-entered fields through one UI boundary.
   warning: 6
   error: 6
+
+custom_rules:
+  short_test_timeout:
+    included: 'PensieveTests/.*\.swift$'
+    name: "Shared positive wait bound"
+    # Match timeout/timeoutSeconds suffixes (case insensitive) in arguments, defaults
+    # and properties, including either ternary arm and DispatchTime intervals. Values
+    # below 15 seconds need the shared bound or a same-line intentional-limit reason.
+    regex: '(?-s)(?i:\b(?:[a-z_][a-z0-9_]*)?timeout(?:seconds)?)\s*(?::\s*(?:[A-Za-z_][A-Za-z0-9_.<>?]*\s*=\s*)?|=\s*)(?:(?:(?:DispatchTime)?\.now\(\)\s*\+\s*)?(?:\.seconds\(\s*(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?\s*\)|\.milliseconds\(\s*(?:0_?)*(?:[0-9](?:_?[0-9]){0,3}|1_?[0-4](?:_?[0-9]){3})(?:\.[0-9](?:_?[0-9])*)?\s*\)|(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?(?=[ \t]*(?:[:,;})]|//|/\*|\r?\n|$)))|\(?\s*(?:[^?:,()\n]|\([^()\n]*\))*\?\s*(?:(?:(?:DispatchTime)?\.now\(\)\s*\+\s*)?(?:\.seconds\(\s*(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?\s*\)|\.milliseconds\(\s*(?:0_?)*(?:[0-9](?:_?[0-9]){0,3}|1_?[0-4](?:_?[0-9]){3})(?:\.[0-9](?:_?[0-9])*)?\s*\)|(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?(?=[ \t]*(?:[:,;})]|//|/\*|\r?\n|$)))|(?:[^:,()\n]|\([^()\n]*\))*:\s*(?:(?:DispatchTime)?\.now\(\)\s*\+\s*)?(?:\.seconds\(\s*(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?\s*\)|\.milliseconds\(\s*(?:0_?)*(?:[0-9](?:_?[0-9]){0,3}|1_?[0-4](?:_?[0-9]){3})(?:\.[0-9](?:_?[0-9])*)?\s*\)|(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?(?=[ \t]*(?:[:,;})]|//|/\*|\r?\n|$))))|\.seconds\(\s*(?:[^?:,()\n]|\([^()\n]*\))*\?\s*(?:(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?(?=[ \t]*(?:[:,;})]|//|/\*|\r?\n|$))|(?:[^:,()\n]|\([^()\n]*\))*:\s*(?:0_?)*(?:[0-9]|1_?[0-4])(?:\.[0-9](?:_?[0-9])*)?(?=[ \t]*(?:[:,;})]|//|/\*|\r?\n|$)))|\.milliseconds\(\s*(?:[^?:,()\n]|\([^()\n]*\))*\?\s*(?:(?:0_?)*(?:[0-9](?:_?[0-9]){0,3}|1_?[0-4](?:_?[0-9]){3})(?:\.[0-9](?:_?[0-9])*)?(?=[ \t]*(?:[:,;})]|//|/\*|\r?\n|$))|(?:[^:,()\n]|\([^()\n]*\))*:\s*(?:0_?)*(?:[0-9](?:_?[0-9]){0,3}|1_?[0-4](?:_?[0-9]){3})(?:\.[0-9](?:_?[0-9])*)?(?=[ \t]*(?:[:,;})]|//|/\*|\r?\n|$))))(?![^\n]*//\s*upper-bound:)'
+    message: "Use TestWait.hostedActionTimeoutSeconds, or explain the intentional limit with // upper-bound: on this line."
+    severity: error

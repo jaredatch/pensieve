@@ -254,14 +254,14 @@ final class DetailContentSnapshotTests: XCTestCase {
 
         let firstDrain = expectation(description: "main queue drained")
         DispatchQueue.main.async { firstDrain.fulfill() }
-        wait(for: [firstDrain], timeout: 1)
+        wait(for: [firstDrain], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertEqual(library.appWriteRevision, before + 1)
 
         // A publish after the drain is a new logical write: it bumps again.
         library.publishAppWriteRevision()
         let secondDrain = expectation(description: "main queue drained again")
         DispatchQueue.main.async { secondDrain.fulfill() }
-        wait(for: [secondDrain], timeout: 1)
+        wait(for: [secondDrain], timeout: TestWait.hostedActionTimeoutSeconds)
         XCTAssertEqual(library.appWriteRevision, before + 2)
     }
 }

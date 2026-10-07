@@ -12,7 +12,8 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         defer { fixture.window.close() }
         let link = try await findLink("Reference", in: fixture.host)
         try click(link, in: fixture.window)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Resolved file link must reach its owner") {
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Resolved file link must reach its owner") {
             !selections.isEmpty
         }
         XCTAssertEqual(selections, ["references/x.md"])
@@ -43,7 +44,8 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         let screenViewport = viewport(of: scroller, in: fixture.window)
         scroller.contentView.scroll(to: NSPoint(x: 0, y: scrollRange(of: scroller)))
         scroller.reflectScrolledClipView(scroller.contentView)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Current-file link must be visible") {
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Current-file link must be visible") {
             fixture.host.layoutSubtreeIfNeeded()
             return screenViewport.contains(link.accessibilityFrame())
         }
@@ -98,7 +100,8 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         scroller.reflectScrolledClipView(scroller.contentView)
         XCTAssertEqual(scroller.contentView.bounds.minY, 200, accuracy: 1)
         try pickFile("SKILL.md", in: fixture.host)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Picker must select SKILL.md") {
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Picker must select SKILL.md") {
             fixture.host.layoutSubtreeIfNeeded()
             return selection.file == "SKILL.md"
         }
@@ -144,14 +147,16 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         let screenViewport = viewport(of: scroller, in: fixture.window)
         scroller.contentView.scroll(to: NSPoint(x: 0, y: scrollRange(of: scroller)))
         scroller.reflectScrolledClipView(scroller.contentView)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Script link must finish scrolling into view") {
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Script link must finish scrolling into view") {
             fixture.host.layoutSubtreeIfNeeded()
             return screenViewport.contains(link.accessibilityFrame())
         }
         try click(link, in: fixture.window)
         let editor = try await TestWait.waitForEditor(in: fixture.host,
                                                      minimumHeight: SkillContentTab.sourceEditorMinimumHeight)
-        let text = await TestWait.waitForEditorText("echo hi", in: editor, timeout: .seconds(3))
+        let text = await TestWait.waitForEditorText("echo hi", in: editor,
+                                                       timeout: .seconds(TestWait.hostedActionTimeoutSeconds))
         XCTAssertEqual(text, "echo hi", "Script source must load into its read-only editor")
         fixture.host.layoutSubtreeIfNeeded()
         XCTAssertEqual(selection.file, "scripts/x.sh")
@@ -185,7 +190,8 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         let nativeView = try XCTUnwrap(linkBackingView(link, in: fixture.host, window: fixture.window),
                                       "The rendered link must have a native view")
         try click(link, in: fixture.window, directlyIn: nativeView)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Return link must load SKILL.md's long body") {
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Return link must load SKILL.md's long body") {
             fixture.host.layoutSubtreeIfNeeded()
             return selection.file == "SKILL.md" && self.elements(fixture.host).contains {
                 ($0.accessibilityValue() as? String) == "Skill"
@@ -212,7 +218,8 @@ final class SkillPreviewLinkHostTests: XCTestCase {
         fixture.host.layoutSubtreeIfNeeded()
         XCTAssertEqual(scrollView.contentView.bounds.origin, origin, "Missing anchors do not move the page")
         try click(jump, in: fixture.window)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Anchor must move the enclosing detail scroller") {
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Anchor must move the enclosing detail scroller") {
             scrollView.contentView.bounds.minY > 100
         }
         XCTAssertGreaterThan(scrollView.contentView.bounds.minY, 100, "Same-document file fragment must scroll")
@@ -244,7 +251,8 @@ extension SkillPreviewLinkHostTests {
         scroller.contentView.scroll(to: NSPoint(x: 0, y: scrollRange(of: scroller)))
         scroller.reflectScrolledClipView(scroller.contentView)
         XCTAssertGreaterThan(scroller.contentView.bounds.minY, 500)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Scrolled link must be inside the viewport") {
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Scrolled link must be inside the viewport") {
             fixture.host.layoutSubtreeIfNeeded()
             return screenViewport.contains(link.accessibilityFrame())
         }
@@ -252,14 +260,16 @@ extension SkillPreviewLinkHostTests {
         await waitForReference(in: fixture.host, selection: selection)
         // Wait for the link's visible result as well as the selected document.
         let row = try filePicker(in: fixture.host)
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Linked file row must finish scrolling into view") {
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Linked file row must finish scrolling into view") {
             fixture.host.layoutSubtreeIfNeeded()
             return screenViewport.intersects(row.accessibilityFrame())
         }
     }
 
     private func waitForReference(in host: NSView, selection: PreviewFileSelection) async {
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Linked or picked reference must load") {
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Linked or picked reference must load") {
             host.layoutSubtreeIfNeeded()
             return selection.file == "references/x.md"
                 && self.elements(host).contains { ($0.accessibilityValue() as? String) == "Reference" }
@@ -330,7 +340,8 @@ extension SkillPreviewLinkHostTests {
 
     private func findLink(_ title: String, in host: NSView) async throws -> NSAccessibilityProtocol {
         var found: NSAccessibilityProtocol?
-        await TestWait.until(timeout: .seconds(3), failureMessage: "Rendered link \(title) must be accessible") {
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Rendered link \(title) must be accessible") {
             host.layoutSubtreeIfNeeded()
             found = self.elements(host).first {
                 $0.accessibilityRole() == .link && [$0.accessibilityTitle(), $0.accessibilityLabel()].contains(title)

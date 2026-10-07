@@ -18,12 +18,12 @@ extension SyncCoordinatorTests {
         }
         scheduler.coordinatorBecameReady()
         scheduler.launchIngestCompleted()
-        await fulfillment(of: [firstStarted], timeout: 1)
+        await fulfillment(of: [firstStarted], timeout: TestWait.hostedActionTimeoutSeconds)
         scheduler.nudge()
         scheduler.tick()
         scheduler.wake()
         await release.open()
-        await fulfillment(of: [followupFinished], timeout: 1)
+        await fulfillment(of: [followupFinished], timeout: TestWait.hostedActionTimeoutSeconds)
         try? await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertEqual(cycles, 2)
     }
@@ -57,10 +57,10 @@ extension SyncCoordinatorTests {
 
         scheduler.coordinatorBecameReady()
         scheduler.launchIngestCompleted()
-        await fulfillment(of: [firstStarted], timeout: 1)
+        await fulfillment(of: [firstStarted], timeout: TestWait.hostedActionTimeoutSeconds)
         await model.syncNowAndReport()
         await release.open()
-        await fulfillment(of: [followupFinished], timeout: 1)
+        await fulfillment(of: [followupFinished], timeout: TestWait.hostedActionTimeoutSeconds)
 
         XCTAssertEqual(cycles, 2)
         XCTAssertEqual(maximumActiveCycles, 1)
@@ -95,11 +95,11 @@ extension SyncCoordinatorTests {
         scheduler.coordinatorBecameReady()
         scheduler.launchIngestCompleted()
         let first = Task { await model.syncNowAndReport() }
-        await fulfillment(of: [firstStarted], timeout: 1)
+        await fulfillment(of: [firstStarted], timeout: TestWait.hostedActionTimeoutSeconds)
         await model.syncNowAndReport()
         await release.open()
         await first.value
-        await fulfillment(of: [followupFinished], timeout: 1)
+        await fulfillment(of: [followupFinished], timeout: TestWait.hostedActionTimeoutSeconds)
 
         XCTAssertEqual(cycles, 2)
     }

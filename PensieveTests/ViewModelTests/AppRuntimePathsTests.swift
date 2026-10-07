@@ -187,7 +187,7 @@ final class AppRuntimePathsTests: XCTestCase {
             runtime.syncModel.apply(.noRemote)
         }
         let cycle = Task { await runtime.syncModel.syncNowAndReport() }
-        await fulfillment(of: [started], timeout: 2)
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         runtime.scheduler.launchIngestCompleted()
         await TestWait.until(failureMessage: "scheduler did not queue its follow-up") {
             !runtime.scheduler.isSyncing && !runtime.scheduler.hasPendingTrigger

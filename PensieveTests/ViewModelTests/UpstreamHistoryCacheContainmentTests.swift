@@ -75,7 +75,7 @@ final class UpstreamHistoryCacheContainmentTests: UpstreamHistoryCacheTestCase {
             ))
             completed.fulfill()
         }
-        await fulfillment(of: [completed], timeout: 1)
+        await fulfillment(of: [completed], timeout: TestWait.hostedActionTimeoutSeconds)
         try await assertSpecialEntryIsUntouched(skill: skill)
 
         XCTAssertNotNil(fileService.fileIdentity(at: cachePath(skill.id), followingLinks: false))

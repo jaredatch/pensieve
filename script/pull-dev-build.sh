@@ -45,6 +45,7 @@
 #   PENSIEVE_DEV_HOST   ssh host (required unless --host is passed)
 #   PENSIEVE_DEV_REPO   repo path on the host, relative to $HOME (Projects/pensieve)
 #   PENSIEVE_DEV_APP    where the dev bundle lands (~/Applications/PensieveDev.app)
+#   PENSIEVE_DEV_SIGN_IDENTITY  local signing identity (default: first valid Apple Development)
 #   PENSIEVE_SANDBOX    sandbox root for --sandbox (~/PensieveSandbox)
 #
 # WHERE THINGS ARE AFTER A --sandbox RUN
@@ -56,7 +57,7 @@
 #   under ~/PensieveSandbox/ — a real project folder would be write-denied.
 #
 # Written for bash 3.2 (stock macOS) and openrsync (macOS 15+).
-# Host-selection tests: python3 -B script/pull_dev_build_self_test.py
+# Host-selection and signing tests: python3 -B script/pull_dev_build_self_test.py
 
 set -euo pipefail
 
@@ -78,6 +79,90 @@ SELF_UPDATE=0
 
 die() { printf 'pull-dev-build: %s\n' "$1" >&2; exit 1; }
 say() { printf '==> %s\n' "$1"; }
+
+# Sign locally: the build host's keychain may be locked in its SSH session.
+resign_dev_app() (
+  identity="${PENSIEVE_DEV_SIGN_IDENTITY:-}"
+  if [ -z "$identity" ]; then
+    identities="$(security find-identity -v -p codesigning 2>/dev/null)" || identities=""
+    identity="$(printf '%s\n' "$identities" | awk '/^[[:space:]]*[0-9]+\) [[:xdigit:]]+ "Apple Development: / && !/CSSMERR/ { if (!found) { print $2; found=1 } }')"
+  fi
+  if [ -z "$identity" ]; then
+    say "warning: no Apple Development signing identity; keeping the ad-hoc build. Install an Apple Development certificate or set PENSIEVE_DEV_SIGN_IDENTITY on this Mac."
+    return 0
+  fi
+
+  work="$(mktemp -d "$(dirname "$APP")/.pensieve-dev-sign.XXXXXX")" || {
+    say "warning: cannot back up the bundle for signing; keeping the ad-hoc build. Check free space and folder permissions."
+    return 0
+  }
+  restore=0
+  cleanup_signing() {
+    status=$?
+    trap - EXIT HUP INT TERM
+    if [ "$restore" -eq 1 ]; then
+      # Restoring bytes also restores every original nested seal and entitlement.
+      if ! { rm -rf "$APP" && mv "$work/original.app" "$APP"; }; then
+        die "could not restore the original bundle; re-run to re-sync (backup directory: $work)"
+      fi
+      say "warning: restored the original ad-hoc build"
+      codesign -v "$APP" 2>/dev/null || say "warning: signature check failed — if it won't launch, re-run to re-sync"
+    fi
+    rm -rf "$work"
+    exit "$status"
+  }
+  trap cleanup_signing EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' HUP TERM
+  if ! cp -pR "$APP" "$work/original.app"; then
+    say "warning: cannot back up the bundle for signing; keeping the ad-hoc build. Check free space and folder permissions."
+    return 0
+  fi
+  restore=1
+
+  sign_code() {
+    # Keep entitlements (including entitled libraries) and runtime flags, but
+    # regenerate requirements: preserving an ad-hoc cdhash defeats stable signing.
+    codesign --force --sign "$identity" --timestamp=none \
+      --preserve-metadata=identifier,entitlements,flags,runtime --force-library-entitlements "$1"
+  }
+  sign_bundle() {
+    # Physical, depth-first traversal avoids framework aliases and seals each
+    # executable/helper before its containing framework, XPC service or app.
+    find "$APP/Contents" -depth \( -type f -o -type d \) -print0 > "$work/code-paths" || return 1
+    while IFS= read -r -d '' code; do
+      [ ! -L "$code" ] || continue
+      if [ -d "$code" ]; then
+        # Seal each physical framework version before its root; Current remains a skipped alias.
+        case "${code%/*}" in
+          *.framework/Versions) ;;
+          *) case "$code" in
+            *.app|*.framework|*.xpc|*.bundle|*.appex|*.plugin|*.systemextension|*.qlgenerator|*.mdimporter|*.saver|*.kext) ;;
+            *) continue ;;
+          esac ;;
+        esac
+        codesign -d "$code" >/dev/null 2>&1 || continue
+      else
+        case "$code" in
+          *.dylib|*.so|*.node|*/MacOS/*|*/Frameworks/*|*/Helpers/*|*/XPCServices/*|*/PlugIns/*|*/Library/LoginItems/*) ;;
+          *) [ -x "$code" ] || continue ;;
+        esac
+        kind="$(file -b "$code")" || return 1
+        case "$kind" in *Mach-O*) ;; *) continue ;; esac
+      fi
+      sign_code "$code" || return 1
+    done < "$work/code-paths"
+    sign_code "$APP" || return 1
+    codesign --verify --deep --strict "$APP"
+  }
+
+  say "signing locally with $identity"
+  if sign_bundle; then
+    restore=0
+  else
+    say "warning: local signing failed. Unlock the login keychain in Keychain Access and allow codesign to use the private key, or check PENSIEVE_DEV_SIGN_IDENTITY; then re-run."
+  fi
+)
 
 usage() {
   # Print the header comment block (everything from line 3 to the first non-comment line).
@@ -221,6 +306,7 @@ rsync -a "$HOST:$REMOTE_REPO/$REMOTE_DOGFOOD" "$DOGFOOD" \
 chmod +x "$DOGFOOD"
 
 xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
+resign_dev_app
 codesign -v "$APP" 2>/dev/null || say "warning: signature check failed — if it won't launch, re-run to re-sync"
 
 pulled_id="$(defaults read "$APP/Contents/Info" CFBundleIdentifier 2>/dev/null || true)"

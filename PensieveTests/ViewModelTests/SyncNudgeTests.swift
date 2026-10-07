@@ -154,7 +154,7 @@ final class SyncNudgeTests: XCTestCase {
         )
         await model.loadAndReport(context: fixture.context)
         let apply = Task { await model.applySelectedAndReport(context: fixture.context) }
-        await fulfillment(of: [firstWriteFinished], timeout: 1)
+        await fulfillment(of: [firstWriteFinished], timeout: TestWait.hostedActionTimeoutSeconds)
         fixture.watcher.emit(skill.directoryName)
         XCTAssertEqual(fixture.counter.value, 0)
         releaseFirst.open()

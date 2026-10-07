@@ -5,7 +5,7 @@ import XCTest
 final class UpstreamHistorySequenceCleanupTests: UpstreamHistoryCacheTestCase {
     func testCleanupTimeoutIsAnXCTestFailureOnTheSuccessPath() async {
         let flow = UpstreamHistorySequenceHarness()
-        flow.cleanupTimeout = .milliseconds(20)
+        flow.cleanupTimeout = .milliseconds(20) // upper-bound: Require a cleanup failure for a deliberately stuck request.
         flow.timeoutThreadSample = { nil } // Deliberate timeout: keep the real failure assertions, omit sampling.
         var held: CheckedContinuation<Void, Never>?
         flow.enqueue("stuck") { await withCheckedContinuation { held = $0 } }

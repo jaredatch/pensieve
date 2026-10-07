@@ -63,11 +63,11 @@ final class UnifiedDiffWorkTests: XCTestCase {
             try PinnedSkillDiff.build(comparison: comparison) { work in
                 if work > 0, progress.record(work) == 1 {
                     reached.fulfill()
-                    XCTAssertEqual(resume.wait(timeout: .now() + 10), .success)
+                    XCTAssertEqual(resume.wait(timeout: .now() + 10), .success) // upper-bound: Blocked callback.
                 }
             }
         }
-        await fulfillment(of: [reached], timeout: 10)
+        await fulfillment(of: [reached], timeout: 10) // upper-bound: Bound the wait for the blocked callback.
         task.cancel()
         resume.signal()
         do {

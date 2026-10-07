@@ -134,6 +134,6 @@ final class SkillExportPanelTests: XCTestCase {
     private func finishDismissal() {
         let finished = expectation(description: "Sheet completion handled on the next main turn")
         DispatchQueue.main.async { finished.fulfill() }
-        wait(for: [finished], timeout: 5)
+        wait(for: [finished], timeout: TestWait.hostedActionTimeoutSeconds)
     }
 }

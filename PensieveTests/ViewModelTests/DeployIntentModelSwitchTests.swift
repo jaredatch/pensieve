@@ -45,8 +45,6 @@ extension DeployIntentModelTests {
         _ = try harness.model.set(
             true, skill: skill, platform: .codex, target: .userWide, context: harness.context
         )
-        harness.context.insert(ScenarioAssignment(skillID: skill.id, platform: .codex))
-        try harness.context.save()
 
         _ = try harness.model.set(
             false, skill: skill, platform: .codex, target: .userWide, context: harness.context
@@ -54,7 +52,6 @@ extension DeployIntentModelTests {
 
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
-        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<ScenarioAssignment>()), 1)
         XCTAssertEqual(harness.linkService.unlinkCalls.count, 1)
 
         harness.platformVM.deploy(
@@ -175,8 +172,6 @@ extension DeployIntentModelTests {
         XCTAssertEqual(try harness.model.selectedMachineIDs(
             skills: [skill], platforms: [.codex], context: harness.context
         ), [localID])
-        harness.context.insert(ScenarioAssignment(skillID: skill.id, platform: .codex))
-        try harness.context.save()
         _ = try harness.model.retract(
             skills: [skill], platforms: [.codex], machineIDs: [localID], context: harness.context
         )

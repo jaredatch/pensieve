@@ -49,7 +49,7 @@ final class UpstreamHistoryFlowHarnessTests: UpstreamHistoryCacheTestCase {
             attempts += 1
             let flow = UpstreamHistorySequenceHarness()
             flow.scenario = "cleanup-stop-fixture"
-            flow.cleanupTimeout = .milliseconds(20)
+            flow.cleanupTimeout = .milliseconds(20) // upper-bound: Prove the first failed cleanup stops replay.
             flow.timeoutThreadSample = { nil } // This deliberately exercises a cleanup failure.
             var held: CheckedContinuation<Void, Never>?
             flow.enqueue("stuck") { await withCheckedContinuation { held = $0 } }

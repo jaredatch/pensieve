@@ -46,7 +46,8 @@ final class TestWaitTests: XCTestCase {
             options.issueMatcher = { $0.compactDescription.contains("task timeout sentinel") }
             XCTExpectFailure("Only the bounded task wait must fail", options: options)
 
-            await TestWait.forTask(target, timeout: .milliseconds(1), failureMessage: "task timeout sentinel")
+            await TestWait.forTask(target, timeout: .milliseconds(1), // upper-bound: Exercise timeout cancellation.
+                                   failureMessage: "task timeout sentinel")
 
             XCTAssertTrue(target.isCancelled, "A timed-out target must be cancelled")
         }

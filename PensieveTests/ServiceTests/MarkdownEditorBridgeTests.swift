@@ -14,7 +14,7 @@ final class MarkdownEditorBridgeTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = webView
-        wait(for: [ready], timeout: 10)
+        wait(for: [ready], timeout: TestWait.hostedActionTimeoutSeconds)
         return (coordinator, window)
     }
 
@@ -31,7 +31,7 @@ final class MarkdownEditorBridgeTests: XCTestCase {
                 XCTAssertEqual(text, hostile)
                 done.fulfill()
             }
-            wait(for: [done], timeout: 10)
+            wait(for: [done], timeout: TestWait.hostedActionTimeoutSeconds)
         }
     }
 
@@ -47,7 +47,7 @@ final class MarkdownEditorBridgeTests: XCTestCase {
         withExtendedLifetime(window) {
             coordinator.setBody("seed")        // Swift push — must NOT echo as a change
             coordinator.simulateEdit(hostile)  // editor-side edit — MUST post contentDidChange
-            wait(for: [edited], timeout: 10)
+            wait(for: [edited], timeout: TestWait.hostedActionTimeoutSeconds)
             XCTAssertFalse(changes.contains("seed"), "a Swift push must not echo back as a change")
         }
     }
@@ -66,7 +66,7 @@ final class MarkdownEditorBridgeTests: XCTestCase {
             coordinator.setBody("seed")        // push — its echo must be suppressed
             coordinator.simulateEdit("draft")  // user edit — posts "draft"
             coordinator.simulateEdit("seed")   // user reverts to the pushed value — MUST post "seed"
-            wait(for: [reverted], timeout: 10)
+            wait(for: [reverted], timeout: TestWait.hostedActionTimeoutSeconds)
             XCTAssertEqual(changes, ["draft", "seed"],
                            "the push echo must be suppressed but a user revert to the pushed value must post")
         }

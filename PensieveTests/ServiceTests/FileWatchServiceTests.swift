@@ -23,29 +23,34 @@ final class FileWatchServiceTests: XCTestCase {
         let skillDir = tempRoot + "/" + directoryName
         try FileManager.default.createDirectory(atPath: skillDir, withIntermediateDirectories: true)
 
-        let delivered = expectation(description: "Delivers changed skill directory")
-        // An atomic write is a temp-file create plus a rename; FSEvents may deliver them as two batches,
-        // and the service dedupes only within a batch. A repeat delivery is correct, not over-fulfillment
-        // (CI run 34276187889 crashed the test process on the second fulfill).
-        delivered.assertForOverFulfill = false
         var receivedDirectoryNames: [String] = []
         watcher = FileWatchService(rootDir: tempRoot) { changedDirectoryName in
             receivedDirectoryNames.append(changedDirectoryName)
-            if changedDirectoryName == directoryName {
-                delivered.fulfill()
-            }
         }
 
         XCTAssertTrue(watcher.start())
 
-        try "# External Edit".write(
-            toFile: skillDir + "/SKILL.md",
-            atomically: true,
-            encoding: .utf8
-        )
+        // SinceNow can advance past the first write while the stream starts under load.
+        // Keep writing while the main run loop lets the main-queue delivery run.
+        let deadline = Date().addingTimeInterval(TestWait.hostedActionTimeoutSeconds)
+        var nextWrite = Date.distantPast
+        var writeNumber = 0
+        // Prove an external write is delivered once the stream is live, rather than its first write after start().
+        while !receivedDirectoryNames.contains(directoryName), Date() < deadline {
+            if Date() >= nextWrite {
+                try "# External Edit \(writeNumber)".write(
+                    toFile: skillDir + "/SKILL.md",
+                    atomically: true,
+                    encoding: .utf8
+                )
+                writeNumber += 1
+                nextWrite = Date().addingTimeInterval(0.5)
+            }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
 
-        wait(for: [delivered], timeout: 5.0)
-        XCTAssertTrue(receivedDirectoryNames.contains(directoryName))
+        XCTAssertTrue(receivedDirectoryNames.contains(directoryName),
+                      "FileWatch delivery never arrived for repeated external skill writes")
     }
 
     func testStartIsQuietWithoutExternalWrites() {
@@ -58,6 +63,6 @@ final class FileWatchServiceTests: XCTestCase {
 
         XCTAssertTrue(watcher.start())
 
-        wait(for: [quiet], timeout: 1.0)
+        wait(for: [quiet], timeout: 1.0) // upper-bound: Inverted expectation observes no file changes.
     }
 }

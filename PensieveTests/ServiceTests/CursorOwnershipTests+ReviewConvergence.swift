@@ -132,8 +132,7 @@ extension CursorOwnershipTests {
     }
 
     func reviewIntent(_ vm: PlatformViewModel) -> IntentReconciler {
-        IntentReconciler(platformVM: vm, machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID),
-                         handoverIsComplete: { true })
+        IntentReconciler(platformVM: vm, machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID))
     }
 
     func reviewRecord(_ state: DeployStateStore, path: String, platform: PlatformTarget = .cursor,

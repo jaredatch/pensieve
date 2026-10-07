@@ -17,6 +17,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- Rendered skills now look like GitHub's Markdown, at a size that fits the window.
 - History now shows the latest 10 commits for an installed skill and 10 saved versions for a skill you wrote before offering to show older ones.
 - Pensieve now needs macOS 26 or later.
 - Running `pensieve-daemon` with no command now shows its help instead of syncing; `pensieve-daemon run` still syncs.

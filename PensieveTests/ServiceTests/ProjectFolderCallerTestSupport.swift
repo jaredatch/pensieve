@@ -42,8 +42,7 @@ struct ProjectFolderCallerHarness {
         )
         intent = IntentReconciler(
             platformVM: platformVM,
-            machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID),
-            handoverIsComplete: { true }
+            machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID)
         )
         category = CategoryReconciler(platformVM: platformVM)
         skill = Skill(name: "Caller Skill", directoryName: slug)
