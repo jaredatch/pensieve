@@ -63,6 +63,23 @@ final class MachineStateServiceTests: XCTestCase {
         )])
     }
 
+    func testKeylessProjectDeployStaysLocalAndPublishesNoPath() throws {
+        let context = try makeContext()
+        let project = Project(name: "Keyless", path: tempDir + "/private-checkout")
+        context.insert(project)
+        try context.save()
+        let realized = DeployState(schemaVersion: 1, records: [DeployStateRecord(slug: "alpha", platform: "codex",
+            scope: "project", projectIdentityKey: nil, artifactPath: project.path + "/agents/alpha.md", recordedAt: "original")])
+        let stateService = service(installed: [.codex], deployState: realized)
+        let state = try stateService.compose(machineID: machineID, context: context, publishedAt: Date(timeIntervalSince1970: 10))
+        XCTAssertTrue(state.projects.isEmpty)
+        XCTAssertTrue(state.projectDeploys.isEmpty)
+        XCTAssertTrue(state.userDeploys.isEmpty, "A keyless project must never become a user-wide observation")
+        try stateService.write(state, toRoot: tempDir)
+        XCTAssertFalse(try fileService.readFile(at: tempDir + "/machines/" + machineID + ".yaml").contains(project.path))
+        XCTAssertEqual(stateService.readAll(fromRoot: tempDir), [state])
+    }
+
     func testProjectsDeduplicateByIdentity() throws {
         let context = try makeContext()
         let first = Project(name: "Zulu", path: tempDir + "/zulu")

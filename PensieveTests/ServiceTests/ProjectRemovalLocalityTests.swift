@@ -79,7 +79,8 @@ final class ProjectRemovalLocalityTests: XCTestCase {
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0)
         h.convergence(audit: { _, _ in }).runAfterLaunchIngest()
         for platform in [PlatformTarget.claudeCode, .grok, .codex, .cursor] {
-            XCTAssertTrue(try h.platformVM.artifactIsOwned(skill: h.skill, platform: platform, target: .project(replacement)))
+            XCTAssertTrue(try h.platformVM.removalOperation(
+                skill: h.skill, platform: platform, target: .project(replacement)).classify().isOwned)
         }
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<SkillProjectAssignment>()).map(\.projectID),
                        Array(repeating: replacement.id, count: 4))

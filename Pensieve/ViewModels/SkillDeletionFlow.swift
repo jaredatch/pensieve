@@ -88,7 +88,9 @@ enum SkillDeletionFlow {
                 switch outcome {
                 case .deleted, .deletedManifestStale:
                     namedMessage = message.isEmpty ? "Deleted “\(skill.name)”." : message
-                default:
+                case .directoryDeletedRowRetained:
+                    namedMessage = message.isEmpty ? "Removed “\(skill.name)”'s files; its entry stays listed." : message
+                case .retainedDirectoryDeleteFailed, nil:
                     namedMessage = "The skill “\(skill.name)” was kept." + (message.isEmpty ? "" : " " + message)
                 }
                 let warning = namedMessage + " Waiting cleanup was saved, "

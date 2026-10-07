@@ -75,7 +75,7 @@ extension DaemonCLI {
 
 private func renderedScope(for record: DeployStateRecord) -> String {
     if record.scope == "project" {
-        return "project:\(record.projectIdentityKey ?? "")"
+        return "project:\(record.projectReference)"
     }
     return "user"
 }

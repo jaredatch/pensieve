@@ -84,6 +84,8 @@ struct BatchResult {
     var didRemoveArtifacts = false
     /// Project request facts can be withdrawn even when no artifact is removed.
     var didWithdrawProjectRequests = false
+    /// Saved retirement of this project's deployment evidence keeps its waiting cleanup on failure.
+    var didRetireProjectEvidence = false
 
     var successes: [BatchPairOutcome] { outcomes.filter { $0.isSuccess } }
     var failures: [BatchPairOutcome] { outcomes.filter { !$0.isSuccess && !$0.isSkipped } }
@@ -155,5 +157,6 @@ struct BatchResult {
         retiredPairs.formUnion(other.retiredPairs)
         didRemoveArtifacts = didRemoveArtifacts || other.didRemoveArtifacts
         didWithdrawProjectRequests = didWithdrawProjectRequests || other.didWithdrawProjectRequests
+        didRetireProjectEvidence = didRetireProjectEvidence || other.didRetireProjectEvidence
     }
 }

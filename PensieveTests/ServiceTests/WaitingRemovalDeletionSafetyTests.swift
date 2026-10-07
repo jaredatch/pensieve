@@ -102,6 +102,12 @@ final class WaitingRemovalDeletionSafetyTests: XCTestCase {
                 }))
             let message = try XCTUnwrap(library.deletionNotice?.message)
             XCTAssertFalse(message.contains("Deleted"), "A kept skill never reports deletion: \(phase)")
+            if phase == "row" {
+                XCTAssertTrue(message.hasPrefix("Removed “"), "Files removed with a retained row must say so first")
+                XCTAssertFalse(message.contains("was kept"), "A retained row is not a kept skill directory")
+            } else {
+                XCTAssertTrue(message.hasPrefix("The skill “"))
+            }
             XCTAssertTrue(message.contains(h.base.skill.name))
             XCTAssertTrue(message.contains("records couldn't be retired"))
             XCTAssertEqual(try h.vm.waitingRemovalStore.read().count, 1)
@@ -124,7 +130,7 @@ final class WaitingRemovalDeletionSafetyTests: XCTestCase {
                     userInfo: [NSLocalizedDescriptionKey: "\(failure) evidence refused"])
                 if failure == "local" { throw error }
                 return SkillProjectDeployEvidence(paths: [], historyFailure: error)
-            }, localDeployHistory: { _ in [] }).batch
+            }).batch
             let message = result.readFailures.map(\.message).joined(separator: " ")
             XCTAssertTrue(message.contains("deploy state unreadable"), failure)
             XCTAssertTrue(message.contains("\(failure) evidence refused"), failure)

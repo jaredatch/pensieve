@@ -73,6 +73,15 @@ final class ListRowsTests: XCTestCase {
         XCTAssertTrue(row.line2TruncatesMiddle)
     }
 
+    func testKeylessProjectRowCountsRecordedSkillsByPath() {
+        let project = Project(name: "Keyless", path: "/checkout")
+        let index = DeployIndex(records: [DeployStateRecord(slug: "alpha", platform: "codex", scope: "project",
+            projectIdentityKey: nil, artifactPath: "/checkout/agents/alpha.md", recordedAt: "original")])
+        let row = ListRows.project(project, deployIndex: index, homeDirectory: "/Users/k")
+        XCTAssertEqual(row.trailingText, "1 skill")
+        XCTAssertEqual(row.line2, "/checkout")
+    }
+
     func testProjectRowUnavailableIndexSaysSo() {
         let project = Project(name: "Pensieve", path: "/tmp/pensieve")
 

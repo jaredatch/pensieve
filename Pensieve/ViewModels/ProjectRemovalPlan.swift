@@ -124,6 +124,7 @@ struct ProjectRemovalPlan {
                     evidence: [.localProjectRecords], action: .retireWithoutInspection)
             })
             if let error = retirement.stateWriteFailure { result.operationFailures.append(error.localizedDescription) }
+            result.didRetireProjectEvidence = retirement.didChangeRecords
             if retirement.didChangeRecords { platformVM.noteDeployStateChanged() }
             return result
         }
@@ -139,6 +140,7 @@ struct ProjectRemovalPlan {
         }
         let removal = platformVM.removalService.remove(admitted)
         result.didRemoveArtifacts = removal.didRemoveArtifacts
+        result.didRetireProjectEvidence = removal.didChangeRecords
         let work = Array(zip(candidates, removal.outcomes))
         let failed = work.filter { $0.1.failure != nil }
         let completed = work.filter { $0.1.completed }

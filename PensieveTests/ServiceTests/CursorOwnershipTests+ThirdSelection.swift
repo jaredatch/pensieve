@@ -49,8 +49,10 @@ extension CursorOwnershipTests {
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0, route)
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0, route)
         for item in skills {
-            XCTAssertFalse(try harness.vm.artifactIsOwned(skill: item, platform: .cursor, target: .project(project)))
-            XCTAssertFalse(try harness.vm.artifactIsOwned(skill: item, platform: .claudeCode, target: .project(project)))
+            XCTAssertFalse(try harness.vm.removalOperation(
+                skill: item, platform: .cursor, target: .project(project)).classify().isOwned)
+            XCTAssertFalse(try harness.vm.removalOperation(
+                skill: item, platform: .claudeCode, target: .project(project)).classify().isOwned)
         }
     }
 

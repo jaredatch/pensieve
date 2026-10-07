@@ -10,7 +10,7 @@ extension CursorOwnershipTests {
         let path = artifactPath(.cursor, project: nil)
         try reviewRecord(harness.state, path: path, target: .userWide)
         let before = harness.vm.refreshCounter
-        let result = harness.vm.removeAllDeploys(skill: skill, projects: [], localDeployHistory: { _ in [] })
+        let result = harness.vm.removeAllDeploys(skill: skill, projects: [])
         XCTAssertFalse(result.batch.hasFailures)
         XCTAssertFalse(result.didChangeDeploys, "Retiring a stale record did not delete an artifact")
         XCTAssertTrue(try harness.state.read().records.isEmpty)
@@ -29,7 +29,7 @@ extension CursorOwnershipTests {
         let vm = PlatformViewModel(fileService: mapped, cursorCompiler: targeted,
             agentDetection: DeployStubDetection(installed: [.cursor]), deployStateStore: harness.state)
         let before = vm.refreshCounter
-        let result = vm.removeAllDeploys(skill: skill, projects: [], localDeployHistory: { _ in [] })
+        let result = vm.removeAllDeploys(skill: skill, projects: [])
         XCTAssertFalse(result.batch.hasFailures)
         XCTAssertFalse(result.didChangeDeploys, "The leaf recheck preserved the replacement")
         XCTAssertEqual(vm.refreshCounter, before, "No artifact or record changed")
@@ -48,7 +48,7 @@ extension CursorOwnershipTests {
         }
         defer { mapped.beforeRuleRead = nil }
         let before = harness.vm.refreshCounter
-        let result = harness.vm.removeAllDeploys(skill: skill, projects: [], localDeployHistory: { _ in [] })
+        let result = harness.vm.removeAllDeploys(skill: skill, projects: [])
         XCTAssertEqual(result.batch.failureCount, 1)
         XCTAssertFalse(result.didChangeDeploys)
         XCTAssertEqual(harness.vm.refreshCounter, before)

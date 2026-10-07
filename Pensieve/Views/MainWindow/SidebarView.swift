@@ -118,7 +118,7 @@ private func projectFolderPreparationFailure(_ error: ProjectFolderError) -> Bat
 private func settleProjectWaitingCleanup(_ outcome: BatchResult, ids: Set<UUID>,
                                          platformVM: PlatformViewModel) -> BatchResult {
     var result = outcome
-    if result.hasFailures {
+    if result.hasFailures && !result.didRetireProjectEvidence {
         do { try platformVM.waitingRemovalStore.retire(ids: ids) } catch {
             result.operationFailures.append("Couldn't withdraw this attempt's waiting cleanup: " + error.localizedDescription)
         }
@@ -136,7 +136,8 @@ private func projectRemovalAdmissionFailure(project: Project, plan: ProjectRemov
         if folderChanged {
             return "The project folder changed at \(project.path) while confirmation was open. Please review removal again."
         }
-        if confirmedPreview.artifactCount != plan.preview.artifactCount {
+        if confirmedPreview.artifactCount != plan.preview.artifactCount
+            || confirmedPreview.hasWaitingRemovals != plan.preview.hasWaitingRemovals {
             return "The project changed while confirmation was open. Please review removal again."
         }
     }
@@ -165,7 +166,10 @@ private func completeProjectRemoval(_ project: Project, intentRows: [IntentAssig
             if !priorFailed || completedDirect { context.delete(row) }
         }
         if !priorFailed { context.delete(project) }
-        if context.hasChanges { try context.save() }
+        if context.hasChanges {
+            try context.save()
+            result.didRetireProjectEvidence = true
+        }
     } catch {
         context.rollback()
         result.operationFailures.append("Couldn't save project removal: " + error.localizedDescription)

@@ -323,14 +323,6 @@ extension PlatformViewModel {
             : (try? cursorCompiler.hasOwnershipMark(skill: skill, projectPath: target.project?.path)) ?? false
     }
 
-    /// Throwing ownership for consumers that retain their ledger when an occupant cannot be checked.
-    func artifactIsOwned(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) throws -> Bool {
-        if platform.usesSymlinks {
-            return try linkService.ownsArtifact(skill: skill, platform: platform, projectPath: target.project?.path)
-        }
-        return try cursorCompiler.ownsArtifact(skill: skill, projectPath: target.project?.path)
-    }
-
     func projectCursorRuleMayExist(skill: Skill, project: Project) throws -> Bool {
         try cursorCompiler.ruleMayExist(skill: skill, projectPath: project.path)
     }

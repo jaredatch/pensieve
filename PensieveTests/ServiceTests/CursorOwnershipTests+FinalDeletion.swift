@@ -15,9 +15,10 @@ extension CursorOwnershipTests {
         mapped.beforeEntryTypeProbe = { probes.append($0) }
         mapped.beforeDeployStateRead = { probes.append($0) }
         defer { mapped.beforeEntryTypeProbe = nil; mapped.beforeDeployStateRead = nil }
-        let cleanup = harness.vm.removeAllDeploys(skill: skill, projects: [project, sibling], localDeployHistory: { _ in
+        let cleanup = harness.vm.removeAllDeploys(skill: skill, projects: [project, sibling], localProjectEvidence: {
             XCTFail("Invalid slugs must not query history")
-            return []
+            return try harness.vm.localSkillProjectDeployEvidence(skill: self.skill,
+                projects: [project, sibling], context: harness.context)
         })
         XCTAssertEqual(cleanup.batch.failureCount, 1, "Validate once before fan-out")
         XCTAssertTrue(probes.isEmpty, "Validation must precede state and artifact reads")
@@ -50,13 +51,15 @@ extension CursorOwnershipTests {
         try mapped.writeFile(at: path, content: bytes)
         let vm = PlatformViewModel(fileService: mapped, cursorCompiler: AbsentCleanupCompiler(path: path),
             agentDetection: DeployStubDetection(installed: [.cursor]), deployStateStore: harness.state)
-        var requestedHistory = false
-        let result = vm.removeAllDeploys(skill: skill, projects: [project], localDeployHistory: { _ in
-            requestedHistory = true
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(EIO))
+        var evidence: SkillProjectDeployEvidence?
+        let result = vm.removeAllDeploys(skill: skill, projects: [project], localProjectEvidence: {
+            var local = try vm.localSkillProjectDeployEvidence(skill: self.skill, projects: [project], context: harness.context)
+            local.historyFailure = NSError(domain: NSPOSIXErrorDomain, code: Int(EIO))
+            evidence = local
+            return local
         }).batch
         XCTAssertFalse(result.hasFailures)
-        XCTAssertFalse(requestedHistory)
+        XCTAssertFalse(try XCTUnwrap(evidence).cursorHistoryPaths.contains(path), "No local history admits the external rule")
         XCTAssertEqual(try mapped.readFile(at: path), bytes)
     }
 

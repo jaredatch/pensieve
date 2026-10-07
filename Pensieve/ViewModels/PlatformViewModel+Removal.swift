@@ -39,8 +39,7 @@ extension PlatformViewModel {
     /// Remove owned deploys using one state snapshot and history only for unrecorded project rules.
     /// An unreadable snapshot fences owned artifacts; absent and foreign occupants remain no-ops.
     func removeAllDeploys(
-        skill: Skill, projects: [Project], localProjectEvidence: (() throws -> SkillProjectDeployEvidence)? = nil,
-        localDeployHistory: (Set<String>) throws -> Set<String> = { _ in [] }
+        skill: Skill, projects: [Project], localProjectEvidence: (() throws -> SkillProjectDeployEvidence)? = nil
     ) -> SkillCleanupResult {
         var result = SkillCleanupResult()
         do {
@@ -70,17 +69,7 @@ extension PlatformViewModel {
         if result.batch.hasFailures { return result }
         let evidence = skillCleanupEvidence(skill: skill, projects: projects, recorded: recorded,
             localPaths: localPaths, unavailable: unavailable, probedProjects: Set(selected.map(\.id)))
-        let locallyDeployed: Set<String>
-        do {
-            locallyDeployed = try skillCleanupCursorHistory(paths: evidence.historyPaths,
-                localEvidence: localEvidence, readHistory: localDeployHistory)
-        } catch {
-            if recorded == nil {
-                recordSkillCleanupStateFailure(skill: skill, problem: stateProblem, batch: &result.batch)
-            }
-            result.batch.recordReadFailure("local deploy history for “\(skill.name)”", error: error)
-            return result
-        }
+        let locallyDeployed = (localEvidence?.cursorHistoryPaths ?? []).intersection(evidence.historyPaths)
         let candidates = skillCleanupCandidates(skill: skill, evidence: evidence, locallyDeployed: locallyDeployed,
             recorded: recorded, stateProblem: stateProblem)
         do {
@@ -96,12 +85,6 @@ extension PlatformViewModel {
 
     private func recordSkillCleanupStateFailure(skill: Skill, problem: String, batch: inout BatchResult) {
         batch.recordReadFailure("deploys for “\(skill.name)”", error: SkillCleanupStateFailure(message: problem))
-    }
-
-    private func skillCleanupCursorHistory(paths: Set<String>, localEvidence: SkillProjectDeployEvidence?,
-                                           readHistory: (Set<String>) throws -> Set<String>) throws -> Set<String> {
-        if let localEvidence { return localEvidence.cursorHistoryPaths.intersection(paths) }
-        return paths.isEmpty ? [] : try readHistory(paths)
     }
 
     private func skillCleanupReadFailures(skill: Skill, recorded: Set<String>?, stateProblem: String,

@@ -60,7 +60,7 @@ enum ListRows {
     }
 
     static func project(_ project: Project, deployIndex: DeployIndex, homeDirectory: String) -> ListRowModel {
-        let count = project.identityKey.map { deployIndex.skillCount(inProjectKey: $0) } ?? 0
+        let count = deployIndex.skillCount(inProjectKey: project.identityKey ?? project.path)
         return ListRowModel(
             title: project.name,
             trailingText: deployIndex.available ? counted(count, "skill") : "Deploy state unavailable",

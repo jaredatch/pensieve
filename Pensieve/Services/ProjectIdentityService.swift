@@ -61,6 +61,35 @@ struct ProjectIdentityService: ProjectIdentityServiceProtocol {
         return nil
     }
 
+    /// Waiting cleanup compares every carried identity. A failed source read cannot prove a
+    /// mismatch, even when another source matches. This probe never creates a marker.
+    func existingIdentityKeys(forProjectAt path: String) throws -> Set<String> {
+        var keys: Set<String> = []
+        let gitPath = path + "/.git"
+        let kind = try fileService.entryTypeWithoutFollowingLinks(at: gitPath)
+        var gitDirectory = kind == .directory
+        if kind == .symlink { gitDirectory = try fileService.directoryExistsFollowingLinks(at: gitPath) }
+        if gitDirectory, let config = try identitySource(at: path + "/.git/config"),
+           let origin = Self.parseOriginURL(fromGitConfig: config) {
+            guard let key = Self.normalizeRemoteURL(origin) else { throw CocoaError(.fileReadCorruptFile) }
+            keys.insert(key)
+        }
+        if let marker = try identitySource(at: path + "/.pensieve-project") {
+            guard let key = Self.parseMarkerID(from: marker) else { throw CocoaError(.fileReadCorruptFile) }
+            keys.insert(key)
+        }
+        return keys
+    }
+
+    private func identitySource(at path: String) throws -> String? {
+        do { return try fileService.readFile(at: path) } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return nil
+        } catch let error as NSError where error.domain == NSPOSIXErrorDomain
+            && (error.code == Int(ENOENT) || error.code == Int(ENOTDIR)) {
+            return nil
+        }
+    }
+
     /// Canonical cross-machine key from a git remote URL, or nil if unparseable.
     static func normalizeRemoteURL(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)

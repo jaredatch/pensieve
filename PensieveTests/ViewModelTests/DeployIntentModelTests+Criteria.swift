@@ -89,9 +89,9 @@ extension DeployIntentModelTests {
             false, skill: skill, platform: .codex, target: .project(project), context: harness.context
         )
 
-        XCTAssertFalse(try harness.platformVM.artifactIsOwned(
+        XCTAssertFalse(try harness.platformVM.removalOperation(
             skill: skill, platform: .codex, target: .project(project)
-        ))
+        ).classify().isOwned)
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
         XCTAssertFalse(harness.manifestFileService.fileExists(at: criteriaIntentPath(harness, skill: skill)))
     }

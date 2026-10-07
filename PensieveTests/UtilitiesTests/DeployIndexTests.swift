@@ -17,7 +17,7 @@ final class DeployIndexTests: XCTestCase {
         let noKey = DeployIndex(records: [rawRecord(platform: "zed", key: nil)])
 
         XCTAssertEqual(indexed.summary(for: "alpha"), "zed · 1 project")
-        XCTAssertEqual(noKey.summary(for: "alpha"), "zed")
+        XCTAssertEqual(noKey.summary(for: "alpha"), "zed · This Mac, 1 project")
     }
 
     func testSummaryNotDeployedAndUnavailable() {
@@ -35,6 +35,20 @@ final class DeployIndexTests: XCTestCase {
 
         XCTAssertEqual(index.skillCount(inProjectKey: "a"), 2)
         XCTAssertEqual(index.skillCount(inProjectKey: "b"), 0)
+    }
+
+    func testKeylessProjectRecordsCountAndSummarizeOnThisMac() {
+        let index = DeployIndex(records: [
+            record(slug: "alpha", platform: .codex, scope: "project", path: "/checkout/agents/alpha.md"),
+            record(slug: "alpha", platform: .claudeCode, scope: "project", path: "/checkout/.claude/skills/alpha"),
+            record(slug: "beta", platform: .cursor, scope: "project", path: "/checkout/.cursor/rules/beta.mdc"),
+            record(slug: "alpha", platform: .codex, scope: "project", path: "/checkout-other/agents/alpha.md")
+        ])
+        XCTAssertEqual(index.summary(for: "alpha"), "Claude Code, Codex · This Mac, 2 projects")
+        XCTAssertEqual(index.summary(for: "beta"), "Cursor · This Mac, 1 project")
+        XCTAssertEqual(index.skillCount(inProjectKey: "/checkout"), 2)
+        XCTAssertEqual(index.skillCount(inProjectKey: "/checkout-other"), 1)
+        XCTAssertEqual(index.skillCount(inProjectKey: "/check"), 0)
     }
 
     func testIsDeployed() {

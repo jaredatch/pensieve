@@ -35,10 +35,10 @@ struct DeployIndex: Equatable {
         !records(for: slug).isEmpty
     }
 
-    /// Distinct slugs carrying at least one project-scoped record for `key` (a `Project.identityKey`).
+    /// Distinct slugs carrying at least one project-scoped record for an identity key or a keyless checkout path.
     func skillCount(inProjectKey key: String) -> Int {
         bySlug.values.reduce(into: 0) { count, records in
-            if records.contains(where: { $0.scope == "project" && $0.projectIdentityKey == key }) {
+            if records.contains(where: { $0.scope == "project" && $0.projectReference == key }) {
                 count += 1
             }
         }
@@ -56,10 +56,10 @@ struct DeployIndex: Equatable {
         let known = PlatformTarget.allCases.filter { rawPlatforms.contains($0.rawValue) }
         let names = known.map(\.displayName) + rawPlatforms.subtracting(known.map(\.rawValue)).sorted()
         var scopes: [String] = []
-        if records.contains(where: { $0.scope == "user" }) {
+        if records.contains(where: { $0.scope == "user" || ($0.scope == "project" && $0.projectIdentityKey == nil) }) {
             scopes.append("This Mac")
         }
-        let projectKeys = Set(records.filter { $0.scope == "project" }.compactMap(\.projectIdentityKey))
+        let projectKeys = Set(records.filter { $0.scope == "project" }.map(\.projectReference))
         if !projectKeys.isEmpty {
             scopes.append(projectKeys.count == 1 ? "1 project" : "\(projectKeys.count) projects")
         }
