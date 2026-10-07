@@ -24,7 +24,8 @@ final class AddProjectSheetHostTests: XCTestCase {
         let window = mount(host)
         defer { window.close() }
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                            failureMessage: "The sheet must render the missing-folder reason") {
+                            failureMessage: "The sheet must render the missing-folder reason",
+                            diagnostics: { self.sheetDiagnostics(host, model) }) {
             (try? self.renderedText(in: host).contains { $0.text.contains("Project folder is missing") }) == true
         }
         try clickAdd(in: host, window: window)
@@ -42,7 +43,8 @@ final class AddProjectSheetHostTests: XCTestCase {
             model.path == root + "/valid"
         }
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                            failureMessage: "The same sheet must render its corrected status") {
+                            failureMessage: "The same sheet must render its corrected status",
+                            diagnostics: { self.sheetDiagnostics(host, model) }) {
             (try? self.renderedText(in: host).contains { $0.text.contains("Marker will be created on Add") }) == true
         }
         try clickAdd(in: host, window: window)
@@ -100,7 +102,8 @@ final class AddProjectSheetHostTests: XCTestCase {
         let window = mount(host)
         defer { window.close() }
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                            failureMessage: "Initial caption") {
+                            failureMessage: "Initial caption",
+                            diagnostics: { self.sheetDiagnostics(host, model) }) {
             (try? self.renderedText(in: host).contains { $0.text.contains("Marker will be created") }) == true
         }
         let initialHeight = host.fittingSize.height
@@ -116,7 +119,8 @@ final class AddProjectSheetHostTests: XCTestCase {
         model.path = h.project.path
         await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                            failureMessage: "Current path shows neutral checking text") {
+                            failureMessage: "Current path shows neutral checking text",
+                            diagnostics: { self.sheetDiagnostics(host, model) }) {
             (try? self.renderedText(in: host).contains { $0.text.contains("Checking project folder") }) == true
         }
         XCTAssertEqual(host.fittingSize.height, initialHeight, accuracy: 1,
@@ -219,6 +223,14 @@ final class AddProjectSheetHostTests: XCTestCase {
             }
             return result
         }
+    }
+
+    // Names what the wait saw, for a run where the caption never appears (the CI runner).
+    private func sheetDiagnostics(_ host: NSView, _ model: AddProjectModel) -> String {
+        let recognized = ((try? renderedText(in: host)) ?? []).map(\.text).joined(separator: " | ")
+        return "model: checking=\(model.isCheckingIdentity) message=\(model.identityMessage ?? "nil") "
+            + "error=\(model.hasIdentityError) directory=\(model.hasProjectDirectory) path=\(model.path); "
+            + "host=\(host.bounds.size) scale=\(host.window?.backingScaleFactor ?? 0); recognized=[\(recognized)]"
     }
 
     private func clickAdd(in host: NSView, window: NSWindow) throws {
