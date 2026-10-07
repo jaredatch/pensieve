@@ -92,8 +92,8 @@ final class WaitingRemovalRequestSafetyTests: XCTestCase {
         XCTAssertEqual(try h.base.files.readFile(at: statePath), "unreadable")
     }
 
-    func testIdentityMismatchRetiresWithoutTouchingMarkedRuleOrOwnedLink() throws {
-        for identity in ["different", "same", "absent", "unreadable"] {
+    func testChangedIdentityStillCleansWaitingOwnedLinkAndMarkedRule() throws {
+        for identity in ["renamed", "unparseable", "absent", "unreadable"] {
             let h = try WaitingRemovalHarness(platforms: [.codex, .cursor])
             defer { h.base.cleanup() }
             try h.deploy([.codex, .cursor])
@@ -101,21 +101,25 @@ final class WaitingRemovalRequestSafetyTests: XCTestCase {
             XCTAssertFalse(h.removeProject().hasFailures)
             try h.restoreFolder()
             let config = h.base.project.path + "/.git/config"
-            if identity == "different" {
+            if identity == "renamed" {
                 try h.base.files.writeFile(at: config,
                     content: "[remote \"origin\"]\nurl = https://github.com/team/different.git\n")
+            } else if identity == "unparseable" {
+                try h.base.files.writeFile(at: config, content: "[remote \"origin\"]\nurl = /local/repository\n")
             } else if identity == "absent" { try h.base.files.deleteFile(at: config) } else if identity == "unreadable" {
                 try h.base.files.deleteFile(at: config)
                 try h.base.files.createDirectory(at: config)
             }
             let waiting = try h.vm.waitingRemovalStore.read()
             let rule = h.vm.artifactPath(skill: h.base.skill, platform: .cursor, target: .project(h.base.project))
-            let bytes = try h.base.files.readData(at: rule)
+            XCTAssertEqual(waiting.count, 2)
+            XCTAssertTrue(waiting.allSatisfy { $0.projectIdentityKey == h.base.project.identityKey })
+            XCTAssertTrue(h.base.files.isSymlink(at: h.base.artifact(.codex)))
+            XCTAssertTrue(try h.mapped.readFile(at: rule).contains("pensieve"))
             XCTAssertFalse(h.vm.reconcileWaitingRemovals(context: h.base.context).hasFailures, identity)
-            XCTAssertEqual(h.base.files.isSymlink(at: h.base.artifact(.codex)), identity != "same", identity)
-            if identity != "same" { XCTAssertEqual(try h.base.files.readData(at: rule), bytes, identity) }
-            let retained = try h.vm.waitingRemovalStore.read()
-            XCTAssertEqual(retained, identity == "absent" || identity == "unreadable" ? waiting : [], identity)
+            XCTAssertFalse(try h.base.files.entryExistsWithoutFollowingLinks(at: h.base.artifact(.codex)), identity)
+            XCTAssertFalse(try h.base.files.entryExistsWithoutFollowingLinks(at: rule), identity)
+            XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty, identity)
             XCTAssertFalse(h.base.files.fileExists(at: h.base.project.path + "/.pensieve-project"))
         }
     }

@@ -154,21 +154,28 @@ private func completeProjectRemoval(_ project: Project, intentRows: [IntentAssig
                                     context: ModelContext) -> BatchResult {
     var result = BatchResult()
     let projectID = project.id, completed = cleanup.completedPairs
+    var didDeleteEvidence = false
     do {
         for row in try context.fetch(FetchDescriptor<SkillProjectAssignment>()) where row.projectID == projectID {
             let pair = BatchPairKey(skillID: row.skillID, platform: row.platform, target: .project(projectID))
-            if !priorFailed || completed.contains(pair) { context.delete(row) }
+            if !priorFailed || completed.contains(pair) {
+                context.delete(row)
+                didDeleteEvidence = true
+            }
         }
         for row in intentRows where row.projectID == projectID {
             let completedDirect = PlatformTarget(rawValue: row.platformRaw).map {
                 completed.contains(BatchPairKey(skillID: row.skillID, platform: $0, target: .project(projectID)))
             } ?? false
-            if !priorFailed || completedDirect { context.delete(row) }
+            if !priorFailed || completedDirect {
+                context.delete(row)
+                didDeleteEvidence = true
+            }
         }
         if !priorFailed { context.delete(project) }
         if context.hasChanges {
             try context.save()
-            result.didRetireProjectEvidence = true
+            result.didRetireProjectEvidence = didDeleteEvidence
         }
     } catch {
         context.rollback()

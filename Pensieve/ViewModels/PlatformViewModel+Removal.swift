@@ -39,7 +39,7 @@ extension PlatformViewModel {
     /// Remove owned deploys using one state snapshot and history only for unrecorded project rules.
     /// An unreadable snapshot fences owned artifacts; absent and foreign occupants remain no-ops.
     func removeAllDeploys(
-        skill: Skill, projects: [Project], localProjectEvidence: (() throws -> SkillProjectDeployEvidence)? = nil
+        skill: Skill, projects: [Project], localProjectEvidence: () throws -> SkillProjectDeployEvidence
     ) -> SkillCleanupResult {
         var result = SkillCleanupResult()
         do {
@@ -49,8 +49,8 @@ extension PlatformViewModel {
             return result
         }
         let (recorded, stateProblem) = skillCleanupState()
-        let localEvidence: SkillProjectDeployEvidence?
-        do { localEvidence = try localProjectEvidence?() } catch {
+        let localEvidence: SkillProjectDeployEvidence
+        do { localEvidence = try localProjectEvidence() } catch {
             if recorded == nil {
                 recordSkillCleanupStateFailure(skill: skill, problem: stateProblem, batch: &result.batch)
             }
@@ -58,9 +58,8 @@ extension PlatformViewModel {
             return result
         }
         let folders = skillCleanupFolderProbe()
-        let localPaths = localEvidence?.paths ?? []
-        // A caller without the local snapshot cannot assert that the evidence is complete.
-        let incomplete = recorded == nil || localEvidence == nil || localEvidence?.historyFailure != nil
+        let localPaths = localEvidence.paths
+        let incomplete = recorded == nil || localEvidence.historyFailure != nil
         let selected = skillCleanupProjects(skill: skill, projects: projects,
             paths: (recorded ?? []).union(localPaths), includeAll: incomplete)
         let unavailable = unavailableSkillCleanupProjects(selected, folders: folders)
@@ -69,7 +68,7 @@ extension PlatformViewModel {
         if result.batch.hasFailures { return result }
         let evidence = skillCleanupEvidence(skill: skill, projects: projects, recorded: recorded,
             localPaths: localPaths, unavailable: unavailable, probedProjects: Set(selected.map(\.id)))
-        let locallyDeployed = (localEvidence?.cursorHistoryPaths ?? []).intersection(evidence.historyPaths)
+        let locallyDeployed = localEvidence.cursorHistoryPaths.intersection(evidence.historyPaths)
         let candidates = skillCleanupCandidates(skill: skill, evidence: evidence, locallyDeployed: locallyDeployed,
             recorded: recorded, stateProblem: stateProblem)
         do {
@@ -88,10 +87,10 @@ extension PlatformViewModel {
     }
 
     private func skillCleanupReadFailures(skill: Skill, recorded: Set<String>?, stateProblem: String,
-                                          localEvidence: SkillProjectDeployEvidence?, projects: [Project],
+                                          localEvidence: SkillProjectDeployEvidence, projects: [Project],
                                           unavailable: Set<UUID>) -> BatchResult {
         var result = BatchResult()
-        if let error = localEvidence?.historyFailure,
+        if let error = localEvidence.historyFailure,
            !unavailable.isEmpty || skillCleanupNeedsCursorHistory(skill: skill, projects: projects) {
             result.recordReadFailure("local deploy history for “\(skill.name)”", error: error)
         }

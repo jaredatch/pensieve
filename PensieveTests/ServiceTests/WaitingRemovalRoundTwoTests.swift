@@ -6,53 +6,6 @@ import XCTest
 
 @MainActor
 final class WaitingRemovalRoundTwoTests: XCTestCase {
-    func testMarkerRegisteredProjectGainingRemoteStillCleansWaitingArtifacts() throws {
-        let h = try WaitingRemovalHarness(platforms: [.codex, .cursor])
-        defer { h.base.cleanup() }
-        try h.base.files.createDirectory(at: h.base.project.path)
-        let marker = try ProjectIdentityService(fileService: h.mapped).identity(forProjectAt: h.base.project.path)
-        h.base.project.identityKey = marker.key
-        XCTAssertFalse(h.vm.deployBatch(skills: [h.base.skill], platforms: [.codex, .cursor],
-            target: .project(h.base.project), context: h.base.context).hasFailures)
-        try h.base.files.replaceItem(at: h.offlinePath, with: h.base.project.path)
-        XCTAssertFalse(h.removeProject().hasFailures)
-        try h.restoreFolder()
-        try h.base.files.writeFile(at: h.base.project.path + "/.git/config",
-            content: "[remote \"origin\"]\nurl = https://github.com/team/new-remote.git\n")
-        XCTAssertFalse(h.vm.reconcileWaitingRemovals(context: h.base.context).hasFailures)
-        for platform in [PlatformTarget.codex, .cursor] {
-            let path = h.vm.artifactPath(skill: h.base.skill, platform: platform, target: .project(h.base.project))
-            XCTAssertFalse(try h.base.files.entryExistsWithoutFollowingLinks(at: path),
-                "The stored marker still identifies this checkout after it gains a remote")
-        }
-        XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty)
-        XCTAssertEqual(try h.base.files.readFile(at: h.base.project.path + "/.pensieve-project").contains(marker.key), true)
-    }
-
-    func testUnreadableGitConfigKeepsWaitingEvenWithReadableMatchingMarker() throws {
-        let h = try WaitingRemovalHarness()
-        defer { h.base.cleanup() }
-        try h.base.files.createDirectory(at: h.base.project.path)
-        let marker = try ProjectIdentityService(fileService: h.mapped).identity(forProjectAt: h.base.project.path)
-        h.base.project.identityKey = marker.key
-        XCTAssertFalse(h.vm.deployBatch(skills: [h.base.skill], platforms: [.codex],
-            target: .project(h.base.project), context: h.base.context).hasFailures)
-        try h.base.files.replaceItem(at: h.offlinePath, with: h.base.project.path)
-        XCTAssertFalse(h.removeProject().hasFailures)
-        try h.restoreFolder()
-        // A directory at config makes the real FileService read fail, without chmod assumptions.
-        try h.base.files.createDirectory(at: h.base.project.path + "/.git/config")
-        let waiting = try h.vm.waitingRemovalStore.read()
-        XCTAssertFalse(h.vm.reconcileWaitingRemovals(context: h.base.context).hasFailures)
-        XCTAssertEqual(try h.vm.waitingRemovalStore.read(), waiting, "An unreadable identity source must keep waiting")
-        XCTAssertTrue(h.base.files.isSymlink(at: h.base.artifact(.codex)))
-        try h.base.files.deleteDirectory(at: h.base.project.path + "/.git/config")
-        try h.base.files.writeFile(at: h.base.project.path + "/.git/config", content: "[core]\n")
-        XCTAssertFalse(h.vm.reconcileWaitingRemovals(context: h.base.context).hasFailures)
-        XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty)
-        XCTAssertFalse(h.base.files.isSymlink(at: h.base.artifact(.codex)))
-    }
-
     func testLateProjectSaveFailureKeepsStateOnlyWaitingEvidenceForOfflineRetry() throws {
         let h = try WaitingRemovalHarness(persistent: true)
         defer { h.base.cleanup() }

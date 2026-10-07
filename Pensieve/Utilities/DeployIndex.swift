@@ -8,19 +8,24 @@ import Foundation
 /// rather than report "Not deployed" (PLAN-24's tri-state rule: a probe's failure is not an answer).
 struct DeployIndex: Equatable {
     private let bySlug: [String: [DeployStateRecord]]
+    private let projectSlugs: [String: Set<String>]
     let available: Bool
 
     init(records: [DeployStateRecord]) {
         var grouped: [String: [DeployStateRecord]] = [:]
+        var projects: [String: Set<String>] = [:]
         for record in records {
             grouped[record.slug, default: []].append(record)
+            if record.scope == "project" { projects[record.projectReference, default: []].insert(record.slug) }
         }
         bySlug = grouped
+        projectSlugs = projects
         available = true
     }
 
     private init(unavailable: Void) {
         bySlug = [:]
+        projectSlugs = [:]
         available = false
     }
 
@@ -37,11 +42,7 @@ struct DeployIndex: Equatable {
 
     /// Distinct slugs carrying at least one project-scoped record for an identity key or a keyless checkout path.
     func skillCount(inProjectKey key: String) -> Int {
-        bySlug.values.reduce(into: 0) { count, records in
-            if records.contains(where: { $0.scope == "project" && $0.projectReference == key }) {
-                count += 1
-            }
-        }
+        projectSlugs[key]?.count ?? 0
     }
 
     /// Mail's second line for a skill: "Claude Code, Codex · This Mac", "Cursor · 2 projects",
@@ -56,7 +57,7 @@ struct DeployIndex: Equatable {
         let known = PlatformTarget.allCases.filter { rawPlatforms.contains($0.rawValue) }
         let names = known.map(\.displayName) + rawPlatforms.subtracting(known.map(\.rawValue)).sorted()
         var scopes: [String] = []
-        if records.contains(where: { $0.scope == "user" || ($0.scope == "project" && $0.projectIdentityKey == nil) }) {
+        if records.contains(where: { $0.scope == "user" }) {
             scopes.append("This Mac")
         }
         let projectKeys = Set(records.filter { $0.scope == "project" }.map(\.projectReference))

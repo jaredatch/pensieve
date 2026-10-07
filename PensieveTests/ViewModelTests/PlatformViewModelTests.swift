@@ -240,7 +240,7 @@ extension PlatformViewModelTests {
         link.linkedPaths = Set(pairs.map { link.path(skill, $0.0, $0.1) })
         try store.replaceAll(pairs.map { stateRecord(path: link.path(skill, $0.0, $0.1), platform: $0.0) })
         let vm = deletionVM(installed: [.claudeCode, .codex], link: link, store: store)
-        let result = vm.removeAllDeploys(skill: skill, projects: [project]).batch
+        let result = try cleanupDeploys(vm, skill: skill, projects: [project]).batch
         XCTAssertEqual(result.successes.count, 3)
         XCTAssertEqual(link.unlinkCalls.map(\.1), [nil, nil, project.path])
         XCTAssertTrue(try store.read().records.isEmpty)
@@ -252,7 +252,7 @@ extension PlatformViewModelTests {
         let store = DeployStateStore(fileService: FileService(), appSupportDir: try deletionRoot())
         let link = DeletionTestLinkService()
         let vm = deletionVM(installed: [.claudeCode], link: link, store: store)
-        let result = vm.removeAllDeploys(skill: Skill(name: "A", directoryName: "a"),
+        let result = try cleanupDeploys(vm, skill: Skill(name: "A", directoryName: "a"),
                                          projects: []).batch
         XCTAssertTrue(result.outcomes.isEmpty)
         XCTAssertTrue(link.unlinkCalls.isEmpty)
@@ -266,8 +266,8 @@ extension PlatformViewModelTests {
         let path = link.path(skill, .claudeCode, nil)
         link.foreignSymlinkPaths.insert(path)
         try store.replaceAll([stateRecord(path: path)])
-        let result = deletionVM(installed: [.claudeCode], link: link, store: store)
-            .removeAllDeploys(skill: skill, projects: []).batch
+        let vm = deletionVM(installed: [.claudeCode], link: link, store: store)
+        let result = try cleanupDeploys(vm, skill: skill, projects: []).batch
         XCTAssertEqual(result.successes.count, 1)
         XCTAssertTrue(link.unlinkCalls.isEmpty)
         XCTAssertTrue(try store.read().records.isEmpty)
@@ -282,7 +282,7 @@ extension PlatformViewModelTests {
         link.linkedPaths = [user, scoped]; link.failingUnlinkPaths = [scoped]
         try store.replaceAll([stateRecord(path: user), stateRecord(path: scoped)])
         let vm = deletionVM(installed: [.claudeCode], link: link, store: store)
-        let result = vm.removeAllDeploys(skill: skill, projects: [project]).batch
+        let result = try cleanupDeploys(vm, skill: skill, projects: [project]).batch
         XCTAssertEqual(result.successes.count, 1); XCTAssertEqual(result.failures.count, 1)
         XCTAssertEqual(try store.read().records.map(\.artifactPath), [scoped])
         XCTAssertEqual(vm.refreshCounter, 1)
@@ -294,7 +294,7 @@ extension PlatformViewModelTests {
         let skill = Skill(name: "A", directoryName: "a"), link = DeletionTestLinkService()
         link.foreignSymlinkPaths.insert(link.path(skill, .claudeCode, nil))
         let vm = deletionVM(installed: [.claudeCode], link: link, store: store)
-        XCTAssertTrue(vm.removeAllDeploys(skill: skill, projects: []).batch.outcomes.isEmpty)
+        XCTAssertTrue(try cleanupDeploys(vm, skill: skill, projects: []).batch.outcomes.isEmpty)
         XCTAssertTrue(link.unlinkCalls.isEmpty); XCTAssertEqual(vm.refreshCounter, 0)
     }
 
@@ -304,8 +304,8 @@ extension PlatformViewModelTests {
         try fs.writeFile(at: root + "/deploy-state.json", content: "not json")
         let skill = Skill(name: "A", directoryName: "a"), link = DeletionTestLinkService()
         link.linkedPaths.insert(link.path(skill, .claudeCode, nil))
-        let result = deletionVM(installed: [.claudeCode], link: link, store: store)
-            .removeAllDeploys(skill: skill, projects: []).batch
+        let vm = deletionVM(installed: [.claudeCode], link: link, store: store)
+        let result = try cleanupDeploys(vm, skill: skill, projects: []).batch
         XCTAssertTrue(result.failures.first?.error?.contains("unreadable") == true)
         XCTAssertTrue(link.unlinkCalls.isEmpty)
         XCTAssertEqual(try fs.readFile(at: root + "/deploy-state.json"), "not json")
@@ -316,7 +316,7 @@ extension PlatformViewModelTests {
         let root = try deletionRoot(), fs = FileService(), store = DeployStateStore(fileService: fs, appSupportDir: root)
         try fs.writeFile(at: root + "/deploy-state.json", content: "garbage")
         let vm = deletionVM(installed: [.claudeCode], link: DeletionTestLinkService(), store: store)
-        XCTAssertTrue(vm.removeAllDeploys(skill: Skill(name: "A", directoryName: "a"),
+        XCTAssertTrue(try cleanupDeploys(vm, skill: Skill(name: "A", directoryName: "a"),
                                           projects: []).batch.outcomes.isEmpty)
         XCTAssertEqual(try fs.readFile(at: root + "/deploy-state.json"), "garbage")
         XCTAssertEqual(vm.refreshCounter, 0)
@@ -329,8 +329,8 @@ extension PlatformViewModelTests {
         try fs.writeFile(at: root + "/deploy-state.json", content: bytes)
         let skill = Skill(name: "A", directoryName: "a"), link = DeletionTestLinkService()
         link.linkedPaths.insert(link.path(skill, .claudeCode, nil))
-        let result = deletionVM(installed: [.claudeCode], link: link, store: store)
-            .removeAllDeploys(skill: skill, projects: []).batch
+        let vm = deletionVM(installed: [.claudeCode], link: link, store: store)
+        let result = try cleanupDeploys(vm, skill: skill, projects: []).batch
         XCTAssertTrue(result.failures.first?.error?.contains("newer schema") == true)
         XCTAssertTrue(link.unlinkCalls.isEmpty)
         XCTAssertEqual(try fs.readFile(at: root + "/deploy-state.json"), bytes)
@@ -343,8 +343,8 @@ extension PlatformViewModelTests {
         let skill = Skill(name: "A", directoryName: "a"), link = DeletionTestLinkService()
         let path = link.path(skill, .claudeCode, nil); link.linkedPaths.insert(path)
         try store.replaceAll([stateRecord(path: path)]); fs.failingWrites.insert(root + "/deploy-state.json")
-        let result = deletionVM(installed: [.claudeCode], link: link, store: store)
-            .removeAllDeploys(skill: skill, projects: []).batch
+        let vm = deletionVM(installed: [.claudeCode], link: link, store: store)
+        let result = try cleanupDeploys(vm, skill: skill, projects: []).batch
         XCTAssertEqual(link.unlinkCalls.count, 1); XCTAssertEqual(result.failures.count, 1)
         XCTAssertEqual(try store.read().records.map(\.artifactPath), [path])
     }
@@ -357,9 +357,9 @@ extension PlatformViewModelTests {
         let path = link.path(skill, .claudeCode, nil); link.linkedPaths.insert(path)
         try store.replaceAll([stateRecord(path: path)]); fs.failingWrites.insert(root + "/deploy-state.json")
         let vm = deletionVM(installed: [.claudeCode], link: link, store: store)
-        XCTAssertEqual(vm.removeAllDeploys(skill: skill, projects: []).batch.failures.count, 1)
+        XCTAssertEqual(try cleanupDeploys(vm, skill: skill, projects: []).batch.failures.count, 1)
         fs.failingWrites.removeAll()
-        XCTAssertEqual(vm.removeAllDeploys(skill: skill, projects: []).batch.successes.count, 1)
+        XCTAssertEqual(try cleanupDeploys(vm, skill: skill, projects: []).batch.successes.count, 1)
         XCTAssertEqual(link.unlinkCalls.count, 1); XCTAssertTrue(try store.read().records.isEmpty)
     }
 
@@ -371,14 +371,14 @@ extension PlatformViewModelTests {
         let skill = Skill(name: "A", directoryName: "a"), link = DeletionTestLinkService()
         let vm = deletionVM(installed: [.claudeCode, .codex], link: link, store: store)
         fs.readCounts.removeAll()
-        XCTAssertTrue(vm.removeAllDeploys(skill: skill, projects: []).batch.outcomes.isEmpty)
+        XCTAssertTrue(try cleanupDeploys(vm, skill: skill, projects: []).batch.outcomes.isEmpty)
         XCTAssertEqual(fs.readCounts[statePath], 1)
         let project = Project(name: "P", path: "/p")
         let pairs: [(PlatformTarget, String?)] = [(.claudeCode, nil), (.codex, nil), (.claudeCode, project.path)]
         link.linkedPaths = Set(pairs.map { link.path(skill, $0.0, $0.1) })
         try store.replaceAll(pairs.map { stateRecord(path: link.path(skill, $0.0, $0.1), platform: $0.0) })
         fs.readCounts.removeAll()
-        XCTAssertEqual(vm.removeAllDeploys(skill: skill, projects: [project]).batch.successes.count, 3)
+        XCTAssertEqual(try cleanupDeploys(vm, skill: skill, projects: [project]).batch.successes.count, 3)
         // One up-front read, one locked batch retirement, and one index refresh.
         XCTAssertEqual(fs.readCounts[statePath], 3)
     }

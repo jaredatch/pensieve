@@ -29,16 +29,8 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
 
         var retire: Set<UUID> = []
         var result = BatchResult()
-        let identities = projectIdentities(reachable)
         var work: [(entry: WaitingRemoval, candidate: DeployRemovalCandidate)] = []
         for entry in reachable {
-            if let key = entry.projectIdentityKey {
-                guard let keys = identities[entry.projectPath], !keys.isEmpty else { continue }
-                if !keys.contains(key) {
-                    retire.insert(entry.id)
-                    continue
-                }
-            }
             let path: String
             do {
                 path = try entryPath(entry.artifactPath)
@@ -89,15 +81,6 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
         }
     }
 
-    private func projectIdentities(_ entries: [WaitingRemoval]) -> [String: Set<String>] {
-        let service = ProjectIdentityService(fileService: fileService)
-        var identities: [String: Set<String>] = [:]
-        for path in Set(entries.filter { $0.projectIdentityKey != nil }.map(\.projectPath)) {
-            identities[path] = try? service.existingIdentityKeys(forProjectAt: path)
-        }
-        return identities
-    }
-
     private func desiredPaths(context: ModelContext, machineID: String,
                               folders: ProjectFolderProbe) throws -> Set<String> {
         let projects = try stateFetcher.projects(context: context)
@@ -139,16 +122,14 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
         var paths: Set<String> = []
         // Derived deployment state requests live skills in registered projects, including keyless
         // direct deploys. History remains after un-assignment and cannot supply current requests.
-        let byPath = Dictionary(grouping: deployments.filter { $0.scope == "project" }, by: \.artifactPath)
-        for project in projects where ProjectDirectory.canAccess(project.path) {
-            for skill in bySlug.values {
-                for platform in PlatformTarget.allCases where platform.supportsProjectScope {
-                    let path = platformVM.artifactPath(skill: skill, platform: platform, target: .project(project))
-                    guard byPath[path]?.contains(where: {
-                        $0.slug == skill.directoryName && $0.platform == platform.rawValue
-                    }) == true else { continue }
-                    paths.insert(folders.isAvailable(project.path) ? try entryPath(path) : path)
-                }
+        let registered = projects.filter { ProjectDirectory.canAccess($0.path) }
+        for record in deployments where record.scope == "project" {
+            guard let skill = bySlug[record.slug], let platform = PlatformTarget(rawValue: record.platform),
+                  platform.supportsProjectScope else { continue }
+            for project in registered where record.artifactPath.hasPrefix(project.path + "/") {
+                let path = platformVM.artifactPath(skill: skill, platform: platform, target: .project(project))
+                guard path == record.artifactPath else { continue }
+                paths.insert(folders.isAvailable(project.path) ? try entryPath(path) : path)
             }
         }
         return paths
