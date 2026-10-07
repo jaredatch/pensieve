@@ -59,8 +59,7 @@ func removeRegisteredProject(_ project: Project,
                              notifier: SyncStateNotifying = SyncStateNotifier.suppressed,
                              logFailure: @escaping (String) -> Void = logProjectRemovalFailure) -> BatchResult {
     defer { notifier() }
-    let intentRows: [IntentAssignment]
-    let intents: [MachineDeployIntent]
+    let intentRows: [IntentAssignment], intents: [MachineDeployIntent]
     let plan: ProjectRemovalPlan
     do {
         intentRows = try stateFetcher.intentAssignments(context: context)
@@ -73,6 +72,7 @@ func removeRegisteredProject(_ project: Project,
             result.operationFailures.append(failure)
             return result
         }
+        try plan.saveWaitingRemovals(project: project, platformVM: platformVM)
     } catch let error as ProjectFolderError {
         var result = BatchResult()
         result.operationFailures.append("Couldn't check the project folder: " + error.localizedDescription)
@@ -116,8 +116,9 @@ private func projectRemovalAdmissionFailure(project: Project, plan: ProjectRemov
     if let confirmedPreview,
        confirmedPreview.artifactCount != plan.preview.artifactCount
         || confirmedPreview.folderIsMissing != plan.preview.folderIsMissing
+        || confirmedPreview.folderIsUncheckable != plan.preview.folderIsUncheckable
         || confirmedPreview.folderIsShared != plan.preview.folderIsShared {
-        return "The project changed while confirmation was open. Please review removal again."
+        return "The project folder changed at \(project.path) while confirmation was open. Please review removal again."
     }
     if !plan.hasIdentitySibling, let key = project.identityKey, localMachineID == nil,
        intents.contains(where: { $0.projectKey == key }) {

@@ -48,7 +48,9 @@ struct CategoryReconciler: CategoryReconcilerProtocol {
 
     @discardableResult
     func reconcile(context: ModelContext) -> BatchResult {
-        reconcile(context: context, excludingProjectIDs: [])
+        var result = reconcile(context: context, excludingProjectIDs: [])
+        result.append(platformVM.reconcileWaitingRemovals(context: context))
+        return result
     }
 
     func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {

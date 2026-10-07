@@ -56,6 +56,10 @@ enum SkillDeletionFlow {
             manifestNote = " The sync manifest couldn't be updated and will regenerate on the next change."
         }
 
+        if !cleanupResult.waitingProjects.isEmpty {
+            manifestNote += " Links and rules in \(cleanupResult.waitingProjects.joined(separator: ", ")) "
+                + "will be removed when the folder is back and can be checked."
+        }
         return present(outcome, skill: skill, manifestNote: manifestNote, library: library)
     }
 

@@ -3,6 +3,7 @@ import Foundation
 struct SkillCleanupResult {
     var batch = BatchResult()
     var didChangeDeploys = false
+    var waitingProjects: [String] = []
 }
 
 extension PlatformViewModel {
@@ -45,19 +46,16 @@ extension PlatformViewModel {
             result.batch.recordReadFailure("deploys for “\(skill.name)”", error: error)
             return result
         }
-        let recorded: Set<String>?
-        let stateProblem: String
-        do {
-            recorded = try deployStateStore.recordedArtifactPaths()
-            stateProblem = ""
-        } catch DeployStateError.unsupportedSchema(let version) {
-            recorded = nil
-            stateProblem = "deploy state uses a newer schema (\(version)); update Pensieve"
-        } catch {
-            recorded = nil
-            stateProblem = "deploy state unreadable"
+        let (recorded, stateProblem) = skillCleanupState()
+        let unavailable = Set(projects.filter { project in
+            guard ProjectDirectory.canAccess(project.path) else { return false }
+            do { try projectReconcilePolicy.requireDirectory(project); return false } catch { return true }
+        }.map(\.id))
+        if !unavailable.isEmpty, recorded == nil {
+            result.batch.recordReadFailure("deploys for “\(skill.name)”", error: SkillCleanupStateFailure(message: stateProblem))
+            return result
         }
-        let evidence = skillCleanupEvidence(skill: skill, projects: projects, recorded: recorded)
+        let evidence = skillCleanupEvidence(skill: skill, projects: projects, recorded: recorded, unavailable: unavailable)
         let locallyDeployed: Set<String>
         do {
             locallyDeployed = evidence.historyPaths.isEmpty ? [] : try localDeployHistory(evidence.historyPaths)
@@ -66,7 +64,13 @@ extension PlatformViewModel {
             return result
         }
         let candidates = skillCleanupCandidates(skill: skill, evidence: evidence, locallyDeployed: locallyDeployed,
-            recorded: recorded, stateProblem: stateProblem)
+            recorded: recorded, stateProblem: stateProblem, unavailable: unavailable)
+        do {
+            result.waitingProjects = try saveWaitingSkillCleanup(skill: skill, candidates: candidates, unavailable: unavailable)
+        } catch {
+            result.batch.recordReadFailure("waiting removals for “\(skill.name)”", error: error)
+            return result
+        }
         let removal = removalService.remove(candidates.map(\.removal))
         for (location, report) in removal.orderedOutcomes(for: candidates.map(\.location)) {
             let outcome = report.outcome
@@ -81,9 +85,26 @@ extension PlatformViewModel {
         return result
     }
 
+    private func skillCleanupState() -> (paths: Set<String>?, problem: String) {
+        do { return (try deployStateStore.recordedArtifactPaths(), "") } catch DeployStateError.unsupportedSchema(let version) {
+            return (nil, "deploy state uses a newer schema (\(version)); update Pensieve")
+        } catch { return (nil, "deploy state unreadable") }
+    }
+
+    private func saveWaitingSkillCleanup(
+        skill: Skill, candidates: [(location: SkillCleanupLocation, removal: DeployRemovalCandidate)], unavailable: Set<UUID>
+    ) throws -> [String] {
+        let waiting = candidates.compactMap { item -> WaitingRemoval? in
+            guard let project = item.location.target.project, unavailable.contains(project.id) else { return nil }
+            return waitingRemoval(skill: skill, platform: item.location.platform, project: project, source: "skill:\(skill.id)")
+        }
+        try waitingRemovalStore.add(waiting)
+        return Array(Set(waiting.map { "\($0.projectName) (\($0.projectPath))" })).sorted()
+    }
+
     private func skillCleanupCandidates(
         skill: Skill, evidence: SkillCleanupEvidence, locallyDeployed: Set<String>,
-        recorded: Set<String>?, stateProblem: String
+        recorded: Set<String>?, stateProblem: String, unavailable: Set<UUID>
     ) -> [(location: SkillCleanupLocation, removal: DeployRemovalCandidate)] {
         var candidates: [(location: SkillCleanupLocation, removal: DeployRemovalCandidate)] = []
         for location in evidence.locations
@@ -93,7 +114,10 @@ extension PlatformViewModel {
             if locallyDeployed.contains(location.path) { sources.insert(.localHistory) }
             let pair = DeployRemovalPair(skill: skill, platform: location.platform)
             var candidate: DeployRemovalCandidate
-            if let error = evidence.probeFailures[location.path] {
+            if let project = location.target.project, unavailable.contains(project.id) {
+                candidate = DeployRemovalCandidate(key: removalKey(pair: pair, target: location.target),
+                    evidence: sources, action: .retireWithoutInspection)
+            } else if let error = evidence.probeFailures[location.path] {
                 candidate = DeployRemovalCandidate(key: removalKey(pair: pair, target: location.target),
                     evidence: sources, action: .fail(error))
             } else {
@@ -110,7 +134,7 @@ extension PlatformViewModel {
     }
 
     private func skillCleanupEvidence(
-        skill: Skill, projects: [Project], recorded: Set<String>?
+        skill: Skill, projects: [Project], recorded: Set<String>?, unavailable: Set<UUID>
     ) -> SkillCleanupEvidence {
         var evidence = SkillCleanupEvidence()
         for target in [DeployTarget.userWide] + projects.map({ .project($0) }) {
@@ -120,7 +144,9 @@ extension PlatformViewModel {
                 // before opening it. Metadata avoids a history fetch for known absent/foreign shapes.
                 if platform == .cursor, let project = target.project, let recorded, !recorded.contains(path) {
                     do {
-                        guard try projectCursorRuleMayExist(skill: skill, project: project) else { continue }
+                        if !unavailable.contains(project.id) {
+                            guard try projectCursorRuleMayExist(skill: skill, project: project) else { continue }
+                        }
                     } catch {
                         // A failed metadata probe matters only if local history admits this path.
                         evidence.probeFailures[path] = error

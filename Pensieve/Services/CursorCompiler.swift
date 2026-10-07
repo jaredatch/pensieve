@@ -18,9 +18,12 @@ protocol CursorCompilerProtocol: DeployRemovalPreparing {
     func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool
     /// Get the output path for a compiled .mdc file
     func outputPath(skill: Skill, projectPath: String?) -> String
+    /// Legacy ownership evidence retained before the source skill can disappear.
+    func removalFingerprint(skill: Skill) -> CursorRemovalFingerprint?
 }
 
 extension CursorCompilerProtocol {
+    func removalFingerprint(skill: Skill) -> CursorRemovalFingerprint? { nil }
     /// Validate before scope admission or filesystem access, for every compiler implementation.
     func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
         try LinkService.validatePathComponent(skill.directoryName)
@@ -121,6 +124,11 @@ final class CursorCompiler: CursorCompilerProtocol {
     private func generateLegacyMDC(skill: Skill, body: String) -> String {
         CursorMDC.generateLegacy(directoryName: skill.directoryName, description: skill.skillDescription,
                                  cursorConfig: skill.cursorConfig, body: body)
+    }
+
+    func removalFingerprint(skill: Skill) -> CursorRemovalFingerprint? {
+        guard let raw = try? skillStore.readBody(directoryName: skill.directoryName) else { return nil }
+        return CursorRemovalFingerprint(content: generateLegacyMDC(skill: skill, body: SkillParser.stripFrontmatter(raw)))
     }
 }
 

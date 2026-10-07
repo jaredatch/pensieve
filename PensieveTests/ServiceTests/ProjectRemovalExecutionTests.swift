@@ -95,7 +95,8 @@ final class ProjectRemovalExecutionTests: XCTestCase {
             if path == h.project.path { throw NSError(domain: NSPOSIXErrorDomain, code: 13) }
         }
         let result = removeRegisteredProject(h.project, reconciler: h.category,
-            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, context: h.context)
+            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
+            confirmedPreview: model.preview, context: h.context)
         let message = ProjectRemovalModel.removalFailureMessage(projectName: h.project.name, result: result)
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(message.contains("folder"))

@@ -144,6 +144,12 @@ A regular Cursor rule is Pensieve's when its closed frontmatter contains the exa
 
 Deleting a skill removes its owned user-wide rules and links, and its owned links in registered projects, for agents installed on this Mac. Removing a project Cursor rule also requires evidence that this Mac deployed it: a deploy-state record for its path or this skill's local deploy history. A marked rule committed by a teammate with no such local evidence stays.
 
+When a registered project's folder is missing or cannot be checked, skill deletion saves waiting removals before retiring any deployment records or assignment rows. The skill can then be deleted. A notice names the project and folder and says its links and rules will be removed when the folder is back and can be checked. If that local save fails, the skill, its requests, assignment rows and deployment records remain.
+
+Waiting removals live only on this Mac, in Application Support beside deployment state. They survive relaunch and never sync. Launch, a sync that brings changes, or a user change that reconciles retries them. Restoring the folder alone starts no work. Pensieve reads all current project intents and category rules first. An unreadable desired state pauses all waiting removals. A current request from any registration for the same artifact path retires the waiting removal without deleting anything.
+
+Otherwise, Pensieve removes only an owned artifact. Foreign occupants and empty paths retire the waiting removal without changing the folder. Marked Cursor rules need no source skill. An unmarked legacy rule must match the SHA-256 digest and byte count captured from its generated output before deletion. Without that evidence, the rule stays. Missing or uncheckable folders keep waiting without reporting a cleanup failure. A malformed waiting file or a newer schema pauses cleanup and reports the problem; Pensieve never rebuilds or replaces that file.
+
 ---
 
 ## Import
@@ -273,7 +279,9 @@ A cleanup, save or manifest update failure keeps the project registered and repo
 
 Registering the same project identity again restores its category deploys at the next convergence without editing the categories. A key that no Mac registers stays in its categories and deploys nowhere. Registering the folder again lets you turn off its category membership.
 
-If the folder is already missing, the confirmation says its links and rules stay. Pensieve withdraws requests no other registration uses and unregisters, leaving unreachable links, rules and deploy-state records behind. It does not queue cleanup for the folder's return. If Pensieve cannot check the folder, removal fails and the project stays registered. If the folder disappears after withdrawal, removal also fails and keeps the registration and records. The requests remain withdrawn for a retry.
+If the folder is already missing or cannot be checked, the confirmation names the folder and says its links and rules will be removed when the folder is back and can be checked. Pensieve gathers this Mac's assignment, deployment-state and historical evidence, including deployments without a state record or project identity key. It saves waiting removals before withdrawing requests or retiring records, then unregisters. A failed waiting-store save keeps the registration, requests, assignment rows and records. Later convergence applies the ownership and current-request rules above. The daemon never reads or runs waiting removals.
+
+If an available folder disappears after withdrawal, removal fails and keeps the registration and records. The requests remain withdrawn for a retry.
 
 ---
 

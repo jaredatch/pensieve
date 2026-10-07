@@ -31,14 +31,15 @@ final class PlatformViewModelTests: XCTestCase {
         func listDirectory(at path: String) throws -> [String] { [] }
         func contentsHash(at path: String) throws -> String { "hash" }
     }
-
     private struct CleanFileService: FileServiceProtocol {
+        var projectDirectories: Set<String> = []
         func readFile(at path: String) throws -> String { "" }
         func writeFile(at path: String, content: String) throws {}
         func deleteFile(at path: String) throws {}
         func fileExists(at path: String) -> Bool { false }
         func isExecutableFile(at path: String) -> Bool { false }
         func directoryExists(at path: String) -> Bool { false }
+        func directoryExistsFollowingLinks(at path: String) throws -> Bool { projectDirectories.contains(path) }
         func createDirectory(at path: String) throws {}
         func deleteDirectory(at path: String) throws {}
         func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {}
@@ -222,7 +223,7 @@ final class PlatformViewModelTests: XCTestCase {
         cursor: DeletionTestCursorCompiler = DeletionTestCursorCompiler(), store: DeployStateStore
     ) -> PlatformViewModel {
         PlatformViewModel(
-            fileService: CleanFileService(), linkService: link, cursorCompiler: cursor,
+            fileService: CleanFileService(projectDirectories: ["/project", "/p"]), linkService: link, cursorCompiler: cursor,
             agentDetection: DeletionTestDetection(installed: installed), deployStateStore: store
         )
     }

@@ -6,6 +6,10 @@ struct ProjectRemovalPreview {
     let artifactCount: Int
     let folderIsMissing: Bool
     let folderIsShared: Bool
+    var folderIsUncheckable = false
+    var folderPath: String?
+
+    var folderIsUnavailable: Bool { folderIsMissing || folderIsUncheckable }
 
     init(projectName: String, artifactCount: Int, folderIsMissing: Bool, folderIsShared: Bool = false) {
         self.projectName = projectName
@@ -16,8 +20,10 @@ struct ProjectRemovalPreview {
 
     var title: String { "Remove “\(projectName)”?" }
     var message: String {
-        if folderIsMissing {
-            return "Pensieve can't reach this folder, so the links and rules it added there stay. Your files stay."
+        if folderIsUnavailable {
+            let folder = folderPath.map { " at \($0)" } ?? ""
+            return "Pensieve can't reach this folder\(folder). Its links and rules will be removed "
+                + "when the folder is back and can be checked. Your files stay."
         }
         if folderIsShared { return "The other registration keeps the links and rules in this folder. Your files stay." }
         if artifactCount == 0 { return "No skill links or rules will be removed. Your files stay." }
@@ -47,12 +53,11 @@ struct ProjectRemovalPlan {
         let hasSibling = projects.contains {
             $0.id != project.id && project.identityKey != nil && $0.identityKey == project.identityKey
         }
+        var folderProblem: ProjectFolderError?
         do {
             try platformVM.projectReconcilePolicy.requireDirectory(project)
-        } catch ProjectFolderError.missing {
-            return ProjectRemovalPlan(preview: ProjectRemovalPreview(
-                projectName: project.name, artifactCount: 0, folderIsMissing: true),
-                candidates: [], hasIdentitySibling: hasSibling, folderSiblingIDs: [])
+        } catch let error as ProjectFolderError {
+            folderProblem = error
         }
         let directory = platformVM.projectReconcilePolicy.resolvedDirectory(project)
         let folderSiblingIDs = Set(projects.filter {
@@ -73,23 +78,47 @@ struct ProjectRemovalPlan {
         var prepared: [Candidate] = []
         for path in candidates.keys.sorted() {
             guard let pair = candidates[path] else { continue }
-            let owned = try platformVM.artifactIsOwned(skill: pair.skill, platform: pair.platform, target: .project(project))
+            let owned = folderProblem == nil
+                ? try platformVM.artifactIsOwned(skill: pair.skill, platform: pair.platform, target: .project(project)) : false
             prepared.append(Candidate(pair: pair, path: path, isOwned: owned))
         }
         let count = prepared.filter(\.isOwned).count
-        return ProjectRemovalPlan(preview: ProjectRemovalPreview(
-            projectName: project.name, artifactCount: count, folderIsMissing: false),
+        var preview = ProjectRemovalPreview(projectName: project.name, artifactCount: count, folderIsMissing: false)
+        if let folderProblem {
+            if case .missing = folderProblem {
+                preview = ProjectRemovalPreview(projectName: project.name, artifactCount: 0, folderIsMissing: true)
+            } else { preview.folderIsUncheckable = true }
+            preview.folderPath = project.path
+        }
+        return ProjectRemovalPlan(preview: preview,
             candidates: prepared, hasIdentitySibling: hasSibling, folderSiblingIDs: [])
+    }
+
+    /// Save deferred work before withdrawal, ledger retirement or deployment-state retirement.
+    func saveWaitingRemovals(project: Project, platformVM: PlatformViewModel) throws {
+        guard preview.folderIsUnavailable, !preview.folderIsShared else { return }
+        try platformVM.waitingRemovalStore.add(candidates.map {
+            platformVM.waitingRemoval(skill: $0.pair.skill, platform: $0.pair.platform,
+                project: project, source: "project:\(project.id)")
+        })
     }
 
     func removeArtifacts(project: Project, platformVM: PlatformViewModel) -> BatchResult {
         var result = BatchResult()
         if preview.folderIsShared { return result }
+        if preview.folderIsUnavailable {
+            let retirement = platformVM.removalService.remove(candidates.map {
+                DeployRemovalCandidate(key: platformVM.removalKey(pair: $0.pair, target: .project(project)),
+                    evidence: [.localProjectRecords], action: .retireWithoutInspection)
+            })
+            if let error = retirement.stateWriteFailure { result.operationFailures.append(error.localizedDescription) }
+            if retirement.didChangeRecords { platformVM.noteDeployStateChanged() }
+            return result
+        }
         if let failure = folderFailure(project: project, platformVM: platformVM) {
             result.operationFailures.append(failure)
             return result
         }
-        if preview.folderIsMissing { return result }
         let admitted = candidates.map {
             DeployRemovalCandidate(key: platformVM.removalKey(pair: $0.pair, target: .project(project)),
                 evidence: [.localProjectRecords], action: $0.isOwned

@@ -10,6 +10,7 @@ final class PlatformViewModel {
     let projectReconcilePolicy: ProjectReconcilePolicy
     let deployStateStore: DeployStateStore
     let removalService: DeployRemovalServicing
+    let waitingRemovalStore: WaitingRemovalStoring
     private let now: () -> Date
     private let persist: (ModelContext) throws -> Void
     /// Installed agents detected once at construction (install state doesn't change mid-session).
@@ -30,6 +31,7 @@ final class PlatformViewModel {
         cursorCompiler: CursorCompilerProtocol? = nil,
         agentDetection: AgentDetectionServiceProtocol? = nil,
         deployStateStore: DeployStateStore? = nil,
+        waitingRemovalStore: WaitingRemovalStoring? = nil,
         now: @escaping () -> Date = Date.init,
         persist: @escaping (ModelContext) throws -> Void = { try $0.save() }
     ) {
@@ -44,6 +46,8 @@ final class PlatformViewModel {
         let stateStore = deployStateStore ?? DeployStateStore(fileService: fs)
         self.deployStateStore = stateStore
         self.removalService = DeployRemovalService(stateStore: stateStore)
+        self.waitingRemovalStore = waitingRemovalStore ?? WaitingRemovalStore(fileService: stateStore.fileService,
+            appSupportDir: stateStore.appSupportDir)
         self.now = now
         self.persist = persist
         self.installed = (agentDetection ?? AgentDetectionService()).installedPlatforms()
@@ -153,6 +157,21 @@ final class PlatformViewModel {
         return platform.usesSymlinks
             ? linkService.removalOperation(skill: skill, platform: platform, projectPath: projectPath)
             : cursorCompiler.removalOperation(skill: skill, platform: platform, projectPath: projectPath)
+    }
+
+    func waitingRemoval(skill: Skill, platform: PlatformTarget, project: Project, source: String) -> WaitingRemoval {
+        WaitingRemoval(source: source, projectPath: project.path, projectName: project.name,
+            projectIdentityKey: project.identityKey,
+            artifactPath: artifactPath(skill: skill, platform: platform, target: .project(project)),
+            platform: platform, slug: skill.directoryName,
+            legacyFingerprint: platform == .cursor ? cursorCompiler.removalFingerprint(skill: skill) : nil)
+    }
+
+    func reconcileWaitingRemovals(context: ModelContext, machineID: String? = nil) -> BatchResult {
+        let reconciler: WaitingRemovalReconciling = WaitingRemovalReconciler(
+            store: waitingRemovalStore, fileService: fileService, platformVM: self,
+            machineIdentity: MachineIdentity(fileService: fileService, appSupportDir: deployStateStore.appSupportDir))
+        return reconciler.reconcile(context: context, machineID: machineID)
     }
 
     func removalKey(pair: DeployRemovalPair, target: DeployTarget) -> DeployRemovalKey {

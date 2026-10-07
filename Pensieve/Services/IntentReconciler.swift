@@ -64,6 +64,7 @@ struct IntentReconciler: IntentReconcilerProtocol {
             context: context, aggregate: &aggregate
         )
         try? context.save()
+        aggregate.append(platformVM.reconcileWaitingRemovals(context: context, machineID: machineID))
         return aggregate
     }
 

@@ -14,7 +14,7 @@ final class DeployRemovalBoundaryTests: XCTestCase {
             source.range(of: "\\bstruct\\s+" + primitiveName + "\\b", options: .regularExpression) != nil
         }?.key)
         let owners: [Any.Type] = [LinkService.self, CursorCompiler.self, PlatformViewModel.self,
-                                  ProjectRemovalPlan.self, DeployReconciler.self]
+                                  ProjectRemovalPlan.self, DeployReconciler.self, WaitingRemovalReconciler.self]
         let ownerNames = owners.map { String(describing: $0) }.joined(separator: "|")
         let declaration = "\\b(?:class|struct|extension)\\s+(?:" + ownerNames + ")\\b"
         var artifactBypasses: [String] = [], stateSinks: [String] = [], operationSinks: [String] = []

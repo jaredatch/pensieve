@@ -139,6 +139,7 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     var beforeDeployStateWrite: ((String) throws -> Void)?
     var beforeFileWrite: ((String) throws -> Void)?
     var beforeSymlinkRead: ((String) throws -> Void)?
+    var beforePathResolution: ((String) throws -> Void)?
     /// Physical-path consumers compare physical literals; containment still applies to every lookup.
     var translatesSymlinkTargets = true
 
@@ -320,7 +321,11 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         try wrapped.contentsHash(at: resolved(path))
     }
     func realPath(at path: String) -> String { wrapped.realPath(at: resolved(path)) }
-    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: resolved(path)) }
+    func resolveRealPath(at path: String) throws -> String {
+        let physical = resolved(path)
+        try beforePathResolution?(physical)
+        return try wrapped.resolveRealPath(at: physical)
+    }
 
 }
 

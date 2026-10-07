@@ -22,8 +22,8 @@ enum DeployStateError: Error, Equatable {
 final class DeployStateStore {
     static let currentSchemaVersion = 1
 
-    private let fileService: FileServiceProtocol
-    private let appSupportDir: String
+    let fileService: FileServiceProtocol
+    let appSupportDir: String
 
     private var statePath: String { appSupportDir + "/deploy-state.json" }
     private var lockPath: String { appSupportDir + "/deploy-state.lock" }

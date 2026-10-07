@@ -99,6 +99,7 @@ final class MemoryDeployFileService: FileServiceProtocol {
     var files: [String: String] = [:]
     var failingWrites: Set<String> = []
     var readCounts: [String: Int] = [:]
+    var projectDirectories: Set<String> = []
 
     func readFile(at path: String) throws -> String {
         readCounts[path, default: 0] += 1
@@ -112,9 +113,14 @@ final class MemoryDeployFileService: FileServiceProtocol {
     }
 
     func deleteFile(at path: String) throws { files[path] = nil }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        files[path] == nil ? nil : .regular
+    }
+    func readData(at path: String) throws -> Data { Data(try readFile(at: path).utf8) }
     func fileExists(at path: String) -> Bool { files[path] != nil }
     func isExecutableFile(at path: String) -> Bool { false }
     func directoryExists(at path: String) -> Bool { false }
+    func directoryExistsFollowingLinks(at path: String) throws -> Bool { projectDirectories.contains(path) }
     func createDirectory(at path: String) throws {}
     func deleteDirectory(at path: String) throws {}
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {}

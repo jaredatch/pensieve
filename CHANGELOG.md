@@ -17,6 +17,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- If a project folder is missing or unreadable when you delete a skill or remove the project, Pensieve remembers the cleanup on this Mac. Once the folder is reachable, a later launch or sync that brings changes removes its links and rules unless a current project still requests them.
 - Removing a project now affects only this Mac. It stays in its categories, so your other Macs keep their category deploys. Add the same project again and its category skills return at the next launch or sync that brings changes.
 - Rendered skills now look like GitHub's Markdown, at a size that fits the window.
 - History now shows the latest 10 commits for an installed skill and 10 saved versions for a skill you wrote before offering to show older ones.

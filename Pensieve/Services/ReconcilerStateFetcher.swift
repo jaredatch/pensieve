@@ -8,6 +8,13 @@ protocol ReconcilerStateFetching {
     func intentAssignments(context: ModelContext) throws -> [IntentAssignment]
     func categoryAssignments(context: ModelContext) throws -> [SkillProjectAssignment]
     func projects(context: ModelContext) throws -> [Project]
+    func categories(context: ModelContext) throws -> [Category]
+}
+
+extension ReconcilerStateFetching {
+    func categories(context: ModelContext) throws -> [Category] {
+        try context.fetch(FetchDescriptor<Category>())
+    }
 }
 
 struct ReconcilerStateFetcher: ReconcilerStateFetching {
