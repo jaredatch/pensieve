@@ -91,22 +91,24 @@ struct ProjectRemovalPlan {
         }
         if preview.folderIsMissing { return result }
         let admitted = candidates.map {
-            platformVM.removalCandidate(pair: $0.pair, target: .project(project), evidence: [.localProjectRecords])
+            DeployRemovalCandidate(key: platformVM.removalKey(pair: $0.pair, target: .project(project)),
+                evidence: [.localProjectRecords], action: $0.isOwned
+                    ? .inspect(platformVM.removalOperation(skill: $0.pair.skill, platform: $0.pair.platform,
+                        target: .project(project))) : .retireWithoutInspection)
         }
         let removal = platformVM.removalService.remove(admitted)
         result.didRemoveArtifacts = !removal.removed.isEmpty
-        let work = Array(zip(candidates, admitted))
-        let failed = work.filter { removal.failures[$0.1.key] != nil }
-        let completed = work.filter { removal.completed.contains($0.1.key) }
-        for (candidate, admittedCandidate) in failed + completed {
-            if let error = removal.failures[admittedCandidate.key]
-                ?? (removal.completed.contains(admittedCandidate.key) ? removal.stateWriteFailure : nil) {
+        let work = Array(zip(candidates, removal.outcomes))
+        let failed = work.filter { $0.1.failure != nil }
+        let completed = work.filter { $0.1.completed }
+        for (candidate, outcome) in failed + completed {
+            if let error = outcome.failure ?? (outcome.completed ? removal.stateWriteFailure : nil) {
                 result.outcomes.append(failure(candidate, project: project, error: error))
-            } else if removal.removed.contains(admittedCandidate.key) {
+            } else if outcome.removed {
                 let pair = candidate.pair
                 result.outcomes.append(BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
                     platform: pair.platform, target: .project(project.id), error: nil))
-            } else if removal.retired.contains(admittedCandidate.key) {
+            } else if outcome.retired {
                 result.retiredPairs.insert(BatchPairKey(skillID: candidate.pair.skill.id,
                     platform: candidate.pair.platform, target: .project(project.id)))
             }

@@ -10,7 +10,7 @@ struct BrokenLink: Equatable {
 
 // MARK: - Protocol
 
-protocol LinkServiceProtocol {
+protocol LinkServiceProtocol: DeployRemovalPreparing {
     /// Create symlink: platform path → ~/.pensieve/skills/{name}/
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws
     /// Remove an owned link; true only after deleting it from disk.
@@ -90,6 +90,7 @@ final class LinkService: LinkServiceProtocol {
         guard platform.usesSymlinks, projectPath == nil || platform.supportsProjectScope,
               ProjectDirectory.canAccess(projectPath) else { return false }
         try Self.validatePathComponent(skill.directoryName)
+        if platform == .hermes { try Self.validatePathComponent(Constants.hermesDefaultCategory) }
         return try ownership.link(
             at: linkPath(skill: skill, platform: platform, projectPath: projectPath),
             skillsDirectory: Constants.pensieveSkillsDir, linksFile: platform == .codex && projectPath != nil
@@ -177,14 +178,10 @@ enum LinkError: LocalizedError {
     }
 }
 
-extension LinkService: DeployRemovalPreparing {
+extension LinkService {
     func removalOperation(skill: Skill, platform: PlatformTarget, projectPath: String?) -> DeployRemovalOperation {
         let path = linkPath(skill: skill, platform: platform, projectPath: projectPath)
         return DeployRemovalOperation(fileService: fileService, path: path) {
-            guard projectPath == nil || platform.supportsProjectScope else { return false }
-            try Self.validatePathComponent(skill.directoryName)
-            if platform == .hermes { try Self.validatePathComponent(Constants.hermesDefaultCategory) }
-            guard ProjectDirectory.canAccess(projectPath) else { return false }
             return try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
         }
     }

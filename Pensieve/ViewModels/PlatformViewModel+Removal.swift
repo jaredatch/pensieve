@@ -12,24 +12,24 @@ extension PlatformViewModel {
         let removal = removalService.remove(candidates)
         logRemovalStateFailure(removal)
         var result = BatchResult()
-        let work = Array(zip(pairs, candidates))
-        let inspectionFailures = work.filter { removal.failuresBeforeDeletion.contains($0.1.key) }
-        let remaining = work.filter { !removal.failuresBeforeDeletion.contains($0.1.key) }
-        for (pair, candidate) in inspectionFailures + remaining {
+        let work = Array(zip(pairs, removal.outcomes))
+        let inspectionFailures = work.filter { $0.1.failedBeforeDeletion }
+        let remaining = work.filter { !$0.1.failedBeforeDeletion }
+        for (pair, outcome) in inspectionFailures + remaining {
             let key = BatchPairKey(skillID: pair.skill.id, platform: pair.platform, target: BatchPairTarget(target))
-            if let error = removal.failures[candidate.key] {
+            if let error = outcome.failure {
                 result.outcomes.append(BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
                     platform: pair.platform, target: key.target, error: BatchPairOutcome.failureMessage(error, target: target),
                     projectFolderError: error as? ProjectFolderError))
-            } else if removal.completed.contains(candidate.key), removal.attemptedDeletions.contains(candidate.key) {
+            } else if outcome.completed, outcome.attemptedDeletion {
                 result.outcomes.append(BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
                     platform: pair.platform, target: key.target, error: nil))
-            } else if removal.retired.contains(candidate.key) {
+            } else if outcome.retired {
                 result.retiredPairs.insert(key)
             }
         }
         // A checked owned removal refreshes even when its delete failed, as the old batch did.
-        if !removal.removed.isEmpty || removal.didAttemptDeletion || removal.didChangeRecords { noteDeployStateChanged() }
+        if removal.didAttemptDeletion || removal.didChangeRecords { noteDeployStateChanged() }
         return result
     }
 
@@ -68,12 +68,12 @@ extension PlatformViewModel {
         let candidates = skillCleanupCandidates(skill: skill, evidence: evidence, locallyDeployed: locallyDeployed,
             recorded: recorded, stateProblem: stateProblem)
         let removal = removalService.remove(candidates.map(\.removal))
-        let inspectionFailures = candidates.filter { removal.failuresBeforeDeletion.contains($0.removal.key) }
-        let remaining = candidates.filter { !removal.failuresBeforeDeletion.contains($0.removal.key) }
-        for (location, candidate) in inspectionFailures + remaining {
-            let problem = removal.failures[candidate.key]
-                ?? (removal.completed.contains(candidate.key) ? removal.stateWriteFailure : nil)
-            guard problem != nil || removal.completed.contains(candidate.key) else { continue }
+        let work = Array(zip(candidates.map(\.location), removal.outcomes))
+        let inspectionFailures = work.filter { $0.1.failedBeforeDeletion }
+        let remaining = work.filter { !$0.1.failedBeforeDeletion }
+        for (location, outcome) in inspectionFailures + remaining {
+            let problem = outcome.failure ?? (outcome.completed ? removal.stateWriteFailure : nil)
+            guard problem != nil || outcome.completed else { continue }
             result.batch.outcomes.append(BatchPairOutcome(skillID: skill.id, skillName: skill.name,
                 platform: location.platform, target: BatchPairTarget(location.target), error: problem?.localizedDescription))
         }
@@ -92,13 +92,13 @@ extension PlatformViewModel {
             var sources: Set<DeployRemovalEvidence> = [.enumeratedSkillPath]
             if recorded?.contains(location.path) == true { sources.insert(.deployState) }
             if locallyDeployed.contains(location.path) { sources.insert(.localHistory) }
-            var candidate = removalCandidate(pair: DeployRemovalPair(skill: skill, platform: location.platform),
-                target: location.target, evidence: sources)
+            let pair = DeployRemovalPair(skill: skill, platform: location.platform)
+            var candidate: DeployRemovalCandidate
             if let error = evidence.probeFailures[location.path] {
-                // History admitted a path whose metadata lookup already failed. Report that error
-                // without opening the occupant, in the same order as other inspection failures.
-                candidate = DeployRemovalCandidate(key: candidate.key, evidence: sources,
-                    operation: DeployRemovalOperation(classify: { throw error }, delete: { false }))
+                candidate = DeployRemovalCandidate(key: removalKey(pair: pair, target: location.target),
+                    evidence: sources, action: .fail(error))
+            } else {
+                candidate = removalCandidate(pair: pair, target: location.target, evidence: sources)
             }
             candidate.retireIfUnowned = recorded?.contains(location.path) == true
             if recorded == nil {

@@ -55,6 +55,13 @@ final class DeployRecordingFileService: FileServiceProtocol {
 }
 
 final class DeployRecordingLinkService: LinkServiceProtocol {
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        DeployRemovalOperation(classify: {
+            try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
+        }, delete: { try self.unlink(skill: skill, platform: platform, projectPath: projectPath) })
+    }
+
     let fileService: DeployRecordingFileService
     var linkCalls: [DeployRecordedLink] = []
     var unlinkCalls: [DeployRecordedLink] = []
@@ -112,6 +119,12 @@ final class DeployRecordingLinkService: LinkServiceProtocol {
 }
 
 final class DeployRecordingCursorCompiler: CursorCompilerProtocol {
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        DeployRemovalOperation(classify: { try self.ownsArtifact(skill: skill, projectPath: projectPath) },
+            delete: { try self.remove(skill: skill, projectPath: projectPath) })
+    }
+
     let fileService: DeployRecordingFileService
     var compileCalls: [DeployRecordedCursorCall] = []
     var removeCalls: [DeployRecordedCursorCall] = []

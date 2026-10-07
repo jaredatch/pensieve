@@ -35,6 +35,13 @@ final class Batch: XCTestCase {
     /// Stub link service: throws for a designated set of (directoryName, platform) pairs, records
     /// the rest. No filesystem touched — succeeding pairs do NOT write into real agent dirs.
     private final class StubLinkService: LinkServiceProtocol {
+        func removalOperation(skill: Skill, platform: PlatformTarget,
+                              projectPath: String?) -> DeployRemovalOperation {
+            DeployRemovalOperation(classify: {
+                try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
+            }, delete: { try self.unlink(skill: skill, platform: platform, projectPath: projectPath) })
+        }
+
         /// keys "directoryName|platform.rawValue" that should throw on link()/unlink().
         var failingLink: Set<String> = []
         var failingUnlink: Set<String> = []

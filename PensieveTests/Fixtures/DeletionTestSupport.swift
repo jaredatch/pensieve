@@ -13,6 +13,13 @@ struct DeletionTestDetection: AgentDetectionServiceProtocol {
 }
 
 final class DeletionTestLinkService: LinkServiceProtocol {
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        DeployRemovalOperation(classify: {
+            try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
+        }, delete: { try self.unlink(skill: skill, platform: platform, projectPath: projectPath) })
+    }
+
     var linkedPaths: Set<String> = []
     var foreignSymlinkPaths: Set<String> = []
     var failingUnlinkPaths: Set<String> = []
@@ -54,6 +61,12 @@ final class DeletionTestLinkService: LinkServiceProtocol {
 }
 
 final class DeletionTestCursorCompiler: CursorCompilerProtocol {
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        DeployRemovalOperation(classify: { try self.ownsArtifact(skill: skill, projectPath: projectPath) },
+            delete: { try self.remove(skill: skill, projectPath: projectPath) })
+    }
+
     var ownedProjectPaths: Set<String?> = []
     private(set) var removeProjectPaths: [String?] = []
     func compile(skill: Skill, projectPath: String?) throws {}

@@ -75,6 +75,14 @@ extension CursorOwnershipTests {
 private struct CleanupRemovalCompiler: CursorCompilerProtocol {
     let wrapped: CursorCompilerProtocol
     let beforeRemoval: () throws -> Void
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        let operation = wrapped.removalOperation(skill: skill, platform: platform, projectPath: projectPath)
+        return DeployRemovalOperation(classify: {
+            try beforeRemoval()
+            return try operation.classify()
+        }, delete: operation.delete)
+    }
     func compile(skill: Skill, projectPath: String?) throws { try wrapped.compile(skill: skill, projectPath: projectPath) }
     func remove(skill: Skill, projectPath: String?) throws -> Bool {
         try beforeRemoval()

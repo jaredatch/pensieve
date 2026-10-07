@@ -10,7 +10,8 @@ final class DeployReconciler: DeployReconciling {
     /// The result of one prune pass. `removed` are the agent symlink paths deleted (dangling and
     /// Pensieve-owned); `skippedDirs` are agent dirs left un-walked (symlinked / realpath-escaping parent).
     struct PruneResult: Equatable {
-        var removed: [String] = []
+        var removedKeys: [DeployRemovalKey] = []
+        var removed: [String] { removedKeys.map(\.artifactPath) }
         var skippedDirs: [String] = []
     }
 
@@ -23,7 +24,12 @@ final class DeployReconciler: DeployReconciling {
 
     private let fileService: FileServiceProtocol
     private let pensieveSkillsDir: String
-    private let agentSkillDirs: [String]
+    struct AgentSkillsDirectory {
+        let platform: PlatformTarget
+        let path: String
+    }
+
+    private let agentSkillDirs: [AgentSkillsDirectory]
     private let cursorRulesDir: String
     private let manifestService: ManifestReadWriting
     private let deployState: DeployStateStore
@@ -33,7 +39,7 @@ final class DeployReconciler: DeployReconciling {
         fileService: FileServiceProtocol,
         deployState: DeployStateStore? = nil,
         pensieveSkillsDir: String = PathConstants.pensieveSkillsDir,
-        agentSkillDirs: [String] = DeployReconciler.defaultAgentSkillDirs,
+        agentSkillDirs: [AgentSkillsDirectory] = DeployReconciler.defaultAgentSkillDirs,
         cursorRulesDir: String = PathConstants.cursorUserRulesDir,
         manifestService: ManifestReadWriting = ManifestService()
     ) {
@@ -48,8 +54,10 @@ final class DeployReconciler: DeployReconciling {
 
     /// User-wide agent skill dirs whose Pensieve symlinks the daemon prunes. Project-scoped agent dirs
     /// are NOT reconciled (daemon scope fence).
-    static var defaultAgentSkillDirs: [String] {
-        PlatformTarget.allCases.compactMap(DeployPaths.userSkillsRoot(for:))
+    static var defaultAgentSkillDirs: [AgentSkillsDirectory] {
+        PlatformTarget.allCases.compactMap { platform in
+            DeployPaths.userSkillsRoot(for: platform).map { AgentSkillsDirectory(platform: platform, path: $0) }
+        }
     }
 
     @discardableResult
@@ -132,16 +140,17 @@ final class DeployReconciler: DeployReconciling {
     func pruneDangling() -> PruneResult {
         var result = PruneResult()
         var candidates: [DeployRemovalCandidate] = []
-        for agentDir in agentSkillDirs {
-            if fileService.isSymlink(at: agentDir) || !isRealpathContained(agentDir) {
+        for agent in agentSkillDirs {
+            let agentDir = agent.path
+            if !agent.platform.usesSymlinks || fileService.isSymlink(at: agentDir) || !isRealpathContained(agentDir) {
                 result.skippedDirs.append(agentDir)
                 continue
             }
-            candidates.append(contentsOf: danglingCandidates(in: agentDir))
+            candidates.append(contentsOf: danglingCandidates(in: agent))
         }
         let removal = DeployRemovalService(stateStore: deployState).remove(candidates)
         // Prune counts physical success, even when the derived state file cannot be retired.
-        result.removed = candidates.filter { removal.removed.contains($0.key) }.map { $0.key.artifactPath }
+        result.removedKeys = removal.outcomes.filter(\.removed).map(\.key)
         return result
     }
 
@@ -158,7 +167,8 @@ final class DeployReconciler: DeployReconciling {
     }
 
     /// Gather dangling Pensieve links without changing artifacts or their records.
-    private func danglingCandidates(in agentDir: String) -> [DeployRemovalCandidate] {
+    private func danglingCandidates(in agent: AgentSkillsDirectory) -> [DeployRemovalCandidate] {
+        let agentDir = agent.path
         guard fileService.directoryExists(at: agentDir),
               let entries = try? fileService.listDirectory(at: agentDir) else { return [] }
         var candidates: [DeployRemovalCandidate] = []
@@ -179,11 +189,10 @@ final class DeployReconciler: DeployReconciling {
             }
             // (b) dangling: the canonical target no longer exists → remove the LINK (never the target).
             guard !fileService.fileExists(at: target), !fileService.directoryExists(at: target) else { continue }
-            let platform = PlatformTarget.allCases.first { DeployPaths.userSkillsRoot(for: $0) == agentDir } ?? .claudeCode
             let operation = DeployRemovalOperation(fileService: fileService, path: link) {
                 try self.ownership.link(at: link, skillsDirectory: self.pensieveSkillsDir, linksFile: false).isOwned
             }
-            var candidate = DeployRemovalCandidate(key: DeployRemovalKey(slug: entry, platform: platform,
+            var candidate = DeployRemovalCandidate(key: DeployRemovalKey(slug: entry, platform: agent.platform,
                 projectPath: nil, artifactPath: link), evidence: [.danglingLink], operation: operation)
             candidate.retireIfUnowned = false
             candidates.append(candidate)

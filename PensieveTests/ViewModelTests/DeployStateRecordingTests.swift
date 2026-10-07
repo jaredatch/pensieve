@@ -26,6 +26,13 @@ final class DeployStateRecordingTests: XCTestCase {
     }
 
     private final class RecordingLinkService: LinkServiceProtocol {
+        func removalOperation(skill: Skill, platform: PlatformTarget,
+                              projectPath: String?) -> DeployRemovalOperation {
+            DeployRemovalOperation(classify: {
+                try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
+            }, delete: { try self.unlink(skill: skill, platform: platform, projectPath: projectPath) })
+        }
+
         let root: String
         init(root: String) { self.root = root }
 
@@ -44,6 +51,12 @@ final class DeployStateRecordingTests: XCTestCase {
     }
 
     private struct RecordingCursorCompiler: CursorCompilerProtocol {
+        func removalOperation(skill: Skill, platform: PlatformTarget,
+                              projectPath: String?) -> DeployRemovalOperation {
+            DeployRemovalOperation(classify: { try self.ownsArtifact(skill: skill, projectPath: projectPath) },
+                delete: { try self.remove(skill: skill, projectPath: projectPath) })
+        }
+
         let root: String
         func compile(skill: Skill, projectPath: String?) throws {}
         func remove(skill: Skill, projectPath: String?) throws -> Bool { false }

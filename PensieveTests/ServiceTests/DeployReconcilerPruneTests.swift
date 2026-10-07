@@ -16,7 +16,7 @@ final class DeployReconcilerPruneTests: XCTestCase {
             fileService: fileService,
             deployState: deployStateStore,
             pensieveSkillsDir: storeSkillsDir,
-            agentSkillDirs: agentDirs ?? [agentDir]
+            agentSkillDirs: (agentDirs ?? [agentDir]).map { .init(platform: .claudeCode, path: $0) }
         )
     }
 
@@ -52,6 +52,15 @@ final class DeployReconcilerPruneTests: XCTestCase {
             artifactPath: artifactPath,
             recordedAt: "2026-07-17T00:00:00Z"
         )
+    }
+
+    func testInjectedPruneDirectoryKeepsItsAgentIdentity() throws {
+        try link("gone", to: storeSkillsDir + "/gone")
+        let result = DeployReconciler(fileService: fileService, deployState: deployStateStore,
+            pensieveSkillsDir: storeSkillsDir,
+            agentSkillDirs: [.init(platform: .codex, path: agentDir)]).pruneDangling()
+        XCTAssertEqual(result.removed, [agentDir + "/gone"])
+        XCTAssertEqual(result.removedKeys.map(\.platform), [.codex], "Injected directories retain their actual agent")
     }
 
     /// (a) A Pensieve symlink whose canonical store dir has vanished is removed.
@@ -188,7 +197,7 @@ final class DeployReconcilerPruneTests: XCTestCase {
                 }
             }
             let result = DeployReconciler(fileService: mapped, deployState: deployStateStore,
-                pensieveSkillsDir: storeSkillsDir, agentSkillDirs: [agentDir]).pruneDangling()
+                pensieveSkillsDir: storeSkillsDir, agentSkillDirs: [.init(platform: .claudeCode, path: agentDir)]).pruneDangling()
             XCTAssertTrue(result.removed.isEmpty)
             XCTAssertEqual(reads, 2, "The dangling admission is followed by a fresh ownership check")
             XCTAssertTrue(fileService.isSymlink(at: path))

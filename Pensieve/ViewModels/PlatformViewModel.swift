@@ -150,26 +150,21 @@ final class PlatformViewModel {
 
     func removalOperation(skill: Skill, platform: PlatformTarget, target: DeployTarget) -> DeployRemovalOperation {
         let projectPath = target.project?.path
-        let adapter: Any = platform.usesSymlinks ? linkService : cursorCompiler
-        if let preparing = adapter as? DeployRemovalPreparing {
-            return preparing.removalOperation(skill: skill, platform: platform, projectPath: projectPath)
-        }
-        return DeployRemovalOperation(classify: {
-            try self.artifactIsOwned(skill: skill, platform: platform, target: target)
-        }, delete: {
-            if platform.usesSymlinks {
-                return try self.linkService.unlink(skill: skill, platform: platform, projectPath: projectPath)
-            }
-            return try self.cursorCompiler.remove(skill: skill, projectPath: projectPath)
-        })
+        return platform.usesSymlinks
+            ? linkService.removalOperation(skill: skill, platform: platform, projectPath: projectPath)
+            : cursorCompiler.removalOperation(skill: skill, platform: platform, projectPath: projectPath)
+    }
+
+    func removalKey(pair: DeployRemovalPair, target: DeployTarget) -> DeployRemovalKey {
+        DeployRemovalKey(slug: pair.skill.directoryName, platform: pair.platform,
+            projectPath: target.project?.path,
+            artifactPath: artifactPath(skill: pair.skill, platform: pair.platform, target: target))
     }
 
     func removalCandidate(pair: DeployRemovalPair, target: DeployTarget,
                           evidence: Set<DeployRemovalEvidence>) -> DeployRemovalCandidate {
-        let path = artifactPath(skill: pair.skill, platform: pair.platform, target: target)
-        return DeployRemovalCandidate(key: DeployRemovalKey(slug: pair.skill.directoryName, platform: pair.platform,
-            projectPath: target.project?.path, artifactPath: path),
-            evidence: evidence, operation: removalOperation(skill: pair.skill, platform: pair.platform, target: target))
+        DeployRemovalCandidate(key: removalKey(pair: pair, target: target), evidence: evidence,
+            operation: removalOperation(skill: pair.skill, platform: pair.platform, target: target))
     }
 
     func logRemovalStateFailure(_ result: DeployRemovalResult) {
@@ -307,8 +302,6 @@ extension PlatformViewModel {
 
     /// Throwing ownership for consumers that retain their ledger when an occupant cannot be checked.
     func artifactIsOwned(skill: Skill, platform: PlatformTarget, target: DeployTarget = .userWide) throws -> Bool {
-        guard target.project == nil || platform.supportsProjectScope else { return false }
-        guard ProjectDirectory.canAccess(target.project?.path) else { return false }
         if platform.usesSymlinks {
             return try linkService.ownsArtifact(skill: skill, platform: platform, projectPath: target.project?.path)
         }

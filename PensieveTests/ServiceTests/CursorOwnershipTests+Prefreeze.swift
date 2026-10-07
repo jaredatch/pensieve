@@ -106,7 +106,8 @@ extension CursorOwnershipTests {
         let ownership = DeployArtifactOwnership(fileService: files)
         let reconciler = DeployReconciler(fileService: files,
             deployState: DeployStateStore(fileService: files, appSupportDir: root + "/canonical-support"),
-            pensieveSkillsDir: skills, agentSkillDirs: [agents], cursorRulesDir: root + "/canonical-rules")
+            pensieveSkillsDir: skills, agentSkillDirs: [.init(platform: .claudeCode, path: agents)],
+            cursorRulesDir: root + "/canonical-rules")
         for (name, linksFile) in [("owned", false), ("caf\u{00e9}", false), ("owned-file", true)] {
             let expected = skills + "/" + name + (linksFile ? "/SKILL.md" : "")
             let target = expected.decomposedStringWithCanonicalMapping

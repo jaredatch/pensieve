@@ -1,26 +1,21 @@
 import SwiftData
 import XCTest
 @testable import Pensieve
-
 final class PlatformViewModelTests: XCTestCase {
-
     private struct StubDetection: AgentDetectionServiceProtocol {
         let installed: [PlatformTarget]
         func isInstalled(_ platform: PlatformTarget) -> Bool { installed.contains(platform) }
         func installedPlatforms() -> [PlatformTarget] { installed }
     }
-
     func testInstalledPlatformsReflectsInjectedDetection() {
         let vm = PlatformViewModel(agentDetection: StubDetection(installed: [.claudeCode, .hermes]),
                                    deployStateStore: .memoryBacked)
         XCTAssertEqual(vm.installedPlatforms(), [.claudeCode, .hermes])
     }
-
     func testInstalledPlatformsEmptyWhenNoneDetected() {
         let vm = PlatformViewModel(agentDetection: StubDetection(installed: []), deployStateStore: .memoryBacked)
         XCTAssertEqual(vm.installedPlatforms(), [])
     }
-
     private struct SymlinkFileService: FileServiceProtocol {
         func readFile(at path: String) throws -> String { "" }
         func writeFile(at path: String, content: String) throws {}
@@ -55,6 +50,12 @@ final class PlatformViewModelTests: XCTestCase {
     }
 
     private final class NoopLinkService: LinkServiceProtocol {
+        func removalOperation(skill: Skill, platform: PlatformTarget,
+                              projectPath: String?) -> DeployRemovalOperation {
+            DeployRemovalOperation(classify: {
+                try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
+            }, delete: { try self.unlink(skill: skill, platform: platform, projectPath: projectPath) })
+        }
         var linked = false
         private(set) var linkProjectPaths: [String?] = []
         private(set) var unlinkProjectPaths: [String?] = []
@@ -80,6 +81,12 @@ final class PlatformViewModelTests: XCTestCase {
     }
 
     private struct StubCursorCompiler: CursorCompilerProtocol {
+        func removalOperation(skill: Skill, platform: PlatformTarget,
+                              projectPath: String?) -> DeployRemovalOperation {
+            DeployRemovalOperation(classify: { try self.ownsArtifact(skill: skill, projectPath: projectPath) },
+                delete: { try self.remove(skill: skill, projectPath: projectPath) })
+        }
+
         func compile(skill: Skill, projectPath: String?) throws {}
         func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
         func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {

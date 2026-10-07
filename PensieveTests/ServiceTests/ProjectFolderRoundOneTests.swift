@@ -116,6 +116,14 @@ final class ProjectFolderRoundOneTests: XCTestCase {
 private final class SiblingFailureLinkService: LinkServiceProtocol {
     let wrapped: LinkService
     var failedPath: String?
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        let operation = wrapped.removalOperation(skill: skill, platform: platform, projectPath: projectPath)
+        return DeployRemovalOperation(classify: operation.classify, delete: {
+            if projectPath == self.failedPath { throw SiblingUnlinkError() }
+            return try operation.delete()
+        })
+    }
     init(files: FileServiceProtocol) { wrapped = LinkService(fileService: files) }
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
         try wrapped.link(skill: skill, platform: platform, projectPath: projectPath)

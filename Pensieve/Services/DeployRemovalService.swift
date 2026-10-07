@@ -11,8 +11,7 @@ enum DeployRemovalEvidence: Hashable {
     case selection, enumeratedSkillPath, deployState, localHistory, localProjectRecords, danglingLink
 }
 
-/// Leaf adapters supply a throwing ownership check and an owned-artifact delete. The real adapters
-/// use FileService; protocol adapters can preserve their own storage and error semantics.
+/// Adapters provide a throwing classification and an owned-artifact deletion without another check.
 struct DeployRemovalOperation {
     let classify: () throws -> Bool
     let delete: () throws -> Bool
@@ -31,58 +30,78 @@ struct DeployRemovalOperation {
     }
 }
 
+enum DeployRemovalAction {
+    case inspect(DeployRemovalOperation)
+    /// The caller did not admit deletion, but its completed record still retires.
+    case retireWithoutInspection
+    /// Admission already failed. There is no artifact operation to execute.
+    case fail(Error)
+}
+
 struct DeployRemovalCandidate {
     let key: DeployRemovalKey
     let evidence: Set<DeployRemovalEvidence>
-    let operation: DeployRemovalOperation
+    let action: DeployRemovalAction
     var retireIfUnowned = true
-    /// Skill cleanup fences owned artifacts when its up-front state snapshot was unreadable.
     var removalBlocker: Error?
+
+    init(key: DeployRemovalKey, evidence: Set<DeployRemovalEvidence>, action: DeployRemovalAction) {
+        self.key = key
+        self.evidence = evidence
+        self.action = action
+    }
+
+    init(key: DeployRemovalKey, evidence: Set<DeployRemovalEvidence>, operation: DeployRemovalOperation) {
+        self.init(key: key, evidence: evidence, action: .inspect(operation))
+    }
+}
+
+struct DeployRemovalOutcome {
+    enum Disposition { case removed, retired, ignored, failed(Error) }
+    let key: DeployRemovalKey
+    let disposition: Disposition
+    let attemptedDeletion: Bool
+
+    var removed: Bool { if case .removed = disposition { return true }; return false }
+    var retired: Bool { if case .retired = disposition { return true }; return false }
+    var completed: Bool { removed || retired }
+    var failure: Error? { if case .failed(let error) = disposition { return error }; return nil }
+    var failedBeforeDeletion: Bool { failure != nil && !attemptedDeletion }
 }
 
 struct DeployRemovalResult {
-    var removed: Set<DeployRemovalKey> = []
-    var retired: Set<DeployRemovalKey> = []
-    var failures: [DeployRemovalKey: Error] = [:]
-    var failuresBeforeDeletion: Set<DeployRemovalKey> = []
-    var attemptedDeletions: Set<DeployRemovalKey> = []
+    /// One outcome per input occurrence, in input order, even when keys repeat.
+    var outcomes: [DeployRemovalOutcome] = []
     var stateWriteFailure: Error?
     var didChangeRecords = false
-    var didAttemptDeletion: Bool { !attemptedDeletions.isEmpty }
 
-    var completed: Set<DeployRemovalKey> { removed.union(retired) }
+    var removed: Set<DeployRemovalKey> { keys { $0.removed } }
+    var retired: Set<DeployRemovalKey> { keys { $0.retired } }
+    var completed: Set<DeployRemovalKey> { keys { $0.completed } }
+    var attemptedDeletions: Set<DeployRemovalKey> { keys { $0.attemptedDeletion } }
+    var failuresBeforeDeletion: Set<DeployRemovalKey> { keys { $0.failedBeforeDeletion } }
+    var didAttemptDeletion: Bool { outcomes.contains { $0.attemptedDeletion } }
+    var failures: [DeployRemovalKey: Error] {
+        Dictionary(outcomes.compactMap { outcome in outcome.failure.map { (outcome.key, $0) } },
+                   uniquingKeysWith: { first, _ in first })
+    }
+
+    private func keys(where predicate: (DeployRemovalOutcome) -> Bool) -> Set<DeployRemovalKey> {
+        Set(outcomes.filter(predicate).map(\.key))
+    }
 }
 
 protocol DeployRemovalServicing {
     func remove(_ candidates: [DeployRemovalCandidate]) -> DeployRemovalResult
 }
 
-/// The shared removal pipeline. Each candidate is classified once before its throwing delete.
-/// Artifact failures remain per pair; the single locked state retirement has a separate failure.
-/// Returning those errors as data lets each caller preserve its own retry and reporting policy.
+/// Each occurrence is classified once. Results retain occurrence identity while record retirement
+/// groups completed paths into one locked write. Callers decide ledger and reporting policy.
 struct DeployRemovalService: DeployRemovalServicing {
     let stateStore: DeployStateStore
 
     func remove(_ candidates: [DeployRemovalCandidate]) -> DeployRemovalResult {
-        var result = DeployRemovalResult()
-        var seen: Set<DeployRemovalKey> = []
-        for candidate in candidates where seen.insert(candidate.key).inserted {
-            do {
-                let disposition = try Self.apply(candidate.operation, blocker: candidate.removalBlocker) {
-                    result.attemptedDeletions.insert(candidate.key)
-                }
-                if disposition == .removed {
-                    result.removed.insert(candidate.key)
-                } else if disposition == .preserved || candidate.retireIfUnowned {
-                    result.retired.insert(candidate.key)
-                }
-            } catch {
-                result.failures[candidate.key] = error
-                if !result.attemptedDeletions.contains(candidate.key) {
-                    result.failuresBeforeDeletion.insert(candidate.key)
-                }
-            }
-        }
+        var result = DeployRemovalResult(outcomes: candidates.map(Self.remove))
         do {
             result.didChangeRecords = try stateStore.remove(artifactPaths: Set(result.completed.map(\.artifactPath)))
         } catch {
@@ -91,7 +110,28 @@ struct DeployRemovalService: DeployRemovalServicing {
         return result
     }
 
-    /// Direct leaf removals share the same ownership-before-delete rule without changing records.
+    private static func remove(_ candidate: DeployRemovalCandidate) -> DeployRemovalOutcome {
+        var attempted = false
+        do {
+            let disposition: DeployRemovalOutcome.Disposition
+            switch candidate.action {
+            case .retireWithoutInspection: disposition = .retired
+            case .fail(let error): throw error
+            case .inspect(let operation):
+                let action = try apply(operation, blocker: candidate.removalBlocker) { attempted = true }
+                switch action {
+                case .removed: disposition = .removed
+                case .preserved: disposition = .retired
+                case .unowned: disposition = candidate.retireIfUnowned ? .retired : .ignored
+                }
+            }
+            return DeployRemovalOutcome(key: candidate.key, disposition: disposition, attemptedDeletion: attempted)
+        } catch {
+            return DeployRemovalOutcome(key: candidate.key, disposition: .failed(error), attemptedDeletion: attempted)
+        }
+    }
+
+    /// Direct leaf removals share the same check without changing deploy-state records.
     static func removeArtifact(_ operation: DeployRemovalOperation) throws -> Bool {
         try apply(operation, blocker: nil, willDelete: {}) == .removed
     }

@@ -3,7 +3,7 @@ import CryptoKit
 
 // MARK: - Protocol
 
-protocol CursorCompilerProtocol {
+protocol CursorCompilerProtocol: DeployRemovalPreparing {
     /// Generate and write .mdc file from skill + Cursor config
     func compile(skill: Skill, projectPath: String?) throws
     /// Remove an owned rule; true only after deleting it from disk.
@@ -120,10 +120,11 @@ final class CursorCompiler: CursorCompilerProtocol {
     }
 }
 
-extension CursorCompiler: DeployRemovalPreparing {
+extension CursorCompiler {
     func removalOperation(skill: Skill, platform: PlatformTarget, projectPath: String?) -> DeployRemovalOperation {
         DeployRemovalOperation(fileService: fileService, path: outputPath(skill: skill, projectPath: projectPath)) {
-            try self.ownsArtifact(skill: skill, projectPath: projectPath)
+            guard platform == .cursor else { return false }
+            return try self.ownsArtifact(skill: skill, projectPath: projectPath)
         }
     }
 }
