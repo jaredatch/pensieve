@@ -89,7 +89,10 @@ extension SkillInstallServiceTests {
         try commit(repository)
 
         let candidates = try service.fetch(repo: repository, ref: nil, path: "bundle", credential: nil).candidates
-        let expected = (links + ["bundle/linked-markdown", "bundle/valid", "bundle/with-asset-link"]).sorted()
+        let expected = [
+            "bundle/.claude/skills/linked", "bundle/linked-markdown", "bundle/skills/category/linked",
+            "bundle/skills/linked", "bundle/valid", "bundle/with-asset-link"
+        ]
         XCTAssertEqual(candidates.map(\.path), expected)
         for candidate in candidates where candidate.path != "bundle/valid" {
             XCTAssertTrue(candidate.containsSymlink, candidate.path)
@@ -100,6 +103,51 @@ extension SkillInstallServiceTests {
             }
         }
         XCTAssertEqual(candidates.first { $0.path == "bundle/valid" }?.isInstallable, true)
+    }
+
+    func testFolderLinkRejectsFoldersContainingOnlyLinks() throws {
+        let repository = try makeRepository()
+        try write("README.md", content: "repository readme", in: repository)
+        try write("assets/logo.png", content: "image", in: repository)
+        try writeSkill("catalog/one", name: "One", description: "fixture", in: repository)
+        try writeSkill("claude-content/skills/helper", name: "Helper", description: "fixture", in: repository)
+        let links = [
+            ("docs/README.md", "../README.md"), ("docs/images/logo.png", "../../assets/logo.png"),
+            ("layouts/skills", "../catalog"), ("layouts/.claude", "../claude-content"),
+            ("links/one", "../catalog/one"), ("links/category/one", "../../catalog/one")
+        ]
+        for (path, destination) in links {
+            try fileService.createDirectory(at: ((repository + "/" + path) as NSString).deletingLastPathComponent)
+            try fileService.createSymlink(at: repository + "/" + path, pointingTo: destination)
+        }
+        try commit(repository)
+
+        for path in ["docs", "layouts", "links"] {
+            XCTAssertThrowsError(try service.fetch(repo: repository, ref: nil, path: path, credential: nil)) {
+                XCTAssertEqual($0 as? SkillInstallError, .noSkillMarkdown(path: path), path)
+                XCTAssertEqual($0.localizedDescription, "no SKILL.md at " + path)
+            }
+        }
+    }
+
+    func testEmptyFolderLinkMatchesRepositoryDiscoveryWithoutRootSkill() throws {
+        for hasLayouts in [true, false] {
+            let repository = try makeRepository(named: hasLayouts ? "with-layouts" : "without-layouts")
+            try writeSkill("docs/guide", name: "Guide", description: "outside layout", in: repository)
+            try writeSkill("examples/category/demo", name: "Demo", description: "outside layout", in: repository)
+            let expectedPaths = hasLayouts ? [".claude/skills/helper", "skills/category/two", "skills/one"] : []
+            for path in expectedPaths {
+                try writeSkill(path, name: "Skill", description: "fixture", in: repository)
+            }
+            try commit(repository)
+            let repositoryCandidates = try service.fetch(repo: repository, ref: nil, credential: nil).candidates
+            XCTAssertEqual(repositoryCandidates.map(\.path), expectedPaths)
+
+            XCTAssertEqual(
+                try service.fetch(repo: repository, ref: nil, path: "", credential: nil).candidates,
+                repositoryCandidates
+            )
+        }
     }
 
     func testFolderLinkRejectsEmptyMissingAndUnsafePaths() throws {
