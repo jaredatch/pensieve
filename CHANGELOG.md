@@ -18,6 +18,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- A GitHub link to a folder of skills now lists the skills in it, the same as a link to the whole repository.
 - The Updates sheet is simpler: one row per skill, with its old and new commit and a View Changes button. A skill you've edited locally gets a "Replace my local edits" checkbox, and Update leaves it alone until you check it.
 - If a project folder is missing or unreadable when you delete a skill or remove the project, Pensieve remembers the cleanup on this Mac. Once the folder is reachable, a later launch or sync that brings changes removes its links and rules unless a current project still requests them.
 - Removing a project now affects only this Mac. It stays in its categories, so your other Macs keep their category deploys. Add the same project again and its category skills return at the next launch or sync that brings changes.

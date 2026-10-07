@@ -191,12 +191,12 @@ Skill names are slugified for directory names: lowercased, non-alphanumeric stri
 
 ## Install from GitHub
 
-Pensieve accepts three GitHub HTTPS forms: a repository URL, a `/tree/<ref>/<path>` skill-directory URL, or a `/blob/<ref>/<path>/SKILL.md` URL. Direct tree/blob links do not support refs containing `/`; paste the repository URL to discover skills from its default branch instead. Other hosts, schemes, embedded credentials, ports, traversal components, and commit-permalink refs are rejected before git runs.
+Pensieve accepts three GitHub HTTPS forms: a repository URL, a `/tree/<ref>/<path>` folder URL, or a `/blob/<ref>/<path>/SKILL.md` URL. A tree link can name one skill or a folder of skills. Direct tree/blob links do not support refs containing `/`. Paste the repository URL to discover skills from its default branch instead. Other hosts, schemes, embedded credentials, ports, traversal components, and commit-permalink refs are rejected before git runs.
 
 ### Install Flow
 
 1. Choose **Add Skill from GitHub…** and paste a supported URL.
-2. Pensieve reconstructs the repository remote, shallow-clones it, and discovers skills only at the repository root, `skills/<name>`, `skills/<category>/<name>`, and `.claude/skills/<name>`. A direct tree/blob link targets one directory.
+2. Pensieve reconstructs the repository remote and shallow-clones it. A repository link discovers skills at its root, `skills/<name>`, `skills/<category>/<name>`, and `.claude/skills/<name>`. A direct tree/blob link selects the linked folder's own `SKILL.md` when present. Otherwise, a tree link lists skills at `<folder>/<name>` and `<folder>/<category>/<name>`. It also checks the repository layouts inside that folder. Candidate paths stay relative to the repository root.
 3. The picker shows every candidate. Missing/invalid required frontmatter and symlink-bearing candidates remain visible but cannot be selected.
 4. Select skills and install. Pensieve vendors each complete skill directory byte-pristine into the canonical store and records schema-v3 `InstalledOrigin` coordinates.
 5. A slug collision can be skipped, renamed, or adopted. Adopt links the existing skill to the named repository and flags local drift; it never merges or overwrites the existing files.
