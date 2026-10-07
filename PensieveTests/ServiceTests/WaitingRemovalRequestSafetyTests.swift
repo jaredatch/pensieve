@@ -114,6 +114,7 @@ final class WaitingRemovalRequestSafetyTests: XCTestCase {
             let rule = h.vm.artifactPath(skill: h.base.skill, platform: .cursor, target: .project(h.base.project))
             XCTAssertEqual(waiting.count, 2)
             XCTAssertTrue(h.base.files.isSymlink(at: h.base.artifact(.codex)))
+            XCTAssertFalse(h.base.files.isSymlink(at: rule), identity)
             let ruleLines = try h.mapped.readFile(at: rule).components(separatedBy: "\n")
             XCTAssertEqual(ruleLines.first, "---", identity)
             let closingLine = try XCTUnwrap(ruleLines.dropFirst().firstIndex(of: "---"), identity)
