@@ -1,8 +1,12 @@
 import Foundation
 
 extension SkillLibraryViewModel {
+    func readSkillDocument(_ skill: Skill) -> String? {
+        try? skillStore.readBody(directoryName: skill.directoryName)
+    }
+
     func readBody(_ skill: Skill) -> String {
-        guard let raw = try? skillStore.readBody(directoryName: skill.directoryName) else { return "" }
+        guard let raw = readSkillDocument(skill) else { return "" }
         return SkillParser.stripFrontmatter(raw)
     }
 

@@ -40,6 +40,7 @@ private struct ExtractedFrontmatter {
 struct ParsedSkill {
     var name: String?
     var description: String?
+    var whenToUse: String?
     var tags: [String]
     var scope: SkillScope?
     var cursorConfig: CursorAdapterConfig?
@@ -259,6 +260,7 @@ enum SkillParser {
         return ParsedSkill(
             name: name,
             description: description,
+            whenToUse: mapping["when_to_use"] as? String,
             tags: tags,
             scope: scope,
             cursorConfig: nil,

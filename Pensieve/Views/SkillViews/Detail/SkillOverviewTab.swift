@@ -63,6 +63,14 @@ private struct StatCard: View {
     let stat: SkillOverviewPresentation.Stat
 
     var body: some View {
+        if let tooltip = stat.tooltip {
+            card.help(tooltip)
+        } else {
+            card
+        }
+    }
+
+    private var card: some View {
         VStack(alignment: .leading, spacing: DesignTokens.cardContentGap) {
             Text(stat.label)
                 .font(DesignTokens.statLabel)
@@ -71,7 +79,7 @@ private struct StatCard: View {
                 .font(DesignTokens.statValue)
                 .foregroundStyle(.primary)
                 .monospacedDigit()
-            if let warning = stat.budgetWarning {
+            if let warning = stat.warningSeverity {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(warning == .exceeded ? Color.red : Color.yellow)

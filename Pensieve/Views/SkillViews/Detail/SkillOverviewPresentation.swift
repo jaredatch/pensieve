@@ -3,7 +3,7 @@ import Foundation
 /// The Overview tab's rows from the snapshot and the provenance — pure, so the numbers and the copy are
 /// tested apart from SwiftUI (the frames `Skills / Details — Overview (installed)` and `(authored)`).
 enum SkillOverviewPresentation {
-    enum BudgetWarning: Int {
+    enum WarningSeverity: Int {
         case warning
         case exceeded
     }
@@ -12,7 +12,8 @@ enum SkillOverviewPresentation {
         let label: String
         let value: String
         let detail: String
-        var budgetWarning: BudgetWarning?
+        var warningSeverity: WarningSeverity?
+        var tooltip: String?
         var id: String { label }
         var accessibilityLabel: String { "\(label), \(value), \(detail)" }
     }
@@ -57,25 +58,6 @@ enum SkillOverviewPresentation {
             Stat(label: "Deployed", value: "\(snapshot.deployedOnThisMac) of \(installedCount)",
                  detail: "platforms on this Mac")
         ]
-    }
-
-    private static func contextCost(snapshot: DetailContentSnapshot, budget: Int, locale: Locale) -> Stat {
-        let deployed = snapshot.macStatus.values.contains(true)
-            || snapshot.projectStatus.values.contains { $0.values.contains(true) }
-        var warning: BudgetWarning?
-        if deployed && budget > 0 {
-            switch TokenCounter.budgetStatus(tokens: snapshot.tokenCount, budget: budget) {
-            case .ok: break
-            case .warning: warning = .warning
-            case .exceeded: warning = .exceeded
-            }
-        }
-        let detail = warning.map {
-            let proximity = $0 == .exceeded ? "over" : "near"
-            return "\(proximity) the \(budget.formatted(.number.locale(locale)))-token budget"
-        } ?? "tokens when loaded"
-        return Stat(label: "Context cost", value: snapshot.tokenCount.formatted(.number.locale(locale)),
-                    detail: detail, budgetWarning: warning)
     }
 
     /// A linked skill: Repository, Tracked ref, Local path, Installed, Last updated. An authored or

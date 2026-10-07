@@ -12,60 +12,60 @@ extension SkillOverviewPresentationTests {
     func testUndeployedSkillNeverWarns() {
         let stat = contextCost(tokens: 100_000, mac: [.claudeCode: false, .grok: false],
                                projects: [UUID(): [.claudeCode: false, .cursor: false]])
-        XCTAssertNil(stat.budgetWarning)
+        XCTAssertNil(stat.warningSeverity)
         XCTAssertEqual(stat.detail, "tokens when loaded")
-        XCTAssertNil(contextCost(tokens: 100_000, mac: [:]).budgetWarning)
+        XCTAssertNil(contextCost(tokens: 100_000, mac: [:]).warningSeverity)
     }
 
     func testEveryUserWidePlatformUsesTheSharedBudget() {
         for platform in PlatformTarget.allCases {
             let stat = contextCost(tokens: 5_001, mac: [platform: true])
-            XCTAssertEqual(stat.budgetWarning, .exceeded, platform.displayName)
+            XCTAssertEqual(stat.warningSeverity, .exceeded, platform.displayName)
             XCTAssertEqual(stat.detail, "over the 5,000-token budget", platform.displayName)
         }
     }
 
     func testJustUnderEightyPercentHasNoWarning() {
         let stat = contextCost(tokens: 3_999)
-        XCTAssertNil(stat.budgetWarning)
+        XCTAssertNil(stat.warningSeverity)
         XCTAssertEqual(stat.detail, "tokens when loaded")
     }
 
     func testExactlyEightyPercentHasNoWarning() {
         let stat = contextCost(tokens: 4_000)
-        XCTAssertNil(stat.budgetWarning)
+        XCTAssertNil(stat.warningSeverity)
         XCTAssertEqual(stat.detail, "tokens when loaded")
     }
 
     func testJustOverEightyPercentWarns() {
         let stat = contextCost(tokens: 4_001)
-        XCTAssertEqual(stat.budgetWarning, .warning)
+        XCTAssertEqual(stat.warningSeverity, .warning)
         XCTAssertEqual(stat.detail, "near the 5,000-token budget")
     }
 
     func testExactlyOneHundredPercentWarns() {
         let stat = contextCost(tokens: 5_000)
-        XCTAssertEqual(stat.budgetWarning, .warning)
+        XCTAssertEqual(stat.warningSeverity, .warning)
         XCTAssertEqual(stat.detail, "near the 5,000-token budget")
     }
 
     func testJustOverOneHundredPercentIsExceeded() {
         let stat = contextCost(tokens: 5_001)
-        XCTAssertEqual(stat.budgetWarning, .exceeded)
+        XCTAssertEqual(stat.warningSeverity, .exceeded)
         XCTAssertEqual(stat.detail, "over the 5,000-token budget")
     }
 
     func testZeroAndNegativeBudgetsTurnWarningOff() {
         for budget in [0, -5_000] {
-            let stat = contextCost(tokens: 100_000, budget: budget)
-            XCTAssertNil(stat.budgetWarning)
+            let stat = contextCost(tokens: 100_000, mac: [.grok: true], budget: budget)
+            XCTAssertNil(stat.warningSeverity)
             XCTAssertEqual(stat.detail, "tokens when loaded")
         }
     }
 
     func testCustomBudgetControlsBothThresholds() {
-        for (tokens, warning) in [(80, nil), (81, SkillOverviewPresentation.BudgetWarning.warning), (101, .exceeded)] {
-            XCTAssertEqual(contextCost(tokens: tokens, budget: 100).budgetWarning, warning)
+        for (tokens, warning) in [(80, nil), (81, SkillOverviewPresentation.WarningSeverity.warning), (101, .exceeded)] {
+            XCTAssertEqual(contextCost(tokens: tokens, budget: 100).warningSeverity, warning)
         }
     }
 
@@ -73,7 +73,7 @@ extension SkillOverviewPresentationTests {
         for platform in PlatformTarget.allCases where platform.supportsProjectScope {
             let stat = contextCost(tokens: 5_001, mac: [platform: false],
                                    projects: [UUID(): [platform: false], UUID(): [platform: true]])
-            XCTAssertEqual(stat.budgetWarning, .exceeded, platform.displayName)
+            XCTAssertEqual(stat.warningSeverity, .exceeded, platform.displayName)
             XCTAssertEqual(stat.detail, "over the 5,000-token budget", platform.displayName)
         }
     }
@@ -115,7 +115,7 @@ extension SkillOverviewPresentationTests {
         let stat = SkillOverviewPresentation.stats(snapshot: snapshot, installedCount: 1,
                                                    budget: 5_000, locale: Locale(identifier: "en_US"))[0]
         XCTAssertEqual(stat.value, "100", "Context cost counts body characters divided by four, excluding frontmatter")
-        XCTAssertNil(stat.budgetWarning, "Long frontmatter must not push a short deployed body over its budget")
+        XCTAssertNil(stat.warningSeverity, "Long frontmatter must not push a short deployed body over its budget")
         XCTAssertEqual(stat.detail, "tokens when loaded")
     }
 }

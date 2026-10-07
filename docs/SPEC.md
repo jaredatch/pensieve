@@ -231,9 +231,22 @@ One skill-size budget applies to every platform. It defaults to **5,000 tokens**
 | Warning | > 80% through 100% of budget | Yellow triangle |
 | Exceeded | > 100% of budget | Red triangle and text |
 
-The Overview tab's Context cost card warns only for skills deployed on this Mac, user-wide or in a registered project, on any platform. It says “near the 5,000-token budget” or “over the 5,000-token budget”, using the configured number and locale. Undeployed skills show no warning. A budget of 0 or less turns warnings off.
+The Overview tab's Context cost card warns only for skills deployed on this Mac, user-wide or in a registered project, on any platform. It says “near the 5,000-token budget” or “over the 5,000-token budget”, using the configured number and locale. Undeployed skills show no warning. A budget of 0 or less turns budget warnings off.
 
 A custom Claude Code budget carries over unless it is the old 2,500 default. Old Grok and Cursor budgets do not carry over. Once the user sets the shared budget, that value wins.
+
+The card also checks known agent limits without a setting. Each check applies only when the skill is deployed to that agent on this Mac, user-wide or in a registered project. These warnings are advisory and never block a deploy. Disabling the budget leaves agent checks active.
+
+| Agent | Warning condition | Severity |
+|-------|-------------------|----------|
+| Codex | Frontmatter `name` is over 64 characters; Codex skips the skill | Red |
+| Claude Code | Frontmatter `description` plus `when_to_use` is over 1,536 characters; the listing cuts the description off | Yellow |
+| Claude Code | Body estimate is over 5,000 tokens; compaction keeps only the first 5,000 | Yellow |
+| Cursor | `alwaysApply` is true and the body estimate is over 500 tokens; the rule loads into every chat | Yellow |
+
+A missing `when_to_use` counts as empty. Grok, OpenClaw and Hermes have no known-limit checks. The table in code records each source and its checked date.
+
+The detail line shows one warning, in this order: Codex skips it, over the budget, Claude Code cuts the description, past the compaction cutoff, large always-on Cursor rule, near the budget. A budget warning suppresses the compaction line. The triangle follows the shown warning's severity, and the value stays the token count. A tooltip lists every applicable warning in that order, including compaction and the budget. With no warning, the card has no tooltip. VoiceOver reads the shown line.
 
 ---
 
