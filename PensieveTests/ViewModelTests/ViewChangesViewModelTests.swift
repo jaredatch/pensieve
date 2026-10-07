@@ -196,10 +196,13 @@ final class ViewChangesViewModelTests: XCTestCase {
                 XCTAssertNil(file.linesRemoved)
             }
         }
+        let noDiff = PinnedSkillFileDiff(change: FileTreeChange(path: "text", kind: .modified,
+            content: .text(old: "same", new: "same")), result: nil)
+        XCTAssertNil(ViewChangesPresentation.sidebarMarker(noDiff), "A text file without a diff must have no marker")
         let line = UnifiedDiffLine(kind: .added, text: "keep\r\n", oldLineNumber: nil, newLineNumber: 1)
-        XCTAssertEqual(ViewChangesPresentation.lineText(line), "keep ⟨CRLF line ending⟩")
-        XCTAssertEqual(ViewChangesPresentation.lineText(UnifiedDiffLine(
-            kind: .context, text: "lone\rinside", oldLineNumber: 1, newLineNumber: 1)), "lone␍inside")
+        XCTAssertEqual(String(ViewChangesPresentation.lineText(line).characters), "keep")
+        XCTAssertEqual(String(ViewChangesPresentation.lineText(UnifiedDiffLine(
+            kind: .context, text: "lone\rinside", oldLineNumber: 1, newLineNumber: 1)).characters), "lone␍inside")
     }
 
     private func loaded(_ model: ViewChangesViewModel) async {

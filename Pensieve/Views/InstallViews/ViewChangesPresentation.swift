@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Presentation of precomputed hunks only. This mapping never runs a diff or reads file contents.
 enum ViewChangesPresentation {
@@ -32,18 +33,18 @@ enum ViewChangesPresentation {
 
     static func summary(_ file: PinnedSkillFileDiff) -> String {
         if case .modeOnly = file.content { return "Permissions changed" }
-        let content = contentSummary(file)
-        return permissionSummary(file).map { content + " · " + $0 } ?? content
+        return [contentSummary(file), permissionSummary(file)].compactMap { $0 }
+            .filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     private static func contentSummary(_ file: PinnedSkillFileDiff) -> String {
-        if case .modeOnly = file.content { return "Permissions changed" }
         guard let added = file.linesAdded, let removed = file.linesRemoved else {
             switch file.content {
             case .binary: return "Binary file"
             case .tooLarge: return "Too large to show"
             case .diffBudgetExhausted: return "Preview diff budget exhausted"
             case .diffOutputBoundReached: return "Preview output bound reached"
+            case .diffOutputTooLarge: return "Diff too large to show"
             case .text, .modeOnly: return ""
             }
         }
@@ -53,22 +54,25 @@ enum ViewChangesPresentation {
 
     static func unavailableReason(_ file: PinnedSkillFileDiff) -> String? {
         switch file.content {
-        case .text:
-            if let diff = file.diff, diff.hunks.isEmpty {
-                if file.kind == .added { return "Empty file added" }
-                if file.kind == .removed { return "Empty file removed" }
-            }
-            return nil
+        case .text: return emptyFileReason(file)
         case .binary: return "This binary file changed. View the change on GitHub."
         case .tooLarge: return "This file is too large to show within the preview limits. View the change on GitHub."
         case .diffBudgetExhausted:
             return "The preview's shared diff budget ran out before this file could be shown. View the change on GitHub."
+        case .diffOutputTooLarge: return "This file's diff is too large to show"
         case .diffOutputBoundReached:
             return "The preview's output bound was reached before this file could be shown. View the change on GitHub."
         case .modeOnly:
             guard let permissions = file.permissions else { return "File contents are unchanged." }
             return unchangedPermissionReason(before: permissions.old, after: permissions.new)
         }
+    }
+
+    private static func emptyFileReason(_ file: PinnedSkillFileDiff) -> String? {
+        guard let diff = file.diff, diff.hunks.isEmpty else { return nil }
+        if file.kind == .added { return "Empty file added" }
+        if file.kind == .removed { return "Empty file removed" }
+        return nil
     }
 
     private static func unchangedPermissionReason(before: UInt32, after: UInt32) -> String {
@@ -96,7 +100,9 @@ enum ViewChangesPresentation {
     static func sidebarMarker(_ file: PinnedSkillFileDiff) -> String? {
         if case .modeOnly = file.content { return "Mode" }
         guard sidebarCounts(file) == nil else { return file.permissions == nil ? nil : "Mode" }
-        return contentSummary(file) + (file.permissions == nil ? "" : " · Mode")
+        let content = contentSummary(file)
+        guard !content.isEmpty else { return file.permissions == nil ? nil : "Mode" }
+        return content + (file.permissions == nil ? "" : " · Mode")
     }
 
     static func permissionSummary(_ file: PinnedSkillFileDiff) -> String? {
@@ -105,34 +111,72 @@ enum ViewChangesPresentation {
             + " to " + String(format: "%04o", permissions.new)
     }
 
-    /// Diff LF is a record delimiter. Every remaining break/control is displayed, never interpreted.
-    static func lineText(_ line: UnifiedDiffLine) -> String {
-        var text = line.text.unicodeScalars
-        let hasLF = text.last?.value == 10
-        if hasLF { text.removeLast() }
-        let hasCRLF = hasLF && text.last?.value == 13
-        if hasCRLF { text.removeLast() }
-        let content = visibleText(String(text))
-        guard line.kind != .context else { return content }
-        if hasCRLF { return content + " ⟨CRLF line ending⟩" }
-        if !hasLF { return content + " ⟨no final newline⟩" }
-        return content
+    /// LF delimits records; CR immediately before LF belongs to the ending, not the content.
+    static func lineText(_ line: UnifiedDiffLine) -> AttributedString {
+        styledText(lineBody(line.text))
     }
 
     static func filePath(_ file: PinnedSkillFileDiff) -> String { visibleText(file.path, filename: true) }
 
     static func visibleText(_ text: String, filename: Bool = false) -> String {
-        var result = ""
+        String(styledText(text, filename: filename).characters)
+    }
+
+    /// Marks carry their own foreground; literal lookalikes inherit the ordinary text style.
+    static func styledText(_ text: String, filename: Bool = false) -> AttributedString {
+        var result = AttributedString()
+        var literal = ""
         for scalar in text.unicodeScalars {
-            let value = scalar.value
-            let hidden = (scalar.properties.generalCategory == .control && (filename || value != 9))
-                || value == 0x200E || value == 0x200F || value == 0x061C || value == 0x85 || value == 0x2028 || value == 0x2029
-                || (0x202A...0x202E).contains(value) || (0x2066...0x2069).contains(value)
-                || (0xE0000...0xE007F).contains(value)
-            if hidden {
-                result += value == 13 ? "␍" : String(format: "⟨U+%04X⟩", value)
-            } else { result.unicodeScalars.append(scalar) }
+            let category = scalar.properties.generalCategory
+            let hidden = (category == .control && scalar.value != 9 && (filename || scalar.value != 10))
+                || category == .format || category == .lineSeparator || category == .paragraphSeparator
+            guard hidden else { literal.unicodeScalars.append(scalar); continue }
+            result.append(AttributedString(literal))
+            literal = ""
+            var mark = AttributedString(scalar.value == 13 ? "␍" : String(format: "⟨U+%04X⟩", scalar.value))
+            mark.foregroundColor = .orange
+            result.append(mark)
         }
+        result.append(AttributedString(literal))
         return result
+    }
+
+    /// Notes have no diff marker or line number. Ending-only pairs get one note after the added line.
+    static func lineNotes(_ lines: [UnifiedDiffLine]) -> [Int: [String]] {
+        var notes: [Int: [String]] = [:]
+        var removed: [Data: [Int]] = [:]
+        var consumed: [Data: Int] = [:]
+        for (index, line) in lines.enumerated() {
+            if line.text.unicodeScalars.last?.value != 10 { notes[index, default: []].append("\\ No newline at end of file") }
+            switch line.kind {
+            case .context:
+                removed.removeAll()
+                consumed.removeAll()
+            case .removed: removed[Data(lineBody(line.text).utf8), default: []].append(index)
+            case .added:
+                let body = Data(lineBody(line.text).utf8)
+                let offset = consumed[body, default: 0]
+                guard let matches = removed[body], offset < matches.count else { continue }
+                let old = matches[offset]
+                consumed[body] = offset + 1
+                let before = lineEnding(lines[old].text), after = lineEnding(line.text)
+                if before != after { notes[index, default: []].append("Line ending changed: \(before) → \(after)") }
+            }
+        }
+        return notes
+    }
+
+    private static func lineBody(_ text: String) -> String {
+        var scalars = text.unicodeScalars
+        if scalars.last?.value == 10 {
+            scalars.removeLast()
+            if scalars.last?.value == 13 { scalars.removeLast() }
+        }
+        return String(scalars)
+    }
+
+    private static func lineEnding(_ text: String) -> String {
+        if text.hasSuffix("\r\n") { return "CRLF" }
+        return text.unicodeScalars.last?.value == 10 ? "LF" : "no newline"
     }
 }

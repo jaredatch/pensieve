@@ -49,6 +49,12 @@ final class UpdatesViewModel {
         self.bodyWriteRegistration = bodyWriteRegistration
     }
 
+    /// Admission for another surface: the sheet owns the meaning of its active work.
+    func isBusy(affecting skillID: UUID) -> Bool {
+        recheckingSkillID == skillID
+            || (isApplying && (selectedSkillIDs.contains(skillID) || statuses[skillID] == .updating))
+    }
+
     var selectableSkillIDs: Set<UUID> {
         let currentStatuses = statuses
         return Set(rows.lazy.filter { currentStatuses[$0.id] != .updated }.map(\.id))

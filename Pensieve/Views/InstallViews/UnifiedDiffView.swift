@@ -10,13 +10,22 @@ struct UnifiedDiffView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(diff.hunks.indices, id: \.self) { index in
                         let hunk = diff.hunks[index]
-                        diffRow(old: nil, new: nil, marker: "", text: hunk.header,
+                        let notes = ViewChangesPresentation.lineNotes(hunk.lines)
+                        diffRow(old: nil, new: nil, marker: "", text: AttributedString(hunk.header),
                                 fill: DesignTokens.diffHunkFill, kind: nil)
                         ForEach(hunk.lines.indices, id: \.self) { index in
                             let line = hunk.lines[index]
                             diffRow(old: line.oldLineNumber, new: line.newLineNumber,
                                     marker: marker(line.kind), text: ViewChangesPresentation.lineText(line),
                                     fill: fill(line.kind), kind: line.kind)
+                            ForEach(notes[index] ?? [], id: \.self) { note in
+                                Text(verbatim: note)
+                                    .font(DesignTokens.diffLineNumber).foregroundStyle(.secondary)
+                                    .padding(.leading,
+                                             2 * DesignTokens.diffNumberColumnWidth + DesignTokens.diffMarkerColumnWidth)
+                                    .frame(maxWidth: .infinity, minHeight: DesignTokens.diffRowHeight, alignment: .leading)
+                                    .background(DesignTokens.diffHunkFill)
+                            }
                         }
                     }
                 }
@@ -26,7 +35,7 @@ struct UnifiedDiffView: View {
         }
     }
 
-    private func diffRow(old: Int?, new: Int?, marker: String, text: String,
+    private func diffRow(old: Int?, new: Int?, marker: String, text: AttributedString,
                          fill: Color, kind: UnifiedDiffLine.Kind?) -> some View {
         HStack(spacing: 0) {
             number(old)
@@ -35,7 +44,7 @@ struct UnifiedDiffView: View {
                 .font(DesignTokens.diffMarker)
                 .foregroundStyle(kind == .removed ? Color(nsColor: .systemRed) : Color(nsColor: .systemGreen))
                 .frame(width: DesignTokens.diffMarkerColumnWidth)
-            Text(verbatim: text)
+            Text(text)
                 .font(DesignTokens.diffText)
                 .foregroundStyle(kind == nil ? .secondary : .primary)
                 .fixedSize(horizontal: true, vertical: false)

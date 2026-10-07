@@ -208,6 +208,10 @@ enum DesignTokens {
     static let changesButtonHeight: CGFloat = 28
     static let changesDividerHeight: CGFloat = 1
     static let changesFileHeaderHeight: CGFloat = 29
+    static let changesFileNameMinimumWidth: CGFloat = 80
+    static let changesFileMarkerMinimumWidth: CGFloat = 60
+    static let changesFilePathMinimumWidth: CGFloat = 160
+    static let changesFileSummaryMinimumWidth: CGFloat = 160
     static let diffRowHeight: CGFloat = 20
     static let diffTextLineHeight: CGFloat = 18
     static let diffNumberColumnWidth: CGFloat = 36

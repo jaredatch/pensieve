@@ -129,13 +129,15 @@ extension SkillInstallService {
     private func previewReadError(_ error: Error, local: String, upstream: String, skillPath: String? = nil) -> Error {
         let failure = error as NSError
         guard let path = failure.userInfo[NSFilePathErrorKey] as? String else {
-            guard error.localizedDescription.contains(scratchRoot) else { return error }
-            let message = error.localizedDescription.replacingOccurrences(of: scratchRoot, with: "[upstream checkout]")
-            return SkillInstallError.unavailableCandidate(message)
+            if error is CancellationError || error is SkillInstallError || error is SkillUpdateFlowError
+                || error is FileTreeComparisonError { return error }
+            return SkillUpdateFlowError.previewReadFailed("Couldn't compare the skill's files.")
         }
         let isUpstream = path == upstream || path.hasPrefix(upstream + "/")
         let root = isUpstream ? upstream : local
-        guard path == root || path.hasPrefix(root + "/") else { return error }
+        guard path == root || path.hasPrefix(root + "/") else {
+            return SkillUpdateFlowError.previewReadFailed("Couldn't compare the skill's files.")
+        }
         var relative = path == root ? "." : String(path.dropFirst(root.count + 1))
         if isUpstream, let skillPath {
             // Scratch/session/repository are implementation paths, not part of the skill.

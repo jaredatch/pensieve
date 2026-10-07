@@ -34,6 +34,7 @@ struct FileTreeChange: Equatable {
         case tooLarge
         case diffBudgetExhausted
         case diffOutputBoundReached
+        case diffOutputTooLarge
     }
     let path: String
     let kind: Kind

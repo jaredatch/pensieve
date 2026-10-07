@@ -10,7 +10,8 @@ extension UnifiedDiffWorkTests {
         ]
         let preview = try PinnedSkillDiff.build(comparison: FileTreeComparison(
             changes: changes, unreadFileCount: 0, bytesRead: 70_025))
-        XCTAssertEqual(preview.files[0].content, .diffOutputBoundReached)
+        XCTAssertEqual(ViewChangesPresentation.unavailableReason(preview.files[0]), "This file's diff is too large to show",
+                       "One oversized file must have its own reason, not claim the whole preview bound is spent")
         XCTAssertNil(preview.files[0].diff)
         XCTAssertEqual(preview.files[1].linesAdded, 1, "An unrendered huge file must leave output room for SKILL.md")
         XCTAssertEqual(preview.files[2].linesAdded, 1, "Later small scripts must still render")

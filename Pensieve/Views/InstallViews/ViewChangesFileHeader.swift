@@ -5,14 +5,14 @@ struct ViewChangesFileHeader: View {
 
     var body: some View {
         HStack {
-            Text(verbatim: ViewChangesPresentation.filePath(file))
+            Text(ViewChangesPresentation.styledText(file.path, filename: true))
                 .font(DesignTokens.changesFilePath).lineLimit(1).truncationMode(.middle)
-                .frame(minWidth: 160, maxWidth: .infinity, alignment: .leading).layoutPriority(1)
-            Spacer()
+                .frame(minWidth: DesignTokens.changesFilePathMinimumWidth, maxWidth: .infinity, alignment: .leading)
             Text(verbatim: ViewChangesPresentation.summary(file))
                 .font(DesignTokens.changesSummary).foregroundStyle(.secondary)
-                .lineLimit(1).truncationMode(.middle)
-                .frame(minWidth: 160, alignment: .trailing)
+                .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.trailing)
+                .frame(minWidth: DesignTokens.changesFileSummaryMinimumWidth, maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, DesignTokens.changesToolbarInset)
         .frame(height: DesignTokens.changesFileHeaderHeight)

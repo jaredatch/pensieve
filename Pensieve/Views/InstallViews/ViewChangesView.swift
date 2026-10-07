@@ -114,15 +114,22 @@ struct ViewChangesView: View {
             ProgressView("Loading changes…").frame(maxWidth: .infinity, maxHeight: .infinity)
         case let .failed(message):
             EmptyStateView("Couldn't Load Changes", description: message) {
-                if model.canRecheck {
+                if model.needsRecheck {
                     Button("Re-check") { model.recheck(context: context) }
+                        .disabled(!model.canRecheck)
                         .accessibilityIdentifier("changes-recheck")
                 } else {
                     Button("Retry") { retry() }.accessibilityIdentifier("changes-retry")
                 }
             }
         case let .stale(message):
-            EmptyStateView("Preview No Longer Current", description: message)
+            EmptyStateView("Preview No Longer Current", description: message) {
+                if model.needsRecheck {
+                    Button("Re-check") { model.recheck(context: context) }
+                        .disabled(!model.canRecheck)
+                        .accessibilityIdentifier("changes-recheck")
+                }
+            }
         case let .loaded(preview):
             if preview.isIncomplete {
                 Text(verbatim: ViewChangesPresentation.incompleteNote(preview.unreadFileCount))

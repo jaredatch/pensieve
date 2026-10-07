@@ -1,6 +1,7 @@
 import AppKit
 import CoreText
 import SwiftUI
+import Vision
 import XCTest
 @testable import Pensieve
 
@@ -8,7 +9,8 @@ extension ViewChangesSceneTests {
     func testLongFileHeaderAndPermissionsFitAtTheMinimumWindowWidth() throws {
         let file = PinnedSkillFileDiff(change: FileTreeChange(path: String(repeating: "long-folder/", count: 12) + "script.swift",
             kind: .modified, content: .text(old: "old\n", new: "new\n"), permissions: .init(old: 0o644, new: 0o755)),
-            result: UnifiedDiff(old: "old\n", new: "new\n"))
+            result: UnifiedDiff(old: String(repeating: "old\n", count: 1_234),
+                                new: String(repeating: "new\n", count: 5_678)))
         let width = DesignTokens.changesWindowWidth - DesignTokens.changesSidebarWidth - 1
         let renderer = ImageRenderer(content: ViewChangesFileHeader(file: file).frame(width: width)
             .padding(.horizontal, 100).background(Color.white).environment(\.colorScheme, .light))
@@ -29,6 +31,11 @@ extension ViewChangesSceneTests {
                 }
             }
         }
+        let text = try recognizedText(image)
+        for part in ["5678 additions", "1234 deletions", "Permissions changed from 0644 to 0755", "script.swift"] {
+            XCTAssertTrue(text.contains(part),
+                          "Header must render every summary part and the path at minimum width: \(part); saw \(text)")
+        }
         XCTAssertFalse(inkBounds.isNull, "A rendered-size check must contain visible text")
         XCTAssertGreaterThanOrEqual(inkBounds.minX, 100, "The file header must not overflow its detail column")
         XCTAssertLessThanOrEqual(inkBounds.maxX, 100 + width, "The file header must not overflow its detail column")
@@ -46,6 +53,44 @@ extension ViewChangesSceneTests {
         let renamedPixels = try rowPixels(renamedImage)
         XCTAssertTrue(zip(pixels, renamedPixels).contains { abs(Int($0) - Int($1)) > 4 },
                       "The long path's filename must stay readable beside its permission suffix")
+    }
+
+    func testBinaryModeSidebarKeepsNameFolderAndMarkerAtMinimumWidth() throws {
+        let folder = "scripts-with-a-very-long-folder-name-TAIL/"
+        let name = "comment-with-an-extremely-long-filename.swift"
+        let file = PinnedSkillFileDiff(change: FileTreeChange(path: folder + name,
+            kind: .modified, content: .binary, permissions: .init(old: 0o644, new: 0o755)), result: nil)
+        let width = DesignTokens.changesSidebarWidth - 4 * DesignTokens.changesSidebarInset
+        let image = try renderLongRow(file, width: width)
+        let text = try recognizedText(image)
+        for part in ["co", "swift", "scripts", "TAIL", "Binary"] {
+            XCTAssertTrue(text.contains(part), "Sidebar must keep the filename, folder and marker readable: \(part); saw \(text)")
+        }
+        let pixels = try rowPixels(image)
+        var bounds = CGRect.null
+        for y in 0..<image.height {
+            for x in 0..<image.width {
+                let offset = (y * image.width + x) * 4
+                if max(pixels[offset], pixels[offset + 1], pixels[offset + 2]) < 220 {
+                    bounds = bounds.union(CGRect(x: CGFloat(x) / rowRenderScale, y: CGFloat(y) / rowRenderScale,
+                                                width: 1 / rowRenderScale, height: 1 / rowRenderScale))
+                }
+            }
+        }
+        XCTAssertFalse(bounds.isNull, "The sidebar size check needs visible pixels")
+        XCTAssertGreaterThanOrEqual(bounds.minX, DesignTokens.changesSidebarWidth)
+        XCTAssertLessThanOrEqual(bounds.maxX, DesignTokens.changesSidebarWidth + width,
+                                 "The binary/mode marker must not push the path outside the sidebar")
+    }
+
+    private func recognizedText(_ image: CGImage) throws -> String {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["en-US"]
+        request.usesLanguageCorrection = false
+        try VNImageRequestHandler(cgImage: image).perform([request])
+        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+            .joined(separator: " ")
     }
 
     private var rowRenderScale: CGFloat { 4 }

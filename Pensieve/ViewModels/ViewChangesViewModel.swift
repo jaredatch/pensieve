@@ -39,7 +39,12 @@ final class ViewChangesViewModel {
         self.skillLookup = skillLookup
     }
 
-    var canRecheck: Bool { offersRecheck && requestedSkillID != nil && !isRechecking }
+    var needsRecheck: Bool { offersRecheck }
+
+    var canRecheck: Bool {
+        guard offersRecheck, let requestedSkillID, !isRechecking else { return false }
+        return updates?.isBusy(affecting: requestedSkillID) != true
+    }
 
     var files: [PinnedSkillFileDiff] {
         guard case let .loaded(preview) = state else { return [] }
@@ -123,11 +128,11 @@ final class ViewChangesViewModel {
             } else { message = nil }
         } else { message = "This skill was deleted." }
         guard let message else { return }
-        markStale(message)
+        markStale(message, allowsRecheck: skill?.modelContext != nil && skill?.isDeleted == false)
     }
 
-    private func markStale(_ message: String) {
-        offersRecheck = false
+    private func markStale(_ message: String, allowsRecheck: Bool = true) {
+        offersRecheck = allowsRecheck
         isRechecking = false
         retirePreview()
         state = .stale(message)
@@ -193,14 +198,6 @@ extension ViewChangesViewModel {
         let container = context.container
         previewTask = Task {
             guard self.sessionID == session, !Task.isCancelled else { return }
-            do { try await self.updates?.waitForCompletion(affecting: requestedSkillID) } catch { return }
-            guard self.sessionID == session, !Task.isCancelled else { return }
-            if let skill = try? self.skillLookup(requestedSkillID, context), let row = self.row,
-               let origin = skill.installedOrigin, origin.installedCommit == row.upstreamCommit,
-               origin.installedTree == row.upstreamTree {
-                self.markStale("This skill was updated.")
-                return
-            }
             let worker = Task.detached(priority: .userInitiated) {
                 try UpdatesViewModel.performUnlessCancelled { try operation(requestedSkillID, container) }
             }

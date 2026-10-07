@@ -52,7 +52,7 @@ struct PinnedSkillDiff: Equatable {
             }
             try Task.checkCancellation()
             if result.isOutputBoundReached {
-                return PinnedSkillFileDiff(change: change, result: nil, unavailableContent: .diffOutputBoundReached)
+                return PinnedSkillFileDiff(change: change, result: nil, unavailableContent: .diffOutputTooLarge)
             }
             if result.isTooLarge {
                 return PinnedSkillFileDiff(change: change, result: nil,

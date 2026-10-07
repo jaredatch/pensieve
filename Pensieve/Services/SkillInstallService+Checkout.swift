@@ -24,7 +24,7 @@ extension SkillInstallService {
         guard InstallRelativePathPolicy.isValid(candidate.path) else {
             throw SkillInstallError.invalidRepositoryPath(candidate.path)
         }
-        return try withCheckout(source: source, credential: credential) { checkoutPath in
+        return try withCheckout(source: source, credential: credential, preview: true) { checkoutPath in
             var directory = checkoutPath
             var relative = ""
             for component in candidate.path.split(separator: "/") {
@@ -34,7 +34,8 @@ extension SkillInstallService {
                     throw SkillInstallError.unavailableCandidate("Unsafe upstream directory: \(relative)")
                 }
             }
-            guard try gitService.treeHash(at: checkoutPath, path: candidate.path) == candidate.treeHash else {
+            let tree = try previewOperation(.treeHash) { try gitService.treeHash(at: checkoutPath, path: candidate.path) }
+            guard tree == candidate.treeHash else {
                 throw SkillInstallError.repositoryChanged
             }
             return try body(checkoutPath)
@@ -65,11 +66,11 @@ extension SkillInstallService {
         return bounded.count
     }
 
-    private func withCheckout<Result>(source: SkillFetchResult, credential: GitCredential?,
+    private func withCheckout<Result>(source: SkillFetchResult, credential: GitCredential?, preview: Bool = false,
                                       body: (String) throws -> Result) throws -> Result {
-        try prepareScratchRoot()
+        try previewOperation(.prepare, enabled: preview) { try prepareScratchRoot() }
         let sessionRoot = scratchRoot + "/" + UUID().uuidString
-        try fileService.createDirectory(at: sessionRoot)
+        try previewOperation(.prepare, enabled: preview) { try fileService.createDirectory(at: sessionRoot) }
         defer { try? fileService.deleteDirectory(at: sessionRoot) }
 
         guard let validatedRemote = validateRemote(source.repo) else {
@@ -77,15 +78,39 @@ extension SkillInstallService {
         }
         let checkoutName = SkillStore.slugify(repositoryName(for: validatedRemote.repo))
         let checkoutPath = sessionRoot + "/" + checkoutName
-        try cloneForInstall(
-            remote: validatedRemote.cloneRemote,
-            branch: source.ref,
-            into: checkoutPath,
-            credential: credential
-        )
-        guard try gitService.commitSHA(at: checkoutPath) == source.headCommit else {
+        try previewOperation(.fetch, enabled: preview) {
+            try cloneForInstall(remote: validatedRemote.cloneRemote, branch: source.ref,
+                                into: checkoutPath, credential: credential)
+        }
+        let commit = try previewOperation(.pinnedCommit, enabled: preview) { try gitService.commitSHA(at: checkoutPath) }
+        guard commit == source.headCommit else {
             throw SkillInstallError.repositoryChanged
         }
         return try body(checkoutPath)
     }
+
+    private func previewOperation<Result>(_ operation: PreviewOperation, enabled: Bool = true,
+                                          body: () throws -> Result) throws -> Result {
+        do { return try body() } catch {
+            guard enabled else { throw error }
+            if error is CancellationError { throw error }
+            let classified = Self.mappedRepositoryError(error)
+            if let failure = classified as? SkillInstallError {
+                switch failure {
+                case .authenticationFailed, .networkUnavailable, .repositoryNotFound, .repositoryChanged:
+                    throw failure
+                default: break
+                }
+            }
+            throw SkillUpdateFlowError.previewReadFailed(operation.rawValue)
+        }
+    }
+
+    private enum PreviewOperation: String {
+        case prepare = "Couldn't prepare the upstream preview."
+        case fetch = "Couldn't fetch the upstream repository."
+        case pinnedCommit = "Couldn't verify the pinned commit."
+        case treeHash = "Couldn't check the upstream tree hash."
+    }
+
 }
