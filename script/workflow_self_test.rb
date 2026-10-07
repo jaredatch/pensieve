@@ -661,9 +661,10 @@ class WorkflowTests < Minitest::Test
   def test_admission_failure_reports_an_example
     error = assert_raises(Minitest::Assertion) { assert_release_admission('true', 'owner/repo', 'over-admits') }
     assert_includes error.message, 'release matrix mismatch:'
-    assert_includes error.message, '"expected"=>false'
-    assert_includes error.message, '"actual"=>true'
-    assert_includes error.message, '"ref"=>'
+    # Hash#inspect spaces its arrows from Ruby 3.4 on; the runner and the mini differ.
+    assert_match(/"expected" ?=> ?false/, error.message)
+    assert_match(/"actual" ?=> ?true/, error.message)
+    assert_match(/"ref" ?=>/, error.message)
   end
 
   def test_repository_witnesses_use_unseen_folded_edges
