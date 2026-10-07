@@ -114,12 +114,9 @@ enum PathConstants {
     static let grokProjectSkillsRel = ".grok/skills"
     static let codexAgentsRel = "agents"
 
-    // MARK: - Token Budgets (defaults, user-configurable)
+    // MARK: - Skill Size Budget (default, user-configurable)
 
-    static let defaultClaudeCodeTokenBudget = 2500
-    static let defaultGrokTokenBudget = 2500
-    static let defaultCursorTokenBudget = 5000
-    static let defaultCodexTokenBudget = Int.max // unlimited
+    static let defaultSkillSizeTokenBudget = 5000
 
     // MARK: - Token Estimation
 

@@ -3,7 +3,7 @@ import Foundation
 /// The Overview tab's rows from the snapshot and the provenance — pure, so the numbers and the copy are
 /// tested apart from SwiftUI (the frames `Skills / Details — Overview (installed)` and `(authored)`).
 enum SkillOverviewPresentation {
-    enum BudgetWarning: Int {
+    enum WarningSeverity: Int {
         case warning
         case exceeded
     }
@@ -12,15 +12,10 @@ enum SkillOverviewPresentation {
         let label: String
         let value: String
         let detail: String
-        var budgetWarning: BudgetWarning?
+        var warningSeverity: WarningSeverity?
+        var tooltip: String?
         var id: String { label }
         var accessibilityLabel: String { "\(label), \(value), \(detail)" }
-    }
-
-    private struct PlatformBudgetWarning {
-        let severity: BudgetWarning
-        let platform: PlatformTarget
-        let budget: Int
     }
 
     enum SourceAction: Equatable {
@@ -51,45 +46,18 @@ enum SkillOverviewPresentation {
     static let contentsRowsShown = 5
 
     static func stats(snapshot: DetailContentSnapshot, installedCount: Int,
-                      budgets: [PlatformTarget: Int], locale: Locale = .current) -> [Stat] {
+                      budget: Int, locale: Locale = .current) -> [Stat] {
         let inventory = snapshot.inventory
         // A walk stopped at its caps or at an unreadable entry counted what it read: a floor, marked "+".
         let floor = inventory.truncated ? "+" : ""
         let bytes = ByteCountFormatter.string(fromByteCount: Int64(inventory.totalBytes), countStyle: .file)
         return [
-            contextCost(snapshot: snapshot, budgets: budgets, locale: locale),
+            contextCost(snapshot: snapshot, budget: budget, locale: locale),
             Stat(label: "Bundle", value: inventory.fileCount.formatted(.number.locale(locale)) + floor,
                  detail: (inventory.fileCount == 1 && !inventory.truncated ? "file · " : "files · ") + bytes + floor),
             Stat(label: "Deployed", value: "\(snapshot.deployedOnThisMac) of \(installedCount)",
                  detail: "platforms on this Mac")
         ]
-    }
-
-    private static func contextCost(snapshot: DetailContentSnapshot, budgets: [PlatformTarget: Int], locale: Locale) -> Stat {
-        var worst: PlatformBudgetWarning?
-        for setting in PlatformTokenBudgetSetting.rows {
-            let platform = setting.platform
-            guard case .editable = setting.budget, let budget = budgets[platform] else { continue }
-            let deployed = snapshot.macStatus[platform] == true
-                || snapshot.projectStatus.values.contains { $0[platform] == true }
-            guard deployed else { continue }
-            let severity: BudgetWarning
-            switch TokenCounter.budgetStatus(tokens: snapshot.tokenCount, budget: budget) {
-            case .ok: continue
-            case .warning: severity = .warning
-            case .exceeded: severity = .exceeded
-            }
-            // Keep the earlier Settings row when severity and budget both tie.
-            if let worst, severity.rawValue < worst.severity.rawValue
-                || (severity == worst.severity && budget >= worst.budget) { continue }
-            worst = PlatformBudgetWarning(severity: severity, platform: platform, budget: budget)
-        }
-        let detail = worst.map {
-            let proximity = $0.severity == .exceeded ? "over" : "near"
-            return "\(proximity) \($0.platform.displayName)'s \($0.budget.formatted(.number.locale(locale))) budget"
-        } ?? "tokens when loaded"
-        return Stat(label: "Context cost", value: snapshot.tokenCount.formatted(.number.locale(locale)),
-                    detail: detail, budgetWarning: worst?.severity)
     }
 
     /// A linked skill: Repository, Tracked ref, Local path, Installed, Last updated. An authored or

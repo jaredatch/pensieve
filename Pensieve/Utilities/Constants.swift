@@ -39,9 +39,6 @@ enum Constants {
     static var claudeCodeProjectSkillsRel: String { PathConstants.claudeCodeProjectSkillsRel }
     static var grokProjectSkillsRel: String { PathConstants.grokProjectSkillsRel }
     static var codexAgentsRel: String { PathConstants.codexAgentsRel }
-    static var defaultClaudeCodeTokenBudget: Int { PathConstants.defaultClaudeCodeTokenBudget }
-    static var defaultGrokTokenBudget: Int { PathConstants.defaultGrokTokenBudget }
-    static var defaultCursorTokenBudget: Int { PathConstants.defaultCursorTokenBudget }
-    static var defaultCodexTokenBudget: Int { PathConstants.defaultCodexTokenBudget }
+    static var defaultSkillSizeTokenBudget: Int { PathConstants.defaultSkillSizeTokenBudget }
     static var charsPerToken: Int { PathConstants.charsPerToken }
 }

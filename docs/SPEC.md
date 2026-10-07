@@ -92,7 +92,6 @@ Claude Code, Grok, Cursor, Codex, OpenClaw, and Hermes ship today. Grok (`~/.gro
 | User-wide path | `~/.claude/skills/{name}/` → symlink → `~/.pensieve/skills/{name}/` |
 | Project-level path | `{project}/.claude/skills/{name}/` → symlink → `~/.pensieve/skills/{name}/` |
 | Format | Standard markdown (SKILL.md inside directory) |
-| Token budget | Advisory, default 2,500 tokens |
 
 Edits to the canonical SKILL.md are visible instantly — the symlink points to the same file.
 
@@ -104,7 +103,6 @@ Edits to the canonical SKILL.md are visible instantly — the symlink points to 
 | User-wide path | `~/.cursor/rules/{name}.mdc` |
 | Project-level path | `{project}/.cursor/rules/{name}.mdc` |
 | Format | `.mdc` with YAML-like frontmatter |
-| Token budget | Advisory, default 5,000 tokens |
 
 Generated `.mdc` format:
 ```
@@ -130,7 +128,6 @@ Freshness is checked by comparing the full generated output against the existing
 | User-wide path | `~/.codex/skills/{name}` → symlink → `~/.pensieve/skills/{name}` (whole directory) |
 | Project-level path | `{project}/agents/{name}.md` → symlink → `~/.pensieve/skills/{name}/SKILL.md` |
 | Format | Standard markdown |
-| Token budget | Unlimited |
 
 Codex deploys both user-wide and project-level. User-wide deploy is a whole-directory symlink at `~/.codex/skills/{name}` pointing at the canonical skill directory; project-level deploy writes a `{project}/agents/{name}.md` file symlink to the canonical `SKILL.md` when the user registers a project in Pensieve. The symlink target is scope-aware (directory vs. file).
 
@@ -194,13 +191,13 @@ Skill names are slugified for directory names: lowercased, non-alphanumeric stri
 
 ## Install from GitHub
 
-Pensieve accepts three GitHub HTTPS forms: a repository URL, a `/tree/<ref>/<path>` skill-directory URL, or a `/blob/<ref>/<path>/SKILL.md` URL. Direct tree/blob links do not support refs containing `/`; paste the repository URL to discover skills from its default branch instead. Other hosts, schemes, embedded credentials, ports, traversal components, and commit-permalink refs are rejected before git runs.
+Pensieve accepts three GitHub HTTPS forms: a repository URL, a `/tree/<ref>/<path>` folder URL, or a `/blob/<ref>/<path>/SKILL.md` URL. A direct link can name one skill or a folder of skills. Direct tree/blob links do not support refs containing `/`. Paste the repository URL to discover skills from its default branch instead. Other hosts, schemes, embedded credentials, ports, traversal components, and commit-permalink refs are rejected before git runs.
 
 ### Install Flow
 
 1. Choose **Add Skill from GitHub…** and paste a supported URL.
-2. Pensieve reconstructs the repository remote, shallow-clones it, and discovers skills only at the repository root, `skills/<name>`, `skills/<category>/<name>`, and `.claude/skills/<name>`. A direct tree/blob link targets one directory.
-3. The picker shows every candidate. Missing/invalid required frontmatter and symlink-bearing candidates remain visible but cannot be selected.
+2. Pensieve reconstructs the repository remote and shallow-clones it. A repository link discovers skills at its root, `skills/<name>`, `skills/<category>/<name>`, and `.claude/skills/<name>`. A direct tree/blob link selects the linked folder's own `SKILL.md` when present. Otherwise, a direct link lists skills at `<folder>/<name>` and `<folder>/<category>/<name>`. It also checks the repository layouts inside that folder. The pass over the folder's own children and grandchildren skips symlinked entries. A link to a missing root `SKILL.md` uses repository discovery. Candidate paths stay relative to the repository root.
+3. The picker shows every candidate. Missing/invalid required frontmatter and symlink-bearing candidates remain visible but cannot be selected. The symlinked entries a direct link's folder pass skips (step 2) are not candidates.
 4. Select skills and install. Pensieve vendors each complete skill directory byte-pristine into the canonical store and records schema-v3 `InstalledOrigin` coordinates.
 5. A slug collision can be skipped, renamed, or adopted. Adopt links the existing skill to the named repository and flags local drift; it never merges or overwrites the existing files.
 
@@ -226,7 +223,7 @@ Pensieve never auto-installs skill updates. Scheduled work detects and reports t
 
 ## Token Budget Validation
 
-Token counting uses **char/4 heuristic** (1 token ≈ 4 characters). Advisory, not enforced.
+One skill-size budget applies to every platform. It defaults to **5,000 tokens** and is configurable in Settings › Platforms › Skill Size. The estimate counts the `SKILL.md` body without frontmatter: characters divided by 4. Warnings are advisory and never block a deploy.
 
 | Status | Condition | UI |
 |--------|-----------|-----|
@@ -234,11 +231,22 @@ Token counting uses **char/4 heuristic** (1 token ≈ 4 characters). Advisory, n
 | Warning | > 80% through 100% of budget | Yellow triangle |
 | Exceeded | > 100% of budget | Red triangle and text |
 
-Default budgets: Claude Code 2,500, Grok 2,500, Cursor 5,000, Codex unlimited. User-configurable in Settings.
+The Overview tab's Context cost card warns only for skills deployed on this Mac, user-wide or in a registered project, on any platform. It says “near the 5,000-token budget” or “over the 5,000-token budget”, using the configured number and locale. Undeployed skills show no warning. A budget of 0 or less turns budget warnings off.
 
-The Overview tab's Context cost card shows a warning beside the raw-file token estimate. It compares the estimate with each platform's budget when the skill is deployed user-wide or in a registered project on this Mac. Undeployed skills and unlimited budgets show no warning.
+A custom Claude Code budget carries over unless it is the old 2,500 default. Old Grok and Cursor budgets do not carry over. Once the user sets the shared budget, that value wins.
 
-The card names the worst platform: Exceeded before Warning, then the smaller budget, then Settings order if budgets tie.
+The card also checks known agent limits without a setting. Each check applies only when the skill is deployed to that agent on this Mac, user-wide or in a registered project. These warnings are advisory and never block a deploy. Disabling the budget leaves agent checks active.
+
+| Agent | Warning condition | Severity |
+|-------|-------------------|----------|
+| Codex | Frontmatter `name` is over 64 characters; Codex skips the skill | Red |
+| Claude Code | Frontmatter `description` plus `when_to_use` is over 1,536 characters; the listing cuts the description off | Yellow |
+| Claude Code | Body estimate is over 5,000 tokens; compaction keeps only the first 5,000 | Yellow |
+| Cursor | `alwaysApply` is true and the body estimate is over 500 tokens; the rule loads into every chat | Yellow |
+
+A missing `when_to_use` counts as empty. Grok, OpenClaw and Hermes have no known-limit checks. The table in code records each source and its checked date.
+
+The detail line shows one warning, in this order: Codex skips it, over the budget, Claude Code cuts the description, past the compaction cutoff, large always-on Cursor rule, near the budget. A budget warning suppresses the compaction line. The triangle follows the shown warning's severity, and the value stays the token count. A tooltip lists every applicable warning in that order, including compaction and the budget. With no warning, the card has no tooltip. VoiceOver reads the shown line.
 
 ---
 
@@ -372,7 +380,7 @@ Add Skill from GitHub…, Check All Skills for Updates, and Check for Updates…
 - **Skill Updates:** Off, Daily, or Weekly (default Weekly) schedules detection on launch/foreground. Check Now runs against every installed skill immediately, even when the schedule is Off; File › Check All Skills for Updates does the same. Detection never applies an update.
 
 **Platforms tab:**
-- Token budgets per platform (Claude Code, Grok, Cursor, Codex)
+- One skill-size budget, default 5,000 tokens, for the `SKILL.md` body. Overview warnings apply only to local deployments and never block a deploy.
 - Platform path display for Claude Code, Grok, and Cursor (read-only)
 
 **GitHub tab:**

@@ -1,45 +1,18 @@
 import SwiftUI
 
-struct PlatformTokenBudgetSetting: Identifiable, Equatable {
-    enum Budget: Equatable {
-        case editable(storageKey: String, defaultValue: Int)
-        case unlimited
-    }
+enum SkillSizeBudgetSetting {
+    static let storageKey = "skillSizeTokenBudget"
 
-    let platform: PlatformTarget
-    let budget: Budget
-
-    var id: PlatformTarget { platform }
-
-    static let rows: [Self] = [
-        Self(
-            platform: .claudeCode,
-            budget: .editable(
-                storageKey: "claudeCodeTokenBudget",
-                defaultValue: Constants.defaultClaudeCodeTokenBudget
-            )
-        ),
-        Self(
-            platform: .grok,
-            budget: .editable(storageKey: "grokTokenBudget", defaultValue: Constants.defaultGrokTokenBudget)
-        ),
-        Self(
-            platform: .cursor,
-            budget: .editable(storageKey: "cursorTokenBudget", defaultValue: Constants.defaultCursorTokenBudget)
-        ),
-        Self(platform: .codex, budget: .unlimited)
-    ]
-
-    static func values(defaults: UserDefaults = .standard) -> [PlatformTarget: Int] {
-        var values: [PlatformTarget: Int] = [:]
-        for setting in rows {
-            guard case let .editable(storageKey, defaultValue) = setting.budget else { continue }
-            let budget = defaults.object(forKey: storageKey) == nil
-                ? defaultValue : defaults.integer(forKey: storageKey)
-            guard budget > 0 else { continue }
-            values[setting.platform] = budget
+    static func value(defaults: UserDefaults = .standard) -> Int {
+        if defaults.object(forKey: storageKey) != nil {
+            return defaults.integer(forKey: storageKey)
         }
-        return values
+        // Preserve a customized Claude Code budget until the user sets the shared budget.
+        if defaults.object(forKey: "claudeCodeTokenBudget") != nil {
+            let legacy = defaults.integer(forKey: "claudeCodeTokenBudget")
+            if legacy != 2_500 { return legacy }
+        }
+        return Constants.defaultSkillSizeTokenBudget
     }
 }
 
@@ -59,27 +32,30 @@ struct PlatformPathSetting: Identifiable, Equatable {
 }
 
 struct PlatformSettingsView: View {
+    @AppStorage private var budget: Int
+
+    init(defaults: UserDefaults = .standard) {
+        _budget = AppStorage(wrappedValue: SkillSizeBudgetSetting.value(defaults: defaults),
+                             SkillSizeBudgetSetting.storageKey, store: defaults)
+    }
+
     var body: some View {
         Form {
-            Section("Token Budgets") {
-                ForEach(PlatformTokenBudgetSetting.rows) { setting in
-                    switch setting.budget {
-                    case let .editable(storageKey, defaultValue):
-                        EditableTokenBudgetRow(
-                            platform: setting.platform,
-                            storageKey: storageKey,
-                            defaultValue: defaultValue
-                        )
-                    case .unlimited:
-                        HStack {
-                            Text(setting.platform.displayName)
-                            Spacer()
-                            Text("Unlimited")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+            Section {
+                HStack {
+                    Text("Budget")
+                    Spacer()
+                    TextField("", value: $budget, format: .number)
+                        .frame(width: 80)
+                        .textFieldStyle(.roundedBorder)
+                    Text("tokens")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+            } header: {
+                Text("Skill Size")
+            } footer: {
+                Text("The Overview tab warns when a deployed skill's instructions get near this size. It never blocks a deploy.")
             }
 
             Section("Platform Paths") {
@@ -94,28 +70,5 @@ struct PlatformSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
-    }
-}
-
-private struct EditableTokenBudgetRow: View {
-    let platform: PlatformTarget
-    @AppStorage private var budget: Int
-
-    init(platform: PlatformTarget, storageKey: String, defaultValue: Int) {
-        self.platform = platform
-        _budget = AppStorage(wrappedValue: defaultValue, storageKey)
-    }
-
-    var body: some View {
-        HStack {
-            Text(platform.displayName)
-            Spacer()
-            TextField("", value: $budget, format: .number)
-                .frame(width: 80)
-                .textFieldStyle(.roundedBorder)
-            Text("tokens")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
     }
 }

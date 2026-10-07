@@ -178,16 +178,23 @@ struct SkillInstallService: SkillInstallServiceProtocol {
         guard InstallRelativePathPolicy.isValid(path) else {
             throw SkillInstallError.invalidRepositoryPath(path)
         }
-        guard !hasSymlinkedComponent(at: repositoryPath, relativePath: path) else {
-            throw SkillInstallError.noSkillMarkdown(path: path)
-        }
         let directory = path.isEmpty ? repositoryPath : repositoryPath + "/" + path
-        guard !fileService.isSymlink(at: directory),
-              fileService.directoryExists(at: directory),
-              skillFileIsPresent(at: directory + "/SKILL.md") else {
+        guard !hasSymlinkedComponent(at: repositoryPath, relativePath: path),
+              !fileService.isSymlink(at: directory),
+              fileService.directoryExists(at: directory) else {
             throw SkillInstallError.noSkillMarkdown(path: path)
         }
-        return [try makeCandidate(at: repositoryPath, relativePath: path)]
+        if skillFileIsPresent(at: directory + "/SKILL.md") {
+            return [try makeCandidate(at: repositoryPath, relativePath: path)]
+        }
+        if path.isEmpty { return try discover(at: repositoryPath) }
+        var candidatePaths: Set<String> = []
+        let prefix = path.isEmpty ? "" : path + "/"
+        try collectSkillsDirectoryCandidates(at: repositoryPath, relativePath: path, listSymlinks: false, into: &candidatePaths)
+        try collectSkillsDirectoryCandidates(at: repositoryPath, relativePath: prefix + "skills", into: &candidatePaths)
+        try collectClaudeCandidates(at: repositoryPath, relativePath: path, into: &candidatePaths)
+        guard !candidatePaths.isEmpty else { throw SkillInstallError.noSkillMarkdown(path: path) }
+        return try candidatePaths.sorted().map { try makeCandidate(at: repositoryPath, relativePath: $0) }
     }
 }
 
@@ -247,17 +254,18 @@ extension SkillInstallService {
         }
     }
 
-    private func collectSkillsDirectoryCandidates(
-        at repositoryPath: String,
-        into paths: inout Set<String>
-    ) throws {
-        let skillsPath = repositoryPath + "/skills"
+    private func collectSkillsDirectoryCandidates(at repositoryPath: String,
+                                                  relativePath: String = "skills",
+                                                  listSymlinks: Bool = true,
+                                                  into paths: inout Set<String>) throws {
+        let skillsPath = relativePath.isEmpty ? repositoryPath : repositoryPath + "/" + relativePath
+        let prefix = relativePath.isEmpty ? "" : relativePath + "/"
         guard let firstLevel = try traversableEntries(at: skillsPath) else { return }
         for firstName in firstLevel where !firstName.hasPrefix(".") {
-            let relative = "skills/" + firstName
+            let relative = prefix + firstName
             let firstPath = repositoryPath + "/" + relative
             if fileService.isSymlink(at: firstPath) {
-                paths.insert(relative)
+                if listSymlinks { paths.insert(relative) }
                 continue
             }
             guard fileService.directoryExists(at: firstPath) else { continue }
@@ -269,10 +277,9 @@ extension SkillInstallService {
             for secondName in secondLevel where !secondName.hasPrefix(".") {
                 let nestedRelative = relative + "/" + secondName
                 let nestedPath = repositoryPath + "/" + nestedRelative
-                if fileService.isSymlink(at: nestedPath) {
-                    paths.insert(nestedRelative)
-                } else if fileService.directoryExists(at: nestedPath),
-                          skillFileIsPresent(at: nestedPath + "/SKILL.md") {
+                let isSymlink = fileService.isSymlink(at: nestedPath)
+                if (isSymlink && listSymlinks) || (!isSymlink && fileService.directoryExists(at: nestedPath)
+                    && skillFileIsPresent(at: nestedPath + "/SKILL.md")) {
                     paths.insert(nestedRelative)
                 }
             }
@@ -280,13 +287,15 @@ extension SkillInstallService {
     }
 
     private func collectClaudeCandidates(at repositoryPath: String,
+                                         relativePath: String = "",
                                          into paths: inout Set<String>) throws {
-        let claudePath = repositoryPath + "/.claude"
+        let prefix = relativePath.isEmpty ? "" : relativePath + "/"
+        let claudePath = repositoryPath + "/" + prefix + ".claude"
         guard !fileService.isSymlink(at: claudePath) else { return }
         let skillsPath = claudePath + "/skills"
         guard let entries = try traversableEntries(at: skillsPath) else { return }
         for name in entries where !name.hasPrefix(".") {
-            let relative = ".claude/skills/" + name
+            let relative = prefix + ".claude/skills/" + name
             let path = repositoryPath + "/" + relative
             if fileService.isSymlink(at: path) {
                 paths.insert(relative)

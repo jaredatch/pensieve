@@ -8,7 +8,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 - Pensieve is open source. The code lives at [github.com/jaredatch/pensieve](https://github.com/jaredatch/pensieve), and that's the place to report a bug or ask for something.
 - Pensieve has its own app icon at last, and its own glyph in the menu bar in place of the stock brain symbol.
-- A skill that's close to or over a platform's token budget now says so on its Overview tab.
+- Overview warns when a deployed skill's instructions are near or over one shared budget, set to 5,000 tokens by default.
+- Overview also warns about known agent limits, like a name too long for Codex or an always-on Cursor rule that loads into every chat.
 - About Pensieve now credits the open-source code Pensieve ships with, and shows each project's license.
 - View Changes opens its own window. It lists every file an update would change, with lines added and removed, and shows each one as an inline diff. Open it from a skill's update banner or from any row in the Updates sheet. Invisible characters show up as visible marks, so nothing can hide in a diff.
 
@@ -19,6 +20,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 ### Changed
 
 - The Projects list now shows projects from your other Macs too.
+- A GitHub link to a folder of skills now lists the skills in it, the same as a link to the whole repository.
 - The Updates sheet is simpler: one row per skill, with its old and new commit and a View Changes button. A skill you've edited locally gets a "Replace my local edits" checkbox, and Update leaves it alone until you check it.
 - If a project folder is missing or unreadable when you delete a skill or remove the project, Pensieve remembers the cleanup on this Mac. Once the folder is reachable, a later launch or sync that brings changes removes its links and rules unless a current project still requests them.
 - Removing a project now affects only this Mac. It stays in its categories, so your other Macs keep their category deploys. Add the same project again and its category skills return at the next launch or sync that brings changes.

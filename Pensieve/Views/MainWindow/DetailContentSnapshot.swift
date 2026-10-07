@@ -1,13 +1,17 @@
 import Foundation
 
 /// Every disk read the skill detail needs, loaded ONCE off the render path (PLAN-26 / 26.1): the body the
-/// Content tab renders, the raw-file token estimate, the bundle inventory (PLAN-34), and the deploy status
+/// Content tab renders, its token estimate, the bundle inventory (PLAN-34), and the deploy status
 /// of every installed platform for This Mac and for each registered project — the Deployments tab's
 /// switches and the Overview's Deployed stat. `body` reads this value and nothing else.
 struct DetailContentSnapshot: Equatable {
     var body: String = ""
-    /// Raw-file estimate (frontmatter included), exactly what `library.estimatedTokens` returns.
+    /// Body-only estimate (frontmatter excluded), exactly what `library.estimatedTokens` returns.
     var tokenCount: Int = 0
+    var frontmatterName: String = ""
+    var frontmatterDescription: String = ""
+    var frontmatterWhenToUse: String = ""
+    var cursorAlwaysApply: Bool = false
     var inventory: SkillBundleInventory = .empty
     /// Per installed platform (`deployablePlatforms(forProject: false)`), from `PlatformViewModel.isDeployed`.
     var macStatus: [PlatformTarget: Bool] = [:]
@@ -15,6 +19,10 @@ struct DetailContentSnapshot: Equatable {
     var projectStatus: [UUID: [PlatformTarget: Bool]] = [:]
 
     var deployedOnThisMac: Int { macStatus.values.filter { $0 }.count }
+
+    func isDeployed(to platform: PlatformTarget) -> Bool {
+        macStatus[platform] == true || projectStatus.values.contains { $0[platform] == true }
+    }
 
     static func load(skill: Skill, projects: [Project],
                      library: SkillLibraryViewModel, platformVM: PlatformViewModel) -> DetailContentSnapshot {
@@ -31,8 +39,15 @@ struct DetailContentSnapshot: Equatable {
             }
             perProject[project.id] = status
         }
-        return DetailContentSnapshot(body: library.readBody(skill),
-                                     tokenCount: library.estimatedTokens(skill),
+        let document = library.readSkillDocument(skill) ?? ""
+        let parsed = SkillParser.parse(document)
+        let body = SkillParser.stripFrontmatter(document)
+        return DetailContentSnapshot(body: body,
+                                     tokenCount: TokenCounter.estimate(body),
+                                     frontmatterName: parsed.name ?? "",
+                                     frontmatterDescription: parsed.description ?? "",
+                                     frontmatterWhenToUse: parsed.whenToUse ?? "",
+                                     cursorAlwaysApply: skill.cursorConfig?.alwaysApply == true,
                                      inventory: library.bundleInventory(skill),
                                      macStatus: mac,
                                      projectStatus: perProject)

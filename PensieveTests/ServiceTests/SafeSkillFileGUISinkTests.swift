@@ -67,7 +67,7 @@ final class SafeSkillFileGUISinkTests: XCTestCase {
         let fs = LeafRejectingFileService()
         let skill = Skill(name: "Victim", skillDescription: "victim", directoryName: "victim")
 
-        XCTAssertEqual(skill.estimatedTokens(using: fs), 0)
+        XCTAssertEqual(SkillLibraryViewModel(fileService: fs).estimatedTokens(skill), 0)
         XCTAssertTrue(fs.readPaths.isEmpty)
     }
 

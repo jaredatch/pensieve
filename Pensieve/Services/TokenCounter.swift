@@ -6,7 +6,7 @@ enum TokenCounter {
         text.count / Constants.charsPerToken
     }
 
-    /// Check if a skill body exceeds a platform's token budget.
+    /// Check if a skill body exceeds its size budget.
     static func budgetStatus(text: String, budget: Int) -> BudgetStatus {
         budgetStatus(tokens: estimate(text), budget: budget)
     }
