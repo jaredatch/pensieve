@@ -43,15 +43,15 @@ struct ViewChangesView: View {
             List(selection: Binding(get: { model.selectedFileID }, set: { id in
                 if let id { model.selectFile(id: id) }
             })) {
-                ForEach(model.files.indices, id: \.self) { id in
-                    let file = model.files[id]
+                // Rows capture their file with its offset, so a reload that shrinks `files` never indexes past its end.
+                ForEach(Array(model.files.enumerated()), id: \.offset) { id, file in
                     ViewChangesFileRow(file: file)
                         .padding(.vertical, DesignTokens.changesFileRowSpacing / 2)
                         .tag(id)
                         .listRowSeparator(.hidden)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(ViewChangesPresentation.accessibilityLabel(file))
-                        .accessibilityIdentifier("changes-file-\(id)")
+                        .accessibilityIdentifier("changes-file-\(file.path)")
                 }
             }
             .listStyle(.sidebar)
