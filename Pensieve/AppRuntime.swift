@@ -270,7 +270,7 @@ private extension AppRuntime {
             guard let self else { return }
             if self.forceLaunchPreflight {
                 self.forceLaunchPreflight = false
-                self.scheduler.enqueueManualTrigger()
+                self.scheduler.enqueueLaunchPreflight()
             }
             self.scheduler.launchIngestCompleted()
         }

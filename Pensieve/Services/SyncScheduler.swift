@@ -47,6 +47,7 @@ final class SyncScheduler {
     private(set) var isLaunchIngestReady = false
     private(set) var isSyncing = false
     private var hasPendingManualTrigger = false
+    private var hasPendingLaunchPreflight = false
 
     @ObservationIgnored @AppStorage("backgroundSyncEnabled")
     private var storedBackgroundSyncEnabled = true
@@ -139,6 +140,12 @@ final class SyncScheduler {
         drainIfPossible()
     }
 
+    func enqueueLaunchPreflight() {
+        hasPendingTrigger = true
+        hasPendingLaunchPreflight = true
+        drainIfPossible()
+    }
+
     private var backgroundSyncEnabled: Bool {
         backgroundSyncOverride?() ?? storedBackgroundSyncEnabled
     }
@@ -162,10 +169,11 @@ final class SyncScheduler {
               isLaunchIngestReady,
               !isSyncing,
               let syncAction else { return }
-        guard backgroundSyncEnabled || hasPendingManualTrigger else { return }
+        guard backgroundSyncEnabled || hasPendingManualTrigger || hasPendingLaunchPreflight else { return }
         guard hasRemote(), !isConflicted() else {
             hasPendingTrigger = false
             hasPendingManualTrigger = false
+            hasPendingLaunchPreflight = false
             return
         }
 
@@ -179,6 +187,7 @@ final class SyncScheduler {
         let priority: TaskPriority = hasPendingManualTrigger ? .userInitiated : .medium
         hasPendingTrigger = false
         hasPendingManualTrigger = false
+        hasPendingLaunchPreflight = false
         isSyncing = true
         Task(priority: priority) { [weak self] in
             await syncAction()

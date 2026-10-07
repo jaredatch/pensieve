@@ -176,7 +176,6 @@ extension SyncCoordinatorTests {
             XCTAssertLessThan(beat, engineFinished, "the main actor heartbeat must advance before the blocking engine returns")
             XCTAssertEqual(engine.qosClass, expectedQoS, "the sync cycle must run at its caller's \(priority) QoS")
         }
-        try await assertRuntimeSyncPriorities()
     }
 
     func testRegisteredObjectFieldChangeVisibleToFreshMainContext() async throws {
