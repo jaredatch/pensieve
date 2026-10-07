@@ -1,29 +1,32 @@
 #!/usr/bin/env bash
-# refreeze.sh: stamps a plan's frozen acceptance section, and re-stamps it after a sanctioned change. It hashes through
+# refreeze.sh: stamps a plan's frozen acceptance section, and re-stamps a closed plan after an extractor change. It hashes through
 # ratchet.sh's one extraction, so what it stamps is exactly what the guard checks. It's a convenience, not a gate: the
 # ratchet still refuses any edit that isn't re-stamped. Rule: protocol/verification.md § Enforce the freeze.
 #
 # Kit copy: install as script/refreeze.sh beside ratchet.sh and acceptance-extract.awk.
 #
 # Usage
-#   refreeze.sh PLAN-NN --initial         the freeze: append `PLAN-NN <sha256>   # frozen <date>` to the ledger. Commit it
-#                                         with PLAN.md's row reading `in-progress (frozen)`, in the same commit.
-#   refreeze.sh PLAN-NN --reason "<text>" after a sanctioned change: rewrite the plan's ledger line and append
-#                                         `<date>  PLAN-NN  <sha256>  <reason>` to the amends ledger. Commit both ledgers
-#                                         as `PLAN-NN / refreeze: <reason>`.
+#   refreeze.sh PLAN-NN --initial         the freeze, which is the close's stamp: append `PLAN-NN <sha256>   # frozen <date>`
+#                                         to the ledger. Commit it in the plan's `PLAN-NN / close` commit, with PLAN.md's row
+#                                         flipping to `complete`.
+#   refreeze.sh PLAN-NN --reason "<text>" re-stamp a closed plan whose criteria didn't change, after an extractor change moved
+#                                         its hash: rewrite the plan's ledger line and append `<date>  PLAN-NN  <sha256>  <reason>`
+#                                         to the amends ledger. Commit both ledgers, and nothing in the plan, as
+#                                         `PLAN-NN / refreeze: <reason>`. A closed plan's criteria are never edited.
 #   refreeze.sh --self-test
 #
 # Refuses (exit 1) when there isn't exactly one plan file for PLAN-NN, the extractor isn't beside this script and
 # tracked, the extraction is empty, the ledger holds a malformed row, --initial finds the plan already stamped or no plan
-# read on record, or --reason finds it not stamped yet. A plan read is on record when round 1's plan-read verdict,
-# tmp/PLAN-NN/prefreeze-read-verdict.md (the launcher writes it for `--read PLAN-NN tmp/PLAN-NN/prefreeze-prompt.md`),
-# exists and isn't empty (protocol/execution-loop.md § Transitions: the freeze gate). The gate is Standard and Full's: a
-# `tier: lite` line in the .execplan stamp skips it, and a missing stamp or tier line keeps it.
+# read on record, or --reason finds it not stamped yet. A plan read is on record when round 1's plan-read verdict exists and
+# isn't empty: tmp/PLAN-NN/prefreeze-read-verdict.md (the launcher writes it for `--read PLAN-NN tmp/PLAN-NN/prefreeze-prompt.md`),
+# or <plans dir>/PLAN-NN-review/reviews/prefreeze-read-verdict.md, where tmp-tidy.sh tracks it, so a close that tidied first still
+# stamps (protocol/execution-loop.md § Transitions: the close's gate). The gate is Standard and Full's: a `tier: lite` line in the
+# .execplan stamp skips it, and a missing stamp or tier line keeps it.
 # A tool failure is exit 2. Usage error: 64.
 # Reads ratchet.sh's configuration (RATCHET_PLANS_DIR, RATCHET_HASHES, RATCHET_AMENDS, RATCHET_EXTRACT, RATCHET_RECORDS).
 # Split-repo mode (RATCHET_RECORDS set, modules/split-repo.md): run it from the code repo as always. The plans and both ledgers
 # are the records repo's (it must be a repo of its own at $RATCHET_RECORDS, else exit 2), the plan-read verdict is the code repo's
-# tmp/PLAN-NN/, the extractor must be tracked in the code repo, and the .execplan stamp is read from the records repo, else the
+# tmp/PLAN-NN/ or the records repo's review dir, the extractor must be tracked in the code repo, and the .execplan stamp is read from the records repo, else the
 # code repo. The stamp's commit goes in the records repo.
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -62,11 +65,11 @@ stamp() {   # $1 = PLAN-NN, $2 = initial|reason, $3 = reason text; runs in $PWD 
   if [ "$mode" = initial ]; then
     ( { [ "$RF_SPLIT" -eq 0 ] || cd "$RF_CODE_ROOT"; } && git ls-files --error-unmatch -- "$RATCHET_EXTRACT" >/dev/null 2>&1 ) \
       || { echo "refreeze: $RATCHET_EXTRACT is not tracked — commit the extractor before the first stamp (the guard that checks this stamp must read the same file)" >&2; return 1; }
-    local tier vrel="tmp/$plan/prefreeze-read-verdict.md" vf where=""
+    local tier vrel="tmp/$plan/prefreeze-read-verdict.md" vf where="" rv="$RATCHET_PLANS_DIR/$plan-review/reviews/prefreeze-read-verdict.md"
     vf="$vrel"; [ "$RF_SPLIT" -eq 0 ] || { vf="$RF_CODE_ROOT/$vrel"; where=" in the code repo ($RF_CODE_ROOT)"; }
     tier="$(stamp_tier)" || return 2
     if [ "$tier" != lite ]; then   # Standard and Full, and any stamp that doesn't say lite (fail closed): the plan read is owed
-      [ -s "$vf" ] || { echo "refreeze: no plan read on record — $vrel$where is missing or empty. Run round 1's plan read before the freeze (protocol/execution-loop.md § Transitions)." >&2; return 1; }
+      [ -s "$vf" ] || [ -s "$rv" ] || { echo "refreeze: no plan read on record — $vrel$where and $rv are missing or empty. Run round 1's plan read before the close (protocol/execution-loop.md § Transitions)." >&2; return 1; }
     fi
   fi
   sec="$(awk -f "$RATCHET_EXTRACT" "$f")"
@@ -81,14 +84,14 @@ stamp() {   # $1 = PLAN-NN, $2 = initial|reason, $3 = reason text; runs in $PWD 
   rc=0; stamped "$plan" "$rows" || rc=$?   # three ways: 0 stamped, 1 not, 2 grep failed (never read as either)
   [ "$rc" -le 1 ] || return 2
   if [ "$mode" = initial ]; then
-    [ "$rc" -eq 1 ] || { echo "refreeze: $plan is already stamped — a sanctioned change is --reason, never a second --initial" >&2; return 1; }
+    [ "$rc" -eq 1 ] || { echo "refreeze: $plan is already stamped — a re-stamp after an extractor change is --reason, never a second --initial" >&2; return 1; }
     printf '%s %s   # frozen %s\n' "$plan" "$new" "${ts%T*}" >> "$RATCHET_HASHES" || { echo "refreeze: appending to $RATCHET_HASHES failed — check it before stamping again" >&2; return 2; }
-    echo "refreeze: $plan stamped -> $new (commit $RATCHET_HASHES with PLAN.md in the same commit — the row reads \`in-progress (frozen)\` — the ratchet refuses a first stamp without PLAN.md)$(rf_where)"
+    echo "refreeze: $plan stamped -> $new (commit $RATCHET_HASHES in the plan's close commit, with PLAN.md's row flipping to \`complete\` — the ratchet refuses a first stamp without PLAN.md)$(rf_where)"
   else
     [ -n "$reason" ] || { echo "refreeze: --reason is required" >&2; return 1; }
     [ "$rc" -eq 0 ] || { echo "refreeze: $plan not stamped yet — freeze it first (--initial)" >&2; return 1; }
     restamp "$plan" "$new" "$reason" "$ts" || return 2
-    echo "refreeze: $plan re-stamped -> $new (commit the criterion edit and both ledgers together, subject: $plan / refreeze: $reason)$(rf_where)"
+    echo "refreeze: $plan re-stamped -> $new (commit both ledgers, and no criterion edit, subject: $plan / refreeze: $reason)$(rf_where)"
   fi
 }
 
@@ -138,7 +141,7 @@ if [ "${1:-}" = "--self-test" ]; then
   # naming the file; with no stamp, and with a stamp naming no tier or tier: full, the gate holds (fail closed); tier: lite skips it;
   # an unreadable stamp is a tool failure (2)
   so="$(run PLAN-01 initial "" 2>&1)" && fail "a first stamp with no plan-read verdict was accepted"
-  grep -Fq "no plan read on record — tmp/PLAN-01/prefreeze-read-verdict.md is missing or empty" <<< "$so" || fail "the missing plan read was not named: $so"
+  grep -Fq "no plan read on record — tmp/PLAN-01/prefreeze-read-verdict.md and docs/plans/PLAN-01-review/reviews/prefreeze-read-verdict.md are missing or empty" <<< "$so" || fail "the missing plan read was not named: $so"
   printf '| 1 | ... | plan read 3 · stage reads 2 | 5 / 0 | 5 / 0 |\n' > "$d/tmp/PLAN-01/prefreeze-prompt.md"
   run PLAN-01 initial "" >/dev/null 2>&1 && fail "a round table naming 'plan read 3' with no verdict file was accepted"
   : > "$d/tmp/PLAN-01/prefreeze-read-verdict.md"
@@ -153,9 +156,16 @@ if [ "${1:-}" = "--self-test" ]; then
   printf 'execplan: 0.24.0\ntier: Lite\n' > "$d/.execplan"
   run PLAN-01 initial "" >/dev/null 2>&1 || fail "tier: lite must skip the plan-read gate (Lite's review is optional)"
   : > "$d/docs/plans/.acceptance-hashes"; printf 'execplan: 0.24.0\ntier: standard\n' > "$d/.execplan"
+  # a close that tidied first: the verdict is in the review dir, where tmp-tidy tracks it, and the stamp still lands
+  mkdir -p "$d/docs/plans/PLAN-01-review/reviews" && : > "$d/docs/plans/PLAN-01-review/reviews/prefreeze-read-verdict.md"
+  run PLAN-01 initial "" >/dev/null 2>&1 && fail "an empty plan-read verdict in the review dir was accepted"
+  printf 'PLAN READY\n' > "$d/docs/plans/PLAN-01-review/reviews/prefreeze-read-verdict.md"
+  so="$(run PLAN-01 initial "" 2>&1)" || fail "a plan-read verdict tracked in the review dir was refused: $so"
+  : > "$d/docs/plans/.acceptance-hashes"; rm -r "$d/docs/plans/PLAN-01-review"
   printf 'PLAN READY — no blocking finding\n' > "$d/tmp/PLAN-01/prefreeze-read-verdict.md"
   so="$(run PLAN-01 initial "")" || fail "initial stamp refused"
-  grep -Fq 'with PLAN.md in the same commit — the row reads `in-progress (frozen)`' <<< "$so" || fail "the first stamp's hint should name the commit it belongs in and the row it leaves: $so"
+  grep -Fq 'in the plan'"'"'s close commit, with PLAN.md'"'"'s row flipping to `complete`' <<< "$so" || fail "the first stamp's hint should name the commit it belongs in and the row it leaves: $so"
+  grep -Fq 'in-progress (frozen)' <<< "$so" && fail "the first stamp's hint still names the retired in-progress (frozen) status: $so"
   grep -Fq 'ready-to-execute' <<< "$so" && fail "the first stamp's hint still names the retired ready-to-execute status: $so"
   grep -q '^PLAN-01 [0-9a-f]\{64\}   # frozen' "$d/docs/plans/.acceptance-hashes" || fail "ledger line malformed: $(cat "$d/docs/plans/.acceptance-hashes")"
   run PLAN-01 initial "" >/dev/null 2>&1 && fail "a second --initial was accepted"
@@ -207,6 +217,9 @@ if [ "${1:-}" = "--self-test" ]; then
     && git add docs && git commit -qm init ) >/dev/null || fail "fixture: the split-repo pair"
   rf() { rc=0; so="$(env -u RATCHET_EXTRACT bash "$s/code/script/refreeze.sh" PLAN-01 $1 2>&1)" || rc=$?; }
   rf --initial; [ "$rc" -eq 1 ] && grep -Fq "tmp/PLAN-01/prefreeze-read-verdict.md in the code repo" <<< "$so" || fail "a verdict only in the records repo's tmp/ passed the gate (rc=$rc): $so"
+  mkdir -p "$s/code/private/docs/plans/PLAN-01-review/reviews" && printf 'PLAN READY\n' > "$s/code/private/docs/plans/PLAN-01-review/reviews/prefreeze-read-verdict.md"
+  rf --initial; [ "$rc" -eq 0 ] || fail "a verdict tracked in the records repo's review dir was refused (rc=$rc): $so"
+  rm -r "$s/code/private/docs/plans/PLAN-01-review" "$s/code/private/docs/plans/.acceptance-hashes"
   mkdir -p "$s/code/tmp/PLAN-01" && printf 'PLAN READY\n' > "$s/code/tmp/PLAN-01/prefreeze-read-verdict.md"
   ( cd "$s/code" && git rm -q --cached script/acceptance-extract.awk )
   rf --initial; [ "$rc" -eq 1 ] && grep -q 'not tracked' <<< "$so" || fail "an extractor untracked in the code repo passed (rc=$rc): $so"

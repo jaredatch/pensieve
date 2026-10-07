@@ -2,6 +2,9 @@
 # pre-push: refuses a push to the default branch unless RATCHET_ALLOW_PUSH=1 is set on the push command itself
 # (`RATCHET_ALLOW_PUSH=1 git push`, never exported). The human sets it; the launcher unsets it before starting an Executor.
 # It also refuses any non-fast-forward (force) push. Rule: protocol/stop-conditions.md § The Never list.
+# After both gates pass for every ref, it runs the project's own check (RATCHET_PROJECT_CHECK) over each commit the push adds,
+# through `ratchet.sh --pre-push`: git am, cherry-pick and rebase make commits that never met pre-commit. Any refusal means
+# nothing is sent.
 #
 # `git push --no-verify` or `git -c core.hooksPath=…` skips this hook. The harness deny rules catch those leading forms;
 # the rest relies on the Never list. Branch protection (no force push, no deletion) doesn't check who pushed; only a
@@ -50,7 +53,7 @@ default_branches() {   # prints the gated branch names, one per line; 1 when a g
 
 defaults="$(default_branches)" || exit 1
 [ -n "$defaults" ] || { echo "pre-push: no default branch resolved — push refused" >&2; exit 1; }
-updates=""
+updates=""   # every ref line, kept for the project check after the gates (a string, never a temp file)
 while read -r local_ref local_sha remote_ref remote_sha; do
   [ -n "$remote_ref" ] || continue
   updates="$updates$local_ref $local_sha $remote_ref $remote_sha"$'\n'
@@ -64,16 +67,22 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       done
       set +f ;;
   esac
-  # a non-fast-forward push (the remote's sha not an ancestor of the local) is a force push
-  if [ "$remote_sha" != "0000000000000000000000000000000000000000" ] && ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+  # a non-fast-forward push (the remote's sha not an ancestor of the local) is a force push. A deletion (an all-zero local sha)
+  # isn't one: deleting the default branch still needs the key above
+  if [ "$remote_sha" != "0000000000000000000000000000000000000000" ] && [ "$local_sha" != "0000000000000000000000000000000000000000" ] \
+    && ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
     echo "pre-push: refusing a non-fast-forward push of $remote_ref (never --force a published branch)" >&2; exit 1
   fi
 done
+[ -n "$updates" ] || exit 0
+# the committing repo's top, as pre-commit passes it: in split-repo mode the records repo runs these hooks too, and has no check
+top="$(git rev-parse --show-toplevel)" || { echo "pre-push: git rev-parse --show-toplevel failed — push refused" >&2; exit 1; }
+repo="$(cd "$(dirname "$0")/../.." && pwd)" || { echo "pre-push: finding the kit's repo failed — push refused" >&2; exit 1; }
+printf '%s' "$updates" | RATCHET_ROOT="$top" "$repo/script/ratchet.sh" --pre-push "$remote" || exit 1
 # Local Pensieve patch pending upstream: scan all public refs once per push,
 # including sequencer commits. Keep the kit gates above intact for deletions.
 # install-hooks.sh uses this tracked hook and never replaces its bytes.
-top="$(git rev-parse --show-toplevel)" || exit 1
-if [ -n "$updates" ] && { [ -f "$top/script/public_hygiene.py" ] || [ -f "$top/script/public-hygiene.json" ]; }; then
+if [ -f "$top/script/public_hygiene.py" ] || [ -f "$top/script/public-hygiene.json" ]; then
   printf '%s' "$updates" | python3 -B "$top/script/public_hygiene.py" --pre-push-batch "$url" || exit 1
 fi
 exit 0

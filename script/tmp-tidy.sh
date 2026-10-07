@@ -10,7 +10,14 @@
 #   tmp-tidy.sh --plan PLAN-NN --apply       copy the evidence into <plans dir>/PLAN-NN-review/{prompts,reviews,notes,probes,
 #                                            shots}/ with a MANIFEST.md, write archive/plans/PLAN-NN.tar.zst (.tar.gz without
 #                                            zstd) and its .list, then delete tmp/PLAN-NN only if nothing is UNRESOLVED and
-#                                            every file is in the .list
+#                                            every file is in the .list. A complete tidy then removes the plan's agent temp
+#                                            folder outside the repo, <scratch root>/tmp/PLAN-NN (the TMPDIR the launcher gave
+#                                            its sessions; the scratch root is <$XP_SCRATCH_PARENT, else the main checkout's
+#                                            parent>/<the main checkout's folder>-scratch, as kit/herdr/lib.sh reads it):
+#                                            never while tmp/.run-lock is held, never with a git checkout inside, never while it
+#                                            is (or holds) this session's own TMPDIR: a stream's Planner runs the close from
+#                                            inside it, and kit/herdr/end-stream.sh removes it once the worktree is gone — a
+#                                            folder it leaves is named with the command, and never changes the exit code
 #   A git checkout under tmp/PLAN-NN (any entry named .git: a file, dir or symlink, tmp/PLAN-NN's own included) stops both
 #   modes before anything is read: named, exit 1, nothing tracked, archived or deleted until it is removed. Keep its diff and log.
 #   tmp-tidy.sh --check                      fail if tmp/ holds anything older than 24 h besides PLAN-*/ folders, the resume
@@ -34,6 +41,8 @@
 #
 # Settings (environment): TMP_TIDY_SHOT_CAP_KB (400), TMP_TIDY_DIR_CAP_KB (2000; below), TMP_TIDY_OPAQUE (below),
 # TMP_TIDY_KEEP (--check), TMP_TIDY_COMPRESSOR=gzip.
+#
+# A run's work dir under TMPDIR goes on every exit, a TERM or Ctrl-C included.
 #
 # Exit codes: 0 clean · 1 something UNRESOLVED or a git checkout (--plan), or a stray (--check) · 2 a tool failed, or a
 # cite can't be parsed, or the LOG is missing (never read as UNRESOLVED, as "no checkout", as "no cites" or as
@@ -59,12 +68,15 @@
 #             number of KB, 1 KB = 1000 bytes) is archived whole: none of its members is tracked for that cite, and the
 #             MANIFEST reads `archived (dir over cap)`. A member cited on its own is still decided on its own.
 #
-# How cites resolve. Cites are read from the plan file, the LOG (which must exist) and its rotated months (<LOG's dir>/log/*.md). A cite resolves if the path is on
+# How cites resolve. Cites are read from the plan file, the plan's evidence file (<plans dir>/PLAN-NN-review/EVIDENCE.md, when it
+# exists: it is tracked from the plan's start, so the tidy reads it and never moves, archives or rewrites it), the LOG (which must
+# exist) and its rotated months (<LOG's dir>/log/*.md). A cite resolves if the path is on
 # disk, tracked, or an archive member (exact, or a folder or prefix match). A pattern cite (.X, .N, .., a * glob, a {a,b}
 # brace set, including an empty alternative like L1{,-r2}.log) needs at least one member and matches whole names only.
 # Not cites: another plan's tmp/PLAN-MM/ path, the placeholder tmp/PLAN-NN/… itself, wildcards alone (tmp/**, tmp/*),
 # and a legacy bare tmp/x cite in the LOG that doesn't resolve here. A cite with a comma outside braces is refused
-# (exit 2): write a brace set or two cites.
+# (exit 2): write a brace set or two cites. So is a cite of this plan's holding a <placeholder> (`NN.X-<letter>-green.log`),
+# which would be cut at the `<`: write a glob or a brace set.
 #
 # The archive is the membership authority. The .list beside it is derived from the verified archive (rewritten by --apply
 # when they disagree), and the guards check that the list is non-empty and its archive sits beside it.
@@ -73,6 +85,13 @@
 # archive step and lookup is captured and checked (exit 2 naming the tool). grep is read three ways (0 hit, 1 none, else
 # an error). `find -mmin` for ages, `wc -c` for sizes, `touch -t` in the self-test, no mapfile or associative arrays.
 set -eu
+mktemp() {   # mktemp / mktemp -d with no template, under $TMPDIR: macOS's own ignores TMPDIR (it reads _CS_DARWIN_USER_TEMP_DIR), so a
+  # session's per-plan TMPDIR (the launcher's) would never see the kit's temp files. A TMPDIR that isn't a writable folder falls back to /tmp
+  local t="${TMPDIR:-}"; { [ -n "$t" ] && [ -d "$t" ] && [ -w "$t" ]; } || t=/tmp
+  case "$#:${1:-}" in 0:|1:-d) command mktemp "$@" "${t%/}/xp.XXXXXXXX" ;; *) command mktemp "$@" ;; esac
+}
+TT_WORK=""   # the --plan run's work dir (mktemp): removed on every exit, Ctrl-C and TERM included
+trap '[ -z "$TT_WORK" ] || rm -rf "$TT_WORK"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM
 
 SCRIPT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ROOT="$SCRIPT_ROOT"
@@ -91,7 +110,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 SIZE_CAP=200000   # bytes; the "small evidence" line — cited files under it are tracked, larger ones archived
-[ "$do_selftest" -eq 0 ] || unset TMP_TIDY_SHOT_CAP_KB TMP_TIDY_KEEP TMP_TIDY_DIR_CAP_KB TMP_TIDY_OPAQUE RATCHET_RECORDS RATCHET_LOG RATCHET_PLANS_DIR   # the self-test proves the CODE at its defaults (its cap probes set their own value); an exported override would move its fixtures
+[ "$do_selftest" -eq 0 ] || unset TMP_TIDY_SHOT_CAP_KB TMP_TIDY_KEEP TMP_TIDY_DIR_CAP_KB TMP_TIDY_OPAQUE RATCHET_RECORDS RATCHET_LOG RATCHET_PLANS_DIR XP_SCRATCH_PARENT   # the self-test proves the CODE at its defaults (its cap probes set their own value); an exported override would move its fixtures
 SHOT_CAP_KB="${TMP_TIDY_SHOT_CAP_KB:-}"; [ -n "$SHOT_CAP_KB" ] || SHOT_CAP_KB=400   # the shot cap: a CITED shot at or under it is tracked, wherever it lives; over it, archive-only
 case "$SHOT_CAP_KB" in *[!0-9]*|????????*) echo "tmp-tidy: TMP_TIDY_SHOT_CAP_KB must be a whole number of KB, at most 7 digits (got '$SHOT_CAP_KB')" >&2; exit 64 ;; esac   # refused, never read as the default: a typo'd cap would track or archive the wrong set silently
 SHOT_CAP=$((10#$SHOT_CAP_KB * 1000))   # bytes, 1 KB = 1000 as SIZE_CAP's 200 KB; 10# so a leading zero is not read as octal
@@ -289,7 +308,8 @@ base_category() {   # $1 = lowercased base name, $2 = size → the category a fi
 }
 
 # every `tmp/...` path a doc cites, one per line, as written (trailing .,;:) punctuation stripped); 2 (a line naming the tool, or
-# the cite) when a producer fails or a cite carries a comma outside braces — a syntax the converter cannot hold as one path
+# the cite) when a producer fails or a cite carries a comma outside braces or a <placeholder> — a syntax the converter cannot hold
+# as one path
 cites_in() {   # $1 = file
   local hits bad rc=0 pat='(^|[^/A-Za-z0-9_])tmp/([A-Za-z0-9._/@+*-]|\{[A-Za-z0-9._,-]+\})+'
   hits="$(grep -oE -e "$pat" -- "$1")" || rc=$?   # `*` and `{a,b}` ride along: a glob or brace set is a pattern cite
@@ -301,6 +321,14 @@ cites_in() {   # $1 = file
        return 2 ;;
     1) ;;
     *) echo "tmp-tidy: grep failed (exit $rc) checking the cites in $1" >&2; return 2 ;;
+  esac
+  # a `<placeholder>` inside this plan's cite (`51.1-<letter>-c5-green.log`, PLAN-51 wrote 29): the cite would be cut at the `<`
+  rc=0; bad="$(grep -oE -e "tmp/$plan/[A-Za-z0-9._/@+*{},-]*<[A-Za-z][A-Za-z0-9_ -]*>[A-Za-z0-9._/@+*{},<>-]*" -- "$1")" || rc=$?
+  case "$rc" in
+    0) while IFS= read -r c; do echo "tmp-tidy: $1 cites \`$c\` — a <placeholder> is not a path; write a glob (\`*\`) or a brace set (\`{a,b}\`) for the files it means" >&2; done <<< "$bad"
+       return 2 ;;
+    1) ;;
+    *) echo "tmp-tidy: grep failed (exit $rc) checking the cites in $1 for a placeholder" >&2; return 2 ;;
   esac
   hits="$(sed -E -e 's/^[^t]//' -e 's/[.,;:)]+$//' <<< "$hits")" || { echo "tmp-tidy: sed failed (exit $?) trimming the cites in $1" >&2; return 2; }
   g -v -e '^tmp/clear-continue\.md$' -e '^tmp/resume-note\.md$' -e '^tmp/$' <<< "$hits" || return 2
@@ -394,6 +422,45 @@ check_tmp() {   # $1 = repo root; 0 iff tmp/ holds only PLAN-*/ dirs, the resume
   return "$bad"
 }
 
+# ---------- the plan's agent temp folder, outside the repo (protocol/context-discipline.md § Workspace) ----------
+scratch_tmp_dir() {   # $1 = repo root, $2 = PLAN-NN → <scratch root>/tmp/PLAN-NN, the TMPDIR the launcher gives the plan's sessions; as kit/herdr/lib.sh's
+  # xp_scratch_root reads it: the scratch root is <XP_SCRATCH_PARENT, else the main checkout's parent>/<the main checkout's folder>-scratch, the main
+  # checkout being the parent of git's common dir (a stream's worktree names the same folder its main checkout does). Prints nothing (a line on
+  # stderr) when it can't be read: the tidy's verdict never depends on it
+  local c m p
+  c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  case "$c" in
+    */.git) m="${c%/.git}" ;;
+    *) m="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || return 0 ;;   # a git dir kept elsewhere: the checkout itself
+  esac
+  case "$m" in /?*) ;; *) return 0 ;; esac
+  p="${m%/*}"
+  if [ -n "${XP_SCRATCH_PARENT:-}" ]; then
+    p="${XP_SCRATCH_PARENT%/}"
+    case "$p" in /?*) ;; *) echo "tmp-tidy: XP_SCRATCH_PARENT '$XP_SCRATCH_PARENT' is not an absolute folder below / — the plan's temp folder is not looked for" >&2; return 0 ;; esac
+  fi
+  printf '%s/%s-scratch/tmp/%s' "$p" "${m##*/}" "$2"
+}
+scratch_tmp_remove() {   # $1 = repo root, $2 = PLAN-NN, $3 = dry-run|apply → after a complete tidy, the plan's temp folder goes (a dry run names it):
+  # never while a run holds tmp/.run-lock, never with a git checkout inside, never through a symlink, never while it is this session's own
+  # TMPDIR (a stream's Planner closes from inside it; deleting it under the live session breaks every later tool's temp file). Best-effort:
+  # a folder it leaves is named with the command, and the tidy's verdict stands. Always 0
+  local s g t sp
+  s="$(scratch_tmp_dir "$1" "$2")"; [ -n "$s" ] || return 0
+  [ -e "$s" ] || [ -L "$s" ] || return 0
+  if [ -d "$s" ] && [ ! -L "$s" ] && [ -n "${TMPDIR:-}" ]; then
+    sp="$(cd "$s" 2>/dev/null && pwd -P)" || sp=""; t="$(cd "$TMPDIR" 2>/dev/null && pwd -P)" || t=""
+    if [ -n "$sp" ] && [ -n "$t" ]; then case "$t/" in "$sp/"*) echo "tmp-tidy: $s is this session's own TMPDIR — left in place; end-stream.sh removes it"; return 0 ;; esac; fi
+  fi
+  if [ "$3" != apply ]; then echo "tmp-tidy: the plan's temp folder $s goes at --apply"; return 0; fi
+  if [ -L "$s" ] || [ ! -d "$s" ]; then echo "tmp-tidy: $s is not a plain folder — left in place; remove it by hand"; return 0; fi
+  if [ -e "$1/tmp/.run-lock" ]; then echo "tmp-tidy: a run holds tmp/.run-lock — the plan's temp folder is left; once the run settles: rm -rf $s"; return 0; fi
+  g="$(cd "$s" && find . -name .git -prune -print)" || { echo "tmp-tidy: scanning $s for a git checkout failed — left in place; once it holds none: rm -rf $s"; return 0; }
+  if [ -n "$g" ]; then g="${g%%$'\n'*}"; g="${g#./}"; echo "tmp-tidy: $s holds a git checkout (${g%/.git}) — left in place: git worktree remove $s/${g%/.git} (or rm -rf a clone), then rm -rf $s"; return 0; fi
+  if rm -rf "$s"; then echo "tmp-tidy: removed the plan's temp folder $s"; else echo "tmp-tidy: removing $s failed — remove it by hand: rm -rf $s"; fi
+  return 0
+}
+
 # ---------- --plan ----------
 tidy_plan() {   # $1 = repo root (tmp/), $2 = PLAN-NN, $3 = dry-run|apply, $4 = the records root (the plan, the LOG, the review dir, the archive;
   # the repo root in one repo) → 0 iff no UNRESOLVED (and, under apply, the delete happened)
@@ -401,7 +468,8 @@ tidy_plan() {   # $1 = repo root (tmp/), $2 = PLAN-NN, $3 = dry-run|apply, $4 = 
   local src="$root/tmp/$plan" rev="$rec/$PLANS_REL/$plan-review" lst="$rec/archive/plans/$plan.list" arc
   arc="$(find_arc "$rec" "$plan" || true)"; [ -n "$arc" ] || arc="$rec/archive/plans/$plan$ARCHIVE_EXT"
   local arext="${arc#$rec/archive/plans/$plan}"
-  local work; work="$(mktemp -d)"
+  local work; work="$(mktemp -d)" || { echo "tmp-tidy: mktemp -d failed — nothing was read or written" >&2; return 2; }
+  TT_WORK="$work"
   local out="$rev"; [ "$mode" = "dry-run" ] && out="$work/review"
   local planfile="" pf npf=0
   for pf in "$rec/$PLANS_REL/${plan}"-*.md; do [ -f "$pf" ] || continue; npf=$((npf+1)); planfile="$planfile${planfile:+ }$pf"; done   # a glob, counted in bash: no ls | grep -c to lose a status
@@ -490,9 +558,9 @@ tidy_plan() {   # $1 = repo root (tmp/), $2 = PLAN-NN, $3 = dry-run|apply, $4 = 
 
   # (b) citations: cited<TAB>rest  (rest = path relative to tmp/PLAN-NN; a legacy bare `tmp/x` is read as tmp/PLAN-NN/x)
   : > "$work/cites.raw"
-  for f in "$planfile" "$rec/$LOG_REL" "$rec/$LOGDIR_REL"/*.md; do   # each source's cites captured and checked (a failed read is a refusal, never "no cites"; the LOG's presence was checked above)
+  for f in "$planfile" "$rev/EVIDENCE.md" "$rec/$LOG_REL" "$rec/$LOGDIR_REL"/*.md; do   # each source's cites captured and checked (a failed read is a refusal, never "no cites"; the LOG's presence was checked above)
     [ -f "$f" ] || continue
-    srcname=log; [ "$f" = "$planfile" ] && srcname=plan
+    srcname=log; { [ "$f" = "$planfile" ] || [ "$f" = "$rev/EVIDENCE.md" ]; } && srcname=plan   # the evidence file is the plan's own record: its cites must resolve, as the plan's do
     c="$(cites_in "$f")" || { bail "reading the cites in ${REC_LABEL}${f#$rec/} failed (the line above names why) — nothing was tracked, archived, or deleted"; return 2; }
     [ -z "$c" ] || while IFS= read -r x; do [ -n "$x" ] && printf '%s\t%s\n' "$srcname" "$x"; done <<< "$c" >> "$work/cites.raw"
   done
@@ -636,7 +704,7 @@ tidy_plan() {   # $1 = repo root (tmp/), $2 = PLAN-NN, $3 = dry-run|apply, $4 = 
   mkdir -p "$out" || { bail "mkdir $out failed"; return 2; }
   {
     printf '# %s — evidence manifest\n\n' "$plan"
-    printf 'Written %s by `script/tmp-tidy.sh` (playbook `protocol/context-discipline.md` § Workspace). Small cited evidence — a cited shot at or under %s KB included, wherever it lived — and every prompt/verdict/note/probe source is tracked here; transcripts, uncited or larger shots, and large artifacts live in `archive/plans/%s%s` (gitignored, on-disk archive; member list in `archive/plans/%s.list`). Paths below are as cited in this plan'"'"'s file, `%s`, and `%s/*.md`.\n\n' "$today" "$SHOT_CAP_KB" "$plan" "$arext" "$plan" "$LOG_REL" "$LOGDIR_REL"
+    printf 'Written %s by `script/tmp-tidy.sh` (playbook `protocol/context-discipline.md` § Workspace). Small cited evidence — a cited shot at or under %s KB included, wherever it lived — and every prompt/verdict/note/probe source is tracked here; transcripts, uncited or larger shots, and large artifacts live in `archive/plans/%s%s` (gitignored, on-disk archive; member list in `archive/plans/%s.list`). Paths below are as cited in this plan'"'"'s file, `%s`, and `%s/*.md`, and the plan'"'"'s `EVIDENCE.md`.\n\n' "$today" "$SHOT_CAP_KB" "$plan" "$arext" "$plan" "$LOG_REL" "$LOGDIR_REL"
     printf '| cited `tmp/` path | now |\n|---|---|\n'
   } > "$out/MANIFEST.md"
   : > "$work/unresolved"
@@ -730,13 +798,16 @@ tidy_plan() {   # $1 = repo root (tmp/), $2 = PLAN-NN, $3 = dry-run|apply, $4 = 
   elif [ "$nunres" -gt 0 ]; then
     rc=1
   fi
-  rm -rf "$work"
+  rm -rf "$work"; TT_WORK=""
+  if [ "$rc" -eq 0 ]; then scratch_tmp_remove "$root" "$plan" "$mode"; fi
   return "$rc"
 }
 
 # ---------- self-test ----------
 if [ "$do_selftest" -eq 1 ]; then
-  d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
+  d="$(mktemp -d)" || { echo "SELF-TEST FAIL: mktemp -d failed"; exit 1; }
+  trap 'rm -rf "$d"' EXIT
+  mkdir -p "$d/systmp" && export TMPDIR="$d/systmp" || { echo "SELF-TEST FAIL: the fixture's temp folder could not be made"; exit 1; }   # every work dir a run makes lands here and goes with $d
   fail() { echo "SELF-TEST FAIL: $1"; exit 1; }
   # fixture A: one existing cite, one missing cite → manifest rows + exactly one UNRESOLVED; nothing written into the repo
   mkdir -p "$d/a/docs/plans" "$d/a/docs/log" "$d/a/tmp/PLAN-07/gate" "$d/a/tmp/PLAN-07/sub"
@@ -1113,6 +1184,24 @@ if [ "$do_selftest" -eq 1 ]; then
   nN="$(grep -c '^UNRESOLVED ' <<< "$outN")" || [ $? -eq 1 ] || fail "fixture N: counting the UNRESOLVED lines failed"   # 1 = no line (the count prints 0); 2 = an error, never a pass
   [ "$rcN" -eq 1 ] && [ "$nN" -eq 1 ] && grep -Fq 'UNRESOLVED tmp/PLAN-16/16.1-verdict.md' <<< "$outN" || fail "fixture N: exactly one UNRESOLVED — the real missing cite, never the placeholder (rc=$rcN): $outN"
   if grep -Fq 'PLAN-NN' <<< "$outN"; then fail "fixture N: the placeholder tmp/PLAN-NN/… was read as a cite: $outN"; else rcg=$?; [ "$rcg" -eq 1 ] || fail "fixture N: the placeholder check failed (grep exit $rcg)"; fi
+  # fixture P (EVO-122): a cite of this plan holding a <placeholder> is refused by name with the fix (the tidy once read it as a cut-off
+  # prefix, UNRESOLVED with no hint); the playbook's own tmp/PLAN-NN/<stage> placeholder and another plan's cite are left alone
+  mkdir -p "$d/p/docs/plans" "$d/p/tmp/PLAN-17"; printf 'g
+' > "$d/p/tmp/PLAN-17/17.1-a-c5-green.log"
+  printf '# PLAN-17
+
+Proof: `tmp/PLAN-17/17.1-a-c5-green.log`; the rule: `tmp/PLAN-NN/<stage>-<kind>.log`; elsewhere `tmp/PLAN-09/09.1-<n>.log`.
+' > "$d/p/docs/plans/PLAN-17-x.md"
+  printf '## log
+
+Green: tmp/PLAN-17/17.1-a-c5-green.log.
+' > "$d/p/docs/LOG.md"
+  "$BASH" "$0" --root "$d/p" --plan PLAN-17 --dry-run >/dev/null 2>&1 || fail "fixture P: the playbook's placeholder or another plan's cite was refused as this plan's"
+  printf '
+Also `tmp/PLAN-17/17.1-<letter>-c5-green.log`.
+' >> "$d/p/docs/LOG.md"
+  set +e; outP="$("$BASH" "$0" --root "$d/p" --plan PLAN-17 --dry-run 2>&1)"; rcP=$?; set -e
+  [ "$rcP" -eq 2 ] && grep -Fq 'cites `tmp/PLAN-17/17.1-<letter>-c5-green.log` — a <placeholder> is not a path' <<< "$outP" || fail "fixture P: a placeholder cite must be refused by name (rc=$rcP): $outP"
   # --check: each scan captured — a failing find (the listing, the bounded scan, an entry's age) is exit 2, never "tmp/ clean"
   mkdir -p "$d/ck/tmp/PLAN-01" "$d/ck/tmp/bounded"; printf 'x\n' > "$d/ck/tmp/bounded/a.log"; printf 'x\n' > "$d/ck/tmp/young.log"
   "$BASH" "$0" --root "$d/ck" --check >/dev/null 2>&1 || fail "--check fixture should be clean with no fault"
@@ -1382,6 +1471,71 @@ if [ "$do_selftest" -eq 1 ]; then
   outZ="$("$BASH" "$0" --root "$d/z" --plan PLAN-35 --apply 2>&1)" || fail "fixture Z: the apply should exit 0: $outZ"
   [ ! -e "$d/z/tmp/PLAN-35" ] && [ -f "$d/z/docs/plans/PLAN-35-review/reviews/big/f7.txt" ] && [ ! -e "$d/z/docs/plans/PLAN-35-review/reviews/big/f8.txt" ] \
     && [ ! -e "$d/z/docs/plans/PLAN-35-review/prompts/big/35.1-prompt.md" ] && grep -Fxq 'PLAN-35/big/f8.txt' "$d/z/archive/plans/PLAN-35.list" || fail "fixture Z: the apply should track f7 alone from big/ and archive the rest: $outZ"
+  # fixture SC: the plan's agent temp folder outside the repo (<scratch root>/tmp/PLAN-NN, the launcher's TMPDIR) goes after a complete
+  # tidy: a dry run only names it; a run lock, a git checkout inside or a symlink leaves it, named, exit 0; a stream's linked worktree
+  # names its main checkout's folder; XP_SCRATCH_PARENT moves it; an incomplete tidy never touches it
+  sc="$d/sc/repo"; mkdir -p "$sc/docs/plans" "$sc/tmp/PLAN-40"
+  ( cd "$sc" && git init -q . && git config user.email t@t && git config user.name t \
+    && printf '# PLAN-40\n' > docs/plans/PLAN-40-x.md && printf '# PLAN-41\n' > docs/plans/PLAN-41-x.md && printf '# PLAN-42\n\n`tmp/PLAN-42/gone.log`\n' > docs/plans/PLAN-42-x.md \
+    && printf '## log\n' > docs/LOG.md && printf 'tmp/\narchive/\n' > .gitignore && git add -A . && git commit -qm init ) >/dev/null || fail "fixture SC: the repo"
+  scs="$(cd "$d" && pwd -P)/sc/repo-scratch/tmp/PLAN-40"; mkdir -p "$scs/nested" && printf 'x\n' > "$scs/nested/f" && printf 'run\n' > "$sc/tmp/PLAN-40/40.1-run.log"
+  outS="$("$BASH" "$0" --root "$sc" --plan PLAN-40 --dry-run 2>&1)" && grep -Fq "temp folder $scs goes at --apply" <<< "$outS" && [ -d "$scs" ] || fail "fixture SC: a dry run must name the plan's temp folder and keep it: $outS"
+  : > "$sc/tmp/.run-lock"
+  outS="$("$BASH" "$0" --root "$sc" --plan PLAN-40 --apply 2>&1)" && grep -Fq 'a run holds tmp/.run-lock' <<< "$outS" && [ -d "$scs" ] && [ ! -e "$sc/tmp/PLAN-40" ] \
+    || fail "fixture SC: under a run lock the tidy must complete and leave the temp folder, named: $outS"
+  rm -f "$sc/tmp/.run-lock"; git init -q "$scs/proof" || fail "fixture SC: a checkout"
+  outS="$("$BASH" "$0" --root "$sc" --plan PLAN-40 --apply 2>&1)" && grep -Fq "holds a git checkout (proof)" <<< "$outS" && [ -d "$scs/proof/.git" ] \
+    || fail "fixture SC: a git checkout inside must leave the temp folder, named: $outS"
+  rm -rf "$scs/proof"
+  outS="$("$BASH" "$0" --root "$sc" --plan PLAN-40 --apply 2>&1)" && grep -Fq "removed the plan's temp folder $scs" <<< "$outS" && [ ! -e "$scs" ] && [ -d "$d/sc/repo-scratch/tmp" ] \
+    || fail "fixture SC: a complete tidy must remove the temp folder, and only it: $outS"
+  ( cd "$sc" && git worktree add -q --detach "$d/sc/repo-PLAN-41" HEAD ) >/dev/null 2>&1 || fail "fixture SC: a stream worktree"
+  mkdir -p "$d/sc/repo-PLAN-41/tmp/PLAN-41" "$d/sc/repo-scratch/tmp/PLAN-41" "$d/sc/repo-PLAN-41-scratch/tmp/PLAN-41" && printf 'r\n' > "$d/sc/repo-PLAN-41/tmp/PLAN-41/41.1-run.log"
+  outS="$("$BASH" "$0" --root "$d/sc/repo-PLAN-41" --plan PLAN-41 --apply 2>&1)" && [ ! -e "$d/sc/repo-scratch/tmp/PLAN-41" ] && [ -d "$d/sc/repo-PLAN-41-scratch/tmp/PLAN-41" ] \
+    || fail "fixture SC: a stream worktree must name its main checkout's temp folder: $outS"
+  mkdir -p "$sc/tmp/PLAN-42" "$d/sc/repo-scratch/tmp/PLAN-42" "$d/alt/repo-scratch/tmp/PLAN-42" && printf 'r\n' > "$sc/tmp/PLAN-42/42.1-run.log"
+  rS=0; outS="$(XP_SCRATCH_PARENT="$d/alt/" "$BASH" "$0" --root "$sc" --plan PLAN-42 --apply 2>&1)" || rS=$?
+  [ "$rS" -eq 1 ] && [ -d "$d/alt/repo-scratch/tmp/PLAN-42" ] && [ -d "$d/sc/repo-scratch/tmp/PLAN-42" ] || fail "fixture SC: an incomplete tidy (an UNRESOLVED cite) must touch no temp folder (rc=$rS): $outS"
+  printf '# PLAN-42\n' > "$sc/docs/plans/PLAN-42-x.md"
+  outS="$(XP_SCRATCH_PARENT="$d/alt/" "$BASH" "$0" --root "$sc" --plan PLAN-42 --apply 2>&1)" && [ ! -e "$d/alt/repo-scratch/tmp/PLAN-42" ] && [ -d "$d/sc/repo-scratch/tmp/PLAN-42" ] \
+    || fail "fixture SC: XP_SCRATCH_PARENT must name the scratch root's parent: $outS"
+  # the closing session's own TMPDIR (a stream's Planner runs the close from inside it): left, named, exit 0 — at the folder or below it
+  for own in "" /own; do
+    mkdir -p "$sc/tmp/PLAN-44" "$d/sc/repo-scratch/tmp/PLAN-44$own" && printf 'r\n' > "$sc/tmp/PLAN-44/44.1-run.log" && printf '# PLAN-44\n' > "$sc/docs/plans/PLAN-44-x.md" || fail "fixture SC: PLAN-44"
+    outS="$(TMPDIR="$d/sc/repo-scratch/tmp/PLAN-44$own/" "$BASH" "$0" --root "$sc" --plan PLAN-44 --apply 2>&1)" && grep -Fq "is this session's own TMPDIR — left in place; end-stream.sh removes it" <<< "$outS" \
+      && [ -d "$d/sc/repo-scratch/tmp/PLAN-44" ] && [ ! -e "$sc/tmp/PLAN-44" ] || fail "fixture SC: the session's own TMPDIR ('$own') must be left, named, the tidy complete: $outS"
+    rm -rf "$d/sc/repo-scratch/tmp/PLAN-44" "$sc/docs/plans/PLAN-44-x.md" "$sc/docs/plans/PLAN-44-review" "$sc/archive/plans/PLAN-44".*
+  done
+  rm -rf "$d/sc/repo-scratch/tmp/PLAN-42" && mkdir -p "$d/sc/elsewhere" && ln -s "$d/sc/elsewhere" "$d/sc/repo-scratch/tmp/PLAN-42" || fail "fixture SC: a symlink"
+  outS="$("$BASH" "$0" --root "$sc" --plan PLAN-42 --apply 2>&1)" && grep -Fq 'not a plain folder' <<< "$outS" && [ -L "$d/sc/repo-scratch/tmp/PLAN-42" ] && [ -d "$d/sc/elsewhere" ] \
+    || fail "fixture SC: a symlinked temp folder must be left, named: $outS"
+  # fixture TR: a --plan run stopped by TERM leaves no work dir in TMPDIR — the EXIT trap removes it. A fake sort sends the
+  # signal to the running tidy once, mid-run
+  mkdir -p "$d/tr/docs/plans" "$d/tr/tmp/PLAN-43" "$d/trt" "$d/trk" && printf '# PLAN-43\n' > "$d/tr/docs/plans/PLAN-43-x.md" && printf '## log\n' > "$d/tr/docs/LOG.md" \
+    && printf 'r\n' > "$d/tr/tmp/PLAN-43/43.1-run.log" \
+    && printf '#!/bin/sh\nif [ ! -e "%s/trk/sent" ]; then ls -A "$TMPDIR" > "%s/trk/sent"; while [ ! -s "%s/trk/pid" ]; do sleep 0.05; done; kill -%s "$(cat "%s/trk/pid")"; fi\nexec %s "$@"\n' \
+      "$d" "$d" "$d" '$TR_SIG' "$d" "$(command -v sort)" > "$d/trk/sort" && chmod +x "$d/trk/sort" || fail "fixture TR: the fake sort"
+  for sig in TERM; do   # (INT can't be probed this way: a background job of a non-interactive shell starts with INT ignored, which no trap undoes)
+    rm -f "$d/trk/sent" "$d/trk/pid"
+    TR_SIG="$sig" TMPDIR="$d/trt" PATH="$d/trk:$PATH" "$BASH" "$0" --root "$d/tr" --plan PLAN-43 --dry-run >/dev/null 2>&1 & trp=$!
+    echo "$trp" > "$d/trk/pid"; rS=0; wait "$trp" || rS=$?
+    [ -s "$d/trk/sent" ] && [ "$rS" -ne 0 ] && [ -z "$(ls -A "$d/trt")" ] || fail "fixture TR: the run's work dir must be made under TMPDIR, and a $sig mid-run must leave none there (rc=$rS; held when signalled: $(cat "$d/trk/sent" 2>/dev/null); left: $(ls -A "$d/trt"))"
+  done
+  # fixture EV (v0.32): the plan's evidence file, docs/plans/PLAN-NN-review/EVIDENCE.md, is tracked from the plan's start and is a cite
+  # source like the plan file: a note cited only there is tracked, a log only there resolves through the archive, a missing cite there
+  # is UNRESOLVED (strict, as the plan's own), and --apply leaves the file byte-identical and out of the inventory
+  mkdir -p "$d/ev/docs/plans/PLAN-44-review" "$d/ev/tmp/PLAN-44" && printf '# PLAN-44\n\nNothing cited.\n' > "$d/ev/docs/plans/PLAN-44-x.md" && printf '## log\n' > "$d/ev/docs/LOG.md" \
+    && printf '# PLAN-44 evidence\n\n| 44.1-a | test | `tmp/PLAN-44/44.1-a-green.log` |\n\nNote: `tmp/PLAN-44/44.1-note.md`; gone: `tmp/PLAN-44/44.1-gone.log`.\n' > "$d/ev/docs/plans/PLAN-44-review/EVIDENCE.md" \
+    && printf 'g\n' > "$d/ev/tmp/PLAN-44/44.1-a-green.log" && printf 'n\n' > "$d/ev/tmp/PLAN-44/44.1-note.md" && cp "$d/ev/docs/plans/PLAN-44-review/EVIDENCE.md" "$d/ev.copy" || fail "fixture EV"
+  rE=0; outE="$("$BASH" "$0" --root "$d/ev" --plan PLAN-44 --dry-run 2>&1)" || rE=$?
+  [ "$rE" -eq 1 ] && grep -Fq 'tmp/PLAN-44/44.1-gone.log' <<< "$outE" && grep -q '^UNRESOLVED ' <<< "$outE" || fail "fixture EV: a missing cite in the evidence file should be UNRESOLVED (rc=$rE): $outE"
+  sed 's/; gone: `tmp\/PLAN-44\/44.1-gone.log`//' "$d/ev.copy" > "$d/ev/docs/plans/PLAN-44-review/EVIDENCE.md" && cp "$d/ev/docs/plans/PLAN-44-review/EVIDENCE.md" "$d/ev.copy" || fail "fixture EV: drop the missing cite"
+  outE="$("$BASH" "$0" --root "$d/ev" --plan PLAN-44 --apply 2>&1)" || fail "fixture EV: apply should exit 0: $outE"
+  grep -Fq '| `tmp/PLAN-44/44.1-note.md` | tracked: docs/plans/PLAN-44-review/reviews/44.1-note.md |' "$d/ev/docs/plans/PLAN-44-review/MANIFEST.md" \
+    && grep -Fq "| \`tmp/PLAN-44/44.1-a-green.log\` | archive: archive/plans/PLAN-44$ARCHIVE_EXT → PLAN-44/44.1-a-green.log |" "$d/ev/docs/plans/PLAN-44-review/MANIFEST.md" \
+    || fail "fixture EV: the evidence file's cites were not read (note tracked, log archived): $(cat "$d/ev/docs/plans/PLAN-44-review/MANIFEST.md")"
+  cmp -s "$d/ev.copy" "$d/ev/docs/plans/PLAN-44-review/EVIDENCE.md" && [ ! -e "$d/ev/tmp/PLAN-44" ] || fail "fixture EV: apply changed the evidence file or kept tmp/PLAN-44"
+  grep -Fq 'tracked: docs/plans/PLAN-44-review/EVIDENCE.md' "$d/ev/docs/plans/PLAN-44-review/MANIFEST.md" && fail "fixture EV: the evidence file is the plan's own record, not tidied evidence — it belongs in no inventory"
   echo "SELF-TEST OK"; exit 0
 fi
 

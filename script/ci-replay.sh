@@ -10,7 +10,9 @@
 #   ci-replay.sh <base>..<head>     replay every commit in the range; run it in CI before the suite
 #   ci-replay.sh --self-test
 #
-# Per commit it checks: the docs-commit rules (stage claim, LOG forms), skip markers, secrets, conflict markers, tmp/ cites (against that
+# Per commit it checks: the docs-commit rules (stage claim, LOG forms), skip markers, secrets, conflict markers, a test floor lowered
+# below its parent's (in a two-parent merge, the merged arithmetic, touched or not) without a `ratchet.sh --lower` reason line new against
+# every parent (ratchet.sh's floor_drop_ok, the hook's decision), tmp/ cites (against that
 # commit's own PLAN.md; on a merge, only a cite new against every parent), the acceptance hashes (from the commit's own
 # ledger, plans and extractor), the refreeze trace (against the parent's ledger), that a builder commit leaves an
 # unstamped plan's Validation and Acceptance unchanged (a merge is judged through its branch's commits), and the close's
@@ -18,7 +20,8 @@
 # detached worktree, with the count floor skipped: CI runs the suite once in its own Test step. The on-disk halves of
 # the close (archive/, tmp/) exist only on the committing machine and aren't checked here.
 #
-# The project's own check (RATCHET_PROJECT_CHECK, ratchet.sh's header) runs per commit over its first-parent diff.
+# The project's own check (RATCHET_PROJECT_CHECK, ratchet.sh's header) runs per commit over its first-parent diff, with
+# RATCHET_CHECK_COMMIT naming the commit.
 #
 # Split-repo mode (RATCHET_RECORDS set; modules/split-repo.md; ratchet.sh's header has the rule table): each repo replays
 # itself. In the code repo, run it as above: the code side's rules. For the records repo, check it out at the code repo's
@@ -46,14 +49,9 @@ if [ "${1:-}" != "--self-test" ]; then ratchet_roots || exit 2; fi
 usage() { echo "usage: $0 <base>..<head> | --self-test" >&2; }
 empty_tree="$(git hash-object -t tree /dev/null)"
 
-first_parent_or_empty_tree() {   # → the first parent, or the empty tree ONLY after a successful lookup shows no parent; a failed lookup is exit 2
-  local p; p="$(git rev-list --parents -n 1 "$1")" || return 2
-  set -- $p; [ "$#" -ge 1 ] && [ "$1" = "$(git rev-parse --verify "${1}^{commit}" 2>/dev/null)" ] || return 2   # the first token is the commit itself
-  shift; if [ "$#" -gt 0 ]; then printf '%s\n' "$1"; else printf '%s\n' "$empty_tree"; fi
-}
+# first_parent_or_empty_tree and patch_of are ratchet.sh's, so pre-push checks a commit's diff exactly as CI does
 files_of()    { local p; p="$(first_parent_or_empty_tree "$1")" || return 2; git diff-tree --no-commit-id --name-only -r "$p" "$1"; }
 present_of()  { local p; p="$(first_parent_or_empty_tree "$1")" || return 2; git diff-tree --no-commit-id --name-only -r --diff-filter=d "$p" "$1"; }   # everything but deletions (a rename INTO a key name counts): a deleted key file is the fix
-patch_of()    { local p; p="$(first_parent_or_empty_tree "$1")" || return 2; git diff-tree --unified=0 --no-prefix -p "$p" "$1" -- "${@:2}" || { echo "ci-replay: git diff-tree failed for $1" >&2; return 2; }; }   # a git failure is an error, never an empty (clean) patch — every caller captures it FIRST and checks
 subject_of()  { git show -s --format=%s "$1"; }
 message_of()  { git show -s --format=%B "$1"; }
 blob_of() {   # $1 = commit, $2 = path → its content; empty ONLY when a checked listing shows the commit holds no such path; 2 on a failed
@@ -64,6 +62,24 @@ blob_of() {   # $1 = commit, $2 = path → its content; empty ONLY when a checke
   git show "$1:$2" || { echo "ci-replay: reading $2 in $1 failed" >&2; return 2; }
 }
 is_default_merge() { local c="$1" p; p="$(git rev-list --parents -n 1 "$c")" || return 2; set -- $p; shift; [ "$#" -gt 1 ] && grep -qE '^Merge ' <<< "$(subject_of "$c")"; }   # $c saved first: after `set --`, $1 is a parent; a failed lookup is 2
+
+replay_floor_lower() {   # $1 = commit, $2 = its first parent (or the empty tree) → ratchet.sh's floor_drop_ok, the hook's decision: the commit's
+  # floor against its parent's, or in a two-parent merge against the merged arithmetic (base + each side's change), with only the reason lines
+  # new against every parent; a merge is judged whether or not it touches the count file. 0 when a non-merge commit leaves the file alone
+  local c="$1" p="$2" ch new ref ps content h cc
+  local pcs=()
+  ps="$(git rev-list --parents -n 1 "$c")" || return 2
+  set -- $ps; shift
+  if [ "$#" -le 1 ]; then
+    ch="$(git diff-tree --no-commit-id --name-only -r --no-renames "$p" "$c" -- "$RATCHET_TEST_COUNT_FILE")" || return 2
+    [ -n "$ch" ] || return 0
+  fi
+  new="$(floor_at "$c")" || return 2
+  content="$(count_file_at "$c")" || return 2
+  for h in "$@"; do cc="$(count_file_at "$h")" || return 2; pcs+=("$cc"); done
+  ref="$(floor_ref_of "$@")" || return 2
+  floor_drop_ok "$new" "$ref" "$content" ${pcs[@]+"${pcs[@]}"}
+}
 
 REPLAY_COMMIT=""; CRIT_OLD=""; CRIT_NEW=""
 crit_show_commit() { if [ "$1" = old ]; then git show "$CRIT_OLD:$2"; else git show "$CRIT_NEW:$2"; fi; }   # the criteria leg's SHOW: the parent's blob, the commit's blob
@@ -98,9 +114,14 @@ replay_commit() {   # $1 = commit, $2 = 1 to exempt the MESSAGE rule only (a PR-
   secret_scan "$present" "$whole" || { echo "ci-replay: $c: a secret-shaped file or line" >&2; return 1; }
   local cm=0; conflict_scan "$whole" || cm=$?
   [ "$cm" -eq 0 ] || { [ "$cm" -eq 1 ] && echo "ci-replay: $c: a file still holds conflict markers (resolve the conflict; an example in a doc indents its markers)" >&2; return "$cm"; }
+  # a lowered floor carries its reason line (ratchet.sh --lower), a docs-only commit too; the records side has no count file
+  if [ "$RATCHET_SIDE" != records ]; then
+    local lw=0; replay_floor_lower "$c" "$parent" || lw=$?
+    [ "$lw" -eq 0 ] || { [ "$lw" -eq 1 ] && echo "ci-replay: $c: see the ratchet line above" >&2; return "$lw"; }
+  fi
   # the project's own check over the commit's first-parent diff (none on the records side)
   if [ "$RATCHET_SIDE" != records ]; then
-    local pr=0; project_check "$whole" || pr=$?
+    local pr=0; project_check "$whole" "$c" || pr=$?
     [ "$pr" -eq 0 ] || { [ "$pr" -eq 1 ] && echo "ci-replay: $c: see the ratchet line above" >&2; return "$pr"; }
   fi
   # tmp/ cites against the commit's own PLAN.md (the row statuses as of that commit)
@@ -198,7 +219,9 @@ if [ "${1:-}" = "--self-test" ]; then
   RATCHET_LOG=docs/LOG.md; RATCHET_PLANS_DIR=docs/plans; RATCHET_HASHES=docs/plans/.acceptance-hashes; RATCHET_AMENDS=docs/plans/.acceptance-amends
   RATCHET_ALLOWLIST=docs/test-allowlist.md; RATCHET_RESUME_NOTE=tmp/resume-note.md
   RATCHET_RECORDS=; RATCHET_PROJECT_CHECK=; RATCHET_SIDE=one; unset RATCHET_ROOT   # one-repo; the split-repo probes set their own
-  d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
+  d="$(mktemp -d)" || { echo "SELF-TEST FAIL: mktemp -d failed"; exit 1; }
+  trap 'rm -rf "$d"' EXIT
+  mkdir -p "$d.tmp" && export TMPDIR="$d.tmp" && trap 'rm -rf "$d" "$d.tmp"' EXIT || { echo "SELF-TEST FAIL: the fixture's temp folder could not be made"; exit 1; }   # beside $d: the repo under test is $d itself
   fail() { echo "SELF-TEST FAIL: $1"; exit 1; }
   cd "$d" && git init -q . && git config user.email t@t && git config user.name t
   mkdir -p docs/plans script && cp "$HERE/ratchet.sh" "$HERE/acceptance-extract.awk" "$HERE/tmp-tidy.sh" script/
@@ -219,7 +242,7 @@ if [ "${1:-}" = "--self-test" ]; then
   printf '# m\n\n## Tracked files\n\n- tracked: docs/plans/PLAN-01-review/prompts/01.1-prompt.md\n- tracked: docs/plans/PLAN-01-review/shots/missing.png\n' > docs/plans/PLAN-01-review/MANIFEST.md
   out="$(replay_commit "$(mk "$c0" "PLAN-01 / close: done")" 2>&1 || true)"; grep -qF 'shots/missing.png' <<< "$out" || fail "an inventoried path absent from the tree was not named: $out"
   rm -rf docs/plans/PLAN-01-review; git checkout -q "$c0" -- docs/LOG.md
-  # 2. forms and their boundary; a stage claim needs the LOG + the plan file (a review-dir edit is not the plan file)
+  # 2. forms and their boundary; a stage claim needs the plan file, not the LOG (a review-dir edit is not the plan file)
   printf '\n## t — note\nx\n' >> docs/LOG.md; replay_commit "$(mk "$c0" "note: x")" || fail "a note: commit was refused"
   replay_commit "$(mk "$c0" "PLAN-01 / patch: spacing")" || fail "a patch form was refused"
   replay_commit "$(mk "$c0" "PLAN-01 / fix — a fix batch across Stages")" || fail "a fix form was refused"
@@ -229,7 +252,10 @@ if [ "${1:-}" = "--self-test" ]; then
   replay_commit "$(mk "$c0" "feat: work (PLAN-02 / 02.1)")" >/dev/null 2>&1 && fail "a review-dir edit satisfied the plan-file rule"
   rm -rf docs/plans/PLAN-02-review; sed '1s/$/ (02.1 in progress)/' docs/plans/PLAN-02-y.md > t && mv t docs/plans/PLAN-02-y.md   # outside Validation and Acceptance
   replay_commit "$(mk "$c0" "feat: work (PLAN-02 / 02.1)")" || fail "a conforming stage commit was refused"
-  git checkout -q "$c0" -- docs/LOG.md docs/plans/PLAN-02-y.md
+  git checkout -q "$c0" -- docs/LOG.md; mkdir -p docs/plans/PLAN-02-review && printf '### 02.1\nfixed\n' > docs/plans/PLAN-02-review/EVIDENCE.md
+  replay_commit "$(mk "$c0" "feat: work (PLAN-02 / 02.1)")" || fail "a stage commit with its plan file and evidence entry, and no LOG entry, was refused"
+  rm -rf docs/plans/PLAN-02-review
+  git checkout -q "$c0" -- docs/plans/PLAN-02-y.md
   replay_commit "$(git commit-tree "$c0^{tree}" -p "$c0" -m "feat: fake (PLAN-02 / 02.1)")" >/dev/null 2>&1 && fail "a stage claim with no diff passed"
   # 3. tmp/ cites judged against the row status AS OF THAT COMMIT; rotated history out of scope
   printf '\n## t — note\n`tmp/PLAN-02/02.1-run.log`, `tmp/PLAN-NN/<stage>-<kind>[-rN].<ext>`, /tmp/x\n' >> docs/LOG.md
@@ -237,6 +263,11 @@ if [ "${1:-}" = "--self-test" ]; then
   printf '`tmp/PLAN-01/01.2-verdict.md`\n' >> docs/LOG.md
   replay_commit "$(mk "$c0" "note: stale")" >/dev/null 2>&1 && fail "a closed plan's cite passed"
   git checkout -q "$c0" -- docs/LOG.md
+  mkdir -p docs/plans/PLAN-02-review && printf '| 02.1-a | `tmp/PLAN-02/02.1-a-green.log` |\n' > docs/plans/PLAN-02-review/EVIDENCE.md
+  replay_commit "$(mk "$c0" "note: evidence row")" || fail "an open plan's own cite in its evidence file tripped"
+  printf 'stale: `tmp/PLAN-01/01.2-verdict.md`\n' >> docs/plans/PLAN-02-review/EVIDENCE.md
+  replay_commit "$(mk "$c0" "note: stale evidence")" >/dev/null 2>&1 && fail "a closed plan's cite in an evidence file passed"
+  rm -rf docs/plans/PLAN-02-review
   printf '\n## t — note\n`tmp/PLAN-02/02.1-run.log`\n' >> docs/LOG.md; sed 's/| in-progress |/| complete |/' PLAN.md > t && mv t PLAN.md
   replay_commit "$(mk "$c0" "note: close-time cite")" >/dev/null 2>&1 && fail "a cite of the plan being closed passed"
   git checkout -q "$c0" -- PLAN.md docs/LOG.md
@@ -356,11 +387,12 @@ if [ "${1:-}" = "--self-test" ]; then
   out="$(replay_commit "$cok" 2>&1)" || fail "CI refused a commit the project check passes: $out"
   rc=0; ( RATCHET_SIDE=records; replay_commit "$cfb" >/dev/null 2>&1 ) || rc=$?; [ "$rc" -eq 0 ] || fail "the records side ran the project check (rc=$rc)"
   RATCHET_PROJECT_CHECK='exit 3'; rc=0; replay_commit "$cfb" >/dev/null 2>&1 || rc=$?; [ "$rc" -eq 2 ] || fail "a project check exiting 3 must be exit 2 in CI (rc=$rc)"
+  RATCHET_PROJECT_CHECK='[ "$RATCHET_CHECK_COMMIT" = "'"$cok"'" ]'; replay_commit "$cok" >/dev/null 2>&1 || fail "CI's project check was not told the commit it judges (RATCHET_CHECK_COMMIT)"
   RATCHET_PROJECT_CHECK=
-  # 9. split-repo mode's code side (modules/split-repo.md): a stage claim with no LOG and a harvest close with no MANIFEST replay clean
+  # 9. split-repo mode's code side (modules/split-repo.md): a stage claim with no plan file and a harvest close with no MANIFEST replay clean
   ccl="$(mk1 "$c0" src.txt x "PLAN-02 / 02.1: build")" && cch="$(mk1 "$c0" CHANGELOG.md x "PLAN-01 / close: harvest")" || fail "fixture: the code-side commits"
-  ( RATCHET_SIDE=code; replay_commit "$ccl" >/dev/null && replay_commit "$cch" >/dev/null ) || fail "the code side asked a stage claim for its LOG or a harvest close for a MANIFEST"
-  rc=0; replay_commit "$ccl" >/dev/null 2>&1 || rc=$?; [ "$rc" -eq 1 ] || fail "one-repo, a stage claim with no LOG must still be refused in CI (rc=$rc)"
+  ( RATCHET_SIDE=code; replay_commit "$ccl" >/dev/null && replay_commit "$cch" >/dev/null ) || fail "the code side asked a stage claim for its plan file or a harvest close for a MANIFEST"
+  rc=0; replay_commit "$ccl" >/dev/null 2>&1 || rc=$?; [ "$rc" -eq 1 ] || fail "one-repo, a stage claim with no plan file must still be refused in CI (rc=$rc)"
   # 10. split-repo mode's records side, end to end through the script: the records checkout nested at the code repo's private/, the
   # kit's extractor read where it lives (a stamped plan replays; an edit to its criteria is refused), no skip scan (a records file
   # that looks like a skipped test replays), and the head tree checked with the kit laid beside it — a secret in the records head is refused
@@ -371,11 +403,12 @@ if [ "${1:-}" = "--self-test" ]; then
     && git init -q private && cd private && git config user.email t@t && git config user.name t && mkdir -p docs/plans \
     && printf '# P\n' > PLAN.md && printf '# LOG\n' > docs/LOG.md && printf '# PLAN-01\n\n## Validation and Acceptance\n\n- a\n\n## Progress\n' > docs/plans/PLAN-01-x.md \
     && git add -A . && git commit -qm 'note: init' && git rev-parse HEAD > "$d/sp-base" \
-    && printf 'PLAN-01 %s\n' "$(RATCHET_EXTRACT=../script/acceptance-extract.awk acc_hash docs/plans/PLAN-01-x.md)" > docs/plans/.acceptance-hashes \
-    && printf '# P\n| **PLAN-01** x | [x](docs/plans/PLAN-01-x.md) | in-progress (frozen) | none | 1d |\n' > PLAN.md \
-    && git add -A . && git commit -qm 'PLAN-01 / review: freeze' && printf '\n## t — PLAN-01 / 01.1\nCode: abcdef1\n' >> docs/LOG.md \
+    && mkdir -p docs/plans/PLAN-01-review && printf '### 01.1\nCode: abcdef1\n' > docs/plans/PLAN-01-review/EVIDENCE.md \
     && printf -- '- [x] 01.1\n' >> docs/plans/PLAN-01-x.md && mkdir -p Tests && printf 'XCTSkip("records hold no tests")\n' > Tests/a.swift \
-    && git add -A . && git commit -qm 'PLAN-01 / 01.1 — records' ) >/dev/null || fail "fixture: the split-repo pair"
+    && git add -A . && git commit -qm 'PLAN-01 / 01.1 — records' \
+    && printf 'PLAN-01 %s\n' "$(RATCHET_EXTRACT=../script/acceptance-extract.awk acc_hash docs/plans/PLAN-01-x.md)" > docs/plans/.acceptance-hashes \
+    && printf '# P\n| **PLAN-01** x | [x](docs/plans/PLAN-01-x.md) | complete | none | 1d |\n' > PLAN.md \
+    && git add -A . && git commit -qm 'note: PLAN-01 stamped with its row complete, as the close does' ) >/dev/null || fail "fixture: the split-repo pair"
   spb="$(cat "$d/sp-base")"
   rc=0; out="$(RATCHET_ROOT="$sp/code/private" bash "$sp/code/script/ci-replay.sh" "$spb..HEAD" 2>&1)" || rc=$?
   [ "$rc" -eq 0 ] && grep -qF 'clean' <<< "$out" || fail "a clean records range did not replay clean on the records side — a skip scan there, per commit or on the head tree, reads as the code side (rc=$rc): $out"
@@ -405,6 +438,49 @@ if [ "${1:-}" = "--self-test" ]; then
   ( cd "$mg" && git checkout -q -b one "$mgb" && git rm -rq docs PLAN.md && git -c core.hooksPath=/dev/null commit -qm 'note: drop the records' ) >/dev/null || fail "fixture: the one-repo deletion"
   rc=0; out="$(env -u RATCHET_RECORDS bash "$mg/script/ci-replay.sh" HEAD~1..HEAD 2>&1)" || rc=$?
   [ "$rc" -eq 1 ] && grep -qF 'once stamped, always stamped' <<< "$out" || fail "one-repo, deleting a stamped ledger must still be refused (rc=$rc): $out"
+  # 12. a lowered floor per commit (ratchet.sh --lower): a drop with no added reason line is refused, a docs-only commit included; the
+  # --lower line passes; a later commit that drops again under the old line is refused; a two-parent merge is judged against base +
+  # each side's change, so the lowered side merged into a raised one passes with no new line
+  lf="$d/lf"; mkdir -p "$lf/script" "$lf/docs"
+  ( cd "$lf" && git init -q . && git config user.email t@t && git config user.name t \
+    && cp "$HERE/ratchet.sh" "$HERE/acceptance-extract.awk" "$HERE/tmp-tidy.sh" "$HERE/ci-replay.sh" script/ \
+    && printf '10\n' > .test-count && printf 'a\n' > src.txt && git add -A . && git -c core.hooksPath=/dev/null commit -qm 'note: init' && git branch -q side && git symbolic-ref --short HEAD > "$d/lf-main" \
+    && printf '8\n' > .test-count && printf 'x\n' > docs/NOTE.md && git add -A . && git -c core.hooksPath=/dev/null commit -qm 'note: quiet drop' ) >/dev/null || fail "fixture: a quiet drop"
+  rc=0; out="$(bash "$lf/script/ci-replay.sh" HEAD~1..HEAD 2>&1)" || rc=$?
+  [ "$rc" -eq 1 ] && grep -qF 'drops 10 → 8 with no reason line' <<< "$out" || fail "a docs-only commit that lowered the floor with no reason line replayed clean (rc=$rc): $out"
+  ( cd "$lf" && git reset -q --hard HEAD~1 && printf '8\n# lowered 10 -> 8 2026-10-06T00:00:00Z: two tests folded into the owner table\n' > .test-count \
+    && git add -A . && git -c core.hooksPath=/dev/null commit -qm 'note: lowered' ) >/dev/null || fail "fixture: a reasoned drop"
+  rc=0; out="$(bash "$lf/script/ci-replay.sh" HEAD~1..HEAD 2>&1)" || rc=$?
+  [ "$rc" -eq 0 ] || fail "a drop with its --lower line was refused (rc=$rc): $out"
+  ( cd "$lf" && printf '7\n# lowered 10 -> 8 2026-10-06T00:00:00Z: two tests folded into the owner table\n' > .test-count \
+    && git add -A . && git -c core.hooksPath=/dev/null commit -qm 'note: again' ) >/dev/null || fail "fixture: a second drop"
+  rc=0; out="$(bash "$lf/script/ci-replay.sh" HEAD~1..HEAD 2>&1)" || rc=$?
+  [ "$rc" -eq 1 ] || fail "a second drop under the old reason line replayed clean (rc=$rc): $out"
+  ( cd "$lf" && git reset -q --hard HEAD~1 && git checkout -q side && printf '12\n' > .test-count && printf 'b\n' > src2.txt && git add -A . \
+    && git -c core.hooksPath=/dev/null commit -qm 'note: raise' && { git -c core.hooksPath=/dev/null merge -q --no-ff --no-commit "$(cat "$d/lf-main")" >/dev/null 2>&1 || :; } \
+    && [ -f .git/MERGE_HEAD ] && \
+    printf '10\n# lowered 10 -> 8 2026-10-06T00:00:00Z: two tests folded into the owner table\n' > .test-count && git add -A . \
+    && git -c core.hooksPath=/dev/null commit -qm 'note: merge master into side' ) >/dev/null || fail "fixture: the merge"
+  rc=0; out="$(bash "$lf/script/ci-replay.sh" HEAD~1..HEAD 2>&1)" || rc=$?
+  [ "$rc" -eq 0 ] || fail "a merge at the merged arithmetic (12 + 8 − 10) was refused (rc=$rc): $out"
+  ( cd "$lf" && printf '9\n' > .test-count && git add -A . && git -c core.hooksPath=/dev/null commit -q --amend -m 'note: merge master into side' ) >/dev/null || fail "fixture: the merge below"
+  rc=0; out="$(bash "$lf/script/ci-replay.sh" HEAD~1..HEAD 2>&1)" || rc=$?
+  [ "$rc" -eq 1 ] && grep -qF 'drops 10 → 9' <<< "$out" || fail "a merge below the merged arithmetic with no new line replayed clean (rc=$rc): $out"
+  # the other parent order (codex r1, v0.30): the lowered side merges the raised one. 9 keeping the side's inherited line, and the lowered
+  # file kept unchanged (no diff against the first parent at all), are refused; 10 passes
+  ( cd "$lf" && git checkout -q "$(cat "$d/lf-main")" \
+    && { git -c core.hooksPath=/dev/null merge -q --no-ff --no-commit 'side^1' >/dev/null 2>&1 || :; } && [ -f .git/MERGE_HEAD ] \
+    && printf '9\n# lowered 10 -> 8 2026-10-06T00:00:00Z: two tests folded into the owner table\n' > .test-count && git add -A . \
+    && git -c core.hooksPath=/dev/null commit -qm 'note: merge side into main' ) >/dev/null || fail "fixture: the lowered-first merge"
+  rc=0; out="$(bash "$lf/script/ci-replay.sh" HEAD~1..HEAD 2>&1)" || rc=$?
+  [ "$rc" -eq 1 ] && grep -qF 'drops 10 → 9' <<< "$out" || fail "the lowered side first: 9 under its inherited line replayed clean (rc=$rc): $out"
+  ( cd "$lf" && git checkout -q HEAD~1 -- .test-count && git add -A . && git -c core.hooksPath=/dev/null commit -q --amend -m 'note: merge side into main' ) >/dev/null || fail "fixture: the lowered file kept"
+  rc=0; out="$(bash "$lf/script/ci-replay.sh" HEAD~1..HEAD 2>&1)" || rc=$?
+  [ "$rc" -eq 1 ] && grep -qF 'drops 10 → 8' <<< "$out" || fail "the lowered side first: its 8 kept unchanged replayed clean (rc=$rc): $out"
+  ( cd "$lf" && printf '10\n# lowered 10 -> 8 2026-10-06T00:00:00Z: two tests folded into the owner table\n' > .test-count && git add -A . \
+    && git -c core.hooksPath=/dev/null commit -q --amend -m 'note: merge side into main' ) >/dev/null || fail "fixture: the lowered-first merge at 10"
+  rc=0; out="$(bash "$lf/script/ci-replay.sh" HEAD~1..HEAD 2>&1)" || rc=$?
+  [ "$rc" -eq 0 ] || fail "the lowered side first: the merged arithmetic (10) was refused (rc=$rc): $out"
   echo "SELF-TEST OK"; exit 0
 fi
 

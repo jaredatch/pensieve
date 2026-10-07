@@ -9,12 +9,14 @@
 #   1. inside a fenced code block: opened by three or more backticks or tildes at up to three spaces of indent, and
 #      closed only by a fence of the same character that is at least as long;
 #   2. inside a shell here-doc opened on an indented line (a Verify: block): <<WORD, <<'WORD', <<"WORD", <<-WORD, and
-#      every here-doc on that line in order, until the line that is exactly the pending WORD (leading tabs allowed
-#      after <<-);
+#      every here-doc on that line in order, until the pending WORD's terminator line: the WORD alone, or the opening
+#      line's own indent followed by the WORD when that line is a Markdown code line (four spaces or a tab: a Verify: block
+#      is indented, so its terminator is too), and for <<- either of those after leading tabs. A copy of the WORD indented deeper than the opener is body text and stays inside;
 #   3. a line indented four or more spaces (a Markdown code line).
 # Fence state is tracked from the top of the file, so a `## Validation and Acceptance` line inside a fence never opens
 # the section. Each rule only extends the extracted region, so a plan with none of these lines keeps its stamp byte for
-# byte.
+# byte. One exception moved stamps once, in 0.29: a here-doc closed at the opener's indent, which earlier versions left
+# open to the end of the plan. A plan stamped with that shape is refrozen when the kit is upgraded.
 function fence_open(line,    m) {                       # → the fence string (```` ``` ```` / `~~~~`) when the line opens one, else ""
   if (match(line, /^ {0,3}(`{3,}|~{3,})/)) { m = substr(line, RSTART, RLENGTH); sub(/^ */, "", m); return m }
   return ""
@@ -25,14 +27,25 @@ function fence_closes(line, open,    m, c) {             # → 1 when the line i
   c = substr(open, 1, 1)
   return (substr(m, 1, 1) == c && length(m) >= length(open))
 }
-function push_heredocs(line,    rest, m, w, d) {          # every `<<WORD` on the line, left to right, queued in order
+function push_heredocs(line,    rest, m, ind, d) {   # every `<<WORD` on the line, left to right, queued in order
+  match(line, /^[ \t]*/); ind = substr(line, 1, RLENGTH)   # the opening line's indent: its terminator's indent
+  if (ind !~ /^ {4}/ && ind !~ /^ {0,3}\t/) ind = ""       # only a Markdown code line's indent; a shallower opener closes as before
   rest = line
   while (match(rest, /<<-?[ \t]*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?/)) {
     m = substr(rest, RSTART, RLENGTH); rest = substr(rest, RSTART + RLENGTH)
     d = (substr(m, 3, 1) == "-") ? 1 : 0
     gsub(/^<<-?[ \t]*['"]?/, "", m); gsub(/['"]$/, "", m)
-    nhd++; hdw[nhd] = m; hdd[nhd] = d
+    nhd++; hdw[nhd] = m; hdd[nhd] = d; hdind[nhd] = ind
   }
+}
+function heredoc_ends(line, k,    n) {                  # → 1 when `line` terminates queued here-doc k
+  n = length(hdind[k])
+  if (n > 0 && substr(line, 1, n) == hdind[k] && heredoc_word(substr(line, n + 1), k)) return 1
+  return heredoc_word(line, k)
+}
+function heredoc_word(t, k) {                           # → 1 when t is the WORD (for <<-, after leading tabs)
+  if (hdd[k]) sub(/^\t+/, "", t)
+  return (t == hdw[k])
 }
 {
   if (fence != "") {                                     # inside a fence (before or inside the section): content until it closes
@@ -42,8 +55,7 @@ function push_heredocs(line,    rest, m, w, d) {          # every `<<WORD` on th
   }
   if (f && hdi <= nhd) {                                 # inside a here-doc body: content until the pending terminator
     print
-    line = $0; if (hdd[hdi]) sub(/^\t+/, "", line)
-    if (line == hdw[hdi]) hdi++
+    if (heredoc_ends($0, hdi)) hdi++
     next
   }
   if (!f && $0 ~ /^## Validation and Acceptance/) { f = 1; nhd = 0; hdi = 1; next }   # the section starts (heading not hashed)

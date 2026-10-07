@@ -12,22 +12,35 @@
 #                                  secret, a tmp/ cite from a plan that isn't in flight (on a merge, only a cite new against
 #                                  every parent), a frozen acceptance section whose hash no longer matches, a change the
 #                                  project's own check refuses (RATCHET_PROJECT_CHECK), a file still holding conflict markers
-#                                  (an opening `<<<<<<<` and a closing `>>>>>>>` line both added), and a test count below the floor. The
-#                                  count floor runs last; a docs-only diff skips it.
-#   ratchet.sh --commit-msg FILE   commit-msg: a stage commit carries the LOG and the plan file; LOG growth needs a subject
+#                                  (an opening `<<<<<<<` and a closing `>>>>>>>` line both added), a staged briefing that fails
+#                                  briefing-lint.sh (when the commit touches CLAUDE.md, AGENTS.md or docs/CHECKLISTS.md, and the lint
+#                                  sits beside this script), a floor lowered with no reason line (--lower, below), and a test count
+#                                  below the floor. The count floor runs last; a docs-only diff skips it. A green suite run it makes
+#                                  is recorded as --recount's is, so a retry after a later refusal doesn't run it again. The staged
+#                                  diff is read with --no-renames, as CI's diff-tree reads a commit.
+#   ratchet.sh --commit-msg FILE   commit-msg: a stage commit carries the plan file; LOG growth needs a subject
 #                                  form (`PLAN-NN / review|close|patch|refreeze|fix`, the word ending at a non-alphanumeric,
 #                                  or a subject opening `note:`); a close carries the tidied workspace (a merge of a branch
 #                                  that already ran its own close is judged on the tracked half only); a changed stamp needs
 #                                  the refreeze form and its amends line; a builder commit (a stage claim, fix or patch)
 #                                  leaves an unstamped plan's Validation and Acceptance alone.
+#   ratchet.sh --pre-push REMOTE   pre-push, after its own gates: RATCHET_PROJECT_CHECK over every commit the push adds (git's
+#                                  pre-push lines on stdin), each against its first parent as ci-replay.sh reads it. git am,
+#                                  cherry-pick and rebase make commits that never met pre-commit.
 #   ratchet.sh --cite-check PLAN   the tmp/ cite check alone. stdin: a unified diff (-U0 --no-prefix); PLAN: the PLAN.md
 #                                  to read statuses from.
 #   ratchet.sh --recount           run the suite once (output streamed), raise the floor to the new count (never lower), and
 #                                  record the green run so the next commit's hook reuses it when the index holds exactly
-#                                  the tested code. This is the stage-close ritual's one suite run, and the integration
+#                                  the tested code. The count file's reason lines stay. This is the stage-close ritual's one suite run, and the integration
 #                                  merge's run on the merged tree. Inside a merge the floor is computed, base + (ours −
 #                                  base) + (theirs − base), from each side's committed count file, so a side that removed
 #                                  tests on purpose settles right and a conflicted .test-count needs no hand edit.
+#   ratchet.sh --lower N --reason TEXT   lower the floor on purpose (tests removed or folded, each contract still owned by a
+#                                  keeper): writes N and appends `# lowered <old> -> N <UTC>: TEXT` to the count file. <old> is
+#                                  HEAD's floor, or inside a merge the merged arithmetic. A commit whose floor drops below its
+#                                  parent's (a two-parent merge: below base + each side's change, touched or not) passes only
+#                                  with such a line new against every parent (the hook and CI, docs-only commits included).
+#                                  Inside a merge, --recount honors the merge's own line.
 #   ratchet.sh --merge-log B A T   git's merge driver for the LOG (install-hooks.sh wires it): both sides' entries, newest
 #                                  first, each once. An entry-shaped `## <timestamp>` line inside a code fence is an example,
 #                                  never a boundary. A LOG that isn't append-only on both sides, or that leaves a fence open,
@@ -46,12 +59,17 @@
 #                                                 refreeze checks are off, because an inline plan is never stamped.
 #   RATCHET_HASHES           $PLANS_DIR/.acceptance-hashes   the freeze ledger; RATCHET_AMENDS is its refreeze ledger
 #   RATCHET_TEST_CMD         ./script/test.sh     prints `<PROJECT>_TEST_COUNT=<n>` as its last line
-#   RATCHET_TEST_COUNT_FILE  .test-count          the committed floor
+#   RATCHET_TEST_COUNT_FILE  .test-count          the committed floor: one integer line, then any `# lowered …` reason lines
+#   RATCHET_SUITE_LOGS_KEEP  5                    a failed suite run's output is kept in <git common dir>/ratchet-logs/,
+#                                                 the newest this many
 #   RATCHET_TEST_PATH_REGEX  Tests/|Tests\.swift$ which staged paths are test files
 #   RATCHET_SKIP_REGEX       (Swift: XCTSkip / .disabled / @Test(.disabled))   an added line that skips a test
 #   RATCHET_ALLOWLIST        docs/test-allowlist.md   test names allowed to skip
 #   RATCHET_SECRET_FILE_REGEX / RATCHET_SECRET_REGEX  secret file names and added-line patterns. A fixture line that must
-#                                                 carry a fake key ends with `ratchet:allow-secret`.
+#                                                 carry a fake key ends with `ratchet:allow-secret`. An AWS key id is bounded:
+#                                                 a letter, digit, + or / beside it reads as base64 data, not a key. The
+#                                                 token prefixes (sk-, ghp_, github_pat_, xox, AIza) are bounded on the left
+#                                                 the same way, and by _ and -, so `cask-…` or `task-…` is a word, not a key.
 #   RATCHET_RESUME_NOTE      tmp/resume-note.md   the one tmp/ path outside a plan's folder that a doc may cite
 #   RATCHET_EXTRACT / RATCHET_TMP_TIDY            the extractor and tmp-tidy (default: beside this script)
 #   RATCHET_PROJECT_CHECK    (empty)              a project's own check over the change's diff (the contract below). One-repo
@@ -74,11 +92,11 @@
 #   rule                                     one-repo   code side   records side
 #   skip scan, project check, count floor    on         on          off — no suite
 #   secrets, tmp/ cites, LOG growth's form   on         on (a)      on
-#   stage claim's LOG + plan file            on         off (b)     on
+#   stage claim's plan file                  on         off (b)     on
 #   hashes, refreeze trace, criteria         on         off (c)     on (d)
 #   close ritual                             on         off (e)     on, plus the pairing (f)
 #   (a) no PLAN.md here, so every tmp/PLAN-NN cite is refused: code-side docs never cite the records' scratch
-#   (b) the LOG entry and the plan file are the records repo's commit for the Stage, paired at the close
+#   (b) the plan file and its evidence entry are the records repo's commit for the Stage, paired at the close
 #   (c) the LOG, the ledgers and the plans are the records repo's: a ledger file in the code repo (or its deletion, when a one-repo
 #       project moves its records out) is no freeze record, in the hook and in ci-replay alike
 #   (d) the extractor is the code repo's kit's file on disk, read where it lives: the records repo's index can't hold it, so an
@@ -88,10 +106,13 @@
 #   (f) the on-disk half finds tmp/PLAN-NN in the code repo and archive/ in the records repo. The pairing: every commit in the
 #       code repo's HEAD history whose SUBJECT builder_claim reads as this plan's `NN.X`, `fix` or `patch` (anywhere in the subject,
 #       as the hooks read it) is named by a line starting `Code: <sha>` (tokens of 7-40 hex, space- or comma-separated, each a prefix
-#       of a sha) in the staged LOG or its rotated months (<LOG's dir>/log/*.md). No exemption: a plan never straddles the split.
+#       of a sha) in the staged LOG, its rotated months (<LOG's dir>/log/*.md) or the plan's evidence file
+#       (<plans dir>/PLAN-NN-review/EVIDENCE.md). No exemption: a plan never straddles the split.
 # RATCHET_PROJECT_CHECK's contract: a shell command (sh -c), run from the code repo's top with the change's unified diff
-# (-U0 --no-prefix) on stdin — the staged diff in the hook, each commit against its first parent (a root commit against the
-# empty tree) in ci-replay.sh. Exit 0 passes, 1 refuses the commit, anything else is a tool failure (the ratchet exits 2).
+# (-U0 --no-prefix, renames as a delete and an add) on stdin — the staged diff in pre-commit, each commit against its first parent
+# (a root commit against the empty tree) in pre-push and ci-replay.sh. RATCHET_CHECK_COMMIT names that commit, and is empty for
+# the staged diff. It runs under the caller's locale. Exit 0 passes, 1 refuses the commit (or the push), anything else is a tool
+# failure (the ratchet exits 2).
 #
 # Shell rules: bash 3.2 and BSD tools. `set -eu`, never pipefail (a `grep -q` closing a pipeline early would SIGPIPE the
 # writer into a false failure). A grep whose no-match is fine carries `|| true` on the grep alone, never on a pipeline that
@@ -116,7 +137,7 @@ RATCHET_TEST_CMD_FROM_CONF=""; [ "${RATCHET_TEST_CMD-}" = "$RATCHET_TEST_CMD_PRE
 [ -n "${RATCHET_SKIP_REGEX:-}" ]        || RATCHET_SKIP_REGEX='XCTSkip(If|Unless)?\(|\.disabled\(|@Test\([^)]*\.disabled'
 : "${RATCHET_ALLOWLIST:=docs/test-allowlist.md}"
 [ -n "${RATCHET_SECRET_FILE_REGEX:-}" ] || RATCHET_SECRET_FILE_REGEX='\.(p8|p12|pem|key|cer|mobileprovision|provisionprofile)$|(^|/)\.env(\.[A-Za-z0-9_-]+)?$|(^|/)id_(rsa|ed25519|ecdsa)$'
-[ -n "${RATCHET_SECRET_REGEX:-}" ]      || RATCHET_SECRET_REGEX='-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|sk-[A-Za-z0-9_-]{20,}|xox[abpr]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}'
+[ -n "${RATCHET_SECRET_REGEX:-}" ]      || RATCHET_SECRET_REGEX='-----BEGIN [A-Z ]*PRIVATE KEY-----|(^|[^A-Za-z0-9+/])AKIA[0-9A-Z]{16}([^A-Za-z0-9+/]|$)|(^|[^A-Za-z0-9+/_-])(ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|sk-[A-Za-z0-9_-]{20,}|xox[abpr]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35})'
 : "${RATCHET_RESUME_NOTE:=tmp/resume-note.md}"
 : "${RATCHET_EXTRACT:=$RATCHET_DIR/acceptance-extract.awk}"
 : "${RATCHET_TMP_TIDY:=$RATCHET_DIR/tmp-tidy.sh}"
@@ -124,6 +145,19 @@ RATCHET_TEST_CMD_FROM_CONF=""; [ "${RATCHET_TEST_CMD-}" = "$RATCHET_TEST_CMD_PRE
 : "${RATCHET_PROJECT_CHECK=}"    # a project's own check over the change's diff; empty = none
 RATCHET_SIDE="one"; RATCHET_CODE_ROOT=""; RATCHET_RECORDS_ROOT=""   # set by ratchet_roots after the cd (library callers call it themselves)
 TAB="$(printf '\t')"
+# A diff is bytes, not text. Under a UTF-8 locale a non-UTF-8 line crashes awk (`towc: multibyte conversion failure`) and makes
+# grep miss a match on it, so the kit's own tools run under the C locale. The project's commands (the check, the suite, the
+# briefing lint) get the caller's locale back through caller_locale.
+if [ -z "${RATCHET_CALLER_LOCALE_SAVED:-}" ]; then   # saved once: a nested run (a hook inside a suite the ratchet started) keeps the first caller's
+  export RATCHET_CALLER_LC_ALL="${LC_ALL-}" RATCHET_CALLER_LC_ALL_SET="${LC_ALL+1}" RATCHET_CALLER_LOCALE_SAVED=1
+fi
+export LC_ALL=C
+mktemp() {   # mktemp / mktemp -d with no template, under $TMPDIR: macOS's own ignores TMPDIR (it reads _CS_DARWIN_USER_TEMP_DIR), so a
+  # session's per-plan TMPDIR (the launcher's) would never see the kit's temp files. A TMPDIR that isn't a writable folder falls back to /tmp
+  local t="${TMPDIR:-}"; { [ -n "$t" ] && [ -d "$t" ] && [ -w "$t" ]; } || t=/tmp
+  case "$#:${1:-}" in 0:|1:-d) command mktemp "$@" "${t%/}/xp.XXXXXXXX" ;; *) command mktemp "$@" ;; esac
+}
+caller_locale() { if [ -n "${RATCHET_CALLER_LC_ALL_SET:-}" ]; then LC_ALL="${RATCHET_CALLER_LC_ALL-}" "$@"; else env -u LC_ALL "$@"; fi; }
 for re in "$RATCHET_TEST_PATH_REGEX" "$RATCHET_SKIP_REGEX" "$RATCHET_SECRET_FILE_REGEX" "$RATCHET_SECRET_REGEX"; do   # a regex that does not compile would
   rc=0; printf '' | grep -E -e "$re" >/dev/null 2>&1 || rc=$?
   [ "$rc" -le 1 ] || { echo "ratchet: a configured regex does not compile: $re" >&2; exit 2; }   # read as "no match" = clean: fail loud instead
@@ -163,7 +197,7 @@ check_acceptance_hashes() {
     content="${content%x}"   # the sentinel keeps the file's exact trailing bytes (a section that ends the file keeps its blank lines)
     cur="$(printf '%s' "$content" | acc_hash_stdin)" || { echo "ratchet: hashing $plan failed (extractor or shasum error) — refusing to read that as a pass"; return 1; }
     [ -n "$cur" ] || { echo "ratchet: $plan extracts an EMPTY acceptance section (the section heading is missing or misspelled)"; return 1; }
-    [ "$cur" = "$hash" ] || { echo "ratchet: acceptance hash mismatch for $plan (the frozen section changed; a sanctioned change goes through refreeze.sh --reason)"; return 1; }
+    [ "$cur" = "$hash" ] || { echo "ratchet: acceptance hash mismatch for $plan (the stamped section changed: a closed plan's criteria are never edited; only an extractor change re-stamps, through refreeze.sh --reason)"; return 1; }
   done
   return 0
 }
@@ -196,7 +230,8 @@ ledger_rows() {   # stdin = a ledger → `PLAN-NN digest` per row, whitespace-no
 # refreeze_trace_ok SUBJECT OLD_LEDGER NEW_LEDGER AMENDS_ADDED PLANMD_STAGED — the two ledger CONTENTS (the parent's and the
 # staged/committed one), not diff lines, so a reformatted or deleted row cannot hide: a stamp that disappears is refused
 # (once stamped, always stamped); a stamp whose digest changed needs the `PLAN-NN / refreeze` form in the SUBJECT and a
-# new amends line for that plan; a stamp that appears (the freeze) needs PLAN.md in the same commit (the flip).
+# new amends line for that plan; a stamp that appears (the freeze, which is the close's stamp) needs PLAN.md in the same commit
+# (the flip to `complete`).
 refreeze_trace_ok() {
   local subject="$1" old="$2" new="$3" ad="$4" planstaged="$5" plan od nd row
   old="$(ledger_rows <<< "$old")" || return 1; new="$(ledger_rows <<< "$new")" || return 1
@@ -209,7 +244,7 @@ refreeze_trace_ok() {
     [ -n "$nd" ] || { echo "ratchet: $plan's stamp is gone from $RATCHET_HASHES — once stamped, always stamped (history stays guarded through complete)"; return 1; }
     [ "$nd" = "$od" ] && continue
     printf '%s\n' "$subject" | grep -qE "$plan / refreeze([^A-Za-z0-9]|\$)" \
-      || { echo "ratchet: $plan's frozen hash changed with no '$plan / refreeze' in the commit SUBJECT (a sanctioned re-stamp is refreeze.sh $plan --reason …; the subject form is the trace)"; return 1; }
+      || { echo "ratchet: $plan's frozen hash changed with no '$plan / refreeze' in the commit SUBJECT (a re-stamp after an extractor change is refreeze.sh $plan --reason …; the subject form is the trace)"; return 1; }
     printf '%s\n' "$ad" | grep -qE "(^|[[:space:]])$plan([[:space:]]|\$)" \
       || { echo "ratchet: $plan's frozen hash changed with no new line for it in $RATCHET_AMENDS (refreeze.sh writes it; stage both ledgers)"; return 1; }
   done
@@ -219,7 +254,7 @@ refreeze_trace_ok() {
     [ -n "$plan" ] || continue
     printf '%s\n' "$old" | grep -qE "^$plan " && continue
     [ "$planstaged" = 1 ] \
-      || { echo "ratchet: $plan gains its first stamp but PLAN.md is not in the commit (the freeze flips the row and stamps in ONE commit)"; return 1; }
+      || { echo "ratchet: $plan gains its first stamp but PLAN.md is not in the commit (the close stamps and flips the row to complete in ONE commit)"; return 1; }
   done
   return 0
 }
@@ -324,24 +359,27 @@ is_docs_only() {   # $1 = newline-separated staged file list; 0 iff NON-empty an
 suite_count() {   # [show] — runs $RATCHET_TEST_CMD (output captured, then read) → sets SUITE_COUNT to the LAST `<PROJECT>_TEST_COUNT=<n>` marker;
   # `show` streams the output to the terminal as it runs (--recount: the ritual's one run is the builder's view of the suite), the
   # command's own status kept through the pipe by a status file. 1 when the capture file cannot be made, the suite fails (its output
-  # kept at the named path), the marker read fails (same), or no marker — the one reader the floor and --recount share
+  # kept at the named path: suite_log_keep's ratchet-logs/ under the git dir, the newest few), the marker read fails (same), or no
+  # marker — the one reader the floor and --recount share
   local out marks st rc
   out="$(mktemp)" || { echo "ratchet: mktemp failed (exit $?) — the suite's output cannot be captured, so no count is read"; return 1; }   # checked: this function runs in `||` contexts where set -e does not, and a mktemp that printed a path before failing once read as a count
   if [ "${1:-}" = show ]; then
     st="$(mktemp)" || { echo "ratchet: mktemp failed (exit $?) — the suite's status cannot be kept"; return 1; }
-    { $RATCHET_TEST_CMD 2>&1; echo "$?" > "$st"; } | tee "$out" || { echo "ratchet: tee failed (exit $?) — the suite's output was not captured (output so far in $out)"; rm -f "$st"; return 1; }
+    { caller_locale $RATCHET_TEST_CMD 2>&1; echo "$?" > "$st"; } | tee "$out" || { echo "ratchet: tee failed (exit $?) — the suite's output was not captured (output so far in $out)"; rm -f "$st"; return 1; }
     rc="$(cat "$st")" || { echo "ratchet: the suite's status could not be read (cat exit $?)"; rm -f "$st"; return 1; }
     rm -f "$st"
-    [ "$rc" = 0 ] || { echo "ratchet: test suite failed ($RATCHET_TEST_CMD, exit ${rc:-unknown}; output in $out)"; return 1; }
+    [ "$rc" = 0 ] || { echo "ratchet: test suite failed ($RATCHET_TEST_CMD, exit ${rc:-unknown}; output in $(suite_log_keep "$out"))"; return 1; }
   else
-    $RATCHET_TEST_CMD > "$out" 2>&1 || { echo "ratchet: test suite failed ($RATCHET_TEST_CMD; output in $out)"; return 1; }
+    caller_locale $RATCHET_TEST_CMD > "$out" 2>&1 || { echo "ratchet: test suite failed ($RATCHET_TEST_CMD; output in $(suite_log_keep "$out"))"; return 1; }
   fi
-  marks="$(sed -n 's/^[A-Z_]*TEST_COUNT=//p' "$out")" || { echo "ratchet: reading the marker from $RATCHET_TEST_CMD's output failed (sed exit $?; output in $out) — refusing to read that as a count"; return 1; }   # captured, then checked: a `sed | tail` dropped sed's status
+  marks="$(sed -n 's/^[A-Z_]*TEST_COUNT=//p' "$out")" || { echo "ratchet: reading the marker from $RATCHET_TEST_CMD's output failed (sed exit $?; output in $(suite_log_keep "$out")) — refusing to read that as a count"; return 1; }   # captured, then checked: a `sed | tail` dropped sed's status
   rm -f "$out"
   SUITE_COUNT="${marks##*$'\n'}"   # the last marker, by expansion over the captured value
   [ -n "${SUITE_COUNT:-}" ] || { echo "ratchet: $RATCHET_TEST_CMD printed no <PROJECT>_TEST_COUNT=<n> marker — the wrapper contract (the module) is broken, so the floor cannot be read"; return 1; }
 }
-suite_count_staged() {   # runs the suite on the INDEX's content in a throwaway detached worktree → sets SUITE_COUNT; 1 on any failure.
+suite_count_staged() {   # [$1 = the index's code fingerprint] runs the suite on the INDEX's content in a throwaway detached worktree → sets
+  # SUITE_COUNT, and SUITE_STAGED_SAME=1 when, after the run, the worktree's code (and its submodules) still reads as $1 — the only case a caller
+  # may record the run under $1 (a suite that writes a tracked file, or an untracked one git doesn't ignore, leaves 0); 1 on any failure.
   # For a commit whose working tree holds code the index leaves out (a partial staging, work-in-progress): the suite in place would
   # count the working tree, not the commit. The whole worktree lifecycle runs in ONE subshell whose EXIT/INT/TERM traps remove it on
   # every path — a failing suite, Ctrl-C, a TERM — (`git worktree remove --force`, then the directory, then `git worktree prune`), the
@@ -350,7 +388,7 @@ suite_count_staged() {   # runs the suite on the INDEX's content in a throwaway 
   # environment's value, then that checkout's own ratchet.conf, then the default — never the working tree's conf. Submodules are
   # initialized at their staged revisions (a failure refuses). A fresh worktree is a fresh build — slower — and holds only tracked
   # files; the test command runs from its root, so it must be repo-relative (the module's wrapper is)
-  local tree commit out rc=0 listing gl confrel root
+  local tree commit out rc=0 listing gl confrel root expect="${1:-}"
   tree="$(git write-tree)" || { echo "ratchet: git write-tree failed (exit $?) — the staged tree cannot be tested"; return 1; }
   [ -n "$tree" ] || { echo "ratchet: git write-tree printed no tree — the staged tree cannot be tested"; return 1; }
   commit="$(GIT_AUTHOR_NAME=ratchet GIT_AUTHOR_EMAIL=ratchet@localhost GIT_COMMITTER_NAME=ratchet GIT_COMMITTER_EMAIL=ratchet@localhost \
@@ -387,14 +425,19 @@ suite_count_staged() {   # runs the suite on the INDEX's content in a throwaway 
     fi
     cd "$wt" || { echo "ratchet: cd into the test worktree failed" >&2; exit 1; }
     unset GIT_DIR
+    fpcmd="$RATCHET_TEST_CMD"   # the command the fingerprint of the caller names (no apostrophe: bash 3.2 misreads one in a comment inside $( ))
     [ -z "$RATCHET_TEST_CMD_FROM_CONF" ] || RATCHET_TEST_CMD="$RATCHET_TEST_CMD_PRECONF"   # drop the value the WORKING conf set
     if [ -f "$confrel" ]; then . "./$confrel" || { echo "ratchet: sourcing the staged $confrel failed" >&2; exit 1; }; fi
     [ -n "${RATCHET_TEST_CMD:-}" ] || RATCHET_TEST_CMD=./script/test.sh
     suite_count >&2 || exit 1
-    printf '%s\n' "$SUITE_COUNT"
+    same=0
+    if [ -n "$expect" ]; then
+      f2="$(RATCHET_TEST_CMD="$fpcmd" code_fingerprint)" && [ "$f2" = "$expect" ] && submodules_clean && same=1
+    fi
+    printf '%s %s\n' "$SUITE_COUNT" "$same"
   )" || rc=$?
   [ "$rc" -eq 0 ] || return 1
-  SUITE_COUNT="$out"
+  SUITE_COUNT="${out%% *}"; SUITE_STAGED_SAME="${out#* }"
   case "$SUITE_COUNT" in ''|*[!0-9]*) echo "ratchet: the staged-tree run returned no count"; return 1 ;; esac
 }
 submodules_clean() {   # → 0 when the index holds no submodule, or every one is initialized, at its recorded commit, with no local
@@ -412,8 +455,9 @@ submodules_clean() {   # → 0 when the index holds no submodule, or every one i
   return 0
 }
 # ---------- the suite-run record: one suite run per stage commit ----------
-# `--recount` (the ritual's one run) records `<fingerprint> <count>` on green; the pre-commit floor reuses it when the COMMIT's code is
-# the code that was tested, instead of running the same suite on the same tree a second time.
+# `--recount` (the ritual's one run) records `<fingerprint> <count>` on green, and so does the hook's own green run (count_floor: in
+# place, when the code is still the index's after it; on the staged tree, under the index's fingerprint); the pre-commit floor reuses it
+# when the COMMIT's code is the code that was tested, instead of running the same suite on the same tree a second time.
 # Two readings of one fingerprint — the CODE: every entry minus the record files the ritual writes AFTER the run
 # (is_record_path: the LOG, the plan files and review dirs, PLAN.md, the count file), so the LOG entry, the plan's Progress, and the
 # floor bump don't invalidate it. Deliberately narrower than the docs-only skip's is_docs_path: any other markdown — a root README a
@@ -459,24 +503,28 @@ code_fingerprint() {   # [index] → a hash of the code content (see above): the
   [ -n "$fp" ] || return 2
   printf '%s\n' "$fp"
 }
-recorded_count() {   # $1 = the current fingerprint → the recorded count when the record matches it; exit 1 when there is no usable
-  # record (absent, stale, or malformed — a malformed record is never a pass); 2 on a tool error
-  local rp rec fp n
+recorded_count() {   # $1 = the current fingerprint → the count of the newest record line that matches it; exit 1 when no line does
+  # (absent, stale, or malformed — a malformed line is never a pass, only skipped); 2 on a tool error
+  local rp rec line fp n hit=""
   rp="$(suite_record_path)" || return 2
   [ -f "$rp" ] || return 1
   rec="$(cat "$rp")" || return 2
-  fp="${rec%% *}"; n="${rec#* }"
-  case "$fp" in ''|*[!0-9a-f]*) return 1 ;; esac
-  case "$n" in ''|*[!0-9]*) return 1 ;; esac
-  [ "${#n}" -le 18 ] || return 1
-  [ "$fp" = "$1" ] || return 1
-  printf '%s\n' "$n"
+  lines_of "$rec"
+  for line in ${LINES_OF[@]+"${LINES_OF[@]}"}; do
+    fp="${line%% *}"; n="${line#* }"
+    case "$fp" in ''|*[!0-9a-f]*) continue ;; esac
+    case "$n" in ''|*[!0-9]*) continue ;; esac
+    [ "${#n}" -le 18 ] || continue
+    [ "$fp" = "$1" ] && hit="$n"
+  done
+  [ -n "$hit" ] || return 1
+  printf '%s\n' "$hit"
 }
 count_floor() {   # $1 = staged file list; docs-only → skip; else read the floor, then the count — from the suite-run record when it
   # matches the COMMITTED code (--recount ran the suite on exactly the code this index holds), else by running the suite — and compare
   # it against the floor: the higher of the index's copy (what the commit carries) and the working file's, each read checked
   if is_docs_only "$1"; then echo "ratchet: docs-only staged diff — skipping count floor"; return 0; fi
-  local have want staged fp rc fprc wfp wrc src
+  local have want staged fp rc fprc wfp wrc src sfp
   want="$(floor_read)" || return 1   # the one floor reader (absent file → 0; a read that fails or a malformed line → a refusal, before the suite runs) — a `cat … || echo 0` here read every failed read as floor 0, and a count of 9 passed it
   staged="$(floor_read_staged)" || return 1   # the floor the commit carries: a working file edited below the staged one never loosens the check
   [ "$staged" -le "$want" ] || want="$staged"
@@ -484,7 +532,7 @@ count_floor() {   # $1 = staged file list; docs-only → skip; else read the flo
   if [ "$fprc" -ne 0 ]; then echo "ratchet: the code fingerprint failed — the suite-run record is not read; running the suite"
   else rc=0; have="$(recorded_count "$fp")" || rc=$?
        case "$rc" in
-         0) echo "ratchet: the suite ran on exactly the code this commit holds (script/ratchet.sh --recount, count $have) — not re-run" ;;
+         0) echo "ratchet: the suite ran on exactly the code this commit holds (a recorded green run: --recount, or this hook's own; count $have) — not re-run" ;;
          1) have="" ;;
          *) have=""; echo "ratchet: reading the suite-run record failed — running the suite" ;;
        esac
@@ -492,11 +540,23 @@ count_floor() {   # $1 = staged file list; docs-only → skip; else read the flo
   if [ -z "$have" ]; then   # the suite runs — on the working tree only when its code IS the index's (else on the staged tree, in a throwaway worktree)
     wrc=0; wfp="$(code_fingerprint)" || wrc=$?
     src=0; submodules_clean || src=$?   # a dirty submodule is invisible to both fingerprints: its run in place would not be the commit's
-    if [ "$fprc" -eq 0 ] && [ "$wrc" -eq 0 ] && [ "$wfp" = "$fp" ] && [ "$src" -eq 0 ]; then suite_count || return 1
-    else suite_count_staged || return 1; fi
+    if [ "$fprc" -eq 0 ] && [ "$wrc" -eq 0 ] && [ "$wfp" = "$fp" ] && [ "$src" -eq 0 ]; then
+      suite_count || return 1
+      # a green run records itself, as --recount's does, so a commit a later check refuses (its message, a cite) doesn't run the suite again
+      # on retry: only when the working tree's code is still the index's after the run (an edit made while it ran was never tested)
+      wrc=0; wfp="$(code_fingerprint)" || wrc=$?; src=0; submodules_clean || src=$?
+      if [ "$wrc" -eq 0 ] && [ "$wfp" = "$fp" ] && [ "$src" -eq 0 ]; then suite_record "$fp" "$SUITE_COUNT"
+      else echo "ratchet: the code changed while the suite ran — the run is not recorded"; fi
+    else
+      sfp=""; [ "$fprc" -ne 0 ] || sfp="$fp"
+      suite_count_staged "$sfp" || return 1
+      # the staged tree IS the index's code (its conf included): recorded under the index's fingerprint, when it still reads so after the run
+      if [ "$SUITE_STAGED_SAME" = 1 ]; then suite_record "$fp" "$SUITE_COUNT"
+      elif [ "$fprc" -eq 0 ]; then echo "ratchet: the staged tree's code (or a submodule) changed while the suite ran — the run is not recorded"; fi
+    fi
     have="$SUITE_COUNT"
   fi
-  [ "$have" -ge "$want" ] || { echo "ratchet: test count $have < floor $want (bump $RATCHET_TEST_COUNT_FILE only in the commit that adds tests)"; return 1; }
+  [ "$have" -ge "$want" ] || { echo "ratchet: test count $have < floor $want (bump $RATCHET_TEST_COUNT_FILE only in the commit that adds tests; tests removed on purpose, their contracts kept by others: script/ratchet.sh --lower $have --reason \"<why>\")"; return 1; }
 }
 floor_read() {   # → the committed floor: $RATCHET_TEST_COUNT_FILE's integer line; 0 when the file is absent; a file a merge left in
   # CONFLICT holds both sides' floors between its markers and reads as the HIGHER (a recount may not go below either side); a file
@@ -527,6 +587,128 @@ floor_parse() {   # stdin = a count file's content → its floor, by the rules a
     case "$rc" in 0) max="$n" ;; 1) ;; *) echo "ratchet: comparing the floor lines $n and $max failed ([ exit $rc) — the floor cannot be read" >&2; return 1 ;; esac
   done
   printf '%s\n' "$max"
+}
+# ---------- lowering the floor on purpose (verification.md § The test ratchet) ----------
+# A removed or folded test whose contract a keeper still owns lowers the floor through `--lower <n> --reason "<text>"`, which writes the
+# new floor and appends a reason line to the count file: `# lowered <old> -> <n> <UTC>: <text>`. floor_parse reads only the integer
+# line, so reason lines are history. A commit whose floor is below the one it is compared with (the parent's; in a two-parent merge,
+# the merged arithmetic, judged whether or not the merge touches the count file) passes only when it holds a reason line from that floor
+# down to at most its own that is new against EVERY parent — a line a merge carries in from a side is that side's — on every commit, a
+# docs-only one too, in the hook and in CI's replay alike (one decision: floor_drop_ok). Deleting the count file is a drop to 0, and
+# `--lower 0` is its form. Inside a merge, --recount accepts a count below the arithmetic only by the merge's own line.
+floor_write() {   # $1 = the floor, $2 = a reason line to append (optional) → writes $RATCHET_TEST_COUNT_FILE: the floor, then every
+  # `# ` line the file already holds (each once, in order — a merge's two sides both kept; conflict markers dropped), then $2; 1 on a failure
+  local body keep=""
+  if [ -f "$RATCHET_TEST_COUNT_FILE" ]; then
+    body="$(cat "$RATCHET_TEST_COUNT_FILE")" || { echo "ratchet: reading $RATCHET_TEST_COUNT_FILE failed — the floor is not written"; return 1; }
+    keep="$(grep_hits '^# ' <<< "$body")" || return 1
+  fi
+  [ -z "${2:-}" ] || keep="$keep${keep:+$'\n'}$2"
+  if [ -n "$keep" ]; then keep="$(awk '!seen[$0]++' <<< "$keep")" || { echo "ratchet: awk failed — the floor is not written"; return 1; }; fi
+  { printf '%s\n' "$1"; [ -z "$keep" ] || printf '%s\n' "$keep"; } > "$RATCHET_TEST_COUNT_FILE" || { echo "ratchet: writing $RATCHET_TEST_COUNT_FILE failed"; return 1; }
+}
+lowered_ok() {   # $1 = the floor compared with, $2 = the commit's floor, $3 = the count file's ADDED lines → 0 when $2 ≥ $1, or when an added
+  # line reads `# lowered <$1> -> <m> <timestamp>: <reason>` with m ≤ $2 and a reason that isn't blank; 1 (named, with the command) otherwise
+  local ref="$1" new="$2" l old m
+  [ "$new" -lt "$ref" ] || return 0
+  lines_of "$3"
+  for l in ${LINES_OF[@]+"${LINES_OF[@]}"}; do
+    set -f; set -- $l; set +f   # the words: `#` `lowered` <old> `->` <m> <timestamp>: <reason…>
+    [ "$#" -ge 7 ] && [ "$1 $2 $4" = "# lowered ->" ] || continue
+    old="$3"; m="$5"
+    case "$old$m" in ''|*[!0-9]*) continue ;; esac
+    case "$6" in *:) ;; *) continue ;; esac
+    [ "${#old}" -le 18 ] && [ "${#m}" -le 18 ] || continue
+    old="${old#"${old%%[!0]*}"}"; [ -n "$old" ] || old=0; m="${m#"${m%%[!0]*}"}"; [ -n "$m" ] || m=0
+    [ "$old" -eq "$ref" ] && [ "$m" -le "$new" ] && return 0
+  done
+  echo "ratchet: the test floor drops $ref → $new with no reason line — removing or folding a test whose contract a keeper still owns is allowed, through: script/ratchet.sh --lower $new --reason \"<which tests went, and what still owns their contracts>\" (verification.md § The test ratchet)"
+  return 1
+}
+fresh_reasons() {   # $1 = a count file's content, $2… = each parent's → its `# lowered` lines that NO parent holds, one per line: a line a
+  # merge carries in from a side is that side's, never this commit's; 2 on a tool error
+  local cand l p out="" hit
+  cand="$(grep_hits '^# lowered ' <<< "$1")" || return 2
+  shift
+  lines_of "$cand"
+  for l in ${LINES_OF[@]+"${LINES_OF[@]}"}; do
+    hit=0
+    for p in "$@"; do case $'\n'"$p"$'\n' in *$'\n'"$l"$'\n'*) hit=1; break ;; esac; done
+    [ "$hit" -eq 1 ] || out="$out$l"$'\n'
+  done
+  printf '%s' "$out"
+}
+floor_drop_ok() {   # THE decision, the hook's and CI's: $1 = the commit's floor, $2 = the floor it is compared with (floor_ref_of), $3 = its count
+  # file's content, $4… = each parent's → lowered_ok with only the reason lines new against EVERY parent; 1 refused (named), 2 a tool error
+  local new="$1" ref="$2" content="$3" fresh
+  shift 3
+  [ "$new" -lt "$ref" ] || return 0
+  fresh="$(fresh_reasons "$content" "$@")" || return 2
+  lowered_ok "$ref" "$new" "$fresh"
+}
+floor_ref_of() {   # $@ = a commit's parents (none: a root commit) → the floor it is compared with: 0 for a root; in a two-parent merge the merged
+  # arithmetic, base + (ours − base) + (theirs − base); else the first parent's floor (an octopus: the strict reading); 2 on a failure
+  case "$#" in
+    0) echo 0 ;;
+    2) merge_floor_of "$1" "$2" ;;
+    *) floor_at "$1" ;;
+  esac
+}
+count_file_at() {   # $1 = a rev → its count file's content, empty when it holds none (a checked listing); 2 on a failure
+  local has
+  has="$(git ls-tree --name-only "$1" -- "$RATCHET_TEST_COUNT_FILE")" || { echo "ratchet: listing $RATCHET_TEST_COUNT_FILE at $1 failed" >&2; return 2; }
+  [ -n "$has" ] || return 0
+  git show "$1:$RATCHET_TEST_COUNT_FILE" || { echo "ratchet: reading $RATCHET_TEST_COUNT_FILE at $1 failed" >&2; return 2; }
+}
+floor_lower_check_staged() {   # $1 = the staged paths → floor_drop_ok over the commit being made: the staged floor against HEAD's, or inside a
+  # two-parent merge against the merged arithmetic — a merge is judged whether or not it touches the count file (a resolution that keeps one
+  # side's lowered floor is still below the arithmetic). 0 when a non-merge commit leaves the count file alone, or HEAD is unborn; 1 refused; 2 a tool failed
+  local new ref mhs hc has content="" c h rc
+  local pcs=()
+  mhs="$(merge_heads)" || return 2
+  if [ -z "$mhs" ]; then case $'\n'"$1"$'\n' in *$'\n'"$RATCHET_TEST_COUNT_FILE"$'\n'*) ;; *) return 0 ;; esac; fi
+  hc=0; git rev-parse -q --verify HEAD >/dev/null 2>&1 || hc=$?
+  [ "$hc" -le 1 ] || { echo "ratchet: git could not resolve HEAD (exit $hc) — the floor's drop cannot be judged"; return 2; }
+  [ "$hc" -eq 0 ] || return 0   # no parent: nothing to drop below
+  new="$(floor_read_staged)" || return $?
+  has="$(git ls-files --cached -- "$RATCHET_TEST_COUNT_FILE")" || { echo "ratchet: listing the staged $RATCHET_TEST_COUNT_FILE failed"; return 2; }
+  [ -z "$has" ] || { content="$(git show ":$RATCHET_TEST_COUNT_FILE")" || { echo "ratchet: reading the staged $RATCHET_TEST_COUNT_FILE failed"; return 2; }; }
+  set -- HEAD
+  lines_of "$mhs"; for h in ${LINES_OF[@]+"${LINES_OF[@]}"}; do set -- "$@" "$h"; done
+  for h in "$@"; do c="$(count_file_at "$h")" || return 2; pcs+=("$c"); done
+  ref="$(floor_ref_of "$@")" || return 2
+  rc=0; floor_drop_ok "$new" "$ref" "$content" ${pcs[@]+"${pcs[@]}"} || rc=$?
+  [ "$rc" -ne 1 ] || [ -z "$mhs" ] || echo "ratchet: (a merge's floor is base + each side's change, $ref here: run script/ratchet.sh --recount inside the merge to set it)"
+  return "$rc"
+}
+suite_record() {   # $1 = the code fingerprint the suite ran on, $2 = its count → appended to the suite-run record (below), which keeps the
+  # newest 8 lines, one per fingerprint: a refused partial staging never pushes out the --recount run of the whole change. A failure is
+  # named and never changes the commit's verdict
+  local rp rec="" kept
+  rp="$(suite_record_path)" || { echo "ratchet: git could not name the suite-run record's path — the run is not recorded"; return 0; }
+  if [ -f "$rp" ]; then rec="$(cat "$rp")" || { echo "ratchet: reading the suite-run record ($rp) failed — the run is not recorded"; return 0; }; fi
+  kept="$(printf '%s\n' "$rec" | awk -v fp="$1" -v n="$2" 'NF && $1 != fp { l[++k] = $0 } END { l[++k] = fp " " n; for (i = (k > 8 ? k - 7 : 1); i <= k; i++) print l[i] }')" \
+    || { echo "ratchet: awk failed — the run is not recorded"; return 0; }
+  printf '%s\n' "$kept" > "$rp" || { echo "ratchet: writing the suite-run record ($rp) failed — the run is not recorded"; return 0; }
+  echo "ratchet: the green run is recorded — a retry of this commit with the same code reuses it"
+}
+suite_log_keep() {   # $1 = a failed run's captured output → moves it into ratchet-logs/ under the git common dir (a linked worktree's own
+  # git dir goes with it), keeps the newest $RATCHET_SUITE_LOGS_KEEP (default 5) there, and prints where it is; on any failure it stays at $1
+  local cdir dir n keep f i
+  cdir="$(git rev-parse --git-common-dir 2>/dev/null)" && cdir="$(cd "$cdir" && pwd -P)" || { printf '%s' "$1"; return 0; }
+  dir="$cdir/ratchet-logs"; mkdir -p "$dir" 2>/dev/null || { printf '%s' "$1"; return 0; }
+  n="$(date -u +%Y%m%dT%H%M%SZ)" || { printf '%s' "$1"; return 0; }
+  n="$dir/suite-$n-$$-${RANDOM:-0}.log"
+  mv "$1" "$n" 2>/dev/null || { printf '%s' "$1"; return 0; }
+  keep="${RATCHET_SUITE_LOGS_KEEP:-5}"; case "$keep" in ''|*[!0-9]*|??????*) keep=5 ;; esac
+  [ "$keep" -ge 1 ] || keep=1   # the log just saved is always kept
+  set -- "$dir"/suite-*.log   # the names sort by time, oldest first — within one second by pid and a random number, so the one just
+  i=$#; for f in "$@"; do     # saved can sort anywhere: it is skipped by name and counted as kept
+    [ "$i" -gt "$keep" ] || break
+    [ "$f" = "$n" ] && continue
+    rm -f "$f"; i=$((i-1))
+  done
+  printf '%s' "$n"
 }
 
 # ---------- diff helpers ----------
@@ -634,16 +816,15 @@ log_form_ok() {   # $1 = the commit SUBJECT: a non-stage form bounded by a non-a
   printf '%s\n' "$1" | grep -qE 'PLAN-[0-9]+ / (review|close|patch|refreeze|fix)([^A-Za-z0-9]|$)' || printf '%s\n' "$1" | grep -qE '^note:'
 }
 # docs_commit_ok SUBJECT MSG FILES LOG_GREW(0/1) — the stage-claim and LOG-growth decision, shared by the hook and CI (on split-repo
-# mode's code side a stage claim demands nothing: its artifacts are the records repo's commit, paired at the close), which
+# mode's code side a stage claim demands nothing: its record is the records repo's commit, paired at the close), which
 # each pass the subject THEY hold (the hook: every reading `subject_readings` returns, one call each; CI: the committed %s). A stage claim ANYWHERE in the
-# message demands its artifacts (direction 1); LOG growth is satisfied only by the SUBJECT (direction 2 — the trace must show
-# in `git log --oneline`).
+# message demands the plan file, where the builder's Progress line goes (direction 1; the builder writes no LOG entry, the Planner
+# does); LOG growth is satisfied only by the SUBJECT (direction 2 — the trace must show in `git log --oneline`).
 docs_commit_ok() {
   local subject="$1" msg="$2" files="$3" grew="$4" plan
   plan="$(stage_ref "$msg")" || return 2
-  if [ -n "$plan" ] && [ "${RATCHET_SIDE:-one}" != code ]; then   # split-repo mode's code side: the LOG and the plan file are the records repo's half
+  if [ -n "$plan" ] && [ "${RATCHET_SIDE:-one}" != code ]; then   # split-repo mode's code side: the plan file is the records repo's half
     printf '%s\n' "$subject" | grep -qE 'PLAN-[0-9]+ / [0-9]+\.[0-9]+' || { [ "$grew" = 1 ] && { echo "ratchet: $plan claim in the body only — the stage reference belongs in the SUBJECT (git log --oneline is the trace)"; return 1; }; }
-    printf '%s\n' "$files" | grep -qx -- "$RATCHET_LOG" || { echo "ratchet: $plan claim, no $RATCHET_LOG staged"; return 1; }
     if [ -n "$RATCHET_PLANS_DIR" ]; then
       printf '%s\n' "$files" | grep -qE "^$RATCHET_PLANS_DIR/$plan-[^/]*\\.md\$" || { echo "ratchet: $plan claim, plan file untouched (a PLAN-NN-review/ edit is not the plan file)"; return 1; }
     else
@@ -694,11 +875,13 @@ tmp_cite_offenders() {   # stdin = cites; $1 = PLAN.md content → one `cite (wh
 }
 diff_doc_lines() {   # stdin = unified diff (-U0 --no-prefix) → the changed content lines of in-scope docs, sign kept — by
   # HUNK STATE (a `diff ` line opens a file, its `+++ ` header names it, `@@` opens content), so a content line that begins
-  # with `+` or `-` (`++see tmp/…`, `-- old`) is judged like any other
+  # with `+` or `-` (`++see tmp/…`, `-- old`) is judged like any other; a review dir is out of scope (tidied scratch, its MANIFEST)
+  # except the live evidence file at its root, PLAN-NN-review/EVIDENCE.md, which holds an open plan's proof cites
   awk '
     /^diff / { h = 0; inscope = 0; next }
     !h && /^\+\+\+ / { f = substr($0, 5); sub(/\t.*$/, "", f)
-                      inscope = (f ~ /^(docs\/.*|[^\/]+)\.md$/ && f !~ /^docs\/(log|archive|research)\// && f !~ /^docs\/plans\/PLAN-[0-9]+-review\//); next }
+                      inscope = (f ~ /^(docs\/.*|[^\/]+)\.md$/ && f !~ /^docs\/(log|archive|research)\// \
+                                 && (f !~ /^docs\/plans\/PLAN-[0-9]+-review\// || f ~ /^docs\/plans\/PLAN-[0-9]+-review\/EVIDENCE\.md$/)); next }
     /^@@/ { h = 1; next }
     h && inscope && /^[-+]/ { print }
   '
@@ -808,18 +991,25 @@ floor_at() {   # $1 = a rev → the floor the count file holds there, parsed as 
   content="$(git show "$1:$RATCHET_TEST_COUNT_FILE")" || { echo "ratchet: reading $RATCHET_TEST_COUNT_FILE at $1 failed — the merged floor cannot be computed" >&2; return 2; }
   printf '%s\n' "$content" | floor_parse
 }
-merge_floor() {   # $1 = the merge's other parents (merge_heads) → the merged floor, base + (ours − base) + (theirs − base), with a
-  # summary line on stderr; 2 on an octopus, no merge base, an unreadable side or a sum below zero (never a guess, never the higher side)
-  local n base b o t e
+merge_floor() {   # $1 = the merge's other parents (merge_heads), $2 = who asks (recount | --lower) → the merged floor, base + (ours − base) +
+  # (theirs − base), with a summary line on stderr; 2 on an octopus, no merge base, an unreadable side or a sum below zero (never a guess,
+  # never the higher side)
+  local n e
   local grc=0
   n="$(grep -c . <<< "$1")" || grc=$?   # three ways: 0 lines counted, 1 none (grep -c still prints 0), anything else grep itself failed
   case "$grc" in 0|1) ;; *) echo "ratchet: counting the merge's other parents failed (grep exit $grc) — the merged floor cannot be computed" >&2; return 2 ;; esac
-  [ "$n" -eq 1 ] || { echo "ratchet: recount inside a merge of $n other parents — the merged floor is computed for a two-parent merge only" >&2; return 2; }
-  base="$(git merge-base HEAD "$1")" || { echo "ratchet: recount inside a merge with no merge base between HEAD and $1 — the merged floor cannot be computed" >&2; return 2; }
-  b="$(floor_at "$base")" || return 2; o="$(floor_at HEAD)" || return 2; t="$(floor_at "$1")" || return 2
+  [ "$n" -eq 1 ] || { echo "ratchet: ${2:-recount} inside a merge of $n other parents — the merged floor is computed for a two-parent merge only" >&2; return 2; }
+  e="$(merge_floor_of HEAD "$1" "ratchet: ${2:-recount} — merge:")" || return 2
+  printf '%s\n' "$e"
+}
+merge_floor_of() {   # $1 = ours, $2 = theirs (two revs) [, $3 = a prefix: the sum is said on stderr after it] → the merged floor,
+  # base + (ours − base) + (theirs − base); 2 on no merge base, an unreadable side or a sum below zero
+  local base b o t e
+  base="$(git merge-base "$1" "$2")" || { echo "ratchet: no merge base between $1 and $2 — the merged floor cannot be computed" >&2; return 2; }
+  b="$(floor_at "$base")" || return 2; o="$(floor_at "$1")" || return 2; t="$(floor_at "$2")" || return 2
   e=$(( o + t - b ))
-  [ "$e" -ge 0 ] || { echo "ratchet: recount — merge: base $b, ours $o, theirs $t gives $e, below zero — the count files cannot be read as floors" >&2; return 2; }
-  echo "ratchet: recount — merge: base $b, ours $o, theirs $t → expected $e" >&2
+  [ "$e" -ge 0 ] || { echo "ratchet: merge: base $b, ours $o, theirs $t gives $e, below zero — the count files cannot be read as floors" >&2; return 2; }
+  [ -z "${3:-}" ] || echo "$3 base $b, ours $o, theirs $t → expected $e" >&2
   printf '%s\n' "$e"
 }
 log_merge_awk='
@@ -940,13 +1130,15 @@ records_root_check() {   # → 0 when RATCHET_RECORDS_ROOT is the top of a git w
   [ "$top" = "$p" ] || { echo "ratchet: $p is inside the work tree $top, not a repo of its own — the records repo must be its own clone at \$RATCHET_RECORDS" >&2; return 2; }
   RATCHET_RECORDS_ROOT="$p"
 }
-records_log_text() {   # → the staged LOG and every staged rotated month beside it (<LOG's dir>/log/*.md): the text the pairing reads; 2 on a failure
-  local dir files f out
+records_log_text() {   # $1 = PLAN-NN → the staged LOG, every staged rotated month beside it (<LOG's dir>/log/*.md) and the plan's staged
+  # evidence file (<plans dir>/PLAN-NN-review/EVIDENCE.md, where a builder's records entry names its code commit; an older plan has none):
+  # the text the pairing reads; 2 on a failure
+  local dir files f out ev="$RATCHET_PLANS_DIR/$1-review/EVIDENCE.md"
   case "$RATCHET_LOG" in */*) dir="${RATCHET_LOG%/*}/log" ;; *) dir="log" ;; esac
-  files="$(git ls-files --cached -- "$RATCHET_LOG" "$dir")" || { echo "ratchet: listing the staged LOG failed — the pairing can't be judged"; return 2; }
+  files="$(git ls-files --cached -- "$RATCHET_LOG" "$dir" "$ev")" || { echo "ratchet: listing the staged LOG and evidence file failed — the pairing can't be judged"; return 2; }
   lines_of "$files"
   for f in ${LINES_OF[@]+"${LINES_OF[@]}"}; do
-    case "$f" in "$RATCHET_LOG"|"$dir"/*.md) ;; *) continue ;; esac
+    case "$f" in "$RATCHET_LOG"|"$dir"/*.md|"$ev") ;; *) continue ;; esac
     out="$(git show ":$f")" || { echo "ratchet: reading the staged $f failed — the pairing can't be judged"; return 2; }
     printf '%s\n' "$out"
   done
@@ -964,7 +1156,7 @@ pairing_ok() {
   [ -n "$hits" ] || return 0
   toks="$(awk '/^Code: / { s = substr($0, 7); gsub(/,/, " ", s); n = split(s, a, /[ \t]+/)
                 for (i = 1; i <= n; i++) if (a[i] ~ /^[0-9a-fA-F]+$/ && length(a[i]) >= 7 && length(a[i]) <= 40) print tolower(a[i]) }' <<< "$log")" \
-    || { echo "ratchet: reading the LOG's Code: lines failed — the pairing can't be judged"; return 2; }
+    || { echo "ratchet: reading the Code: lines failed — the pairing can't be judged"; return 2; }
   local tl=(); lines_of "$toks"; tl=(${LINES_OF[@]+"${LINES_OF[@]}"})
   lines_of "$hits"
   for row in ${LINES_OF[@]+"${LINES_OF[@]}"}; do
@@ -976,22 +1168,75 @@ pairing_ok() {
     [ "$named" -eq 0 ] || continue
     miss="$miss  ${sha:0:12} $subj"$'\n'
   done
-  [ -z "$miss" ] || { echo "ratchet: $plan / close — these code-side commits have no \`Code: <sha>\` line in $RATCHET_LOG (a Stage's records entry names its code commit — modules/split-repo.md):"; printf '%s' "$miss"; return 1; }
+  [ -z "$miss" ] || { echo "ratchet: $plan / close — these code-side commits have no \`Code: <sha>\` line in $RATCHET_LOG or $RATCHET_PLANS_DIR/$plan-review/EVIDENCE.md (a builder's records entry names its code commit — modules/split-repo.md):"; printf '%s' "$miss"; return 1; }
   return 0
 }
-project_check() {   # $1 = the change's unified diff → RATCHET_PROJECT_CHECK over it (stdin), from the working directory: 0 pass (or none
-  # configured), 1 refused, 2 the check failed to run or exited anything else — never read as a pass
+project_check() {   # $1 = the change's unified diff, $2 = the commit it is (empty: the index) → RATCHET_PROJECT_CHECK over it (stdin), from
+  # the working directory, with RATCHET_CHECK_COMMIT=$2: 0 pass (or none configured), 1 refused, 2 the check failed to run or exited
+  # anything else — never read as a pass
   local f rc=0
   [ -n "$RATCHET_PROJECT_CHECK" ] || return 0
   f="$(mktemp)" || { echo "ratchet: mktemp failed — the project check can't run"; return 2; }
   { [ -z "$1" ] || printf '%s\n' "$1"; } > "$f" || { rm -f "$f"; echo "ratchet: writing the diff for the project check failed"; return 2; }
-  sh -c "$RATCHET_PROJECT_CHECK" < "$f" || rc=$?
+  RATCHET_CHECK_COMMIT="${2:-}" caller_locale sh -c "$RATCHET_PROJECT_CHECK" < "$f" || rc=$?
   rm -f "$f"
   case "$rc" in
     0) return 0 ;;
     1) echo "ratchet: the project check refused this change (RATCHET_PROJECT_CHECK: $RATCHET_PROJECT_CHECK)"; return 1 ;;
     *) echo "ratchet: the project check failed to run (exit $rc) — never read as a pass (RATCHET_PROJECT_CHECK: $RATCHET_PROJECT_CHECK)"; return 2 ;;
   esac
+}
+
+briefings_lint() {   # $1 = the staged paths, deletions excluded → when the commit touches a briefing (CLAUDE.md, AGENTS.md, docs/CHECKLISTS.md),
+  # briefing-lint.sh over the INDEX copies of all three (its duplicate check reads them together), under the caller's locale as the close
+  # runs it: 0 pass, or no briefing touched, or no briefing-lint.sh beside this script (Lite copies none); 1 refused; 2 a tool failed
+  local hit w f has out rc=0 files=""
+  hit="$(grep_hits '^(CLAUDE|AGENTS)\.md$|^docs/CHECKLISTS\.md$' <<< "$1")" || return 2
+  [ -n "$hit" ] && [ -f "$RATCHET_DIR/briefing-lint.sh" ] || return 0
+  w="$(mktemp -d)" || { echo "ratchet: mktemp -d failed — the briefings can't be linted"; return 2; }
+  for f in CLAUDE.md AGENTS.md docs/CHECKLISTS.md; do
+    has="$(git ls-files --cached -- "$f")" || { rm -rf "$w"; echo "ratchet: listing the staged $f failed — the briefings can't be linted"; return 2; }
+    [ -n "$has" ] || continue
+    mkdir -p "$w/docs" && git show ":$f" > "$w/$f" || { rm -rf "$w"; echo "ratchet: reading the staged $f failed — the briefings can't be linted"; return 2; }
+    files="$files $f"
+  done
+  out="$(cd "$w" && caller_locale bash "$RATCHET_DIR/briefing-lint.sh" $files 2>&1)" || rc=$?
+  rm -rf "$w"
+  case "$rc" in
+    0) return 0 ;;
+    1) echo "ratchet: a staged briefing fails briefing-lint (its word budget, or a sentence two briefings share) — trim it and stage it again:"; printf '%s\n' "$out" | sed 's/^/  /'; return 1 ;;
+    *) echo "ratchet: briefing-lint failed to run (exit $rc) — never read as a pass:"; printf '%s\n' "$out" | sed 's/^/  /'; return 2 ;;
+  esac
+}
+
+# ---------- one commit's diff, as CI replays it and as pre-push checks it ----------
+first_parent_or_empty_tree() {   # $1 = commit → its first parent, or the empty tree ONLY after a successful lookup shows no parent; a failed lookup is exit 2
+  local p; p="$(git rev-list --parents -n 1 "$1")" || return 2
+  set -- $p; [ "$#" -ge 1 ] && [ "$1" = "$(git rev-parse --verify "${1}^{commit}" 2>/dev/null)" ] || return 2   # the first token is the commit itself
+  shift; if [ "$#" -gt 0 ]; then printf '%s\n' "$1"; else git hash-object -t tree /dev/null || return 2; fi
+}
+patch_of() {   # $1 = commit [, paths…] → its unified diff (-U0 --no-prefix) against its first parent; a git failure is exit 2, never an empty
+  # (clean) patch — every caller captures it FIRST and checks
+  local p; p="$(first_parent_or_empty_tree "$1")" || return 2
+  git diff-tree --unified=0 --no-prefix -p "$p" "$1" -- "${@:2}" || { echo "ratchet: git diff-tree failed for $1" >&2; return 2; }
+}
+pushed_commits() {   # stdin = git's pre-push lines (`<local ref> <local sha> <remote ref> <remote sha>`), $1 = the remote's name (its URL
+  # when the push named no remote) → every commit the push adds, oldest first, each once: <remote sha>..<local sha> for a ref the
+  # remote has; for a new ref, the commits on none of that remote's tracking refs (every remote's, when $1 is no configured remote).
+  # A deletion adds none. 2 on a git failure. Known limit: a new ref pushed to a bare URL skips commits already on another remote, since
+  # the URL's history is unknown here; CI's replay still checks them
+  local lr ls rr rs out all="" not="--remotes"
+  if [ -n "${1:-}" ] && git config --get "remote.$1.url" >/dev/null 2>&1; then not="--remotes=$1"; fi
+  while read -r lr ls rr rs; do
+    [ -n "$rr" ] || continue
+    case "$ls" in *[!0]*) ;; *) continue ;; esac   # all zeros: a deletion
+    case "$rs" in
+      *[!0]*) out="$(git rev-list --reverse "$rs..$ls")" || { echo "ratchet: git rev-list $rs..$ls failed — the pushed commits can't be listed" >&2; return 2; } ;;
+      *)      out="$(git rev-list --reverse "$ls" --not "$not")" || { echo "ratchet: git rev-list $ls --not $not failed — the pushed commits can't be listed" >&2; return 2; } ;;
+    esac
+    [ -z "$out" ] || all="$all$out"$'\n'
+  done
+  awk 'NF && !seen[$0]++' <<< "$all"
 }
 
 # ---------- library mode: ci-replay.sh sources the decisions and stops here ----------
@@ -1017,6 +1262,21 @@ if [ "${1:-}" != "--self-test" ]; then ratchet_roots || exit 2; fi   # the self-
 # ---------- --cite-check ----------
 if [ "${1:-}" = "--cite-check" ]; then tmp_cite_guard "$(cat "$2")" || exit 1; exit 0; fi
 
+# ---------- --pre-push: the project check over every commit a push adds (kit/hooks/pre-push runs it after its own gates) ----------
+# git am, cherry-pick and rebase make commits that never met pre-commit; this checks each of them before transport, over the same
+# first-parent diff CI replays. No check configured, or the records side: nothing to do
+if [ "${1:-}" = "--pre-push" ]; then
+  { [ -n "$RATCHET_PROJECT_CHECK" ] && [ "$RATCHET_SIDE" != records ]; } || exit 0
+  commits="$(pushed_commits "${2:-}")" || exit 2
+  lines_of "$commits"
+  for c in ${LINES_OF[@]+"${LINES_OF[@]}"}; do
+    whole="$(patch_of "$c")" || exit 2
+    rc=0; project_check "$whole" "$c" || rc=$?
+    [ "$rc" -eq 0 ] || { echo "ratchet: pre-push — commit $c, see the line above (the push is refused; nothing was sent)"; exit "$rc"; }
+  done
+  exit 0
+fi
+
 # ---------- --recount: the ritual's one suite run, and the integration merge's (execution-loop.md § Stage-close ritual, § Parallel streams) ----------
 # runs the suite once (its output streamed), and its count becomes the floor — never a lower one (a merged or grown suite counts no
 # fewer; when it does, the refusal names a lost test); outside a merge a conflicted .test-count reads as its higher side, inside one
@@ -1027,16 +1287,24 @@ if [ "${1:-}" = "--cite-check" ]; then tmp_cite_guard "$(cat "$2")" || exit 1; e
 if [ "${1:-}" = "--recount" ]; then
   [ "$RATCHET_SIDE" != records ] || { echo "ratchet: recount in the records repo — it has no suite (split-repo mode); run it in the code repo ($RATCHET_CODE_ROOT)"; exit 1; }
   heads="$(merge_heads)" || { echo "ratchet: reading MERGE_HEAD failed — refusing to guess whether a merge is in progress"; exit 2; }
-  if [ -n "$heads" ]; then want="$(merge_floor "$heads")" || exit 2   # the integration merge: the arithmetic decides, never the conflict's higher side
+  if [ -n "$heads" ]; then want="$(merge_floor "$heads" recount)" || exit 2   # the integration merge: the arithmetic decides, never the conflict's higher side
   else want="$(floor_read)" || exit $?; fi
   rp="$(suite_record_path)" || { echo "ratchet: git could not name the suite-run record's path — refusing to run unrecorded"; exit 2; }
   rm -f "$rp" || { echo "ratchet: could not remove the old suite-run record ($rp)"; exit 2; }   # a stale record never outlives a new run
   fprc=0; fp1="$(code_fingerprint)" || fprc=$?
   sub1=0; submodules_clean || sub1=$?
   suite_count show || exit 1; have="$SUITE_COUNT"
+  if [ -n "$heads" ] && [ "$have" -lt "$want" ] && [ -f "$RATCHET_TEST_COUNT_FILE" ]; then   # a --lower made inside this merge: its line, new
+    # against both sides (an inherited one is that side's), excuses the drop below the arithmetic, as the commit's hook will judge it
+    wc_="$(cat "$RATCHET_TEST_COUNT_FILE")" || { echo "ratchet: reading $RATCHET_TEST_COUNT_FILE failed"; exit 2; }
+    pc1="$(count_file_at HEAD)" || exit 2; pc2="$(count_file_at "$heads")" || exit 2
+    lrc=0; floor_drop_ok "$have" "$want" "$wc_" "$pc1" "$pc2" >/dev/null || lrc=$?
+    [ "$lrc" -le 1 ] || exit 2
+    if [ "$lrc" -eq 0 ]; then echo "ratchet: recount — below the merged floor $want, by this merge's own --lower line"; want="$have"; fi
+  fi
   [ -z "$heads" ] || [ "$have" -ge "$want" ] || { echo "ratchet: recount refused — test count $have < the merged floor $want (base, plus each side's change): the merge lost a test — find it before anything lands"; exit 1; }
-  [ "$have" -ge "$want" ] || { echo "ratchet: recount refused — test count $have < floor $want: a recount never lowers the floor (a merged suite counts more, never fewer — investigate the regression; $RATCHET_TEST_COUNT_FILE moves only in the commit that adds tests)"; exit 1; }
-  printf '%s\n' "$have" > "$RATCHET_TEST_COUNT_FILE" || exit 1
+  [ "$have" -ge "$want" ] || { echo "ratchet: recount refused — test count $have < floor $want: a recount never lowers the floor (a merged suite counts more, never fewer — investigate the regression; $RATCHET_TEST_COUNT_FILE moves only in the commit that adds tests). Tests removed on purpose, their contracts kept by others: script/ratchet.sh --lower $have --reason \"<which tests went, and what still owns their contracts>\", then --recount"; exit 1; }
+  floor_write "$have" || exit 1   # the reason lines the file holds stay
   if [ "$have" -eq "$want" ]; then echo "ratchet: recount — floor unchanged at $have"; else echo "ratchet: recount — floor $want → $have"; fi
   [ "$fprc" -eq 0 ] || { echo "ratchet: recount — the run is NOT recorded: the code fingerprint failed (exit $fprc); the commit's hook will run the suite again"; exit 2; }
   fprc=0; fp2="$(code_fingerprint)" || fprc=$?
@@ -1049,6 +1317,32 @@ if [ "${1:-}" = "--recount" ]; then
   exit 0
 fi
 
+# ---------- --lower: a deliberate drop of the floor, with its reason (verification.md § The test ratchet) ----------
+# writes <n> as the floor and appends `# lowered <old> -> <n> <UTC>: <reason>`, where <old> is the floor the commit's hook compares with:
+# HEAD's, or inside a two-parent merge the merged arithmetic. <n> must be below it (a raise is --recount's). The suite doesn't run: the
+# stage-close --recount that follows counts the suite and keeps the reason line
+if [ "${1:-}" = "--lower" ]; then
+  [ "$#" -eq 4 ] && [ "$3" = --reason ] || { echo 'usage: ratchet.sh --lower <n> --reason "<which tests went, and what still owns their contracts>"' >&2; exit 64; }
+  n="$2"; reason="$4"
+  case "$n" in ''|*[!0-9]*) echo "ratchet: --lower takes a whole number (got '$n')" >&2; exit 64 ;; esac
+  [ "${#n}" -le 18 ] || { echo "ratchet: --lower $n has more digits than a count bash can compare" >&2; exit 64; }
+  n="${n#"${n%%[!0]*}"}"; [ -n "$n" ] || n=0
+  case "$reason" in *$'\n'*|*$'\r'*) echo "ratchet: --reason is one line" >&2; exit 64 ;; esac
+  [ -n "${reason// /}" ] || { echo "ratchet: --lower needs a --reason: which tests went, and what still owns their contracts" >&2; exit 64; }
+  [ "$RATCHET_SIDE" != records ] || { echo "ratchet: --lower in the records repo — it has no suite (split-repo mode); run it in the code repo ($RATCHET_CODE_ROOT)"; exit 1; }
+  hc=0; git rev-parse -q --verify HEAD >/dev/null 2>&1 || hc=$?
+  [ "$hc" -le 1 ] || { echo "ratchet: git could not resolve HEAD (exit $hc) — the floor to lower from is unknown"; exit 2; }
+  heads="$(merge_heads)" || { echo "ratchet: reading MERGE_HEAD failed — refusing to guess whether a merge is in progress"; exit 2; }
+  if [ -n "$heads" ]; then old="$(merge_floor "$heads" --lower)" || exit 2
+  elif [ "$hc" -eq 0 ]; then old="$(floor_at HEAD)" || exit 2
+  else old=0; fi
+  [ "$n" -lt "$old" ] || { echo "ratchet: --lower $n is not below the floor the commit is compared with ($old) — nothing to lower (a raise is --recount's)"; exit 1; }
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || { echo "ratchet: date failed — the reason line has no time"; exit 2; }
+  floor_write "$n" "# lowered $old -> $n $ts: $reason" || exit 1
+  echo "ratchet: floor $old → $n, reason recorded in $RATCHET_TEST_COUNT_FILE — commit it (with the --recount that follows at the Stage's close)"
+  exit 0
+fi
+
 # ---------- --self-test ----------
 if [ "${1:-}" = "--self-test" ]; then
   # the probes prove the CODE against fixed fixtures — a project's ratchet.conf (a Lite LOG.md, an empty plans dir) is
@@ -1056,7 +1350,10 @@ if [ "${1:-}" = "--self-test" ]; then
   RATCHET_LOG=docs/LOG.md; RATCHET_PLANS_DIR=docs/plans; RATCHET_HASHES=docs/plans/.acceptance-hashes; RATCHET_AMENDS=docs/plans/.acceptance-amends
   RATCHET_ALLOWLIST=docs/test-allowlist.md; RATCHET_RESUME_NOTE=tmp/resume-note.md
   RATCHET_RECORDS=; RATCHET_PROJECT_CHECK=; RATCHET_SIDE=one; unset RATCHET_ROOT   # one-repo; the split-repo probes set their own
-  d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
+  d="$(mktemp -d)" || { echo "SELF-TEST FAIL: mktemp -d failed"; exit 1; }
+  trap 'rm -rf "$d"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM
+  mkdir -p "$d/tmp" && export TMPDIR="$d/tmp" || { echo "SELF-TEST FAIL: the fixture's temp folder could not be made"; exit 1; }   # every temp file a probe or a hook it runs makes lands here and goes with $d
+  RATCHET_SUITE_LOGS_KEEP=5
   fail() { echo "SELF-TEST FAIL: $1"; exit 1; }
   fx() { cat "$d/plans/$1-x.md"; }
   mkdir -p "$d/plans"
@@ -1151,6 +1448,22 @@ outside'
   printf '## Validation and Acceptance\n- a\n\n````\n```\n## Release Notes\n````\n- b\n## Next\nout\n' | awk -f "$RATCHET_EXTRACT" | grep -qF -- '- b' || fail "a triple fence closed a quadruple opener"
   printf '## Validation and Acceptance\n- a\n\n      Verify:\n          cat <<A <<B\nfirst\nA\n## Release Notes\nB\n- b\n## Next\nout\n' | awk -f "$RATCHET_EXTRACT" | grep -qF -- '- b' || fail "the second of two chained here-docs was not tracked"
   [ "$(printf '# P\n```\n## Validation and Acceptance\n```\n## Validation and Acceptance\n- real\n## Next\n' | awk -f "$RATCHET_EXTRACT")" = "- real" ] || fail "a fenced '## Validation and Acceptance' line opened the section"
+  # a here-doc inside a Verify block ends at its terminator as the block indents it (PLAN-44's Stage 44.2: the rest of the plan read as
+  # acceptance); a `## ` line inside the body is still content
+  ih="$(printf '## Validation and Acceptance\n- a\n\n      Verify:\n          cat <<'"'"'EOF'"'"'\n## inside\n          EOF\n- b\n## Next\nout\n' | awk -f "$RATCHET_EXTRACT")"
+  grep -qF '## inside' <<< "$ih" && grep -qF -- '- b' <<< "$ih" || fail "an indented here-doc's body or the lines after it were not extracted: $ih"
+  grep -qF 'out' <<< "$ih" && fail "an indented here-doc terminator did not close the here-doc (the rest of the plan read as acceptance): $ih"
+  # only the opener's own indent closes: a copy of the word indented deeper is body text, so a `## ` line after it stays inside
+  ih="$(printf '## Validation and Acceptance\n- a\n\n      Verify:\n          cat <<ENDWORD\n              ENDWORD\n## Release Notes\nENDWORD\n- more criterion\n## Next\nout\n' | awk -f "$RATCHET_EXTRACT")"
+  grep -qF -- '- more criterion' <<< "$ih" || fail "a deeper-indented copy of the here-doc word closed the here-doc: $ih"
+  # the word at column 0 still closes, and <<- closes on tabs, alone or after the opener's indent
+  for hd in '<<EOF\n## inside\nEOF' '<<-EOF\n## inside\n\t\tEOF' '<<-EOF\n## inside\n          \tEOF'; do
+    ih="$(printf "## Validation and Acceptance\n- a\n\n      Verify:\n          cat $hd\n- b\n## Next\nout\n" | awk -f "$RATCHET_EXTRACT")"
+    grep -qF -- '- b' <<< "$ih" && ! grep -qF 'out' <<< "$ih" || fail "a here-doc terminator did not close ($hd): $ih"
+  done
+  # an opener indented less than a code line closes only as before 0.29 (the word alone), so a plan stamped with that shape keeps its stamp
+  ih="$(printf '## Validation and Acceptance\n- before\n  cat <<EOF\n  EOF\n## body\nEOF\n- after\n## Outcomes\nOUTSIDE\n' | awk -f "$RATCHET_EXTRACT")"
+  grep -qF -- '- after' <<< "$ih" && ! grep -qF 'OUTSIDE' <<< "$ih" || fail "a shallow opener's indented word closed its here-doc (a pre-0.29 stamp moves): $ih"
   # 3. the refreeze trace over ledger CONTENTS: a changed digest needs the subject form + an amends line; a new stamp needs
   #    PLAN.md; a deleted or reformatted (tab-separated) row cannot hide; a body-only form does not count
   HA="$(printf a | shasum -a 256 | cut -c1-64)"; HB="$(printf b | shasum -a 256 | cut -c1-64)"; L0="$(printf 'PLAN-03 %s   # frozen\n' "$HA")"; L1="$(printf 'PLAN-03 %s   # frozen; re-stamped\n' "$HB")"; AD="$(printf '2026-01-01T00:00:00Z  PLAN-03  bbb  narrowed\n')"
@@ -1386,6 +1699,127 @@ outside'
     && bash script/ratchet.sh --recount >/dev/null && [ "$(runs2)" = 3 ] && git add Sources/gen.swift .test-count && count_floor "Sources/gen.swift" >/dev/null && [ "$(runs2)" = 3 ] \
     && printf '12\n' > .test-count && git add .test-count && printf '7\n' > .test-count && ! count_floor "Sources/gen.swift" >/dev/null 2>&1 && [ "$(runs2)" = 3 ] ) \
     || fail "the record against the commit: a partial staging of two changes tested together must run the suite (both staged: reused); a tracked file an ignore rule matches must stay in the tested fingerprint (its change seen; the normal flow still reuses); a staged floor of 12 must refuse a count of 9 when the working copy reads 7"
+  # 4w. the hook's own green run records itself (v0.30): a retry of the same commit after a later refusal reuses it, in place and on the
+  #     staged tree; an edit made while the suite ran is never recorded; the staged-tree record doesn't push out --recount's; a record
+  #     under a different test command is not reused (the fingerprint names the command)
+  ( cd "$d" && rm -rf hr && mkdir -p hr/script hr/Sources && cd hr && git init -q . && git config user.email t@t && git config user.name t \
+    && cp "$RATCHET_SELF" script/ratchet.sh && cp "$RATCHET_TMP_TIDY" script/tmp-tidy.sh && cp "$RATCHET_EXTRACT" script/acceptance-extract.awk \
+    && printf '#!/bin/sh\necho run >> "%s/hr-runs"\necho "A_TEST_COUNT=9"\n' "$d" > script/test.sh && chmod +x script/test.sh \
+    && printf 'let a = 1\n' > Sources/a.swift && printf '7\n' > .test-count && git add -A . && git commit -qm init && : > "$d/hr-runs" \
+    && export RATCHET_TEST_CMD=./script/test.sh RATCHET_TEST_COUNT_FILE=.test-count && runs3() { grep -c run "$d/hr-runs" || true; } \
+    && printf 'let a = 2\n' > Sources/a.swift && git add Sources/a.swift \
+    && so="$(RATCHET_SKIP_COUNT_FLOOR= bash script/ratchet.sh)" && [ "$(runs3)" = 1 ] && grep -qF 'green run is recorded' <<< "$so" \
+    && so="$(RATCHET_SKIP_COUNT_FLOOR= bash script/ratchet.sh)" && [ "$(runs3)" = 1 ] && grep -qF 'not re-run' <<< "$so" \
+    && printf 'let a = 3\n' > Sources/a.swift && git add Sources/a.swift && printf 'let a = 4\n' > Sources/a.swift && printf 'let c = 1\n' > Sources/c.swift \
+    && so="$(RATCHET_SKIP_COUNT_FLOOR= bash script/ratchet.sh 2>&1)" && [ "$(runs3)" = 2 ] && grep -qF 'STAGED tree' <<< "$so" && grep -qF 'green run is recorded' <<< "$so" \
+    && so="$(RATCHET_SKIP_COUNT_FLOOR= bash script/ratchet.sh 2>&1)" && [ "$(runs3)" = 2 ] && grep -qF 'not re-run' <<< "$so" \
+    && { RATCHET_TEST_CMD='./script/test.sh --other' bash script/ratchet.sh >/dev/null 2>&1 || :; } && [ "$(runs3)" = 3 ] \
+    && git add Sources/a.swift Sources/c.swift && bash script/ratchet.sh --recount >/dev/null && [ "$(runs3)" = 4 ] \
+    && git reset -q Sources/c.swift && RATCHET_SKIP_COUNT_FLOOR= bash script/ratchet.sh >/dev/null 2>&1 && [ "$(runs3)" = 5 ] \
+    && git add Sources/c.swift .test-count && so="$(RATCHET_SKIP_COUNT_FLOOR= bash script/ratchet.sh)" && [ "$(runs3)" = 5 ] && grep -qF 'not re-run' <<< "$so" \
+    && printf '#!/bin/sh\necho run >> "%s/hr-runs"\necho "let a = 9" > Sources/a.swift\necho "A_TEST_COUNT=9"\n' "$d" > script/test.sh && git add script/test.sh \
+    && so="$(RATCHET_SKIP_COUNT_FLOOR= bash script/ratchet.sh)" && [ "$(runs3)" = 6 ] && grep -qF 'changed while the suite ran' <<< "$so" \
+    && git add Sources/a.swift && so="$(RATCHET_SKIP_COUNT_FLOOR= bash script/ratchet.sh)" && [ "$(runs3)" = 7 ] ) \
+    || fail "the hook's own green run: it must record (in place and on the staged tree) and a retry reuse it; a different test command must run again; a refused partial staging must not push out --recount's record of the whole change; an edit made while the suite ran must not be recorded"
+  # 4x. the kit's mktemp honors TMPDIR (macOS's own reads _CS_DARWIN_USER_TEMP_DIR instead, so a per-plan TMPDIR caught nothing), and a
+  #      TMPDIR that isn't a writable folder falls back to /tmp, never a failed run
+  mkdir -p "$d/mt" && mt="$(TMPDIR="$d/mt" mktemp)" && mtd="$(TMPDIR="$d/mt/" mktemp -d)" && [ "${mt%/*}" = "$d/mt" ] && [ -f "$mt" ] && [ "${mtd%/*}" = "$d/mt" ] && [ -d "$mtd" ] \
+    && mt="$(TMPDIR="$d/no-such" mktemp)" && [ "${mt%/*}" = /tmp ] && rm -f "$mt" || fail "the kit's mktemp must make its file under TMPDIR, and under /tmp when TMPDIR is no writable folder"
+  # 4y. a failed run's output is kept under the git dir's ratchet-logs/ (the newest RATCHET_SUITE_LOGS_KEEP), never left in TMPDIR (a
+  #     self-test once left ~3,700 of them in the shared temp folder)
+  ( cd "$d" && rm -rf kl && mkdir -p kl/script kl/Sources kl/t && cd kl && git init -q . && git config user.email t@t && git config user.name t \
+    && cp "$RATCHET_SELF" script/ratchet.sh && cp "$RATCHET_TMP_TIDY" script/tmp-tidy.sh && cp "$RATCHET_EXTRACT" script/acceptance-extract.awk \
+    && printf '#!/bin/sh\necho boom\nexit 1\n' > script/test.sh && chmod +x script/test.sh && printf 't/\n' > .gitignore \
+    && printf 'let a = 1\n' > Sources/a.swift && printf '7\n' > .test-count && git add -A . && git commit -qm init \
+    && export RATCHET_TEST_CMD=./script/test.sh RATCHET_TEST_COUNT_FILE=.test-count && printf 'let a = 2\n' > Sources/a.swift && git add Sources/a.swift \
+    && for i in 1 2 3 4; do ! TMPDIR="$d/kl/t" RATCHET_SUITE_LOGS_KEEP=3 RATCHET_SKIP_COUNT_FLOOR= bash script/ratchet.sh > "$d/kl-out" 2>&1 || exit 1; done \
+    && [ -z "$(ls -A "$d/kl/t")" ] && [ "$(ls .git/ratchet-logs | grep -c '^suite-.*\.log$')" = 3 ] \
+    && kept="$(sed -n 's/.*output in \([^)]*\)).*/\1/p' "$d/kl-out")" && [ -f "$kept" ] && grep -qF boom "$kept" && case "$kept" in */.git/ratchet-logs/*) ;; *) false ;; esac ) \
+    || fail "a failed suite run's output must move to <git dir>/ratchet-logs/ (the newest RATCHET_SUITE_LOGS_KEEP kept, the refusal naming it), leaving nothing in TMPDIR"
+  # 4z. lowering the floor on purpose (v0.30): a drop with no reason line is refused on every commit, a docs-only one and one under
+  #     RATCHET_SKIP_COUNT_FLOOR included, and the refusal names --lower; --lower writes the floor and the reason, then --recount keeps the
+  #     line; an old reason line, one from another floor, a blank reason, a deleted count file and a non-lowering --lower are refused; in a
+  #     merge the drop is judged against the merged arithmetic
+  ( cd "$d" && rm -rf lw && mkdir -p lw/script lw/Sources lw/docs && cd lw && git init -q . && git config user.email t@t && git config user.name t \
+    && cp "$RATCHET_SELF" script/ratchet.sh && cp "$RATCHET_TMP_TIDY" script/tmp-tidy.sh && cp "$RATCHET_EXTRACT" script/acceptance-extract.awk \
+    && printf '#!/bin/sh\necho "A_TEST_COUNT=$(cat %s/lw-count)"\n' "$d" > script/test.sh && chmod +x script/test.sh && echo 10 > "$d/lw-count" \
+    && printf 'let a = 1\n' > Sources/a.swift && printf '10\n' > .test-count && git add -A . && git commit -qm init \
+    && export RATCHET_TEST_CMD=./script/test.sh RATCHET_TEST_COUNT_FILE=.test-count && echo 9 > "$d/lw-count" \
+    && printf '8\n' > .test-count && printf 'x\n' > docs/NOTE.md && git add .test-count docs/NOTE.md \
+    && { rc=0; so="$(bash script/ratchet.sh 2>&1)" || rc=$?; } && [ "$rc" -eq 1 ] && grep -qF 'drops 10 → 8 with no reason line' <<< "$so" && grep -qF 'script/ratchet.sh --lower 8 --reason' <<< "$so" \
+    && { rc=0; RATCHET_SKIP_COUNT_FLOOR=1 bash script/ratchet.sh >/dev/null 2>&1 || rc=$?; } && [ "$rc" -eq 1 ] \
+    && bash script/ratchet.sh --lower 8 --reason "folded testA into testB's table; testB owns the contract" >/dev/null \
+    && [ "$(sed -n 1p .test-count)" = 8 ] && grep -qE '^# lowered 10 -> 8 [0-9T:-]+Z: folded testA into testB' .test-count \
+    && git add .test-count && RATCHET_SKIP_COUNT_FLOOR=1 bash script/ratchet.sh >/dev/null \
+    && bash script/ratchet.sh --recount >/dev/null && [ "$(sed -n 1p .test-count)" = 9 ] && grep -qF '# lowered 10 -> 8 ' .test-count \
+    && git add .test-count && bash script/ratchet.sh >/dev/null && git commit -qm lowered \
+    && printf '7\n' > "$d/lw-t" && grep '^# ' .test-count >> "$d/lw-t" && cp "$d/lw-t" .test-count && git add .test-count \
+    && { rc=0; RATCHET_SKIP_COUNT_FLOOR=1 bash script/ratchet.sh >/dev/null 2>&1 || rc=$?; } && [ "$rc" -eq 1 ] \
+    && printf '# lowered 10 -> 7 2026-01-01T00:00:00Z: from the wrong floor\n' >> .test-count && git add .test-count \
+    && { rc=0; RATCHET_SKIP_COUNT_FLOOR=1 bash script/ratchet.sh >/dev/null 2>&1 || rc=$?; } && [ "$rc" -eq 1 ] \
+    && git checkout -q -- .test-count && git rm -q --cached .test-count \
+    && { rc=0; so="$(RATCHET_SKIP_COUNT_FLOOR=1 bash script/ratchet.sh 2>&1)" || rc=$?; } && [ "$rc" -eq 1 ] && grep -qF -- '--lower 0' <<< "$so" \
+    && git reset -q .test-count && git checkout -q -- .test-count \
+    && { rc=0; bash script/ratchet.sh --lower 9 --reason x >/dev/null 2>&1 || rc=$?; } && [ "$rc" -eq 1 ] \
+    && { rc=0; bash script/ratchet.sh --lower 5 --reason "   " >/dev/null 2>&1 || rc=$?; } && [ "$rc" -eq 64 ] \
+    && { rc=0; bash script/ratchet.sh --lower 5 >/dev/null 2>&1 || rc=$?; } && [ "$rc" -eq 64 ] \
+    && { rc=0; bash script/ratchet.sh --lower 5x --reason y >/dev/null 2>&1 || rc=$?; } && [ "$rc" -eq 64 ] && [ "$(sed -n 1p .test-count)" = 9 ] ) \
+    || fail "lowering the floor: a drop with no new reason line (docs-only, under RATCHET_SKIP_COUNT_FLOOR, an inherited line, a line from another floor, a deleted file) must be refused naming --lower; --lower then --recount must pass and keep the line; a non-lowering, reasonless or malformed --lower must refuse and write nothing"
+  ( cd "$d" && rm -rf lm && mkdir -p lm/script lm/Sources && cd lm && git init -q . && git config user.email t@t && git config user.name t \
+    && cp "$RATCHET_SELF" script/ratchet.sh && cp "$RATCHET_TMP_TIDY" script/tmp-tidy.sh && cp "$RATCHET_EXTRACT" script/acceptance-extract.awk \
+    && printf '#!/bin/sh\necho "A_TEST_COUNT=$(cat %s/lm-count)"\n' "$d" > script/test.sh && chmod +x script/test.sh \
+    && printf 'let a = 1\n' > Sources/a.swift && printf '10\n' > .test-count && git add -A . && git commit -qm init && git branch -q side \
+    && export RATCHET_TEST_CMD=./script/test.sh RATCHET_TEST_COUNT_FILE=.test-count \
+    && printf '12\n' > .test-count && printf 'let b = 1\n' > Sources/b.swift && git add -A . && git commit -qm raise \
+    && git checkout -q side && echo 8 > "$d/lm-count" && bash script/ratchet.sh --lower 8 --reason "two tests folded into the owner's table" >/dev/null \
+    && git add .test-count && git commit -qm lower && git checkout -q - \
+    && ! git merge -q --no-ff --no-commit side >/dev/null 2>&1 && echo 10 > "$d/lm-count" \
+    && bash script/ratchet.sh --recount >/dev/null 2>&1 && [ "$(sed -n 1p .test-count)" = 10 ] && grep -qF '# lowered 10 -> 8 ' .test-count \
+    && git add .test-count && floor_lower_check_staged ".test-count" >/dev/null \
+    && printf '9\n' > .test-count && git add .test-count && ! floor_lower_check_staged ".test-count" >/dev/null 2>&1 ) \
+    || fail "lowering the floor in a merge: the merged arithmetic (12 + 8 − 10) must pass with the side's reason line kept by --recount, and a floor below it with no new line must be refused"
+  # 4z2. a merge is judged against base + each side's change in BOTH parent orders, whether or not it touches the count file, and a reason
+  #      line excuses a drop only when it is new against every parent (codex r1, v0.30): base 10, A lowers to 8 with its line, B raises to 12
+  #      → 10. A resolution of 9 (A's line inherited), or A's 8 kept unchanged, is refused; 10 passes; a --lower made inside the merge
+  #      (its own line) lets the instructed --recount write 9 and the hook pass
+  ( cd "$d" && rm -rf lo && mkdir -p lo/script && cd lo && git init -q . && git config user.email t@t && git config user.name t \
+    && cp "$RATCHET_SELF" script/ratchet.sh && cp "$RATCHET_TMP_TIDY" script/tmp-tidy.sh && cp "$RATCHET_EXTRACT" script/acceptance-extract.awk \
+    && printf '#!/bin/sh\necho "A_TEST_COUNT=$(cat %s/lo-count)"\n' "$d" > script/test.sh && chmod +x script/test.sh \
+    && printf '10\n' > .test-count && printf 'a\n' > a.txt && git add -A . && git commit -qm init && git branch -q B \
+    && export RATCHET_TEST_CMD=./script/test.sh RATCHET_TEST_COUNT_FILE=.test-count && git checkout -q -b A \
+    && bash script/ratchet.sh --lower 8 --reason "two tests folded into the owner table" >/dev/null && git add .test-count && git commit -qm lower \
+    && git checkout -q B && printf '12\n' > .test-count && printf 'b\n' > b.txt && git add -A . && git commit -qm raise \
+    && lo_try() {   # $1 = the branch checked out (HEAD), $2 = the one merged in, $3 = the floor line to stage ("ours": HEAD's file kept) → the hook's rc
+         git checkout -q "$1" && { git merge -q --no-ff --no-commit "$2" >/dev/null 2>&1 || :; } && [ -f .git/MERGE_HEAD ] || return 9
+         if [ "$3" = ours ]; then git checkout -q HEAD -- .test-count; else { printf '%s\n' "$3"; grep '^# ' "$d/lo-lines" || :; } > .test-count; fi
+         git add .test-count && { rc=0; RATCHET_SKIP_COUNT_FLOOR=1 bash script/ratchet.sh > "$d/lo-out" 2>&1 || rc=$?; } && git merge --abort && return "$rc"; } \
+    && git show A:.test-count > "$d/lo-lines" \
+    && { rc=0; lo_try A B 9 || rc=$?; } && [ "$rc" -eq 1 ] && grep -qF 'drops 10 → 9' "$d/lo-out" && grep -qF -- '--recount inside the merge' "$d/lo-out" \
+    && { rc=0; lo_try A B ours || rc=$?; } && [ "$rc" -eq 1 ] && grep -qF 'drops 10 → 8' "$d/lo-out" \
+    && { rc=0; lo_try A B 10 || rc=$?; } && [ "$rc" -eq 0 ] \
+    && { rc=0; lo_try B A 9 || rc=$?; } && [ "$rc" -eq 1 ] && grep -qF 'drops 10 → 9' "$d/lo-out" \
+    && { rc=0; lo_try B A 10 || rc=$?; } && [ "$rc" -eq 0 ] \
+    && git checkout -q B && { git merge -q --no-ff --no-commit A >/dev/null 2>&1 || :; } && echo 9 > "$d/lo-count" \
+    && so="$(bash script/ratchet.sh --lower 9 --reason "one more folded" 2>&1)" && grep -qF 'ratchet: --lower — merge: base 10' <<< "$so" && ! grep -qF 'recount — merge' <<< "$so" \
+    && grep -qE '^# lowered 10 -> 9 ' .test-count && bash script/ratchet.sh --recount >/dev/null 2>&1 && [ "$(sed -n 1p .test-count)" = 9 ] \
+    && git add .test-count && RATCHET_SKIP_COUNT_FLOOR=1 bash script/ratchet.sh >/dev/null 2>&1 && git merge --abort \
+    && git checkout -q B && { git merge -q --no-ff --no-commit A >/dev/null 2>&1 || :; } && { git show A:.test-count; printf '# lowered 10 -> 9\n'; } > .test-count \
+    && { rc=0; bash script/ratchet.sh --recount >/dev/null 2>&1 || rc=$?; } && [ "$rc" -eq 1 ] && git merge --abort ) \
+    || fail "a merge's floor: base 10, a side lowered to 8 with its line, the other raised to 12 — in both parent orders 9 (the side's line inherited) and the lowered side's file kept unchanged must be refused, 10 must pass; a --lower inside the merge must say so, and its own line must let --recount write 9 and the hook pass; an inherited or malformed line must not excuse --recount"
+  # 4z3. the staged-tree run is recorded only when the worktree's code still reads as the index's after the run (codex r1, v0.30): a suite that
+  #      rewrites a tracked file leaves no record, and a retry runs again; a failed run's log just saved is never pruned, wherever it sorts
+  ( cd "$d" && rm -rf sv && mkdir -p sv/script sv/Sources && cd sv && git init -q . && git config user.email t@t && git config user.name t \
+    && cp "$RATCHET_SELF" script/ratchet.sh && cp "$RATCHET_TMP_TIDY" script/tmp-tidy.sh && cp "$RATCHET_EXTRACT" script/acceptance-extract.awk \
+    && printf '#!/bin/sh\necho run >> "%s/sv-runs"\necho "let z = 9" > Sources/a.swift\necho "A_TEST_COUNT=9"\n' "$d" > script/test.sh && chmod +x script/test.sh \
+    && printf 'let a = 1\n' > Sources/a.swift && printf '7\n' > .test-count && git add -A . && git commit -qm init && : > "$d/sv-runs" \
+    && export RATCHET_TEST_CMD=./script/test.sh RATCHET_TEST_COUNT_FILE=.test-count && runs4() { grep -c run "$d/sv-runs" || true; } \
+    && printf 'let a = 2\n' > Sources/a.swift && git add Sources/a.swift && printf 'let a = 3\n' > Sources/a.swift \
+    && so="$(RATCHET_SKIP_COUNT_FLOOR= bash script/ratchet.sh 2>&1)" && [ "$(runs4)" = 1 ] && grep -qF 'STAGED tree' <<< "$so" && grep -qF 'changed while the suite ran — the run is not recorded' <<< "$so" \
+    && RATCHET_SKIP_COUNT_FLOOR= bash script/ratchet.sh >/dev/null 2>&1 && [ "$(runs4)" = 2 ] \
+    && printf '#!/bin/sh\necho boom\nexit 1\n' > script/test.sh && git add script/test.sh && mkdir -p .git/ratchet-logs && : > .git/ratchet-logs/suite-99999999T999999Z-1-1.log \
+    && { RATCHET_SUITE_LOGS_KEEP=1 RATCHET_SKIP_COUNT_FLOOR= bash script/ratchet.sh > "$d/sv-out" 2>&1 && exit 1 || :; } \
+    && kept="$(sed -n 's/.*output in \([^)]*\)).*/\1/p' "$d/sv-out")" && [ -f "$kept" ] && grep -qF boom "$kept" && [ ! -e .git/ratchet-logs/suite-99999999T999999Z-1-1.log ] ) \
+    || fail "the staged-tree run: a suite that rewrites a tracked file in the worktree must not be recorded (a retry runs again); the log a failed run just saved must survive the pruning even when it sorts first"
   # 4h. the fingerprint leaves out ONLY the record files the ritual writes after the run (codex round 1, v0.19): a root `check.md` the suite
   #     reads, or any other markdown, changed after the recount → the suite runs; the LOG, a plan file, PLAN.md, and .test-count → reused
   is_record_path docs/LOG.md && is_record_path docs/plans/PLAN-01-x.md && is_record_path docs/plans/PLAN-01-review/MANIFEST.md \
@@ -1486,21 +1920,44 @@ outside'
   skip_scan "$D" "- testFoo (other)" >/dev/null 2>&1 && fail "an allowlist entry for testFoo covered testFooBar (prefix match)"
   skip_scan "$(printf -- 'diff --git x x\n--- x\n+++ x\n@@ -0,0 +1 @@\n+let y = 1\n')" "" >/dev/null || fail "a clean added line tripped"
   rc=0; ( RATCHET_SKIP_REGEX='(' skip_scan "$D" "" >/dev/null 2>&1 ) || rc=$?; [ "$rc" -eq 2 ] || fail "a grep error in the skip scan did not surface as an error (rc=$rc)"
-  # 6. secrets: a key file, a private-key line, a token; the allow marker; clean lines
+  # 6. secrets: a key file, a private-key line, a token; the allow marker; clean lines. The fake key and key header are built at run time,
+  # so this file holds no secret-shaped literal: a scanner run over the kit (gitleaks in PLAN-45) reports nothing, and no report the
+  # close tracks carries one
+  ak="AKIA""ABCDEFGHIJKLMNOP"; pk="-----BEGIN RSA PRIV""ATE KEY-----"
+  sdiff() { printf -- 'diff --git a a\n--- a\n+++ a\n@@ -0,0 +1 @@\n'; printf -- '%s\n' "$@"; }   # $@ = the hunk's lines, `+` included
   secret_scan "$(printf 'Sources/a.swift\ncerts/dev.p12\n')" "" >/dev/null 2>&1 && fail "a .p12 passed"
   secret_scan "$(printf 'config/.env\n')" "" >/dev/null 2>&1 && fail "an .env passed"
-  secret_scan "" "$(printf -- 'diff --git a.swift a.swift\n--- a.swift\n+++ a.swift\n@@ -0,0 +1 @@\n++AKIAABCDEFGHIJKLMNOP\n')" >/dev/null 2>&1 && fail "an added line whose content starts with + escaped the scan"   # ratchet:allow-secret
-  secret_scan "" "$(printf -- 'diff --git a.swift a.swift\n--- a.swift\n+++ a.swift\n@@ -0,0 +1 @@\n+let k = "AKIAABCDEFGHIJKLMNOP" // ratchet:allow-secret was here, not at the end\n')" >/dev/null 2>&1 && fail "the allow marker counted mid-line"   # ratchet:allow-secret
+  secret_scan "" "$(sdiff "++ $ak")" >/dev/null 2>&1 && fail "an added line whose content starts with + escaped the scan"
+  secret_scan "" "$(sdiff "+let k = \"$ak\" // ratchet:allow-secret was here, not at the end")" >/dev/null 2>&1 && fail "the allow marker counted mid-line"
   # a `-- previous` → `++ AKIA…` replacement pair looks like a --- / +++ header to a naive parser; hunk state keeps it content
-  secret_scan "" "$(printf -- 'diff --git a a\n--- a\n+++ a\n@@ -1 +1 @@\n--- previous\n+++ AKIAABCDEFGHIJKLMNOP\n')" >/dev/null 2>&1 && fail "a removed '-- x' / added '++ y' pair (rendered ---/+++) hid a credential"   # ratchet:allow-secret
+  secret_scan "" "$(sdiff "--- previous" "+++ $ak")" >/dev/null 2>&1 && fail "a removed '-- x' / added '++ y' pair (rendered ---/+++) hid a credential"
   [ "$(added_lines <<< "$(printf -- 'diff --git a a\n--- a\n+++ a\n@@ -1 +1 @@\n--- previous\n+++ content\n')")" = "++ content" ] || fail "added_lines dropped a hunk line that looks like a file header"
-  rc=0; ( RATCHET_SECRET_REGEX='(' secret_scan "" "$(printf -- 'diff --git a a\n--- a\n+++ a\n@@ -0,0 +1 @@\n+x\n')" >/dev/null 2>&1 ) || rc=$?; [ "$rc" -eq 2 ] || fail "a grep error in the secret scan did not surface as an error (rc=$rc)"
-  # (each probe's source line carries the allow marker in a trailing comment — outside the printf payload — so committing
-  # THIS file through a wired hook is not refused by the scan it defines; the payload the probe feeds has no marker)
-  secret_scan "Sources/a.swift" "$(printf -- 'diff --git a a\n--- a\n+++ a\n@@ -0,0 +1,2 @@\n+-----BEGIN RSA PRIVATE KEY-----\n')" >/dev/null 2>&1 && fail "a private key line passed"   # ratchet:allow-secret
-  secret_scan "Sources/a.swift" "$(printf -- 'diff --git a a\n--- a\n+++ a\n@@ -0,0 +1,2 @@\n+let k = "AKIAABCDEFGHIJKLMNOP"\n')" >/dev/null 2>&1 && fail "an AWS key passed"   # ratchet:allow-secret
-  secret_scan "Sources/a.swift" "$(printf -- 'diff --git a a\n--- a\n+++ a\n@@ -0,0 +1,2 @@\n+let k = "AKIAABCDEFGHIJKLMNOP" // fixture ratchet:allow-secret\n')" >/dev/null || fail "the allow marker was ignored"   # ratchet:allow-secret
-  secret_scan "Sources/a.swift" "$(printf -- 'diff --git a a\n--- a\n+++ a\n@@ -0,0 +1,2 @@\n+let url = "https://x.y/sk-not-a-key"\n+let ghp = "ghp_short"\n')" >/dev/null || fail "clean lines tripped the secret scan"
+  rc=0; ( RATCHET_SECRET_REGEX='(' secret_scan "" "$(sdiff "+x")" >/dev/null 2>&1 ) || rc=$?; [ "$rc" -eq 2 ] || fail "a grep error in the secret scan did not surface as an error (rc=$rc)"
+  secret_scan "Sources/a.swift" "$(sdiff "+$pk")" >/dev/null 2>&1 && fail "a private key line passed"
+  secret_scan "Sources/a.swift" "$(sdiff "+let k = \"$ak\"")" >/dev/null 2>&1 && fail "an AWS key passed"
+  secret_scan "Sources/a.swift" "$(sdiff "+let k = \"$ak\" // fixture ratchet:allow-secret")" >/dev/null || fail "the allow marker was ignored"
+  secret_scan "Sources/a.swift" "$(sdiff '+let url = "https://x.y/sk-not-a-key"' '+let ghp = "ghp_short"')" >/dev/null || fail "clean lines tripped the secret scan"
+  # the AWS key is bounded (PLAN-45: a chance AKIA run inside a base64 JPEG): a letter, digit, + or / on either side is data; a key after
+  # `=`, quoted, or alone on a line is still refused
+  secret_scan "a.html" "$(sdiff "+<img src=\"data:image/jpeg;base64,/9j/4Q${ak}x+/\">" "+/9j/${ak}+Zz")" >/dev/null || fail "an AKIA run inside base64 data tripped the scan"
+  for l in "+KEY=$ak" "+$ak" "+'$ak'"; do secret_scan "a" "$(sdiff "$l")" >/dev/null 2>&1 && fail "a bounded AWS key passed: $l"; done
+  # the token prefixes are bounded on the left too (PLAN-46's close: `cask-…` in a records line read as an OpenAI key): a letter, digit,
+  # + / _ or - before the prefix makes it part of a word; after `=`, a quote, a space or alone on a line it is still a key
+  tk="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"   # 36 token characters
+  sk="sk""-$tk"; gh="ghp""_$tk"; gp="github""_pat_$tk"; xb="xox""b-$tk"; ai="AI""za${tk}x"
+  for l in "+brew install --cask-$tk" "+task-$tk" "+my_$sk" "+a-$gh" "+x$gp" "+Ab$xb" "+/9j/$ai" "+q+$ai"; do
+    secret_scan "a" "$(sdiff "$l")" >/dev/null 2>&1 || fail "a token prefix inside a word tripped the scan: $l"
+  done
+  for l in "+KEY=$sk" "+\"$gh\"" "+$gp" "+token: $xb" "+k='$ai'" "+($sk)"; do
+    secret_scan "a" "$(sdiff "$l")" >/dev/null 2>&1 && fail "a bounded token passed: $l"
+  done
+  # a non-UTF-8 line (an adversarial PDF probe crashed awk under a UTF-8 locale; grep silently missed the key on it): the script runs its
+  # tools under the C locale, whatever the caller's
+  ( cd "$d" && rm -rf nu && mkdir -p nu/script && cd nu && git init -q . && git config user.email t@t && git config user.name t \
+    && cp "$RATCHET_SELF" script/ratchet.sh && cp "$RATCHET_TMP_TIDY" script/tmp-tidy.sh && cp "$RATCHET_EXTRACT" script/acceptance-extract.awk \
+    && git add -A . && git -c core.hooksPath=/dev/null commit -qm init && printf '\377\376 %s x\n' "$ak" > blob.bin && git add blob.bin ) || fail "fixture: a non-UTF-8 line"
+  rc=0; so="$(cd "$d/nu" && LC_ALL=en_US.UTF-8 RATCHET_SKIP_COUNT_FLOOR=1 bash script/ratchet.sh 2>&1)" || rc=$?
+  [ "$rc" -eq 1 ] && grep -qF 'looks like a credential' <<< "$so" || fail "a key on a non-UTF-8 line must be refused by name, never a crash or a pass (rc=$rc): $so"
   self="$RATCHET_SELF"
   selfdiff="$(printf 'diff --git a b\n--- /dev/null\n+++ b\n@@ -0,0 +1,%s @@\n' "$(wc -l < "$self" | tr -d ' ')"; sed 's/^/+/' "$self")"
   [ "$(added_lines <<< "$selfdiff" | wc -l | tr -d ' ')" -eq "$(wc -l < "$self" | tr -d ' ')" ] || fail "the self-source diff did not reach the scanner in full"
@@ -1518,14 +1975,15 @@ outside'
   # 7. the docs-commit decision: stage claim needs LOG + plan file; LOG growth needs a form; the boundary; the Lite shape
   docs_commit_ok "$(subject_of_msg "feat: x (PLAN-02 / 02.1)")" "feat: x (PLAN-02 / 02.1)" "$(printf 'docs/LOG.md\ndocs/plans/PLAN-02-y.md\nSources/a.swift\n')" 1 >/dev/null || fail "a conforming stage commit was refused"
   docs_commit_ok "$(subject_of_msg "feat: x (PLAN-02 / 02.1)")" "feat: x (PLAN-02 / 02.1)" "$(printf 'docs/LOG.md\ndocs/plans/PLAN-02-review/notes/e.md\n')" 1 >/dev/null 2>&1 && fail "a review-dir edit satisfied the plan-file rule"
-  docs_commit_ok "$(subject_of_msg "feat: x (PLAN-02 / 02.1)")" "feat: x (PLAN-02 / 02.1)" "$(printf 'docs/plans/PLAN-02-y.md\n')" 0 >/dev/null 2>&1 && fail "a stage claim with no LOG passed"
+  docs_commit_ok "$(subject_of_msg "feat: x (PLAN-02 / 02.1)")" "feat: x (PLAN-02 / 02.1)" "$(printf 'docs/plans/PLAN-02-y.md\ndocs/plans/PLAN-02-review/EVIDENCE.md\n')" 0 >/dev/null || fail "a stage claim with its plan file and no LOG entry was refused (the builder writes no LOG entry)"
+  docs_commit_ok "$(subject_of_msg "feat: x (PLAN-02 / 02.1)")" "feat: x (PLAN-02 / 02.1)" "$(printf 'docs/plans/PLAN-02-review/EVIDENCE.md\nSources/a.swift\n')" 0 >/dev/null 2>&1 && fail "a stage claim with only the evidence file (no plan file) passed"
   docs_commit_ok "$(subject_of_msg "chore: grow")" "chore: grow" "docs/LOG.md" 1 >/dev/null 2>&1 && fail "LOG growth with no form passed"
   for m in 'docs: PLAN-03 / review — r1' 'PLAN-03 / close: flip' 'PLAN-03 / patch (spacing)' 'PLAN-03 / refreeze: narrowed' 'PLAN-03 / fix — x' 'note: housekeeping'; do docs_commit_ok "$(subject_of_msg "$m")" "$m" "docs/LOG.md" 1 >/dev/null || fail "form '$m' refused"; done
   for m in 'PLAN-03 / patchwork' 'PLAN-03 / closeup' 'PLAN-03 / review2' 'PLAN-03 / refreezes' 'PLAN-03 / fixup' 'a note: inside'; do docs_commit_ok "$(subject_of_msg "$m")" "$m" "docs/LOG.md" 1 >/dev/null 2>&1 && fail "look-alike '$m' accepted"; done
   docs_commit_ok "$(subject_of_msg "$(printf 'chore: tidy\n\nnote: buried in the body\n')")" "$(printf 'chore: tidy\n\nnote: buried in the body\n')" "docs/LOG.md" 1 >/dev/null 2>&1 && fail "a note: in the body satisfied LOG growth"
   docs_commit_ok "$(subject_of_msg "$(printf 'chore: tidy\n\nPLAN-03 / review in the body\n')")" "$(printf 'chore: tidy\n\nPLAN-03 / review in the body\n')" "docs/LOG.md" 1 >/dev/null 2>&1 && fail "a form in the body satisfied LOG growth"
   docs_commit_ok "$(subject_of_msg "$(printf 'chore: work\n\ndone as PLAN-02 / 02.1\n')")" "$(printf 'chore: work\n\ndone as PLAN-02 / 02.1\n')" "$(printf 'docs/LOG.md\ndocs/plans/PLAN-02-y.md\n')" 1 >/dev/null 2>&1 && fail "a stage claim in the body only satisfied LOG growth"
-  docs_commit_ok "$(subject_of_msg "$(printf 'chore: work\n\ndone as PLAN-02 / 02.1\n')")" "$(printf 'chore: work\n\ndone as PLAN-02 / 02.1\n')" "$(printf 'docs/plans/PLAN-02-y.md\n')" 0 >/dev/null 2>&1 && fail "a body claim without the LOG passed (a claim anywhere demands its artifacts)"
+  docs_commit_ok "$(subject_of_msg "$(printf 'chore: work\n\ndone as PLAN-02 / 02.1\n')")" "$(printf 'chore: work\n\ndone as PLAN-02 / 02.1\n')" "$(printf 'Sources/a.swift\n')" 0 >/dev/null 2>&1 && fail "a body claim without the plan file passed (a claim anywhere demands its record)"
   [ -z "$(close_plan_in "PLAN-05 / closeup")" ] || fail "closeup read as a close"
   [ "$(stage_ref "$(printf 'x\n\ndone as PLAN-02 / 02.1 and PLAN-03 / 03.1\n')")" = PLAN-02 ] || fail "stage_ref did not return the first claim"
   rc=0; ( PATH=/nonexistent close_plan_in "PLAN-05 / close" >/dev/null 2>&1 ) || rc=$?; [ "$rc" -eq 2 ] || fail "a grep failure in close_plan_in did not surface as an error (rc=$rc)"
@@ -1580,7 +2038,8 @@ outside'
   [ "$(plan_status "$planmd" PLAN-01)" = complete ] || fail "plan_status PLAN-01"
   [ "$(plan_status "$planmd" PLAN-03)" = drafted ] || fail "plan_status parked"
   [ "$(plan_status "$planmd" PLAN-99)" = no-row ] || fail "plan_status no-row"
-  # the freeze marks the row `in-progress (frozen)` (execution-loop.md § Lifecycle): the parenthetical strips, so the plan stays open and its tmp/ cites stay legal
+  # an older plan's row may read `in-progress (frozen)` (the status retired in v0.32, when the freeze moved into the close): the
+  # parenthetical strips, so the plan stays open and its tmp/ cites stay legal
   frozenmd="$(printf '| **PLAN-04** live | [w](docs/plans/PLAN-04-w.md) | in-progress (frozen) | none | 2d |\n')"
   [ "$(plan_status "$frozenmd" PLAN-04)" = in-progress ] || fail "plan_status: in-progress (frozen) should read in-progress"
   cite_ok tmp/PLAN-04/04.1-run.log "$frozenmd" || fail "a frozen, open plan's tmp/ cite was refused"
@@ -1601,6 +2060,15 @@ outside'
   for want in 'tmp/PLAN-01/01.2-verdict.md (PLAN-01 is complete' 'tmp/plan29-L2.log (legacy' 'tmp/PLAN-99/x.md (PLAN-99 is no-row' 'tmp/PLAN-07-discussion.md (PLAN-07 is no-row' 'tmp/PLAN-88/x.log (PLAN-88 is no-row' "tmp/bounded/uc-paths-run.log (a small change's scratch is disposable"; do grep -qF "$want" <<< "$so" || fail "cite guard did not report: $want"; done
   [ "$(grep -c '^  tmp/' <<< "$so")" -eq 6 ] || fail "expected exactly 6 offenders: $so"
   grep -qF 'tmp/removed.log' <<< "$so" && fail "a removed line's cite was reported"
+  # 8a. the live evidence file is in scope (it holds an open plan's proof cites); the rest of a review dir is not
+  ev="$(printf '%s\n' 'diff --git docs/plans/PLAN-02-review/EVIDENCE.md docs/plans/PLAN-02-review/EVIDENCE.md' '--- docs/plans/PLAN-02-review/EVIDENCE.md' '+++ docs/plans/PLAN-02-review/EVIDENCE.md' '@@ -0,0 +1,3 @@' \
+    '+| 02.1-a | t | abc, 0 | m | 1 | `tmp/PLAN-02/02.1-a-green.log` |' '+stale: `tmp/PLAN-01/01.2-verdict.md`' '+repro: `tmp/bounded/x.log`' \
+    'diff --git docs/plans/PLAN-02-review/notes/n.md docs/plans/PLAN-02-review/notes/n.md' '--- /dev/null' '+++ docs/plans/PLAN-02-review/notes/n.md' '@@ -0,0 +1 @@' '+tidied: `tmp/plan02-old.log`')"
+  so="$(printf '%s\n' "$ev" | tmp_cite_guard "$planmd" 2>&1)" && fail "an evidence file's stale cites passed the cite guard"
+  for want in 'tmp/PLAN-01/01.2-verdict.md (PLAN-01 is complete' "tmp/bounded/x.log (a small change's scratch is disposable"; do grep -qF "$want" <<< "$so" || fail "cite guard did not report the evidence file's: $want"; done
+  grep -qF 'tmp/PLAN-02/02.1-a-green.log' <<< "$so" && fail "an open plan's own cite in its evidence file was refused"
+  grep -qF 'tmp/plan02-old.log' <<< "$so" && fail "a file elsewhere under the review dir came into the cite guard's scope"
+  [ "$(grep -c '^  tmp/' <<< "$so")" -eq 2 ] || fail "expected exactly 2 evidence-file offenders: $so"
   # 8b. a merge: a cite is new only when it is new against EVERY parent — a closed plan's own LOG line, written on its branch
   #     while the plan was open, is inherited through the merge; a stale cite first written while resolving is still new
   inh="$(printf '%s\n' 'diff --git docs/LOG.md docs/LOG.md' '--- docs/LOG.md' '+++ docs/LOG.md' '@@ -0,0 +1,2 @@' '+evidence `tmp/PLAN-01/01.2-verdict.md`' '+resolved: `tmp/PLAN-01/01.9-late.md`')"
@@ -1832,18 +2300,18 @@ outside'
   rc=0; out="$(cd "$sp/code" && RATCHET_RECORDS=absent RATCHET_ROOT="$(pwd -P)" bash "$sp/code/script/ratchet.sh" --commit-msg "$d/sp-msg" 2>&1)" || rc=$?
   [ "$rc" -eq 0 ] || fail "a missing records path must leave the code side's stage claim passing (rc=$rc): $out"
   rm -rf "$sp/code/plain"
-  # the code side, through the script as the hooks call it: a stage claim with no LOG passes, and so does a harvest close with no MANIFEST;
+  # the code side, through the script as the hooks call it: a stage claim with no plan file passes, and so does a harvest close with no MANIFEST;
   # a tmp/PLAN-NN cite in a code-side doc is refused (no PLAN.md here); the same claim one-repo is refused
   cm2() { rc=0; printf '%s\n' "$2" > "$d/sp-msg"; out="$(cd "$1" && RATCHET_ROOT="$(pwd -P)" bash "$sp/code/script/ratchet.sh" --commit-msg "$d/sp-msg" 2>&1)" || rc=$?; }
   pc2() { rc=0; out="$(cd "$1" && RATCHET_ROOT="$(pwd -P)" bash "$sp/code/script/ratchet.sh" 2>&1)" || rc=$?; }
   ( cd "$sp/code" && printf 'b\n' >> src.txt && git add src.txt ) || fail "fixture: a code change"
-  cm2 "$sp/code" 'PLAN-01 / 01.1 — build'; [ "$rc" -eq 0 ] || fail "a code-side stage claim with no LOG was refused (rc=$rc): $out"
+  cm2 "$sp/code" 'PLAN-01 / 01.1 — build'; [ "$rc" -eq 0 ] || fail "a code-side stage claim with no plan file was refused (rc=$rc): $out"
   pc2 "$sp/code"; [ "$rc" -eq 0 ] || fail "a code-side code change failed the pre-commit legs (rc=$rc): $out"
   cm2 "$sp/code" 'PLAN-01 / close — harvest'; [ "$rc" -eq 0 ] || fail "a code-side harvest close was asked for a MANIFEST (rc=$rc): $out"
   sed 's/^RATCHET_RECORDS=private$/RATCHET_RECORDS=/' "$sp/code/script/ratchet.conf" > "$d/sp-conf" && cp "$sp/code/script/ratchet.conf" "$d/sp-conf0" && cp "$d/sp-conf" "$sp/code/script/ratchet.conf"
   cm2 "$sp/code" 'PLAN-01 / 01.1 — build'; o1="$out"; r1="$rc"
   export RATCHET_RECORDS=private; cm2 "$sp/code" 'PLAN-01 / 01.1 — build'; unset RATCHET_RECORDS; cp "$d/sp-conf0" "$sp/code/script/ratchet.conf"
-  [ "$r1" -eq 1 ] && grep -qF 'no docs/LOG.md staged' <<< "$o1" || fail "the same claim one-repo must still need its LOG (rc=$r1): $o1"
+  [ "$r1" -eq 1 ] && grep -qF 'plan file untouched' <<< "$o1" || fail "the same claim one-repo must still need its plan file (rc=$r1): $o1"
   [ "$rc" -eq 0 ] || fail "a non-empty RATCHET_RECORDS in the environment must outrank the conf's empty one (rc=$rc): $out"
   ( cd "$sp/code" && printf 'see tmp/PLAN-01/01.1-L1.log\n' > NOTES.md && git add NOTES.md ) || fail "fixture: a cite"
   pc2 "$sp/code"; [ "$rc" -eq 1 ] && grep -qF 'tmp/PLAN-01/01.1-L1.log' <<< "$out" || fail "a code-side doc citing the records' scratch passed (rc=$rc): $out"
@@ -1855,12 +2323,63 @@ outside'
   pc2 "$sp/code"; [ "$rc" -eq 1 ] && grep -qF 'the project check refused' <<< "$out" || fail "the project check's refusal did not refuse the commit (rc=$rc): $out"
   RATCHET_PROJECT_CHECK='exit 3'; pc2 "$sp/code"; [ "$rc" -eq 2 ] && grep -qF 'failed to run (exit 3)' <<< "$out" || fail "a project check exiting 3 must be a tool failure (rc=$rc): $out"
   ( cd "$sp/code" && git reset -q && git checkout -q -- src.txt ) || fail "fixture: reset the code side"
+  # the hook's diff is CI's: a pure rename reaches the check as a delete and an add (content lines), and RATCHET_CHECK_COMMIT is empty
+  # for the staged diff whatever the environment holds
+  RATCHET_PROJECT_CHECK='[ -z "$RATCHET_CHECK_COMMIT" ] && grep -q "^+[^+]"'
+  ( cd "$sp/code" && git mv src.txt moved.txt ) || fail "fixture: a pure rename"
+  RATCHET_CHECK_COMMIT=bogus pc2 "$sp/code"; [ "$rc" -eq 0 ] || fail "a pure rename reached the project check with no content, or RATCHET_CHECK_COMMIT was not empty for the staged diff (rc=$rc): $out"
+  ( cd "$sp/code" && git mv moved.txt src.txt ) || fail "fixture: undo the rename"
+  # pre-push: every commit the push adds, each once, oldest first — a new ref's commits are those on none of the remote's tracking refs, a
+  # known ref's are remote..local, a deletion adds none — and the check judges each against its first parent with RATCHET_CHECK_COMMIT set
+  ( cd "$sp/code" && git init -q --bare "$d/pp.git" && git remote add pp "$d/pp.git" && git push -q pp HEAD:refs/heads/base >/dev/null 2>&1 \
+    && for m in one two FORBIDDEN; do printf '%s\n' "$m" >> src.txt && git add src.txt && git -c core.hooksPath=/dev/null commit -qm "note: $m" || exit 1; done ) \
+    || fail "fixture: a remote and three local commits"
+  pb="$(cd "$sp/code" && git rev-parse pp/base)"; p1="$(cd "$sp/code" && git rev-parse HEAD~2)"; p2="$(cd "$sp/code" && git rev-parse HEAD~1)"; p3="$(cd "$sp/code" && git rev-parse HEAD)"
+  z=0000000000000000000000000000000000000000
+  pp() { rc=0; out="$(cd "$sp/code" && printf '%s\n' "$@" | RATCHET_ROOT="$(pwd -P)" bash "$sp/code/script/ratchet.sh" --pre-push pp 2>&1)" || rc=$?; }
+  got="$(cd "$sp/code" && printf 'refs/heads/x %s refs/heads/new %s\nrefs/heads/x %s refs/heads/base %s\n(delete) %s refs/heads/old %s\n' "$p2" "$z" "$p2" "$pb" "$z" "$pb" | pushed_commits pp | tr '\n' ' ')"
+  [ "$got" = "$p1 $p2 " ] || fail "pushed_commits must list each added commit once, oldest first, and none for a deletion (got '$got', want '$p1 $p2 ')"
+  RATCHET_PROJECT_CHECK='printf "%s\n" "$RATCHET_CHECK_COMMIT" >> "'"$d"'/pp-seen"; ! grep -q "^+FORBIDDEN"'
+  : > "$d/pp-seen"; pp "refs/heads/x $p2 refs/heads/base $pb"
+  [ "$rc" -eq 0 ] && [ "$(tr '\n' ' ' < "$d/pp-seen")" = "$p1 $p2 " ] || fail "a clean push must check each added commit by sha (rc=$rc, seen: $(tr '\n' ' ' < "$d/pp-seen")): $out"
+  pp "refs/heads/x $p3 refs/heads/base $pb"
+  [ "$rc" -eq 1 ] && grep -qF "commit $p3" <<< "$out" || fail "a pushed commit the check refuses must refuse the push, naming it (rc=$rc): $out"
+  RATCHET_PROJECT_CHECK='exit 3'; pp "refs/heads/x $p3 refs/heads/base $pb"; [ "$rc" -eq 2 ] || fail "a project check exiting 3 at pre-push must be a tool failure (rc=$rc): $out"
+  : > "$d/pp-seen"; RATCHET_PROJECT_CHECK='printf x >> "'"$d"'/pp-seen"'; pp "(delete) $z refs/heads/base $pb"
+  [ "$rc" -eq 0 ] && [ ! -s "$d/pp-seen" ] || fail "a deletion must check nothing (rc=$rc): $out"
+  ( cd "$sp/code" && git reset -q --hard HEAD~3 && git remote remove pp ) || fail "fixture: drop the pre-push commits"
+  # the briefings: a commit touching one lints the STAGED copies (the working tree's don't count); a briefing over budget or a sentence
+  # two briefings share refuses it; one not touching a briefing never runs the lint; no briefing-lint.sh beside the script, no lint
+  # A Lite install copies no briefing-lint.sh: then only the no-lint case runs
+  if [ -f "$(dirname "$RATCHET_SELF")/briefing-lint.sh" ]; then
+    cp "$(dirname "$RATCHET_SELF")/briefing-lint.sh" "$sp/code/script/" || fail "fixture: briefing-lint beside the code side's ratchet"
+    bl_dup="Every stage close runs lint, tests, the headless smoke, and the plan's own Verify blocks before the commit lands."
+    ( cd "$sp/code" && printf '# C\n\nShort.\n' > CLAUDE.md && printf '# A\n\nShort too.\n' > AGENTS.md && git add CLAUDE.md AGENTS.md \
+      && git -c core.hooksPath=/dev/null commit -qm 'note: briefings' && printf '# A\n\n%s\n' "$bl_dup" > AGENTS.md && git add AGENTS.md ) || fail "fixture: briefings"
+    pc2 "$sp/code"; [ "$rc" -eq 0 ] || fail "a briefing edit that passes the lint was refused (rc=$rc): $out"
+    ( cd "$sp/code" && printf '# C\n\n%s\n' "$bl_dup" > CLAUDE.md ) || fail "fixture: an unstaged duplicate"
+    pc2 "$sp/code"; [ "$rc" -eq 0 ] || fail "the lint read the working tree's CLAUDE.md, not the staged one (rc=$rc): $out"
+    ( cd "$sp/code" && git add CLAUDE.md ) || fail "fixture: stage the duplicate"
+    pc2 "$sp/code"; [ "$rc" -eq 1 ] && grep -qF 'fails briefing-lint' <<< "$out" && grep -qF 'DUPLICATE' <<< "$out" || fail "a sentence two staged briefings share passed (rc=$rc): $out"
+    ( cd "$sp/code" && printf '# C\n\n' > CLAUDE.md && printf 'w %.0s' $(seq 1 1310) >> CLAUDE.md && git add CLAUDE.md && git checkout -q HEAD -- AGENTS.md ) || fail "fixture: an over-budget briefing"
+    pc2 "$sp/code"; [ "$rc" -eq 1 ] && grep -qF 'OVER BUDGET' <<< "$out" || fail "a staged briefing over its budget passed (rc=$rc): $out"
+    ( cd "$sp/code" && git commit -q --no-verify -m 'note: over budget, no hook' && printf 'c\n' >> src.txt && git add src.txt ) || fail "fixture: a non-briefing change over an over-budget briefing"
+    pc2 "$sp/code"; [ "$rc" -eq 0 ] || fail "a commit touching no briefing ran the lint (rc=$rc): $out"
+    ( cd "$sp/code" && rm script/briefing-lint.sh && printf 'x\n' >> CLAUDE.md && git add CLAUDE.md ) || fail "fixture: no briefing-lint beside the script"
+    pc2 "$sp/code"; [ "$rc" -eq 0 ] || fail "with no briefing-lint.sh beside the ratchet (Lite) the commit must pass (rc=$rc): $out"
+    ( cd "$sp/code" && git reset -q --hard HEAD~2 ) || fail "fixture: drop the briefing commits"
+  else
+    ( cd "$sp/code" && printf '# C\n\nShort.\n' > CLAUDE.md && git add CLAUDE.md ) || fail "fixture: a briefing, no briefing-lint beside the script"
+    pc2 "$sp/code"; [ "$rc" -eq 0 ] || fail "with no briefing-lint.sh beside the ratchet (Lite) the commit must pass (rc=$rc): $out"
+    ( cd "$sp/code" && git reset -q --hard HEAD ) || fail "fixture: drop the staged briefing"
+  fi
+  RATCHET_PROJECT_CHECK='exit 3'
   ( cd "$sp/code" && mkdir -p docs/plans && printf '# PLAN-09\n\n## Validation and Acceptance\n\n- a\n' > docs/plans/PLAN-09-x.md && git add docs/plans \
     && git -c core.hooksPath=/dev/null commit -qm 'note: a code-side docs/plans' && sed 's/^- a$/- b/' docs/plans/PLAN-09-x.md > t && mv t docs/plans/PLAN-09-x.md && git add docs/plans ) >/dev/null \
     || fail "fixture: a code-side plan-shaped file"
   cm2 "$sp/code" 'PLAN-09 / 09.1 — build'; [ "$rc" -eq 0 ] || fail "the code side judged a plan-shaped file of its own as a plan (the plans are the records repo's) (rc=$rc): $out"
   ( cd "$sp/code" && git reset -q --hard HEAD~1 ) || fail "fixture: drop the plan-shaped file"
-  # the records side: the stage claim needs its LOG and plan file; no count floor (a script change commits with no suite here), no skip
+  # the records side: the stage claim needs its plan file (no LOG entry: the builder writes none); no count floor (a script change commits with no suite here), no skip
   # scan, no project check; the hash leg reads the extractor from the code repo — an unchanged stamped plan passes, a changed one is refused
   ( cd "$spr" && mkdir -p Tests && printf 'XCTSkip("x")\nFORBIDDEN\n' > Tests/a.swift && printf 'echo x\n' > tool.sh \
     && printf '\n## t — PLAN-01 / 01.1\nCode: abcdef1\n' >> docs/LOG.md && printf -- '- [x] 01.1\n' >> docs/plans/PLAN-01-x.md && git add -A . ) || fail "fixture: a records stage"
@@ -1868,7 +2387,10 @@ outside'
   pc2 "$spr"; [ "$rc" -eq 0 ] || fail "the records side ran a suite, a skip scan or the project check, or misread the code repo's extractor (rc=$rc): $out"
   cm2 "$spr" 'PLAN-01 / 01.1 — records'; [ "$rc" -eq 0 ] || fail "a records-side stage claim with its LOG and plan file was refused (rc=$rc): $out"
   ( cd "$spr" && git reset -q -- docs/LOG.md ) || fail "fixture: unstage the LOG"
-  cm2 "$spr" 'PLAN-01 / 01.1 — records'; [ "$rc" -eq 1 ] && grep -qF 'no docs/LOG.md staged' <<< "$out" || fail "a records-side stage claim with no LOG passed (rc=$rc): $out"
+  cm2 "$spr" 'PLAN-01 / 01.1 — records'; [ "$rc" -eq 0 ] || fail "a records-side stage claim with its plan file and no LOG was refused (rc=$rc): $out"
+  ( cd "$spr" && git reset -q -- docs/plans/PLAN-01-x.md ) || fail "fixture: unstage the plan file"
+  cm2 "$spr" 'PLAN-01 / 01.1 — records'; [ "$rc" -eq 1 ] && grep -qF 'plan file untouched' <<< "$out" || fail "a records-side stage claim with no plan file passed (rc=$rc): $out"
+  ( cd "$spr" && git add docs/LOG.md docs/plans/PLAN-01-x.md ) || fail "fixture: restage the records stage"
   ( cd "$spr" && sed 's/After A, B./After A, anything./' docs/plans/PLAN-01-x.md > t && mv t docs/plans/PLAN-01-x.md && git add -A . ) || fail "fixture: a criteria edit"
   pc2 "$spr"; [ "$rc" -eq 1 ] && grep -qF 'acceptance hash mismatch for PLAN-01' <<< "$out" || fail "a records-side edit to a stamped plan passed (rc=$rc): $out"
   rc=0; out="$(cd "$spr" && RATCHET_ROOT="$(pwd -P)" bash "$sp/code/script/ratchet.sh" --recount 2>&1)" || rc=$?
@@ -1919,6 +2441,11 @@ outside'
   [ "$rc" -eq 1 ] && grep -qF 'archive/plans/PLAN-01.list is missing' <<< "$out" || fail "the close found the archive in the code repo instead of the records repo (rc=$rc): $out"
   ( cd "$spr" && git rm -q --cached docs/log/2026-09.md ) || fail "fixture: unstage the month"
   cm2 "$spr" 'PLAN-01 / close — done'; [ "$rc" -eq 1 ] && grep -qF "${s1:0:12} PLAN-01 / 01.1 — build" <<< "$out" || fail "a close with a stage commit unpaired passed (rc=$rc): $out"
+  grep -qF 'docs/plans/PLAN-01-review/EVIDENCE.md' <<< "$out" || fail "the pairing's refusal should name the evidence file as a place for the Code: line: $out"
+  # a builder's records entry in the plan's evidence file names its code commit as well as the LOG does
+  ( cd "$spr" && printf '# PLAN-01 evidence\n\n### 01.1\nCode: %s\n' "${s1:0:9}" > docs/plans/PLAN-01-review/EVIDENCE.md && git add docs/plans/PLAN-01-review/EVIDENCE.md ) || fail "fixture: the evidence file"
+  cm2 "$spr" 'PLAN-01 / close — done'; [ "$rc" -eq 0 ] || fail "a stage commit named only in the plan's evidence file was refused (rc=$rc): $out"
+  ( cd "$spr" && git rm -q --cached docs/plans/PLAN-01-review/EVIDENCE.md && rm docs/plans/PLAN-01-review/EVIDENCE.md ) || fail "fixture: unstage the evidence file"
   unset RATCHET_TMP_TIDY; RATCHET_TMP_TIDY="$RATCHET_DIR/tmp-tidy.sh"
   # the pre-commit hash leg's ledger: a failed listing or a failed read of the staged ledger is exit 2, never an empty ledger that checks
   # nothing (a stamped plan's edited criteria would pass)
@@ -1976,7 +2503,7 @@ if [ "${1:-}" = "--commit-msg" ]; then
       else
         check_close_ritual "$close" "$tree" . "$man" || exit $?
         if [ "$RATCHET_SIDE" = records ]; then   # the pairing: every code-side builder commit named by a Code: line
-          lt="$(records_log_text)" || exit $?
+          lt="$(records_log_text "$close")" || exit $?
           pairing_ok "$close" "$lt" "$RATCHET_CODE_ROOT" || exit $?
         fi
       fi
@@ -2040,14 +2567,14 @@ if [ -n "$test_files" ]; then
   skip_scan "$added_test" "$(git show ":$RATCHET_ALLOWLIST" 2>/dev/null || true)" || exit 1
 fi
 # (b) secrets — the Never list, wired: added/modified file names, then every added line of the staged diff
-whole="$(git diff --cached -U0 --no-prefix)" || exit 1
+whole="$(git diff --cached -U0 --no-prefix --no-renames)" || exit 1                              # a rename as a delete and an add, as CI's diff-tree shows it
 secret_scan "$present_files" "$whole" || exit 1
 conflict_scan "$whole" || exit $?                                                            # a resolution staged with its markers still in
 # (c) tmp/ cites — PLAN.md read from the INDEX (a close flips its row in the same commit)
 planmd=""; has="$(git ls-files --cached -- PLAN.md)" || exit 2
 [ -z "$has" ] || planmd="$(git show :PLAN.md)" || exit 2                                     # the INDEX copy; absent = no rows = any plan cite refused
 others=(); mhs="$(merge_heads)" || exit 2                                                    # a merge concluded by `git commit`: each cite judged against every parent
-lines_of "$mhs"; for h in ${LINES_OF[@]+"${LINES_OF[@]}"}; do d="$(git diff --cached -U0 --no-prefix "$h")" || exit 1; f="$(fresh_cites <<< "$d")" || exit 2; others+=("$f"); done
+lines_of "$mhs"; for h in ${LINES_OF[@]+"${LINES_OF[@]}"}; do d="$(git diff --cached -U0 --no-prefix --no-renames "$h")" || exit 1; f="$(fresh_cites <<< "$d")" || exit 2; others+=("$f"); done
 tmp_cite_guard "$planmd" ${others[@]+"${others[@]}"} <<< "$whole" || exit 1
 # (d) acceptance hashes — the INDEX copies of the ledger, each plan file, and the extractor itself; nothing falls back to disk
 # (the code side holds no ledger of the plans, which are the records repo's: the leg is the records side's and one-repo's). Presence is a
@@ -2065,9 +2592,14 @@ if [ -n "$hl" ]; then
   esac
   RATCHET_EXTRACT="$ex" check_acceptance_hashes "$ledger" plan_content_index || exit 1
 fi
-# (e) the project's own check (RATCHET_PROJECT_CHECK) over the staged diff; the records side has none
-if [ "$RATCHET_SIDE" != records ]; then project_check "$whole" || exit $?; fi
-# (f) count floor — last, because it builds and tests; docs-only skips; CI sets RATCHET_SKIP_COUNT_FLOOR=1 and runs the suite itself;
+# (e) the briefings' budgets and duplicates, when the commit touches one (EVO-121: a note: commit once took both over budget)
+briefings_lint "$present_files" || exit $?
+# (f) the project's own check (RATCHET_PROJECT_CHECK) over the staged diff; the records side has none
+if [ "$RATCHET_SIDE" != records ]; then project_check "$whole" "" || exit $?; fi
+# (g) a lowered floor carries its reason line (--lower) — every commit, docs-only too, and whatever RATCHET_SKIP_COUNT_FLOOR says: the
+# count file reads as a record path to the suite-run record, so nothing else would see a drop. The records repo has no count file
+if [ "$RATCHET_SIDE" != records ]; then floor_lower_check_staged "$(git diff --cached --name-only --no-renames)" || exit $?; fi
+# (h) count floor — last, because it builds and tests; docs-only skips; CI sets RATCHET_SKIP_COUNT_FLOOR=1 and runs the suite itself;
 # the records repo has no suite
 if [ "${RATCHET_SKIP_COUNT_FLOOR:-}" != "1" ] && [ "$RATCHET_SIDE" != records ]; then
   count_floor "$(git diff --cached --name-only --no-renames)" || exit 1

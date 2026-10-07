@@ -32,7 +32,8 @@
 #                     there is no run log (a Stage the Planner built: the commit before its first). The head defaults to
 #                     HEAD; name the Stage's own last commit once later Stages have landed.
 #   --dry-run         print the exact command and exit 0: every argument single-quoted so it pastes back, prefixed with
-#                     `env -u RATCHET_ALLOW_PUSH`. The refusals still apply; the preflight doesn't run.
+#                     `env -u RATCHET_ALLOW_PUSH` (a build's also with `TMPDIR=<its agent temp>`, which the dry-run
+#                     doesn't make). The refusals still apply; the preflight doesn't run.
 #   --preflight       run only the preflight. --no-preflight skips it for one launch.
 #   --root DIR        act on another repo (the self-test uses it)
 #
@@ -63,12 +64,14 @@
 #     `executor (NN.X)` or `executor (<slug>)`. The agent is <project>-codex-NN-X, or <project>-codex-<slug> with the slug
 #     lowercased and anything outside a-z, 0-9 and - turned into -. Herdr caps a name at 32 characters, so a longer one is
 #     refused before anything is made. --headless opts out. --resume, --fix, --review and --read always run headless, and
-#     --continue, --wait, --peek and --abandon follow the Stage's binding. A failed Herdr check (no herdr, an untested version, no workspace)
+#     --continue, --wait, --peek and --abandon follow the Stage's binding. A failed Herdr check (no herdr, its server not running, no workspace; any Herdr version runs)
 #     refuses and names --headless. It never falls back to headless on its own. Outside Herdr every launch is headless.
 #     A pane launch closes the tabs of the plan's settled Stages (a small change's: the other settled small changes), but
 #     only while Herdr reads that Codex idle or done, or the pane no longer holds Codex. A working one (a human may have
 #     typed a follow-up), a reply that names no agent kind, or a failed read leaves the tab open with one line; the launch
-#     goes on.
+#     goes on. A small change is one-off: when its run, --continue or --wait settles, it closes its own tab at once under
+#     the same guard, waiting up to DRIVE_STAGE_SETTLE_TAB_WAIT (15) s for Herdr to read its Codex idle. A Stage keeps its
+#     tab until the Stage ends (the next launch's sweep, or end-stream), so every --continue queues into the live pane.
 #   Locks. A lock is a mkdir plus an owner file (pid, start time, plan, stage; kit/herdr/lib.sh's convention). A lock
 #     whose launcher died is stale and still blocks the next build, because its Codex may still be working. A build
 #     keeps its lock past its own exit while its message is unsettled. Only --wait or --abandon of the same plan and
@@ -81,11 +84,24 @@
 #     model_reasoning_effort=), because without -m Codex runs the interactive default in ~/.codex/config.toml.
 #   Preflight. Before every real launch, `codex --version` must equal DRIVE_STAGE_CODEX_VERSION (empty is refused: probe
 #     the invocation by hand once, then pin it), and a 60 s read-only smoke under the pin the mode will use must answer
-#     OK. On a mismatch it refuses and prints the recovery: re-probe by hand, re-pin, write a playbook-feedback LOG note.
+#     OK. On a mismatch it refuses and prints the recovery: re-probe by hand, re-pin, write a playbook-feedback LOG note. A
+#     failed smoke names the usual cause of a refused model first: a model newer than the pinned CLI, which needs the CLI
+#     upgraded and the pin raised.
 #   Safety. stdin is closed (an open stdin wedges `codex exec`) and `timeout` bounds the run. RATCHET_ALLOW_PUSH is unset
 #     before the launch, so an Executor never inherits the human's push key. Every producer is captured and checked: a
 #     git failure before the launch refuses (exit 1, nothing launched), and a git, sort or grep failure after it is exit 2
 #     with Codex's status and the transcript path, never a result line with a wrong head or count.
+#   Agent temp. A build session (a Stage, --continue, --resume, --fix, --bounded) runs with TMPDIR set to its plan's folder
+#     under the project's scratch root, outside the repo: <the main checkout's parent>/<its folder>-scratch/tmp/PLAN-NN/ (a
+#     small change's: …/tmp/bounded/), so its tests' and tools' temp leaves the shared temp folder and goes when the plan
+#     closes (tmp-tidy) or goes stale (the watchman's sweep). XP_SCRATCH_PARENT, absolute, replaces <parent>.
+#     A pane gets it through `tab create --env` (with XP_SCRATCH_PARENT when set, and the inherited TMPDIR when no agent temp
+#     could be chosen: a tab's shell starts from Herdr's environment), a headless run through the environment, and a dry-run
+#     prints it. A path over
+#     80 bytes, an unusable XP_SCRATCH_PARENT or a folder that can't be made keeps the inherited TMPDIR with one line:
+#     temp never stops a run. Reviews and reads are read-only and keep the inherited TMPDIR. The `>>> xp_scratch` block is
+#     kept byte for byte the same as kit/herdr/lib.sh's (new-stream.sh's self-test compares them); the rule's home is
+#     protocol/context-discipline.md § Workspace.
 #   Reviews. --review refuses an EDIT-ME review pin or mandate, a missing run-log header without --base, a --base or
 #     --head that isn't a commit, an empty range (base equals head: commit the Stage first), a base that isn't an
 #     ancestor of the head, and an existing review log or verdict without --again.
@@ -95,7 +111,7 @@
 #     file stay in the code repo; trailing slashes are stripped, and the records root must be relative, with no '.', '..' or
 #     empty component and no symlink along it, and its own git work tree (else exit 2); a build's message (a fresh session, a --fix batch, a --bounded change) and a read's
 #     carry one `[split-repo]` line naming the records repo and, for a build, the two-commit rule (code first, then its
-#     records under the same subject, the LOG entry naming the code commit in a `Code: <short sha>` line); a review's prompt
+#     records under the same subject, with a `Code: <short sha>` line naming the code commit: in the plan's evidence entry for a Stage or a --fix batch, in its LOG entry for a --bounded change); a review's prompt
 #     names the records repo and, when the run log's header recorded it, the Stage's records range; workspace-write also
 #     grants the records repo's git dir and common dir; the run log's header ends ` records=<short sha>`; the binding keeps
 #     the records HEAD (rhead=); and the result line adds records-head= and records-commit= (changed= counts both repos).
@@ -142,7 +158,6 @@ TIMEOUT_NORMAL="${DRIVE_STAGE_TIMEOUT:-3600}"
 TIMEOUT_HEAVY="${DRIVE_STAGE_TIMEOUT_HEAVY:-7200}"
 CODEX_VERSION="${DRIVE_STAGE_CODEX_VERSION-0.160.0}"   # the pin, e.g. 0.144.3 — what the invocation below was last probed against; empty = unpinned (a launch is refused until it is set). `-` not `:-`: an explicitly EMPTY env value means unpinned even on a filled copy (the self-test relies on it)
 REVIEW_MANDATE="${DRIVE_STAGE_REVIEW_MANDATE:-private/.codex/agents/pensieve-reviewer.toml}"   # the stage reviewer's mandate file, repo-relative: templates/codex-reviewer.toml copied to .codex/agents/<project>-reviewer.toml; --review is refused while it reads EDIT-ME
-HERDR_TESTED="${DRIVE_STAGE_HERDR_VERSION-0.9.3}"   # the pane's gate: the Herdr version (client AND server) the pane calls were probed on; any other refuses before a tab is made
 # --------------------------------------------------------------------------------------------------
 PROJECT="${DRIVE_STAGE_PROJECT:-}"   # a pane launch names its agent <project>-codex-NN-X or <project>-codex-<slug> (Herdr names are global across workspaces); empty = the main checkout's folder name
 PANE_DELIVERY="${DRIVE_STAGE_PANE_DELIVERY:-180}"   # a pane launch / a queued --continue: seconds for the tagged message to show in Codex's session record before its delivery reads as unconfirmed
@@ -252,6 +267,7 @@ preflight() {   # $1 root, $2 model, $3 reasoning → 0 iff the CLI is the pinne
   last="$(last_line "$out")"
   if [ "$rc" -ne 0 ] || [ "$last" != "OK" ]; then   # the exit status AND the final line, exactly — an echoed prompt or a timeout that mentions OK is not an answer
     echo "drive-stage: preflight — the smoke under the pin $model ($reasoning) did not complete with the answer OK (exit $rc, last line: '${last:-<none>}'; the pin was refused, or the invocation shape or the auth moved). Re-probe by hand, re-pin, playbook-feedback note. --no-preflight skips this once." >&2
+    echo "  If the output below says $model is unknown, unsupported or needs a newer version, the usual cause is a model newer than codex $have: upgrade the CLI, re-probe, and raise DRIVE_STAGE_CODEX_VERSION to the new version." >&2
     tl="$(tail -n 5 <<< "$out")" || tl="$out"
     while IFS= read -r l; do echo "  $l" >&2; done <<< "$tl"
     return 1
@@ -263,6 +279,55 @@ shq() {   # single-quote one argument for the dry-run's printed command, so a pa
   local s="$1" q="'"
   s="${s//$q/$q\\$q$q}"
   printf "'%s'" "$s"
+}
+
+# >>> xp_scratch: agent temp's home (protocol/context-discipline.md § Workspace). Kept byte for byte the same in kit/herdr/lib.sh and
+# kit/drive-stage.sh.example, which is copied into projects and can't source this file; new-stream.sh's self-test compares the copies.
+xp_scratch_root() {   # $1 a checkout (the main one or a stream's worktree) → prints the project's scratch root, no trailing slash:
+  # <parent>/<the main checkout's folder>-scratch, the parent being XP_SCRATCH_PARENT when set (absolute), else the main checkout's own.
+  # The main checkout is the parent of git's common dir, so a stream's worktree (../<project>-PLAN-NN) maps to its project's root, and
+  # two projects under one XP_SCRATCH_PARENT keep apart. 1 when the override isn't usable, 2 when git fails (the reason printed either way)
+  local c m p
+  c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || { echo "scratch: git rev-parse --git-common-dir failed in $1" >&2; return 2; }
+  case "$c" in
+    */.git) m="${c%/.git}" ;;
+    *) m="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || { echo "scratch: git rev-parse --show-toplevel failed in $1" >&2; return 2; } ;;   # a git dir kept elsewhere: the checkout itself
+  esac
+  case "$m" in /?*) ;; *) echo "scratch: the main checkout '$m' has no parent folder" >&2; return 1 ;; esac
+  p="${m%/*}"
+  if [ -n "${XP_SCRATCH_PARENT:-}" ]; then
+    p="${XP_SCRATCH_PARENT%/}"
+    case "$p" in /?*) ;; *) echo "scratch: XP_SCRATCH_PARENT '$XP_SCRATCH_PARENT' is not an absolute folder below /" >&2; return 1 ;; esac
+  fi
+  printf '%s/%s-scratch\n' "$p" "${m##*/}"
+}
+
+xp_scratch_tmpdir() {   # $1 a checkout, $2 PLAN-NN | bounded → prints <scratch root>/tmp/<$2>/, the TMPDIR of that plan's sessions (of small
+  # changes and sprints: bounded), without making it; 1 when it can't, the reason printed: a bad name, no scratch root, or a path over 80
+  # bytes (a socket made under it could pass macOS's 104-byte limit; counted under LC_ALL=C, so a multibyte name counts every byte). The
+  # caller then keeps the inherited TMPDIR: temp never stops a run
+  local r n
+  case "$2" in bounded|PLAN-[0-9]*) ;; *) echo "scratch: '$2' is not PLAN-NN or bounded" >&2; return 1 ;; esac
+  case "$2" in PLAN-*[!0-9]*) echo "scratch: '$2' is not PLAN-NN or bounded" >&2; return 1 ;; esac
+  r="$(xp_scratch_root "$1")" || return 1
+  r="$r/tmp/$2/"
+  n="$(LC_ALL=C; printf '%s' "${#r}")" || { echo "scratch: cannot measure $r" >&2; return 1; }
+  [ "$n" -le 80 ] || { echo "scratch: $r is $n bytes, over 80: a socket made under it could pass macOS's 104-byte limit — set XP_SCRATCH_PARENT to a shorter folder" >&2; return 1; }
+  printf '%s\n' "$r"
+}
+# <<< xp_scratch
+
+SCRATCH_TMP=""   # the TMPDIR this launch's build session gets (scratch_env); empty = the inherited one
+scratch_env() {   # $1 root, $2 PLAN-NN | bounded, $3 dry (0/1) → a build session's agent temp outside the repo (protocol/context-discipline.md
+  # § Workspace): SCRATCH_TMP set and, on a real launch, the folder made and TMPDIR exported. Anything that fails keeps the inherited
+  # TMPDIR with one line on stderr: temp never stops a run. A dry-run makes nothing and only prints it
+  local t
+  t="$(xp_scratch_tmpdir "$1" "$2")" || { echo "drive-stage: the session keeps TMPDIR=${TMPDIR:-/tmp} (the line above)" >&2; return 0; }
+  if [ "$3" -eq 0 ]; then
+    mkdir -p "$t" 2>/dev/null && [ -w "$t" ] || { echo "drive-stage: cannot create or write $t — the session keeps TMPDIR=${TMPDIR:-/tmp}" >&2; return 0; }
+    TMPDIR="$t"; export TMPDIR
+  fi
+  SCRATCH_TMP="$t"
 }
 
 records_resolve() {   # $1 root → REC_REL / REC for split-repo mode (modules/split-repo.md): RATCHET_RECORDS as every kit script reads it — a
@@ -293,10 +358,14 @@ records_resolve() {   # $1 root → REC_REL / REC for split-repo mode (modules/s
   REC_REL="$rr"; REC="$phys"
 }
 
-split_note() {   # $1 build|read → the one `[split-repo]` line a message carries in split-repo mode; nothing in one repo
+split_note() {   # $1 build|read, $2 the plan (`bounded` for a small change) → the one `[split-repo]` line a message carries in
+  # split-repo mode; nothing in one repo. A Stage or --fix build names the plan's evidence entry as the Code: line's home; a small
+  # change has no plan file (and a patch never edits a closed plan's), so its Code: line rides in its LOG entry (modules/split-repo.md)
   [ -n "$REC_REL" ] || return 0
-  if [ "$1" = build ]; then
-    printf '%s\n' "[split-repo] The records (PLAN.md, the LOG, the plan files) are the separate git repo at $REC_REL/ (modules/split-repo.md). Every builder commit is two commits: the code in this repo first, then its records in $REC_REL/ under the same subject, the LOG entry carrying a \`Code: <short sha>\` line that names the code commit."
+  if [ "$1" = build ] && [ "${2:-}" = bounded ]; then
+    printf '%s\n' "[split-repo] The records (PLAN.md, the LOG, the plan files) are the separate git repo at $REC_REL/ (modules/split-repo.md). Every builder commit is two commits: the code in this repo first, then its records in $REC_REL/ under the same subject, the small change's LOG entry carrying a \`Code: <short sha>\` line that names the code commit. A closed plan's files are never edited."
+  elif [ "$1" = build ]; then
+    printf '%s\n' "[split-repo] The records (PLAN.md, the LOG, the plan files) are the separate git repo at $REC_REL/ (modules/split-repo.md). Every builder commit is two commits: the code in this repo first, then its records in $REC_REL/ under the same subject, the plan's evidence entry (docs/plans/PLAN-NN-review/EVIDENCE.md there) carrying a \`Code: <short sha>\` line that names the code commit."
   else
     printf '%s\n' "[split-repo] The records (PLAN.md, the LOG, the plan files) are the separate git repo at $REC_REL/ (modules/split-repo.md): read the plan and the LOG there."
   fi
@@ -667,12 +736,12 @@ drive() {   # $1 root, $2 plan, $3 stage (`fix` for --fix), $4 heavy, $5 resume,
     grants="$(all_write_dirs "$root")" || return 1   # resolved for the dry-run too: it must print the real grant, and a git failure here is a refusal before anything is written
     while IFS= read -r g; do [ -n "$g" ] || continue; set -- "$@" --add-dir "$g"; extra="$extra --add-dir $(shq "$g")"; done <<< "$grants"
   fi
-  note="$(split_note build)"   # split-repo mode: one line after the tag; empty in one repo, and the message is then exactly as before
+  note="$(split_note build "$plan")"   # split-repo mode: one line after the tag; empty in one repo, and the message is then exactly as before
   if [ "$dry" -eq 1 ]; then   # ONE line, the command — every argument single-quoted: it pastes back to the same argv (the tag line, then the prompt file); the trailing comment says what the launcher does before it
     if [ -n "$note" ]; then catpart="\"\$(printf ${sq}%s\\n${sq} $(shq "$tag") $(shq "$note"); cat $(shq "$prompt"))\""
     else catpart="\"\$(printf ${sq}%s\\n${sq} $(shq "$tag"); cat $(shq "$prompt"))\""; fi
-    printf 'env -u RATCHET_ALLOW_PUSH %s %s codex exec -m %s -c %s -s %s%s -C %s %s < /dev/null >> %s 2>&1   # the launcher takes the run lock, writes the binding and the run-log header (line 1 of the log) first, then runs this\n' \
-      "$tb" "$secs" "$(shq "$CODEX_MODEL")" "$(shq "model_reasoning_effort=$CODEX_REASONING")" "$(shq "$CODEX_SANDBOX")" "$extra" "$(shq "$root")" "$catpart" "$(shq "$log")"
+    printf 'env -u RATCHET_ALLOW_PUSH%s %s %s codex exec -m %s -c %s -s %s%s -C %s %s < /dev/null >> %s 2>&1   # the launcher takes the run lock, writes the binding and the run-log header (line 1 of the log) first, then runs this\n' \
+      "${SCRATCH_TMP:+ TMPDIR=$(shq "$SCRATCH_TMP")}" "$tb" "$secs" "$(shq "$CODEX_MODEL")" "$(shq "model_reasoning_effort=$CODEX_REASONING")" "$(shq "$CODEX_SANDBOX")" "$extra" "$(shq "$root")" "$catpart" "$(shq "$log")"
     return 0
   fi
   unfilled "a build launch" "CODEX_MODEL=$CODEX_MODEL" "CODEX_REASONING=$CODEX_REASONING" "CODEX_SANDBOX=$CODEX_SANDBOX" || return 1
@@ -766,7 +835,7 @@ review_records_note() {   # $1 root, $2 run log (repo-relative) → the sentence
         [ "$rbf" = "$rhf" ] || range=" The records written since this Stage began are the range $rbf..$rhf there: run 'git -C $REC_REL diff $rbf..$rhf'. It runs to the records HEAD, so it may include later Stages' records: this Stage's are the commits under its own subject ('git -C $REC_REL log --oneline $rbf..$rhf')." ;;
     esac
   fi
-  printf ' Split-repo mode (modules/split-repo.md): the records (PLAN.md, the LOG, the plan file and its Verify: blocks) are the separate git repo at %s/, and each code commit'"'"'s records commit there carries the same subject.%s\n' "$REC_REL" "$range"
+  printf ' Split-repo mode (modules/split-repo.md): the records (PLAN.md, the LOG, the plan file and its Verify: blocks, and the evidence file holding its proof table) are the separate git repo at %s/, and each code commit'"'"'s records commit there carries the same subject.%s\n' "$REC_REL" "$range"
 }
 
 review() {   # $1 root, $2 plan, $3 stage, $4 base (or ""), $5 again, $6 dry, $7 head (or "" = the current HEAD) — the review of a COMMITTED range as its own invocation, by the model that did not write the code (nothing committed since the base is a refusal — a review never reads an uncommitted tree): `codex exec -C <root> review "<prompt>"`, read-only by the subcommand's design
@@ -802,7 +871,7 @@ review() {   # $1 root, $2 plan, $3 stage, $4 base (or ""), $5 again, $6 dry, $7
   aroot="$(cd "$root" && pwd -P)" || { echo "drive-stage: review — root '$root' cannot be entered — nothing launched" >&2; return 1; }   # -o gets an absolute path: never resolved against a directory codex chose
   what="$plan Stage $stage"; [ "$plan" = bounded ] && what="bounded task $stage"
   if [ -n "$REC" ]; then recnote="$(review_records_note "$root" "$runlog")" || return 1; fi   # split-repo mode: where the plan lives, and the Stage's records range when the run log recorded it
-  prompt="Review under the mandate in $REVIEW_MANDATE — read that file first; its developer_instructions govern; you are read-only and change nothing. Scope: ONLY $scopetext — $what. Re-prove the Stage's Verify: blocks where the plan has them, as the mandate says (the playbook's prompts/review-stage.md — read-only: audit the named mutation). Return the verdict as that prompt specifies: PASS or ISSUES (n findings), blocking / non-blocking, file, line, why.$recnote"
+  prompt="Review under the mandate in $REVIEW_MANDATE — read that file first; its developer_instructions govern; you are read-only and change nothing. Scope: ONLY $scopetext — $what. Re-prove the Stage's Verify: blocks where the plan has them, as the mandate says (the playbook's prompts/review-stage.md — read-only: audit the named mutation). Return the verdict as that prompt specifies: PASS or ISSUES (n findings), blocking / Observations, file, line, why.$recnote"
   if [ "$dry" -eq 1 ]; then   # every argument single-quoted: the line pastes back to the same argv
     printf '%s %s codex exec -C %s review -m %s -c %s -o %s %s < /dev/null > %s 2>&1\n' "$tb" "$secs" "$(shq "$root")" "$(shq "$CODEX_REVIEW_MODEL")" "$(shq "model_reasoning_effort=$CODEX_REVIEW_REASONING")" "$(shq "$aroot/$v")" "$(shq "$prompt")" "$(shq "$l1")"
     return 0
@@ -872,6 +941,7 @@ read_plan() {   # $1 root, $2 plan, $3 prompt file (repo-relative or absolute), 
 
 # ---- the session modes: --continue, --wait, --peek, --abandon, and the pane --------------------------------------------------------
 ESC_WAIT="${DRIVE_STAGE_ESC_WAIT:-30}"   # seconds an Esc gets to show as the turn's end in the record
+SETTLE_TAB_WAIT="${DRIVE_STAGE_SETTLE_TAB_WAIT:-15}"   # seconds a settled run's Codex gets to read idle in Herdr before its tab is left open for the next launch
 H_OUT=""; H_CODE=""
 hcall() {   # herdr <args…> under a timeout (HCALL_TIMEOUT, default 20 s): H_OUT = stdout, H_CODE = Herdr's JSON error code off stderr ("" on success, timeout on 124); returns herdr's status
   local tb ef rc=0
@@ -887,16 +957,15 @@ hcall() {   # herdr <args…> under a timeout (HCALL_TIMEOUT, default 20 s): H_O
 
 need_jq() { command -v jq >/dev/null 2>&1 || { echo "drive-stage: $1 reads Codex's session record with jq (macOS 15+ ships /usr/bin/jq) — not on PATH; nothing done" >&2; return 1; }; }
 
-herdr_gate() {   # the gate of every Herdr action (a tab, an agent start, an Esc, a queued message into a pane): inside Herdr, the tested version on both sides
+herdr_gate() {   # the gate of every Herdr action (a tab, an agent start, an Esc, a queued message into a pane): inside Herdr, its server running; any version
   local v
   [ "${HERDR_ENV:-}" = 1 ] || { echo "drive-stage: a pane runs inside Herdr only (HERDR_ENV=1) — nothing created" >&2; return 1; }
   command -v herdr >/dev/null 2>&1 || { echo "drive-stage: herdr is not on PATH — nothing created" >&2; return 1; }
   need_jq "a pane" || return 1
-  [ -n "$HERDR_TESTED" ] || { echo "drive-stage: DRIVE_STAGE_HERDR_VERSION is empty — pin the Herdr version the pane calls were probed on; nothing created" >&2; return 1; }
   hcall status --json || { echo "drive-stage: herdr status failed ($H_CODE) — nothing created" >&2; return 1; }
-  v="$(printf '%s' "$H_OUT" | jq -r '"\(.client.version // "?") \(.server.version // "?") \(.server.running // false)"')" || { echo "drive-stage: jq failed reading herdr status — nothing created" >&2; return 1; }
-  [ "$v" = "$HERDR_TESTED $HERDR_TESTED true" ] && return 0
-  echo "drive-stage: untested Herdr (client/server/running: $v; the pane calls were probed on $HERDR_TESTED) — re-probe them on a named throwaway session (modules/herdr.md), then re-pin DRIVE_STAGE_HERDR_VERSION. Nothing created" >&2
+  v="$(printf '%s' "$H_OUT" | jq -r '.server.running // false')" || { echo "drive-stage: jq failed reading herdr status — nothing created" >&2; return 1; }
+  [ "$v" = true ] && return 0
+  echo "drive-stage: the Herdr server is not running (status: running=$v) — nothing created" >&2
   return 1
 }
 
@@ -1020,33 +1089,60 @@ discover_session() {   # $1 root → prints the pane Codex's session id: Herdr's
 }
 
 close_settled_tabs() {   # $1 root, $2 dir → closes the tab of every SETTLED pane binding of this plan (the previous Stage's, this Stage's earlier run):
-  # a full-access agent holding a finished Stage's instructions has no reason to stay alive. An unsettled one is left alone. Tab ids are never reused.
-  # Settled is the launcher's view only: a human may have typed a follow-up since. So a tab closes only while Herdr reads its pane's Codex idle
-  # or done, or the pane no longer holds Codex (gone: agent_not_found / pane_not_found; or a kind that isn't codex, a shell). The reply must be
-  # an agent object with a string kind: `{}`, no .result.agent, or no kind is never "gone". Working, blocked, unknown, no status, a malformed
-  # reply, or a read that fails: left open, one line each, and the launch goes on — a failed read is never idle
-  local b k st v
+  # a full-access agent holding a finished Stage's instructions has no reason to stay alive. An unsettled one is left alone. Tab ids are never
+  # reused. The launch goes on whatever happens here (close_settled_tab names every tab it leaves open)
+  local b
   for b in "$1/$2"/*-binding; do
     [ -f "$b" ] || continue
-    [ ! -e "$b.new" ] || continue   # a pane launch between its start and its binding write: not settled
-    bind_read "$b" || { echo "drive-stage: warning — ${b##*/} could not be read: its Stage's tab, if any, is left open" >&2; continue; }
-    [ -n "$B_tab" ] && [ "$B_state" = settled ] || continue   # a pane Stage later continued headless keeps its tab id until this closes it
-    if [ -n "$B_pane" ]; then
-      if hcall agent get "$B_pane"; then
-        v="$(printf '%s' "$H_OUT" | jq -r '.result.agent as $a | if ($a | type) == "object" and ($a.agent | type) == "string" and $a.agent != ""
-            then [$a.agent, (if ($a.agent_status | type) == "string" then $a.agent_status else "" end)] | @tsv else "-" end')" \
-          || { echo "drive-stage: jq failed reading pane $B_pane's reply — the settled Stage's tab $B_tab is left open" >&2; continue; }
-        [ "$v" != - ] || { echo "drive-stage: Herdr's reply for pane $B_pane names no agent kind — the settled Stage's tab $B_tab is left open" >&2; continue; }
-        k="${v%%	*}"; st="${v#*	}"
-        if [ "$k" = codex ]; then case "$st" in idle|done) ;; *) echo "drive-stage: the settled Stage's tab $B_tab is left open — its Codex reads ${st:-no status} (a human's follow-up?); a later launch closes it once it's idle, or close it by hand" >&2; continue ;; esac; fi
-      else
-        case "$H_CODE" in agent_not_found|pane_not_found) ;; *) echo "drive-stage: cannot read pane $B_pane ($H_CODE) — the settled Stage's tab $B_tab is left open" >&2; continue ;; esac
-      fi
-    fi
-    if ! hcall tab close "$B_tab" && [ "$H_CODE" != tab_not_found ]; then echo "drive-stage: could not close the settled Stage's tab $B_tab ($H_CODE) — left open" >&2; continue; fi
-    echo "drive-stage: closed the settled Stage's tab $B_tab (${b##*/})" >&2
-    B_tab=""; bind_write "$b" || echo "drive-stage: warning — ${b##*/} still names the closed tab (its rewrite failed)" >&2
+    close_settled_tab "$b" 0 || true
   done
+}
+
+close_settled_tab() {   # $1 a binding, $2 1 = quiet while its Codex still reads busy → 0 closed, or nothing to close (not a pane, no tab, not
+  # settled); 1 left open because its Codex reads working, blocked, unknown or no status; 2 left open for another reason (named). Leaves B_* read
+  # from the binding. Settled is the launcher's view only: a human may have typed a follow-up since. So a tab closes only while Herdr reads its
+  # pane's Codex idle or done, or the pane no longer holds Codex (gone: agent_not_found / pane_not_found; or a kind that isn't codex, a shell).
+  # The reply must be an agent object with a string kind: `{}`, no .result.agent, or no kind is never "gone". A malformed reply or a read that
+  # fails is never idle
+  local b="$1" quiet="$2" k st v
+  [ ! -e "$b.new" ] || return 0   # a pane launch between its start and its binding write: not settled
+  bind_read "$b" || { echo "drive-stage: warning — ${b##*/} could not be read: its Stage's tab, if any, is left open" >&2; return 2; }
+  [ -n "$B_tab" ] && [ "$B_state" = settled ] || return 0   # a pane Stage later continued headless keeps its tab id until this closes it
+  if [ -n "$B_pane" ]; then
+    if hcall agent get "$B_pane"; then
+      v="$(printf '%s' "$H_OUT" | jq -r '.result.agent as $a | if ($a | type) == "object" and ($a.agent | type) == "string" and $a.agent != ""
+          then [$a.agent, (if ($a.agent_status | type) == "string" then $a.agent_status else "" end)] | @tsv else "-" end')" \
+        || { echo "drive-stage: jq failed reading pane $B_pane's reply — the settled Stage's tab $B_tab is left open" >&2; return 2; }
+      [ "$v" != - ] || { echo "drive-stage: Herdr's reply for pane $B_pane names no agent kind — the settled Stage's tab $B_tab is left open" >&2; return 2; }
+      k="${v%%	*}"; st="${v#*	}"
+      if [ "$k" = codex ]; then case "$st" in idle|done) ;; *) [ "$quiet" = 1 ] || echo "drive-stage: the settled Stage's tab $B_tab is left open — its Codex reads ${st:-no status} (a human's follow-up?); a later launch closes it once it's idle, or close it by hand" >&2; return 1 ;; esac; fi
+    else
+      case "$H_CODE" in agent_not_found|pane_not_found) ;; *) echo "drive-stage: cannot read pane $B_pane ($H_CODE) — the settled Stage's tab $B_tab is left open" >&2; return 2 ;; esac
+    fi
+  fi
+  if ! hcall tab close "$B_tab" && [ "$H_CODE" != tab_not_found ]; then echo "drive-stage: could not close the settled Stage's tab $B_tab ($H_CODE) — left open" >&2; return 2; fi
+  echo "drive-stage: closed the settled Stage's tab $B_tab (${b##*/})" >&2
+  B_tab=""; bind_write "$b" || echo "drive-stage: warning — ${b##*/} still names the closed tab (its rewrite failed)" >&2
+  return 0
+}
+
+close_on_settle() {   # $1 the binding of a run that just settled → its tab closed now, not at the next launch (a one-off run has none): Herdr's status
+  # can trail the record by a moment, so a Codex still reading busy is re-read every POLL for up to SETTLE_TAB_WAIT s, then left open, named, for
+  # the next launch's sweep (close_settled_tabs) or end-stream.sh. Outside Herdr, or past a failed gate, the tab is left open, named. Never fails
+  # the run: its result line is already printed
+  local b="$1" rc end now
+  bind_read "$b" 2>/dev/null || return 0   # a binding this run just wrote; one that can't be read now has nothing this can close
+  [ -n "$B_tab" ] && [ "$B_state" = settled ] || return 0
+  herdr_gate >/dev/null 2>&1 || { echo "drive-stage: the settled run's tab $B_tab is left open — no tested Herdr to close it from here; the next launch or end-stream.sh closes it" >&2; return 0; }
+  now="$(date +%s)" || now=0; end=$(( now + SETTLE_TAB_WAIT ))
+  while :; do
+    rc=0; close_settled_tab "$b" 1 || rc=$?
+    [ "$rc" -eq 1 ] || return 0
+    now="$(date +%s)" || break   # a clock that can't be read ends the wait: the last read below names the tab left open
+    [ "$now" -lt "$end" ] || break
+    sleep "$POLL"
+  done
+  close_settled_tab "$b" 0 || true
 }
 
 result_line() {   # $1 root, $2 plan, $3 stage, $4 rc, $5 log, $6 the short pre-send HEAD, $7 extra fields → the one result line; 2 when a producer fails.
@@ -1070,7 +1166,7 @@ result_line() {   # $1 root, $2 plan, $3 stage, $4 rc, $5 log, $6 the short pre-
 
 drive_pane() {   # $1 root, $2 plan, $3 stage, $4 heavy, $5 again, $6 dry — a build Stage or a --bounded small change (plan=bounded, stage=<slug>) in its own Herdr tab: `codex NN.X` or `codex <slug>` in the caller's workspace
   local root="$1" plan="$2" stage="$3" heavy="$4" again="$5" dry="$6"
-  local secs paths prompt log dir name sn attempt tag pointer grants g before started tab pane i sid drc=0 frc ws settled sq="'" note rbfull="" rhdr=""
+  local secs paths prompt log dir name sn attempt tag pointer grants g before started tab pane i sid drc=0 frc ws settled sq="'" note rbfull="" rhdr="" ptmp
   secs="$TIMEOUT_NORMAL"; [ "$heavy" -eq 1 ] && secs="$TIMEOUT_HEAVY"
   paths="$(resolve_paths "$root" "$plan" "$stage" 0 "" "$again" 0)" || return 1
   prompt="${paths%	*}"; log="${paths#*	}"; dir="tmp/$plan"; [ "$plan" = bounded ] && dir="tmp/bounded"; ROOT_BIND="$root/$dir/$stage-binding"
@@ -1083,13 +1179,14 @@ drive_pane() {   # $1 root, $2 plan, $3 stage, $4 heavy, $5 again, $6 dry — a 
   attempt=$(( ${B_attempt:-0} + 1 )); tag="[planner $stage-c$attempt]"
   fresh_ok "$root" "$plan" "$stage" 0 || return $?
   pointer="$tag Your prompt is the file $prompt: read it in full and carry it out."   # Herdr refuses a newline in a launch argument (invalid_agent_argument, 0.9.1): the Stage prompt stays a file Codex reads
-  note="$(split_note build)"; pointer="$pointer${note:+ $note}"   # split-repo mode: the one-line note rides on the pointer (no newline); one repo: unchanged
+  note="$(split_note build "$plan")"; pointer="$pointer${note:+ $note}"   # split-repo mode: the one-line note rides on the pointer (no newline); one repo: unchanged
   set -- -m "$CODEX_MODEL" -c "model_reasoning_effort=$CODEX_REASONING" -s "$CODEX_SANDBOX"
   if [ "$CODEX_SANDBOX" = workspace-write ]; then grants="$(all_write_dirs "$root")" || return 1; while IFS= read -r g; do [ -n "$g" ] || continue; set -- "$@" --add-dir "$g"; done <<< "$grants"; fi
   set -- "$@" -a never -c check_for_update_on_startup=false -C "$root" "$pointer"
   ws="${HERDR_WORKSPACE_ID:-}"
+  ptmp="${SCRATCH_TMP:-${TMPDIR:-}}"   # the tab's shell starts from Herdr's environment, not ours: the agent temp, or else the inherited TMPDIR, goes with it, and so does XP_SCRATCH_PARENT (the session's own launcher and tidy compute the same root)
   if [ "$dry" -eq 1 ]; then
-    printf 'herdr tab create --workspace %s --cwd %s --label %s --env DISABLE_AUTO_UPDATE=true --env RATCHET_ALLOW_PUSH= --no-focus\n' "$(shq "${ws:-<HERDR_WORKSPACE_ID>}")" "$(shq "$root")" "$(shq "executor ($stage)")"
+    printf 'herdr tab create --workspace %s --cwd %s --label %s --env DISABLE_AUTO_UPDATE=true --env RATCHET_ALLOW_PUSH=%s --no-focus\n' "$(shq "${ws:-<HERDR_WORKSPACE_ID>}")" "$(shq "$root")" "$(shq "executor ($stage)")" "${ptmp:+ --env $(shq "TMPDIR=$ptmp")}${XP_SCRATCH_PARENT:+ --env $(shq "XP_SCRATCH_PARENT=$XP_SCRATCH_PARENT")}"
     printf 'herdr agent start %s --kind codex --pane <the new tab'"'"'s pane> --timeout 60000 --' "$(shq "$name")"; for g in "$@"; do printf ' %s' "$(shq "$g")"; done
     printf '   # the launcher takes the run lock and writes the binding first; then it waits on the session record\n'
     return 0
@@ -1106,7 +1203,8 @@ drive_pane() {   # $1 root, $2 plan, $3 stage, $4 heavy, $5 again, $6 dry — a 
   fresh_ok "$root" "$plan" "$stage" 0 || return $?   # re-read under the lock
   before="$(git -C "$root" rev-parse --short HEAD)" || { echo "drive-stage: git rev-parse HEAD failed — nothing launched" >&2; return 1; }
   if [ -n "$REC" ]; then records_before || return 1; fi
-  hcall tab create --workspace "$ws" --cwd "$root" --label "executor ($stage)" --env DISABLE_AUTO_UPDATE=true --env RATCHET_ALLOW_PUSH= --no-focus \
+  hcall tab create --workspace "$ws" --cwd "$root" --label "executor ($stage)" --env DISABLE_AUTO_UPDATE=true --env RATCHET_ALLOW_PUSH= \
+    ${ptmp:+--env} ${ptmp:+"TMPDIR=$ptmp"} ${XP_SCRATCH_PARENT:+--env} ${XP_SCRATCH_PARENT:+"XP_SCRATCH_PARENT=$XP_SCRATCH_PARENT"} --no-focus \
     || { echo "drive-stage: herdr tab create failed ($H_CODE) — nothing launched" >&2; return 1; }
   tab="$(printf '%s' "$H_OUT" | jq -r '.result.tab.tab_id // ""')" && pane="$(printf '%s' "$H_OUT" | jq -r '.result.root_pane.pane_id // ""')" && [ -n "$tab" ] && [ -n "$pane" ] \
     || { echo "drive-stage: herdr tab create returned no tab/pane id — nothing launched" >&2; return 1; }
@@ -1162,6 +1260,7 @@ drive_pane() {   # $1 root, $2 plan, $3 stage, $4 heavy, $5 again, $6 dry — a 
   settle_record "$root" "$log" || return 2; bind_write "$ROOT_BIND" || return 2
   settled=no; [ "$B_state" != settled ] || { settled=yes; LOCK_RELEASE=1; }
   result_line "$root" "$plan" "$stage" "$W_RC" "$log" "$before" " pane=$pane settled=$settled" || return 2
+  [ "$settled" = no ] || [ "$plan" != bounded ] || close_on_settle "$ROOT_BIND"   # a small change is one-off: no next launch closes its tab
   return "$W_RC"
 }
 
@@ -1185,8 +1284,8 @@ cont() {   # $1 root, $2 plan, $3 stage, $4 prompt file, $5 heavy, $6 dry — --
   if [ "$dry" -eq 1 ]; then
     catpart="\"\$(printf ${sq}%s\\n${sq} $(shq "$tag"); cat $(shq "$pf"))\""
     if [ "$mode" = pane ]; then printf 'codex queue --thread %s --message %s < /dev/null   # into the live pane session (headless resume if its tab is gone); the launcher takes the run lock and writes the binding first, then waits on the record\n' "$(shq "$B_session")" "$catpart"
-    else printf 'env -u RATCHET_ALLOW_PUSH %s %s codex exec -m %s -c %s -s %s%s -C %s resume %s %s < /dev/null >> %s 2>&1   # the launcher takes the run lock, writes the binding and the log header first\n' \
-      "$tb" "$secs" "$(shq "$CODEX_MODEL")" "$(shq "model_reasoning_effort=$CODEX_REASONING")" "$(shq "$CODEX_SANDBOX")" "$extra" "$(shq "$root")" "$(shq "$B_session")" "$catpart" "$(shq "$log")"; fi
+    else printf 'env -u RATCHET_ALLOW_PUSH%s %s %s codex exec -m %s -c %s -s %s%s -C %s resume %s %s < /dev/null >> %s 2>&1   # the launcher takes the run lock, writes the binding and the log header first\n' \
+      "${SCRATCH_TMP:+ TMPDIR=$(shq "$SCRATCH_TMP")}" "$tb" "$secs" "$(shq "$CODEX_MODEL")" "$(shq "model_reasoning_effort=$CODEX_REASONING")" "$(shq "$CODEX_SANDBOX")" "$extra" "$(shq "$root")" "$(shq "$B_session")" "$catpart" "$(shq "$log")"; fi
     return 0
   fi
   need_jq "--continue" || return 1
@@ -1233,6 +1332,7 @@ cont() {   # $1 root, $2 plan, $3 stage, $4 prompt file, $5 heavy, $6 dry — --
   settle_record "$root" "$log" || return 2; bind_write "$ROOT_BIND" || return 2
   settled=no; [ "$B_state" != settled ] || { settled=yes; LOCK_RELEASE=1; }
   result_line "$root" "$plan" "$stage" "$W_RC" "$log" "$before" " pane=$B_pane settled=$settled" || return 2
+  [ "$settled" = no ] || [ "$plan" != bounded ] || close_on_settle "$ROOT_BIND"
   return "$W_RC"
 }
 
@@ -1287,7 +1387,8 @@ wait_run() {   # $1 root, $2 plan, $3 stage, $4 heavy — --wait: reattach to th
   R_SESSION="$B_session"; R_COPY="${B_copy:-none}"
   if [ "$B_state" = settled ]; then
     echo "drive-stage: the last message $B_tag is settled — nothing to wait for" >&2
-    result_line "$root" "$plan" "$stage" 0 "$B_log" "$before" " pane=${B_pane:-none} settled=yes" || return 2; return 0
+    result_line "$root" "$plan" "$stage" 0 "$B_log" "$before" " pane=${B_pane:-none} settled=yes" || return 2
+    [ "$plan" != bounded ] || close_on_settle "$ROOT_BIND"; return 0
   fi
   secs="$TIMEOUT_NORMAL"; [ "$heavy" -eq 1 ] && secs="$TIMEOUT_HEAVY"
   pane_wait "$root" "$B_log" $(( $(date +%s) + secs )) 0 || return 2   # 124 here is --wait's own bound: the message is still running (settled=no) — --wait again or --peek, never --continue
@@ -1295,6 +1396,9 @@ wait_run() {   # $1 root, $2 plan, $3 stage, $4 heavy — --wait: reattach to th
   settle_record "$root" "$B_log" || return 2; bind_write "$ROOT_BIND" || return 2
   settled=no; [ "$B_state" != settled ] || { settled=yes; LOCK_RELEASE=1; }
   result_line "$root" "$plan" "$stage" "$W_RC" "$B_log" "$before" " pane=${B_pane:-none} settled=$settled" || return 2
+  # a small change is one-off: its tab goes now, not at a next launch that may never come. A Stage keeps its tab until the Stage ends
+  # (the next launch's sweep, or end-stream), so its next --continue queues into the live pane
+  [ "$settled" = no ] || [ "$plan" != bounded ] || close_on_settle "$ROOT_BIND"
   return "$W_RC"
 }
 
@@ -1347,7 +1451,8 @@ peek() {   # $1 root, $2 plan, $3 stage, $4 n — the Stage's session state and 
 }
 
 if [ "$selftest" -eq 1 ]; then
-  d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
+  d="$(mktemp -d)"; sr="$(mktemp -d /tmp/xps.XXXXXX)"; trap 'rm -rf "$d" "$sr"' EXIT
+  sr="$(cd "$sr" && pwd -P)"; export XP_SCRATCH_PARENT="$sr"   # every launch's agent temp: a SHORT parent (mktemp -d's own path is over scratch_env's 80-byte cap)
   d="$(cd "$d" && pwd -P)"   # the PHYSICAL path: the grants are resolved through `pwd -P` (and git's own linked-worktree answers are physical), so a fixture under a symlinked tmp (/var → /private/var on macOS) is compared as the launcher prints it
   fail() { echo "SELF-TEST FAIL: $1"; exit 1; }
   export CODEX_HOME="$d/codexhome"; CODEX_SESSIONS="$CODEX_HOME/sessions"; mkdir -p "$CODEX_SESSIONS/2026/09/23"   # never the real session store
@@ -1375,6 +1480,7 @@ if [ -n "$isrev" ] || [ "$sb" = read-only ]; then
 fi
 printf '%s\n' "$@" > "$FAKE_ARGV"
 if read -r line; then echo "STDIN_HAD_DATA:$line"; else echo "STDIN_EMPTY"; fi
+[ -z "${FAKE_TMPDIR_OUT:-}" ] || printf '%s\n' "${TMPDIR-unset}" > "$FAKE_TMPDIR_OUT"   # the agent temp this build session got
 echo "hello from fake codex"
 echo "PUSH_KEY=${RATCHET_ALLOW_PUSH-unset}"   # the launcher must have stripped it, even when the launching shell exported it
 while [ "$#" -gt 0 ]; do [ "$1" = -C ] && { echo "new" > "$2/created-by-codex.txt"; break; }; shift; done   # write into the -C dir (real codex chdirs there)
@@ -1415,6 +1521,7 @@ FAKE
   set +e; out="$(PATH="$d/bin:$PATH" FAKE_SMOKE=garbage DRIVE_STAGE_CODEX_VERSION=0.1.0 "$BASH" "$0" --root "$R" --preflight 2>&1)"; rc=$?; set -e
   [ "$rc" -eq 1 ] || fail "a refused preflight should exit 1 (got $rc): $out"
   grep -q 'did not complete' <<< "$out" || fail "a failed smoke did not refuse: $out"
+  grep -Fq 'a model newer than codex 0.1.0: upgrade the CLI' <<< "$out" || fail "a failed smoke should name a too-old CLI as the usual cause of a refused model: $out"
   set +e; out="$(PATH="$d/bin:$PATH" DRIVE_STAGE_CODEX_VERSION= "$BASH" "$0" --root "$R" --preflight 2>&1)"; rc=$?; set -e
   [ "$rc" -eq 1 ] || fail "a refused preflight should exit 1 (got $rc): $out"
   grep -q 'no pin' <<< "$out" || fail "an unpinned preflight should refuse and name the pin to set: $out"
@@ -1448,7 +1555,7 @@ FAKE
   # dry-run: normal
   out="$("$BASH" "$0" --root "$R" PLAN-07 07.1 --dry-run)" || fail "dry-run exit non-zero"
   label="   # the launcher takes the run lock, writes the binding and the run-log header (line 1 of the log) first, then runs this"
-  [ "$(sed -n '1p' <<< "$out")" = "env -u RATCHET_ALLOW_PUSH $tb $TIMEOUT_NORMAL codex exec -m 'fake-model-1' -c 'model_reasoning_effort=$CODEX_REASONING' -s 'danger-full-access' -C '$R' \"\$(printf '%s\\n' '[planner 07.1-c1]'; cat 'tmp/PLAN-07/07.1-prompt.md')\" < /dev/null >> 'tmp/PLAN-07/07.1-run.log' 2>&1$label" ] \
+  [ "$(sed -n '1p' <<< "$out")" = "env -u RATCHET_ALLOW_PUSH TMPDIR='$sr/repo-scratch/tmp/PLAN-07/' $tb $TIMEOUT_NORMAL codex exec -m 'fake-model-1' -c 'model_reasoning_effort=$CODEX_REASONING' -s 'danger-full-access' -C '$R' \"\$(printf '%s\\n' '[planner 07.1-c1]'; cat 'tmp/PLAN-07/07.1-prompt.md')\" < /dev/null >> 'tmp/PLAN-07/07.1-run.log' 2>&1$label" ] \
     || fail "dry-run normal command differs: $out"
   [ "$(grep -c . <<< "$out")" -eq 1 ] || fail "a stage dry-run should print just the command line: $out"
   # dry-run: --heavy
@@ -1819,7 +1926,7 @@ FAKE
   set +e; "$BASH" "$0" --root "$R" --read PLAN-07 --dry-run >/dev/null 2>&1; rc=$?; set -e; [ "$rc" -eq 64 ] || fail "--read with no prompt file should be refused with 64 (got $rc)"
   # --fix: a fresh build session under the BUILD pin and sandbox, log fix-run.log under the stage header; the result line reads `PLAN-NN fix …`
   out="$("$BASH" "$0" --root "$R" --fix PLAN-07 tmp/PLAN-07/fix-prompt.md --dry-run)" || fail "--fix dry-run exit non-zero"
-  [ "$out" = "env -u RATCHET_ALLOW_PUSH $tb $TIMEOUT_NORMAL codex exec -m 'fake-model-1' -c 'model_reasoning_effort=high' -s 'danger-full-access' -C '$R' \"\$(printf '%s\\n' '[planner fix-c1]'; cat 'tmp/PLAN-07/fix-prompt.md')\" < /dev/null >> 'tmp/PLAN-07/fix-run.log' 2>&1$label" ] || fail "--fix dry-run differs: $out"
+  [ "$out" = "env -u RATCHET_ALLOW_PUSH TMPDIR='$sr/repo-scratch/tmp/PLAN-07/' $tb $TIMEOUT_NORMAL codex exec -m 'fake-model-1' -c 'model_reasoning_effort=high' -s 'danger-full-access' -C '$R' \"\$(printf '%s\\n' '[planner fix-c1]'; cat 'tmp/PLAN-07/fix-prompt.md')\" < /dev/null >> 'tmp/PLAN-07/fix-run.log' 2>&1$label" ] || fail "--fix dry-run differs: $out"
   set +e; out="$(PATH="$d/bin:$PATH" FAKE_ARGV="$d/argvF" FAKE_SMOKE_ARGV="$d/smk4" "$BASH" "$0" --root "$R" --fix PLAN-07 tmp/PLAN-07/fix-prompt.md 2>&1)"; rc=$?; set -e
   [ "$rc" -eq 3 ] && grep -Eq "^PLAN-07 fix exit=3 log=tmp/PLAN-07/fix-run\.log head=[0-9a-f]+ changed=[0-9]+ commit=[^ ]+ session=none rollout=none\$" <<< "$out" || fail "--fix result line differs (rc=$rc): $out"
   [ "$(cat "$d/argvF")" = "$(printf 'exec\n-m\nfake-model-1\n-c\nmodel_reasoning_effort=high\n-s\ndanger-full-access\n-C\n%s\n[planner fix-c1]\nfix across stages' "$R")" ] || fail "--fix argv differs: $(cat "$d/argvF")"
@@ -1901,7 +2008,7 @@ H="${FAKE_HERDR:?}"; B2="${FAKE_BIN2:?}"; printf '%s\n' "$*" >> "$H/calls.log"
 die() { echo "{\"error\":{\"code\":\"$1\"}}" >&2; exit 1; }
 if [ -f "$H/fail.$1.$2" ]; then read -r code times < "$H/fail.$1.$2"; if [ "${times:-9}" -gt 0 ]; then echo "$code $(( ${times:-9} - 1 ))" > "$H/fail.$1.$2"; die "$code"; fi; fi
 case "$1 $2" in
-  "status --json") v="${FAKE_HERDR_VERSION:-0.9.1}"; echo "{\"client\":{\"version\":\"$v\"},\"server\":{\"running\":true,\"version\":\"$v\"}}" ;;
+  "status --json") v="${FAKE_HERDR_VERSION:-0.9.1}"; echo "{\"client\":{\"version\":\"$v\"},\"server\":{\"running\":${FAKE_HERDR_RUNNING:-true},\"version\":\"$v\"}}" ;;
   "tab create") n=$(( $(cat "$H/tabs" 2>/dev/null || echo 1) + 1 )); echo "$n" > "$H/tabs"; echo "{\"result\":{\"tab\":{\"tab_id\":\"w1:t$n\"},\"root_pane\":{\"pane_id\":\"w1:p$n\"}}}" ;;
   "tab close") grep -qx "$3" "$H/closed" 2>/dev/null && die tab_not_found; echo "$3" >> "$H/closed"; p="w1:p${3#w1:t}"; for f in "$H"/agent.*; do [ -f "$f" ] && grep -q " $p " "$f" && rm -f "$f"; done; echo '{"result":{"type":"ok"}}' ;;
   "agent start")
@@ -1917,7 +2024,8 @@ case "$1 $2" in
     hit=""; for f in "$H"/agent.*; do [ -f "$f" ] || continue; read -r n p s < "$f"; { [ "$n" = "$3" ] || [ "$p" = "$3" ]; } && hit="$f" && break; done
     [ -n "$hit" ] || die agent_not_found; read -r n p s < "$hit"; nj="\"$n\""; [ "$n" != - ] || nj=null
     if [ -n "$s" ]; then sj="{\"value\":\"$s\"}"; else sj=null; fi
-    st=idle; [ ! -f "$H/status.$p" ] || read -r st < "$H/status.$p"
+    st=idle; sn=""; [ ! -f "$H/status.$p" ] || read -r st sn < "$H/status.$p"
+    if [ -n "$sn" ]; then if [ "$sn" -gt 0 ]; then echo "$st $((sn - 1))" > "$H/status.$p"; else st=idle; fi; fi   # `<status> N`: that status for N more reads, then idle
     echo "{\"result\":{\"agent\":{\"agent\":\"codex\",\"name\":$nj,\"pane_id\":\"$p\",\"agent_session\":$sj,\"agent_status\":\"$st\"}}}" ;;
   "agent rename") for f in "$H"/agent.*; do [ -f "$f" ] || continue; read -r n p s < "$f"; [ "$p" = "$3" ] && echo "$4 $p $s " > "$f"; done; echo '{"result":{"type":"ok"}}' ;;
   "agent send-keys")
@@ -2039,13 +2147,13 @@ FAKE
   : > "$d/fh/calls.log"; export FAKE_HERDR="$d/fh" FAKE_BIN2="$d/bin2"; P3="$d/bin3:$d/bin2:$PATH"
   set +e; out="$(PATH="$P3" "$BASH" "$0" --root "$SR" PLAN-09 09.3 --pane 2>&1)"; rc=$?; set -e
   [ "$rc" -eq 1 ] && grep -Fq 'inside Herdr only' <<< "$out" && ! grep -q 'tab create' "$d/fh/calls.log" || fail "S8: --pane outside Herdr should refuse before any call (rc=$rc): $out"
-  set +e; out="$(PATH="$P3" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 FAKE_HERDR_VERSION=0.9.2 "$BASH" "$0" --root "$SR" PLAN-09 09.3 --pane 2>&1)"; rc=$?; set -e
-  [ "$rc" -eq 1 ] && grep -Fq 'untested Herdr' <<< "$out" && ! grep -q 'tab create' "$d/fh/calls.log" || fail "S8: an untested Herdr should refuse before a tab is made (rc=$rc): $out"
+  set +e; out="$(PATH="$P3" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 FAKE_HERDR_RUNNING=false "$BASH" "$0" --root "$SR" PLAN-09 09.3 --pane 2>&1)"; rc=$?; set -e
+  [ "$rc" -eq 1 ] && grep -Fq 'server is not running' <<< "$out" && ! grep -q 'tab create' "$d/fh/calls.log" || fail "S8: a stopped Herdr server should refuse before a tab is made (rc=$rc): $out"
   pe() { PATH="$P3" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1 DRIVE_STAGE_PROJECT=proj DRIVE_STAGE_POLL=0.2 DRIVE_STAGE_PANE_DELIVERY=3 DRIVE_STAGE_TIMEOUT=8 DRIVE_STAGE_ESC_WAIT=2 "$@"; }   # a short bound: a regression fails in seconds, never hangs
-  set +e; out="$(pe env FAKE_SESSION=pane-3 FAKE_PANE_COMMIT='PLAN-09 / 09.3' "$BASH" "$0" --root "$SR" PLAN-09 09.3 --pane 2>&1)"; rc=$?; set -e
+  set +e; out="$(pe env FAKE_HERDR_VERSION=1.0.0 FAKE_SESSION=pane-3 FAKE_PANE_COMMIT='PLAN-09 / 09.3' "$BASH" "$0" --root "$SR" PLAN-09 09.3 --pane 2>&1)"; rc=$?; set -e   # another Herdr version runs: the kit pins none
   h3="$(git -C "$SR" rev-parse --short HEAD)"
   [ "$rc" -eq 0 ] && grep -Eq "^PLAN-09 09\.3 exit=0 log=tmp/PLAN-09/09\.3-run\.log head=$h3 changed=[0-9]+ commit=$h3 session=pane-3 rollout=tmp/PLAN-09/09\.3-rollout\.jsonl pane=w1:p2 settled=yes\$" <<< "$out" || fail "S8: the pane result line differs (rc=$rc): $out"
-  grep -Fxq "tab create --workspace w1 --cwd $SR --label executor (09.3) --env DISABLE_AUTO_UPDATE=true --env RATCHET_ALLOW_PUSH= --no-focus" "$d/fh/calls.log" || fail "S8: tab create differs: $(cat "$d/fh/calls.log")"
+  grep -Fxq "tab create --workspace w1 --cwd $SR --label executor (09.3) --env DISABLE_AUTO_UPDATE=true --env RATCHET_ALLOW_PUSH= --env TMPDIR=$sr/${SR##*/}-scratch/tmp/PLAN-09/ --env XP_SCRATCH_PARENT=$sr --no-focus" "$d/fh/calls.log" || fail "S8: tab create differs: $(cat "$d/fh/calls.log")"
   grep -Fxq "agent start proj-codex-09-3 --kind codex --pane w1:p2 --timeout 30000 -- -m fake-model-1 -c model_reasoning_effort=high -s danger-full-access -a never -c check_for_update_on_startup=false -C $SR [planner 09.3-c1] Your prompt is the file tmp/PLAN-09/09.3-prompt.md: read it in full and carry it out." "$d/fh/calls.log" || fail "S8: agent start differs: $(cat "$d/fh/calls.log")"
   grep -Fxq 'session id: pane-3' "$SB/09.3-run.log" && [ "$(bget 09.3 mode)" = pane ] && [ "$(bget 09.3 agent)" = proj-codex-09-3 ] && [ "$(bget 09.3 tab)" = w1:t2 ] && [ "$(bget 09.3 state)" = settled ] && [ ! -e "$LK" ] || fail "S8: the pane binding or log differs: $(cat "$SB/09.3-binding")"
   # S9 --continue into the live pane: `codex queue --thread <id>` with the next tag, then the same wait
@@ -2213,8 +2321,8 @@ FAKE
   set +e; out="$(pe "$BASH" "$0" --root "$SR" PLAN-09 09.50 --pane --headless --dry-run 2>&1)"; rc=$?; set -e
   [ "$rc" -eq 64 ] || fail "S30: --pane with --headless should be a usage error (rc=$rc): $out"
   : > "$d/fh/calls.log"
-  set +e; out="$(pe env FAKE_HERDR_VERSION=0.9.2 FAKE_ARGV="$d/sa30" "$BASH" "$0" --root "$SR" PLAN-09 09.50 2>&1)"; rc=$?; set -e
-  [ "$rc" -eq 1 ] && grep -Fq 'untested Herdr' <<< "$out" && grep -Fq 'pass --headless' <<< "$out" && ! grep -q 'tab create' "$d/fh/calls.log" && [ ! -e "$d/sa30" ] || fail "S30: a failed gate under the default should refuse naming --headless, nothing launched (rc=$rc): $out"
+  set +e; out="$(pe env FAKE_HERDR_RUNNING=false FAKE_ARGV="$d/sa30" "$BASH" "$0" --root "$SR" PLAN-09 09.50 2>&1)"; rc=$?; set -e
+  [ "$rc" -eq 1 ] && grep -Fq 'server is not running' <<< "$out" && grep -Fq 'pass --headless' <<< "$out" && ! grep -q 'tab create' "$d/fh/calls.log" && [ ! -e "$d/sa30" ] || fail "S30: a failed gate under the default should refuse naming --headless, nothing launched (rc=$rc): $out"
   # … a --bounded small change in its own tab: the slug lowercased, anything outside [a-z0-9-] turned into -, scratch under tmp/bounded/
   mkdir -p "$SR/tmp/bounded"; printf 'fix the spacing\n' > "$SR/tmp/bounded/Side_Bar.spacing-prompt.md"
   : > "$d/fh/calls.log"
@@ -2223,6 +2331,7 @@ FAKE
   grep -Eq '^tab create --workspace w1 --cwd .* --label executor \(Side_Bar\.spacing\) ' "$d/fh/calls.log" && grep -Fq 'agent start proj-codex-side-bar-spacing --kind codex' "$d/fh/calls.log" \
     && grep -Fq '[planner Side_Bar.spacing-c1] Your prompt is the file tmp/bounded/Side_Bar.spacing-prompt.md' "$d/fh/calls.log" || fail "S30: the --bounded tab or agent start differs: $(cat "$d/fh/calls.log")"
   [ "$(kv_get "$SR/tmp/bounded/Side_Bar.spacing-binding" mode)" = pane ] && [ ! -e "$LK" ] || fail "S30: the --bounded pane binding differs, or the lock stayed: $(cat "$SR/tmp/bounded/Side_Bar.spacing-binding")"
+  [ -z "$(kv_get "$SR/tmp/bounded/Side_Bar.spacing-binding" tab)" ] && grep -q '^tab close w1:t' "$d/fh/calls.log" || fail "S30: a settled small change should close its own tab at once (v0.29): $(cat "$d/fh/calls.log")"
   # … a slug whose agent name is over Herdr's 32 characters refuses before anything is made, naming --headless (which still launches it)
   printf 'x\n' > "$SR/tmp/bounded/a-very-long-slug-for-herdr-prompt.md"
   set +e; out="$(pe "$BASH" "$0" --root "$SR" --bounded a-very-long-slug-for-herdr --dry-run 2>&1)"; rc=$?; set -e
@@ -2261,6 +2370,55 @@ FAKE
   mk32; printf '%s\n' '{"result":{"agent":{"agent":"shell","pane_id":"w1:p60","agent_status":"idle"}}}' > "$d/fh/reply.agent.get"
   set +e; out="$( PATH="$P3"; hash -r; close_settled_tabs "$d" cst 2>&1 )"; rc=$?; set -e; hash -r; rm -f "$d/fh/reply.agent.get"
   [ "$rc" -eq 0 ] && grep -Fxq 'tab close w1:t60' "$d/fh/calls.log" && [ -z "$(kv_get "$cstb" tab)" ] || fail "S32: a pane back at a shell should be closed (rc=$rc): $out"
+  # S34 (v0.29) a Stage keeps its tab through --wait (S8: the next --continue queues into the live pane). A small change closes its tab when it
+  # settles, under the sweep's guard: close_on_settle re-reads a Codex that still reads working for up to DRIVE_STAGE_SETTLE_TAB_WAIT s (Herdr
+  # trails the record), then leaves it open, named; outside Herdr it is left open, named
+  printf 'do stage 09.61
+' > "$SB/09.61-prompt.md"; printf 'do stage 09.62
+' > "$SB/09.62-prompt.md"
+  set +e; out="$(pe env FAKE_SESSION=pane-61 "$BASH" "$0" --root "$SR" PLAN-09 09.61 --pane 2>&1)"; rc=$?; set -e
+  t61="$(bget 09.61 tab)"; p61="$(bget 09.61 pane)"
+  [ "$rc" -eq 0 ] && [ -n "$t61" ] && [ "$(bget 09.61 state)" = settled ] || fail "S34: fixture — 09.61's pane launch should settle and keep its tab (rc=$rc): $out"
+  n61="$(line_count "$(bget 09.61 rollout)")" || fail "S34: fixture — the record's length"   # a message still out (sent), whose turn then completes
+  sed -e 's/^state=.*/state=sent/' -e 's/^tag=.*/tag=[planner 09.61-c9]/' -e "s/^lines=.*/lines=$n61/" -e "s/^sent_s=.*/sent_s=$(date +%s)/" "$SB/09.61-binding" > "$SB/09.61-binding.tmp" && mv "$SB/09.61-binding.tmp" "$SB/09.61-binding" || fail "S34: fixture — the binding"
+  "$d/bin2/fake-turn" pane-61 "[planner 09.61-c9] one more thing" C "$(cd "$SR" && pwd -P)"
+  echo idle > "$d/fh/status.$p61"; : > "$d/fh/calls.log"
+  set +e; out="$(pe env DRIVE_STAGE_SETTLE_TAB_WAIT=5 "$BASH" "$0" --root "$SR" PLAN-09 09.61 --wait 2>&1)"; rc=$?; set -e
+  [ "$rc" -eq 0 ] && ! grep -q '^tab close' "$d/fh/calls.log" && [ "$(bget 09.61 tab)" = "$t61" ] && ! grep -Fq 'left open' <<< "$out" \
+    || fail "S34: --wait on a Stage should keep its tab open until the Stage ends (rc=$rc): $out / $(cat "$d/fh/calls.log")"
+  grep -Eq '^PLAN-09 09\.61 exit=0 .* settled=yes$' <<< "$out" || fail "S34: --wait should have waited the message out: $out"
+  # close_on_settle itself, on 09.61's settled binding: a busy Codex is re-read until it reads idle, then the tab closes
+  echo 'working 2' > "$d/fh/status.$p61"; : > "$d/fh/calls.log"
+  set +e; out="$( export PATH="$P3" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1; hash -r; SETTLE_TAB_WAIT=5; POLL=0.2; close_on_settle "$SB/09.61-binding" 2>&1 )"; rc=$?; set -e; hash -r
+  [ "$rc" -eq 0 ] && grep -Fxq "tab close $t61" "$d/fh/calls.log" && [ -z "$(bget 09.61 tab)" ] && [ "$(grep -c "^agent get $p61\$" "$d/fh/calls.log")" -ge 3 ] && ! grep -Fq 'left open' <<< "$out" \
+    || fail "S34: close_on_settle should close a settled run's tab once its Codex reads idle, re-reading a busy one (rc=$rc): $out / $(cat "$d/fh/calls.log")"
+  set +e; out="$(pe env FAKE_SESSION=pane-62 "$BASH" "$0" --root "$SR" PLAN-09 09.62 --pane 2>&1)"; rc=$?; set -e
+  t62="$(bget 09.62 tab)"; p62="$(bget 09.62 pane)"; [ "$rc" -eq 0 ] && [ -n "$t62" ] || fail "S34: fixture — 09.62's pane launch (rc=$rc): $out"
+  echo working > "$d/fh/status.$p62"; : > "$d/fh/calls.log"
+  set +e; out="$( export PATH="$P3" HERDR_ENV=1 HERDR_WORKSPACE_ID=w1; hash -r; SETTLE_TAB_WAIT=1; POLL=0.2; close_on_settle "$SB/09.62-binding" 2>&1 )"; rc=$?; set -e; hash -r
+  [ "$rc" -eq 0 ] && ! grep -q '^tab close' "$d/fh/calls.log" && [ "$(bget 09.62 tab)" = "$t62" ] && grep -Fq "tab $t62 is left open — its Codex reads working" <<< "$out" \
+    || fail "S34: a Codex still working after the wait should leave the tab open, named (rc=$rc): $out"
+  set +e; out="$( export PATH="$P3"; unset HERDR_ENV; hash -r; close_on_settle "$SB/09.62-binding" 2>&1 )"; rc=$?; set -e; hash -r
+  [ "$rc" -eq 0 ] && [ "$(bget 09.62 tab)" = "$t62" ] && grep -Fq "tab $t62 is left open — no tested Herdr" <<< "$out" || fail "S34: outside Herdr the tab should be left open, named (rc=$rc): $out"
+  rm -f "$d/fh/status.$p62"
+  # … and a small change's queued --continue into its live pane closes the tab when that message settles (its first run's tab left open: busy)
+  printf 'small one\n' > "$SR/tmp/bounded/s34-prompt.md"; printf 'and its fix\n' > "$SR/tmp/bounded/s34-fix-prompt.md"
+  pn=$(( $(cat "$d/fh/tabs") + 1 )); echo working > "$d/fh/status.w1:p$pn"
+  set +e; out="$(pe env FAKE_SESSION=pane-s34 DRIVE_STAGE_SETTLE_TAB_WAIT=0 "$BASH" "$0" --root "$SR" --bounded s34 2>&1)"; rc=$?; set -e
+  [ "$rc" -eq 0 ] && [ "$(kv_get "$SR/tmp/bounded/s34-binding" tab)" = "w1:t$pn" ] || fail "S34: fixture — the small change's tab should stay open while its Codex reads working (rc=$rc): $out"
+  rm -f "$d/fh/status.w1:p$pn"; : > "$d/fh/calls.log"
+  set +e; out="$(pe env FAKE_ARGV="$d/sa34" FAKE_REPO="$SR" "$BASH" "$0" --root "$SR" --bounded s34 --continue tmp/bounded/s34-fix-prompt.md 2>&1)"; rc=$?; set -e
+  [ "$rc" -eq 0 ] && grep -Fxq queue "$d/sa34" && grep -Fxq "tab close w1:t$pn" "$d/fh/calls.log" && [ -z "$(kv_get "$SR/tmp/bounded/s34-binding" tab)" ] \
+    || fail "S34: a small change's queued --continue should close its tab when it settles (rc=$rc): $out / $(cat "$d/fh/calls.log")"
+  # … and a small change's --wait closes its tab once its Codex reads idle (its own run left the tab open: busy)
+  printf 'another small one\n' > "$SR/tmp/bounded/s35-prompt.md"
+  pn=$(( $(cat "$d/fh/tabs") + 1 )); echo working > "$d/fh/status.w1:p$pn"
+  set +e; out="$(pe env FAKE_SESSION=pane-s35 DRIVE_STAGE_SETTLE_TAB_WAIT=0 "$BASH" "$0" --root "$SR" --bounded s35 2>&1)"; rc=$?; set -e
+  [ "$rc" -eq 0 ] && [ "$(kv_get "$SR/tmp/bounded/s35-binding" tab)" = "w1:t$pn" ] || fail "S34: fixture — s35's tab should stay open while its Codex reads working (rc=$rc): $out"
+  rm -f "$d/fh/status.w1:p$pn"; : > "$d/fh/calls.log"
+  set +e; out="$(pe "$BASH" "$0" --root "$SR" --bounded s35 --wait 2>&1)"; rc=$?; set -e
+  [ "$rc" -eq 0 ] && grep -Fxq "tab close w1:t$pn" "$d/fh/calls.log" && [ -z "$(kv_get "$SR/tmp/bounded/s35-binding" tab)" ] \
+    || fail "S34: a small change's --wait should close its settled tab (rc=$rc): $out / $(cat "$d/fh/calls.log")"
   # S33 (v0.22 r1) the agent name's lowercase step failing (after printing its input unchanged) is exit 2, never a name built on its
   # output — for the Stage's part and for the project's (no DRIVE_STAGE_PROJECT: the folder name); no pipe hides the first step's status
   # The fake fails only on the one input FAKE_TR_ON names (the Stage's 09.50, or the folder name srepo), so each assertion proves its own step
@@ -2293,7 +2451,12 @@ FAKE
   [ "$rc" -eq 3 ] && [ "$out" = "PLAN-07 07.1 exit=3 log=tmp/PLAN-07/07.1-run.log head=$csh changed=1 commit=none session=none rollout=none records-head=$rsh records-commit=none" ] \
     || fail "SP: the split result line differs (rc=$rc): $out"
   head -n 1 "$SP/tmp/PLAN-07/07.1-run.log" | grep -Eq "^# drive-stage: before=$csh sandbox=danger-full-access started=[0-9TZ:-]+ records=$rsh\$" || fail "SP: the header must end records=$rsh: $(head -n 1 "$SP/tmp/PLAN-07/07.1-run.log")"
-  [ "$(sed -n '/^\[planner 07.1-c1\]$/,$p' "$d/argvSP")" = "$(printf '[planner 07.1-c1]\n%s\ndo stage 07.1' "$( ( REC_REL=private; split_note build ) )")" ] || fail "SP: the message must be the tag, the note, then the prompt: $(cat "$d/argvSP")"
+  [ "$(sed -n '/^\[planner 07.1-c1\]$/,$p' "$d/argvSP")" = "$(printf '[planner 07.1-c1]\n%s\ndo stage 07.1' "$( ( REC_REL=private; split_note build PLAN-07 ) )")" ] || fail "SP: the message must be the tag, the note, then the prompt: $(cat "$d/argvSP")"
+  # where the Code: line goes: a Stage or --fix build names the plan's evidence entry; a --bounded small change its LOG entry, never a plan's files
+  ns="$( ( REC_REL=private; split_note build PLAN-07 ) )"; nb="$( ( REC_REL=private; split_note build bounded ) )"
+  grep -Fq "the plan's evidence entry (docs/plans/PLAN-NN-review/EVIDENCE.md there)" <<< "$ns" && ! grep -Fq 'LOG entry carrying' <<< "$ns" || fail "SP: a Stage build's note must name the evidence entry: $ns"
+  grep -Fq "the small change's LOG entry carrying a \`Code: <short sha>\` line" <<< "$nb" && grep -Fq "A closed plan's files are never edited." <<< "$nb" && ! grep -Fq 'EVIDENCE.md' <<< "$nb" \
+    || fail "SP: a --bounded build's note must put the Code: line in its LOG entry, never a plan's evidence file: $nb"
   grep -Fxq 'rhead='"$(git -C "$SP/private" rev-parse HEAD)" "$SP/tmp/PLAN-07/07.1-binding" || fail "SP: the binding must keep the records HEAD: $(cat "$SP/tmp/PLAN-07/07.1-binding")"
   # a records-only change: result_line reads the records commit and counts its paths (never commit=none alone)
   ( cd "$SP/private" && printf '\n## e\nCode: %s\n' "$csh" >> LOG.md && git commit -qam 'PLAN-07 / 07.1 — records' && printf 'n\n' > new.md ) >/dev/null || fail "SP: records commit"
@@ -2312,7 +2475,7 @@ FAKE
   ( cd "$SP" && printf 'y\n' > b.txt && git add b.txt && git commit -qm 'PLAN-07 / 07.1 — code' ) >/dev/null || fail "SP: code commit"
   mkdir -p "$SP/.codex/agents" && printf 'x\n' > "$SP/.codex/agents/t-reviewer.toml"
   out="$(DRIVE_STAGE_REVIEW_MANDATE=.codex/agents/t-reviewer.toml "$BASH" "$0" --root "$SP" --review PLAN-07 07.1 --dry-run 2>&1)" || fail "SP: the split review dry-run failed: $out"
-  grep -Fq "Split-repo mode (modules/split-repo.md): the records (PLAN.md, the LOG, the plan file and its Verify: blocks) are the separate git repo at private/" <<< "$out" \
+  grep -Fq "Split-repo mode (modules/split-repo.md): the records (PLAN.md, the LOG, the plan file and its Verify: blocks, and the evidence file holding its proof table) are the separate git repo at private/" <<< "$out" \
     && grep -Fq "git -C private diff $(git -C "$SP/private" rev-parse "$rsh")..$(git -C "$SP/private" rev-parse HEAD)" <<< "$out" || fail "SP: the review must name the records repo and the Stage's records range: $out"
   grep -Fq "It runs to the records HEAD, so it may include later Stages" <<< "$out" && grep -Fq "are the commits under its own subject" <<< "$out" \
     && ! grep -Fq "records half is the range" <<< "$out" || fail "SP: the records range must be labelled as running to the records HEAD, never as the Stage's own half: $out"
@@ -2347,6 +2510,61 @@ FAKE
   out="$("$BASH" "$0" --root "$SP" PLAN-07 07.1 --again --dry-run 2>&1)" && grep -Fq 'separate git repo at real/rec/ ' <<< "$out" || fail "SP: real/rec (no symlink) must pass the path rule: $out"
   rm -f "$SP/lnk" "$SP/via"; rm -rf "$SP/real"
   printf 'RATCHET_RECORDS=private\n' > "$SP/script/ratchet.conf"
+  # SC (v0.30): a build session's agent temp is outside the repo, under the project's scratch root (protocol/context-discipline.md
+  # § Workspace): <the main checkout's parent>/<its folder>-scratch/tmp/<PLAN-NN|bounded>/; XP_SCRATCH_PARENT replaces the parent. Anything that
+  # fails keeps the inherited TMPDIR with one line; a dry-run prints it and makes nothing
+  SC="$d/screpo"; mkdir -p "$SC/tmp/PLAN-07" "$SC/tmp/bounded"
+  ( cd "$SC" && git init -q && git config user.email t@t && git config user.name t && printf 'x\n' > a.txt && printf 'tmp/\n' > .gitignore && git add a.txt .gitignore && git commit -qm init ) >/dev/null || fail "SC: fixture"
+  printf 'do stage 07.1\n' > "$SC/tmp/PLAN-07/07.1-prompt.md"; printf 'tweak\n' > "$SC/tmp/bounded/tw-prompt.md"
+  scl() { set +e; out="$(PATH="$d/bin:$PATH" FAKE_ARGV="$d/argvSC" FAKE_TMPDIR_OUT="$d/scT" TMPDIR="$d/inherited/" "$@" 2>&1)"; rc=$?; set -e; }
+  [ "$( unset XP_SCRATCH_PARENT; xp_scratch_root "$SC" )" = "$d/screpo-scratch" ] || fail "SC: the main checkout's scratch root differs: $( unset XP_SCRATCH_PARENT; xp_scratch_root "$SC" 2>&1 )"
+  git -C "$SC" worktree add -q --detach "$d/screpo-PLAN-07" 2>/dev/null || fail "SC: worktree"
+  [ "$( unset XP_SCRATCH_PARENT; xp_scratch_root "$d/screpo-PLAN-07" )" = "$d/screpo-scratch" ] || fail "SC: a stream's worktree must map to its project's root, never <worktree>-scratch: $( unset XP_SCRATCH_PARENT; xp_scratch_root "$d/screpo-PLAN-07" 2>&1 )"
+  git init -q --separate-git-dir "$d/sep.git" "$d/sepwt" >/dev/null || fail "SC: separate git dir"
+  [ "$( unset XP_SCRATCH_PARENT; xp_scratch_root "$d/sepwt" )" = "$d/sepwt-scratch" ] || fail "SC: a git dir kept elsewhere must map to the checkout itself: $( unset XP_SCRATCH_PARENT; xp_scratch_root "$d/sepwt" 2>&1 )"
+  [ "$(xp_scratch_tmpdir "$SC" PLAN-07)" = "$sr/screpo-scratch/tmp/PLAN-07/" ] && [ "$(xp_scratch_tmpdir "$SC" bounded)" = "$sr/screpo-scratch/tmp/bounded/" ] || fail "SC: the plan's and the small changes' TMPDIR differ"
+  for bad in PLAN-0x PLAN- ../x '' bounded/..; do
+    set +e; out="$(xp_scratch_tmpdir "$SC" "$bad" 2>&1)"; rc=$?; set -e
+    [ "$rc" -eq 1 ] && grep -Fq 'is not PLAN-NN or bounded' <<< "$out" || fail "SC: the name '$bad' must be refused (rc=$rc): $out"
+  done
+  for bad in rel/x /; do
+    set +e; out="$(XP_SCRATCH_PARENT="$bad"; xp_scratch_tmpdir "$SC" PLAN-07 2>&1)"; rc=$?; set -e
+    [ "$rc" -eq 1 ] && grep -Fq 'is not an absolute folder below /' <<< "$out" || fail "SC: the override '$bad' must be refused (rc=$rc): $out"
+  done
+  set +e; out="$(XP_SCRATCH_PARENT="/$(printf '%051d' 0)"; xp_scratch_tmpdir "$SC" PLAN-07 2>&1)"; rc=$?; set -e   # / + 51 + /screpo-scratch/tmp/PLAN-07/ = 80: fits
+  [ "$rc" -eq 0 ] || fail "SC: an 80-byte TMPDIR must pass (rc=$rc): $out"
+  set +e; out="$(XP_SCRATCH_PARENT="/$(printf '%052d' 0)"; xp_scratch_tmpdir "$SC" PLAN-07 2>&1)"; rc=$?; set -e   # 81: over
+  [ "$rc" -eq 1 ] && grep -Fq 'over 80' <<< "$out" && grep -Fq 'set XP_SCRATCH_PARENT to a shorter folder' <<< "$out" || fail "SC: an 81-byte TMPDIR must be refused, naming the override (rc=$rc): $out"
+  # bytes, not characters: 30 two-byte letters make 59 characters but 89 bytes under a UTF-8 locale
+  mb=""; i=0; while [ "$i" -lt 30 ]; do mb="$mb$(printf '\303\251')"; i=$((i + 1)); done
+  set +e; out="$(LC_ALL=en_US.UTF-8; XP_SCRATCH_PARENT="/$mb"; xp_scratch_tmpdir "$SC" PLAN-07 2>&1)"; rc=$?; set -e
+  [ "$rc" -eq 1 ] && grep -Fq 'is 89 bytes, over 80' <<< "$out" || fail "SC: the cap must count bytes, not characters (rc=$rc): $out"
+  # one XP_SCRATCH_PARENT, two projects: each keeps its own root (a PLAN-07 in one never shares a folder with the other's)
+  git init -q "$d/pa" && git init -q "$d/pb" || fail "SC: two projects"
+  [ "$(XP_SCRATCH_PARENT="$sr/"; xp_scratch_root "$d/pa")" = "$sr/pa-scratch" ] && [ "$(XP_SCRATCH_PARENT="$sr/"; xp_scratch_root "$d/pb")" = "$sr/pb-scratch" ] \
+    || fail "SC: two projects under one XP_SCRATCH_PARENT must get distinct roots: $(XP_SCRATCH_PARENT="$sr/"; xp_scratch_root "$d/pa" 2>&1) / $(XP_SCRATCH_PARENT="$sr/"; xp_scratch_root "$d/pb" 2>&1)"
+  # a real build: the session's TMPDIR is the plan's, made; nothing said
+  scl "$BASH" "$0" --root "$SC" PLAN-07 07.1 --no-preflight
+  [ "$rc" -eq 3 ] && [ "$(cat "$d/scT")" = "$sr/screpo-scratch/tmp/PLAN-07/" ] && [ -d "$sr/screpo-scratch/tmp/PLAN-07" ] && ! grep -Fq 'keeps TMPDIR' <<< "$out" || fail "SC: a build's session must get the plan's agent temp (rc=$rc, TMPDIR=$(cat "$d/scT" 2>&1)): $out"
+  # a small change: the bounded folder
+  scl "$BASH" "$0" --root "$SC" --bounded tw --headless --no-preflight
+  [ "$rc" -eq 3 ] && [ "$(cat "$d/scT")" = "$sr/screpo-scratch/tmp/bounded/" ] || fail "SC: a small change's session must get the bounded agent temp (rc=$rc, TMPDIR=$(cat "$d/scT" 2>&1)): $out"
+  # an unusable override, or a folder that can't be made: the run goes on with the inherited TMPDIR, said once
+  XP_SCRATCH_PARENT=rel scl "$BASH" "$0" --root "$SC" PLAN-07 07.1 --again --no-preflight
+  [ "$rc" -eq 3 ] && [ "$(cat "$d/scT")" = "$d/inherited/" ] && [ "$(grep -c 'keeps TMPDIR' <<< "$out")" -eq 1 ] || fail "SC: an unusable root must keep the inherited TMPDIR, said once (rc=$rc, TMPDIR=$(cat "$d/scT" 2>&1)): $out"
+  mkdir "$sr/ro" && chmod 555 "$sr/ro"
+  XP_SCRATCH_PARENT="$sr/ro/x" scl "$BASH" "$0" --root "$SC" PLAN-07 07.1 --again --no-preflight
+  chmod 755 "$sr/ro"
+  [ "$rc" -eq 3 ] && [ "$(cat "$d/scT")" = "$d/inherited/" ] && grep -Fq "cannot create or write $sr/ro/x/screpo-scratch/tmp/PLAN-07/" <<< "$out" || fail "SC: a folder that can't be made must keep the inherited TMPDIR (rc=$rc, TMPDIR=$(cat "$d/scT" 2>&1)): $out"
+  # a pane's shell starts from Herdr's environment: when no agent temp could be chosen it still gets the inherited TMPDIR, and it always
+  # gets XP_SCRATCH_PARENT when set, so the session's own launcher and tidy compute the same root
+  : > "$d/fh/calls.log"; printf 'do 09.88\n' > "$SR/tmp/PLAN-09/09.88-prompt.md"; mkdir -p "$d/inh"
+  set +e; out="$(pe env FAKE_HERDR="$d/fh" FAKE_BIN2="$d/bin2" XP_SCRATCH_PARENT=rel TMPDIR="$d/inh/" FAKE_SESSION=pane-88 FAKE_PANE_COMMIT='PLAN-09 / 09.88' "$BASH" "$0" --root "$SR" PLAN-09 09.88 --pane 2>&1)"; rc=$?; set -e
+  grep -Fxq "tab create --workspace w1 --cwd $SR --label executor (09.88) --env DISABLE_AUTO_UPDATE=true --env RATCHET_ALLOW_PUSH= --env TMPDIR=$d/inh/ --env XP_SCRATCH_PARENT=rel --no-focus" "$d/fh/calls.log" \
+    || fail "SC: a pane with no agent temp must still get the inherited TMPDIR, and XP_SCRATCH_PARENT (rc=$rc): $out / $(grep '^tab create' "$d/fh/calls.log")"
+  # a dry-run prints the TMPDIR on the command and makes nothing; a --continue's prints it too
+  rm -rf "$sr/screpo-scratch"
+  out="$("$BASH" "$0" --root "$SC" PLAN-07 07.1 --again --dry-run 2>&1)" && grep -Fq "env -u RATCHET_ALLOW_PUSH TMPDIR='$sr/screpo-scratch/tmp/PLAN-07/' " <<< "$out" && [ ! -e "$sr/screpo-scratch" ] || fail "SC: a dry-run must print the TMPDIR and make nothing: $out"
   echo "SELF-TEST OK"; exit 0
 fi
 
@@ -2371,7 +2589,7 @@ if [ "$readmode" -eq 1 ] || [ "$fixmode" -eq 1 ]; then
     [ "$heavy" -eq 0 ] && [ "$sandbox_set" -eq 0 ] || { echo "drive-stage: --read is read-only by design (no --heavy/--sandbox)" >&2; exit 64; }
     read_plan "$ROOT" "$plan" "$stage" "$again" "$dry"; exit $?
   fi
-  drive "$ROOT" "$plan" fix "$heavy" 0 "$stage" "$again" "$dry" 1; exit $?
+  scratch_env "$ROOT" "$plan" "$dry"; drive "$ROOT" "$plan" fix "$heavy" 0 "$stage" "$again" "$dry" 1; exit $?
 fi
 if [ -n "$bounded" ]; then
   [ -z "$plan" ] || { echo "drive-stage: --bounded takes no PLAN-NN" >&2; exit 64; }
@@ -2394,7 +2612,7 @@ fi
 if [ "$sess" -gt 0 ]; then   # the Stage's session: continue it, reattach, look, or settle — PLAN-NN NN.X or --bounded <slug>
   [ "$sess" -eq 1 ] || { echo "drive-stage: --continue, --wait, --peek and --abandon are four modes — pick one" >&2; exit 64; }
   [ "$resume" -eq 0 ] && [ "$again" -eq 0 ] && [ "$panemode" -eq 0 ] && [ "$headless" -eq 0 ] || { echo "drive-stage: --continue/--wait/--peek/--abandon take no --resume, --again, --pane or --headless (the mode follows the Stage's binding)" >&2; exit 64; }
-  if [ -n "$cont_prompt" ]; then cont "$ROOT" "$plan" "$stage" "$cont_prompt" "$heavy" "$dry"; exit $?; fi
+  if [ -n "$cont_prompt" ]; then scratch_env "$ROOT" "$plan" "$dry"; cont "$ROOT" "$plan" "$stage" "$cont_prompt" "$heavy" "$dry"; exit $?; fi
   [ "$dry" -eq 0 ] && [ "$sandbox_set" -eq 0 ] || { echo "drive-stage: --wait/--peek/--abandon send nothing (no --dry-run, no --sandbox)" >&2; exit 64; }
   if [ "$waitmode" -eq 1 ]; then wait_run "$ROOT" "$plan" "$stage" "$heavy"; exit $?; fi
   [ "$heavy" -eq 0 ] || { echo "drive-stage: --peek/--abandon take no --heavy" >&2; exit 64; }
@@ -2405,6 +2623,7 @@ if [ "$panemode" -eq 1 ] || { [ "$headless" -eq 0 ] && [ "${HERDR_ENV:-}" = 1 ] 
   # a pane: asked for (--pane), or the default inside Herdr for a build Stage or a --bounded small change; --headless opts out
   [ "$headless" -eq 0 ] || { echo "drive-stage: --pane and --headless are two modes — pick one" >&2; exit 64; }
   [ "$resume" -eq 0 ] || { echo "drive-stage: --pane runs a build Stage or a --bounded small change (no --resume — that fallback is headless)" >&2; exit 64; }
-  drive_pane "$ROOT" "$plan" "$stage" "$heavy" "$again" "$dry"; exit $?
+  scratch_env "$ROOT" "$plan" "$dry"; drive_pane "$ROOT" "$plan" "$stage" "$heavy" "$again" "$dry"; exit $?
 fi
+scratch_env "$ROOT" "$plan" "$dry"
 drive "$ROOT" "$plan" "$stage" "$heavy" "$resume" "$resume_prompt" "$again" "$dry"

@@ -23,8 +23,16 @@
 #   paragraph  one line is one paragraph (no hard wraps). Fenced code, `|` table rows and 4-space-indented command blocks
 #              are skipped by the paragraph and sentence checks.
 #
-# Exit codes: 0 pass · 1 a file over budget or a duplicate (0 with --warn) · 2 a tool failed (never a pass, --warn or not)
+# Exit codes: 0 pass · 1 a file over budget or a duplicate (0 with --warn) · 2 a tool failed (never a pass, --warn or not).
+# Its work dir under TMPDIR goes on every exit, a TERM or Ctrl-C included.
 set -eu   # NOT pipefail (the kit's rule): no producer sits on the left of a pipe — every count and read is captured, then checked
+mktemp() {   # mktemp / mktemp -d with no template, under $TMPDIR: macOS's own ignores TMPDIR (it reads _CS_DARWIN_USER_TEMP_DIR), so a
+  # session's per-plan TMPDIR (the launcher's) would never see the kit's temp files. A TMPDIR that isn't a writable folder falls back to /tmp
+  local t="${TMPDIR:-}"; { [ -n "$t" ] && [ -d "$t" ] && [ -w "$t" ]; } || t=/tmp
+  case "$#:${1:-}" in 0:|1:-d) command mktemp "$@" "${t%/}/xp.XXXXXXXX" ;; *) command mktemp "$@" ;; esac
+}
+BL_WORK=""   # lint's work dir (mktemp): removed on every exit, Ctrl-C and TERM included
+trap '[ -z "$BL_WORK" ] || rm -rf "$BL_WORK"' EXIT; trap 'exit 130' INT; trap 'exit 143' TERM
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 budget_all=""; warn=0; selftest=0; files=""
@@ -75,6 +83,7 @@ lint() {   # $@ = files → prints the report; returns 1 on over-budget or dupli
   # where set -e is off: every step below checks its own status)
   local bad=0 f words budget nplan ndec work rc=0
   work="$(mktemp -d)" || { echo "briefing-lint: mktemp failed" >&2; return 2; }
+  BL_WORK="$work"
   : > "$work/sentences" || { rm -rf "$work"; return 2; }
   tool() { echo "briefing-lint: $1 failed on $f" >&2; rm -rf "$work"; }
   for f in "$@"; do
@@ -117,12 +126,13 @@ lint() {   # $@ = files → prints the report; returns 1 on over-budget or dupli
       exit (dups > 0) ? 1 : 0 }
   ' "$work/sentences" || rc=$?
   case "${rc:-0}" in 0) ;; 1) bad=1 ;; *) f="the duplicate scan"; tool "awk (exit $rc)"; return 2 ;; esac
-  rm -rf "$work"
+  rm -rf "$work"; BL_WORK=""
   return "$bad"
 }
 
 if [ "$selftest" -eq 1 ]; then
-  d="$(mktemp -d)"; trap 'rm -rf "$d"' EXIT
+  d="$(mktemp -d)" || { echo "SELF-TEST FAIL: mktemp -d failed"; exit 1; }
+  trap 'rm -rf "$d"' EXIT
   fail() { echo "SELF-TEST FAIL: $1"; exit 1; }
   shared="Every stage close runs lint, tests, the headless smoke, and the plan's own Verify blocks before the commit lands."
   { printf '# A\n\nShort intro about PLAN-01 and DEC-12.\n\n%s\n\n' "$shared"; printf 'word %.0s' $(seq 1 130); printf '\n'; } > "$d/A.md"
@@ -163,6 +173,12 @@ if [ "$selftest" -eq 1 ]; then
     set +e; out="$(PATH="$d/fk1:$PATH" "$BASH" "$0" --warn "$d/C.md" 2>&1)"; rc=$?; set -e
     [ "$rc" -eq 2 ] || fail "a failing $t should exit 2 under --warn (got $rc): $out"
   done
+  # a run stopped by TERM leaves no work dir in TMPDIR (the EXIT trap): a fake awk sends the signal to the running lint once, mid-run
+  mkdir -p "$d/trt" "$d/trk" && printf '#!/bin/sh\nif [ ! -e "%s/trk/sent" ]; then ls -A "$TMPDIR" > "%s/trk/sent"; while [ ! -s "%s/trk/pid" ]; do sleep 0.05; done; kill -TERM "$(cat "%s/trk/pid")"; fi\nexec %s "$@"\n' \
+    "$d" "$d" "$d" "$d" "$(command -v awk)" > "$d/trk/awk" && chmod +x "$d/trk/awk" || fail "the fake awk could not be written"
+  TMPDIR="$d/trt" PATH="$d/trk:$PATH" "$BASH" "$0" "$d/B.md" "$d/C.md" >/dev/null 2>&1 & trp=$!
+  echo "$trp" > "$d/trk/pid"; rc=0; wait "$trp" || rc=$?
+  [ -s "$d/trk/sent" ] && [ "$rc" -ne 0 ] && [ -z "$(ls -A "$d/trt")" ] || fail "the work dir must be made under TMPDIR, and a TERM mid-run must leave none there (rc=$rc; held when signalled: $(cat "$d/trk/sent" 2>/dev/null); left: $(ls -A "$d/trt"))"
   echo "SELF-TEST OK"; exit 0
 fi
 

@@ -109,6 +109,12 @@ case "${1:-}" in
     git push -q origin HEAD:master >/dev/null 2>&1 && fail "the pre-push hook did not fire (master pushed without RATCHET_ALLOW_PUSH)"
     RATCHET_ALLOW_PUSH=1 git push -q origin HEAD:master >/dev/null 2>&1 || fail "a push with RATCHET_ALLOW_PUSH=1 was refused"
     git push -q origin HEAD:feature >/dev/null 2>&1 || fail "a push to a non-default branch was refused"
+    # a deletion is no force push: a feature branch deletes; deleting the default branch still needs the key
+    git push -q origin --delete feature >/dev/null 2>&1 || fail "deleting a pushed feature branch was refused"
+    out="$(git push -q origin --delete master 2>&1)" && fail "deleting master passed without RATCHET_ALLOW_PUSH"
+    grep -qF 'needs RATCHET_ALLOW_PUSH=1' <<< "$out" || fail "deleting master was refused, but not by the key gate: $out"
+    RATCHET_ALLOW_PUSH=1 git push -q origin --delete master >/dev/null 2>&1 || fail "deleting master with RATCHET_ALLOW_PUSH=1 was refused"
+    RATCHET_ALLOW_PUSH=1 git push -q origin HEAD:master >/dev/null 2>&1 || fail "fixture: re-push master"
     # the default branch is found without the environment (EVO-80): script/ratchet.conf names it; else the one of master/main
     printf 'RATCHET_DEFAULT_BRANCH="trunk"\n' > script/ratchet.conf
     env -u RATCHET_DEFAULT_BRANCH git push -q origin HEAD:trunk >/dev/null 2>&1 && fail "a push to trunk (named only in script/ratchet.conf) passed without RATCHET_ALLOW_PUSH"
@@ -147,6 +153,15 @@ case "${1:-}" in
     git checkout -q -b prev && git checkout -q main || fail "fixture: a previous branch for @{-1}"
     printf 'RATCHET_DEFAULT_BRANCH=@{-1}\n' > script/ratchet.conf
     nopush feature "a conf naming @{-1} must refuse every push (check-ref-format expands it; the hook would gate the literal)"
+    rm -f script/ratchet.conf
+    # the project check at push time (EVO-100): a commit that never met pre-commit (a cherry-pick, `git am`) and that the check refuses
+    # stops the push before anything is sent; once it's gone, the push goes through
+    printf 'RATCHET_PROJECT_CHECK='"'"'! grep -q "^+.*FORBIDDEN"'"'"'\n' > script/ratchet.conf
+    printf 'FORBIDDEN\n' > bad.txt && git add bad.txt && git -c core.hooksPath=/dev/null commit -qm "note: picked" >/dev/null || fail "fixture: a commit that skipped pre-commit"
+    rc=0; out="$(git push origin HEAD:feature 2>&1)" || rc=$?
+    [ "$rc" -ne 0 ] && grep -qF 'project check refused' <<< "$out" || fail "a pushed commit the project check refuses was sent (rc=$rc): $out"
+    [ "$(git rev-parse HEAD)" != "$(git --git-dir="$d/remote.git" rev-parse feature)" ] || fail "the refused commit reached the remote"
+    git -c core.hooksPath=/dev/null reset -q --hard HEAD~1 && bump && git push -q origin HEAD:feature >/dev/null 2>&1 || fail "a clean push with a project check configured was refused"
     rm -f script/ratchet.conf
     # the LOG merge driver, end to end: two branches each add an entry at the LOG's top (a conflict to a plain merge) and a real
     # `git merge` interleaves them newest first with the hooks on; the same from a second worktree (config and info/attributes are
@@ -187,9 +202,11 @@ case "${1:-}" in
     rm -f script/ratchet.conf
     # split-repo mode end to end, real hooks (modules/split-repo.md; the going-public brief's acceptance 1-4 — its 6, a one-repo project
     # unchanged, is every probe above and every other self-test): a code repo with /private ignored, a records repo nested at private/,
-    # both wired by one install; the freeze from the code repo; a stream pair (a code worktree and a records worktree nested in it, one
-    # branch name) whose records commits run that stream's own hooks; a Stage as two commits; the close refused while a code commit is
-    # unpaired, then passing; the integration merge of the records branch through the relative merge driver
+    # both wired by one install; a stream pair (a code worktree and a records worktree nested in it, one branch name) whose records
+    # commits run that stream's own hooks; a Stage as two commits, its records half naming the code commit in the plan's evidence
+    # file; the close, which stamps from the code worktree into the records worktree (after the tidy moved the plan read's verdict
+    # into the review dir), refused while a code commit is unpaired or the stamp lacks PLAN.md's flip, then passing; the integration
+    # merge of the records branch through the relative merge driver
     ( e="$d/split"; mkdir -p "$e/code/script/hooks" && cd "$e/code" && git init -q . && git config user.email t@t && git config user.name t || exit 1
       for f in ratchet.sh tmp-tidy.sh acceptance-extract.awk refreeze.sh; do cp "$HERE/$f" script/ || exit 1; done
       for h in pre-commit commit-msg pre-push; do cp "$HERE/hooks/$h" script/hooks/ || exit 1; done
@@ -205,47 +222,47 @@ case "${1:-}" in
       [ "$(git -C private config core.hooksPath)" = ../script/hooks ] || fail "the records repo's hooks are not wired back to the kit"
       [ "$(git -C private config merge.execplan-log.driver)" = '../script/ratchet.sh --merge-log %O %A %B' ] || fail "the records repo's merge driver doesn't name the kit relative to its top"
       grep -qxF 'docs/LOG.md merge=execplan-log' "$(git -C private rev-parse --path-format=absolute --git-common-dir)/info/attributes" || fail "the records repo's LOG isn't mapped to the driver"
-      # acceptance 3: the freeze from the code repo stamps into the records repo; the records hooks refuse the stamp without PLAN.md's
-      # flip and pass it with the flip
-      mkdir -p tmp/PLAN-01 && printf 'PLAN READY\n' > tmp/PLAN-01/prefreeze-read-verdict.md
-      so="$(bash script/refreeze.sh PLAN-01 --initial 2>&1)" || fail "the freeze from the code repo failed: $so"
-      grep -q '^PLAN-01 [0-9a-f]\{64\}' private/docs/plans/.acceptance-hashes || fail "the freeze did not stamp into the records repo"
-      ( cd private && git add docs/plans/.acceptance-hashes && git commit -qm 'PLAN-01 / review: freeze' >/dev/null 2>&1 ) && fail "the records hooks passed a first stamp with no PLAN.md flip"
-      ( cd private && sed 's/| drafted |/| in-progress (frozen) |/' PLAN.md > t && mv t PLAN.md && git add PLAN.md && git commit -qm 'PLAN-01 / review: freeze' >/dev/null ) \
-        || fail "the records hooks refused the freeze (stamp plus flip)"
-      rm -rf tmp/PLAN-01
       # the stream pair: one branch name in both repos, the records worktree nested in the code worktree
       git worktree add -q "$e/wt" -b plan-01 >/dev/null 2>&1 && git -C private worktree add -q "$e/wt/private" -b plan-01 >/dev/null 2>&1 || fail "fixture: the stream pair"
       [ -z "$(git -C "$e/wt" status --porcelain)" ] || fail "the nested records worktree shows in the code worktree's status: $(git -C "$e/wt" status --porcelain)"
-      cd "$e/wt" && mkdir -p tmp/PLAN-01 && printf 'PASS\n' > tmp/PLAN-01/01.1-verdict.md
-      # acceptance 1: the code half passes the code hooks with no LOG staged; the records half passes the records hooks (and without its
-      # LOG it is refused — they fire)
+      cd "$e/wt" && mkdir -p tmp/PLAN-01 && printf 'PASS\n' > tmp/PLAN-01/01.1-verdict.md && printf 'PLAN READY\n' > tmp/PLAN-01/prefreeze-read-verdict.md
+      # acceptance 1: the code half passes the code hooks with no LOG staged; the records half (the Progress line and the evidence
+      # entry naming the code commit, no LOG entry) passes the records hooks, and without the plan file it is refused — they fire
       printf 'b\n' >> src.txt && git add src.txt && git commit -qm 'PLAN-01 / 01.1 — build' >/dev/null 2>&1 || fail "the code half of a Stage was refused by the code hooks"
       s1="$(git rev-parse HEAD)"
-      ( cd private && printf -- '- [x] 01.1\n' >> docs/plans/PLAN-01-x.md && git add docs/plans/PLAN-01-x.md && git commit -qm 'PLAN-01 / 01.1 — build' >/dev/null 2>&1 ) \
-        && fail "the stream's records hooks passed a stage claim with no LOG"
-      ( cd private && printf '\n## 2026-09-28T10:00:00Z — PLAN-01 / 01.1\nCode: %s\nevidence: tmp/PLAN-01/01.1-verdict.md\n' "${s1:0:9}" >> docs/LOG.md \
-        && git add docs/LOG.md docs/plans/PLAN-01-x.md && git commit -qm 'PLAN-01 / 01.1 — build' >/dev/null ) || fail "the records half of a Stage was refused"
+      ( cd private && mkdir -p docs/plans/PLAN-01-review && printf '# PLAN-01 evidence\n\n### 01.1\nCode: %s\nevidence: tmp/PLAN-01/01.1-verdict.md\n' "${s1:0:9}" > docs/plans/PLAN-01-review/EVIDENCE.md \
+        && git add docs/plans/PLAN-01-review/EVIDENCE.md && git commit -qm 'PLAN-01 / 01.1 — build' >/dev/null 2>&1 ) \
+        && fail "the stream's records hooks passed a stage claim with no plan file"
+      ( cd private && printf -- '- [x] 01.1\n' >> docs/plans/PLAN-01-x.md \
+        && git add docs/plans/PLAN-01-x.md docs/plans/PLAN-01-review/EVIDENCE.md && git commit -qm 'PLAN-01 / 01.1 — build' >/dev/null ) || fail "the records half of a Stage was refused"
       # acceptance 2: a code-side fix with no records half is caught at the close; the harvest close on the code side needs nothing
       printf 'c\n' >> src.txt && git add src.txt && git commit -qm 'PLAN-01 / fix — r1' >/dev/null 2>&1 || fail "the code-side fix was refused"
       s2="$(git rev-parse HEAD)"
       git commit -q --allow-empty -m 'PLAN-01 / close — harvest' >/dev/null 2>&1 || fail "the code-side harvest close was refused"
-      # acceptance 4: tmp-tidy tidies the code worktree's tmp/PLAN-01 into the records worktree's review dir and archive/; the close is
-      # refused while the fix is unpaired, and passes once its Code: line is in
+      # acceptance 4: tmp-tidy tidies the code worktree's tmp/PLAN-01 into the records worktree's review dir and archive/, reading the
+      # evidence file's cite and leaving the file in place; the close stamps from the code worktree into the records worktree, the
+      # plan read's verdict now in the review dir; the close is refused while the fix is unpaired, then while the stamp lacks
+      # PLAN.md's flip, and passes with both
+      cp private/docs/plans/PLAN-01-review/EVIDENCE.md "$e/ev0"
       so="$(bash script/tmp-tidy.sh --plan PLAN-01 --apply 2>&1)" || fail "tmp-tidy --apply into the records repo failed: $so"
       [ -f private/docs/plans/PLAN-01-review/MANIFEST.md ] && [ -s private/archive/plans/PLAN-01.list ] && [ ! -e tmp/PLAN-01 ] \
-        || fail "the tidy did not land in the records repo (review dir, archive) and clear the code repo's tmp/PLAN-01"
-      ( cd private && sed 's/| in-progress (frozen) |/| complete |/' PLAN.md > t && mv t PLAN.md && printf '\n## 2026-09-28T11:00:00Z — PLAN-01 / close\nDone.\n' >> docs/LOG.md \
+        && cmp -s "$e/ev0" private/docs/plans/PLAN-01-review/EVIDENCE.md \
+        || fail "the tidy did not land in the records repo (review dir, archive), clear the code repo's tmp/PLAN-01 and leave the evidence file as it was"
+      so="$(bash script/refreeze.sh PLAN-01 --initial 2>&1)" || fail "the close's stamp from the code worktree failed (the verdict is in the records review dir): $so"
+      grep -q '^PLAN-01 [0-9a-f]\{64\}' private/docs/plans/.acceptance-hashes || fail "the close's stamp did not land in the records worktree"
+      ( cd private && sed 's/| drafted |/| complete |/' PLAN.md > t && mv t PLAN.md && printf '\n## 2026-09-28T11:00:00Z — PLAN-01 / close\nDone.\n' >> docs/LOG.md \
         && git add -A . && so="$(git commit -qm 'PLAN-01 / close — done' 2>&1)"; rc=$?; [ "$rc" -ne 0 ] && grep -qF "${s2:0:12} PLAN-01 / fix — r1" <<< "$so" ) \
         || fail "the records close passed with the code-side fix unpaired (or didn't name it)"
-      ( cd private && printf 'Code: %s\n' "$s2" >> docs/LOG.md && git add docs/LOG.md && git commit -qm 'PLAN-01 / close — done' >/dev/null ) || fail "the paired, tidied records close was refused"
+      ( cd private && printf 'Code: %s\n' "$s2" >> docs/LOG.md && git add docs/LOG.md && git reset -q PLAN.md && so="$(git commit -qm 'PLAN-01 / close — done' 2>&1)"; rc=$?
+        [ "$rc" -ne 0 ] && grep -qF 'PLAN.md is not in the commit' <<< "$so" ) || fail "the records hooks passed the close's first stamp with no PLAN.md flip"
+      ( cd private && git add PLAN.md && git commit -qm 'PLAN-01 / close — done' >/dev/null ) || fail "the paired, tidied, stamped records close was refused"
       # the integration: the records branch merges into the records master, whose LOG grew at the same place meanwhile (a conflict to
       # git's own merge), through the relative driver
       cd "$e/code/private" && printf '\n## 2026-09-28T10:30:00Z — note: another stream\nx\n' >> docs/LOG.md \
         && git commit -qam 'note: another stream' >/dev/null || fail "fixture: the records master moves"
       git merge -q --no-ff --no-commit plan-01 >/dev/null 2>&1 && ! grep -q '^<<<<<<<' docs/LOG.md && git commit -qm 'merge: PLAN-01 / close' >/dev/null \
         || fail "the records branch did not merge through the driver and the hooks"
-      [ "$(awk '/^## 20/ { print $2 }' docs/LOG.md | sort | tr '\n' ' ')" = "2026-09-28T09:00:00Z 2026-09-28T10:00:00Z 2026-09-28T10:30:00Z 2026-09-28T11:00:00Z " ] \
+      [ "$(awk '/^## 20/ { print $2 }' docs/LOG.md | sort | tr '\n' ' ')" = "2026-09-28T09:00:00Z 2026-09-28T10:30:00Z 2026-09-28T11:00:00Z " ] \
         || fail "the merged records LOG does not hold both sides' entries once each: $(awk '/^## 20/ { print $2 }' docs/LOG.md | tr '\n' ' ')"
     ) || fail "split-repo mode end to end (a step above named its failure)"
     # a records repo reached through a symlink is refused, and left unwired: its relative core.hooksPath would resolve from the link's
