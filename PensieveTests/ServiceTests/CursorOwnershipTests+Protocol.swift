@@ -75,6 +75,11 @@ extension CursorOwnershipTests {
         [
             """
             struct Probe: LinkServiceProtocol {
+                func removalOperation(skill: Skill, platform: PlatformTarget,
+                                      projectPath: String?) -> DeployRemovalOperation {
+                    DeployRemovalOperation(classify: { false }, delete: { false })
+                }
+
                 func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
                 func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
                 func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
@@ -86,6 +91,11 @@ extension CursorOwnershipTests {
             """,
             """
             struct Probe: CursorCompilerProtocol {
+                func removalOperation(skill: Skill, platform: PlatformTarget,
+                                      projectPath: String?) -> DeployRemovalOperation {
+                    DeployRemovalOperation(classify: { false }, delete: { false })
+                }
+
                 func compile(skill: Skill, projectPath: String?) throws {}
                 func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
                 func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }

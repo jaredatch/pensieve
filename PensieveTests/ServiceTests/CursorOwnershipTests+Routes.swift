@@ -38,7 +38,8 @@ extension CursorOwnershipTests {
                             if route == "skill", platform == .cursor, projectPath != nil, owned {
                                 try reviewRecord(harness.state, path: path, target: target)
                             }
-                            XCTAssertEqual(try vm.artifactIsOwned(skill: skill, platform: platform, target: target), owned)
+                            XCTAssertEqual(try vm.removalOperation(
+                                skill: skill, platform: platform, target: target).classify().isOwned, owned)
                             try removeByRoute(route, harness: harness, platform: platform, project: project, target: target)
                             try verifyRemoval(owned: owned, platform: platform, path: path)
                             cases += 1
@@ -146,7 +147,8 @@ extension CursorOwnershipTests {
         } else {
             XCTAssertEqual(try mapped.readFile(at: path), "User rule")
         }
-        _ = vm.removeAllDeploys(skill: skill, projects: [project], localDeployHistory: { _ in [] }).batch
+        _ = removeAllDeploysWithLocalEvidence(vm, skill: skill, projects: [project],
+            context: context).batch
         try mapped.deleteFile(at: path)
     }
 
@@ -173,7 +175,8 @@ extension CursorOwnershipTests {
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<IntentAssignment>()), 1)
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<DeployRecord>()), 2)
             XCTAssertTrue(reconciler.reconcile(context: context).outcomes.isEmpty)
-            _ = vm.removeAllDeploys(skill: skill, projects: [], localDeployHistory: { _ in [] }).batch
+            _ = removeAllDeploysWithLocalEvidence(vm, skill: skill, projects: [],
+                context: context).batch
         }
     }
 

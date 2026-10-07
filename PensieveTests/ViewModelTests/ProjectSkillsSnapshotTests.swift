@@ -9,6 +9,11 @@ private struct ProjectSnapshotDetection: AgentDetectionServiceProtocol {
 }
 
 private final class ProjectSnapshotLinkService: LinkServiceProtocol {
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        adapterRemovalOperation(skill: skill, platform: platform, projectPath: projectPath)
+    }
+
     var deployedSlugs: Set<String>
     private(set) var checkedPlatforms: [PlatformTarget] = []
     private(set) var checkedProjectPaths: [String?] = []
@@ -41,6 +46,11 @@ private final class ProjectSnapshotLinkService: LinkServiceProtocol {
 }
 
 private final class ProjectSnapshotCursorCompiler: CursorCompilerProtocol {
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        adapterRemovalOperation(skill: skill, projectPath: projectPath)
+    }
+
     var deployedSlugs: Set<String>
     private(set) var checkedProjectPaths: [String?] = []
 

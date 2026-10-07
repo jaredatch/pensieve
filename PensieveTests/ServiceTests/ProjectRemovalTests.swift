@@ -40,10 +40,14 @@ final class ProjectRemovalTests: XCTestCase {
         let h = try ProjectFolderCallerHarness()
         defer { h.cleanup() }
         try h.files.createDirectory(at: h.project.path)
-        _ = try h.addCategory()
+        let category = try h.addCategory()
         XCTAssertFalse(h.category.reconcile(context: h.context).hasFailures)
-        for platform in [PlatformTarget.codex, .cursor] { try h.addIntent(platform: platform) }
+        try h.addIntent(platform: .codex)
+        try h.addIntent(platform: .cursor)
+        let direct = try h.addDirectSkill(platforms: [.codex, .cursor])
         XCTAssertFalse(h.intent.reconcile(context: h.context).hasFailures)
+        XCTAssertEqual(try h.context.fetch(FetchDescriptor<IntentAssignment>())
+            .filter { $0.skillID == h.skill.id && $0.projectID == h.project.id }.map(\.platformRaw).sorted(), ["codex", "cursor"])
         h.context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.remoteID,
             skillSlug: h.skill.directoryName, platformRaw: "cursor", projectKey: h.project.identityKey))
         h.context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.localID,
@@ -61,6 +65,10 @@ final class ProjectRemovalTests: XCTestCase {
             XCTAssertFalse(try h.files.entryExistsWithoutFollowingLinks(at: h.platformVM.artifactPath(
                 skill: h.skill, platform: platform, target: .project(h.project))))
         }
+        for platform in [PlatformTarget.codex, .cursor] {
+            XCTAssertFalse(try h.files.entryExistsWithoutFollowingLinks(at: h.platformVM.artifactPath(
+                skill: direct, platform: platform, target: .project(h.project))))
+        }
         XCTAssertEqual(try h.files.readFile(at: userFile), "Keep my notes")
         XCTAssertEqual(try h.files.readFile(at: teamRule), "---\n# pensieve: managed\n---\nTeammate's rule")
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0)
@@ -71,7 +79,13 @@ final class ProjectRemovalTests: XCTestCase {
         let snapshot = try manifest.read(fromRoot: h.root + "/sync")
         XCTAssertEqual(snapshot.deployIntents.count, 2)
         XCTAssertFalse(snapshot.deployIntents.contains { $0.machineID == ProjectIntentHarness.localID && $0.projectKey != nil })
-        XCTAssertTrue(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).allSatisfy { $0.projectKeys.isEmpty })
+        XCTAssertEqual(category.projectKeys, ["github.com/owner/project"])
+        let saved = ModelContext(h.context.container)
+        XCTAssertEqual(try saved.fetch(FetchDescriptor<Pensieve.Category>()).first?.projectKeys,
+                       ["github.com/owner/project"])
+        XCTAssertEqual(snapshot.categories.first?.projectKeys, ["github.com/owner/project"])
+        XCTAssertEqual(try saved.fetch(FetchDescriptor<Project>()).map(\.id), [h.otherProject.id])
+        XCTAssertTrue(try h.deployState.read().records.isEmpty)
     }
 
     func testSameKeySiblingKeepsDeploysIntentsMembershipAndLedger() throws {

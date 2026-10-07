@@ -5,6 +5,106 @@ import XCTest
 
 @MainActor
 final class ProjectRemovalExecutionTests: XCTestCase {
+    func testUnrelatedPendingChangeDoesNotReportProjectEvidenceRetirement() throws {
+        let h = try ProjectFolderCallerHarness(installed: [.codex])
+        defer { h.cleanup() }
+        try h.files.createDirectory(at: h.project.path)
+        try h.addIntent()
+        XCTAssertFalse(h.intent.reconcile(context: h.context).hasFailures)
+        let records = try h.deployState.read().records
+        h.mapped.beforeDeployStateWrite = { _ in
+            h.otherProject.name = "Unrelated saved edit"
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        let result = removeRegisteredProject(h.project, reconciler: h.category,
+            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, context: h.context)
+        XCTAssertTrue(result.hasFailures)
+        XCTAssertFalse(result.didRetireProjectEvidence, "Saving another project's edit did not retire this project's evidence")
+        XCTAssertFalse(h.context.hasChanges, "The unrelated pending edit reached the final save")
+        XCTAssertEqual(h.otherProject.name, "Unrelated saved edit")
+        XCTAssertEqual(try h.deployState.read().records, records)
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<IntentAssignment>()), 1)
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 2)
+    }
+
+    func testSavedLedgerRetirementReportsProjectEvidenceWithoutStateRecords() throws {
+        let h = try ProjectFolderCallerHarness(installed: [.claudeCode, .codex])
+        defer { h.cleanup() }
+        try h.files.createDirectory(at: h.project.path)
+        for platform in [PlatformTarget.claudeCode, .codex] { try h.addIntent(platform: platform) }
+        XCTAssertFalse(h.intent.reconcile(context: h.context).hasFailures)
+        try h.deployState.replaceAll([])
+        h.mapped.beforeArtifactDeletion = { path in
+            if path == h.artifact(.codex) { throw CocoaError(.fileWriteNoPermission) }
+        }
+        let result = removeRegisteredProject(h.project, reconciler: h.category,
+            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, context: h.context)
+        XCTAssertTrue(result.hasFailures)
+        XCTAssertTrue(result.didRetireProjectEvidence, "A saved project ledger retirement is evidence even without state rows")
+        let remaining = try h.context.fetch(FetchDescriptor<IntentAssignment>())
+        XCTAssertEqual(remaining.map(\.platformRaw), [PlatformTarget.codex.rawValue])
+        XCTAssertFalse(h.files.isSymlink(at: h.artifact(.claudeCode)))
+        XCTAssertTrue(h.files.isSymlink(at: h.artifact(.codex)))
+        XCTAssertTrue(try h.deployState.read().records.isEmpty)
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 2)
+    }
+
+    func testArtifactFailureDetailsPrecedeStateWriteFailureDetails() throws {
+        let h = try ProjectFolderCallerHarness(installed: [.claudeCode, .codex])
+        defer { h.cleanup() }
+        try h.files.createDirectory(at: h.project.path)
+        try h.addIntent(platform: .claudeCode)
+        try h.addIntent(platform: .codex)
+        XCTAssertFalse(h.intent.reconcile(context: h.context).hasFailures)
+        h.mapped.beforeArtifactDeletion = { path in
+            if path == h.artifact(.codex) { throw NSError(domain: NSPOSIXErrorDomain, code: 13,
+                userInfo: [NSLocalizedDescriptionKey: "Artifact delete failed"]) }
+        }
+        h.mapped.beforeDeployStateWrite = { _ in
+            throw NSError(domain: NSPOSIXErrorDomain, code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "State retirement failed"])
+        }
+        let result = removeRegisteredProject(h.project, reconciler: h.category,
+            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, context: h.context)
+        XCTAssertEqual(result.failureCount, 2)
+        let message = ProjectRemovalModel.removalFailureMessage(projectName: h.project.name, result: result)
+        let artifact = try XCTUnwrap(message.range(of: "Artifact delete failed"))
+        let state = try XCTUnwrap(message.range(of: "State retirement failed"))
+        XCTAssertLessThan(artifact.lowerBound, state.lowerBound,
+                          "Project removal reports artifact errors before batched state errors")
+        XCTAssertFalse(h.files.isSymlink(at: h.artifact(.claudeCode)))
+        XCTAssertTrue(h.files.isSymlink(at: h.artifact(.codex)))
+        XCTAssertEqual(try h.deployState.read().records.count, 2)
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<IntentAssignment>()), 2)
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 2)
+    }
+
+    func testOwnershipReadFailureAfterWithdrawalKeepsArtifactRecordAndRegistration() throws {
+        let h = try ProjectFolderCallerHarness(installed: [.cursor])
+        defer { h.cleanup() }
+        try h.files.createDirectory(at: h.project.path)
+        try h.addIntent(platform: .cursor)
+        XCTAssertFalse(h.intent.reconcile(context: h.context).hasFailures)
+        let path = h.platformVM.artifactPath(skill: h.skill, platform: .cursor, target: .project(h.project))
+        let bytes = try h.files.readFile(at: path)
+        let before = try h.deployState.read()
+        let reconciler = RemovalCheckpointReconciler(reconciler: h.category) {
+            h.mapped.beforeRuleRead = { candidate in
+                if candidate == path { throw NSError(domain: NSPOSIXErrorDomain, code: 5) }
+            }
+            return BatchResult()
+        }
+        let result = removeRegisteredProject(h.project, reconciler: reconciler,
+            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, context: h.context)
+        XCTAssertEqual(result.failureCount, 1)
+        XCTAssertTrue(result.failures.first?.error?.contains("Could not check ownership") == true)
+        XCTAssertTrue(result.failures.first?.error?.contains(path) == true)
+        XCTAssertEqual(try h.files.readFile(at: path), bytes)
+        XCTAssertEqual(try h.deployState.read(), before)
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 2)
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<IntentAssignment>()), 1)
+    }
+
     func testFolderDisappearingAfterPreparationKeepsDeployStateEvidence() throws {
         let h = try ProjectFolderCallerHarness(installed: [.codex])
         defer { h.cleanup() }
@@ -39,7 +139,8 @@ final class ProjectRemovalExecutionTests: XCTestCase {
             if path == h.project.path { throw NSError(domain: NSPOSIXErrorDomain, code: 13) }
         }
         let result = removeRegisteredProject(h.project, reconciler: h.category,
-            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, context: h.context)
+            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
+            confirmedPreview: model.preview, context: h.context)
         let message = ProjectRemovalModel.removalFailureMessage(projectName: h.project.name, result: result)
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(message.contains("folder"))

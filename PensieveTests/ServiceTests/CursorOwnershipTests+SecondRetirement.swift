@@ -13,7 +13,11 @@ extension CursorOwnershipTests {
         let result = harness.vm.deployBatch(skills: [skill], platforms: [.cursor],
             target: .project(project), context: harness.context)
         XCTAssertEqual(result.successes.count, 1)
-        XCTAssertTrue(try harness.state.read().records.isEmpty)
+        let records = try harness.state.read().records
+        XCTAssertEqual(records.map(\.artifactPath), [path])
+        XCTAssertNil(records.first?.projectIdentityKey)
+        // Older direct deploys have history but no deploy state.
+        try harness.state.replaceAll([])
         XCTAssertTrue(try harness.context.fetch(FetchDescriptor<DeployRecord>()).contains {
             $0.skillID == skill.id && $0.targetPath == path
         })
@@ -47,6 +51,7 @@ extension CursorOwnershipTests {
                 try harness.context.save()
                 let result = reviewIntent(harness.vm).reconcile(context: harness.context)
                 XCTAssertTrue(result.outcomes.isEmpty)
+                XCTAssertFalse(result.hasFailures)
                 XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
                 XCTAssertEqual(try files.readFile(at: statePath), newer)
                 if foreign {

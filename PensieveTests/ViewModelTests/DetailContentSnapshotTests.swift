@@ -48,6 +48,11 @@ private struct InventoryFileService: FileServiceProtocol {
 }
 
 private final class SnapshotLinkService: LinkServiceProtocol {
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        adapterRemovalOperation(skill: skill, platform: platform, projectPath: projectPath)
+    }
+
     let linkedPlatforms: Set<PlatformTarget>
     var linkedByProjectPath: [String: Set<PlatformTarget>] = [:]
     private(set) var isLinkedProjectPaths: [String?] = []
@@ -81,6 +86,11 @@ private final class SnapshotLinkService: LinkServiceProtocol {
 }
 
 private struct SnapshotCursorCompiler: CursorCompilerProtocol {
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        adapterRemovalOperation(skill: skill, projectPath: projectPath)
+    }
+
     var upToDate = false
 
     func compile(skill: Skill, projectPath: String?) throws {}

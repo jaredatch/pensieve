@@ -11,6 +11,11 @@ private struct RecordedLink: Hashable {
 }
 
 private final class RecordingLinkService: LinkServiceProtocol {
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        adapterRemovalOperation(skill: skill, platform: platform, projectPath: projectPath)
+    }
+
     var linkCalls: [RecordedLink] = []
     var unlinkCalls: [RecordedLink] = []
     private var artifacts: Set<RecordedLink> = []

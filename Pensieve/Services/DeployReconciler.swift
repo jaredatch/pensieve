@@ -10,7 +10,8 @@ final class DeployReconciler: DeployReconciling {
     /// The result of one prune pass. `removed` are the agent symlink paths deleted (dangling and
     /// Pensieve-owned); `skippedDirs` are agent dirs left un-walked (symlinked / realpath-escaping parent).
     struct PruneResult: Equatable {
-        var removed: [String] = []
+        var removedKeys: [DeployRemovalKey] = []
+        var removed: [String] { removedKeys.map(\.artifactPath) }
         var skippedDirs: [String] = []
     }
 
@@ -23,7 +24,12 @@ final class DeployReconciler: DeployReconciling {
 
     private let fileService: FileServiceProtocol
     private let pensieveSkillsDir: String
-    private let agentSkillDirs: [String]
+    struct AgentSkillsDirectory {
+        let platform: PlatformTarget
+        let path: String
+    }
+
+    private let agentSkillDirs: [AgentSkillsDirectory]
     private let cursorRulesDir: String
     private let manifestService: ManifestReadWriting
     private let deployState: DeployStateStore
@@ -33,7 +39,7 @@ final class DeployReconciler: DeployReconciling {
         fileService: FileServiceProtocol,
         deployState: DeployStateStore? = nil,
         pensieveSkillsDir: String = PathConstants.pensieveSkillsDir,
-        agentSkillDirs: [String] = DeployReconciler.defaultAgentSkillDirs,
+        agentSkillDirs: [AgentSkillsDirectory] = DeployReconciler.defaultAgentSkillDirs,
         cursorRulesDir: String = PathConstants.cursorUserRulesDir,
         manifestService: ManifestReadWriting = ManifestService()
     ) {
@@ -48,8 +54,10 @@ final class DeployReconciler: DeployReconciling {
 
     /// User-wide agent skill dirs whose Pensieve symlinks the daemon prunes. Project-scoped agent dirs
     /// are NOT reconciled (daemon scope fence).
-    static var defaultAgentSkillDirs: [String] {
-        PlatformTarget.allCases.compactMap(DeployPaths.userSkillsRoot(for:))
+    static var defaultAgentSkillDirs: [AgentSkillsDirectory] {
+        PlatformTarget.allCases.compactMap { platform in
+            DeployPaths.userSkillsRoot(for: platform).map { AgentSkillsDirectory(platform: platform, path: $0) }
+        }
     }
 
     @discardableResult
@@ -131,13 +139,19 @@ final class DeployReconciler: DeployReconciling {
     /// Only the LINK is ever removed, never a target. Pure filesystem; no SwiftData.
     func pruneDangling() -> PruneResult {
         var result = PruneResult()
-        for agentDir in agentSkillDirs {
+        var candidates: [DeployRemovalCandidate] = []
+        for agent in agentSkillDirs {
+            let agentDir = agent.path
+            guard agent.platform.usesSymlinks else { continue }
             if fileService.isSymlink(at: agentDir) || !isRealpathContained(agentDir) {
                 result.skippedDirs.append(agentDir)
                 continue
             }
-            result.removed.append(contentsOf: prunedLinks(in: agentDir))
+            candidates.append(contentsOf: danglingCandidates(in: agent))
         }
+        let removal = DeployRemovalService(stateStore: deployState).remove(candidates)
+        // Prune counts physical success, even when the derived state file cannot be retired.
+        result.removedKeys = removal.outcomes.filter(\.removed).map(\.key)
         return result
     }
 
@@ -153,11 +167,12 @@ final class DeployReconciler: DeployReconciling {
         return realDir == realParent + "/" + last
     }
 
-    /// Prune the dangling Pensieve-owned symlinks directly under `agentDir`. Returns the removed link paths.
-    private func prunedLinks(in agentDir: String) -> [String] {
+    /// Gather Pensieve link candidates without changing artifacts or their records.
+    private func danglingCandidates(in agent: AgentSkillsDirectory) -> [DeployRemovalCandidate] {
+        let agentDir = agent.path
         guard fileService.directoryExists(at: agentDir),
               let entries = try? fileService.listDirectory(at: agentDir) else { return [] }
-        var removed: [String] = []
+        var candidates: [DeployRemovalCandidate] = []
         for entry in entries {
             // The link's basename is the realized skill's slug; guard it through the single C7 guard.
             guard SkillStore.safeSkillDirectory(
@@ -173,19 +188,19 @@ final class DeployReconciler: DeployReconciling {
             guard DeployArtifactOwnership.ownsLinkTarget(target, skillsDirectory: pensieveSkillsDir, linksFile: false) else {
                 continue
             }
-            // (b) dangling: the canonical target no longer exists → remove the LINK (never the target).
-            guard !fileService.fileExists(at: target), !fileService.directoryExists(at: target) else { continue }
-            // Report a removal only when the delete actually succeeded — a link we could not remove (e.g.
-            // a permissions error) is left for the next cycle, never counted as pruned (the count feeds
-            // the status file PLAN-14 reads).
-            do {
-                try fileService.deleteFile(at: link)
-                _ = try? deployState.remove(artifactPath: link)
-                removed.append(link)
-            } catch {
-                continue
+            guard fileService.fileIdentity(at: link, followingLinks: true) == nil else { continue }
+            let operation = DeployRemovalOperation(fileService: fileService, path: link) {
+                guard try self.ownership.link(at: link, skillsDirectory: self.pensieveSkillsDir, linksFile: false).isOwned else {
+                    return false
+                }
+                // One following probe rechecks dangling status; a restored target keeps its link and record.
+                return self.fileService.fileIdentity(at: link, followingLinks: true) == nil
             }
+            var candidate = DeployRemovalCandidate(key: DeployRemovalKey(slug: entry, platform: agent.platform,
+                projectPath: nil, artifactPath: link), evidence: [.danglingLink], operation: operation)
+            candidate.retireIfUnowned = false
+            candidates.append(candidate)
         }
-        return removed
+        return candidates
     }
 }

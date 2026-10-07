@@ -31,6 +31,8 @@ final class ProjectRemovalFreshnessTests: XCTestCase {
             let ledgerKeys = Set(try h.context.fetch(FetchDescriptor<IntentAssignment>()).map(\.key))
             let result = confirm(model, h)
             XCTAssertTrue(result.hasFailures, "Changed confirmation must stop before withdrawing or unlinking")
+            XCTAssertTrue(model.error?.contains("The project changed while confirmation was open.") == true)
+            XCTAssertFalse(model.error?.contains("project folder changed") == true)
             XCTAssertTrue(model.error?.contains("changed") == true)
             XCTAssertTrue(model.error?.contains("review") == true)
             XCTAssertTrue(h.files.isSymlink(at: h.artifact(.codex)))
@@ -139,15 +141,17 @@ final class ProjectRemovalFreshnessTests: XCTestCase {
             XCTAssertEqual(h.files.isSymlink(at: h.artifact(.codex)), failure != "state write")
             XCTAssertEqual(model.error?.contains("stopped partway"), failure == "state write")
             XCTAssertEqual(model.error?.contains("Nothing was changed."), unchanged)
-            XCTAssertEqual(model.error?.contains("Pensieve stopped requesting this project's deploys."), failure == "unlink")
+            XCTAssertEqual(model.error?.contains("Pensieve withdrew this Mac's direct deploy requests for this project."),
+                           failure == "unlink")
             XCTAssertTrue(model.error?.contains(". It stays registered;") == true)
             XCTAssertTrue(model.error?.contains("retry to complete it.") == true)
+            XCTAssertFalse(model.error?.contains("category") == true, "Failure copy never promises to stop category deploys")
             XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 2)
             XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), unchanged ? 1 : 0)
-            XCTAssertEqual(category.projectKeys, unchanged ? [h.project.identityKey!] : [])
+            XCTAssertEqual(category.projectKeys, [h.project.identityKey!])
             XCTAssertEqual(try manifest.read(fromRoot: root).deployIntents.count, unchanged ? 1 : 0)
             XCTAssertEqual(try manifest.read(fromRoot: root).categories.first?.projectKeys,
-                           unchanged ? [h.project.identityKey!] : [])
+                           [h.project.identityKey!])
         }
     }
 

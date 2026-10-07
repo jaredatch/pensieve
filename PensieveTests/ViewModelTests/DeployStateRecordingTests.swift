@@ -26,6 +26,11 @@ final class DeployStateRecordingTests: XCTestCase {
     }
 
     private final class RecordingLinkService: LinkServiceProtocol {
+        func removalOperation(skill: Skill, platform: PlatformTarget,
+                              projectPath: String?) -> DeployRemovalOperation {
+            adapterRemovalOperation(skill: skill, platform: platform, projectPath: projectPath)
+        }
+
         let root: String
         init(root: String) { self.root = root }
 
@@ -44,6 +49,11 @@ final class DeployStateRecordingTests: XCTestCase {
     }
 
     private struct RecordingCursorCompiler: CursorCompilerProtocol {
+        func removalOperation(skill: Skill, platform: PlatformTarget,
+                              projectPath: String?) -> DeployRemovalOperation {
+            adapterRemovalOperation(skill: skill, projectPath: projectPath)
+        }
+
         let root: String
         func compile(skill: Skill, projectPath: String?) throws {}
         func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
@@ -113,7 +123,7 @@ final class DeployStateRecordingTests: XCTestCase {
     }
 
     @MainActor
-    func testProjectDeployWithNilIdentityKeySkipsRecord() throws {
+    func testProjectDeployWithNilIdentityKeyRecordsItsDeployment() throws {
         let context = try makeContext()
         let skill = insertedSkill("Alpha", slug: "alpha", context: context)
         let project = insertedProject("Project", path: tempDir + "/project", identityKey: nil, context: context)
@@ -122,7 +132,11 @@ final class DeployStateRecordingTests: XCTestCase {
         vm.deploy(skill: skill, platform: .claudeCode, target: .project(project), context: context)
 
         XCTAssertNil(vm.error)
-        XCTAssertTrue(try store.read().records.isEmpty)
+        let record = try XCTUnwrap(store.read().records.first)
+        XCTAssertEqual(record.slug, skill.directoryName)
+        XCTAssertEqual(record.scope, "project")
+        XCTAssertNil(record.projectIdentityKey)
+        XCTAssertEqual(record.artifactPath, tempDir + "/project/links/" + PlatformTarget.claudeCode.rawValue + "/alpha")
         XCTAssertEqual(try context.fetch(FetchDescriptor<DeployRecord>()).count, 1)
     }
 

@@ -1,8 +1,9 @@
 import Foundation
 import SwiftData
 
-/// Publish the durable request withdrawal before touching project artifacts. Registration and
-/// realized ledgers remain live until cleanup finishes. Every attempt publishes the saved snapshot.
+/// Publish this Mac's intent withdrawal before touching project artifacts. Shared category rules
+/// stay unchanged. Registration and realized ledgers remain live until cleanup finishes.
+/// Every attempt publishes the saved snapshot.
 struct ProjectRemovalWithdrawalRequest {
     let keepingSharedKey: Bool
     let intents: [MachineDeployIntent]
@@ -15,23 +16,12 @@ struct ProjectRemovalWithdrawal {
     let logFailure: (String) -> Void
 
     func apply(project: Project, request: ProjectRemovalWithdrawalRequest, context: ModelContext) throws -> Bool {
-        let key = project.identityKey
-        let categories: [Category]
-        if !request.keepingSharedKey, let key {
-            categories = try context.fetch(FetchDescriptor<Category>()).filter { $0.projectKeys.contains(key) }
-        } else {
-            categories = []
-        }
-        let memberships = categories.map { (category: $0, keys: $0.projectKeys) }
-        let withdrawing = request.intents.filter {
-            !request.keepingSharedKey && key != nil && $0.machineID == request.localMachineID && $0.projectKey == key
-        }
+        let withdrawing = intentsToWithdraw(project: project, request: request)
         let facts = withdrawing.map {
             DeployIntentRecord(machineID: $0.machineID, skillSlug: $0.skillSlug,
                                platformRaw: $0.platformRaw, projectKey: $0.projectKey)
         }
-        let changed = !categories.isEmpty || !withdrawing.isEmpty
-        for category in categories { category.projectKeys.removeAll { $0 == key } }
+        let changed = !withdrawing.isEmpty
         for intent in withdrawing { context.delete(intent) }
         do {
             if context.hasChanges { try context.save() }
@@ -48,7 +38,7 @@ struct ProjectRemovalWithdrawal {
             var withdrawalRemainsSaved = false
             do {
                 if changed {
-                    try restore(memberships: memberships, facts: facts, context: context)
+                    try restore(facts: facts, context: context)
                     restoration = "The saved withdrawal was restored."
                 }
             } catch {
@@ -64,9 +54,12 @@ struct ProjectRemovalWithdrawal {
         return changed
     }
 
-    private func restore(memberships: [(category: Category, keys: [String])], facts: [DeployIntentRecord],
-                         context: ModelContext) throws {
-        for membership in memberships { membership.category.projectKeys = membership.keys }
+    private func intentsToWithdraw(project: Project, request: ProjectRemovalWithdrawalRequest) -> [MachineDeployIntent] {
+        guard !request.keepingSharedKey, let key = project.identityKey else { return [] }
+        return request.intents.filter { $0.machineID == request.localMachineID && $0.projectKey == key }
+    }
+
+    private func restore(facts: [DeployIntentRecord], context: ModelContext) throws {
         for fact in facts {
             context.insert(MachineDeployIntent(machineID: fact.machineID, skillSlug: fact.skillSlug,
                 platformRaw: fact.platformRaw, projectKey: fact.projectKey))

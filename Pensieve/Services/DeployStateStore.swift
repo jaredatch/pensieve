@@ -7,6 +7,18 @@ struct DeployStateRecord: Codable, Equatable {
     let projectIdentityKey: String?
     let artifactPath: String
     let recordedAt: String
+
+    /// Keyless deployments are local project facts, named by their checkout path in local readers.
+    var projectReference: String {
+        if let projectIdentityKey { return projectIdentityKey }
+        guard let platform = PlatformTarget(rawValue: platform), platform.supportsProjectScope else { return artifactPath }
+        let suffix = platform == .cursor
+            ? DeployPaths.cursorPath(directoryName: slug, projectPath: "")
+            : DeployPaths.linkPath(directoryName: slug, platform: platform, projectPath: "")
+        guard artifactPath.hasSuffix(suffix) else { return artifactPath }
+        let path = String(artifactPath.dropLast(suffix.count))
+        return path.isEmpty ? "/" : path
+    }
 }
 
 struct DeployState: Codable, Equatable {
@@ -22,8 +34,8 @@ enum DeployStateError: Error, Equatable {
 final class DeployStateStore {
     static let currentSchemaVersion = 1
 
-    private let fileService: FileServiceProtocol
-    private let appSupportDir: String
+    let fileService: FileServiceProtocol
+    let appSupportDir: String
 
     private var statePath: String { appSupportDir + "/deploy-state.json" }
     private var lockPath: String { appSupportDir + "/deploy-state.lock" }

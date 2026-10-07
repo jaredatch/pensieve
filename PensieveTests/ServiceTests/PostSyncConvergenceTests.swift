@@ -141,7 +141,7 @@ final class PostSyncConvergenceTests: XCTestCase {
             fileService: fileService,
             deployState: deployState,
             pensieveSkillsDir: skillsRoot,
-            agentSkillDirs: [agentRoot],
+            agentSkillDirs: [.init(platform: .claudeCode, path: agentRoot)],
             cursorRulesDir: tempDir + "/cursor"
         )
         let container = try AppRuntime.makeContainer(

@@ -99,7 +99,13 @@ final class ProjectFolderCallerTests: XCTestCase {
             pairs: DeployRemovalPair.expand(skills: [harness.skill], platforms: [.claudeCode, .grok, .codex, .cursor]),
             target: .project(harness.project)
         )
-        XCTAssertEqual(removed.completedPairs.count, 4)
+        XCTAssertTrue(removed.completedPairs.isEmpty, "Absence in an unreachable folder cannot complete cleanup")
+        XCTAssertEqual(removed.failures.count, 4)
+        XCTAssertTrue(removed.failures.allSatisfy {
+            guard case .missing(let path)? = $0.projectFolderError else { return false }
+            return path == harness.project.path
+        })
+        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 1)
         let unregister = removeRegisteredProject(
             harness.project,
             reconciler: harness.category, manifestService: ManifestService(fileService: harness.files),
@@ -110,7 +116,9 @@ final class ProjectFolderCallerTests: XCTestCase {
         XCTAssertFalse(unregister.hasFailures)
         XCTAssertEqual(try harness.context.fetch(FetchDescriptor<Project>()).map(\.id), [harness.otherProject.id])
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0)
-        XCTAssertFalse(rule.projectKeys.contains(harness.project.identityKey!))
+        XCTAssertEqual(rule.projectKeys, ["github.com/owner/project"])
+        XCTAssertEqual(try ManifestService(fileService: harness.files)
+            .read(fromRoot: harness.root + "/store").categories.first?.projectKeys, ["github.com/owner/project"])
         XCTAssertFalse(try harness.files.entryExistsWithoutFollowingLinks(at: harness.root + "/absent"))
     }
 

@@ -6,6 +6,11 @@ struct ProjectRemovalPreview {
     let artifactCount: Int
     let folderIsMissing: Bool
     let folderIsShared: Bool
+    var folderIsUncheckable = false
+    var folderPath: String?
+    var hasWaitingRemovals = false
+
+    var folderIsUnavailable: Bool { folderIsMissing || folderIsUncheckable }
 
     init(projectName: String, artifactCount: Int, folderIsMissing: Bool, folderIsShared: Bool = false) {
         self.projectName = projectName
@@ -16,8 +21,13 @@ struct ProjectRemovalPreview {
 
     var title: String { "Remove “\(projectName)”?" }
     var message: String {
-        if folderIsMissing {
-            return "Pensieve can't reach this folder, so the links and rules it added there stay. Your files stay."
+        if folderIsUnavailable {
+            let folder = folderPath.map { " at \($0)" } ?? ""
+            guard hasWaitingRemovals else {
+                return "Pensieve can't reach this folder\(folder). No skill links or rules will be removed. Your files stay."
+            }
+            return "Pensieve can't reach this folder\(folder). Its links and rules will be removed "
+                + "when the folder is back and can be checked. Your files stay."
         }
         if folderIsShared { return "The other registration keeps the links and rules in this folder. Your files stay." }
         if artifactCount == 0 { return "No skill links or rules will be removed. Your files stay." }
@@ -47,12 +57,15 @@ struct ProjectRemovalPlan {
         let hasSibling = projects.contains {
             $0.id != project.id && project.identityKey != nil && $0.identityKey == project.identityKey
         }
+        guard ProjectDirectory.canAccess(project.path) else {
+            return ProjectRemovalPlan(preview: ProjectRemovalPreview(projectName: project.name,
+                artifactCount: 0, folderIsMissing: true), candidates: [], hasIdentitySibling: hasSibling, folderSiblingIDs: [])
+        }
+        var folderProblem: ProjectFolderError?
         do {
             try platformVM.projectReconcilePolicy.requireDirectory(project)
-        } catch ProjectFolderError.missing {
-            return ProjectRemovalPlan(preview: ProjectRemovalPreview(
-                projectName: project.name, artifactCount: 0, folderIsMissing: true),
-                candidates: [], hasIdentitySibling: hasSibling, folderSiblingIDs: [])
+        } catch let error as ProjectFolderError {
+            folderProblem = error
         }
         let directory = platformVM.projectReconcilePolicy.resolvedDirectory(project)
         let folderSiblingIDs = Set(projects.filter {
@@ -73,54 +86,77 @@ struct ProjectRemovalPlan {
         var prepared: [Candidate] = []
         for path in candidates.keys.sorted() {
             guard let pair = candidates[path] else { continue }
-            let owned = try platformVM.artifactIsOwned(skill: pair.skill, platform: pair.platform, target: .project(project))
+            let owned = folderProblem == nil
+                ? try platformVM.removalOperation(skill: pair.skill, platform: pair.platform,
+                    target: .project(project)).classify().isOwned : false
             prepared.append(Candidate(pair: pair, path: path, isOwned: owned))
         }
         let count = prepared.filter(\.isOwned).count
-        return ProjectRemovalPlan(preview: ProjectRemovalPreview(
-            projectName: project.name, artifactCount: count, folderIsMissing: false),
+        var preview = ProjectRemovalPreview(projectName: project.name, artifactCount: count, folderIsMissing: false)
+        if let folderProblem {
+            if case .missing = folderProblem {
+                preview = ProjectRemovalPreview(projectName: project.name, artifactCount: 0, folderIsMissing: true)
+            } else { preview.folderIsUncheckable = true }
+            preview.folderPath = project.path
+            preview.hasWaitingRemovals = !prepared.isEmpty
+        }
+        return ProjectRemovalPlan(preview: preview,
             candidates: prepared, hasIdentitySibling: hasSibling, folderSiblingIDs: [])
+    }
+
+    /// Save deferred work before withdrawal, ledger retirement or deployment-state retirement.
+    func saveWaitingRemovals(project: Project, platformVM: PlatformViewModel) throws -> Set<UUID> {
+        guard preview.hasWaitingRemovals else { return [] }
+        let entries = candidates.map {
+            platformVM.waitingRemoval(skill: $0.pair.skill, platform: $0.pair.platform,
+                project: project, source: "project:\(project.id)")
+        }
+        try platformVM.waitingRemovalStore.add(entries)
+        return Set(entries.map(\.id))
     }
 
     func removeArtifacts(project: Project, platformVM: PlatformViewModel) -> BatchResult {
         var result = BatchResult()
         if preview.folderIsShared { return result }
+        if preview.folderIsUnavailable {
+            let retirement = platformVM.removalService.remove(candidates.map {
+                DeployRemovalCandidate(key: platformVM.removalKey(pair: $0.pair, target: .project(project)),
+                    evidence: [.localProjectRecords], action: .retireWithoutInspection)
+            })
+            if let error = retirement.stateWriteFailure { result.operationFailures.append(error.localizedDescription) }
+            result.didRetireProjectEvidence = retirement.didChangeRecords
+            if retirement.didChangeRecords { platformVM.noteDeployStateChanged() }
+            return result
+        }
         if let failure = folderFailure(project: project, platformVM: platformVM) {
             result.operationFailures.append(failure)
             return result
         }
-        if preview.folderIsMissing { return result }
-        var changed = false
-        var completed: [(candidate: Candidate, deleted: Bool)] = []
-        for candidate in candidates {
-            let pair = candidate.pair
-            do {
-                let deleted = candidate.isOwned ? try platformVM.removeArtifact(
-                    skill: pair.skill, platform: pair.platform, target: .project(project)) : false
-                result.didRemoveArtifacts = deleted || result.didRemoveArtifacts
-                changed = deleted || changed
-                completed.append((candidate, deleted))
-            } catch {
+        let admitted = candidates.map {
+            DeployRemovalCandidate(key: platformVM.removalKey(pair: $0.pair, target: .project(project)),
+                evidence: [.localProjectRecords], action: $0.isOwned
+                    ? .inspect(platformVM.removalOperation(skill: $0.pair.skill, platform: $0.pair.platform,
+                        target: .project(project))) : .retireWithoutInspection)
+        }
+        let removal = platformVM.removalService.remove(admitted)
+        result.didRemoveArtifacts = removal.didRemoveArtifacts
+        result.didRetireProjectEvidence = removal.didChangeRecords
+        let work = Array(zip(candidates, removal.outcomes))
+        let failed = work.filter { $0.1.failure != nil }
+        let completed = work.filter { $0.1.completed }
+        for (candidate, outcome) in failed + completed {
+            if let error = outcome.failure ?? (outcome.completed ? removal.stateWriteFailure : nil) {
                 result.outcomes.append(failure(candidate, project: project, error: error))
+            } else if outcome.removed {
+                let pair = candidate.pair
+                result.outcomes.append(BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
+                    platform: pair.platform, target: .project(project.id), error: nil))
+            } else if outcome.retired {
+                result.retiredPairs.insert(BatchPairKey(skillID: candidate.pair.skill.id,
+                    platform: candidate.pair.platform, target: .project(project.id)))
             }
         }
-        do {
-            let retired = try platformVM.deployStateStore.remove(artifactPaths: Set(completed.map { $0.candidate.path }))
-            changed = retired || changed
-            for item in completed {
-                let pair = item.candidate.pair
-                if item.deleted {
-                    result.outcomes.append(BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
-                        platform: pair.platform, target: .project(project.id), error: nil))
-                } else {
-                    result.retiredPairs.insert(BatchPairKey(skillID: pair.skill.id,
-                        platform: pair.platform, target: .project(project.id)))
-                }
-            }
-        } catch {
-            for item in completed { result.outcomes.append(failure(item.candidate, project: project, error: error)) }
-        }
-        if changed { platformVM.noteDeployStateChanged() }
+        if result.didRemoveArtifacts || removal.didChangeRecords { platformVM.noteDeployStateChanged() }
         return result
     }
 

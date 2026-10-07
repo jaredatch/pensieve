@@ -167,7 +167,6 @@ struct DeployStateBackfill: DeployStateBackfilling {
             guard let projectID = record.projectID,
                   let skill = skillsByID[record.skillID],
                   let project = projectsByID[projectID],
-                  let identityKey = project.identityKey,
                   ProjectDirectory.canAccess(project.path) else { continue }
 
             if record.platform.usesSymlinks {
@@ -195,7 +194,7 @@ struct DeployStateBackfill: DeployStateBackfilling {
                 slug: skill.directoryName,
                 platform: record.platform,
                 scope: "project",
-                projectIdentityKey: identityKey,
+                projectIdentityKey: project.identityKey,
                 artifactPath: record.targetPath
             ))
         }

@@ -19,7 +19,8 @@ final class DeployPlatformCoverageTests: XCTestCase {
         let pruneDirectories = DeployReconciler.defaultAgentSkillDirs
         for platform in PlatformTarget.allCases where platform.usesSymlinks {
             let root = try XCTUnwrap(DeployPaths.userSkillsRoot(for: platform))
-            XCTAssertTrue(pruneDirectories.contains(root), "Missing \(platform) root from daemon prune list")
+            XCTAssertTrue(pruneDirectories.contains { $0.path == root && $0.platform == platform },
+                          "Missing \(platform) root from daemon prune list")
         }
     }
 
@@ -36,7 +37,7 @@ final class DeployPlatformCoverageTests: XCTestCase {
 
     func testCursorHasNoUserSkillsRoot() {
         XCTAssertNil(DeployPaths.userSkillsRoot(for: .cursor))
-        XCTAssertFalse(DeployReconciler.defaultAgentSkillDirs.contains(PathConstants.cursorUserRulesDir))
+        XCTAssertFalse(DeployReconciler.defaultAgentSkillDirs.contains { $0.path == PathConstants.cursorUserRulesDir })
         XCTAssertFalse(
             DeployStateBackfill.userWideSymlinkDirectories(paths: .defaults).contains { $0.platform == .cursor }
         )

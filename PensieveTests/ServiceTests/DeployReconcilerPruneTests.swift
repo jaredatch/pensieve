@@ -16,7 +16,7 @@ final class DeployReconcilerPruneTests: XCTestCase {
             fileService: fileService,
             deployState: deployStateStore,
             pensieveSkillsDir: storeSkillsDir,
-            agentSkillDirs: agentDirs ?? [agentDir]
+            agentSkillDirs: (agentDirs ?? [agentDir]).map { .init(platform: .claudeCode, path: $0) }
         )
     }
 
@@ -54,6 +54,15 @@ final class DeployReconcilerPruneTests: XCTestCase {
         )
     }
 
+    func testInjectedPruneDirectoryKeepsItsAgentIdentity() throws {
+        try link("gone", to: storeSkillsDir + "/gone")
+        let result = DeployReconciler(fileService: fileService, deployState: deployStateStore,
+            pensieveSkillsDir: storeSkillsDir,
+            agentSkillDirs: [.init(platform: .codex, path: agentDir)]).pruneDangling()
+        XCTAssertEqual(result.removed, [agentDir + "/gone"])
+        XCTAssertEqual(result.removedKeys.map(\.platform), [.codex], "Injected directories retain their actual agent")
+    }
+
     /// (a) A Pensieve symlink whose canonical store dir has vanished is removed.
     func testDanglingPensieveLinkRemoved() throws {
         try link("gone", to: storeSkillsDir + "/gone")   // target never created → dangling
@@ -69,6 +78,34 @@ final class DeployReconcilerPruneTests: XCTestCase {
         let result = makeReconciler().pruneDangling()
         XCTAssertEqual(result.removed, [])
         XCTAssertTrue(fileService.isSymlink(at: agentDir + "/live"))
+    }
+
+    func testTargetRestoredBeforePruneTurnKeepsLinkAndRecord() throws {
+        let secondDir = tempDir + "/second-agent/skills"
+        let firstPath = agentDir + "/gone"
+        let restoredPath = secondDir + "/restored"
+        let restoredTarget = storeSkillsDir + "/restored"
+        try link("gone", to: storeSkillsDir + "/gone")
+        try fileService.createSymlink(at: restoredPath, pointingTo: restoredTarget)
+        try deployStateStore.replaceAll([record(slug: "gone", artifactPath: firstPath),
+            record(slug: "restored", artifactPath: restoredPath)])
+        let mapped = LinkServiceCanonicalDirectoryFileService(wrapped: fileService,
+            pathMappings: [], physicalSandbox: tempDir)
+        mapped.beforeArtifactDeletion = { path in
+            guard path == firstPath else { return }
+            try self.fileService.createDirectory(at: restoredTarget)
+            try self.fileService.writeFile(at: restoredTarget + "/SKILL.md", content: "Restored skill")
+        }
+        let result = DeployReconciler(fileService: mapped, deployState: deployStateStore,
+            pensieveSkillsDir: storeSkillsDir, agentSkillDirs: [
+                .init(platform: .claudeCode, path: agentDir),
+                .init(platform: .codex, path: secondDir)
+            ]).pruneDangling()
+        XCTAssertEqual(result.removed, [firstPath])
+        XCTAssertFalse(fileService.isSymlink(at: firstPath))
+        XCTAssertTrue(fileService.isSymlink(at: restoredPath))
+        XCTAssertEqual(try fileService.readFile(at: restoredPath + "/SKILL.md"), "Restored skill")
+        XCTAssertEqual(try deployStateStore.read().records.map(\.artifactPath), [restoredPath])
     }
 
     /// (c) A FOREIGN symlink (target outside the store) is never touched — even when dangling. This is
@@ -103,7 +140,11 @@ final class DeployReconcilerPruneTests: XCTestCase {
         try FileManager.default.createSymbolicLink(atPath: realTarget + "/gone", withDestinationPath: storeSkillsDir + "/gone")
         let symlinkedAgentDir = tempDir + "/agent-symlinked"
         try FileManager.default.createSymbolicLink(atPath: symlinkedAgentDir, withDestinationPath: realTarget)
-        let result = makeReconciler(agentDirs: [symlinkedAgentDir]).pruneDangling()
+        let result = DeployReconciler(fileService: fileService, deployState: deployStateStore,
+            pensieveSkillsDir: storeSkillsDir, agentSkillDirs: [
+                .init(platform: .claudeCode, path: symlinkedAgentDir),
+                .init(platform: .cursor, path: agentDir)
+            ]).pruneDangling()
         XCTAssertEqual(result.skippedDirs, [symlinkedAgentDir])
         XCTAssertEqual(result.removed, [])
         XCTAssertTrue(fileService.isSymlink(at: realTarget + "/gone"))
@@ -167,6 +208,36 @@ final class DeployReconcilerPruneTests: XCTestCase {
 
         XCTAssertEqual(result.removed, [linkPath])
         XCTAssertEqual(try deployStateStore.read().records.map(\.artifactPath), [agentDir + "/other"])
+    }
+
+    func testPruneRechecksOwnershipAndKeepsUnreadableOrReplacedLinkRecorded() throws {
+        for replacement in [false, true] {
+            let path = agentDir + "/gone"
+            try link("gone", to: storeSkillsDir + "/gone")
+            try deployStateStore.replaceAll([record(slug: "gone", artifactPath: path)])
+            let mapped = LinkServiceCanonicalDirectoryFileService(wrapped: fileService,
+                pathMappings: [], physicalSandbox: tempDir)
+            var reads = 0
+            mapped.beforeSymlinkRead = { candidate in
+                guard candidate == path else { return }
+                reads += 1
+                if reads == 2 {
+                    if replacement {
+                        try self.fileService.deleteFile(at: path)
+                        try self.fileService.createSymlink(at: path, pointingTo: self.tempDir + "/outside")
+                    } else { throw DeletionTestError() }
+                }
+            }
+            let result = DeployReconciler(fileService: mapped, deployState: deployStateStore,
+                pensieveSkillsDir: storeSkillsDir, agentSkillDirs: [.init(platform: .claudeCode, path: agentDir)]).pruneDangling()
+            XCTAssertTrue(result.removed.isEmpty)
+            XCTAssertEqual(reads, 2, "The dangling admission is followed by a fresh ownership check")
+            XCTAssertTrue(fileService.isSymlink(at: path))
+            XCTAssertEqual(try deployStateStore.read().records.map(\.artifactPath), [path])
+            XCTAssertEqual(try fileService.symlinkTarget(at: path),
+                           replacement ? tempDir + "/outside" : storeSkillsDir + "/gone")
+            try fileService.deleteFile(at: path)
+        }
     }
 
     /// (16.3) A deploy-state write failure is tolerated: prune deletes the dangling link anyway.

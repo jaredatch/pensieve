@@ -22,7 +22,9 @@ final class PlatformViewModelDeployIndexTests: XCTestCase {
         XCTAssertTrue(vm.deployIndex.isDeployed(slug: "alpha"))
         XCTAssertEqual(vm.deployIndex.summary(for: "alpha"), "Claude Code · This Mac")
 
-        XCTAssertEqual(vm.removeAllDeploys(skill: skill, projects: [], localDeployHistory: { _ in [] }).batch.successes.count, 1)
+        let context = try makeContext()
+        XCTAssertEqual(removeAllDeploysWithLocalEvidence(vm, skill: skill, projects: [],
+            context: context).batch.successes.count, 1)
         XCTAssertTrue(vm.deployIndex.available)
         XCTAssertFalse(vm.deployIndex.isDeployed(slug: "alpha"))
     }
@@ -93,10 +95,7 @@ final class PlatformViewModelDeployIndexTests: XCTestCase {
     }
 
     private func makeContext() throws -> ModelContext {
-        let container = try ModelContainer(
-            for: Skill.self, Project.self, SkillProjectAssignment.self, DeployRecord.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-        )
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         return ModelContext(container)
     }
 

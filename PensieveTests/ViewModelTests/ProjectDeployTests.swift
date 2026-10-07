@@ -12,6 +12,11 @@ final class ProjectDeployTests: XCTestCase {
     }
 
     private final class RecordingLinkService: LinkServiceProtocol {
+        func removalOperation(skill: Skill, platform: PlatformTarget,
+                              projectPath: String?) -> DeployRemovalOperation {
+            adapterRemovalOperation(skill: skill, platform: platform, projectPath: projectPath)
+        }
+
         private(set) var lastLinkProjectPath: String?
         private(set) var lastUnlinkProjectPath: String?
         var ownsRemovalPairs = false
@@ -40,6 +45,11 @@ final class ProjectDeployTests: XCTestCase {
     }
 
     private struct StubCursorCompiler: CursorCompilerProtocol {
+        func removalOperation(skill: Skill, platform: PlatformTarget,
+                              projectPath: String?) -> DeployRemovalOperation {
+            adapterRemovalOperation(skill: skill, projectPath: projectPath)
+        }
+
         func compile(skill: Skill, projectPath: String?) throws {}
         func remove(skill: Skill, projectPath: String?) throws -> Bool { false }
         func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {

@@ -21,6 +21,11 @@ private struct SeededRule {
 }
 
 private final class RecordingLinkService: LinkServiceProtocol {
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        adapterRemovalOperation(skill: skill, platform: platform, projectPath: projectPath)
+    }
+
     var linked: Set<RecordedLink> = []
     var linkCalls: [RecordedLink] = []
     var unlinkCalls: [RecordedLink] = []

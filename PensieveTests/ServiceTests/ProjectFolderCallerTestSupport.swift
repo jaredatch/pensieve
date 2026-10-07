@@ -59,10 +59,10 @@ struct ProjectFolderCallerHarness {
 
     func cleanup() { try? files.deleteDirectory(at: root) }
 
-    func addIntent(platform: PlatformTarget = .codex, project: Project? = nil) throws {
+    func addIntent(platform: PlatformTarget = .codex, project: Project? = nil, skill: Skill? = nil) throws {
         let target = project ?? self.project
         context.insert(MachineDeployIntent(
-            machineID: ProjectIntentHarness.localID, skillSlug: skill.directoryName,
+            machineID: ProjectIntentHarness.localID, skillSlug: (skill ?? self.skill).directoryName,
             platformRaw: platform.rawValue, projectKey: target.identityKey
         ))
         try context.save()
@@ -75,6 +75,17 @@ struct ProjectFolderCallerHarness {
         context.insert(rule)
         try context.save()
         return rule
+    }
+
+    func addDirectSkill(platforms: [PlatformTarget]) throws -> Skill {
+        let slug = try SkillStore(fileService: files, baseDir: root + "/store/skills")
+            .createSkill(name: "Direct Skill", description: "Direct", body: "# Direct")
+        let direct = Skill(name: "Direct Skill", directoryName: slug)
+        context.insert(direct)
+        for platform in platforms {
+            try addIntent(platform: platform, skill: direct)
+        }
+        return direct
     }
 
     func model() -> DeployIntentModel {

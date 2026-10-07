@@ -71,27 +71,23 @@ final class ProjectRemovalConfirmationTests: XCTestCase {
             }
             let model = ProjectRemovalModel()
             model.request(h.project, platformVM: h.platformVM, context: h.context)
-            if status == "uncheckable" {
-                XCTAssertNil(model.project)
-                XCTAssertTrue(model.error?.contains(h.project.path) == true)
-                XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 2)
-                XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<IntentAssignment>()), 1)
-            } else {
-                let preview = try XCTUnwrap(model.preview)
-                XCTAssertEqual(preview.artifactCount, 0)
-                XCTAssertEqual(preview.folderIsMissing, status == "missing")
-                XCTAssertTrue(preview.message.contains(status == "missing"
-                    ? "can't reach this folder" : "No skill links or rules will be removed"))
-                model.confirm { project, plan in
-                    removeRegisteredProject(project, reconciler: h.category,
-                        manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/sync",
-                        platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, confirmedPreview: plan,
-                        context: h.context)
-                }
-                XCTAssertNil(model.error)
-                XCTAssertFalse(try h.context.fetch(FetchDescriptor<Project>()).contains { $0.id == id })
-                XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
+            let preview = try XCTUnwrap(model.preview)
+            XCTAssertEqual(preview.artifactCount, 0)
+            XCTAssertEqual(preview.folderIsMissing, status == "missing")
+            XCTAssertEqual(preview.folderIsUncheckable, status == "uncheckable")
+            XCTAssertTrue(preview.message.contains(status != "empty"
+                ? "will be removed when the folder is back" : "No skill links or rules will be removed"))
+            if status != "empty" { XCTAssertTrue(preview.message.contains(h.project.path)) }
+            model.confirm { project, plan in
+                removeRegisteredProject(project, reconciler: h.category,
+                    manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/sync",
+                    platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, confirmedPreview: plan,
+                    context: h.context)
             }
+            XCTAssertNil(model.error)
+            XCTAssertFalse(try h.context.fetch(FetchDescriptor<Project>()).contains { $0.id == id })
+            XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
+            XCTAssertEqual(try h.platformVM.waitingRemovalStore.read().count, status == "empty" ? 0 : 1)
             if let retainedRule { XCTAssertTrue(h.files.fileExists(at: retainedRule)) }
         }
     }

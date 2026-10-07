@@ -13,6 +13,11 @@ struct AppRuntimePaths {
     }
 
     private struct NoDeploymentLinkService: LinkServiceProtocol {
+        func removalOperation(skill: Skill, platform: PlatformTarget,
+                              projectPath: String?) -> DeployRemovalOperation {
+            DeployRemovalOperation(classify: { false }, delete: { false })
+        }
+
         let outputRoot: String
 
         func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
@@ -30,6 +35,11 @@ struct AppRuntimePaths {
     }
 
     private struct NoDeploymentCursorCompiler: CursorCompilerProtocol {
+        func removalOperation(skill: Skill, platform: PlatformTarget,
+                              projectPath: String?) -> DeployRemovalOperation {
+            DeployRemovalOperation(classify: { false }, delete: { false })
+        }
+
         let outputRoot: String
 
         func compile(skill: Skill, projectPath: String?) throws {}

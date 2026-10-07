@@ -57,6 +57,17 @@ final class DaemonDeployedCommandTests: XCTestCase {
         )
     }
 
+    func testRenderKeylessProjectNamesCheckoutPathAndPreservesJSON() throws {
+        let data = deployStateData(records: [recordJSON(slug: "alpha", platform: "codex", scope: "project",
+            projectIdentityKey: nil, artifactPath: "/checkout/agents/alpha.md")])
+        let human = DaemonCLI.renderDeployed(data: data, path: "/state/deploy-state.json", json: false)
+        XCTAssertFalse(human.isError)
+        XCTAssertEqual(human.exitCode, 0)
+        XCTAssertEqual(human.output, "alpha\tcodex\tproject:/checkout\t/checkout/agents/alpha.md\n")
+        let json = DaemonCLI.renderDeployed(data: data, path: "/state/deploy-state.json", json: true)
+        XCTAssertEqual(Data(json.output.utf8), data)
+    }
+
     func testRenderEmptyHumanStateSaysNoDeploymentsRecorded() {
         let rendered = DaemonCLI.renderDeployed(
             data: Data(#"{"records":[],"schema_version":1}"#.utf8),

@@ -77,7 +77,8 @@ extension DeployIntentModelTests {
         XCTAssertTrue(refused)
         XCTAssertEqual(harness.model.error, "Sync is running. Try again when it finishes.")
         try assertNoIntegrationIntent(harness, skill: skill)
-        XCTAssertFalse(try harness.platformVM.artifactIsOwned(skill: skill, platform: .codex))
+        XCTAssertFalse(try harness.platformVM.removalOperation(
+            skill: skill, platform: .codex, target: .userWide).classify().isOwned)
 
         _ = try harness.model.set(
             true, skill: skill, platform: .codex, target: .userWide, context: harness.context

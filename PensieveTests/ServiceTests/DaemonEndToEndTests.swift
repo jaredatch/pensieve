@@ -64,7 +64,7 @@ final class DaemonEndToEndTests: XCTestCase {
                 fileService: fileService,
                 deployState: DeployStateStore(fileService: fileService, appSupportDir: appSupport),
                 pensieveSkillsDir: cloneB + "/skills",
-                agentSkillDirs: [agentDir],
+                agentSkillDirs: [.init(platform: .claudeCode, path: agentDir)],
                 cursorRulesDir: cursorRulesDir,
                 manifestService: manifest
             ),

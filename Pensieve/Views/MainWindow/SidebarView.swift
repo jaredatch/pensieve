@@ -59,9 +59,9 @@ func removeRegisteredProject(_ project: Project,
                              notifier: SyncStateNotifying = SyncStateNotifier.suppressed,
                              logFailure: @escaping (String) -> Void = logProjectRemovalFailure) -> BatchResult {
     defer { notifier() }
-    let intentRows: [IntentAssignment]
-    let intents: [MachineDeployIntent]
+    let intentRows: [IntentAssignment], intents: [MachineDeployIntent]
     let plan: ProjectRemovalPlan
+    let waitingIDs: Set<UUID>
     do {
         intentRows = try stateFetcher.intentAssignments(context: context)
         intents = try stateFetcher.deployIntents(context: context)
@@ -73,10 +73,9 @@ func removeRegisteredProject(_ project: Project,
             result.operationFailures.append(failure)
             return result
         }
+        waitingIDs = try plan.saveWaitingRemovals(project: project, platformVM: platformVM)
     } catch let error as ProjectFolderError {
-        var result = BatchResult()
-        result.operationFailures.append("Couldn't check the project folder: " + error.localizedDescription)
-        return result
+        return projectFolderPreparationFailure(error)
     } catch { return BatchResult.readFailure("project deploy records", error: error) }
     let publication = ProjectRemovalWithdrawal(manifestService: manifestService,
         manifestRoot: manifestRoot, logFailure: logFailure)
@@ -88,7 +87,7 @@ func removeRegisteredProject(_ project: Project,
     } catch {
         result.didWithdrawProjectRequests = (error as? ProjectRemovalWithdrawalFailure)?.didWithdrawRequests ?? false
         result.operationFailures.append(error.localizedDescription)
-        return result
+        return settleProjectWaitingCleanup(result, ids: waitingIDs, platformVM: platformVM)
     }
     result.append(reconciler.reconcileRemovingProject(project.id, preservingProjects: plan.folderSiblingIDs, context: context))
     do {
@@ -102,22 +101,45 @@ func removeRegisteredProject(_ project: Project,
         guard case .project(let id)? = outcome.target else { return false }
         return id != project.id
     }
-    guard !result.hasFailures else { return result }
+    guard !result.hasFailures else { return settleProjectWaitingCleanup(result, ids: waitingIDs, platformVM: platformVM) }
     let cleanup = plan.removeArtifacts(project: project, platformVM: platformVM)
     result.append(cleanup)
     result.append(completeProjectRemoval(project, intentRows: intentRows, cleanup: cleanup,
         priorFailed: result.hasFailures, context: context))
+    return settleProjectWaitingCleanup(result, ids: waitingIDs, platformVM: platformVM)
+}
+
+private func projectFolderPreparationFailure(_ error: ProjectFolderError) -> BatchResult {
+    var result = BatchResult()
+    result.operationFailures.append("Couldn't check the project folder: " + error.localizedDescription)
+    return result
+}
+
+private func settleProjectWaitingCleanup(_ outcome: BatchResult, ids: Set<UUID>,
+                                         platformVM: PlatformViewModel) -> BatchResult {
+    var result = outcome
+    if result.hasFailures && !result.didRetireProjectEvidence {
+        do { try platformVM.waitingRemovalStore.retire(ids: ids) } catch {
+            result.operationFailures.append("Couldn't withdraw this attempt's waiting cleanup: " + error.localizedDescription)
+        }
+    }
     return result
 }
 
 private func projectRemovalAdmissionFailure(project: Project, plan: ProjectRemovalPlan,
                                             confirmedPreview: ProjectRemovalPreview?,
                                             intents: [MachineDeployIntent], localMachineID: String?) -> String? {
-    if let confirmedPreview,
-       confirmedPreview.artifactCount != plan.preview.artifactCount
-        || confirmedPreview.folderIsMissing != plan.preview.folderIsMissing
-        || confirmedPreview.folderIsShared != plan.preview.folderIsShared {
-        return "The project changed while confirmation was open. Please review removal again."
+    if let confirmedPreview {
+        let folderChanged = confirmedPreview.folderIsMissing != plan.preview.folderIsMissing
+            || confirmedPreview.folderIsUncheckable != plan.preview.folderIsUncheckable
+            || confirmedPreview.folderIsShared != plan.preview.folderIsShared
+        if folderChanged {
+            return "The project folder changed at \(project.path) while confirmation was open. Please review removal again."
+        }
+        if confirmedPreview.artifactCount != plan.preview.artifactCount
+            || confirmedPreview.hasWaitingRemovals != plan.preview.hasWaitingRemovals {
+            return "The project changed while confirmation was open. Please review removal again."
+        }
     }
     if !plan.hasIdentitySibling, let key = project.identityKey, localMachineID == nil,
        intents.contains(where: { $0.projectKey == key }) {
@@ -132,19 +154,29 @@ private func completeProjectRemoval(_ project: Project, intentRows: [IntentAssig
                                     context: ModelContext) -> BatchResult {
     var result = BatchResult()
     let projectID = project.id, completed = cleanup.completedPairs
+    var didDeleteEvidence = false
     do {
         for row in try context.fetch(FetchDescriptor<SkillProjectAssignment>()) where row.projectID == projectID {
             let pair = BatchPairKey(skillID: row.skillID, platform: row.platform, target: .project(projectID))
-            if !priorFailed || completed.contains(pair) { context.delete(row) }
+            if !priorFailed || completed.contains(pair) {
+                context.delete(row)
+                didDeleteEvidence = true
+            }
         }
         for row in intentRows where row.projectID == projectID {
             let completedDirect = PlatformTarget(rawValue: row.platformRaw).map {
                 completed.contains(BatchPairKey(skillID: row.skillID, platform: $0, target: .project(projectID)))
             } ?? false
-            if !priorFailed || completedDirect { context.delete(row) }
+            if !priorFailed || completedDirect {
+                context.delete(row)
+                didDeleteEvidence = true
+            }
         }
         if !priorFailed { context.delete(project) }
-        if context.hasChanges { try context.save() }
+        if context.hasChanges {
+            try context.save()
+            result.didRetireProjectEvidence = didDeleteEvidence
+        }
     } catch {
         context.rollback()
         result.operationFailures.append("Couldn't save project removal: " + error.localizedDescription)

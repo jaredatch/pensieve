@@ -23,7 +23,7 @@ extension CursorOwnershipTests {
         let deploy = harness.vm.deployBatch(skills: skills, platforms: Array(platforms),
             target: .project(project), context: harness.context)
         XCTAssertEqual(deploy.successes.count, 4)
-        try seedRemovalState(skills: skills, platforms: platforms, project: project, harness: harness, route: route)
+        try assertRemovalState(skills: skills, platforms: platforms, project: project, harness: harness, route: route)
         try seedRemovalLedger(route: route, skills: skills, platforms: platforms,
                               project: project, context: harness.context)
         var probes = 0
@@ -49,29 +49,21 @@ extension CursorOwnershipTests {
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0, route)
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0, route)
         for item in skills {
-            XCTAssertFalse(try harness.vm.artifactIsOwned(skill: item, platform: .cursor, target: .project(project)))
-            XCTAssertFalse(try harness.vm.artifactIsOwned(skill: item, platform: .claudeCode, target: .project(project)))
+            XCTAssertFalse(try harness.vm.removalOperation(
+                skill: item, platform: .cursor, target: .project(project)).classify().isOwned)
+            XCTAssertFalse(try harness.vm.removalOperation(
+                skill: item, platform: .claudeCode, target: .project(project)).classify().isOwned)
         }
     }
 
     @MainActor
-    private func seedRemovalState(skills: [Skill], platforms: Set<PlatformTarget>, project: Project,
-                                  harness: OwnershipRouteHarness, route: String) throws {
+    private func assertRemovalState(skills: [Skill], platforms: Set<PlatformTarget>, project: Project,
+                                    harness: OwnershipRouteHarness, route: String) throws {
         let paths = Set(skills.flatMap { item in
             platforms.map { harness.vm.artifactPath(skill: item, platform: $0, target: .project(project)) }
         })
         if route == "direct" {
-            XCTAssertTrue(try harness.state.recordedArtifactPaths().isEmpty, route)
-            // Keyless deploys cannot write state records. Model records retained from a former identity
-            // only on this route; keyed routes must retire the records their real deploy wrote.
-            for item in skills {
-                for platform in platforms {
-                    try harness.state.upsert(DeployStateRecord(slug: item.directoryName, platform: platform.rawValue,
-                        scope: "project", projectIdentityKey: "github.com/owner/project",
-                        artifactPath: harness.vm.artifactPath(skill: item, platform: platform, target: .project(project)),
-                        recordedAt: "2026-10-05T00:00:00Z"))
-                }
-            }
+            XCTAssertTrue(try harness.state.read().records.allSatisfy { $0.projectIdentityKey == nil }, route)
         }
         XCTAssertEqual(try harness.state.recordedArtifactPaths(), paths, route)
     }

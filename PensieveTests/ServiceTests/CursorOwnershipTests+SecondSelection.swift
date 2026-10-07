@@ -49,9 +49,12 @@ extension CursorOwnershipTests {
         project.identityKey = nil
         let path = artifactPath(.cursor, project: project.path)
         try mapped.writeFile(at: path, content: "User rule")
+        try reviewRecord(harness.state, path: path, target: .project(project))
         let result = try secondReviewModel(harness).set(false, skill: skill, platform: .cursor,
             target: .project(project), context: harness.context)
         XCTAssertTrue(result.outcomes.isEmpty)
+        XCTAssertFalse(result.hasFailures)
+        XCTAssertTrue(try harness.state.read().records.isEmpty)
         XCTAssertEqual(try mapped.readFile(at: path), "User rule")
     }
 

@@ -66,8 +66,8 @@ final class ProjectFolderRoundOneTests: XCTestCase {
                         categoryOwned ? h.category.reconcile(context: h.context) : h.intent.reconcile(context: h.context)
                     }
                     XCTAssertEqual(run().successes.count, 1)
-                    XCTAssertTrue(try h.platformVM.artifactIsOwned(
-                        skill: h.skill, platform: platform, target: .project(h.project)))
+                    XCTAssertTrue(try h.platformVM.removalOperation(
+                        skill: h.skill, platform: platform, target: .project(h.project)).classify().isOwned)
                     let path = h.artifact(platform)
                     try h.files.deleteFile(at: path)
                     switch occupant {
@@ -77,8 +77,8 @@ final class ProjectFolderRoundOneTests: XCTestCase {
                     }
                     XCTAssertFalse(h.platformVM.isDeployed(skill: h.skill, platform: platform, target: .project(h.project)),
                                    "\(platform) / \(occupant) is not a link to the store")
-                    XCTAssertFalse(try h.platformVM.artifactIsOwned(
-                        skill: h.skill, platform: platform, target: .project(h.project)))
+                    XCTAssertFalse(try h.platformVM.removalOperation(
+                        skill: h.skill, platform: platform, target: .project(h.project)).classify().isOwned)
                     let result = run()
                     XCTAssertEqual(result.failureCount, 1, "Convergence must report the occupant")
                     XCTAssertTrue(result.failures.first?.error?.contains("already exists") == true)
@@ -107,7 +107,8 @@ final class ProjectFolderRoundOneTests: XCTestCase {
             baseDir: h.root + "/store/skills"))
         let path = compiler.outputPath(skill: h.skill, projectPath: h.project.path)
         try h.files.writeFile(at: path, content: "Edited Cursor rule")
-        XCTAssertFalse(try h.platformVM.artifactIsOwned(skill: h.skill, platform: .cursor, target: .project(h.project)))
+        XCTAssertFalse(try h.platformVM.removalOperation(
+            skill: h.skill, platform: .cursor, target: .project(h.project)).classify().isOwned)
         XCTAssertEqual(h.intent.reconcile(context: h.context).failureCount, 1)
         XCTAssertEqual(try h.files.readFile(at: path), "Edited Cursor rule")
     }
@@ -116,6 +117,14 @@ final class ProjectFolderRoundOneTests: XCTestCase {
 private final class SiblingFailureLinkService: LinkServiceProtocol {
     let wrapped: LinkService
     var failedPath: String?
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        let operation = wrapped.removalOperation(skill: skill, platform: platform, projectPath: projectPath)
+        return DeployRemovalOperation(classify: operation.classify, delete: {
+            if projectPath == self.failedPath { throw SiblingUnlinkError() }
+            return try operation.delete()
+        })
+    }
     init(files: FileServiceProtocol) { wrapped = LinkService(fileService: files) }
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
         try wrapped.link(skill: skill, platform: platform, projectPath: projectPath)

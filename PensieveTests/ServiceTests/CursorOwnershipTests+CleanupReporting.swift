@@ -10,7 +10,8 @@ extension CursorOwnershipTests {
         let path = artifactPath(.cursor, project: nil)
         try reviewRecord(harness.state, path: path, target: .userWide)
         let before = harness.vm.refreshCounter
-        let result = harness.vm.removeAllDeploys(skill: skill, projects: [], localDeployHistory: { _ in [] })
+        let result = removeAllDeploysWithLocalEvidence(harness.vm, skill: skill, projects: [],
+            context: harness.context)
         XCTAssertFalse(result.batch.hasFailures)
         XCTAssertFalse(result.didChangeDeploys, "Retiring a stale record did not delete an artifact")
         XCTAssertTrue(try harness.state.read().records.isEmpty)
@@ -29,7 +30,8 @@ extension CursorOwnershipTests {
         let vm = PlatformViewModel(fileService: mapped, cursorCompiler: targeted,
             agentDetection: DeployStubDetection(installed: [.cursor]), deployStateStore: harness.state)
         let before = vm.refreshCounter
-        let result = vm.removeAllDeploys(skill: skill, projects: [], localDeployHistory: { _ in [] })
+        let result = removeAllDeploysWithLocalEvidence(vm, skill: skill, projects: [],
+            context: harness.context)
         XCTAssertFalse(result.batch.hasFailures)
         XCTAssertFalse(result.didChangeDeploys, "The leaf recheck preserved the replacement")
         XCTAssertEqual(vm.refreshCounter, before, "No artifact or record changed")
@@ -48,7 +50,8 @@ extension CursorOwnershipTests {
         }
         defer { mapped.beforeRuleRead = nil }
         let before = harness.vm.refreshCounter
-        let result = harness.vm.removeAllDeploys(skill: skill, projects: [], localDeployHistory: { _ in [] })
+        let result = removeAllDeploysWithLocalEvidence(harness.vm, skill: skill, projects: [],
+            context: harness.context)
         XCTAssertEqual(result.batch.failureCount, 1)
         XCTAssertFalse(result.didChangeDeploys)
         XCTAssertEqual(harness.vm.refreshCounter, before)
@@ -75,6 +78,14 @@ extension CursorOwnershipTests {
 private struct CleanupRemovalCompiler: CursorCompilerProtocol {
     let wrapped: CursorCompilerProtocol
     let beforeRemoval: () throws -> Void
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        let operation = wrapped.removalOperation(skill: skill, platform: platform, projectPath: projectPath)
+        return DeployRemovalOperation(classify: {
+            try beforeRemoval()
+            return try operation.classify()
+        }, delete: operation.delete)
+    }
     func compile(skill: Skill, projectPath: String?) throws { try wrapped.compile(skill: skill, projectPath: projectPath) }
     func remove(skill: Skill, projectPath: String?) throws -> Bool {
         try beforeRemoval()

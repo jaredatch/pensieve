@@ -16,9 +16,15 @@ enum SkillDeletionFlow {
             return false
         }
 
-        let cleanupResult = platformVM.removeAllDeploys(skill: skill, projects: projects, localDeployHistory: { paths in
-            try localCursorDeployPaths(skill: skill, paths: paths, context: context)
+        let cleanupResult = platformVM.removeAllDeploys(skill: skill, projects: projects, localProjectEvidence: {
+            try platformVM.localSkillProjectDeployEvidence(skill: skill, projects: projects, context: context)
         })
+        var retirementSaved = false
+        var deletionOutcome: SkillLibraryViewModel.SkillDeletionResult?
+        defer {
+            settleWaitingCleanup(cleanupResult, retirementSaved: retirementSaved,
+                outcome: deletionOutcome, skill: skill, library: library, platformVM: platformVM)
+        }
         let cleanup = cleanupResult.batch
         if cleanup.hasFailures {
             var messages = cleanup.readFailures.map(\.message)
@@ -39,6 +45,7 @@ enum SkillDeletionFlow {
         do {
             try retire(skill: skill, context: context)
             try persist(context)
+            retirementSaved = true
         } catch {
             context.rollback()
             library.deletionNotice = .failed(
@@ -48,6 +55,14 @@ enum SkillDeletionFlow {
         }
 
         let outcome = library.deleteSkillEntry(skill, context: context, persist: persist)
+        deletionOutcome = outcome
+        let manifestNote = updateManifest(library: library, context: context, waitingProjects: cleanupResult.waitingProjects)
+        return present(outcome, skill: skill, manifestNote: manifestNote, library: library)
+    }
+
+    private static func updateManifest(
+        library: SkillLibraryViewModel, context: ModelContext, waitingProjects: [String]
+    ) -> String {
         var manifestNote = ""
         do {
             try library.writeManifest(context: context)
@@ -56,26 +71,49 @@ enum SkillDeletionFlow {
             manifestNote = " The sync manifest couldn't be updated and will regenerate on the next change."
         }
 
-        return present(outcome, skill: skill, manifestNote: manifestNote, library: library)
+        if !waitingProjects.isEmpty {
+            manifestNote += " Links and rules in \(waitingProjects.joined(separator: ", ")) "
+                + "will be removed when the folder is back and can be checked."
+        }
+        return manifestNote
+    }
+
+    private static func settleWaitingCleanup(_ cleanup: SkillCleanupResult, retirementSaved: Bool,
+                                             outcome: SkillLibraryViewModel.SkillDeletionResult?, skill: Skill,
+                                             library: SkillLibraryViewModel, platformVM: PlatformViewModel) {
+        if retirementSaved {
+            if let error = platformVM.finishWaitingSkillCleanup(cleanup) {
+                let message = library.deletionNotice?.message ?? ""
+                let namedMessage: String
+                switch outcome {
+                case .deleted, .deletedManifestStale:
+                    namedMessage = message.isEmpty ? "Deleted “\(skill.name)”." : message
+                case .directoryDeletedRowRetained:
+                    namedMessage = message.isEmpty ? "Removed “\(skill.name)”'s files; its entry stays listed." : message
+                case .retainedDirectoryDeleteFailed, nil:
+                    namedMessage = "The skill “\(skill.name)” was kept." + (message.isEmpty ? "" : " " + message)
+                }
+                let warning = namedMessage + " Waiting cleanup was saved, "
+                    + "but its deployment records couldn't be retired: \(error)."
+                switch library.deletionNotice {
+                case .failed: library.deletionNotice = .failed(warning)
+                case .pending: library.deletionNotice = .pending(warning)
+                case .warning, nil: library.deletionNotice = .warning(warning)
+                }
+            }
+        } else {
+            do { try platformVM.abandonWaitingSkillCleanup(cleanup) } catch {
+                let message = library.deletionNotice?.message ?? "The skill was kept."
+                library.deletionNotice = .failed(message + " Couldn't withdraw this attempt's waiting cleanup: "
+                    + error.localizedDescription)
+            }
+        }
     }
 
     private static func retainedSkillMessage(didChangeDeploys: Bool) -> String {
         didChangeDeploys
             ? "Agent links and rules already removed stay removed; the skill was kept so you can retry."
             : "The skill was kept so you can retry."
-    }
-
-    private static func localCursorDeployPaths(
-        skill: Skill, paths: Set<String>, context: ModelContext
-    ) throws -> Set<String> {
-        let paths = Array(paths)
-        let skillID = skill.id
-        let predicate = #Predicate<DeployRecord> {
-            $0.skillID == skillID && $0.projectID != nil && paths.contains($0.targetPath)
-        }
-        // SwiftData cannot compare captured Codable enums; the predicate bounds Cursor paths first.
-        return Set(try context.fetch(FetchDescriptor(predicate: predicate))
-            .filter { $0.platform == .cursor }.map(\.targetPath))
     }
 
     private static func retire(skill: Skill, context: ModelContext) throws {

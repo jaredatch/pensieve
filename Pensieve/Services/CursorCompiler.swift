@@ -3,7 +3,7 @@ import CryptoKit
 
 // MARK: - Protocol
 
-protocol CursorCompilerProtocol {
+protocol CursorCompilerProtocol: DeployRemovalPreparing {
     /// Generate and write .mdc file from skill + Cursor config
     func compile(skill: Skill, projectPath: String?) throws
     /// Remove an owned rule; true only after deleting it from disk.
@@ -18,9 +18,12 @@ protocol CursorCompilerProtocol {
     func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool
     /// Get the output path for a compiled .mdc file
     func outputPath(skill: Skill, projectPath: String?) -> String
+    /// Legacy ownership evidence retained before the source skill can disappear.
+    func removalFingerprint(skill: Skill) -> CursorRemovalFingerprint?
 }
 
 extension CursorCompilerProtocol {
+    func removalFingerprint(skill: Skill) -> CursorRemovalFingerprint? { nil }
     /// Validate before scope admission or filesystem access, for every compiler implementation.
     func ruleMayExist(skill: Skill, projectPath: String?) throws -> Bool {
         try LinkService.validatePathComponent(skill.directoryName)
@@ -62,22 +65,22 @@ final class CursorCompiler: CursorCompilerProtocol {
 
     @discardableResult
     func remove(skill: Skill, projectPath: String?) throws -> Bool {
-        guard ProjectDirectory.canAccess(projectPath) else { return false }
-        let path = outputPath(skill: skill, projectPath: projectPath)
-        guard try ownsArtifact(skill: skill, projectPath: projectPath) else { return false }
-        try fileService.deleteFile(at: path)
-        return true
+        try DeployRemovalService.removeArtifact(removalOperation(skill: skill, platform: .cursor, projectPath: projectPath))
     }
 
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {
-        guard ProjectDirectory.canAccess(projectPath) else { return false }
+        try artifactOccupant(skill: skill, projectPath: projectPath).isOwned
+    }
+
+    private func artifactOccupant(skill: Skill, projectPath: String?) throws -> DeployArtifactOccupant {
+        guard ProjectDirectory.canAccess(projectPath) else { return .foreign }
         try LinkService.validatePathComponent(skill.directoryName)
         return try ownership.cursor(
             at: outputPath(skill: skill, projectPath: projectPath)
         ) {
             let raw = try self.skillStore.readBody(directoryName: skill.directoryName)
             return self.generateLegacyMDC(skill: skill, body: SkillParser.stripFrontmatter(raw))
-        }.isOwned
+        }
     }
 
     func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool {
@@ -121,5 +124,22 @@ final class CursorCompiler: CursorCompilerProtocol {
     private func generateLegacyMDC(skill: Skill, body: String) -> String {
         CursorMDC.generateLegacy(directoryName: skill.directoryName, description: skill.skillDescription,
                                  cursorConfig: skill.cursorConfig, body: body)
+    }
+
+    func removalFingerprint(skill: Skill) -> CursorRemovalFingerprint? {
+        guard let raw = try? skillStore.readBody(directoryName: skill.directoryName) else { return nil }
+        return CursorRemovalFingerprint(content: generateLegacyMDC(skill: skill, body: SkillParser.stripFrontmatter(raw)))
+    }
+}
+
+extension CursorCompiler {
+    func removalOperation(skill: Skill, platform: PlatformTarget, projectPath: String?) -> DeployRemovalOperation {
+        DeployRemovalOperation(fileService: fileService, path: outputPath(skill: skill, projectPath: projectPath)) {
+            guard platform == .cursor else {
+                throw ArtifactOwnershipError.couldNotCheck(path: self.outputPath(skill: skill, projectPath: projectPath),
+                    reason: "Cursor compiler cannot remove \(platform.rawValue) artifacts")
+            }
+            return try self.artifactOccupant(skill: skill, projectPath: projectPath)
+        }
     }
 }

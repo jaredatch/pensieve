@@ -2,6 +2,14 @@ import Foundation
 import SwiftData
 @testable import Pensieve
 
+func removeAllDeploysWithLocalEvidence(
+    _ vm: PlatformViewModel, skill: Skill, projects: [Project], context: ModelContext
+) -> SkillCleanupResult {
+    vm.removeAllDeploys(skill: skill, projects: projects, localProjectEvidence: {
+        try vm.localSkillProjectDeployEvidence(skill: skill, projects: projects, context: context)
+    })
+}
+
 struct DeletionTestError: LocalizedError {
     var errorDescription: String? { "injected failure" }
 }
@@ -13,6 +21,12 @@ struct DeletionTestDetection: AgentDetectionServiceProtocol {
 }
 
 final class DeletionTestLinkService: LinkServiceProtocol {
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        adapterRemovalOperation(skill: skill, platform: platform, projectPath: projectPath,
+            foreignArtifactExists: { self.foreignSymlinkPaths.contains(self.path(skill, platform, projectPath)) })
+    }
+
     var linkedPaths: Set<String> = []
     var foreignSymlinkPaths: Set<String> = []
     var failingUnlinkPaths: Set<String> = []
@@ -54,7 +68,14 @@ final class DeletionTestLinkService: LinkServiceProtocol {
 }
 
 final class DeletionTestCursorCompiler: CursorCompilerProtocol {
+    func removalOperation(skill: Skill, platform: PlatformTarget,
+                          projectPath: String?) -> DeployRemovalOperation {
+        adapterRemovalOperation(skill: skill, projectPath: projectPath,
+            artifactExists: { self.ownedProjectPaths.contains(projectPath) || self.foreignProjectPaths.contains(projectPath) })
+    }
+
     var ownedProjectPaths: Set<String?> = []
+    var foreignProjectPaths: Set<String?> = []
     private(set) var removeProjectPaths: [String?] = []
     func compile(skill: Skill, projectPath: String?) throws {}
     func remove(skill: Skill, projectPath: String?) throws -> Bool {
@@ -65,7 +86,7 @@ final class DeletionTestCursorCompiler: CursorCompilerProtocol {
 
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
     func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
-        return ownedProjectPaths.contains(projectPath)
+        return ownedProjectPaths.contains(projectPath) || foreignProjectPaths.contains(projectPath)
     }
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { ownedProjectPaths.contains(projectPath) }
     func outputPath(skill: Skill, projectPath: String?) -> String {
@@ -87,6 +108,7 @@ final class MemoryDeployFileService: FileServiceProtocol {
     var files: [String: String] = [:]
     var failingWrites: Set<String> = []
     var readCounts: [String: Int] = [:]
+    var projectDirectories: Set<String> = []
 
     func readFile(at path: String) throws -> String {
         readCounts[path, default: 0] += 1
@@ -100,9 +122,14 @@ final class MemoryDeployFileService: FileServiceProtocol {
     }
 
     func deleteFile(at path: String) throws { files[path] = nil }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        files[path] == nil ? nil : .regular
+    }
+    func readData(at path: String) throws -> Data { Data(try readFile(at: path).utf8) }
     func fileExists(at path: String) -> Bool { files[path] != nil }
     func isExecutableFile(at path: String) -> Bool { false }
     func directoryExists(at path: String) -> Bool { false }
+    func directoryExistsFollowingLinks(at path: String) throws -> Bool { projectDirectories.contains(path) }
     func createDirectory(at path: String) throws {}
     func deleteDirectory(at path: String) throws {}
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {}
@@ -223,4 +250,30 @@ final class DeletionCounter {
     private(set) var value = 0
     lazy var notify: SyncStateNotifying = { [weak self] in self?.value += 1 }
     func reset() { value = 0 }
+}
+
+// Explicit witnesses may share these operations when their leaf deletion is already unchecked.
+// Real filesystem adapters prepare their own direct FileService deletion instead.
+extension LinkServiceProtocol {
+    func adapterRemovalOperation(skill: Skill, platform: PlatformTarget,
+                                 projectPath: String?,
+                                 foreignArtifactExists: (() throws -> Bool)? = nil) -> DeployRemovalOperation {
+        DeployRemovalOperation(classify: {
+            if try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath) { return .owned }
+            // Unknown presence is conservatively foreign. A fixture claiming absence must supply
+            // its occupant evidence, including directories and foreign or dangling symlinks.
+            return try foreignArtifactExists?() == false ? .absent : .foreign
+        }, delete: { try self.unlink(skill: skill, platform: platform, projectPath: projectPath) })
+    }
+}
+
+extension CursorCompilerProtocol {
+    func adapterRemovalOperation(skill: Skill, projectPath: String?,
+                                 artifactExists: (() throws -> Bool)? = nil) -> DeployRemovalOperation {
+        DeployRemovalOperation(classify: {
+            if try self.ownsArtifact(skill: skill, projectPath: projectPath) { return .owned }
+            return try artifactExists?() == false ? .absent : .foreign
+        },
+            delete: { try self.remove(skill: skill, projectPath: projectPath) })
+    }
 }

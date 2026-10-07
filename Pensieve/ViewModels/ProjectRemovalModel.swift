@@ -22,7 +22,7 @@ final class ProjectRemovalModel {
         if result.didRemoveArtifacts || !result.successes.isEmpty {
             progress = "Removal of “\(projectName)” stopped partway. "
         } else if result.didWithdrawProjectRequests {
-            progress = "Couldn't remove “\(projectName)”. Pensieve stopped requesting this project's deploys. "
+            progress = "Couldn't remove “\(projectName)”. Pensieve withdrew this Mac's direct deploy requests for this project. "
         } else {
             progress = "Couldn't remove “\(projectName)”. Nothing was changed. "
         }

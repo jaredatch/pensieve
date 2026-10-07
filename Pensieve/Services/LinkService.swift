@@ -10,7 +10,7 @@ struct BrokenLink: Equatable {
 
 // MARK: - Protocol
 
-protocol LinkServiceProtocol {
+protocol LinkServiceProtocol: DeployRemovalPreparing {
     /// Create symlink: platform path → ~/.pensieve/skills/{name}/
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws
     /// Remove an owned link; true only after deleting it from disk.
@@ -83,29 +83,23 @@ final class LinkService: LinkServiceProtocol {
 
     @discardableResult
     func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
-        guard projectPath == nil || platform.supportsProjectScope else { return false }
-        // Path-component safety invariant at the remove boundary too (mirrors link()):
-        // a malicious directoryName must not let a delete escape the intended deploy root.
-        try Self.validatePathComponent(skill.directoryName)
-        if platform == .hermes {
-            try Self.validatePathComponent(Constants.hermesDefaultCategory)
-        }
-
-        guard ProjectDirectory.canAccess(projectPath) else { return false }
-        let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
-        guard try ownsArtifact(skill: skill, platform: platform, projectPath: projectPath) else { return false }
-        try fileService.deleteFile(at: link)
-        return true
+        try DeployRemovalService.removeArtifact(removalOperation(skill: skill, platform: platform, projectPath: projectPath))
     }
 
     func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
-        guard platform.usesSymlinks, projectPath == nil || platform.supportsProjectScope,
-              ProjectDirectory.canAccess(projectPath) else { return false }
+        try artifactOccupant(skill: skill, platform: platform, projectPath: projectPath).isOwned
+    }
+
+    private func artifactOccupant(skill: Skill, platform: PlatformTarget,
+                                  projectPath: String?) throws -> DeployArtifactOccupant {
+        guard platform.usesSymlinks, projectPath == nil || platform.supportsProjectScope else { return .foreign }
         try Self.validatePathComponent(skill.directoryName)
+        if platform == .hermes { try Self.validatePathComponent(Constants.hermesDefaultCategory) }
+        guard ProjectDirectory.canAccess(projectPath) else { return .foreign }
         return try ownership.link(
             at: linkPath(skill: skill, platform: platform, projectPath: projectPath),
             skillsDirectory: Constants.pensieveSkillsDir, linksFile: platform == .codex && projectPath != nil
-        ) == .owned
+        )
     }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
@@ -185,6 +179,15 @@ enum LinkError: LocalizedError {
         case .occupiedByRealPath(let path):
             "A real file or directory already exists at \(path). "
                 + "Pensieve will not overwrite it — move or delete it, then deploy again."
+        }
+    }
+}
+
+extension LinkService {
+    func removalOperation(skill: Skill, platform: PlatformTarget, projectPath: String?) -> DeployRemovalOperation {
+        let path = linkPath(skill: skill, platform: platform, projectPath: projectPath)
+        return DeployRemovalOperation(fileService: fileService, path: path) {
+            return try self.artifactOccupant(skill: skill, platform: platform, projectPath: projectPath)
         }
     }
 }
