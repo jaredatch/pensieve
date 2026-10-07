@@ -97,7 +97,7 @@ struct ProjectRemovalPlan {
                         target: .project(project))) : .retireWithoutInspection)
         }
         let removal = platformVM.removalService.remove(admitted)
-        result.didRemoveArtifacts = !removal.removed.isEmpty
+        result.didRemoveArtifacts = removal.didRemoveArtifacts
         let work = Array(zip(candidates, removal.outcomes))
         let failed = work.filter { $0.1.failure != nil }
         let completed = work.filter { $0.1.completed }

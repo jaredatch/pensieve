@@ -87,14 +87,19 @@ final class LinkService: LinkServiceProtocol {
     }
 
     func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
-        guard platform.usesSymlinks, projectPath == nil || platform.supportsProjectScope else { return false }
+        try artifactOccupant(skill: skill, platform: platform, projectPath: projectPath).isOwned
+    }
+
+    private func artifactOccupant(skill: Skill, platform: PlatformTarget,
+                                  projectPath: String?) throws -> DeployArtifactOccupant {
+        guard platform.usesSymlinks, projectPath == nil || platform.supportsProjectScope else { return .foreign }
         try Self.validatePathComponent(skill.directoryName)
         if platform == .hermes { try Self.validatePathComponent(Constants.hermesDefaultCategory) }
-        guard ProjectDirectory.canAccess(projectPath) else { return false }
+        guard ProjectDirectory.canAccess(projectPath) else { return .foreign }
         return try ownership.link(
             at: linkPath(skill: skill, platform: platform, projectPath: projectPath),
             skillsDirectory: Constants.pensieveSkillsDir, linksFile: platform == .codex && projectPath != nil
-        ) == .owned
+        )
     }
 
     func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool {
@@ -182,7 +187,7 @@ extension LinkService {
     func removalOperation(skill: Skill, platform: PlatformTarget, projectPath: String?) -> DeployRemovalOperation {
         let path = linkPath(skill: skill, platform: platform, projectPath: projectPath)
         return DeployRemovalOperation(fileService: fileService, path: path) {
-            return try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
+            return try self.artifactOccupant(skill: skill, platform: platform, projectPath: projectPath)
         }
     }
 }

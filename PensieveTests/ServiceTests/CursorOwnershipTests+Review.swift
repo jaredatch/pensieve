@@ -4,6 +4,33 @@ import XCTest
 
 extension CursorOwnershipTests {
     @MainActor
+    func testBatchInspectionCannotDeleteAReplacementFolder() throws {
+        let h = try contextAndVM()
+        let project = reviewProject(h.context)
+        let second = Skill(name: "Other pair", directoryName: "other-pair")
+        h.context.insert(second)
+        let link = LinkService(fileService: mapped)
+        let firstPath = artifactPath(.claudeCode, project: project.path)
+        let secondPath = link.linkPath(skill: second, platform: .claudeCode, projectPath: project.path)
+        try plant(owned: true, legacy: false, platform: .claudeCode, path: firstPath, project: project.path)
+        try mapped.createSymlink(at: secondPath, pointingTo: Constants.pensieveSkillsDir + "/" + second.directoryName)
+        mapped.beforeSymlinkRead = { path in
+            guard path == secondPath else { return }
+            if try self.mapped.entryExistsWithoutFollowingLinks(at: firstPath) {
+                try self.mapped.deleteFile(at: firstPath)
+            }
+            try self.mapped.createDirectory(at: firstPath)
+            try self.mapped.writeFile(at: firstPath + "/keep.txt", content: "User contents")
+        }
+        let result = h.vm.removeOwnedBatch(pairs: [DeployRemovalPair(skill: skill, platform: .claudeCode),
+            DeployRemovalPair(skill: second, platform: .claudeCode)], target: .project(project))
+        XCTAssertFalse(result.hasFailures)
+        XCTAssertEqual(try mapped.readFile(at: firstPath + "/keep.txt"), "User contents")
+        XCTAssertEqual(try mapped.entryTypeWithoutFollowingLinks(at: firstPath), .directory)
+        XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: secondPath))
+    }
+
+    @MainActor
     func testDuplicateSlugSelectionReportsEachInputSeparately() throws {
         let h = try contextAndVM()
         let project = reviewProject(h.context)

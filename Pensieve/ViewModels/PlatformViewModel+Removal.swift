@@ -9,16 +9,17 @@ extension PlatformViewModel {
     /// Only owned artifacts are removal actions. Foreign and absent pairs retire silently.
     func removeOwnedBatch(pairs: [DeployRemovalPair], target: DeployTarget) -> BatchResult {
         let candidates = pairs.map { removalCandidate(pair: $0, target: target, evidence: [.selection]) }
-        let removal = removalService.remove(candidates, inspection: .beforeBatch)
+        let removal = removalService.remove(candidates)
         logRemovalStateFailure(removal)
         var result = BatchResult()
-        for (pair, outcome) in removal.orderedOutcomes(for: pairs) {
+        for (pair, report) in removal.orderedOutcomes(for: pairs) {
+            let outcome = report.outcome
             let key = BatchPairKey(skillID: pair.skill.id, platform: pair.platform, target: BatchPairTarget(target))
             if let error = outcome.failure {
                 result.outcomes.append(BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
                     platform: pair.platform, target: key.target, error: BatchPairOutcome.failureMessage(error, target: target),
                     projectFolderError: error as? ProjectFolderError))
-            } else if outcome.completed, outcome.attemptedDeletion {
+            } else if (outcome.completed && outcome.attemptedDeletion) || report.absentAfterRemoval {
                 result.outcomes.append(BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
                     platform: pair.platform, target: key.target, error: nil))
             } else if outcome.retired {
@@ -64,14 +65,15 @@ extension PlatformViewModel {
         }
         let candidates = skillCleanupCandidates(skill: skill, evidence: evidence, locallyDeployed: locallyDeployed,
             recorded: recorded, stateProblem: stateProblem)
-        let removal = removalService.remove(candidates.map(\.removal), inspection: .beforeBatch)
-        for (location, outcome) in removal.orderedOutcomes(for: candidates.map(\.location)) {
-            let problem = outcome.failure ?? (outcome.completed ? removal.stateWriteFailure : nil)
-            guard problem != nil || outcome.completed else { continue }
+        let removal = removalService.remove(candidates.map(\.removal))
+        for (location, report) in removal.orderedOutcomes(for: candidates.map(\.location)) {
+            let outcome = report.outcome
+            let problem = outcome.failure ?? ((outcome.completed || report.absentAfterRemoval) ? removal.stateWriteFailure : nil)
+            guard problem != nil || outcome.completed || report.absentAfterRemoval else { continue }
             result.batch.outcomes.append(BatchPairOutcome(skillID: skill.id, skillName: skill.name,
                 platform: location.platform, target: BatchPairTarget(location.target), error: problem?.localizedDescription))
         }
-        result.didChangeDeploys = !removal.removed.isEmpty
+        result.didChangeDeploys = removal.didRemoveArtifacts
         if result.didChangeDeploys || removal.didChangeRecords { noteDeployStateChanged() }
         return result
     }

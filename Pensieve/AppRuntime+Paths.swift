@@ -15,7 +15,7 @@ struct AppRuntimePaths {
     private struct NoDeploymentLinkService: LinkServiceProtocol {
         func removalOperation(skill: Skill, platform: PlatformTarget,
                               projectPath: String?) -> DeployRemovalOperation {
-            adapterRemovalOperation(skill: skill, platform: platform, projectPath: projectPath)
+            DeployRemovalOperation(classify: { false }, delete: { false })
         }
 
         let outputRoot: String
@@ -37,7 +37,7 @@ struct AppRuntimePaths {
     private struct NoDeploymentCursorCompiler: CursorCompilerProtocol {
         func removalOperation(skill: Skill, platform: PlatformTarget,
                               projectPath: String?) -> DeployRemovalOperation {
-            adapterRemovalOperation(skill: skill, projectPath: projectPath)
+            DeployRemovalOperation(classify: { false }, delete: { false })
         }
 
         let outputRoot: String

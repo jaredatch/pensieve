@@ -66,14 +66,18 @@ final class CursorCompiler: CursorCompilerProtocol {
     }
 
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool {
-        guard ProjectDirectory.canAccess(projectPath) else { return false }
+        try artifactOccupant(skill: skill, projectPath: projectPath).isOwned
+    }
+
+    private func artifactOccupant(skill: Skill, projectPath: String?) throws -> DeployArtifactOccupant {
+        guard ProjectDirectory.canAccess(projectPath) else { return .foreign }
         try LinkService.validatePathComponent(skill.directoryName)
         return try ownership.cursor(
             at: outputPath(skill: skill, projectPath: projectPath)
         ) {
             let raw = try self.skillStore.readBody(directoryName: skill.directoryName)
             return self.generateLegacyMDC(skill: skill, body: SkillParser.stripFrontmatter(raw))
-        }.isOwned
+        }
     }
 
     func hasOwnershipMark(skill: Skill, projectPath: String?) throws -> Bool {
@@ -127,7 +131,7 @@ extension CursorCompiler {
                 throw ArtifactOwnershipError.couldNotCheck(path: self.outputPath(skill: skill, projectPath: projectPath),
                     reason: "Cursor compiler cannot remove \(platform.rawValue) artifacts")
             }
-            return try self.ownsArtifact(skill: skill, projectPath: projectPath)
+            return try self.artifactOccupant(skill: skill, projectPath: projectPath)
         }
     }
 }

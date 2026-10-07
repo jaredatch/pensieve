@@ -13,10 +13,10 @@ enum DeployRemovalEvidence: Hashable {
 
 /// Adapters provide a throwing classification and an owned-artifact deletion without another check.
 struct DeployRemovalOperation {
-    let classify: () throws -> Bool
+    let classify: () throws -> DeployArtifactOccupant
     let delete: () throws -> Bool
 
-    init(fileService: FileServiceProtocol, path: String, classify: @escaping () throws -> Bool) {
+    init(fileService: FileServiceProtocol, path: String, classify: @escaping () throws -> DeployArtifactOccupant) {
         self.classify = classify
         self.delete = {
             try fileService.deleteFile(at: path)
@@ -24,9 +24,17 @@ struct DeployRemovalOperation {
         }
     }
 
-    init(classify: @escaping () throws -> Bool, delete: @escaping () throws -> Bool) {
+    init(classify: @escaping () throws -> DeployArtifactOccupant, delete: @escaping () throws -> Bool) {
         self.classify = classify
         self.delete = delete
+    }
+
+    init(fileService: FileServiceProtocol, path: String, classify: @escaping () throws -> Bool) {
+        self.init(fileService: fileService, path: path, classify: { try classify() ? .owned : .foreign })
+    }
+
+    init(classify: @escaping () throws -> Bool, delete: @escaping () throws -> Bool) {
+        self.init(classify: { try classify() ? .owned : .foreign }, delete: delete)
     }
 }
 
@@ -61,6 +69,7 @@ struct DeployRemovalOutcome {
     let key: DeployRemovalKey
     let disposition: Disposition
     let attemptedDeletion: Bool
+    let foundAbsent: Bool
 
     var removed: Bool { if case .removed = disposition { return true }; return false }
     var retired: Bool { if case .retired = disposition { return true }; return false }
@@ -75,30 +84,29 @@ struct DeployRemovalResult {
     var stateWriteFailure: Error?
     var didChangeRecords = false
 
-    var removed: Set<DeployRemovalKey> { keys { $0.removed } }
-    var completed: Set<DeployRemovalKey> { keys { $0.completed } }
+    var didRemoveArtifacts: Bool { outcomes.contains { $0.removed } }
+    var completedArtifactPaths: Set<String> { Set(outcomes.filter(\.completed).map { $0.key.artifactPath }) }
     var didAttemptDeletion: Bool { outcomes.contains { $0.attemptedDeletion } }
-    /// Batch callers historically report inspection failures before deletion outcomes.
-    func orderedOutcomes<Input>(for inputs: [Input]) -> [(Input, DeployRemovalOutcome)] {
-        let work = Array(zip(inputs, outcomes))
-        return work.filter { $0.1.failedBeforeDeletion } + work.filter { !$0.1.failedBeforeDeletion }
+
+    struct Report {
+        let outcome: DeployRemovalOutcome
+        let absentAfterRemoval: Bool
     }
 
-    private func keys(where predicate: (DeployRemovalOutcome) -> Bool) -> Set<DeployRemovalKey> {
-        Set(outcomes.filter(predicate).map(\.key))
+    /// Duplicate absence changes reporting only; every occurrence has already been inspected.
+    func orderedOutcomes<Input>(for inputs: [Input]) -> [(Input, Report)] {
+        var removedPaths: Set<String> = []
+        let work = zip(inputs, outcomes).map { input, outcome in
+            let absentAfterRemoval = outcome.foundAbsent && removedPaths.contains(outcome.key.artifactPath)
+            if outcome.removed { removedPaths.insert(outcome.key.artifactPath) }
+            return (input, Report(outcome: outcome, absentAfterRemoval: absentAfterRemoval))
+        }
+        return work.filter { $0.1.outcome.failedBeforeDeletion } + work.filter { !$0.1.outcome.failedBeforeDeletion }
     }
 }
-
-enum DeployRemovalInspection { case perCandidate, beforeBatch }
 
 protocol DeployRemovalServicing {
-    func remove(_ candidates: [DeployRemovalCandidate], inspection: DeployRemovalInspection) -> DeployRemovalResult
-}
-
-extension DeployRemovalServicing {
-    func remove(_ candidates: [DeployRemovalCandidate]) -> DeployRemovalResult {
-        remove(candidates, inspection: .perCandidate)
-    }
+    func remove(_ candidates: [DeployRemovalCandidate]) -> DeployRemovalResult
 }
 
 /// Each occurrence is classified once. Results retain occurrence identity while record retirement
@@ -106,76 +114,63 @@ extension DeployRemovalServicing {
 struct DeployRemovalService: DeployRemovalServicing {
     let stateStore: DeployStateStore
 
-    func remove(_ candidates: [DeployRemovalCandidate], inspection: DeployRemovalInspection) -> DeployRemovalResult {
-        let inspected = inspection == .beforeBatch ? candidates.map(Self.inspect) : nil
-        var removedPaths: Set<String> = []
-        var result = DeployRemovalResult(outcomes: candidates.enumerated().map { index, candidate in
-            let outcome = Self.remove(candidate, inspected: inspected?[index] ?? Self.inspect(candidate),
-                previouslyRemoved: removedPaths.contains(candidate.key.artifactPath))
-            if outcome.removed { removedPaths.insert(candidate.key.artifactPath) }
-            return outcome
-        })
+    func remove(_ candidates: [DeployRemovalCandidate]) -> DeployRemovalResult {
+        var result = DeployRemovalResult(outcomes: candidates.map(Self.remove))
         do {
-            result.didChangeRecords = try stateStore.remove(artifactPaths: Set(result.completed.map(\.artifactPath)))
+            result.didChangeRecords = try stateStore.remove(artifactPaths: result.completedArtifactPaths)
         } catch {
             result.stateWriteFailure = error
         }
         return result
     }
 
-    private static func inspect(_ candidate: DeployRemovalCandidate) -> Result<Bool, Error> {
-        Result {
-            switch candidate.action {
-            case .inspect(let operation): return try operation.classify()
-            case .retireWithoutInspection: return false
-            case .fail(let error): throw error
-            }
-        }
-    }
-
-    private static func remove(_ candidate: DeployRemovalCandidate,
-                               inspected: Result<Bool, Error>, previouslyRemoved: Bool) -> DeployRemovalOutcome {
-        var attempted = false
+    private static func remove(_ candidate: DeployRemovalCandidate) -> DeployRemovalOutcome {
+        var attempted = false, absent = false
         do {
-            let owned = try inspected.get()
-            let willRetire = owned || candidate.retireIfUnowned || isUnconditionalRetirement(candidate.action)
-            if willRetire, let blocker = candidate.removalBlocker { throw blocker }
             let disposition: DeployRemovalOutcome.Disposition
             switch candidate.action {
-            case .retireWithoutInspection: disposition = .retired
+            case .retireWithoutInspection:
+                disposition = .retired
+                try fence(disposition, blocker: candidate.removalBlocker)
             case .fail(let error): throw error
             case .inspect(let operation):
-                let action = try apply(operation, owned: owned, previouslyRemoved: previouslyRemoved) { attempted = true }
-                switch action {
-                case .removed: disposition = .removed
-                case .preserved: disposition = .retired
-                case .unowned: disposition = candidate.retireIfUnowned ? .retired : .ignored
-                }
+                disposition = try apply(operation, retireIfUnowned: candidate.retireIfUnowned,
+                    blocker: candidate.removalBlocker, didClassify: { absent = $0 == .absent },
+                    willDelete: { attempted = true })
             }
-            return DeployRemovalOutcome(key: candidate.key, disposition: disposition, attemptedDeletion: attempted)
+            return DeployRemovalOutcome(key: candidate.key, disposition: disposition,
+                attemptedDeletion: attempted, foundAbsent: absent)
         } catch {
-            return DeployRemovalOutcome(key: candidate.key, disposition: .failed(error), attemptedDeletion: attempted)
+            return DeployRemovalOutcome(key: candidate.key, disposition: .failed(error),
+                attemptedDeletion: attempted, foundAbsent: absent)
         }
     }
 
-    private static func isUnconditionalRetirement(_ action: DeployRemovalAction) -> Bool {
-        if case .retireWithoutInspection = action { return true }
+    /// Direct leaf removals share the same adjacent check and delete without record retirement.
+    static func removeArtifact(_ operation: DeployRemovalOperation) throws -> Bool {
+        let disposition = try apply(operation, retireIfUnowned: false, blocker: nil,
+            didClassify: { _ in }, willDelete: {})
+        if case .removed = disposition { return true }
         return false
     }
 
-    /// Direct leaf removals share the same check without changing deploy-state records.
-    static func removeArtifact(_ operation: DeployRemovalOperation) throws -> Bool {
-        try apply(operation, owned: operation.classify(), willDelete: {}) == .removed
+    private static func fence(_ disposition: DeployRemovalOutcome.Disposition, blocker: Error?) throws {
+        switch disposition {
+        case .removed, .retired: if let blocker { throw blocker }
+        case .ignored, .failed: break
+        }
     }
 
-    private enum Disposition { case unowned, removed, preserved }
-
-    private static func apply(_ operation: DeployRemovalOperation, owned: Bool, previouslyRemoved: Bool = false,
-                              willDelete: () -> Void) throws -> Disposition {
-        guard owned else { return .unowned }
+    private static func apply(_ operation: DeployRemovalOperation, retireIfUnowned: Bool, blocker: Error?,
+                              didClassify: (DeployArtifactOccupant) -> Void,
+                              willDelete: () -> Void) throws -> DeployRemovalOutcome.Disposition {
+        let occupant = try operation.classify()
+        didClassify(occupant)
+        let disposition: DeployRemovalOutcome.Disposition = occupant.isOwned ? .removed
+            : (retireIfUnowned ? .retired : .ignored)
+        try fence(disposition, blocker: blocker)
+        guard occupant.isOwned else { return disposition }
         willDelete()
-        // A pre-admitted duplicate still completes its attempt after this batch removed the path.
-        guard !previouslyRemoved else { return .preserved }
-        return try operation.delete() ? .removed : .preserved
+        return try operation.delete() ? .removed : .retired
     }
 }

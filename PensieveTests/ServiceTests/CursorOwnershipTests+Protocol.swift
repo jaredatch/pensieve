@@ -77,7 +77,7 @@ extension CursorOwnershipTests {
             struct Probe: LinkServiceProtocol {
                 func removalOperation(skill: Skill, platform: PlatformTarget,
                                       projectPath: String?) -> DeployRemovalOperation {
-                    adapterRemovalOperation(skill: skill, platform: platform, projectPath: projectPath)
+                    DeployRemovalOperation(classify: { false }, delete: { false })
                 }
 
                 func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
@@ -93,7 +93,7 @@ extension CursorOwnershipTests {
             struct Probe: CursorCompilerProtocol {
                 func removalOperation(skill: Skill, platform: PlatformTarget,
                                       projectPath: String?) -> DeployRemovalOperation {
-                    adapterRemovalOperation(skill: skill, projectPath: projectPath)
+                    DeployRemovalOperation(classify: { false }, delete: { false })
                 }
 
                 func compile(skill: Skill, projectPath: String?) throws {}

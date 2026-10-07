@@ -169,7 +169,7 @@ final class PlatformViewModel {
 
     func logRemovalStateFailure(_ result: DeployRemovalResult) {
         if let error = result.stateWriteFailure {
-            NSLog("Pensieve deploy-state remove failed for \(result.completed.map(\.artifactPath).sorted()): \(error)")
+            NSLog("Pensieve deploy-state remove failed for \(result.completedArtifactPaths.sorted()): \(error)")
         }
     }
 
