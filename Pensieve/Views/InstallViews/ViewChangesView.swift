@@ -131,15 +131,7 @@ struct ViewChangesView: View {
                     .padding(Spacing.sm)
             }
             if let file = model.selectedFile {
-                HStack {
-                    Text(verbatim: ViewChangesPresentation.filePath(file)).font(DesignTokens.changesFilePath).lineLimit(1)
-                    Spacer()
-                    Text(verbatim: ViewChangesPresentation.summary(file))
-                        .font(DesignTokens.changesSummary).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: true, vertical: false).layoutPriority(1)
-                }
-                .padding(.horizontal, DesignTokens.changesToolbarInset)
-                .frame(height: DesignTokens.changesFileHeaderHeight)
+                ViewChangesFileHeader(file: file)
                 if let reason = ViewChangesPresentation.unavailableReason(file) {
                     EmptyStateView(ViewChangesPresentation.unavailableTitle(file), description: reason)
                 } else if let diff = file.diff {

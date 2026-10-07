@@ -32,6 +32,12 @@ enum ViewChangesPresentation {
 
     static func summary(_ file: PinnedSkillFileDiff) -> String {
         if case .modeOnly = file.content { return "Permissions changed" }
+        let content = contentSummary(file)
+        return permissionSummary(file).map { content + " · " + $0 } ?? content
+    }
+
+    private static func contentSummary(_ file: PinnedSkillFileDiff) -> String {
+        if case .modeOnly = file.content { return "Permissions changed" }
         guard let added = file.linesAdded, let removed = file.linesRemoved else {
             switch file.content {
             case .binary: return "Binary file"
@@ -42,7 +48,7 @@ enum ViewChangesPresentation {
             }
         }
         let counts = "\(added) \(added == 1 ? "addition" : "additions"), \(removed) \(removed == 1 ? "deletion" : "deletions")"
-        return permissionSummary(file).map { counts + " · " + $0 } ?? counts
+        return counts
     }
 
     static func unavailableReason(_ file: PinnedSkillFileDiff) -> String? {
@@ -59,8 +65,9 @@ enum ViewChangesPresentation {
             return "The preview's shared diff budget ran out before this file could be shown. View the change on GitHub."
         case .diffOutputBoundReached:
             return "The preview's output bound was reached before this file could be shown. View the change on GitHub."
-        case let .modeOnly(before, after):
-            return unchangedPermissionReason(before: before, after: after)
+        case .modeOnly:
+            guard let permissions = file.permissions else { return "File contents are unchanged." }
+            return unchangedPermissionReason(before: permissions.old, after: permissions.new)
         }
     }
 
@@ -88,7 +95,8 @@ enum ViewChangesPresentation {
 
     static func sidebarMarker(_ file: PinnedSkillFileDiff) -> String? {
         if case .modeOnly = file.content { return "Mode" }
-        return file.permissions == nil ? nil : "Mode"
+        guard sidebarCounts(file) == nil else { return file.permissions == nil ? nil : "Mode" }
+        return contentSummary(file) + (file.permissions == nil ? "" : " · Mode")
     }
 
     static func permissionSummary(_ file: PinnedSkillFileDiff) -> String? {
@@ -99,9 +107,16 @@ enum ViewChangesPresentation {
 
     /// Diff LF is a record delimiter. Every remaining break/control is displayed, never interpreted.
     static func lineText(_ line: UnifiedDiffLine) -> String {
-        let text = line.text.unicodeScalars
-        let content = text.last?.value == 10 ? String(text.dropLast()) : line.text
-        return visibleText(content)
+        var text = line.text.unicodeScalars
+        let hasLF = text.last?.value == 10
+        if hasLF { text.removeLast() }
+        let hasCRLF = hasLF && text.last?.value == 13
+        if hasCRLF { text.removeLast() }
+        let content = visibleText(String(text))
+        guard line.kind != .context else { return content }
+        if hasCRLF { return content + " ⟨CRLF line ending⟩" }
+        if !hasLF { return content + " ⟨no final newline⟩" }
+        return content
     }
 
     static func filePath(_ file: PinnedSkillFileDiff) -> String { visibleText(file.path, filename: true) }
@@ -110,10 +125,11 @@ enum ViewChangesPresentation {
         var result = ""
         for scalar in text.unicodeScalars {
             let value = scalar.value
-            let hidden = value == 13 || value == 0x85 || value == 0x2028 || value == 0x2029
+            let hidden = (scalar.properties.generalCategory == .control && (filename || value != 9))
+                || value == 0x200E || value == 0x200F || value == 0x061C || value == 0x85 || value == 0x2028 || value == 0x2029
                 || (0x202A...0x202E).contains(value) || (0x2066...0x2069).contains(value)
                 || (0xE0000...0xE007F).contains(value)
-            if hidden || (filename && scalar.properties.generalCategory == .control) {
+            if hidden {
                 result += value == 13 ? "␍" : String(format: "⟨U+%04X⟩", value)
             } else { result.unicodeScalars.append(scalar) }
         }

@@ -37,6 +37,11 @@ extension UpdatesViewModelTests {
                 if step == "vendor" { XCTAssertTrue(error.localizedDescription.contains(".")) }
                 if step == "admission" { XCTAssertTrue(error.localizedDescription.contains("SKILL.md")) }
                 if step == "comparison" { XCTAssertTrue(error.localizedDescription.contains("nested/file")) }
+                if ["clone", "head", "tree"].contains(step) {
+                    let operation = step == "head" ? "HEAD" : step
+                    XCTAssertTrue(error.localizedDescription.contains("injected " + operation + " failure"),
+                                  "The git failure cause must survive scratch location removal")
+                }
             }
         }
     }

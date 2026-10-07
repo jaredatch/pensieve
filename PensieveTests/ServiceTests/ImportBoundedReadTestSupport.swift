@@ -38,7 +38,7 @@ final class ImportBoundedReadSpy: FileServiceProtocol {
     }
 
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
-                          limits: FileTreeComparisonLimits, beforeReading: () throws -> Void) throws -> FileTreeComparison {
+                          limits: FileTreeComparisonLimits, beforeReading: () throws -> Int) throws -> FileTreeComparison {
         comparisonThreads.append(Thread.isMainThread)
         try comparisonFailure?(local, upstream)
         return try files.compareFileTrees(local: local, upstream: upstream, excludingUpstreamGit: excludingUpstreamGit,

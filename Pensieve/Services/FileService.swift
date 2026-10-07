@@ -10,9 +10,9 @@ protocol FileServiceProtocol {
     func readRegularFileHeader(at path: String, maximumBytes: Int) throws -> Data
     /// Checks the opened inode's resolved path is inside this directory before reading any bytes.
     func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data
-    /// Runs admission after both inventories, before any compared file content is read.
+    /// Runs admission after both inventories; its returned bytes seed the shared read total.
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
-                          limits: FileTreeComparisonLimits, beforeReading: () throws -> Void) throws -> FileTreeComparison
+                          limits: FileTreeComparisonLimits, beforeReading: () throws -> Int) throws -> FileTreeComparison
     /// Reads through EOF or maximumBytes + 1, retaining one lookahead byte for bounded frontmatter admission.
     func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data
     func writeFile(at path: String, content: String) throws
@@ -86,11 +86,11 @@ extension FileServiceProtocol {
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
                           limits: FileTreeComparisonLimits) throws -> FileTreeComparison {
         try compareFileTrees(local: local, upstream: upstream, excludingUpstreamGit: excludingUpstreamGit,
-                             limits: limits, beforeReading: {})
+                             limits: limits, beforeReading: { 0 })
     }
     /// Inert default: unmodeled admission ordering must never read content on the host.
     func compareFileTrees(local: String, upstream: String, excludingUpstreamGit: Bool,
-                          limits: FileTreeComparisonLimits, beforeReading: () throws -> Void) throws -> FileTreeComparison {
+                          limits: FileTreeComparisonLimits, beforeReading: () throws -> Int) throws -> FileTreeComparison {
         throw CocoaError(.featureUnsupported)
     }
     /// Inert default: an unmodeled directory probe is unknown and never accesses the host.

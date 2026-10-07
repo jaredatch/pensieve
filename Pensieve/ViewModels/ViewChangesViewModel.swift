@@ -183,26 +183,6 @@ final class ViewChangesViewModel {
 }
 
 extension ViewChangesViewModel {
-    private func waitForSheet(skillID: UUID, context: ModelContext, session: UUID) async -> Bool {
-        var waited = false
-        while let updates, updates.recheckingSkillID == skillID
-            || (updates.isApplying && (updates.selectedSkillIDs.contains(skillID) || updates.statuses[skillID] == .updating)) {
-            waited = true
-            do { try await Task.sleep(for: .milliseconds(20)) } catch { return true }
-            guard sessionID == session, !Task.isCancelled else { return true }
-        }
-        guard sessionID == session, !Task.isCancelled else { return true }
-        guard waited else { return false }
-        // A sheet check or apply is authoritative. Reopen its current pin without checking again.
-        isRechecking = false
-        if let skill = try? skillLookup(skillID, context), !UpdatesViewModel.isEligibleForUpdates(skill) {
-            validate(skills: [skill], folderRevisions: library.folderChangeRevisions, context: context)
-            if case .stale = state { return true }
-        }
-        open(skillID: skillID, context: context, folderRevisions: library.folderChangeRevisions)
-        return true
-    }
-
     func recheck(context: ModelContext) {
         guard canRecheck, let requestedSkillID else { return }
         retirePreview()
@@ -213,7 +193,14 @@ extension ViewChangesViewModel {
         let container = context.container
         previewTask = Task {
             guard self.sessionID == session, !Task.isCancelled else { return }
-            if await self.waitForSheet(skillID: requestedSkillID, context: context, session: session) { return }
+            do { try await self.updates?.waitForCompletion(affecting: requestedSkillID) } catch { return }
+            guard self.sessionID == session, !Task.isCancelled else { return }
+            if let skill = try? self.skillLookup(requestedSkillID, context), let row = self.row,
+               let origin = skill.installedOrigin, origin.installedCommit == row.upstreamCommit,
+               origin.installedTree == row.upstreamTree {
+                self.markStale("This skill was updated.")
+                return
+            }
             let worker = Task.detached(priority: .userInitiated) {
                 try UpdatesViewModel.performUnlessCancelled { try operation(requestedSkillID, container) }
             }

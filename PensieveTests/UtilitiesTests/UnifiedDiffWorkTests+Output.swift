@@ -2,6 +2,20 @@ import XCTest
 @testable import Pensieve
 
 extension UnifiedDiffWorkTests {
+    func testOversizedOutputFileLeavesRoomForLaterSmallDiffs() throws {
+        let changes = [
+            FileTreeChange(path: "00-huge", kind: .added, content: .text(old: "", new: String(repeating: "\n", count: 70_000))),
+            FileTreeChange(path: "SKILL.md", kind: .modified, content: .text(old: "old\n", new: "new\n")),
+            FileTreeChange(path: "scripts/small", kind: .added, content: .text(old: "", new: "echo hello\n"))
+        ]
+        let preview = try PinnedSkillDiff.build(comparison: FileTreeComparison(
+            changes: changes, unreadFileCount: 0, bytesRead: 70_025))
+        XCTAssertEqual(preview.files[0].content, .diffOutputBoundReached)
+        XCTAssertNil(preview.files[0].diff)
+        XCTAssertEqual(preview.files[1].linesAdded, 1, "An unrendered huge file must leave output room for SKILL.md")
+        XCTAssertEqual(preview.files[2].linesAdded, 1, "Later small scripts must still render")
+    }
+
     func testDiffRowsAndHunksSpendTheSharedWorkBudget() throws {
         let change = FileTreeChange(path: "text", kind: .modified, content: .text(old: "old\n", new: "new\n"))
         let budget = BoundedLineDifference.WorkBudget(maximumWork: 17)

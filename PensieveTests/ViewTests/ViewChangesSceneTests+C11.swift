@@ -5,6 +5,49 @@ import XCTest
 @testable import Pensieve
 
 extension ViewChangesSceneTests {
+    func testLongFileHeaderAndPermissionsFitAtTheMinimumWindowWidth() throws {
+        let file = PinnedSkillFileDiff(change: FileTreeChange(path: String(repeating: "long-folder/", count: 12) + "script.swift",
+            kind: .modified, content: .text(old: "old\n", new: "new\n"), permissions: .init(old: 0o644, new: 0o755)),
+            result: UnifiedDiff(old: "old\n", new: "new\n"))
+        let width = DesignTokens.changesWindowWidth - DesignTokens.changesSidebarWidth - 1
+        let renderer = ImageRenderer(content: ViewChangesFileHeader(file: file).frame(width: width)
+            .padding(.horizontal, 100).background(Color.white).environment(\.colorScheme, .light))
+        renderer.scale = rowRenderScale
+        let image = try XCTUnwrap(renderer.cgImage)
+        let pixels = try rowPixels(image)
+        var pathBounds = CGRect.null
+        var inkBounds = CGRect.null
+        for y in 0..<image.height {
+            for x in 0..<image.width {
+                let offset = (y * image.width + x) * 4
+                let red = pixels[offset], green = pixels[offset + 1], blue = pixels[offset + 2]
+                if max(red, green, blue) < 220 {
+                    let pixel = CGRect(x: CGFloat(x) / rowRenderScale, y: CGFloat(y) / rowRenderScale,
+                                       width: 1 / rowRenderScale, height: 1 / rowRenderScale)
+                    inkBounds = inkBounds.union(pixel)
+                    if max(red, green, blue) < 80 { pathBounds = pathBounds.union(pixel) }
+                }
+            }
+        }
+        XCTAssertFalse(inkBounds.isNull, "A rendered-size check must contain visible text")
+        XCTAssertGreaterThanOrEqual(inkBounds.minX, 100, "The file header must not overflow its detail column")
+        XCTAssertLessThanOrEqual(inkBounds.maxX, 100 + width, "The file header must not overflow its detail column")
+        XCTAssertFalse(pathBounds.isNull, "The file path must remain visible")
+        XCTAssertGreaterThanOrEqual(pathBounds.width, 120, "The path must keep a readable minimum beside the permission suffix")
+        let renamed = PinnedSkillFileDiff(change: FileTreeChange(
+            path: String(repeating: "long-folder/", count: 12) + "renamed.zzzzz",
+            kind: .modified, content: file.content, permissions: file.permissions), result: file.diff)
+        let renamedRenderer = ImageRenderer(content: ViewChangesFileHeader(file: renamed).frame(width: width)
+            .padding(.horizontal, 100).background(Color.white).environment(\.colorScheme, .light))
+        renamedRenderer.scale = rowRenderScale
+        let renamedImage = try XCTUnwrap(renamedRenderer.cgImage)
+        XCTAssertEqual(renamedImage.width, image.width)
+        XCTAssertEqual(renamedImage.height, image.height)
+        let renamedPixels = try rowPixels(renamedImage)
+        XCTAssertTrue(zip(pixels, renamedPixels).contains { abs(Int($0) - Int($1)) > 4 },
+                      "The long path's filename must stay readable beside its permission suffix")
+    }
+
     private var rowRenderScale: CGFloat { 4 }
     func testLongFileRowKeepsFullCountsAcrossProposedWidthsAndMiddleTruncatesName() throws {
         let folder = "scripts-with-a-very-long-folder-name-TAIL/"

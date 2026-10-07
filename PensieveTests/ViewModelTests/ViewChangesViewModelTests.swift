@@ -179,11 +179,12 @@ final class ViewChangesViewModelTests: XCTestCase {
     func testPresentationReasonsDistinguishBinarySizeBudgetAndModeWithoutInventingCounts() throws {
         let cases: [(FileTreeChange.Content, String)] = [
             (.binary, "binary"), (.tooLarge, "too large"), (.diffBudgetExhausted, "diff budget"),
-            (.modeOnly(old: 0, new: 0o100), "off to on")
+            (.modeOnly, "off to on")
         ]
         for (content, expected) in cases {
             let file = try XCTUnwrap(PinnedSkillDiff.build(comparison: FileTreeComparison(changes: [
-                FileTreeChange(path: "file", kind: .modified, content: content)
+                FileTreeChange(path: "file", kind: .modified, content: content,
+                               permissions: content == .modeOnly ? .init(old: 0, new: 0o100) : nil)
             ], unreadFileCount: 0, bytesRead: 0)).files.first)
             XCTAssertTrue(ViewChangesPresentation.unavailableReason(file)?.contains(expected) == true)
             if case .modeOnly = content {
@@ -196,7 +197,7 @@ final class ViewChangesViewModelTests: XCTestCase {
             }
         }
         let line = UnifiedDiffLine(kind: .added, text: "keep\r\n", oldLineNumber: nil, newLineNumber: 1)
-        XCTAssertEqual(ViewChangesPresentation.lineText(line), "keep␍")
+        XCTAssertEqual(ViewChangesPresentation.lineText(line), "keep ⟨CRLF line ending⟩")
         XCTAssertEqual(ViewChangesPresentation.lineText(UnifiedDiffLine(
             kind: .context, text: "lone\rinside", oldLineNumber: 1, newLineNumber: 1)), "lone␍inside")
     }

@@ -5,7 +5,6 @@ struct FileTreeComparisonLimits {
                                                        maximumFiles: 1_000, maximumTotalBytes: 32 * 1_024 * 1_024)
     static let maximumInventoryEntries = 20_000
     static let maximumDirectoryDepth = 64
-    var bytesReadBeforeComparison: () -> Int = { 0 }
     let maximumEntries: Int
     let maximumDepth: Int
     let maximumFileBytes: Int
@@ -30,7 +29,7 @@ struct FileTreeChange: Equatable {
     enum Kind { case added, removed, modified }
     enum Content: Equatable {
         case text(old: String, new: String)
-        case modeOnly(old: UInt32, new: UInt32)
+        case modeOnly
         case binary
         case tooLarge
         case diffBudgetExhausted

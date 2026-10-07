@@ -3,17 +3,53 @@ import XCTest
 @testable import Pensieve
 
 extension ViewChangesViewModelTests {
+    func testWindowRecheckCoordinationDoesNotPollTheMainActor() async throws {
+        // Architecture contract: the auxiliary window must not schedule periodic sheet probes.
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let path = root.appendingPathComponent("Pensieve/ViewModels/ViewChangesViewModel.swift").path
+        let source = try FileService().readFile(at: path)
+        XCTAssertFalse(source.contains("Task.sleep"), "Window coordination must await sheet completion without a polling timer")
+        let skill = try fixture.skill("cancelled-wait")
+        let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
+        let started = DispatchSemaphore(value: 0)
+        let release = TestWait.Gate(owner: self)
+        let sheet = blockedSheet(row: row, applied: try appliedCompletion(skill: skill, row: row),
+                                 started: started, release: release, commit: row.upstreamCommit, outcome: "applied")
+        await sheet.loadAndReport(context: fixture.context)
+        sheet.applySelected(context: fixture.context)
+        let applyTask = try XCTUnwrap(sheet.operationTask)
+        let didStart = await TestWait.forSemaphore(started)
+        XCTAssertTrue(didStart)
+        let wait = Task {
+            do {
+                try await sheet.waitForCompletion(affecting: skill.id)
+                XCTFail("A cancelled completion wait must throw")
+            } catch is CancellationError {
+                // Cancellation belongs to the waiter, leaving the sheet's operation running.
+            } catch { XCTFail("Unexpected wait failure: \(error)") }
+        }
+        wait.cancel()
+        await TestWait.forTask(wait, failureMessage: "Cancelled completion wait retained the blocked worker")
+        XCTAssertTrue(sheet.isApplying, "Cancelling a waiter must not cancel the sheet's apply")
+        release.open()
+        await TestWait.forTask(applyTask, failureMessage: "Owned apply did not finish")
+    }
+
     func testPresentationMakesHiddenLineAndFilenameScalarsVisible() throws {
-        let values: [UInt32] = [13, 0x85, 0x2028, 0x2029] + Array(0x202A...0x202E)
+        let values: [UInt32] = Array(0...8) + Array(11...31) + Array(0x7F...0x9F)
+            + [0x2028, 0x2029, 0x200E, 0x200F, 0x061C] + Array(0x202A...0x202E)
             + Array(0x2066...0x2069) + Array(0xE0000...0xE007F)
         for value in values {
             let scalar = try XCTUnwrap(Unicode.Scalar(value))
             let mark = value == 13 ? "␍" : String(format: "⟨U+%04X⟩", value)
             let line = UnifiedDiffLine(kind: .added, text: "before" + String(scalar) + "after\n",
                                        oldLineNumber: nil, newLineNumber: 1)
-            XCTAssertEqual(ViewChangesPresentation.lineText(line), "before" + mark + "after",
+            XCTAssertTrue(ViewChangesPresentation.lineText(line) == "before" + mark + "after",
                            "Hidden scalars must remain visible in the exact presentation rendered by the diff")
         }
+        let tab = UnifiedDiffLine(kind: .context, text: "a\tb\n", oldLineNumber: 1, newLineNumber: 1)
+        XCTAssertEqual(ViewChangesPresentation.lineText(tab), "a\tb", "Tabs remain literal in diff lines")
         for (path, visible) in [("folder/evil\u{202E}.txt", "evil⟨U+202E⟩.txt"),
                                 ("folder/first\nlast", "first⟨U+000A⟩last"),
                                 ("folder/tab\tname", "tab⟨U+0009⟩name")] {
@@ -24,6 +60,20 @@ extension ViewChangesViewModelTests {
                            "The file header must use the same visible marks as its sidebar")
             XCTAssertEqual(ViewChangesPresentation.accessibilityLabel(file), visible + ", folder, Binary file",
                            "Filename controls must be visible in the sidebar and header presentation")
+        }
+    }
+
+    func testCRLFContextAndLineEndingChangesRemainReadable() throws {
+        let context = UnifiedDiff(old: "same\r\nold\r\n", new: "same\r\nnew\r\n")
+        let lines = try XCTUnwrap(context.hunks.first).lines
+        XCTAssertEqual(ViewChangesPresentation.lineText(lines[0]), "same", "CRLF context must not show a CR mark")
+        XCTAssertFalse(lines.map(ViewChangesPresentation.lineText).contains { $0.contains("␍") })
+        let ending = UnifiedDiff(old: "same\n", new: "same\r\n")
+        let changed = try XCTUnwrap(ending.hunks.first).lines.map(ViewChangesPresentation.lineText)
+        XCTAssertNotEqual(changed[0], changed[1], "An LF-to-CRLF change must have a visible line ending difference")
+        for text in ["a\rb\n", "last\r"] {
+            let line = UnifiedDiffLine(kind: .added, text: text, oldLineNumber: nil, newLineNumber: 1)
+            XCTAssertTrue(ViewChangesPresentation.lineText(line).contains("␍"), "A CR outside CRLF must be marked")
         }
     }
 
@@ -51,8 +101,9 @@ extension ViewChangesViewModelTests {
         XCTAssertEqual(calls.values, [skill.id, skill.id], "Changed identities still need a fresh preview")
     }
     func testWindowRecheckWaitsForSheetAndKeepsItsApplyOrRecheckResult() async throws {
-        for apply in [true, false] {
-            let skill = try fixture.skill(apply ? "busy-apply" : "busy-check")
+        for outcome in ["applied", "checked", "failed", "other"] {
+            let apply = outcome != "checked"
+            let skill = try fixture.skill("busy-" + outcome)
             let row = try UpdatesViewModel.makeRow(skill: skill, driftedLocally: false)
             let applied = try appliedCompletion(skill: skill, row: row)
             let started = DispatchSemaphore(value: 0)
@@ -60,7 +111,10 @@ extension ViewChangesViewModelTests {
             let checks = UpdateReviewRecorder<UUID>()
             let diffs = UpdateReviewRecorder<String>()
             let newCommit = String(repeating: "4", count: 40)
-            let sheet = blockedSheet(row: row, applied: applied, started: started, release: release, commit: newCommit)
+            let other = try fixture.skill("unrelated-" + outcome)
+            let sheetRow = outcome == "other" ? try UpdatesViewModel.makeRow(skill: other, driftedLocally: false) : row
+            let sheet = blockedSheet(row: sheetRow, applied: applied, started: started, release: release,
+                                     commit: newCommit, outcome: outcome)
             let window = ViewChangesViewModel(library: fixture.library,
                 operations: fixture.operations(rows: [row], diff: { request, _ in
                     diffs.append(request.upstreamCommit)
@@ -68,7 +122,9 @@ extension ViewChangesViewModelTests {
                     return UpdateReviewFixture.preview()
                 }, recheck: { id, _ in
                     checks.append(id)
-                    return UpdatesViewModelTests.refreshedRecheckCompletion(row: row, skillID: id)
+                    return SkillUpdateRecheckCompletion(row: row, skillID: id, updateAvailable: true,
+                        lastCheckedAt: Date(), lastCheckedHead: newCommit, upstreamTree: "sheet-tree",
+                        upstreamCommit: newCommit, upstreamCommitDate: row.updateDate, checkError: nil)
                 }), updates: sheet)
             sheet.present(library: fixture.library)
             await sheet.loadAndReport(context: fixture.context)
@@ -80,28 +136,41 @@ extension ViewChangesViewModelTests {
             XCTAssertTrue(didStart)
             window.recheck(context: fixture.context)
             try await Task.sleep(for: .milliseconds(80))
-            XCTAssertTrue(checks.values.isEmpty, "The window must hold Re-check while the sheet's worker is blocked")
-            XCTAssertTrue(window.isRechecking)
+            if outcome != "other" {
+                XCTAssertTrue(checks.values.isEmpty, "The window must hold Re-check while the sheet's worker is blocked")
+            }
+            if outcome != "other" { XCTAssertTrue(window.isRechecking) }
             release.open()
             await TestWait.forTask(task, failureMessage: "sheet worker did not finish")
             await TestWait.until(failureMessage: "held window check did not settle") { !window.isRechecking }
-            XCTAssertTrue(checks.values.isEmpty, "The sheet's completed result must remain authoritative")
-            XCTAssertEqual(skill.updateAvailable, !apply)
-            XCTAssertEqual(skill.upstreamCommit, apply ? nil : newCommit)
-            XCTAssertEqual(skill.upstreamTree, apply ? nil : "sheet-tree")
-            if apply { XCTAssertEqual(window.state, .stale("This skill was updated.")) } else {
-                await TestWait.until(failureMessage: "the sheet pin did not reload") { window.state != .loading }
-                XCTAssertEqual(window.row?.upstreamCommit, newCommit)
-                XCTAssertNotNil(window.selectedFile)
-            }
+            await assertRecheckResult(window: window, skill: skill, outcome: outcome, checks: checks, commit: newCommit)
+        }
+    }
+
+    private func assertRecheckResult(window: ViewChangesViewModel, skill: Skill, outcome: String,
+                                     checks: UpdateReviewRecorder<UUID>, commit: String) async {
+        XCTAssertEqual(checks.values, outcome == "applied" ? [] : [skill.id],
+                       "A waited Re-check must check upstream unless the sheet updated this skill")
+        XCTAssertEqual(skill.updateAvailable, outcome != "applied")
+        XCTAssertEqual(skill.upstreamCommit, outcome == "applied" ? nil : commit)
+        XCTAssertEqual(skill.upstreamTree, outcome == "applied" ? nil : "sheet-tree")
+        if outcome == "applied" { XCTAssertEqual(window.state, .stale("This skill was updated.")) } else {
+            await TestWait.until(failureMessage: "the sheet pin did not reload") { window.state != .loading }
+            XCTAssertEqual(window.row?.upstreamCommit, commit)
+            XCTAssertNotNil(window.selectedFile)
         }
     }
 
     private func blockedSheet(row: UpdatesRow, applied: SkillUpdateCompletion, started: DispatchSemaphore,
-                              release: TestWait.Gate, commit: String) -> UpdatesViewModel {
+                              release: TestWait.Gate, commit: String, outcome: String) -> UpdatesViewModel {
         UpdatesViewModel(rowLoader: { _ in [row] }, applyOperation: { _, _, _, _, _, _ in
             started.signal()
             try release.wait()
+            if outcome == "failed" { throw SkillUpdateFlowError.repositoryChanged }
+            if outcome == "other" {
+                return SkillUpdateCompletion(skillID: row.id, name: "Other", skillDescription: "Other",
+                    installedOriginData: applied.installedOriginData, updatedAt: Date())
+            }
             return applied
         }, recheckOperation: { id, _ in
             started.signal()

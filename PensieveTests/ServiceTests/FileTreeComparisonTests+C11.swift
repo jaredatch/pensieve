@@ -13,7 +13,8 @@ extension FileTreeComparisonTests {
             XCTAssertEqual(chmod(new + "/mode", mode_t(after)), 0)
             let preview = try PinnedSkillDiff.build(comparison: try compare())
             let file = try XCTUnwrap(preview.files.first)
-            XCTAssertEqual(file.content, .modeOnly(old: UInt32(before), new: UInt32(after)))
+            XCTAssertEqual(file.content, .modeOnly)
+            XCTAssertEqual(file.permissions, .init(old: UInt32(before), new: UInt32(after)))
             XCTAssertEqual(ViewChangesPresentation.unavailableReason(file), reason,
                            "Mode-only copy must describe the bits that actually changed")
             XCTAssertNil(file.diff)

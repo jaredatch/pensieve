@@ -3,6 +3,51 @@ import XCTest
 @testable import Pensieve
 
 extension FileTreeComparisonTests {
+    func testAdmissionByteReceiptIsConsumedOnce() throws {
+        try files.writeFile(at: new + "/text", content: "new\n")
+        var calls = 0
+        let comparison = try files.compareFileTrees(local: old, upstream: new, excludingUpstreamGit: true,
+            limits: .updatePreview, beforeReading: { calls += 1; return 7 })
+        XCTAssertEqual(calls, 1, "Admission byte accounting must consume one immutable receipt")
+        XCTAssertEqual(comparison.bytesRead, 11)
+    }
+
+    func testPermissionReportUsesTheOpenedFilesAfterInventory() throws {
+        for side in [old, new] {
+            try files.writeFile(at: side + "/script", content: "same\n")
+            XCTAssertEqual(chmod(side + "/script", 0o644), 0)
+        }
+        let comparison = try compare { event in
+            if case let .directory(path) = event, path == self.new {
+                XCTAssertEqual(chmod(self.old + "/script", 0o600), 0)
+            }
+        }
+        let file = try XCTUnwrap(comparison.changes.first)
+        XCTAssertEqual(file.permissions, .init(old: 0o600, new: 0o644),
+                       "Reported permissions must come from the opened descriptors, even for an unstable file")
+    }
+
+    func testBinaryPermissionChangeKeepsContentAndModeInBothSummaries() throws {
+        try files.writeData(at: old + "/binary", data: Data([0xff]))
+        try files.writeData(at: new + "/binary", data: Data([0xfe]))
+        XCTAssertEqual(chmod(old + "/binary", 0o644), 0)
+        XCTAssertEqual(chmod(new + "/binary", 0o755), 0)
+        let file = try XCTUnwrap(PinnedSkillDiff.build(comparison: try compare()).files.first)
+        XCTAssertEqual(file.content, .binary)
+        XCTAssertEqual(ViewChangesPresentation.sidebarMarker(file), "Binary file · Mode",
+                       "The sidebar must show both binary content and its changed mode")
+        XCTAssertEqual(ViewChangesPresentation.summary(file), "Binary file · Permissions changed from 0644 to 0755",
+                       "The header must show permissions for binary content too")
+        for (content, label) in [(FileTreeChange.Content.tooLarge, "Too large to show"),
+                                 (.diffBudgetExhausted, "Preview diff budget exhausted"),
+                                 (.diffOutputBoundReached, "Preview output bound reached")] {
+            let unavailable = PinnedSkillFileDiff(change: FileTreeChange(path: "file", kind: .modified,
+                content: content, permissions: file.permissions), result: nil)
+            XCTAssertEqual(ViewChangesPresentation.sidebarMarker(unavailable), label + " · Mode")
+            XCTAssertEqual(ViewChangesPresentation.summary(unavailable), label + " · Permissions changed from 0644 to 0755")
+        }
+    }
+
     func testBOMChangesMatchGitNumstatWithoutLosingBytes() throws {
         for (before, after) in [("first\n", "\u{FEFF}first\n"),
                                 ("\u{FEFF}first\n", "first\n"),

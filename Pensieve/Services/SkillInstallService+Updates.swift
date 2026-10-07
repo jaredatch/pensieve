@@ -109,14 +109,11 @@ extension SkillInstallService {
                 guard fileService.isRegularFile(at: upstreamDirectory + "/SKILL.md") else {
                     throw SkillInstallError.unavailableCandidate("Unsafe upstream file: SKILL.md")
                 }
-                var admissionBytes = 0
-                var limits = FileTreeComparisonLimits.updatePreview
-                limits.bytesReadBeforeComparison = { admissionBytes }
                 let comparison = try fileService.compareFileTrees(
                     local: localDirectory, upstream: upstreamDirectory,
-                    excludingUpstreamGit: update.candidate.path.isEmpty, limits: limits,
+                    excludingUpstreamGit: update.candidate.path.isEmpty, limits: .updatePreview,
                     beforeReading: {
-                        admissionBytes = try requirePreviewInstallable(update.candidate, at: upstreamDirectory + "/SKILL.md")
+                        try requirePreviewInstallable(update.candidate, at: upstreamDirectory + "/SKILL.md")
                     }
                 )
                 return try PinnedSkillDiff.build(comparison: comparison)
@@ -133,7 +130,8 @@ extension SkillInstallService {
         let failure = error as NSError
         guard let path = failure.userInfo[NSFilePathErrorKey] as? String else {
             guard error.localizedDescription.contains(scratchRoot) else { return error }
-            return SkillInstallError.unavailableCandidate("Cannot preview upstream path .: the file or folder could not be read.")
+            let message = error.localizedDescription.replacingOccurrences(of: scratchRoot, with: "[upstream checkout]")
+            return SkillInstallError.unavailableCandidate(message)
         }
         let isUpstream = path == upstream || path.hasPrefix(upstream + "/")
         let root = isUpstream ? upstream : local
