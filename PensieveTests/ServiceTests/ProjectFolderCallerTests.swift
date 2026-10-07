@@ -99,7 +99,13 @@ final class ProjectFolderCallerTests: XCTestCase {
             pairs: DeployRemovalPair.expand(skills: [harness.skill], platforms: [.claudeCode, .grok, .codex, .cursor]),
             target: .project(harness.project)
         )
-        XCTAssertEqual(removed.completedPairs.count, 4)
+        XCTAssertTrue(removed.completedPairs.isEmpty, "Absence in an unreachable folder cannot complete cleanup")
+        XCTAssertEqual(removed.failures.count, 4)
+        XCTAssertTrue(removed.failures.allSatisfy {
+            guard case .missing(let path)? = $0.projectFolderError else { return false }
+            return path == harness.project.path
+        })
+        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 1)
         let unregister = removeRegisteredProject(
             harness.project,
             reconciler: harness.category, manifestService: ManifestService(fileService: harness.files),

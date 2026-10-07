@@ -78,7 +78,7 @@ final class DeployStateBackfillTests: XCTestCase {
     }
 
     @MainActor
-    func testProjectScopedBackfillValidatesExactShapesAndSkipsNilIdentity() throws {
+    func testProjectScopedBackfillValidatesExactShapesIncludingKeylessProjects() throws {
         let context = try makeContext()
         let project = insertedProject("Project", path: tempDir + "/project", identityKey: "project-key", context: context)
         let nilProject = insertedProject("Nil", path: tempDir + "/nil-project", identityKey: nil, context: context)
@@ -112,14 +112,16 @@ final class DeployStateBackfillTests: XCTestCase {
         let validCursor = project.path + "/.cursor/rules/valid-cursor.mdc"
         try fileService.writeFile(at: validCursor, content: "project cursor")
         insertRecord(skill: validCursorSkill, platform: .cursor, targetPath: validCursor, project: project, context: context)
-        try insertInvalidProjectRecords(project: project, nilProject: nilProject, context: context)
+        try insertAdditionalProjectRecords(project: project, nilProject: nilProject, context: context)
         try context.save()
 
         makeBackfill().backfill(context: context)
 
         let records = try store.read().records
-        XCTAssertEqual(Set(records.map(\.artifactPath)), [validLink, validCursor])
-        XCTAssertEqual(Set(records.map(\.projectIdentityKey)), ["project-key"])
+        let keylessLink = DeployPaths.linkPath(directoryName: "nil-skill", platform: .claudeCode, projectPath: nilProject.path)
+        XCTAssertEqual(Set(records.map(\.artifactPath)), [validLink, validCursor, keylessLink])
+        XCTAssertEqual(Set(records.map(\.projectIdentityKey)), ["project-key", nil])
+        XCTAssertEqual(records.first { $0.artifactPath == keylessLink }?.scope, "project")
     }
 
     @MainActor
@@ -197,7 +199,7 @@ final class DeployStateBackfillTests: XCTestCase {
     }
 
     @MainActor
-    private func insertInvalidProjectRecords(
+    private func insertAdditionalProjectRecords(
         project: Project,
         nilProject: Project,
         context: ModelContext

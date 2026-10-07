@@ -188,12 +188,13 @@ final class DeployReconciler: DeployReconciling {
             guard DeployArtifactOwnership.ownsLinkTarget(target, skillsDirectory: pensieveSkillsDir, linksFile: false) else {
                 continue
             }
+            guard fileService.fileIdentity(at: link, followingLinks: true) == nil else { continue }
             let operation = DeployRemovalOperation(fileService: fileService, path: link) {
                 guard try self.ownership.link(at: link, skillsDirectory: self.pensieveSkillsDir, linksFile: false).isOwned else {
                     return false
                 }
-                // These probes follow the freshly checked link, so a restored target keeps its link and record.
-                return !self.fileService.fileExists(at: link) && !self.fileService.directoryExists(at: link)
+                // One following probe rechecks dangling status; a restored target keeps its link and record.
+                return self.fileService.fileIdentity(at: link, followingLinks: true) == nil
             }
             var candidate = DeployRemovalCandidate(key: DeployRemovalKey(slug: entry, platform: agent.platform,
                 projectPath: nil, artifactPath: link), evidence: [.danglingLink], operation: operation)

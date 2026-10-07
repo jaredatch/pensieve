@@ -61,6 +61,7 @@ func removeRegisteredProject(_ project: Project,
     defer { notifier() }
     let intentRows: [IntentAssignment], intents: [MachineDeployIntent]
     let plan: ProjectRemovalPlan
+    let waitingIDs: Set<UUID>
     do {
         intentRows = try stateFetcher.intentAssignments(context: context)
         intents = try stateFetcher.deployIntents(context: context)
@@ -72,11 +73,9 @@ func removeRegisteredProject(_ project: Project,
             result.operationFailures.append(failure)
             return result
         }
-        try plan.saveWaitingRemovals(project: project, platformVM: platformVM)
+        waitingIDs = try plan.saveWaitingRemovals(project: project, platformVM: platformVM)
     } catch let error as ProjectFolderError {
-        var result = BatchResult()
-        result.operationFailures.append("Couldn't check the project folder: " + error.localizedDescription)
-        return result
+        return projectFolderPreparationFailure(error)
     } catch { return BatchResult.readFailure("project deploy records", error: error) }
     let publication = ProjectRemovalWithdrawal(manifestService: manifestService,
         manifestRoot: manifestRoot, logFailure: logFailure)
@@ -88,7 +87,7 @@ func removeRegisteredProject(_ project: Project,
     } catch {
         result.didWithdrawProjectRequests = (error as? ProjectRemovalWithdrawalFailure)?.didWithdrawRequests ?? false
         result.operationFailures.append(error.localizedDescription)
-        return result
+        return settleProjectWaitingCleanup(result, ids: waitingIDs, platformVM: platformVM)
     }
     result.append(reconciler.reconcileRemovingProject(project.id, preservingProjects: plan.folderSiblingIDs, context: context))
     do {
@@ -102,11 +101,28 @@ func removeRegisteredProject(_ project: Project,
         guard case .project(let id)? = outcome.target else { return false }
         return id != project.id
     }
-    guard !result.hasFailures else { return result }
+    guard !result.hasFailures else { return settleProjectWaitingCleanup(result, ids: waitingIDs, platformVM: platformVM) }
     let cleanup = plan.removeArtifacts(project: project, platformVM: platformVM)
     result.append(cleanup)
     result.append(completeProjectRemoval(project, intentRows: intentRows, cleanup: cleanup,
         priorFailed: result.hasFailures, context: context))
+    return settleProjectWaitingCleanup(result, ids: waitingIDs, platformVM: platformVM)
+}
+
+private func projectFolderPreparationFailure(_ error: ProjectFolderError) -> BatchResult {
+    var result = BatchResult()
+    result.operationFailures.append("Couldn't check the project folder: " + error.localizedDescription)
+    return result
+}
+
+private func settleProjectWaitingCleanup(_ outcome: BatchResult, ids: Set<UUID>,
+                                         platformVM: PlatformViewModel) -> BatchResult {
+    var result = outcome
+    if result.hasFailures {
+        do { try platformVM.waitingRemovalStore.retire(ids: ids) } catch {
+            result.operationFailures.append("Couldn't withdraw this attempt's waiting cleanup: " + error.localizedDescription)
+        }
+    }
     return result
 }
 

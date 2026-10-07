@@ -8,6 +8,7 @@ struct ProjectRemovalPreview {
     let folderIsShared: Bool
     var folderIsUncheckable = false
     var folderPath: String?
+    var hasWaitingRemovals = false
 
     var folderIsUnavailable: Bool { folderIsMissing || folderIsUncheckable }
 
@@ -22,6 +23,9 @@ struct ProjectRemovalPreview {
     var message: String {
         if folderIsUnavailable {
             let folder = folderPath.map { " at \($0)" } ?? ""
+            guard hasWaitingRemovals else {
+                return "Pensieve can't reach this folder\(folder). No skill links or rules will be removed. Your files stay."
+            }
             return "Pensieve can't reach this folder\(folder). Its links and rules will be removed "
                 + "when the folder is back and can be checked. Your files stay."
         }
@@ -83,7 +87,8 @@ struct ProjectRemovalPlan {
         for path in candidates.keys.sorted() {
             guard let pair = candidates[path] else { continue }
             let owned = folderProblem == nil
-                ? try platformVM.artifactIsOwned(skill: pair.skill, platform: pair.platform, target: .project(project)) : false
+                ? try platformVM.removalOperation(skill: pair.skill, platform: pair.platform,
+                    target: .project(project)).classify().isOwned : false
             prepared.append(Candidate(pair: pair, path: path, isOwned: owned))
         }
         let count = prepared.filter(\.isOwned).count
@@ -93,18 +98,21 @@ struct ProjectRemovalPlan {
                 preview = ProjectRemovalPreview(projectName: project.name, artifactCount: 0, folderIsMissing: true)
             } else { preview.folderIsUncheckable = true }
             preview.folderPath = project.path
+            preview.hasWaitingRemovals = !prepared.isEmpty
         }
         return ProjectRemovalPlan(preview: preview,
             candidates: prepared, hasIdentitySibling: hasSibling, folderSiblingIDs: [])
     }
 
     /// Save deferred work before withdrawal, ledger retirement or deployment-state retirement.
-    func saveWaitingRemovals(project: Project, platformVM: PlatformViewModel) throws {
-        guard preview.folderIsUnavailable, !preview.folderIsShared else { return }
-        try platformVM.waitingRemovalStore.add(candidates.map {
+    func saveWaitingRemovals(project: Project, platformVM: PlatformViewModel) throws -> Set<UUID> {
+        guard preview.hasWaitingRemovals else { return [] }
+        let entries = candidates.map {
             platformVM.waitingRemoval(skill: $0.pair.skill, platform: $0.pair.platform,
                 project: project, source: "project:\(project.id)")
-        })
+        }
+        try platformVM.waitingRemovalStore.add(entries)
+        return Set(entries.map(\.id))
     }
 
     func removeArtifacts(project: Project, platformVM: PlatformViewModel) -> BatchResult {

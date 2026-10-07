@@ -62,7 +62,8 @@ final class DeletionTestLinkService: LinkServiceProtocol {
 final class DeletionTestCursorCompiler: CursorCompilerProtocol {
     func removalOperation(skill: Skill, platform: PlatformTarget,
                           projectPath: String?) -> DeployRemovalOperation {
-        adapterRemovalOperation(skill: skill, projectPath: projectPath)
+        adapterRemovalOperation(skill: skill, projectPath: projectPath,
+            artifactExists: { self.ownedProjectPaths.contains(projectPath) || self.foreignProjectPaths.contains(projectPath) })
     }
 
     var ownedProjectPaths: Set<String?> = []
@@ -248,20 +249,22 @@ final class DeletionCounter {
 extension LinkServiceProtocol {
     func adapterRemovalOperation(skill: Skill, platform: PlatformTarget,
                                  projectPath: String?,
-                                 foreignArtifactExists: @escaping () -> Bool = { false }) -> DeployRemovalOperation {
+                                 foreignArtifactExists: (() throws -> Bool)? = nil) -> DeployRemovalOperation {
         DeployRemovalOperation(classify: {
             if try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath) { return .owned }
-            // Simple link mocks model owned paths only; fixtures with foreign occupants supply their presence.
-            return foreignArtifactExists() ? .foreign : .absent
+            // Unknown presence is conservatively foreign. A fixture claiming absence must supply
+            // its occupant evidence, including directories and foreign or dangling symlinks.
+            return try foreignArtifactExists?() == false ? .absent : .foreign
         }, delete: { try self.unlink(skill: skill, platform: platform, projectPath: projectPath) })
     }
 }
 
 extension CursorCompilerProtocol {
-    func adapterRemovalOperation(skill: Skill, projectPath: String?) -> DeployRemovalOperation {
+    func adapterRemovalOperation(skill: Skill, projectPath: String?,
+                                 artifactExists: (() throws -> Bool)? = nil) -> DeployRemovalOperation {
         DeployRemovalOperation(classify: {
             if try self.ownsArtifact(skill: skill, projectPath: projectPath) { return .owned }
-            return try self.probeRulePresence(skill: skill, projectPath: projectPath) ? .foreign : .absent
+            return try artifactExists?() == false ? .absent : .foreign
         },
             delete: { try self.remove(skill: skill, projectPath: projectPath) })
     }

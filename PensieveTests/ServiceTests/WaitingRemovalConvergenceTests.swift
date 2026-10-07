@@ -82,7 +82,7 @@ final class WaitingRemovalConvergenceTests: XCTestCase {
         XCTAssertEqual(try h.base.files.readData(at: h.storePath), before)
     }
 
-    func testDesiredProjectProbeSkipsMissingPathsAndUncheckablePausesReadyWork() throws {
+    func testUnavailableDesiredProjectKeepsUnresolvedPathsWithoutPausingReadyWork() throws {
         for unavailable in ["missing", "uncheckable"] {
             let h = try WaitingRemovalHarness()
             defer { h.base.cleanup() }
@@ -99,13 +99,10 @@ final class WaitingRemovalConvergenceTests: XCTestCase {
             h.mapped.beforePathResolution = { path in
                 XCTAssertFalse(path.hasPrefix(h.base.otherProject.path), "Unavailable desired paths must stay unresolved")
             }
-            let before = try h.base.files.readData(at: h.storePath)
             let result = h.vm.reconcileWaitingRemovals(context: h.base.context)
-            XCTAssertEqual(result.hasFailures, unavailable == "uncheckable")
-            XCTAssertEqual(h.base.files.isSymlink(at: h.base.artifact(.codex)), unavailable == "uncheckable")
-            if unavailable == "uncheckable" {
-                XCTAssertEqual(try h.base.files.readData(at: h.storePath), before)
-            } else { XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty) }
+            XCTAssertFalse(result.hasFailures, unavailable)
+            XCTAssertFalse(h.base.files.isSymlink(at: h.base.artifact(.codex)), unavailable)
+            XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty)
         }
     }
 }

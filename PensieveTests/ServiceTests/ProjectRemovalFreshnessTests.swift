@@ -145,6 +145,7 @@ final class ProjectRemovalFreshnessTests: XCTestCase {
                            failure == "unlink")
             XCTAssertTrue(model.error?.contains(". It stays registered;") == true)
             XCTAssertTrue(model.error?.contains("retry to complete it.") == true)
+            XCTAssertFalse(model.error?.contains("category") == true, "Failure copy never promises to stop category deploys")
             XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 2)
             XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), unchanged ? 1 : 0)
             XCTAssertEqual(category.projectKeys, [h.project.identityKey!])

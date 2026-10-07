@@ -18,13 +18,12 @@ enum SkillDeletionFlow {
 
         let cleanupResult = platformVM.removeAllDeploys(skill: skill, projects: projects, localProjectEvidence: {
             try platformVM.localSkillProjectDeployEvidence(skill: skill, projects: projects, context: context)
-        }, localDeployHistory: { paths in
-            try localCursorDeployPaths(skill: skill, paths: paths, context: context)
         })
         var retirementSaved = false
+        var deletionOutcome: SkillLibraryViewModel.SkillDeletionResult?
         defer {
             settleWaitingCleanup(cleanupResult, retirementSaved: retirementSaved,
-                skill: skill, library: library, platformVM: platformVM)
+                outcome: deletionOutcome, skill: skill, library: library, platformVM: platformVM)
         }
         let cleanup = cleanupResult.batch
         if cleanup.hasFailures {
@@ -56,6 +55,7 @@ enum SkillDeletionFlow {
         }
 
         let outcome = library.deleteSkillEntry(skill, context: context, persist: persist)
+        deletionOutcome = outcome
         let manifestNote = updateManifest(library: library, context: context, waitingProjects: cleanupResult.waitingProjects)
         return present(outcome, skill: skill, manifestNote: manifestNote, library: library)
     }
@@ -78,13 +78,19 @@ enum SkillDeletionFlow {
         return manifestNote
     }
 
-    private static func settleWaitingCleanup(_ cleanup: SkillCleanupResult, retirementSaved: Bool, skill: Skill,
+    private static func settleWaitingCleanup(_ cleanup: SkillCleanupResult, retirementSaved: Bool,
+                                             outcome: SkillLibraryViewModel.SkillDeletionResult?, skill: Skill,
                                              library: SkillLibraryViewModel, platformVM: PlatformViewModel) {
         if retirementSaved {
             if let error = platformVM.finishWaitingSkillCleanup(cleanup) {
                 let message = library.deletionNotice?.message ?? ""
-                let prefix = "Deleted “\(skill.name)”."
-                let namedMessage = message.hasPrefix(prefix) ? message : prefix + (message.isEmpty ? "" : " " + message)
+                let namedMessage: String
+                switch outcome {
+                case .deleted, .deletedManifestStale:
+                    namedMessage = message.isEmpty ? "Deleted “\(skill.name)”." : message
+                default:
+                    namedMessage = "The skill “\(skill.name)” was kept." + (message.isEmpty ? "" : " " + message)
+                }
                 let warning = namedMessage + " Waiting cleanup was saved, "
                     + "but its deployment records couldn't be retired: \(error)."
                 switch library.deletionNotice {
@@ -106,19 +112,6 @@ enum SkillDeletionFlow {
         didChangeDeploys
             ? "Agent links and rules already removed stay removed; the skill was kept so you can retry."
             : "The skill was kept so you can retry."
-    }
-
-    private static func localCursorDeployPaths(
-        skill: Skill, paths: Set<String>, context: ModelContext
-    ) throws -> Set<String> {
-        let paths = Array(paths)
-        let skillID = skill.id
-        let predicate = #Predicate<DeployRecord> {
-            $0.skillID == skillID && $0.projectID != nil && paths.contains($0.targetPath)
-        }
-        // SwiftData cannot compare captured Codable enums; the predicate bounds Cursor paths first.
-        return Set(try context.fetch(FetchDescriptor(predicate: predicate))
-            .filter { $0.platform == .cursor }.map(\.targetPath))
     }
 
     private static func retire(skill: Skill, context: ModelContext) throws {

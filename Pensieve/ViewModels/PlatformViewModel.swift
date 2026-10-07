@@ -154,9 +154,17 @@ final class PlatformViewModel {
 
     func removalOperation(skill: Skill, platform: PlatformTarget, target: DeployTarget) -> DeployRemovalOperation {
         let projectPath = target.project?.path
-        return platform.usesSymlinks
+        let operation = platform.usesSymlinks
             ? linkService.removalOperation(skill: skill, platform: platform, projectPath: projectPath)
             : cursorCompiler.removalOperation(skill: skill, platform: platform, projectPath: projectPath)
+        return DeployRemovalOperation(classify: {
+            let occupant = try operation.classify()
+            if occupant == .absent, let projectPath, ProjectDirectory.canAccess(projectPath) {
+                // Absence only completes cleanup while its containing project is still reachable.
+                _ = try self.fileService.requireProjectDirectory(at: projectPath)
+            }
+            return occupant
+        }, delete: operation.delete)
     }
 
     func waitingRemoval(skill: Skill, platform: PlatformTarget, project: Project, source: String) -> WaitingRemoval {
@@ -208,12 +216,8 @@ final class PlatformViewModel {
         let scope: String
         let projectIdentityKey: String?
         if let project = target.project {
-            guard let identityKey = project.identityKey else {
-                NSLog("Pensieve deploy-state skipped project record for \(artifactPath): missing project identityKey")
-                return
-            }
             scope = "project"
-            projectIdentityKey = identityKey
+            projectIdentityKey = project.identityKey
         } else {
             scope = "user"
             projectIdentityKey = nil

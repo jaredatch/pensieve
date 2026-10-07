@@ -46,12 +46,14 @@ enum WaitingRemovalError: LocalizedError {
     case unreadable(String)
     case unsupportedSchema
     case locked
+    case invalidEntry(String)
 
     var errorDescription: String? {
         switch self {
         case .unreadable(let path): "Waiting removals paused: couldn't read \(path). The file was kept."
         case .unsupportedSchema: "Waiting removals paused: update Pensieve to read this newer waiting-removal file."
         case .locked: "Waiting removals paused: their local store is busy. Try again."
+        case .invalidEntry(let path): "Couldn't save waiting cleanup: rejected the entry at \(path)."
         }
     }
 }
@@ -93,7 +95,7 @@ final class WaitingRemovalStore: WaitingRemovalStoring {
             var state = try load()
             let initialCount = state.removals.count
             for entry in entries {
-                guard entry.isValid else { throw WaitingRemovalError.unreadable(path) }
+                guard entry.isValid else { throw WaitingRemovalError.invalidEntry(entry.artifactPath) }
                 if !state.removals.contains(where: { $0.source == entry.source && $0.artifactPath == entry.artifactPath }) {
                     state.removals.append(entry)
                 }

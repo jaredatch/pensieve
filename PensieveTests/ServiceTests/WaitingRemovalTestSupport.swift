@@ -33,11 +33,21 @@ struct WaitingRemovalHarness {
 
     func deploy(_ platforms: [PlatformTarget]) throws {
         try base.files.createDirectory(at: base.project.path)
+        try recordProjectIdentity()
         for platform in platforms { try base.addIntent(platform: platform) }
         XCTAssertFalse(base.intent.reconcile(context: base.context).hasFailures)
     }
 
-    func hideFolder() throws { try base.files.replaceItem(at: offlinePath, with: base.project.path) }
+    func recordProjectIdentity() throws {
+        guard let key = base.project.identityKey else { return }
+        try base.files.writeFile(at: base.project.path + "/.git/config",
+            content: "[remote \"origin\"]\nurl = https://\(key).git\n")
+    }
+
+    func hideFolder() throws {
+        try recordProjectIdentity()
+        try base.files.replaceItem(at: offlinePath, with: base.project.path)
+    }
     func restoreFolder() throws { try base.files.replaceItem(at: base.project.path, with: offlinePath) }
 
     @discardableResult

@@ -143,6 +143,10 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     /// Physical-path consumers compare physical literals; containment still applies to every lookup.
     var translatesSymlinkTargets = true
 
+    func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? {
+        wrapped.fileIdentity(at: resolved(path), followingLinks: followingLinks)
+    }
+
     init(
         wrapped: FileServiceProtocol,
         canonicalDirectory: String,

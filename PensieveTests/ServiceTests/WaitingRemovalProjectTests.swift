@@ -90,6 +90,7 @@ final class WaitingRemovalProjectTests: XCTestCase {
         let model = ProjectRemovalModel()
         model.request(h.base.project, platformVM: vm, context: h.base.context)
         XCTAssertEqual(model.preview?.artifactCount, 0)
+        XCTAssertFalse(model.preview?.message.contains("when the folder is back") == true)
         let result = removeRegisteredProject(h.base.project, reconciler: h.base.category,
             platformVM: vm, localMachineID: ProjectIntentHarness.localID, context: h.base.context)
         XCTAssertFalse(result.hasFailures)

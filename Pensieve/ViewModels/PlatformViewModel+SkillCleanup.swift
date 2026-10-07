@@ -4,6 +4,7 @@ import SwiftData
 struct SkillProjectDeployEvidence {
     var paths: Set<String>
     var historyFailure: Error?
+    var cursorHistoryPaths: Set<String> = []
 }
 
 extension PlatformViewModel {
@@ -38,8 +39,9 @@ extension PlatformViewModel {
             }
         }
         do {
-            paths.formUnion(try localSkillCursorHistory(skill: skill, projects: projects, context: context))
-            return SkillProjectDeployEvidence(paths: paths)
+            let history = try localSkillCursorHistory(skill: skill, projects: projects, context: context)
+            paths.formUnion(history)
+            return SkillProjectDeployEvidence(paths: paths, cursorHistoryPaths: history)
         } catch {
             // Incomplete history needs a broader folder fence. The cleanup coordinator keeps
             // this history error for the notice, even when a folder is also unavailable.

@@ -28,12 +28,24 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
         } catch { return BatchResult.readFailure("waiting removals", error: error) }
 
         var retire: Set<UUID> = []
+        var result = BatchResult()
+        let identities = projectIdentities(reachable)
         var work: [(entry: WaitingRemoval, candidate: DeployRemovalCandidate)] = []
         for entry in reachable {
+            if let key = entry.projectIdentityKey {
+                guard let identity = identities[entry.projectPath] else { continue }
+                if identity.key != key {
+                    retire.insert(entry.id)
+                    continue
+                }
+            }
             let path: String
             do {
                 path = try entryPath(entry.artifactPath)
-            } catch { continue }
+            } catch {
+                result.operationFailures.append("\(entry.artifactPath): \(error.localizedDescription)")
+                continue
+            }
             if desired.contains(path) {
                 retire.insert(entry.id)
             } else {
@@ -46,7 +58,8 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
             }
         }
         let removal = platformVM.removalService.remove(work.map(\.candidate))
-        return finish(removal, entries: work.map(\.entry), retiring: retire)
+        result.append(finish(removal, entries: work.map(\.entry), retiring: retire))
+        return result
     }
 
     private func finish(_ removal: DeployRemovalResult, entries: [WaitingRemoval], retiring: Set<UUID>) -> BatchResult {
@@ -76,23 +89,29 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
         }
     }
 
+    private func projectIdentities(_ entries: [WaitingRemoval]) -> [String: ProjectIdentity] {
+        let service = ProjectIdentityService(fileService: fileService)
+        var identities: [String: ProjectIdentity] = [:]
+        for path in Set(entries.filter { $0.projectIdentityKey != nil }.map(\.projectPath)) {
+            identities[path] = service.peekIdentity(forProjectAt: path)
+        }
+        return identities
+    }
+
     private func desiredPaths(context: ModelContext, machineID: String,
                               folders: ProjectFolderProbe) throws -> Set<String> {
         let projects = try stateFetcher.projects(context: context)
         let skills = try stateFetcher.skills(context: context)
         let intents = try stateFetcher.deployIntents(context: context)
         let categories = try stateFetcher.categories(context: context)
+        let deployments = try platformVM.deployStateStore.read().records
         let bySlug = Dictionary(skills.map { ($0.directoryName, $0) }, uniquingKeysWith: { first, _ in first })
         var paths: Set<String> = []
         func request(_ skill: Skill, _ platform: PlatformTarget, _ project: Project) throws {
-            do {
-                try folders.require(project.path)
-            } catch let error as ProjectFolderError {
-                guard case .missing = error else { throw error }
-                return
-            }
             let path = platformVM.artifactPath(skill: skill, platform: platform, target: .project(project))
-            paths.insert(try entryPath(path))
+            // An unavailable project's paths remain lexical. Only resolution inside a reachable
+            // folder can fail the complete desired-state read.
+            paths.insert(folders.isAvailable(project.path) ? try entryPath(path) : path)
         }
         for intent in intents where intent.machineID == machineID {
             guard let key = intent.projectKey, let skill = bySlug[intent.skillSlug],
@@ -109,6 +128,24 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
                         try request(skill, platform, project)
                     }
                 }
+            }
+        }
+        paths.formUnion(try deployedPaths(deployments, projects: projects, bySlug: bySlug, folders: folders))
+        return paths
+    }
+
+    private func deployedPaths(_ deployments: [DeployStateRecord], projects: [Project], bySlug: [String: Skill],
+                               folders: ProjectFolderProbe) throws -> Set<String> {
+        var paths: Set<String> = []
+        // Derived deployment state requests live skills in registered projects, including keyless
+        // direct deploys. History remains after un-assignment and cannot supply current requests.
+        for deployment in deployments where deployment.scope == "project" {
+            guard let skill = bySlug[deployment.slug], let platform = PlatformTarget(rawValue: deployment.platform),
+                  platform.supportsProjectScope else { continue }
+            for project in projects where ProjectDirectory.canAccess(project.path) {
+                let path = platformVM.artifactPath(skill: skill, platform: platform, target: .project(project))
+                guard path == deployment.artifactPath else { continue }
+                paths.insert(folders.isAvailable(project.path) ? try entryPath(path) : path)
             }
         }
         return paths

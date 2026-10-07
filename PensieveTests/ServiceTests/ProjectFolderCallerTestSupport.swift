@@ -85,7 +85,6 @@ struct ProjectFolderCallerHarness {
         for platform in platforms {
             try addIntent(platform: platform, skill: direct)
         }
-        try context.save()
         return direct
     }
 
