@@ -42,8 +42,11 @@ final class ProjectRemovalTests: XCTestCase {
         try h.files.createDirectory(at: h.project.path)
         let category = try h.addCategory()
         XCTAssertFalse(h.category.reconcile(context: h.context).hasFailures)
+        try h.addIntent(platform: .codex)
         let direct = try h.addDirectSkill(platforms: [.codex, .cursor])
         XCTAssertFalse(h.intent.reconcile(context: h.context).hasFailures)
+        XCTAssertEqual(try h.context.fetch(FetchDescriptor<IntentAssignment>())
+            .filter { $0.skillID == h.skill.id && $0.projectID == h.project.id }.map(\.platformRaw), ["codex"])
         h.context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.remoteID,
             skillSlug: h.skill.directoryName, platformRaw: "cursor", projectKey: h.project.identityKey))
         h.context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.localID,

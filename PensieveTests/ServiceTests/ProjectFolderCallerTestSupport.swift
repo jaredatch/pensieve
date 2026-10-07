@@ -59,10 +59,10 @@ struct ProjectFolderCallerHarness {
 
     func cleanup() { try? files.deleteDirectory(at: root) }
 
-    func addIntent(platform: PlatformTarget = .codex, project: Project? = nil) throws {
+    func addIntent(platform: PlatformTarget = .codex, project: Project? = nil, skill: Skill? = nil) throws {
         let target = project ?? self.project
         context.insert(MachineDeployIntent(
-            machineID: ProjectIntentHarness.localID, skillSlug: skill.directoryName,
+            machineID: ProjectIntentHarness.localID, skillSlug: (skill ?? self.skill).directoryName,
             platformRaw: platform.rawValue, projectKey: target.identityKey
         ))
         try context.save()
@@ -83,8 +83,7 @@ struct ProjectFolderCallerHarness {
         let direct = Skill(name: "Direct Skill", directoryName: slug)
         context.insert(direct)
         for platform in platforms {
-            context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.localID,
-                skillSlug: slug, platformRaw: platform.rawValue, projectKey: project.identityKey))
+            try addIntent(platform: platform, skill: direct)
         }
         try context.save()
         return direct

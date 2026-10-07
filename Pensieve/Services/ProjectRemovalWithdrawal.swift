@@ -16,10 +16,7 @@ struct ProjectRemovalWithdrawal {
     let logFailure: (String) -> Void
 
     func apply(project: Project, request: ProjectRemovalWithdrawalRequest, context: ModelContext) throws -> Bool {
-        let key = project.identityKey
-        let withdrawing = request.intents.filter {
-            !request.keepingSharedKey && key != nil && $0.machineID == request.localMachineID && $0.projectKey == key
-        }
+        let withdrawing = intentsToWithdraw(project: project, request: request)
         let facts = withdrawing.map {
             DeployIntentRecord(machineID: $0.machineID, skillSlug: $0.skillSlug,
                                platformRaw: $0.platformRaw, projectKey: $0.projectKey)
@@ -55,6 +52,11 @@ struct ProjectRemovalWithdrawal {
                           didWithdrawRequests: withdrawalRemainsSaved)
         }
         return changed
+    }
+
+    private func intentsToWithdraw(project: Project, request: ProjectRemovalWithdrawalRequest) -> [MachineDeployIntent] {
+        guard !request.keepingSharedKey, let key = project.identityKey else { return [] }
+        return request.intents.filter { $0.machineID == request.localMachineID && $0.projectKey == key }
     }
 
     private func restore(facts: [DeployIntentRecord], context: ModelContext) throws {

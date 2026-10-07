@@ -86,7 +86,7 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").deployIntents.count, 2)
         let message = ProjectRemovalModel.removalFailureMessage(projectName: project.name, result: result)
         XCTAssertFalse(message.contains("Nothing was changed."), "The withdrawal remains saved after restoration fails")
-        XCTAssertTrue(message.contains("Pensieve stopped requesting this project's deploys."))
+        XCTAssertTrue(message.contains("Pensieve withdrew this Mac's direct deploy requests for this project."))
         h.mapped.beforeFileWrite = nil
         fault.refusesRestore = false
         try relaunchAndRetry(h, projectID: projectID)

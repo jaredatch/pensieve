@@ -267,11 +267,11 @@ Remove asks for confirmation with the project's name and the number of owned lin
 
 Removing a project affects only this Mac. Category membership stays shared, so other Macs keep their category deploys. After confirmation, Pensieve withdraws this Mac's project deployment requests that no other local registration uses. It saves and publishes that withdrawal before removing any links or rules. Cleanup covers owned category and direct deploys recorded in this Mac's assignments, deploy state or local deploy history. Pensieve does not scan the folder for marked rules. It deletes the registration and remaining assignment records last, after cleanup succeeds. Other Macs' direct deployment requests stay.
 
-Another registration on this Mac with the same project identity keeps the shared requests and category memberships. Another registration resolving to the same folder, including through a link, keeps all links, rules and deploy-state records there. That confirmation counts zero removals and explains why.
+Another registration on this Mac with the same project identity keeps the shared direct requests. Another registration resolving to the same folder, including through a link, keeps all links, rules and deploy-state records there. That confirmation counts zero removals and explains why.
 
 A cleanup, save or manifest update failure keeps the project registered and reports the error so you can retry. Requests may already be withdrawn even when no file was removed. Since the registration still belongs to its categories, ordinary convergence can restore removed category deploys until retry finishes. Another registration with the same identity can also keep direct requests live. Failed removals keep their cleanup records.
 
-Registering the same project identity again restores its category deploys at the next convergence without editing the categories. A key that no Mac registers stays in its categories and deploys nowhere until you remove it from the rule.
+Registering the same project identity again restores its category deploys at the next convergence without editing the categories. A key that no Mac registers stays in its categories and deploys nowhere. Registering the folder again lets you turn off its category membership.
 
 If the folder is already missing, the confirmation says its links and rules stay. Pensieve withdraws requests no other registration uses and unregisters, leaving unreachable links, rules and deploy-state records behind. It does not queue cleanup for the folder's return. If Pensieve cannot check the folder, removal fails and the project stays registered. If the folder disappears after withdrawal, removal also fails and keeps the registration and records. The requests remain withdrawn for a retry.
 

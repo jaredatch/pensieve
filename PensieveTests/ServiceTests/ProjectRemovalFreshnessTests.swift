@@ -139,7 +139,8 @@ final class ProjectRemovalFreshnessTests: XCTestCase {
             XCTAssertEqual(h.files.isSymlink(at: h.artifact(.codex)), failure != "state write")
             XCTAssertEqual(model.error?.contains("stopped partway"), failure == "state write")
             XCTAssertEqual(model.error?.contains("Nothing was changed."), unchanged)
-            XCTAssertEqual(model.error?.contains("Pensieve stopped requesting this project's deploys."), failure == "unlink")
+            XCTAssertEqual(model.error?.contains("Pensieve withdrew this Mac's direct deploy requests for this project."),
+                           failure == "unlink")
             XCTAssertTrue(model.error?.contains(". It stays registered;") == true)
             XCTAssertTrue(model.error?.contains("retry to complete it.") == true)
             XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 2)

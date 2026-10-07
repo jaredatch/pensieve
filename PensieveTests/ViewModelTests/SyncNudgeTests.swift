@@ -233,16 +233,26 @@ final class SyncNudgeTests: XCTestCase {
         registerProject(project, context: context, notifier: counter.notify)
         let category = try XCTUnwrap(store.create(name: "Rules", context: context))
         store.setProject(project, inCategory: category, member: true, context: context)
+        context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.localID,
+            skillSlug: "withdraw-before-reconcile", platformRaw: "codex", projectKey: project.identityKey))
+        try context.save()
         counter.reset()
-
+        var reconciled = false
+        let reconciler = RemovalCheckpointReconciler(reconciler: ResultReconciler(fails: true)) {
+            reconciled = true
+            XCTAssertEqual(try? ModelContext(context.container).fetchCount(FetchDescriptor<MachineDeployIntent>()), 0,
+                           "The withdrawal must be saved before the failing reconcile")
+            return BatchResult()
+        }
         let result = removeRegisteredProject(
-            project, reconciler: ResultReconciler(fails: true),
+            project, reconciler: reconciler,
             platformVM: PlatformViewModel(fileService: FileService(),
                 agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked),
             localMachineID: ProjectIntentHarness.localID,
             context: context, notifier: counter.notify
         )
         XCTAssertTrue(result.hasFailures)
+        XCTAssertTrue(reconciled && result.didWithdrawProjectRequests)
         XCTAssertEqual(counter.value, 1)
         XCTAssertEqual(try context.fetch(FetchDescriptor<Project>()).count, 1)
         XCTAssertEqual(category.projectKeys, ["github.com/example/app"], "Local removal keeps the shared rule")
