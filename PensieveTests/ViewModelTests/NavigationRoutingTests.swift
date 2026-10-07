@@ -55,7 +55,7 @@ final class NavigationRoutingTests: XCTestCase {
         XCTAssertNil(
             prunedEntitySelection(
                 .tag("swift"), projectIDs: [], categoryIDs: [],
-                machineIDs: [], tags: []
+                machineIDs: [], tags: [], remoteProjectKeys: []
             )
         )
     }
@@ -182,7 +182,7 @@ final class NavigationRoutingTests: XCTestCase {
             XCTAssertNil(
                 prunedEntitySelection(
                     selection, projectIDs: [], categoryIDs: [],
-                    machineIDs: [], tags: []
+                    machineIDs: [], tags: [], remoteProjectKeys: []
                 )
             )
         }
@@ -200,7 +200,7 @@ final class NavigationRoutingTests: XCTestCase {
             XCTAssertEqual(
                 prunedEntitySelection(
                     selection, projectIDs: [projectID], categoryIDs: [categoryID],
-                    machineIDs: ["mac-mini"], tags: ["swift"]
+                    machineIDs: ["mac-mini"], tags: ["swift"], remoteProjectKeys: []
                 ),
                 selection
             )

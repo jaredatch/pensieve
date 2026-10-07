@@ -48,7 +48,33 @@ final class ProjectListModelTests: XCTestCase {
         XCTAssertEqual(list(states: [third, laptop, mini]).rows.first?.presentation.line2,
                        "On Mac mini, MacBook Pro, and Studio")
         let marker = Fixture.machine(projects: [Fixture.project(key: "marker-id", kind: "marker")])
-        XCTAssertEqual(list(states: [marker]).rows.first?.presentation.line3, "Local marker identity")
+        XCTAssertEqual(list(states: [marker]).rows.first?.presentation.line3, "Marker identity")
+        let unknown = Fixture.machine(projects: [Fixture.project(kind: "future-kind")])
+        XCTAssertEqual(list(states: [unknown]).rows.first?.presentation.line3, "Unknown identity")
+        let localMarker = Project(name: "Local", path: "/local")
+        localMarker.identityKind = "marker"
+        XCTAssertEqual(list(projects: [localMarker]).rows.first?.presentation.line3, "Local marker identity")
+        localMarker.identityKind = "future-kind"
+        XCTAssertEqual(list(projects: [localMarker]).rows.first?.presentation.line3, "Identity pending")
+    }
+
+    func testEqualTitlesSortLocalBeforeRemoteThenByStableIdentity() throws {
+        let first = Project(name: "Workspace", path: "/first")
+        first.id = try XCTUnwrap(UUID(uuidString: "00000000-0000-4000-8000-000000000001"))
+        first.identityKey = "local-a"
+        let second = Project(name: "Workspace", path: "/second")
+        second.id = try XCTUnwrap(UUID(uuidString: "00000000-0000-4000-8000-000000000002"))
+        second.identityKey = "local-b"
+        let remoteA = Fixture.machine(id: "a", projects: [Fixture.project(key: "remote-a")])
+        let remoteB = Fixture.machine(id: "b", name: "Studio", projects: [Fixture.project(key: "remote-b")])
+        let expected: [EntitySelection] = [
+            .project(first.id), .project(second.id), .remoteProject("remote-a"), .remoteProject("remote-b")
+        ]
+        for projects in [[second, first], [first, second]] {
+            for states in [[remoteB, remoteA], [remoteA, remoteB]] {
+                XCTAssertEqual(list(projects: projects, states: states).rows.map(\.selection), expected)
+            }
+        }
     }
 
     func testLocalIdentityAndOwnStateExcludeRemoteRows() {

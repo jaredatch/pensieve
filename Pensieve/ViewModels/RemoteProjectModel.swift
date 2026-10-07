@@ -13,11 +13,18 @@ struct RemoteProjectModel: Identifiable {
     let identityKey: String
     let kind: String
     let name: String
+    let publishedAt: Date
     let machines: [Machine]
 
     var id: String { identityKey }
     var displayIdentityKey: String { PublishedStringSanitizer.path(identityKey) }
-    var identityLine: String { ListRows.identityLine(key: displayIdentityKey, kind: kind) }
+    var identityLine: String {
+        switch ProjectIdentity.Kind(rawValue: kind) {
+        case .remote: displayIdentityKey
+        case .marker: "Marker identity"
+        case nil: "Unknown identity"
+        }
+    }
     var skillCount: Int { Set(machines.flatMap { $0.deploys.map(\.skillSlug) }).count }
 
     static func onlyOnOtherMacs(
@@ -40,9 +47,12 @@ struct RemoteProjectModel: Identifiable {
                     deploys: detail.projectDeploys.filter { $0.projectKey == project.identityKey }
                 )
                 let existing = projects[project.identityKey]
+                // Macs are ordered by name and ID, so equal publish dates keep a deterministic first choice.
+                let metadata = existing.flatMap { $0.publishedAt >= state.publishedAt ? $0 : nil }
                 projects[project.identityKey] = Self(
-                    identityKey: project.identityKey, kind: existing?.kind ?? project.kind,
-                    name: existing?.name ?? project.name, machines: (existing?.machines ?? []) + [machine]
+                    identityKey: project.identityKey, kind: metadata?.kind ?? project.kind,
+                    name: metadata?.name ?? project.name, publishedAt: metadata?.publishedAt ?? state.publishedAt,
+                    machines: (existing?.machines ?? []) + [machine]
                 )
             }
         }

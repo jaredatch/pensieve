@@ -95,7 +95,7 @@ func detailColumn(for section: SidebarSection, entity: EntitySelection?,
 func prunedEntitySelection(_ entity: EntitySelection?, projectIDs: Set<UUID>,
                            categoryIDs: Set<UUID>,
                            machineIDs: Set<String>, tags: Set<String>,
-                           remoteProjectKeys: Set<String> = []) -> EntitySelection? {
+                           remoteProjectKeys: Set<String>) -> EntitySelection? {
     switch entity {
     case .project(let id):  return projectIDs.contains(id) ? entity : nil
     case .remoteProject(let key): return remoteProjectKeys.contains(key) ? entity : nil

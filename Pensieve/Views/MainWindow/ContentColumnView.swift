@@ -10,6 +10,7 @@ struct ContentColumnView: View {
     let library: SkillLibraryViewModel
     @Binding var skillFilter: SkillListFilter
     let machineStates: [MachineState]
+    let remoteProjects: [RemoteProjectModel]
     let localMachineID: String?
     let notifier: SyncStateNotifying
     let now: () -> Date
@@ -36,7 +37,7 @@ struct ContentColumnView: View {
                 entitySelection: $entitySelection,
                 searchText: $searchText,
                 platformVM: platformVM,
-                machineStates: machineStates,
+                remoteProjects: remoteProjects,
                 localMachineID: localMachineID,
                 notifier: notifier,
                 onAdd: { onAdd(.projects) },

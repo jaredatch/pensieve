@@ -5,7 +5,7 @@ struct ProjectListView: View {
     @Binding var entitySelection: EntitySelection?
     @Binding var searchText: String
     let platformVM: PlatformViewModel
-    let machineStates: [MachineState]
+    let remoteProjects: [RemoteProjectModel]
     let localMachineID: String?
     @Environment(\.modelContext) private var context
     @Query(sort: \Project.name) private var projects: [Project]
@@ -18,14 +18,14 @@ struct ProjectListView: View {
     let addsFenced: Bool
 
     init(entitySelection: Binding<EntitySelection?>, searchText: Binding<String>,
-         platformVM: PlatformViewModel, machineStates: [MachineState], localMachineID: String?,
+         platformVM: PlatformViewModel, remoteProjects: [RemoteProjectModel], localMachineID: String?,
          notifier: @escaping SyncStateNotifying,
          onAdd: @escaping () -> Void,
          addsFenced: Bool) {
         _entitySelection = entitySelection
         _searchText = searchText
         self.platformVM = platformVM
-        self.machineStates = machineStates
+        self.remoteProjects = remoteProjects
         self.localMachineID = localMachineID
         self.notifier = notifier
         self.onAdd = onAdd
@@ -35,10 +35,7 @@ struct ProjectListView: View {
     private var model: ProjectListModel {
         ProjectListModel(
             projects: projects,
-            remoteProjects: RemoteProjectModel.onlyOnOtherMacs(
-                states: machineStates, localProjectIdentityKeys: Set(projects.compactMap(\.identityKey)),
-                localMachineID: localMachineID
-            ),
+            remoteProjects: remoteProjects,
             deployIndex: platformVM.deployIndex, homeDirectory: Constants.homeDirectory, searchText: searchText
         )
     }

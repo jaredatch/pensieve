@@ -13,6 +13,7 @@ struct DetailColumnView: View {
     let provenance: SkillProvenanceViewModel
     let upstreamHistory: UpstreamHistoryViewModel
     let machineStates: [MachineState]
+    let remoteProjects: [RemoteProjectModel]
     let localMachineID: String?
     let notifier: SyncStateNotifying
     let intentDependencies: DeployIntentDependencies
@@ -184,10 +185,6 @@ struct DetailColumnView: View {
 
     @ViewBuilder
     private func remoteProjectDetail(_ key: String) -> some View {
-        let remoteProjects = RemoteProjectModel.onlyOnOtherMacs(
-            states: machineStates, localProjectIdentityKeys: Set(projects.compactMap(\.identityKey)),
-            localMachineID: localMachineID, now: now
-        )
         if let project = remoteProjects.first(where: { $0.identityKey == key }) {
             RemoteProjectDetailView(model: project)
                 .id(key)

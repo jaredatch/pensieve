@@ -5,6 +5,7 @@ struct ProjectListModel {
         let selection: EntitySelection
         let presentation: ListRowModel
         let localProject: Project?
+        let sortKey: String
 
         var id: EntitySelection { selection }
     }
@@ -21,14 +22,15 @@ struct ProjectListModel {
         let local = projects.map { project in
             Row(selection: .project(project.id),
                 presentation: ListRows.project(project, deployIndex: deployIndex, homeDirectory: homeDirectory),
-                localProject: project)
+                localProject: project, sortKey: "0|" + project.id.uuidString)
         }
         let remote = remoteProjects.map { project in
             Row(selection: .remoteProject(project.identityKey), presentation: ListRows.remoteProject(project),
-                localProject: nil)
+                localProject: nil, sortKey: "1|" + project.identityKey)
         }
         let all = (local + remote).sorted {
-            $0.presentation.title.localizedStandardCompare($1.presentation.title) == .orderedAscending
+            let order = $0.presentation.title.localizedStandardCompare($1.presentation.title)
+            return order == .orderedSame ? $0.sortKey < $1.sortKey : order == .orderedAscending
         }
         totalCount = all.count
         let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()

@@ -4,6 +4,42 @@ import XCTest
 final class RemoteProjectModelTests: XCTestCase {
     private typealias Fixture = RemoteProjectTestSupport
 
+    func testNewestPublishSuppliesNameAndKindWithStableTies() throws {
+        let old = Fixture.machine(id: "air", name: "Air", projects: [Fixture.project(name: "OldName")])
+        let recentDate = Fixture.publishedAt.addingTimeInterval(86_400)
+        let recent = Fixture.machine(id: "studio", name: "Studio", projects: [
+            Fixture.project(name: "NewName", kind: "marker")
+        ], publishedAt: recentDate)
+        let middle = Fixture.machine(id: "mini", name: "Mini", projects: [Fixture.project(name: "MiddleName")],
+                                     publishedAt: Fixture.publishedAt.addingTimeInterval(3_600))
+        for states in [[old, middle, recent], [recent, middle, old]] {
+            let project = try XCTUnwrap(RemoteProjectModel.onlyOnOtherMacs(
+                states: states, localProjectIdentityKeys: [], localMachineID: InertMachineIdentity.value
+            ).first)
+            XCTAssertEqual(project.name, "NewName")
+            XCTAssertEqual(project.kind, "marker")
+            XCTAssertEqual(project.machines.map { $0.detail.name }, ["Air", "Mini", "Studio"])
+        }
+        let newestAir = Fixture.machine(id: "air", name: "Air", projects: [Fixture.project(name: "NewestAir")],
+                                        publishedAt: recentDate.addingTimeInterval(3_600))
+        for states in [[newestAir, recent], [recent, newestAir]] {
+            let project = try XCTUnwrap(RemoteProjectModel.onlyOnOtherMacs(
+                states: states, localProjectIdentityKeys: [], localMachineID: InertMachineIdentity.value
+            ).first)
+            XCTAssertEqual(project.name, "NewestAir")
+            XCTAssertEqual(project.kind, "remote")
+        }
+        let tied = Fixture.machine(id: "air", name: "Air", projects: [Fixture.project(name: "TieName")],
+                                   publishedAt: recentDate)
+        for states in [[recent, tied], [tied, recent]] {
+            let project = try XCTUnwrap(RemoteProjectModel.onlyOnOtherMacs(
+                states: states, localProjectIdentityKeys: [], localMachineID: InertMachineIdentity.value
+            ).first)
+            XCTAssertEqual(project.name, "TieName")
+            XCTAssertEqual(project.kind, "remote")
+        }
+    }
+
     func testDetailShowsEachMacPathFreshnessAndOnlyItsProjectDeploys() throws {
         let mini = Fixture.machine(projects: [Fixture.project(path: "~/Projects/mini")], deploys: [
             Fixture.deploy("alpha"), Fixture.deploy("alpha"), Fixture.deploy("alpha", platform: "cursor"),
