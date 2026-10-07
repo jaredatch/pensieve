@@ -40,6 +40,7 @@ final class MachineDetailModel {
         let displaySkillSlug: String
         let platformName: String
         let projectName: String?
+        let projectKey: String?
     }
 
     let machineID: String
@@ -132,7 +133,8 @@ private extension MachineDetailModel {
                 skillSlug: deploy.slug,
                 displaySkillSlug: PublishedStringSanitizer.name(deploy.slug, fallback: "Skill"),
                 platformName: platformName(deploy.platform),
-                projectName: nil
+                projectName: nil,
+                projectKey: nil
             )
         }
         return uniqueDeploys(summaries)
@@ -152,7 +154,8 @@ private extension MachineDetailModel {
                 displaySkillSlug: PublishedStringSanitizer.name(deploy.slug, fallback: "Skill"),
                 platformName: platformName(deploy.platform),
                 projectName: names[deploy.projectKey]
-                    ?? PublishedStringSanitizer.projectName("", identityKey: deploy.projectKey)
+                    ?? PublishedStringSanitizer.projectName("", identityKey: deploy.projectKey),
+                projectKey: deploy.projectKey
             )
         }
         return uniqueDeploys(summaries)

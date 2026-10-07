@@ -89,6 +89,15 @@ enum ListRows {
         )
     }
 
+    static func remoteProject(_ project: RemoteProjectModel) -> ListRowModel {
+        ListRowModel(
+            title: project.name,
+            trailingText: counted(project.skillCount, "skill"),
+            line2: "On " + ListFormatter.localizedString(byJoining: project.machines.map { $0.detail.name }),
+            line3: project.identityLine
+        )
+    }
+
     static func tag(_ tag: String, skills: [Skill]) -> ListRowModel {
         let carriers = skills.filter { $0.tags.contains(tag) }
         return ListRowModel(
@@ -135,8 +144,12 @@ enum ListRows {
     }
 
     static func identityLine(_ project: Project) -> String {
-        switch ProjectIdentity.Kind(rawValue: project.identityKind ?? "") {
-        case .remote: project.identityKey ?? "Git remote identity"
+        identityLine(key: project.identityKey, kind: project.identityKind)
+    }
+
+    static func identityLine(key: String?, kind: String?) -> String {
+        switch ProjectIdentity.Kind(rawValue: kind ?? "") {
+        case .remote: key ?? "Git remote identity"
         case .marker: "Local marker identity"
         case nil: "Identity pending"
         }

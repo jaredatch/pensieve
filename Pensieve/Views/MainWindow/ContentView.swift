@@ -25,18 +25,6 @@ struct ContentView: View {
     private let notifier: SyncStateNotifying
     private let machineDependencies: MachineObservabilityDependencies
 
-    /// Arrays, not Sets — this value is rebuilt on every body evaluation, and this plan exists partly
-    /// because expensive work in a render pass is a bug. Building four Sets per frame is the cheap
-    /// version of that mistake; the handler builds them once, when something actually changed.
-    private struct EntityKeys: Equatable {
-        let projectIDs: [UUID], categoryIDs: [UUID]
-        let machineIDs: [String], tags: [String]
-    }
-    private var entityKeys: EntityKeys {
-        EntityKeys(projectIDs: projects.map(\.id), categoryIDs: categories.map(\.id),
-                   machineIDs: machineStates.map(\.machineID),
-                   tags: skills.flatMap(\.tags))
-    }
     init(
         installService: SkillInstallServiceProtocol,
         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
@@ -216,11 +204,16 @@ struct ContentView: View {
 
         let entityView = selectionView
             .onChange(of: entityKeys) { _, keys in
+            let remoteProjects = RemoteProjectModel.onlyOnOtherMacs(
+                states: machineStates, localProjectIdentityKeys: Set(keys.localProjectKeys),
+                localMachineID: keys.localMachineID
+            )
             entitySelection = prunedEntitySelection(entitySelection,
                                                     projectIDs: Set(keys.projectIDs),
                                                     categoryIDs: Set(keys.categoryIDs),
                                                     machineIDs: Set(keys.machineIDs),
-                                                    tags: Set(keys.tags))
+                                                    tags: Set(keys.tags),
+                                                    remoteProjectKeys: Set(remoteProjects.map(\.identityKey)))
         }
         .onChange(of: showsMachines) { _, shows in
             section = availableSection(section, showsMachines: shows)
@@ -255,6 +248,25 @@ struct ContentView: View {
     }
 }
 private extension ContentView {
+    private struct MachineProjectKeys: Equatable {
+        let machineID: String
+        let projectKeys: [String]
+    }
+    /// Arrays keep the render-pass key cheap. The change handler builds sets only when inputs change.
+    private struct EntityKeys: Equatable {
+        let projectIDs: [UUID], categoryIDs: [UUID]
+        let machineIDs: [String], tags: [String]
+        let localProjectKeys: [String], machineProjects: [MachineProjectKeys]
+        let localMachineID: String?
+    }
+    private var entityKeys: EntityKeys {
+        EntityKeys(projectIDs: projects.map(\.id), categoryIDs: categories.map(\.id),
+                   machineIDs: machineStates.map(\.machineID),
+                   tags: skills.flatMap(\.tags), localProjectKeys: projects.compactMap(\.identityKey),
+                   machineProjects: machineStates.map {
+                       MachineProjectKeys(machineID: $0.machineID, projectKeys: $0.projects.map(\.identityKey))
+                   }, localMachineID: localMachineID)
+    }
     var library: SkillLibraryViewModel { runtime.library }
     var platformVM: PlatformViewModel { runtime.platformVM }
     var syncModel: SyncModel { runtime.syncModel }

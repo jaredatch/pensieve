@@ -262,6 +262,43 @@ final class NavigationRoutingTests: XCTestCase {
 }
 
 extension NavigationRoutingTests {
+    func testRemoteProjectRoutesByIdentityKeyOnlyInProjects() {
+        let selection = EntitySelection.remoteProject(RemoteProjectTestSupport.key)
+        XCTAssertEqual(detailColumn(for: .projects, entity: selection, selectedSkillCount: 0, skillsEmpty: false),
+                       .remoteProject(RemoteProjectTestSupport.key))
+        XCTAssertEqual(detailColumn(for: .categories, entity: selection, selectedSkillCount: 0, skillsEmpty: false),
+                       .selectEntityPrompt(.categories))
+    }
+
+    func testRemoteSelectionPrunesAfterUnpublishOrLocalRegistration() {
+        let key = RemoteProjectTestSupport.key
+        let first = RemoteProjectTestSupport.machine()
+        let second = RemoteProjectTestSupport.machine(id: "second")
+        let local = Project(name: "Registered now", path: "/local")
+        local.identityKey = key
+        let cases: [(([MachineState], [Project]), EntitySelection?)] = [
+            (([first, second], []), .remoteProject(key)),
+            (([second], []), .remoteProject(key)),
+            (([], []), nil),
+            (([first, second], [local]), nil)
+        ]
+        for ((states, projects), expected) in cases {
+            let remote = RemoteProjectModel.onlyOnOtherMacs(
+                states: states, localProjectIdentityKeys: Set(projects.compactMap(\.identityKey)),
+                localMachineID: InertMachineIdentity.value
+            )
+            let selection = prunedEntitySelection(
+                .remoteProject(key), projectIDs: Set(projects.map(\.id)), categoryIDs: [], machineIDs: [], tags: [],
+                remoteProjectKeys: Set(remote.map(\.identityKey))
+            )
+            XCTAssertEqual(selection, expected)
+            if expected == nil {
+                XCTAssertEqual(detailColumn(for: .projects, entity: selection, selectedSkillCount: 0, skillsEmpty: false),
+                               .selectEntityPrompt(.projects))
+            }
+        }
+    }
+
     func testRevealSkillSwitchesToSkillsSection() {
         let skill = Skill(name: "Reveal", directoryName: "reveal")
         var section = SidebarSection.projects

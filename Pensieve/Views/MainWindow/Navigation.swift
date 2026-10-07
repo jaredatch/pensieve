@@ -12,10 +12,11 @@ enum SidebarSection: String, Hashable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// The content column's selected entity. One case per non-skill section; skills keep their own
-/// `Set<Skill>` multi-selection in ContentView, unchanged from today.
+/// The content column's selected entity. Remote projects use their cross-machine identity;
+/// skills keep their own `Set<Skill>` multi-selection in ContentView.
 enum EntitySelection: Hashable {
     case project(UUID)
+    case remoteProject(String)
     case category(UUID)
     case machine(String)
     case tag(String)
@@ -24,7 +25,7 @@ enum EntitySelection: Hashable {
     /// refuse a mismatched pair, so a selection left over from another section is inert.
     var section: SidebarSection {
         switch self {
-        case .project:  return .projects
+        case .project, .remoteProject: return .projects
         case .category: return .categories
         case .machine:  return .machines
         case .tag:      return .tags
@@ -42,6 +43,7 @@ enum ContentColumn: Equatable {
 
 enum DetailColumn: Equatable {
     case project(UUID)
+    case remoteProject(String)
     case category(UUID)
     case machine(String)
     case tag(String)
@@ -75,6 +77,7 @@ func detailColumn(for section: SidebarSection, entity: EntitySelection?,
         guard let entity, entity.section == section else { return .selectEntityPrompt(section) }
         switch entity {
         case .project(let id):  return .project(id)
+        case .remoteProject(let key): return .remoteProject(key)
         case .category(let id): return .category(id)
         case .machine(let id):  return .machine(id)
         case .tag(let name):    return .tag(name)
@@ -91,9 +94,11 @@ func detailColumn(for section: SidebarSection, entity: EntitySelection?,
 /// selection instead. Tags are included: a tag stops existing when its last carrier loses it.
 func prunedEntitySelection(_ entity: EntitySelection?, projectIDs: Set<UUID>,
                            categoryIDs: Set<UUID>,
-                           machineIDs: Set<String>, tags: Set<String>) -> EntitySelection? {
+                           machineIDs: Set<String>, tags: Set<String>,
+                           remoteProjectKeys: Set<String> = []) -> EntitySelection? {
     switch entity {
     case .project(let id):  return projectIDs.contains(id) ? entity : nil
+    case .remoteProject(let key): return remoteProjectKeys.contains(key) ? entity : nil
     case .category(let id): return categoryIDs.contains(id) ? entity : nil
     case .machine(let id):  return machineIDs.contains(id) ? entity : nil
     case .tag(let name):    return tags.contains(name) ? entity : nil

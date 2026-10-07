@@ -5,6 +5,7 @@ struct ProjectListView: View {
     @Binding var entitySelection: EntitySelection?
     @Binding var searchText: String
     let platformVM: PlatformViewModel
+    let machineStates: [MachineState]
     let localMachineID: String?
     @Environment(\.modelContext) private var context
     @Query(sort: \Project.name) private var projects: [Project]
@@ -17,46 +18,54 @@ struct ProjectListView: View {
     let addsFenced: Bool
 
     init(entitySelection: Binding<EntitySelection?>, searchText: Binding<String>,
-         platformVM: PlatformViewModel, localMachineID: String?, notifier: @escaping SyncStateNotifying,
+         platformVM: PlatformViewModel, machineStates: [MachineState], localMachineID: String?,
+         notifier: @escaping SyncStateNotifying,
          onAdd: @escaping () -> Void,
          addsFenced: Bool) {
         _entitySelection = entitySelection
         _searchText = searchText
         self.platformVM = platformVM
+        self.machineStates = machineStates
         self.localMachineID = localMachineID
         self.notifier = notifier
         self.onAdd = onAdd
         self.addsFenced = addsFenced
     }
 
-    private var filteredProjects: [Project] {
-        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !query.isEmpty else { return projects }
-        return projects.filter { $0.name.lowercased().contains(query) }
+    private var model: ProjectListModel {
+        ProjectListModel(
+            projects: projects,
+            remoteProjects: RemoteProjectModel.onlyOnOtherMacs(
+                states: machineStates, localProjectIdentityKeys: Set(projects.compactMap(\.identityKey)),
+                localMachineID: localMachineID
+            ),
+            deployIndex: platformVM.deployIndex, homeDirectory: Constants.homeDirectory, searchText: searchText
+        )
     }
 
     var body: some View {
+        let model = model
         List(selection: $entitySelection) {
-            ForEach(filteredProjects) { project in
-                ListRowView(model: ListRows.project(project, deployIndex: platformVM.deployIndex,
-                                                     homeDirectory: Constants.homeDirectory),
+            ForEach(model.rows) { row in
+                ListRowView(model: row.presentation,
                             showsLine2: showsLine2, showsLine3: showsLine3)
-                .tag(EntitySelection.project(project.id))
+                .tag(row.selection)
                 .contextMenu {
-                    Button("Remove", role: .destructive) {
-                        removal.request(project, platformVM: platformVM, context: context)
-                        confirmingRemoval = removal.project != nil
+                    if let project = row.localProject {
+                        Button("Remove", role: .destructive) {
+                            removal.request(project, platformVM: platformVM, context: context)
+                            confirmingRemoval = removal.project != nil
+                        }
                     }
                 }
             }
         }
         .navigationTitle("Projects")
-        .navigationSubtitle(ListSubtitle.text(total: projects.count, shown: filteredProjects.count,
-                                              singular: "project", plural: "projects"))
+        .navigationSubtitle(model.subtitle)
         .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 360)
         .searchable(text: $searchText, placement: .automatic, prompt: "Search")
         .overlay {
-            if filteredProjects.isEmpty {
+            if model.rows.isEmpty {
                 if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
                     EmptyStateView("No Projects",
                                    description: "Add a project to organize and deploy skills by workspace.") {

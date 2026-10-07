@@ -36,6 +36,7 @@ struct ContentColumnView: View {
                 entitySelection: $entitySelection,
                 searchText: $searchText,
                 platformVM: platformVM,
+                machineStates: machineStates,
                 localMachineID: localMachineID,
                 notifier: notifier,
                 onAdd: { onAdd(.projects) },

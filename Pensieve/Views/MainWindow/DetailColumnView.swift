@@ -47,6 +47,8 @@ struct DetailColumnView: View {
                 projectID: id, platformVM: platformVM, library: library, onReveal: onReveal
             )
                 .id(id)
+        case .remoteProject(let key):
+            remoteProjectDetail(key)
         case .category(let id):
             CategoryDetailView(
                 categoryID: id, platformVM: platformVM, notifier: notifier, onReveal: onReveal
@@ -178,6 +180,20 @@ struct DetailColumnView: View {
 
     private func selectEntityPrompt(_ section: SidebarSection) -> some View {
         EmptyStateView.noSelection(section)
+    }
+
+    @ViewBuilder
+    private func remoteProjectDetail(_ key: String) -> some View {
+        let remoteProjects = RemoteProjectModel.onlyOnOtherMacs(
+            states: machineStates, localProjectIdentityKeys: Set(projects.compactMap(\.identityKey)),
+            localMachineID: localMachineID, now: now
+        )
+        if let project = remoteProjects.first(where: { $0.identityKey == key }) {
+            RemoteProjectDetailView(model: project)
+                .id(key)
+        } else {
+            EmptyStateView.noSelection(.projects)
+        }
     }
 
     @ViewBuilder
