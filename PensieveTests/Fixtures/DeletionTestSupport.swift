@@ -2,6 +2,12 @@ import Foundation
 import SwiftData
 @testable import Pensieve
 
+func localProjectDeployEvidence(
+    _ vm: PlatformViewModel, skill: Skill, projects: [Project], context: ModelContext
+) -> () throws -> SkillProjectDeployEvidence {
+    { try vm.localSkillProjectDeployEvidence(skill: skill, projects: projects, context: context) }
+}
+
 struct DeletionTestError: LocalizedError {
     var errorDescription: String? { "injected failure" }
 }

@@ -37,7 +37,7 @@ final class DeployIndexTests: XCTestCase {
         XCTAssertEqual(index.skillCount(inProjectKey: "b"), 0)
     }
 
-    func testKeylessProjectRecordsCountAndSummarizeOnThisMac() {
+    func testKeylessProjectRecordsCountAsProjectsNotThisMac() {
         let index = DeployIndex(records: [
             record(slug: "alpha", platform: .codex, scope: "project", path: "/checkout/agents/alpha.md"),
             record(slug: "alpha", platform: .claudeCode, scope: "project", path: "/checkout/.claude/skills/alpha"),

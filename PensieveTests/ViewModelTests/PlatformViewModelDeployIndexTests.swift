@@ -23,9 +23,8 @@ final class PlatformViewModelDeployIndexTests: XCTestCase {
         XCTAssertEqual(vm.deployIndex.summary(for: "alpha"), "Claude Code · This Mac")
 
         let context = try makeContext()
-        XCTAssertEqual(vm.removeAllDeploys(skill: skill, projects: [], localProjectEvidence: {
-            try vm.localSkillProjectDeployEvidence(skill: skill, projects: [], context: context)
-        }).batch.successes.count, 1)
+        XCTAssertEqual(vm.removeAllDeploys(skill: skill, projects: [], localProjectEvidence:
+            localProjectDeployEvidence(vm, skill: skill, projects: [], context: context)).batch.successes.count, 1)
         XCTAssertTrue(vm.deployIndex.available)
         XCTAssertFalse(vm.deployIndex.isDeployed(slug: "alpha"))
     }
