@@ -50,11 +50,13 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         XCTAssertTrue(message.contains("Nothing was changed."))
         XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").deployIntents.count, 2,
                        "The previous atomic manifest remains intact")
-        XCTAssertEqual(category.projectKeys, keys, "Failed withdrawal publication must restore the saved prune")
+        XCTAssertEqual(category.projectKeys, keys, "Withdrawal leaves shared category membership unchanged")
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 2)
         XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").categories.first?.projectKeys, keys)
         h.mapped.beforeFileWrite = nil
         try relaunchAndRetry(h, projectID: projectID)
+        XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").categories.first?.projectKeys, keys)
+        XCTAssertEqual(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).first?.projectKeys, keys)
     }
 
     func testFailedPublishAndRestoreSaveRetryRepublishesSavedWithdrawal() throws {

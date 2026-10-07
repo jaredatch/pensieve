@@ -245,7 +245,7 @@ final class SyncNudgeTests: XCTestCase {
         XCTAssertTrue(result.hasFailures)
         XCTAssertEqual(counter.value, 1)
         XCTAssertEqual(try context.fetch(FetchDescriptor<Project>()).count, 1)
-        XCTAssertFalse(category.projectKeys.contains("github.com/example/app"), "the synced rule mutated before deploy failed")
+        XCTAssertEqual(category.projectKeys, ["github.com/example/app"], "Local removal keeps the shared rule")
     }
 
     func testAppAuthoredSaveDoesNotDoubleFire() throws {

@@ -110,7 +110,9 @@ final class ProjectFolderCallerTests: XCTestCase {
         XCTAssertFalse(unregister.hasFailures)
         XCTAssertEqual(try harness.context.fetch(FetchDescriptor<Project>()).map(\.id), [harness.otherProject.id])
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0)
-        XCTAssertFalse(rule.projectKeys.contains(harness.project.identityKey!))
+        XCTAssertEqual(rule.projectKeys, ["github.com/owner/project"])
+        XCTAssertEqual(try ManifestService(fileService: harness.files)
+            .read(fromRoot: harness.root + "/store").categories.first?.projectKeys, ["github.com/owner/project"])
         XCTAssertFalse(try harness.files.entryExistsWithoutFollowingLinks(at: harness.root + "/absent"))
     }
 

@@ -77,6 +77,19 @@ struct ProjectFolderCallerHarness {
         return rule
     }
 
+    func addDirectSkill(platforms: [PlatformTarget]) throws -> Skill {
+        let slug = try SkillStore(fileService: files, baseDir: root + "/store/skills")
+            .createSkill(name: "Direct Skill", description: "Direct", body: "# Direct")
+        let direct = Skill(name: "Direct Skill", directoryName: slug)
+        context.insert(direct)
+        for platform in platforms {
+            context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.localID,
+                skillSlug: slug, platformRaw: platform.rawValue, projectKey: project.identityKey))
+        }
+        try context.save()
+        return direct
+    }
+
     func model() -> DeployIntentModel {
         let manifest = ManifestService(fileService: files)
         return DeployIntentModel(platformVM: platformVM, dependencies: DeployIntentDependencies(

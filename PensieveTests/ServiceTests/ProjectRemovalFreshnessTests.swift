@@ -144,10 +144,10 @@ final class ProjectRemovalFreshnessTests: XCTestCase {
             XCTAssertTrue(model.error?.contains("retry to complete it.") == true)
             XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 2)
             XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), unchanged ? 1 : 0)
-            XCTAssertEqual(category.projectKeys, unchanged ? [h.project.identityKey!] : [])
+            XCTAssertEqual(category.projectKeys, [h.project.identityKey!])
             XCTAssertEqual(try manifest.read(fromRoot: root).deployIntents.count, unchanged ? 1 : 0)
             XCTAssertEqual(try manifest.read(fromRoot: root).categories.first?.projectKeys,
-                           unchanged ? [h.project.identityKey!] : [])
+                           [h.project.identityKey!])
         }
     }
 
