@@ -204,10 +204,18 @@ final class AddProjectSheetHostTests: XCTestCase {
 
     // SwiftUI's virtual accessibility children are absent in this in-process host. Recognize
     // the actual live render, then send mouse events at Add's rendered position.
+    // Recognize a 2x render whatever the display's backing scale. On the CI runner's 1x display,
+    // recognition misread the status caption ("Marker will he created on Addi").
     private func renderedText(in host: NSView) throws -> [(text: String, bounds: CGRect)] {
         host.layoutSubtreeIfNeeded()
-        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let bounds = host.bounds
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int((bounds.width * 2).rounded(.up)),
+            pixelsHigh: Int((bounds.height * 2).rounded(.up)), bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ))
+        bitmap.size = bounds.size
+        host.cacheDisplay(in: bounds, to: bitmap)
         let image = try XCTUnwrap(bitmap.cgImage)
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
