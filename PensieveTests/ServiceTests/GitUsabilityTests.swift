@@ -11,9 +11,9 @@ final class GitUsabilityTests: XCTestCase {
             XCTAssertEqual(try fixture.broken(state).probeUsability(), state)
         }
         let missing = GitService(executablePath: fixture.base + "/missing")
-        guard case let .failed(detail) = missing.probeUsability() else { return XCTFail("launch failure must be unknown") }
+        guard case let .failed(detail) = try missing.probeUsability() else { return XCTFail("launch failure must be unknown") }
         XCTAssertFalse(detail.text.isEmpty)
-        XCTAssertEqual(GitService().probeUsability(), .usable)
+        XCTAssertEqual(try GitService().probeUsability(), .usable)
     }
 
     func testGeneratedRemoteOutcomeSweep() throws {

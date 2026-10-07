@@ -119,7 +119,7 @@ final class AppRuntime {
         updateCheckOperation: UpdateCheckOperation? = nil,
         updateCheckApply: (([UUID: SkillUpdateCheckResult]) throws -> Void)? = nil,
         now: @escaping () -> Date = Date.init,
-        gitUsabilityProbe: @escaping () -> GitUsability = { GitService().probeUsability() },
+        gitUsabilityProbe: @escaping () throws -> GitUsability = { try GitService().probeUsability() },
         // The paths configure the coordinator first (`bootstrapTask`); this hook runs after, so a test
         // can swap in stubs. A bare `configure()` here would reset the paths to production.
         coordinatorConfigure: @escaping CoordinatorConfigure = { _ in }

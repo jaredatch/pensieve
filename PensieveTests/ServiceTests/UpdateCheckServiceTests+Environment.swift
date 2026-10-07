@@ -8,16 +8,33 @@ extension UpdateCheckServiceTests {
         let failure = GitError.outputReadFailed(detail: "Authentication failed; HTTP 403; Xcode license not accepted")
         let message = "Pensieve couldn’t read git’s output: Authentication failed; HTTP 403; Xcode license not accepted"
         try context.save()
-        for stage in ["head", "clone"] {
+        for stage in ["preflight", "head", "clone", "diagnostic", "tree-diagnostic"] {
             git.remoteHeadErrors = stage == "head" ? ["fixture://repo": failure] : [:]
+            if stage == "diagnostic" {
+                git.remoteHeadErrors = ["fixture://repo": .commandFailed(args: ["ls-remote"], exitCode: 128, stderr: "failed")]
+            }
             git.cloneErrors = stage == "clone" ? ["fixture://repo": failure] : [:]
             git.heads["fixture://repo"] = "new-head"
             let before = git.probeCalls
             // A local pipe failure must not be reclassified by a subsequent host diagnostic.
-            git.onProbe = { self.git.probeCalls == before + 1 ? .usable : .licenseNotAccepted }
+            git.onProbe = {
+                if stage == "preflight" || (stage.contains("diagnostic") && self.git.probeCalls > before + 1) { throw failure }
+                return self.git.probeCalls == before + 1 ? .usable : .licenseNotAccepted
+            }
+            if stage == "preflight" {
+                XCTAssertThrowsError(try makeService().checkAll(context: context)) { error in
+                    guard let execution = error as? UpdateCheckExecutionFailure else { return XCTFail("\(error)") }
+                    XCTAssertEqual(execution.underlying as? GitError, failure)
+                    XCTAssertNil(execution.report.environmentError)
+                    XCTAssertNil(execution.report.gitUsability)
+                }
+                try assertPreviousCheck(skill.id)
+                continue
+            }
             let report = try makeService().checkAll(context: context)
             XCTAssertNil(report.environmentError)
-            XCTAssertEqual(git.probeCalls, before + 1)
+            XCTAssertEqual(report.gitUsability, .usable)
+            XCTAssertEqual(git.probeCalls, before + (stage.contains("diagnostic") ? 2 : 1))
             XCTAssertEqual(try persistedSkill(id: skill.id).checkError, message)
             XCTAssertTrue(try persistedSkill(id: skill.id).updateAvailable)
         }
@@ -176,6 +193,18 @@ extension UpdateCheckServiceTests {
         XCTAssertNil(report.environmentError)
         XCTAssertEqual(git.treeHashCalls.count, 3)
         XCTAssertEqual(git.probeCalls, 2, "one run preflight plus one diagnostic probe for the batch")
+        let before = git.probeCalls
+        git.onProbe = {
+            if self.git.probeCalls == before + 1 { return .usable }
+            throw GitError.outputReadFailed(detail: "diagnostic EIO")
+        }
+        let local = try makeService().checkAll(context: context)
+        XCTAssertNil(local.environmentError)
+        XCTAssertEqual(local.gitUsability, .usable)
+        XCTAssertEqual(git.probeCalls, before + 2, "a failed diagnostic is also cached for the batch")
+        for skill in try ModelContext(container).fetch(FetchDescriptor<Skill>()) {
+            XCTAssertEqual(skill.checkError, "Pensieve couldn’t read git’s output: diagnostic EIO")
+        }
     }
 
     func testReportCarriesActualUsabilityAcrossOfflineAndRecovery() throws {

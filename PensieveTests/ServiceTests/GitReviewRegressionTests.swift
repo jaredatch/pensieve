@@ -61,8 +61,8 @@ final class GitReviewRegressionTests: XCTestCase {
                 MESSAGE
                 exit 1
                 """)
-            XCTAssertEqual(git.probeUsability(), .developerToolsMissing)
-            XCTAssertTrue(git.probeUsability().message?.contains("xcode-select --install") == true)
+            XCTAssertEqual(try git.probeUsability(), .developerToolsMissing)
+            XCTAssertTrue(try git.probeUsability().message?.contains("xcode-select --install") == true)
         }
     }
 

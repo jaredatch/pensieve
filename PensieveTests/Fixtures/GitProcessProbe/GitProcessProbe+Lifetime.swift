@@ -9,6 +9,9 @@ extension GitProcessProbe {
         let pipe = mode.contains("stdout") ? 1 : 2
         let writing = mode.contains("writing")
         let afterExit = mode == "holder-after-exit-failure"
+        let partial = mode.hasSuffix("partial")
+        let pidPath = root + "/holder"
+        let publish = { if partial { try files.writeFile(at: pidPath + ".resume", content: "publish") } }
         do {
             try files.writeExecutableFile(at: executable, content: """
             #!/usr/bin/python3
@@ -18,7 +21,10 @@ extension GitProcessProbe {
                 os.setsid()
                 os.close(\(pipe == 1 ? 2 : 1))
                 with open('\(root)/children/' + str(os.getpid()), 'w') as f: f.write('holder')
-                with open('\(root)/holder', 'w') as f: f.write(str(os.getpid()))
+                with open('\(root)/holder', 'w') as f:
+                    if \(partial ? "True" : "False"):
+                        while not os.path.exists('\(root)/holder.resume'): time.sleep(0.001)
+                    f.write(str(os.getpid()))
                 while True:
                     if \(writing ? "True" : "False"):
                         try: os.write(\(pipe), b'H' * 4096)
@@ -40,18 +46,22 @@ extension GitProcessProbe {
             })
             let output: GitService.GitDataOutput
             do { output = try service.runData(["--version"], in: nil) } catch GitError.outputReadFailed {
-                let pid = pid_t(try files.readFile(at: root + "/holder")) ?? 0
+                let pid = try readPID(at: pidPath, onIncomplete: publish)
                 return failedAfterExit && pid > 0 && kill(pid, 0) == 0
                     ? "OK read error after exit; holder alive" : "FAIL exit fault"
             }
-            let pid = pid_t(try files.readFile(at: root + "/holder")) ?? 0
-            let alive = pid > 0 && kill(pid, 0) == 0
-            // The holder may interleave H bytes; remove only those independently known fixture bytes.
-            let intact = Data(output.stdout.filter { $0 != 72 }) == Data(repeating: 79, count: 262_144)
-                && Data(output.stderr.filter { $0 != 72 }) == Data(repeating: 69, count: 262_144)
-            return alive && intact && output.exit == 23
-                ? "OK output, status; holder alive" : "FAIL alive=\(alive), intact=\(intact)"
+            let pid = try readPID(at: pidPath, onIncomplete: publish)
+            return holderResult(output, pid: pid)
         } catch { return "FAIL \(error)" }
+    }
+
+    private static func holderResult(_ output: GitService.GitDataOutput, pid: pid_t) -> String {
+        let alive = kill(pid, 0) == 0
+        // The holder may interleave H bytes; remove only those independently known fixture bytes.
+        let intact = Data(output.stdout.filter { $0 != 72 }) == Data(repeating: 79, count: 262_144)
+            && Data(output.stderr.filter { $0 != 72 }) == Data(repeating: 69, count: 262_144)
+        return alive && intact && output.exit == 23
+            ? "OK output, status; holder alive" : "FAIL alive=\(alive), intact=\(intact)"
     }
 
     private static func waitForUnreapedExit(_ pid: pid_t) {

@@ -63,7 +63,15 @@ final class GitProcess {
         defer { posix_spawnattr_destroy(&attributes) }
         // A new group is established atomically in the child, before executable code runs.
         try requireZero(posix_spawnattr_setpgroup(&attributes, 0))
-        try requireZero(posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT)))
+        // Executor threads can block signals, and the app may ignore them. Neither belongs to git.
+        var emptyMask = sigset_t()
+        var defaultSignals = sigset_t()
+        sigemptyset(&emptyMask)
+        sigfillset(&defaultSignals)
+        try requireZero(posix_spawnattr_setsigmask(&attributes, &emptyMask))
+        try requireZero(posix_spawnattr_setsigdefault(&attributes, &defaultSignals))
+        let flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF
+        try requireZero(posix_spawnattr_setflags(&attributes, Int16(flags)))
         try requireZero(posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0))
         try requireZero(posix_spawn_file_actions_adddup2(&actions, stdout, STDOUT_FILENO))
         try requireZero(posix_spawn_file_actions_adddup2(&actions, stderr, STDERR_FILENO))

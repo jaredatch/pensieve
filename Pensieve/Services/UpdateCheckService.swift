@@ -38,7 +38,7 @@ enum UpdateCheckSchedule {
 }
 
 protocol UpdateCheckGitServing {
-    func probeUsability() -> GitUsability
+    func probeUsability() throws -> GitUsability
     func remoteHead(remote: String, ref: String,
                     credential: GitCredential?) throws -> String?
     func cloneShallow(remote: String, branch: String?, into path: String,
@@ -204,13 +204,13 @@ extension UpdateCheckService {
         }
 
         guard !batches.isEmpty else { return report }
-        let usability = gitService.probeUsability()
-        report.gitUsability = usability
-        guard usability == .usable else {
-            report.environmentError = GitError.unusable(usability)
-            return report
-        }
         do {
+            let usability = try gitService.probeUsability()
+            report.gitUsability = usability
+            guard usability == .usable else {
+                report.environmentError = GitError.unusable(usability)
+                return report
+            }
             for key in batches.keys.sorted(by: batchOrder) {
                 if let snapshots = batches[key] {
                     try checkBatch(key: key, snapshots: snapshots, context: context, report: &report)
@@ -287,10 +287,11 @@ extension UpdateCheckService {
         let commitDate = try gitService.commitDate(at: checkout)
         // Read the whole batch before persisting: a host failure on a later tree preserves earlier skills too.
         let trees = try snapshots.map { snapshot -> (Snapshot, Result<String, Error>) in
-            let tree = Result { try gitService.treeHash(at: checkout, path: snapshot.origin.path) }
+            var tree = Result { try gitService.treeHash(at: checkout, path: snapshot.origin.path) }
             if case let .failure(error) = tree {
                 let failure = diagnostics.classify(error)
                 if failure.environment { throw failure.error }
+                tree = .failure(failure.error)
             }
             return (snapshot, tree)
         }

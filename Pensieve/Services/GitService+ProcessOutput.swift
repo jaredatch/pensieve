@@ -11,24 +11,28 @@ extension GitProcess {
         var err = Data()
         var outOpen = true
         var errOpen = true
+        var buffer = [UInt8](repeating: 0, count: 16_384)
         do {
+            let events = try GitOutputEvents(child: self)
             while true {
-                let exited = try hasExited()
+                let exited = try events.exitNotified || hasExited()
                 if exited {
                     let outRemaining = try queuedBytes(stdout)
                     let errRemaining = try queuedBytes(stderr)
-                    try read(stdout, maximum: outRemaining, into: &out, exited: true)
-                    try read(stderr, maximum: errRemaining, into: &err, exited: true)
+                    try read(stdout, maximum: outRemaining, into: &out, buffer: &buffer, exited: true)
+                    try read(stderr, maximum: errRemaining, into: &err, buffer: &buffer, exited: true)
                     return try GitService.GitDataOutput(stdout: out, stderr: err, exit: reap())
                 }
-                if outOpen { outOpen = try read(stdout, maximum: 65_536, into: &out, exited: false) }
-                if errOpen { errOpen = try read(stderr, maximum: 65_536, into: &err, exited: false) }
-                var descriptors = [pollfd(fd: outOpen ? stdout : -1, events: Int16(POLLIN), revents: 0),
-                                   pollfd(fd: errOpen ? stderr : -1, events: Int16(POLLIN), revents: 0)]
-                // EOF can precede child exit. Even with no open pipe, observe git's life at this interval.
-                if poll(&descriptors, nfds_t(descriptors.count), 10) == -1, errno != EINTR {
-                    throw Self.posixError()
+                if outOpen {
+                    outOpen = try read(stdout, maximum: 65_536, into: &out, buffer: &buffer, exited: false)
+                    if !outOpen { try events.removePipe(stdout) }
                 }
+                if errOpen {
+                    errOpen = try read(stderr, maximum: 65_536, into: &err, buffer: &buffer, exited: false)
+                    if !errOpen { try events.removePipe(stderr) }
+                }
+                // Pipe readiness and child exit both wake this caller, including exit after both EOFs.
+                try events.wait()
             }
         } catch {
             // This child remains unreaped even if exit was already observed. Its group cannot belong
@@ -48,12 +52,12 @@ extension GitProcess {
     }
 
     @discardableResult
-    private func read(_ descriptor: Int32, maximum: Int, into data: inout Data, exited: Bool) throws -> Bool {
+    private func read(_ descriptor: Int32, maximum: Int, into data: inout Data,
+                      buffer: inout [UInt8], exited: Bool) throws -> Bool {
         #if GIT_PROCESS_PROBE
         try probeHooks?.beforeRead(pid, descriptor, descriptor == stdout, exited)
         #endif
         var remaining = maximum
-        var buffer = [UInt8](repeating: 0, count: min(16_384, max(1, maximum)))
         while remaining > 0 {
             let count = Darwin.read(descriptor, &buffer, min(buffer.count, remaining))
             if count > 0 {
@@ -70,5 +74,59 @@ extension GitProcess {
             }
         }
         return true
+    }
+}
+
+/// Kernel notifications do not reap the child. Its identity remains owned until all reads succeed.
+private final class GitOutputEvents {
+    private var queue: Int32
+    private var ready = Array(repeating: kevent(), count: 3)
+    private(set) var exitNotified = false
+
+    init(child: GitProcess) throws {
+        queue = kqueue()
+        guard queue != -1 else { throw GitProcess.posixError() }
+        do {
+            guard fcntl(queue, F_SETFD, FD_CLOEXEC) != -1 else { throw GitProcess.posixError() }
+            try change(ident: UInt(child.stdout), filter: Int16(EVFILT_READ), flags: UInt16(EV_ADD))
+            try change(ident: UInt(child.stderr), filter: Int16(EVFILT_READ), flags: UInt16(EV_ADD))
+            do {
+                try change(ident: UInt(child.pid), filter: Int16(EVFILT_PROC),
+                           flags: UInt16(EV_ADD | EV_ONESHOT), notes: UInt32(NOTE_EXIT))
+            } catch {
+                // A fast child may be a zombie before registration; waitid still owns its exit.
+                guard (error as NSError).code == Int(ESRCH), try child.hasExited() else { throw error }
+                exitNotified = true
+            }
+        } catch {
+            close(queue)
+            queue = -1
+            throw error
+        }
+    }
+
+    deinit { if queue != -1 { close(queue) } }
+
+    func removePipe(_ descriptor: Int32) throws {
+        try change(ident: UInt(descriptor), filter: Int16(EVFILT_READ), flags: UInt16(EV_DELETE))
+    }
+
+    private func change(ident: UInt, filter: Int16, flags: UInt16, notes: UInt32 = 0) throws {
+        var event = kevent(ident: ident, filter: filter, flags: flags, fflags: notes, data: 0, udata: nil)
+        while kevent(queue, &event, 1, nil, 0, nil) == -1 {
+            guard errno == EINTR else { throw GitProcess.posixError() }
+        }
+    }
+
+    func wait() throws {
+        let count = kevent(queue, nil, 0, &ready, Int32(ready.count), nil)
+        if count == -1 {
+            guard errno == EINTR else { throw GitProcess.posixError() }
+            return
+        }
+        for event in ready.prefix(Int(count)) {
+            if event.flags & UInt16(EV_ERROR) != 0 { throw GitProcess.posixError(Int32(event.data)) }
+            if event.filter == Int16(EVFILT_PROC), event.fflags & UInt32(NOTE_EXIT) != 0 { exitNotified = true }
+        }
     }
 }

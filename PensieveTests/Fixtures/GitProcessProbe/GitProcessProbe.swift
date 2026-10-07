@@ -50,6 +50,9 @@ enum GitProcessProbe {
     }
 
     static func run(_ mode: String, executable: String) -> String {
+        if mode == "spawn-signals" { return spawnSignals() }
+        if mode == "exit-latency" { return exitLatency() }
+        if mode == "usability-read" || mode == "confirmation-read" { return usabilityRead(mode) }
         if mode.hasPrefix("holder-") { return holder(mode) }
         if mode.hasPrefix("group-") { return groupFailure(mode) }
         if mode == "blocking" { return blocking(executable: executable) }
@@ -61,7 +64,7 @@ enum GitProcessProbe {
                 completed.enter()
                 BlockingWork.task(priority: .utility) {
                     // Exact production probe path, including its default executable and pipe reader.
-                    state.record(git().probeUsability() == .usable)
+                    state.record((try? git().probeUsability()) == .usable)
                     completed.leave()
                 }
             }

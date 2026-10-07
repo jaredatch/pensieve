@@ -8,6 +8,8 @@ extension GitProcessProbe {
         let root = (CommandLine.arguments[3] as NSString).deletingLastPathComponent
         let files = FileService()
         let executable = root + "/group-git"
+        let stdoutFailure = mode.contains("stdout")
+        let partial = mode.hasSuffix("partial")
         var gitPID: pid_t = 0
         var helperPID: pid_t = 0
         var admitted = false
@@ -18,19 +20,20 @@ extension GitProcessProbe {
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
             child = os.fork()
             if child == 0:
-                os.close(\(mode == "group-stdout" ? 1 : 2))
-                with open('\(root)/helper', 'w') as f: f.write(str(os.getpid()))
+                os.close(\(stdoutFailure ? 1 : 2))
+                with open('\(root)/children/' + str(os.getpid()), 'w') as f: f.write('helper')
+                with open('\(root)/helper', 'w') as f:
+                    if \(partial ? "True" : "False"):
+                        while not os.path.exists('\(root)/helper.resume'): time.sleep(0.001)
+                    f.write(str(os.getpid()))
             while True: time.sleep(1)
             """)
             let service = git(executable) { pid, descriptor, stdout, _ in
-                guard stdout == (mode == "group-stdout") else { return }
+                guard stdout == stdoutFailure else { return }
                 gitPID = pid
-                let deadline = ProcessInfo.processInfo.systemUptime + 5
-                while !files.fileExists(at: root + "/helper"), ProcessInfo.processInfo.systemUptime < deadline {
-                    Thread.sleep(forTimeInterval: 0.01)
+                helperPID = try readPID(at: root + "/helper") {
+                    if partial { try files.writeFile(at: root + "/helper.resume", content: "publish") }
                 }
-                helperPID = pid_t(try files.readFile(at: root + "/helper")) ?? 0
-                guard helperPID > 0 else { throw GitProcess.posixError(EIO) }
                 record(helperPID)
                 admitted = getpgid(pid) == pid && getpgid(helperPID) == pid
                     && kill(pid, 0) == 0 && kill(helperPID, 0) == 0

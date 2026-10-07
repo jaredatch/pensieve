@@ -65,7 +65,7 @@ struct GitCommit: Equatable {
 }
 
 protocol GitServiceProtocol {
-    func probeUsability() -> GitUsability
+    func probeUsability() throws -> GitUsability
     func initRepository(at path: String) throws
     func setRemote(_ url: String, at path: String) throws
     /// Remove `origin`. Throws when there is none (git exits 2); callers guard with the configured URL.
@@ -286,7 +286,7 @@ struct GitService: GitServiceProtocol {
         let detail = stderr.isEmpty ? (String(bytes: outData, encoding: .utf8) ?? "") : stderr
         var confirmingProbe: GitUsability?
         if args != ["--version"], GitUsability.environmentFailure(exit: output.exit, output: detail) != nil {
-            let answer = probeUsability()
+            let answer = try probeUsability()
             try answer.requireUsable()
             confirmingProbe = answer
         }

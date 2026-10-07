@@ -69,7 +69,7 @@ final class GitFailureSyncTests: XCTestCase {
         try fixture.files.deleteFile(at: fixture.root + "/.git/HEAD")
         let before = try fixture.snapshot()
         let git = GitService()
-        XCTAssertEqual(git.probeUsability(), .usable)
+        XCTAssertEqual(try git.probeUsability(), .usable)
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         let engine = SyncEngine(lockPath: fixture.support + "/sync.lock")
         XCTAssertThrowsError(try engine.sync(root: fixture.root, message: "test", credential: nil,

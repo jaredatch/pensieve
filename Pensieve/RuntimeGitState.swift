@@ -13,9 +13,9 @@ final class RuntimeGitState {
     private(set) var usability: GitUsability?
     private var evidenceOrder = 0
     private var appliedEvidenceOrder = 0
-    private let probe: () -> GitUsability
+    private let probe: () throws -> GitUsability
 
-    init(probe: @escaping () -> GitUsability) { self.probe = probe }
+    init(probe: @escaping () throws -> GitUsability) { self.probe = probe }
 
     func failureClassifier() -> (Error) -> ClassifiedUpdateFailure {
         let probe = probe
@@ -47,9 +47,15 @@ final class RuntimeGitState {
         let probe = probe
         let read = model.configurationRead()
         let (observed, remote) = await BlockingWork.task(priority: .utility) {
-            let observed = probingGit ? probe() : nil
-            let remote = (observed ?? cached) == .usable ? read() : nil
-            return (observed, remote)
+            () -> (GitUsability?, Result<String?, Error>?) in
+            do {
+                let observed = probingGit ? try probe() : nil
+                let remote = (observed ?? cached) == .usable ? read() : nil
+                return (observed, remote)
+            } catch {
+                // A local probe read failure is configuration evidence, never host usability evidence.
+                return (nil, .failure(error))
+            }
         }.value
         let change: Change?
         if let observed, let evidence {

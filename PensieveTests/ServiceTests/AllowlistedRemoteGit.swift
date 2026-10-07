@@ -15,7 +15,7 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
         self.acceptedRemote = acceptedRemote
     }
 
-    func probeUsability() -> GitUsability { wrapped.probeUsability() }
+    func probeUsability() throws -> GitUsability { try wrapped.probeUsability() }
 
     /// The ONLY override: report an accepted URL when the wrapped service has an origin (preserving the
     /// `.noRemote` path when it does not).

@@ -10,7 +10,7 @@ final class AppRuntimeGitUsabilityTests: XCTestCase {
             let git = try fixture.broken(state)
             let runtime = try AppRuntime(defaults: isolatedDefaults("launch-\(index)"), paths: fixture.paths, gitUsabilityProbe: {
                 XCTAssertFalse(Thread.isMainThread)
-                return git.probeUsability()
+                return try git.probeUsability()
             })
             await runtime.bootstrapTask.value
             XCTAssertEqual(runtime.gitUsability, state)
@@ -22,5 +22,21 @@ final class AppRuntimeGitUsabilityTests: XCTestCase {
                 XCTAssertNil(runtime.gitUsability?.message)
             }
         }
+        let fixture = try GitFailureFixture()
+        defer { try? fixture.remove() }
+        var failRead = false
+        let runtime = try AppRuntime(defaults: isolatedDefaults("local-probe-read"), paths: fixture.paths, gitUsabilityProbe: {
+            if failRead { throw GitError.outputReadFailed(detail: "probe EIO") }
+            return .usable
+        })
+        await runtime.bootstrapTask.value
+        failRead = true
+        await runtime.refreshGitUsability()
+        XCTAssertEqual(runtime.gitUsability, .usable, "A local read failure supplies no host evidence")
+        XCTAssertEqual(runtime.syncModel.configurationError, "Pensieve couldn’t read git’s output: probe EIO")
+        failRead = false
+        await runtime.refreshGitUsability()
+        XCTAssertEqual(runtime.gitUsability, .usable)
+        XCTAssertNil(runtime.syncModel.configurationError)
     }
 }
