@@ -91,8 +91,8 @@ final class ProjectFolderThirdFixTests: XCTestCase {
         for path in relativePaths {
             h.project.path = path
             try h.deployState.replaceAll(platforms.filter(\.usesSymlinks).map { record(h, platform: $0) })
-            let result = vm.removeAllDeploys(skill: h.skill, projects: [h.project], localProjectEvidence:
-                localProjectDeployEvidence(vm, skill: h.skill, projects: [h.project], context: h.context)).batch
+            let result = removeAllDeploysWithLocalEvidence(vm, skill: h.skill, projects: [h.project],
+                context: h.context).batch
             XCTAssertEqual(result.successes.count, 3)
             XCTAssertFalse(result.hasFailures)
             XCTAssertEqual(try h.deployState.read().records, [])

@@ -78,8 +78,8 @@ extension CursorOwnershipTests {
         h.context.insert(sibling)
         let path = artifactPath(.claudeCode, project: project.path)
         try plant(owned: true, legacy: false, platform: .claudeCode, path: path, project: project.path)
-        let result = h.vm.removeAllDeploys(skill: skill, projects: [project, sibling], localProjectEvidence:
-            localProjectDeployEvidence(h.vm, skill: skill, projects: [project, sibling], context: h.context))
+        let result = removeAllDeploysWithLocalEvidence(h.vm, skill: skill, projects: [project, sibling],
+            context: h.context)
         XCTAssertFalse(result.batch.hasFailures)
         XCTAssertEqual(result.batch.successes.map(\.target), [.project(project.id), .project(sibling.id)])
         XCTAssertTrue(result.didChangeDeploys)

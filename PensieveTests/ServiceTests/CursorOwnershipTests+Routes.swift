@@ -147,8 +147,8 @@ extension CursorOwnershipTests {
         } else {
             XCTAssertEqual(try mapped.readFile(at: path), "User rule")
         }
-        _ = vm.removeAllDeploys(skill: skill, projects: [project], localProjectEvidence:
-            localProjectDeployEvidence(vm, skill: skill, projects: [project], context: context)).batch
+        _ = removeAllDeploysWithLocalEvidence(vm, skill: skill, projects: [project],
+            context: context).batch
         try mapped.deleteFile(at: path)
     }
 
@@ -175,8 +175,8 @@ extension CursorOwnershipTests {
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<IntentAssignment>()), 1)
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<DeployRecord>()), 2)
             XCTAssertTrue(reconciler.reconcile(context: context).outcomes.isEmpty)
-            _ = vm.removeAllDeploys(skill: skill, projects: [], localProjectEvidence:
-                localProjectDeployEvidence(vm, skill: skill, projects: [], context: context)).batch
+            _ = removeAllDeploysWithLocalEvidence(vm, skill: skill, projects: [],
+                context: context).batch
         }
     }
 

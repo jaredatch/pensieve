@@ -6,8 +6,8 @@ extension PlatformViewModelTests {
     @MainActor
     func cleanupDeploys(_ vm: PlatformViewModel, skill: Skill, projects: [Project]) throws -> SkillCleanupResult {
         let context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
-        return vm.removeAllDeploys(skill: skill, projects: projects, localProjectEvidence:
-            localProjectDeployEvidence(vm, skill: skill, projects: projects, context: context))
+        return removeAllDeploysWithLocalEvidence(vm, skill: skill, projects: projects,
+            context: context)
     }
 
     @MainActor
@@ -18,8 +18,8 @@ extension PlatformViewModelTests {
         try h.mapped.writeFile(at: path, content: "User's foreign rule")
         try h.base.deployState.upsert(DeployStateRecord(slug: h.base.skill.directoryName, platform: "cursor",
             scope: "user", projectIdentityKey: nil, artifactPath: path, recordedAt: "old"))
-        let result = h.vm.removeAllDeploys(skill: h.base.skill, projects: [], localProjectEvidence:
-            localProjectDeployEvidence(h.vm, skill: h.base.skill, projects: [], context: h.base.context)).batch
+        let result = removeAllDeploysWithLocalEvidence(h.vm, skill: h.base.skill, projects: [],
+            context: h.base.context).batch
         XCTAssertEqual(result.successes.count, 1)
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(try h.mapped.readFile(at: path), "User's foreign rule")

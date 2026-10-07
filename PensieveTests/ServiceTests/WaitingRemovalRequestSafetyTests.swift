@@ -114,8 +114,10 @@ final class WaitingRemovalRequestSafetyTests: XCTestCase {
             let rule = h.vm.artifactPath(skill: h.base.skill, platform: .cursor, target: .project(h.base.project))
             XCTAssertEqual(waiting.count, 2)
             XCTAssertTrue(h.base.files.isSymlink(at: h.base.artifact(.codex)))
-            XCTAssertTrue(CursorMDC.hasOwnershipMark(in: try h.mapped.readRegularFileHeader(
-                at: rule, maximumBytes: DeployArtifactOwnership.maximumHeaderBytes)))
+            let ruleLines = try h.mapped.readFile(at: rule).components(separatedBy: "\n")
+            XCTAssertEqual(ruleLines.first, "---", identity)
+            let closingLine = try XCTUnwrap(ruleLines.dropFirst().firstIndex(of: "---"), identity)
+            XCTAssertTrue(ruleLines[1..<closingLine].contains("# pensieve: managed"), identity)
             XCTAssertFalse(h.vm.reconcileWaitingRemovals(context: h.base.context).hasFailures, identity)
             XCTAssertFalse(try h.base.files.entryExistsWithoutFollowingLinks(at: h.base.artifact(.codex)), identity)
             XCTAssertFalse(try h.base.files.entryExistsWithoutFollowingLinks(at: rule), identity)

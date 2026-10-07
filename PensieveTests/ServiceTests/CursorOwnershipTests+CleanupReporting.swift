@@ -10,8 +10,8 @@ extension CursorOwnershipTests {
         let path = artifactPath(.cursor, project: nil)
         try reviewRecord(harness.state, path: path, target: .userWide)
         let before = harness.vm.refreshCounter
-        let result = harness.vm.removeAllDeploys(skill: skill, projects: [], localProjectEvidence:
-            localProjectDeployEvidence(harness.vm, skill: skill, projects: [], context: harness.context))
+        let result = removeAllDeploysWithLocalEvidence(harness.vm, skill: skill, projects: [],
+            context: harness.context)
         XCTAssertFalse(result.batch.hasFailures)
         XCTAssertFalse(result.didChangeDeploys, "Retiring a stale record did not delete an artifact")
         XCTAssertTrue(try harness.state.read().records.isEmpty)
@@ -30,8 +30,8 @@ extension CursorOwnershipTests {
         let vm = PlatformViewModel(fileService: mapped, cursorCompiler: targeted,
             agentDetection: DeployStubDetection(installed: [.cursor]), deployStateStore: harness.state)
         let before = vm.refreshCounter
-        let result = vm.removeAllDeploys(skill: skill, projects: [], localProjectEvidence:
-            localProjectDeployEvidence(vm, skill: skill, projects: [], context: harness.context))
+        let result = removeAllDeploysWithLocalEvidence(vm, skill: skill, projects: [],
+            context: harness.context)
         XCTAssertFalse(result.batch.hasFailures)
         XCTAssertFalse(result.didChangeDeploys, "The leaf recheck preserved the replacement")
         XCTAssertEqual(vm.refreshCounter, before, "No artifact or record changed")
@@ -50,8 +50,8 @@ extension CursorOwnershipTests {
         }
         defer { mapped.beforeRuleRead = nil }
         let before = harness.vm.refreshCounter
-        let result = harness.vm.removeAllDeploys(skill: skill, projects: [], localProjectEvidence:
-            localProjectDeployEvidence(harness.vm, skill: skill, projects: [], context: harness.context))
+        let result = removeAllDeploysWithLocalEvidence(harness.vm, skill: skill, projects: [],
+            context: harness.context)
         XCTAssertEqual(result.batch.failureCount, 1)
         XCTAssertFalse(result.didChangeDeploys)
         XCTAssertEqual(harness.vm.refreshCounter, before)

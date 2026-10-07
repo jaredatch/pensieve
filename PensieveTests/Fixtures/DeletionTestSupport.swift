@@ -2,10 +2,12 @@ import Foundation
 import SwiftData
 @testable import Pensieve
 
-func localProjectDeployEvidence(
+func removeAllDeploysWithLocalEvidence(
     _ vm: PlatformViewModel, skill: Skill, projects: [Project], context: ModelContext
-) -> () throws -> SkillProjectDeployEvidence {
-    { try vm.localSkillProjectDeployEvidence(skill: skill, projects: projects, context: context) }
+) -> SkillCleanupResult {
+    vm.removeAllDeploys(skill: skill, projects: projects, localProjectEvidence: {
+        try vm.localSkillProjectDeployEvidence(skill: skill, projects: projects, context: context)
+    })
 }
 
 struct DeletionTestError: LocalizedError {

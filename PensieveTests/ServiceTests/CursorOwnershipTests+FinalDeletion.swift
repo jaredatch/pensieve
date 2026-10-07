@@ -50,10 +50,9 @@ extension CursorOwnershipTests {
         try mapped.writeFile(at: path, content: bytes)
         let vm = PlatformViewModel(fileService: mapped, cursorCompiler: AbsentCleanupCompiler(path: path),
             agentDetection: DeployStubDetection(installed: [.cursor]), deployStateStore: harness.state)
-        let readEvidence = localProjectDeployEvidence(vm, skill: skill, projects: [project], context: harness.context)
         var evidence: SkillProjectDeployEvidence?
         let result = vm.removeAllDeploys(skill: skill, projects: [project], localProjectEvidence: {
-            var local = try readEvidence()
+            var local = try vm.localSkillProjectDeployEvidence(skill: skill, projects: [project], context: harness.context)
             local.historyFailure = NSError(domain: NSPOSIXErrorDomain, code: Int(EIO))
             evidence = local
             return local
