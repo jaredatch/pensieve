@@ -239,7 +239,7 @@ final class PlatformViewModel {
             target: target, evidence: [.selection])
         let result = removalService.remove([candidate])
         logRemovalStateFailure(result)
-        error = result.failures[candidate.key].map { "Remove failed: \($0.localizedDescription)" }
+        error = result.outcomes.first?.failure.map { "Remove failed: \($0.localizedDescription)" }
     }
 
     /// Toggle a single (skill, platform, target): remove when currently deployed, deploy otherwise.

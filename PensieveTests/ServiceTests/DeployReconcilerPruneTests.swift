@@ -112,7 +112,11 @@ final class DeployReconcilerPruneTests: XCTestCase {
         try FileManager.default.createSymbolicLink(atPath: realTarget + "/gone", withDestinationPath: storeSkillsDir + "/gone")
         let symlinkedAgentDir = tempDir + "/agent-symlinked"
         try FileManager.default.createSymbolicLink(atPath: symlinkedAgentDir, withDestinationPath: realTarget)
-        let result = makeReconciler(agentDirs: [symlinkedAgentDir]).pruneDangling()
+        let result = DeployReconciler(fileService: fileService, deployState: deployStateStore,
+            pensieveSkillsDir: storeSkillsDir, agentSkillDirs: [
+                .init(platform: .claudeCode, path: symlinkedAgentDir),
+                .init(platform: .cursor, path: agentDir)
+            ]).pruneDangling()
         XCTAssertEqual(result.skippedDirs, [symlinkedAgentDir])
         XCTAssertEqual(result.removed, [])
         XCTAssertTrue(fileService.isSymlink(at: realTarget + "/gone"))

@@ -37,9 +37,7 @@ final class Batch: XCTestCase {
     private final class StubLinkService: LinkServiceProtocol {
         func removalOperation(skill: Skill, platform: PlatformTarget,
                               projectPath: String?) -> DeployRemovalOperation {
-            DeployRemovalOperation(classify: {
-                try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
-            }, delete: { try self.unlink(skill: skill, platform: platform, projectPath: projectPath) })
+            adapterRemovalOperation(skill: skill, platform: platform, projectPath: projectPath)
         }
 
         /// keys "directoryName|platform.rawValue" that should throw on link()/unlink().

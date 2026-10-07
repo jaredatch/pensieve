@@ -34,9 +34,7 @@ struct CategoryFixtureStubDetection: AgentDetectionServiceProtocol {
 final class CategoryFixtureRecordingLinkService: LinkServiceProtocol {
     func removalOperation(skill: Skill, platform: PlatformTarget,
                           projectPath: String?) -> DeployRemovalOperation {
-        DeployRemovalOperation(classify: {
-            try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
-        }, delete: { try self.unlink(skill: skill, platform: platform, projectPath: projectPath) })
+        adapterRemovalOperation(skill: skill, platform: platform, projectPath: projectPath)
     }
 
     var fileService: CategoryFixtureStubFileService?
@@ -82,8 +80,7 @@ final class CategoryFixtureRecordingLinkService: LinkServiceProtocol {
 final class CategoryFixtureRecordingCursorCompiler: CursorCompilerProtocol {
     func removalOperation(skill: Skill, platform: PlatformTarget,
                           projectPath: String?) -> DeployRemovalOperation {
-        DeployRemovalOperation(classify: { try self.ownsArtifact(skill: skill, projectPath: projectPath) },
-            delete: { try self.remove(skill: skill, projectPath: projectPath) })
+        adapterRemovalOperation(skill: skill, projectPath: projectPath)
     }
 
     var fileService: CategoryFixtureStubFileService?

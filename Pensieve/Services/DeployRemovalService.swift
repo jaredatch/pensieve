@@ -76,14 +76,12 @@ struct DeployRemovalResult {
     var didChangeRecords = false
 
     var removed: Set<DeployRemovalKey> { keys { $0.removed } }
-    var retired: Set<DeployRemovalKey> { keys { $0.retired } }
     var completed: Set<DeployRemovalKey> { keys { $0.completed } }
-    var attemptedDeletions: Set<DeployRemovalKey> { keys { $0.attemptedDeletion } }
-    var failuresBeforeDeletion: Set<DeployRemovalKey> { keys { $0.failedBeforeDeletion } }
     var didAttemptDeletion: Bool { outcomes.contains { $0.attemptedDeletion } }
-    var failures: [DeployRemovalKey: Error] {
-        Dictionary(outcomes.compactMap { outcome in outcome.failure.map { (outcome.key, $0) } },
-                   uniquingKeysWith: { first, _ in first })
+    /// Batch callers historically report inspection failures before deletion outcomes.
+    func orderedOutcomes<Input>(for inputs: [Input]) -> [(Input, DeployRemovalOutcome)] {
+        let work = Array(zip(inputs, outcomes))
+        return work.filter { $0.1.failedBeforeDeletion } + work.filter { !$0.1.failedBeforeDeletion }
     }
 
     private func keys(where predicate: (DeployRemovalOutcome) -> Bool) -> Set<DeployRemovalKey> {
@@ -91,8 +89,16 @@ struct DeployRemovalResult {
     }
 }
 
+enum DeployRemovalInspection { case perCandidate, beforeBatch }
+
 protocol DeployRemovalServicing {
-    func remove(_ candidates: [DeployRemovalCandidate]) -> DeployRemovalResult
+    func remove(_ candidates: [DeployRemovalCandidate], inspection: DeployRemovalInspection) -> DeployRemovalResult
+}
+
+extension DeployRemovalServicing {
+    func remove(_ candidates: [DeployRemovalCandidate]) -> DeployRemovalResult {
+        remove(candidates, inspection: .perCandidate)
+    }
 }
 
 /// Each occurrence is classified once. Results retain occurrence identity while record retirement
@@ -100,8 +106,15 @@ protocol DeployRemovalServicing {
 struct DeployRemovalService: DeployRemovalServicing {
     let stateStore: DeployStateStore
 
-    func remove(_ candidates: [DeployRemovalCandidate]) -> DeployRemovalResult {
-        var result = DeployRemovalResult(outcomes: candidates.map(Self.remove))
+    func remove(_ candidates: [DeployRemovalCandidate], inspection: DeployRemovalInspection) -> DeployRemovalResult {
+        let inspected = inspection == .beforeBatch ? candidates.map(Self.inspect) : nil
+        var removedPaths: Set<String> = []
+        var result = DeployRemovalResult(outcomes: candidates.enumerated().map { index, candidate in
+            let outcome = Self.remove(candidate, inspected: inspected?[index] ?? Self.inspect(candidate),
+                previouslyRemoved: removedPaths.contains(candidate.key.artifactPath))
+            if outcome.removed { removedPaths.insert(candidate.key.artifactPath) }
+            return outcome
+        })
         do {
             result.didChangeRecords = try stateStore.remove(artifactPaths: Set(result.completed.map(\.artifactPath)))
         } catch {
@@ -110,15 +123,29 @@ struct DeployRemovalService: DeployRemovalServicing {
         return result
     }
 
-    private static func remove(_ candidate: DeployRemovalCandidate) -> DeployRemovalOutcome {
+    private static func inspect(_ candidate: DeployRemovalCandidate) -> Result<Bool, Error> {
+        Result {
+            switch candidate.action {
+            case .inspect(let operation): return try operation.classify()
+            case .retireWithoutInspection: return false
+            case .fail(let error): throw error
+            }
+        }
+    }
+
+    private static func remove(_ candidate: DeployRemovalCandidate,
+                               inspected: Result<Bool, Error>, previouslyRemoved: Bool) -> DeployRemovalOutcome {
         var attempted = false
         do {
+            let owned = try inspected.get()
+            let willRetire = owned || candidate.retireIfUnowned || isUnconditionalRetirement(candidate.action)
+            if willRetire, let blocker = candidate.removalBlocker { throw blocker }
             let disposition: DeployRemovalOutcome.Disposition
             switch candidate.action {
             case .retireWithoutInspection: disposition = .retired
             case .fail(let error): throw error
             case .inspect(let operation):
-                let action = try apply(operation, blocker: candidate.removalBlocker) { attempted = true }
+                let action = try apply(operation, owned: owned, previouslyRemoved: previouslyRemoved) { attempted = true }
                 switch action {
                 case .removed: disposition = .removed
                 case .preserved: disposition = .retired
@@ -131,18 +158,24 @@ struct DeployRemovalService: DeployRemovalServicing {
         }
     }
 
+    private static func isUnconditionalRetirement(_ action: DeployRemovalAction) -> Bool {
+        if case .retireWithoutInspection = action { return true }
+        return false
+    }
+
     /// Direct leaf removals share the same check without changing deploy-state records.
     static func removeArtifact(_ operation: DeployRemovalOperation) throws -> Bool {
-        try apply(operation, blocker: nil, willDelete: {}) == .removed
+        try apply(operation, owned: operation.classify(), willDelete: {}) == .removed
     }
 
     private enum Disposition { case unowned, removed, preserved }
 
-    private static func apply(_ operation: DeployRemovalOperation, blocker: Error?,
+    private static func apply(_ operation: DeployRemovalOperation, owned: Bool, previouslyRemoved: Bool = false,
                               willDelete: () -> Void) throws -> Disposition {
-        guard try operation.classify() else { return .unowned }
-        if let blocker { throw blocker }
+        guard owned else { return .unowned }
         willDelete()
+        // A pre-admitted duplicate still completes its attempt after this batch removed the path.
+        guard !previouslyRemoved else { return .preserved }
         return try operation.delete() ? .removed : .preserved
     }
 }

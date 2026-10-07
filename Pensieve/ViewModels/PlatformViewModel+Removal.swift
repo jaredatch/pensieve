@@ -9,13 +9,10 @@ extension PlatformViewModel {
     /// Only owned artifacts are removal actions. Foreign and absent pairs retire silently.
     func removeOwnedBatch(pairs: [DeployRemovalPair], target: DeployTarget) -> BatchResult {
         let candidates = pairs.map { removalCandidate(pair: $0, target: target, evidence: [.selection]) }
-        let removal = removalService.remove(candidates)
+        let removal = removalService.remove(candidates, inspection: .beforeBatch)
         logRemovalStateFailure(removal)
         var result = BatchResult()
-        let work = Array(zip(pairs, removal.outcomes))
-        let inspectionFailures = work.filter { $0.1.failedBeforeDeletion }
-        let remaining = work.filter { !$0.1.failedBeforeDeletion }
-        for (pair, outcome) in inspectionFailures + remaining {
+        for (pair, outcome) in removal.orderedOutcomes(for: pairs) {
             let key = BatchPairKey(skillID: pair.skill.id, platform: pair.platform, target: BatchPairTarget(target))
             if let error = outcome.failure {
                 result.outcomes.append(BatchPairOutcome(skillID: pair.skill.id, skillName: pair.skill.name,
@@ -67,11 +64,8 @@ extension PlatformViewModel {
         }
         let candidates = skillCleanupCandidates(skill: skill, evidence: evidence, locallyDeployed: locallyDeployed,
             recorded: recorded, stateProblem: stateProblem)
-        let removal = removalService.remove(candidates.map(\.removal))
-        let work = Array(zip(candidates.map(\.location), removal.outcomes))
-        let inspectionFailures = work.filter { $0.1.failedBeforeDeletion }
-        let remaining = work.filter { !$0.1.failedBeforeDeletion }
-        for (location, outcome) in inspectionFailures + remaining {
+        let removal = removalService.remove(candidates.map(\.removal), inspection: .beforeBatch)
+        for (location, outcome) in removal.orderedOutcomes(for: candidates.map(\.location)) {
             let problem = outcome.failure ?? (outcome.completed ? removal.stateWriteFailure : nil)
             guard problem != nil || outcome.completed else { continue }
             result.batch.outcomes.append(BatchPairOutcome(skillID: skill.id, skillName: skill.name,

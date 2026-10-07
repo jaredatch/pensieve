@@ -142,7 +142,8 @@ final class DeployReconciler: DeployReconciling {
         var candidates: [DeployRemovalCandidate] = []
         for agent in agentSkillDirs {
             let agentDir = agent.path
-            if !agent.platform.usesSymlinks || fileService.isSymlink(at: agentDir) || !isRealpathContained(agentDir) {
+            guard agent.platform.usesSymlinks else { continue }
+            if fileService.isSymlink(at: agentDir) || !isRealpathContained(agentDir) {
                 result.skippedDirs.append(agentDir)
                 continue
             }

@@ -123,7 +123,10 @@ final class CursorCompiler: CursorCompilerProtocol {
 extension CursorCompiler {
     func removalOperation(skill: Skill, platform: PlatformTarget, projectPath: String?) -> DeployRemovalOperation {
         DeployRemovalOperation(fileService: fileService, path: outputPath(skill: skill, projectPath: projectPath)) {
-            guard platform == .cursor else { return false }
+            guard platform == .cursor else {
+                throw ArtifactOwnershipError.couldNotCheck(path: self.outputPath(skill: skill, projectPath: projectPath),
+                    reason: "Cursor compiler cannot remove \(platform.rawValue) artifacts")
+            }
             return try self.ownsArtifact(skill: skill, projectPath: projectPath)
         }
     }

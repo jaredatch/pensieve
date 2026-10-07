@@ -87,10 +87,10 @@ final class LinkService: LinkServiceProtocol {
     }
 
     func ownsArtifact(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool {
-        guard platform.usesSymlinks, projectPath == nil || platform.supportsProjectScope,
-              ProjectDirectory.canAccess(projectPath) else { return false }
+        guard platform.usesSymlinks, projectPath == nil || platform.supportsProjectScope else { return false }
         try Self.validatePathComponent(skill.directoryName)
         if platform == .hermes { try Self.validatePathComponent(Constants.hermesDefaultCategory) }
+        guard ProjectDirectory.canAccess(projectPath) else { return false }
         return try ownership.link(
             at: linkPath(skill: skill, platform: platform, projectPath: projectPath),
             skillsDirectory: Constants.pensieveSkillsDir, linksFile: platform == .codex && projectPath != nil

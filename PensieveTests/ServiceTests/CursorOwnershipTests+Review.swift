@@ -15,11 +15,44 @@ extension CursorOwnershipTests {
         let result = h.vm.removeOwnedBatch(pairs: [DeployRemovalPair(skill: skill, platform: .claudeCode),
             DeployRemovalPair(skill: second, platform: .claudeCode)], target: .project(project))
         XCTAssertFalse(result.hasFailures)
-        XCTAssertEqual(result.successes.map(\.skillID), [skill.id], "A duplicate input does not share the first success")
-        XCTAssertEqual(result.retiredPairs, [BatchPairKey(skillID: second.id, platform: .claudeCode,
-            target: .project(project.id))])
+        XCTAssertEqual(result.successes.map(\.skillID), [skill.id, second.id])
+        XCTAssertTrue(result.retiredPairs.isEmpty)
         XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path))
         XCTAssertTrue(try h.state.read().records.isEmpty)
+    }
+
+    @MainActor
+    func testDuplicateProjectPathsCleanupKeepsBothAdmittedOutcomes() throws {
+        let h = try contextAndVM()
+        let project = reviewProject(h.context)
+        let sibling = Project(name: "Same folder", path: project.path)
+        h.context.insert(sibling)
+        let path = artifactPath(.claudeCode, project: project.path)
+        try plant(owned: true, legacy: false, platform: .claudeCode, path: path, project: project.path)
+        let result = h.vm.removeAllDeploys(skill: skill, projects: [project, sibling], localDeployHistory: { _ in [] })
+        XCTAssertFalse(result.batch.hasFailures)
+        XCTAssertEqual(result.batch.successes.map(\.target), [.project(project.id), .project(sibling.id)])
+        XCTAssertTrue(result.didChangeDeploys)
+        XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path))
+        XCTAssertTrue(try h.state.read().records.isEmpty)
+    }
+
+    @MainActor
+    func testInvalidSlugFailsBeforeInaccessibleProjectCanRetireState() throws {
+        let h = try contextAndVM()
+        let project = Project(name: "Relative path", path: "relative/project")
+        let invalid = Skill(name: "Invalid", directoryName: "../escape")
+        h.context.insert(project)
+        h.context.insert(invalid)
+        let link = LinkService(fileService: mapped)
+        let path = link.linkPath(skill: invalid, platform: .claudeCode, projectPath: project.path)
+        try reviewRecord(h.state, path: path, platform: .claudeCode, target: .project(project))
+        XCTAssertThrowsError(try link.unlink(skill: invalid, platform: .claudeCode, projectPath: project.path))
+        let result = h.vm.removeOwnedBatch(pairs: [DeployRemovalPair(skill: invalid, platform: .claudeCode)],
+            target: .project(project))
+        XCTAssertEqual(result.failures.count, 1)
+        XCTAssertTrue(result.retiredPairs.isEmpty)
+        XCTAssertEqual(try h.state.read().records.map(\.artifactPath), [path])
     }
 
     @MainActor
@@ -75,7 +108,17 @@ extension CursorOwnershipTests {
             let bytes = try mapped.readFile(at: path)
             for platform in PlatformTarget.allCases where platform != .cursor {
                 let operation = compiler.removalOperation(skill: skill, platform: platform, projectPath: project)
-                XCTAssertFalse(try DeployRemovalService.removeArtifact(operation), "Cursor refuses \(platform)")
+                XCTAssertThrowsError(try DeployRemovalService.removeArtifact(operation), "Cursor refuses \(platform)")
+                let state = DeployStateStore(fileService: mapped, appSupportDir: root + "/misroute-state")
+                let record = DeployStateRecord(slug: skill.directoryName, platform: platform.rawValue, scope: "user",
+                    projectIdentityKey: nil, artifactPath: path, recordedAt: "2026-10-07T00:00:00Z")
+                try state.replaceAll([record])
+                let candidate = DeployRemovalCandidate(key: DeployRemovalKey(slug: skill.directoryName,
+                    platform: platform, projectPath: project, artifactPath: path), evidence: [.selection], operation: operation)
+                let result = DeployRemovalService(stateStore: state).remove([candidate])
+                XCTAssertNotNil(result.outcomes.first?.failure)
+                XCTAssertFalse(result.didChangeRecords)
+                XCTAssertEqual(try state.read().records, [record])
                 XCTAssertEqual(try mapped.readFile(at: path), bytes)
             }
         }

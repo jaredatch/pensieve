@@ -156,8 +156,7 @@ extension CursorOwnershipTests {
 private struct AbsentCleanupCompiler: CursorCompilerProtocol {
     func removalOperation(skill: Skill, platform: PlatformTarget,
                           projectPath: String?) -> DeployRemovalOperation {
-        DeployRemovalOperation(classify: { try self.ownsArtifact(skill: skill, projectPath: projectPath) },
-            delete: { try self.remove(skill: skill, projectPath: projectPath) })
+        adapterRemovalOperation(skill: skill, projectPath: projectPath)
     }
 
     let path: String

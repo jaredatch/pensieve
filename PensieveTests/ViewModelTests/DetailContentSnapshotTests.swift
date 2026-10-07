@@ -50,9 +50,7 @@ private struct InventoryFileService: FileServiceProtocol {
 private final class SnapshotLinkService: LinkServiceProtocol {
     func removalOperation(skill: Skill, platform: PlatformTarget,
                           projectPath: String?) -> DeployRemovalOperation {
-        DeployRemovalOperation(classify: {
-            try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
-        }, delete: { try self.unlink(skill: skill, platform: platform, projectPath: projectPath) })
+        adapterRemovalOperation(skill: skill, platform: platform, projectPath: projectPath)
     }
 
     let linkedPlatforms: Set<PlatformTarget>
@@ -90,8 +88,7 @@ private final class SnapshotLinkService: LinkServiceProtocol {
 private struct SnapshotCursorCompiler: CursorCompilerProtocol {
     func removalOperation(skill: Skill, platform: PlatformTarget,
                           projectPath: String?) -> DeployRemovalOperation {
-        DeployRemovalOperation(classify: { try self.ownsArtifact(skill: skill, projectPath: projectPath) },
-            delete: { try self.remove(skill: skill, projectPath: projectPath) })
+        adapterRemovalOperation(skill: skill, projectPath: projectPath)
     }
 
     var upToDate = false
