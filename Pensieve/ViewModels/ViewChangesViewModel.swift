@@ -179,7 +179,7 @@ final class ViewChangesViewModel {
         guard sessionID == session, !Task.isCancelled, let requested = row else { return }
         let container = context.container
         let diff = operations.diffOperation
-        let worker = Task.detached(priority: .userInitiated) {
+        let worker = BlockingWork.task(priority: .userInitiated) {
             try Task.checkCancellation()
             let preview = try diff(requested, container)
             let notes = preview.files.map { file in
@@ -220,7 +220,7 @@ extension ViewChangesViewModel {
         let container = context.container
         previewTask = Task {
             guard self.sessionID == session, !Task.isCancelled else { return }
-            let worker = Task.detached(priority: .userInitiated) {
+            let worker = BlockingWork.task(priority: .userInitiated) {
                 try UpdatesViewModel.performUnlessCancelled { try operation(requestedSkillID, container) }
             }
             self.cancelWorker = { worker.cancel() }

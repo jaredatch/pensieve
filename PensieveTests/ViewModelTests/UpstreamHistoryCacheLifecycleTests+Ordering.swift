@@ -37,7 +37,7 @@ extension UpstreamHistoryCacheLifecycleTests {
         XCTAssertTrue(removalDidStart)
         let later = disk.beginRequest(skillID: skill.id, superseding: false)
 
-        let load = Task.detached {
+        let load = BlockingWork.task {
             disk.load(
                 skillID: skill.id,
                 origin: installedOrigin,
@@ -73,7 +73,7 @@ extension UpstreamHistoryCacheLifecycleTests {
         let later = disk.beginRequest(skillID: skill.id, superseding: false)
         let fresh = result(head: String(repeating: "c", count: 40), subject: "fresh")
 
-        let store = Task.detached {
+        let store = BlockingWork.task {
             disk.store(
                 skillID: skill.id,
                 origin: installedOrigin,

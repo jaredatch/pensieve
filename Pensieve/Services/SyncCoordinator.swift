@@ -35,10 +35,14 @@ enum SyncCycleResult: Equatable {
     }
 }
 
-/// Owns the only SwiftData context used by resident sync. The actor is constructed from a detached
-/// task, so synchronous snapshot/git/rebuild work never occupies the main actor.
-@ModelActor
+/// Serial resident sync runs outside the cooperative pool. Each synchronous cycle owns a fresh
+/// SwiftData context created and used entirely within its executor job.
 actor SyncCoordinator {
+    nonisolated private let executor = BlockingSerialExecutor()
+    nonisolated var unownedExecutor: UnownedSerialExecutor { executor.asUnownedSerialExecutor() }
+    private let modelContainer: ModelContainer
+
+    init(modelContainer: ModelContainer) { self.modelContainer = modelContainer }
     private var engine: SyncEngineProtocol = SyncEngine()
     private var git: GitServiceProtocol = GitService()
     private var credentials: CredentialStoreProtocol = KeychainCredentialStore()
@@ -82,8 +86,7 @@ actor SyncCoordinator {
     func runCycle() -> SyncCycleResult {
         let result: SyncCycleResult
         do {
-            // ModelActor's synthesized context is process-lived. A fresh per-cycle context prevents an
-            // object registered by an earlier cycle from hiding a newer save made by the UI context.
+            // A fresh context prevents an earlier cycle's registered objects from hiding a newer UI save.
             let cycleContext = ModelContext(modelContainer)
             var preflightWarnings: [String] = [], preparedHeadStamp: String?, preflightAdvanced = false
             let outcome = try engine.sync(root: root, message: Self.commitMessage(at: now()),

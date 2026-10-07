@@ -9,7 +9,9 @@ extension TestWait {
     /// one wait, even if consumed after cleanup. Cleanup abandons only uncovered waits, which
     /// throw instead of returning a canned result. Timeouts also throw and stay recorded even
     /// if production swallows the error. Recorded failures never revoke granted permits.
-    /// Workers never report XCTest issues. Teardown asserts a release was granted and no
+    /// Blocking waits run on BlockingWork workers or native threads, never on the cooperative pool.
+    /// Pre-opened, nonblocking waits may run inline. Workers never report XCTest issues.
+    /// Teardown asserts a release was granted and no
     /// failure was recorded. This gate does not join operations or undo permitted work.
     /// `abandon` can count only workers already inside `wait`. A worker arriving afterwards
     /// can be abandoned after the teardown check without reporting it. The owning test's

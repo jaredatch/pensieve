@@ -78,7 +78,7 @@ final class SkillProvenanceViewModel {
     func present(skillID: UUID, context: ModelContext) async {
         let container = context.container
         let operation = driftOperation
-        let task = Task.detached(priority: .utility) {
+        let task = BlockingWork.task(priority: .utility) {
             try Task.checkCancellation()
             return try operation(skillID, container)
         }
@@ -187,7 +187,7 @@ private extension SkillProvenanceViewModel {
     ) async {
         guard checkOperationIDs[skillID] == operationID, !Task.isCancelled else { return }
         let operation = checkOperation
-        let task = Task.detached(priority: .userInitiated) {
+        let task = BlockingWork.task(priority: .userInitiated) {
             try Task.checkCancellation()
             return try operation(skillID, container)
         }

@@ -31,7 +31,7 @@ enum GitProcessProbe {
         exit(text.hasPrefix("OK") ? 0 : 1)
     }
 
-    private static func record(_ child: Process) {
+    static func record(_ child: Process) {
         do {
             try FileService().writeFile(at: registry + "/\(child.processIdentifier)", content: "child")
         } catch {
@@ -42,13 +42,14 @@ enum GitProcessProbe {
     }
 
     static func run(_ mode: String, executable: String) -> String {
+        if mode == "blocking" { return blocking(executable: executable) }
         if mode == "concurrency" {
             let count = max(64, ProcessInfo.processInfo.activeProcessorCount * 4)
             let state = ProbeResults()
             let completed = DispatchGroup()
             for _ in 0..<count {
                 completed.enter()
-                Task.detached(priority: .utility) {
+                BlockingWork.task(priority: .utility) {
                     // Exact production probe path, including its default executable and pipe reader.
                     state.record(GitService(processStarted: record).probeUsability() == .usable)
                     completed.leave()

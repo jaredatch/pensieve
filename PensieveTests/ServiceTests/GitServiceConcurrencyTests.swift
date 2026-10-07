@@ -3,6 +3,13 @@ import XCTest
 @testable import Pensieve
 
 final class GitServiceConcurrencyTests: XCTestCase {
+    func testBlockedCallsBeyondCoreCountAllowAnotherSamePriorityGitCall() throws {
+        let result = try GitProcessProbeRunner.run("blocking", timeout: 45, strictPool: true)
+        XCTAssertFalse(result.timedOut, "The off-pool watchdog must judge progress and clean up")
+        XCTAssertEqual(result.status, 0, result.report)
+        XCTAssertEqual(result.report, "OK blocked=\(ProcessInfo.processInfo.activeProcessorCount + 1); extra git completed")
+    }
+
     func testBothPipesDrainBeyondTheirBufferCapacity() throws {
         let files = FileService()
         let directory = TestTemporaryDirectory.path + "GitPipeDrainTest-" + UUID().uuidString

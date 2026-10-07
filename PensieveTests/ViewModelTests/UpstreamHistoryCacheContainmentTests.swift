@@ -64,7 +64,7 @@ final class UpstreamHistoryCacheContainmentTests: UpstreamHistoryCacheTestCase {
         XCTAssertEqual(mkfifo(cachePath(skill.id), 0o600), 0)
         let completed = expectation(description: "FIFO was refused before open")
 
-        Task.detached {
+        BlockingWork.task {
             let disk = self.cache()
             let generation = disk.beginRequest(skillID: skill.id, superseding: false)
             XCTAssertNil(disk.load(

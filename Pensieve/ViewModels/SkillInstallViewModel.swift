@@ -209,7 +209,7 @@ extension SkillInstallViewModel {
         // between the guard and the detached task's own cancellation hook.
         guard operationID == id, !Task.isCancelled else { return }
         let service = service
-        let task = Task.detached(priority: .userInitiated) {
+        let task = BlockingWork.task(priority: .userInitiated) {
             try Self.performUnlessCancelled { () throws -> SkillFetchResult in
                 if let path = url.path {
                     return try service.fetch(repo: url.repo, ref: url.ref, path: path, credential: nil)
@@ -263,7 +263,7 @@ extension SkillInstallViewModel {
             let candidate = installQueue[installIndex]
             let service = service
             let bodyWriteRegistration = bodyWriteRegistration
-            let task = Task.detached(priority: .userInitiated) {
+            let task = BlockingWork.task(priority: .userInitiated) {
                 try Self.performUnlessCancelled { () throws -> SkillInstallResult in
                     let context = ModelContext(container)
                     return try service.install(

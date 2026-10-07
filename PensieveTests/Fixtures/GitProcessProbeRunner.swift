@@ -17,7 +17,7 @@ enum GitProcessProbeRunner {
 
     static func run(
         _ mode: String, executable: String = "/usr/bin/git", timeout: TimeInterval = 20,
-        waitForReady: Bool = false, noteTimeout: Bool = true
+        waitForReady: Bool = false, noteTimeout: Bool = true, strictPool: Bool = false
     ) throws -> Outcome {
         let files = FileService()
         let directory = TestTemporaryDirectory.path + "GitProcessProbe-" + UUID().uuidString
@@ -30,6 +30,11 @@ enum GitProcessProbeRunner {
         let bundle = Bundle(for: GitServiceConcurrencyTests.self).bundleURL
         process.executableURL = bundle.appendingPathComponent("Contents/MacOS/GitProcessProbe")
         process.arguments = [mode, executable, report]
+        if strictPool {
+            var environment = ProcessInfo.processInfo.environment
+            environment["LIBDISPATCH_COOPERATIVE_POOL_STRICT"] = "1"
+            process.environment = environment
+        }
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()

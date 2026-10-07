@@ -99,6 +99,7 @@ targets:
     platform: macOS
     sources:
       - path: PensieveTests/Fixtures/GitProcessProbe
+      - path: Pensieve/Utilities/BlockingWork.swift
       - path: Pensieve/Services/GitService.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
       - path: Pensieve/Services/GitService+Usability.swift

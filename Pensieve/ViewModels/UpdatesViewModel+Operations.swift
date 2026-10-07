@@ -5,7 +5,7 @@ extension UpdatesViewModel {
     func performLoad(container: ModelContainer, operationID id: UUID) async {
         guard operationID == id, !Task.isCancelled else { return }
         let loader = rowLoader
-        let task = Task.detached(priority: .userInitiated) {
+        let task = BlockingWork.task(priority: .userInitiated) {
             try Self.performUnlessCancelled { try loader(container) }
         }
         backgroundCancel = { task.cancel() }
@@ -62,7 +62,7 @@ extension UpdatesViewModel {
         statuses[row.id] = .updating
         let apply = applyOperation
         let bodyWriteRegistration = bodyWriteRegistration
-        let task = Task.detached(priority: .userInitiated) {
+        let task = BlockingWork.task(priority: .userInitiated) {
             try Self.performUnlessCancelled {
                 try apply(
                     row.id, row.upstreamCommit, row.upstreamTree, confirmed,
@@ -122,7 +122,7 @@ extension UpdatesViewModel {
         }
         guard operationID == id, !Task.isCancelled else { return }
         let recheck = recheckOperation
-        let task = Task.detached(priority: .userInitiated) {
+        let task = BlockingWork.task(priority: .userInitiated) {
             try Self.performUnlessCancelled { try recheck(row.id, container) }
         }
         backgroundCancel = { task.cancel() }

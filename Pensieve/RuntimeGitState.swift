@@ -46,7 +46,7 @@ final class RuntimeGitState {
         let cached = usability
         let probe = probe
         let read = model.configurationRead()
-        let (observed, remote) = await Task.detached(priority: .utility) {
+        let (observed, remote) = await BlockingWork.task(priority: .utility) {
             let observed = probingGit ? probe() : nil
             let remote = (observed ?? cached) == .usable ? read() : nil
             return (observed, remote)

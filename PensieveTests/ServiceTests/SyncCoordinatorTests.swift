@@ -231,7 +231,7 @@ extension SyncCoordinatorTests {
         try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
     }
 
-    private func configuredCoordinator(
+    func configuredCoordinator(
         container: ModelContainer,
         engine: SyncEngineProtocol,
         git: GitServiceProtocol = GitService(),
@@ -250,7 +250,7 @@ extension SyncCoordinatorTests {
         return coordinator
     }
 
-    private func makeRemoteHarness() throws -> RemoteHarness {
+    func makeRemoteHarness() throws -> RemoteHarness {
         let remotePath = tempDir + "/remote.git"
         XCTAssertEqual(try rawGit(["init", "--bare", remotePath]), 0)
         let remote = "file://" + remotePath
@@ -302,14 +302,14 @@ extension SyncCoordinatorTests {
         process.waitUntilExit()
         return (process.terminationStatus, data)
     }
-    private func rawGitOutput(_ args: [String]) throws -> String {
+    func rawGitOutput(_ args: [String]) throws -> String {
         let result = try rawGitRun(args)
         XCTAssertEqual(result.status, 0)
         return (String(bytes: result.data, encoding: .utf8) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-private struct RemoteHarness {
+struct RemoteHarness {
     let remotePath, remote, clone: String
     let git: GitService
     let allowlistedGit: AllowlistedRemoteGit

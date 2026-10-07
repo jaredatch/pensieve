@@ -15,9 +15,9 @@ extension AppRuntime {
     /// Samples and applies one cycle's watcher state; the caller owns git evidence and launch signaling.
     static func runCoordinatorCycle(_ coordinator: SyncCoordinator, library: SkillLibraryViewModel,
                                     paths: AppRuntimePaths) async -> SyncCycleResult {
-        let result = await Task.detached { await coordinator.runCycle() }.value
+        let result = await coordinator.runCycle()
         let sampledWatcherEventSequence = library.coordinatorWatcherEventSequence
-        let hasUnsyncedChanges = await Task.detached { !paths.isWorktreeClean() }.value
+        let hasUnsyncedChanges = await BlockingWork.run { !paths.isWorktreeClean() }
         library.finishCoordinatorChanges(
             hasUnsyncedChanges: hasUnsyncedChanges,
             sampledWatcherEventSequence: sampledWatcherEventSequence,
