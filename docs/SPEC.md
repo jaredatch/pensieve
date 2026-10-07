@@ -197,7 +197,7 @@ Pensieve accepts three GitHub HTTPS forms: a repository URL, a `/tree/<ref>/<pat
 
 1. Choose **Add Skill from GitHub…** and paste a supported URL.
 2. Pensieve reconstructs the repository remote and shallow-clones it. A repository link discovers skills at its root, `skills/<name>`, `skills/<category>/<name>`, and `.claude/skills/<name>`. A direct tree/blob link selects the linked folder's own `SKILL.md` when present. Otherwise, a direct link lists skills at `<folder>/<name>` and `<folder>/<category>/<name>`. It also checks the repository layouts inside that folder. The pass over the folder's own children and grandchildren skips symlinked entries. A link to a missing root `SKILL.md` uses repository discovery. Candidate paths stay relative to the repository root.
-3. The picker shows every candidate. Missing/invalid required frontmatter and symlink-bearing candidates remain visible but cannot be selected.
+3. The picker shows every candidate. Missing/invalid required frontmatter and symlink-bearing candidates remain visible but cannot be selected. The symlinked entries a direct link's folder pass skips (step 2) are not candidates.
 4. Select skills and install. Pensieve vendors each complete skill directory byte-pristine into the canonical store and records schema-v3 `InstalledOrigin` coordinates.
 5. A slug collision can be skipped, renamed, or adopted. Adopt links the existing skill to the named repository and flags local drift; it never merges or overwrites the existing files.
 
