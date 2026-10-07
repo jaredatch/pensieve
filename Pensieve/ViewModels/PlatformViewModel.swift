@@ -167,12 +167,11 @@ final class PlatformViewModel {
             legacyFingerprint: platform == .cursor ? cursorCompiler.removalFingerprint(skill: skill) : nil)
     }
 
-    func reconcileWaitingRemovals(context: ModelContext, machineID: String? = nil,
-                                  identity: MachineIdentityProviding? = nil) -> BatchResult {
+    func reconcileWaitingRemovals(context: ModelContext, identity: MachineIdentityProviding? = nil) -> BatchResult {
         let reconciler: WaitingRemovalReconciling = WaitingRemovalReconciler(
             store: waitingRemovalStore, fileService: fileService, platformVM: self,
             machineIdentity: identity ?? MachineIdentity(fileService: fileService, appSupportDir: deployStateStore.appSupportDir))
-        return reconciler.reconcile(context: context, machineID: machineID)
+        return reconciler.reconcile(context: context)
     }
 
     func removalKey(pair: DeployRemovalPair, target: DeployTarget) -> DeployRemovalKey {

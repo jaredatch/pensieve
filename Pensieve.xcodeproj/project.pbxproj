@@ -120,6 +120,7 @@
 		318FCBB12122C6D08CB119DA /* SyncFooterPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C228F564CC4F45097339E523 /* SyncFooterPresentationTests.swift */; };
 		32B2487B1334E235028BE228 /* CursorOwnershipTests+SecondRetirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93CEA0ACB1B507090876A3D3 /* CursorOwnershipTests+SecondRetirement.swift */; };
 		330008FDA54D8B6C256BB540 /* TagTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F062FEB99E265A3CE94F630 /* TagTokens.swift */; };
+		3300D3D48B9478DBCFC6AD05 /* WaitingRemovalSkillFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D9983C1DECCCB35375138D9 /* WaitingRemovalSkillFailureTests.swift */; };
 		3407CE3AEFDE8BCCE931BAF6 /* CategoryDetailModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DA6897904B8FB4C9C9E2E9B /* CategoryDetailModelTests.swift */; };
 		34771FAECC1D498DDB03F1FF /* RuntimeGitState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38DF8547A04CD4ADE2E4759A /* RuntimeGitState.swift */; };
 		34946563A2BE682B5749C192 /* FileServiceProjectFolderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76797AA7F0FE67395BA50E98 /* FileServiceProjectFolderTests.swift */; };
@@ -1155,6 +1156,7 @@
 		6CA8D283F6493072A5AC35FF /* ManifestDeployIntentWriterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestDeployIntentWriterTests.swift; sourceTree = "<group>"; };
 		6D5E044A59476AA23092513E /* DeployRemovalPreparing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeployRemovalPreparing.swift; sourceTree = "<group>"; };
 		6D8ECEDE5D2C85033D1278A8 /* AppRuntime+LaunchSignals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppRuntime+LaunchSignals.swift"; sourceTree = "<group>"; };
+		6D9983C1DECCCB35375138D9 /* WaitingRemovalSkillFailureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaitingRemovalSkillFailureTests.swift; sourceTree = "<group>"; };
 		6DF549CF04EE96ADE8590316 /* DeployIntentModelTests+DisplayPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DeployIntentModelTests+DisplayPath.swift"; sourceTree = "<group>"; };
 		6EEA806C2B9CC4F2F43F8F7A /* UpstreamHistoryViewModel+Refresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UpstreamHistoryViewModel+Refresh.swift"; sourceTree = "<group>"; };
 		6F2DDE8B4F2A8D3EDE5AF947 /* DaemonCLI+Deployed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DaemonCLI+Deployed.swift"; sourceTree = "<group>"; };
@@ -2571,6 +2573,7 @@
 				BCE7A60C557C7D918F019B02 /* WaitingRemovalProjectTests.swift */,
 				C96112C9C77993F691BD8AF2 /* WaitingRemovalRequestTests.swift */,
 				24C69FB46DF391C69D16304A /* WaitingRemovalSkillAdmissionTests.swift */,
+				6D9983C1DECCCB35375138D9 /* WaitingRemovalSkillFailureTests.swift */,
 				EB6BE78F1584C69879707068 /* WaitingRemovalTestSupport.swift */,
 			);
 			path = ServiceTests;
@@ -3236,6 +3239,7 @@
 				2E1E6169A4407D997D2C6587 /* WaitingRemovalProjectTests.swift in Sources */,
 				12FA75AAE05D87C38086ACF7 /* WaitingRemovalRequestTests.swift in Sources */,
 				D55CB0D67A1DFEE105F57589 /* WaitingRemovalSkillAdmissionTests.swift in Sources */,
+				3300D3D48B9478DBCFC6AD05 /* WaitingRemovalSkillFailureTests.swift in Sources */,
 				47C7EB430CA3FBC396BFB7E6 /* WaitingRemovalTestSupport.swift in Sources */,
 				CE5A73671C42C3724F0BDA43 /* WebLinkPolicyTests.swift in Sources */,
 				58C31E087A256621C938A094 /* WindowCloseGuardTests.swift in Sources */,

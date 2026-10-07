@@ -21,8 +21,8 @@ enum SkillDeletionFlow {
         }, localDeployHistory: { paths in
             try localCursorDeployPaths(skill: skill, paths: paths, context: context)
         })
-        var deleted = false
-        defer { settleWaitingCleanup(cleanupResult, deleted: deleted, skill: skill, library: library, platformVM: platformVM) }
+        var retirementSaved = false
+        defer { settleWaitingCleanup(cleanupResult, retirementSaved: retirementSaved, library: library, platformVM: platformVM) }
         let cleanup = cleanupResult.batch
         if cleanup.hasFailures {
             var messages = cleanup.readFailures.map(\.message)
@@ -43,6 +43,7 @@ enum SkillDeletionFlow {
         do {
             try retire(skill: skill, context: context)
             try persist(context)
+            retirementSaved = true
         } catch {
             context.rollback()
             library.deletionNotice = .failed(
@@ -53,8 +54,7 @@ enum SkillDeletionFlow {
 
         let outcome = library.deleteSkillEntry(skill, context: context, persist: persist)
         let manifestNote = updateManifest(library: library, context: context, waitingProjects: cleanupResult.waitingProjects)
-        deleted = present(outcome, skill: skill, manifestNote: manifestNote, library: library)
-        return deleted
+        return present(outcome, skill: skill, manifestNote: manifestNote, library: library)
     }
 
     private static func updateManifest(
@@ -75,12 +75,18 @@ enum SkillDeletionFlow {
         return manifestNote
     }
 
-    private static func settleWaitingCleanup(_ cleanup: SkillCleanupResult, deleted: Bool, skill: Skill,
+    private static func settleWaitingCleanup(_ cleanup: SkillCleanupResult, retirementSaved: Bool,
                                              library: SkillLibraryViewModel, platformVM: PlatformViewModel) {
-        if deleted {
+        if retirementSaved {
             if let error = platformVM.finishWaitingSkillCleanup(cleanup) {
-                library.deletionNotice = .warning("Deleted “\(skill.name)”. Waiting cleanup was saved, "
-                    + "but its deployment records couldn't be retired: \(error).")
+                let message = library.deletionNotice?.message ?? ""
+                let warning = message + " Waiting cleanup was saved, "
+                    + "but its deployment records couldn't be retired: \(error)."
+                switch library.deletionNotice {
+                case .failed: library.deletionNotice = .failed(warning)
+                case .pending: library.deletionNotice = .pending(warning)
+                case .warning, nil: library.deletionNotice = .warning(warning)
+                }
             }
         } else {
             do { try platformVM.abandonWaitingSkillCleanup(cleanup) } catch {

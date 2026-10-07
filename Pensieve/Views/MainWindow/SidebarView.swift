@@ -113,17 +113,16 @@ func removeRegisteredProject(_ project: Project,
 private func projectRemovalAdmissionFailure(project: Project, plan: ProjectRemovalPlan,
                                             confirmedPreview: ProjectRemovalPreview?,
                                             intents: [MachineDeployIntent], localMachineID: String?) -> String? {
-    if let confirmedPreview,
-       confirmedPreview.artifactCount != plan.preview.artifactCount
-        || confirmedPreview.folderIsMissing != plan.preview.folderIsMissing
-        || confirmedPreview.folderIsUncheckable != plan.preview.folderIsUncheckable
-        || confirmedPreview.folderIsShared != plan.preview.folderIsShared {
-        if confirmedPreview.folderIsMissing != plan.preview.folderIsMissing
+    if let confirmedPreview {
+        let folderChanged = confirmedPreview.folderIsMissing != plan.preview.folderIsMissing
             || confirmedPreview.folderIsUncheckable != plan.preview.folderIsUncheckable
-            || confirmedPreview.folderIsShared != plan.preview.folderIsShared {
+            || confirmedPreview.folderIsShared != plan.preview.folderIsShared
+        if folderChanged {
             return "The project folder changed at \(project.path) while confirmation was open. Please review removal again."
         }
-        return "The project changed while confirmation was open. Please review removal again."
+        if confirmedPreview.artifactCount != plan.preview.artifactCount {
+            return "The project changed while confirmation was open. Please review removal again."
+        }
     }
     if !plan.hasIdentitySibling, let key = project.identityKey, localMachineID == nil,
        intents.contains(where: { $0.projectKey == key }) {

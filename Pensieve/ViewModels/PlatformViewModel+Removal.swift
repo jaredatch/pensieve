@@ -50,20 +50,14 @@ extension PlatformViewModel {
             return result
         }
         let (recorded, stateProblem) = skillCleanupState()
+        let unavailable = unavailableSkillCleanupProjects(projects)
+        if !unavailable.isEmpty, recorded == nil {
+            result.batch.recordReadFailure("deploys for “\(skill.name)”", error: SkillCleanupStateFailure(message: stateProblem))
+            return result
+        }
         let localPaths: Set<String>
         do { localPaths = try localProjectDeployPaths() } catch {
             result.batch.recordReadFailure("local deploy history and assignments for “\(skill.name)”", error: error)
-            return result
-        }
-        let admittedPaths = (recorded ?? []).union(localPaths)
-        let unavailable = Set(projects.filter { project in
-            guard ProjectDirectory.canAccess(project.path), deployablePlatforms(forProject: true).contains(where: {
-                admittedPaths.contains(artifactPath(skill: skill, platform: $0, target: .project(project)))
-            }) else { return false }
-            do { try projectReconcilePolicy.requireDirectory(project); return false } catch { return true }
-        }.map(\.id))
-        if !unavailable.isEmpty, recorded == nil {
-            result.batch.recordReadFailure("deploys for “\(skill.name)”", error: SkillCleanupStateFailure(message: stateProblem))
             return result
         }
         let evidence = skillCleanupEvidence(skill: skill, projects: projects, recorded: recorded,
@@ -76,24 +70,32 @@ extension PlatformViewModel {
             return result
         }
         let candidates = skillCleanupCandidates(skill: skill, evidence: evidence, locallyDeployed: locallyDeployed,
-            recorded: recorded, stateProblem: stateProblem, unavailable: unavailable)
+            recorded: recorded, stateProblem: stateProblem)
         do {
-            try saveWaitingSkillCleanup(skill: skill, candidates: candidates, unavailable: unavailable, result: &result)
+            try saveWaitingSkillCleanup(skill: skill, candidates: candidates.deferred, result: &result)
         } catch {
             result.batch.recordReadFailure("waiting removals for “\(skill.name)”", error: error)
             return result
         }
-        let available = candidates.filter { item in
-            item.location.target.project.map { !unavailable.contains($0.id) } ?? true
-        }
-        let removal = removalService.remove(available.map(\.removal))
-        applySkillCleanupReport(removal, skill: skill, candidates: available, result: &result)
+        let removal = removalService.remove(candidates.available.map(\.removal))
+        applySkillCleanupReport(removal, skill: skill, candidates: candidates.available, result: &result)
         return result
+    }
+
+    private func unavailableSkillCleanupProjects(_ projects: [Project]) -> Set<UUID> {
+        var available: [String: Bool] = [:]
+        return Set(projects.filter { project in
+            guard ProjectDirectory.canAccess(project.path) else { return false }
+            if let checked = available[project.path] { return !checked }
+            let checked = (try? projectReconcilePolicy.requireDirectory(project)) != nil
+            available[project.path] = checked
+            return !checked
+        }.map(\.id))
     }
 
     private func applySkillCleanupReport(
         _ removal: DeployRemovalResult, skill: Skill,
-        candidates: [(location: SkillCleanupLocation, removal: DeployRemovalCandidate)], result: inout SkillCleanupResult) {
+        candidates: [SkillCleanupCandidate], result: inout SkillCleanupResult) {
         for (location, report) in removal.orderedOutcomes(for: candidates.map(\.location)) {
             let outcome = report.outcome
             let reportsCleanupCompletion = outcome.completed || report.absentAfterRemoval
@@ -113,26 +115,24 @@ extension PlatformViewModel {
     }
 
     private func saveWaitingSkillCleanup(
-        skill: Skill, candidates: [(location: SkillCleanupLocation, removal: DeployRemovalCandidate)],
-        unavailable: Set<UUID>, result: inout SkillCleanupResult
+        skill: Skill, candidates: [SkillCleanupCandidate], result: inout SkillCleanupResult
     ) throws {
         let waiting = candidates.compactMap { item -> WaitingRemoval? in
-            guard let project = item.location.target.project, unavailable.contains(project.id) else { return nil }
+            guard let project = item.location.target.project else { return nil }
             return waitingRemoval(skill: skill, platform: item.location.platform, project: project, source: "skill:\(skill.id)")
         }
         try waitingRemovalStore.add(waiting)
         result.waitingProjects = Array(Set(waiting.map { "\($0.projectName) (\($0.projectPath))" })).sorted()
         result.waitingRemovalIDs = Set(waiting.map(\.id))
-        result.deferredRemovals = candidates.filter { item in
-            item.location.target.project.map { unavailable.contains($0.id) } ?? false
-        }.map(\.removal)
+        result.deferredRemovals = candidates.map(\.removal)
     }
 
     private func skillCleanupCandidates(
         skill: Skill, evidence: SkillCleanupEvidence, locallyDeployed: Set<String>,
-        recorded: Set<String>?, stateProblem: String, unavailable: Set<UUID>
-    ) -> [(location: SkillCleanupLocation, removal: DeployRemovalCandidate)] {
-        var candidates: [(location: SkillCleanupLocation, removal: DeployRemovalCandidate)] = []
+        recorded: Set<String>?, stateProblem: String
+    ) -> (available: [SkillCleanupCandidate], deferred: [SkillCleanupCandidate]) {
+        var available: [SkillCleanupCandidate] = []
+        var deferred: [SkillCleanupCandidate] = []
         for location in evidence.locations
             where !evidence.historyPaths.contains(location.path) || locallyDeployed.contains(location.path) {
             var sources: Set<DeployRemovalEvidence> = [.enumeratedSkillPath]
@@ -140,7 +140,7 @@ extension PlatformViewModel {
             if locallyDeployed.contains(location.path) { sources.insert(.localHistory) }
             let pair = DeployRemovalPair(skill: skill, platform: location.platform)
             var candidate: DeployRemovalCandidate
-            if let project = location.target.project, unavailable.contains(project.id) {
+            if location.isDeferred {
                 candidate = DeployRemovalCandidate(key: removalKey(pair: pair, target: location.target),
                     evidence: sources, action: .retireWithoutInspection)
             } else if let error = evidence.probeFailures[location.path] {
@@ -154,9 +154,9 @@ extension PlatformViewModel {
                 candidate.removalBlocker = SkillCleanupStateFailure(
                     message: "\(stateProblem); nothing removed at \(location.path)")
             }
-            candidates.append((location, candidate))
+            if location.isDeferred { deferred.append((location, candidate)) } else { available.append((location, candidate)) }
         }
-        return candidates
+        return (available, deferred)
     }
 
     private func skillCleanupEvidence(
@@ -164,24 +164,25 @@ extension PlatformViewModel {
     ) -> SkillCleanupEvidence {
         var evidence = SkillCleanupEvidence()
         for target in [DeployTarget.userWide] + projects.map({ .project($0) }) {
+            let isDeferred = target.project.map { unavailable.contains($0.id) } ?? false
             for platform in deployablePlatforms(forProject: target.project != nil) {
                 let path = artifactPath(skill: skill, platform: platform, target: target)
+                if isDeferred, recorded?.contains(path) != true, !localPaths.contains(path) { continue }
                 // A rule's mark can arrive through git from another Mac. Check this Mac's evidence
                 // before opening it. Metadata avoids a history fetch for known absent/foreign shapes.
                 if platform == .cursor, let project = target.project, let recorded, !recorded.contains(path) {
                     do {
-                        if !unavailable.contains(project.id) {
+                        if !isDeferred {
                             guard try projectCursorRuleMayExist(skill: skill, project: project) else { continue }
                         }
                     } catch {
                         // A failed metadata probe matters only if local history admits this path.
                         evidence.probeFailures[path] = error
                     }
-                    if !unavailable.contains(project.id) || !localPaths.contains(path) { evidence.historyPaths.insert(path) }
+                    if !isDeferred { evidence.historyPaths.insert(path) }
                 }
-                if let project = target.project, unavailable.contains(project.id),
-                   recorded?.contains(path) != true, !localPaths.contains(path) { continue }
-                evidence.locations.append(SkillCleanupLocation(platform: platform, target: target, path: path))
+                evidence.locations.append(SkillCleanupLocation(platform: platform, target: target,
+                    path: path, isDeferred: isDeferred))
             }
         }
         return evidence
@@ -196,7 +197,10 @@ extension PlatformViewModel {
         let platform: PlatformTarget
         let target: DeployTarget
         let path: String
+        let isDeferred: Bool
     }
+
+    private typealias SkillCleanupCandidate = (location: SkillCleanupLocation, removal: DeployRemovalCandidate)
 
     private struct SkillCleanupEvidence {
         var locations: [SkillCleanupLocation] = []

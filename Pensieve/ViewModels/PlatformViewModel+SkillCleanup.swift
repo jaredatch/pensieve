@@ -2,13 +2,14 @@ import Foundation
 import SwiftData
 
 extension PlatformViewModel {
-    /// Local evidence selects deferred pairs before their folders are probed. Shared category
+    /// Local evidence selects deferred pairs. Shared category
     /// membership and another machine's intent alone cannot authorize cleanup on this Mac.
     func localSkillProjectDeployPaths(skill: Skill, projects: [Project], context: ModelContext) throws -> Set<String> {
         var paths: Set<String> = []
         let byID = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         func admit(_ projectID: UUID?, _ platform: PlatformTarget?) {
-            guard let projectID, let project = byID[projectID], let platform, platform.supportsProjectScope else { return }
+            guard let projectID, let project = byID[projectID], let platform, platform.usesSymlinks,
+                  platform.supportsProjectScope else { return }
             paths.insert(artifactPath(skill: skill, platform: platform, target: .project(project)))
         }
         for row in try context.fetch(FetchDescriptor<SkillProjectAssignment>()) where row.skillID == skill.id {
@@ -43,7 +44,11 @@ extension PlatformViewModel {
         } catch {
             // Preserve the existing absent/foreign-rule policy when an unrelated history table fails.
             // A present or unreadable possible rule still needs that evidence and fences deletion.
-            for project in projects where try projectCursorRuleMayExist(skill: skill, project: project) { throw error }
+            for project in projects where ProjectDirectory.canAccess(project.path) {
+                // The unreadable history may name a rule hidden in any unavailable checkout.
+                try projectReconcilePolicy.requireDirectory(project)
+                if try projectCursorRuleMayExist(skill: skill, project: project) { throw error }
+            }
             return []
         }
     }

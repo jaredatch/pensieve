@@ -5,10 +5,6 @@ protocol IntentReconcilerProtocol: DeploymentLedgerReconciling {
     func reconcileWaitingRemovals(context: ModelContext) -> BatchResult
 }
 
-extension IntentReconcilerProtocol {
-    func reconcileWaitingRemovals(context: ModelContext) -> BatchResult { BatchResult() }
-}
-
 /// Reconciles this machine's user-wide and project-scoped intent against its private realization ledger.
 struct IntentReconciler: IntentReconcilerProtocol {
     let platformVM: PlatformViewModel

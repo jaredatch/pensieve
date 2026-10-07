@@ -140,6 +140,28 @@ extension CursorOwnershipTests {
     }
 
     @MainActor
+    func testFailedHistoryFetchWithMissingProjectKeepsSkillAndHiddenRule() throws {
+        let (harness, project) = try persistentHistoryHarness(projectRule: true)
+        let path = artifactPath(.cursor, project: project.path)
+        let bytes = try mapped.readFile(at: path)
+        let hidden = root + "/offline"
+        try files.replaceItem(at: hidden, with: project.path)
+        let database = root + "/history.sqlite"
+        try renameHistoryTable(at: database, broken: true)
+        defer { try? renameHistoryTable(at: database, broken: false) }
+        XCTAssertThrowsError(try harness.context.fetch(FetchDescriptor<DeployRecord>()))
+        let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
+            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+        XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
+            projects: [project], context: harness.context))
+        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<Skill>()), 1)
+        XCTAssertTrue(files.fileExists(at: root + "/store/skills/" + skill.directoryName + "/SKILL.md"))
+        let hiddenRule = hidden + String(path.dropFirst(project.path.count))
+        XCTAssertEqual(try files.readFile(at: hiddenRule), bytes)
+        XCTAssertTrue(try harness.vm.waitingRemovalStore.read().isEmpty)
+    }
+
+    @MainActor
     private func persistentHistoryHarness(projectRule: Bool) throws -> (OwnershipRouteHarness, Project) {
         let url = URL(fileURLWithPath: root + "/history.sqlite")
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(url: url))

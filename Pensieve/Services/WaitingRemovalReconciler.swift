@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 protocol WaitingRemovalReconciling {
-    func reconcile(context: ModelContext, machineID: String?) -> BatchResult
+    func reconcile(context: ModelContext) -> BatchResult
 }
 
 /// Read all desired project work before executing any waiting removal. Requests arbitrate by
@@ -14,16 +14,17 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
     let machineIdentity: MachineIdentityProviding
     var stateFetcher: ReconcilerStateFetching = ReconcilerStateFetcher()
 
-    func reconcile(context: ModelContext, machineID: String? = nil) -> BatchResult {
+    func reconcile(context: ModelContext) -> BatchResult {
         let waiting: [WaitingRemoval]
         let reachable: [WaitingRemoval]
         let desired: Set<String>
+        var folders: [String: Result<Void, Error>] = [:]
         do {
             waiting = try store.read()
             guard !waiting.isEmpty else { return BatchResult() }
-            reachable = reachableEntries(waiting)
+            reachable = reachableEntries(waiting, folders: &folders)
             guard !reachable.isEmpty else { return BatchResult() }
-            desired = try desiredPaths(context: context, machineID: machineID ?? machineIdentity.identifier())
+            desired = try desiredPaths(context: context, machineID: machineIdentity.identifier(), folders: &folders)
         } catch { return BatchResult.readFailure("waiting removals", error: error) }
 
         var retire: Set<UUID> = []
@@ -31,7 +32,6 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
         for entry in reachable {
             let path: String
             do {
-                try fileService.requireProjectDirectory(at: entry.projectPath)
                 path = try entryPath(entry.artifactPath)
             } catch { continue }
             if desired.contains(path) {
@@ -65,37 +65,36 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
         return result
     }
 
-    private func reachableEntries(_ waiting: [WaitingRemoval]) -> [WaitingRemoval] {
-        var checked: [String: Bool] = [:]
+    private func reachableEntries(_ waiting: [WaitingRemoval], folders: inout [String: Result<Void, Error>]) -> [WaitingRemoval] {
         return waiting.filter { entry in
-            if let available = checked[entry.projectPath] { return available }
-            let available = (try? fileService.requireProjectDirectory(at: entry.projectPath)) != nil
-            checked[entry.projectPath] = available
-            return available
+            (try? requireFolder(entry.projectPath, folders: &folders)) != nil
         }
     }
 
-    private func desiredPaths(context: ModelContext, machineID: String) throws -> Set<String> {
+    private func requireFolder(_ path: String, folders: inout [String: Result<Void, Error>]) throws {
+        let check: Result<Void, Error>
+        if let cached = folders[path] { check = cached } else {
+            check = Result { try fileService.requireProjectDirectory(at: path) }
+            folders[path] = check
+        }
+        try check.get()
+    }
+
+    private func desiredPaths(context: ModelContext, machineID: String,
+                              folders: inout [String: Result<Void, Error>]) throws -> Set<String> {
         let projects = try stateFetcher.projects(context: context)
         let skills = try stateFetcher.skills(context: context)
         let intents = try stateFetcher.deployIntents(context: context)
         let categories = try stateFetcher.categories(context: context)
         let bySlug = Dictionary(skills.map { ($0.directoryName, $0) }, uniquingKeysWith: { first, _ in first })
         var paths: Set<String> = []
-        var checkedProjects: [UUID: Bool] = [:]
         func request(_ skill: Skill, _ platform: PlatformTarget, _ project: Project) throws {
-            let available: Bool
-            if let checked = checkedProjects[project.id] { available = checked } else {
-                do {
-                    try fileService.requireProjectDirectory(at: project.path)
-                    available = true
-                } catch let error as ProjectFolderError {
-                    guard case .missing = error else { throw error }
-                    available = false
-                }
-                checkedProjects[project.id] = available
+            do {
+                try requireFolder(project.path, folders: &folders)
+            } catch let error as ProjectFolderError {
+                guard case .missing = error else { throw error }
+                return
             }
-            guard available else { return }
             let path = platformVM.artifactPath(skill: skill, platform: platform, target: .project(project))
             paths.insert(try entryPath(path))
         }

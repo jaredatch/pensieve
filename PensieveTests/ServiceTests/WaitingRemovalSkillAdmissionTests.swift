@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 final class WaitingRemovalSkillAdmissionTests: XCTestCase {
-    func testNeverDeployedMissingProjectDoesNotQueueOrAppearInNoticeOrProbes() throws {
+    func testNeverDeployedMissingProjectDoesNotQueueOrAppearInNotice() throws {
         let h = try WaitingRemovalHarness(platforms: [.claudeCode, .codex, .cursor])
         defer { h.base.cleanup() }
         var probes: [String] = []
@@ -14,18 +14,39 @@ final class WaitingRemovalSkillAdmissionTests: XCTestCase {
         XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty)
         XCTAssertFalse(h.library.deletionNotice?.message.contains(h.base.project.name) == true)
         XCTAssertFalse(h.library.deletionNotice?.message.contains(h.base.project.path) == true)
-        XCTAssertTrue(probes.isEmpty)
+        XCTAssertEqual(Set(probes), [h.base.project.path, h.base.otherProject.path])
+        XCTAssertEqual(probes.count, 2)
     }
 
-    func testUnrelatedMissingProjectDoesNotBlockDeletionUnderUnreadableDeploymentState() throws {
+    func testUnreadableStateWithUnavailableRegistrationKeepsPossibleStateOnlyDeploy() throws {
         for content in ["broken", #"{"schema_version":999,"records":[]}"#] {
-            let h = try WaitingRemovalHarness()
-            defer { h.base.cleanup() }
-            try h.base.files.writeFile(at: h.base.root + "/support/deploy-state.json", content: content)
-            XCTAssertTrue(h.deleteSkill(), content)
-            XCTAssertEqual(try h.base.context.fetchCount(FetchDescriptor<Skill>()), 0)
-            XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty)
-            XCTAssertEqual(try h.base.files.readFile(at: h.base.root + "/support/deploy-state.json"), content)
+            for missing in [true, false] {
+                let h = try WaitingRemovalHarness()
+                defer { h.base.cleanup() }
+                try h.base.files.createDirectory(at: h.base.project.path)
+                try h.vm.deploy(skill: h.base.skill, platform: .codex, target: .project(h.base.project), context: h.base.context)
+                XCTAssertEqual(try h.base.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
+                XCTAssertEqual(try h.base.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
+                if missing { try h.hideFolder() } else {
+                    h.mapped.beforeProjectProbe = { path in
+                        if path == h.base.project.path { throw CocoaError(.fileReadNoPermission) }
+                    }
+                }
+                try h.base.files.writeFile(at: h.base.root + "/support/deploy-state.json", content: content)
+                XCTAssertFalse(h.deleteSkill(), "\(content)/\(missing)")
+                XCTAssertEqual(try h.base.context.fetchCount(FetchDescriptor<Skill>()), 1)
+                XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty)
+                XCTAssertEqual(try h.base.files.readFile(at: h.base.root + "/support/deploy-state.json"), content)
+                XCTAssertTrue(h.base.files.fileExists(
+                    at: h.base.root + "/store/skills/" + h.base.skill.directoryName + "/SKILL.md"))
+                let folder = missing ? h.offlinePath : h.base.project.path
+                XCTAssertTrue(h.base.files.isSymlink(at: folder + "/agents/" + h.base.skill.directoryName + ".md"))
+            }
+            let available = try WaitingRemovalHarness()
+            defer { available.base.cleanup() }
+            try available.base.files.createDirectory(at: available.base.project.path)
+            try available.base.files.writeFile(at: available.base.root + "/support/deploy-state.json", content: content)
+            XCTAssertTrue(available.deleteSkill(), "All available, no owned artifacts")
         }
     }
 
@@ -54,9 +75,10 @@ final class WaitingRemovalSkillAdmissionTests: XCTestCase {
                 var probes: [String] = []
                 h.mapped.beforeProjectProbe = { probes.append($0) }
                 XCTAssertTrue(h.deleteSkill(), "\(source)/\(platform)")
-                let admitted = source != "remote request"
+                let admitted = source != "remote request" && (platform != .cursor || source == "state" || source == "history")
                 XCTAssertEqual(try h.vm.waitingRemovalStore.read().map(\.artifactPath), admitted ? [path] : [])
-                XCTAssertEqual(probes, admitted ? [h.base.project.path] : [])
+                XCTAssertEqual(Set(probes), [h.base.project.path, h.base.otherProject.path])
+                XCTAssertEqual(probes.count, 2)
                 XCTAssertEqual(h.library.deletionNotice?.message.contains(h.base.project.path) == true, admitted)
                 XCTAssertFalse(h.library.deletionNotice?.message.contains(h.base.otherProject.path) == true)
             }
