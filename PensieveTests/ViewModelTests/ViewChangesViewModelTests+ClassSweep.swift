@@ -33,10 +33,7 @@ extension ViewChangesViewModelTests {
         let didStart = await TestWait.forSemaphore(started)
         XCTAssertTrue(didStart)
         XCTAssertFalse(sheet.canApply, "The sheet cannot apply a skill while its window Re-check is running")
-        let presentation = UpdatesSheetPresentation(sheet)
-        XCTAssertFalse(presentation.updateEnabled)
-        XCTAssertFalse(try XCTUnwrap(presentation.rows.first).recheckEnabled,
-                       "The sheet's same-skill Re-check control must be unavailable")
+        try assertSheetControlsAreBlocked(sheet)
         await assertSameSkillSheetIntentsAreBlocked(sheet, row: row, applied: applied, checked: checked)
         XCTAssertTrue(skill.updateAvailable, "A blocked apply must leave the stored update untouched")
         sheet.selectedSkillIDs = [other.id]
@@ -46,6 +43,7 @@ extension ViewChangesViewModelTests {
         await sheet.applySelectedAndReport(context: fixture.context)
         XCTAssertEqual(checked.values, [other.id])
         XCTAssertEqual(applied.values, [other.id])
+        assertStaleSelectionDoesNotBlock(sheet, busy: skill.id, selectable: other.id)
         release.open()
         await TestWait.until(failureMessage: "window check did not finish") { !window.isRechecking }
         sheet.selectedSkillIDs = [skill.id]
@@ -54,6 +52,21 @@ extension ViewChangesViewModelTests {
         await sheet.applySelectedAndReport(context: fixture.context)
         XCTAssertEqual(applied.values, [other.id, skill.id])
         XCTAssertFalse(skill.updateAvailable, "An apply admitted after Re-check must keep its cleared update state")
+    }
+
+    private func assertSheetControlsAreBlocked(_ sheet: UpdatesViewModel) throws {
+        let presentation = UpdatesSheetPresentation(sheet)
+        XCTAssertFalse(presentation.updateEnabled)
+        XCTAssertFalse(try XCTUnwrap(presentation.rows.first).recheckEnabled,
+                       "The sheet's same-skill Re-check control must be unavailable")
+    }
+
+    private func assertStaleSelectionDoesNotBlock(_ sheet: UpdatesViewModel, busy: UUID, selectable: UUID) {
+        sheet.selectedSkillIDs = [selectable, busy]
+        sheet.statuses[busy] = .updated
+        sheet.statuses[selectable] = .idle
+        XCTAssertTrue(sheet.canApply, "A stale updated selection must not block another row's Update during window work")
+        sheet.statuses[busy] = .idle
     }
 
     private func assertSameSkillSheetIntentsAreBlocked(

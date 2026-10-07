@@ -5,23 +5,26 @@ import XCTest
 
 extension ViewChangesViewModelTests {
     func testPresentationMakesHiddenLineAndFilenameScalarsVisible() throws {
-        // Sweep the independent Unicode contract, including every assigned format character.
+        // Sweep hiding categories and default-ignorables; names have no joining/presentation exemption.
         let categories: Set<Unicode.GeneralCategory> = [.control, .format, .lineSeparator, .paragraphSeparator]
         for value in UInt32(0)...0x10FFFF {
-            guard let scalar = Unicode.Scalar(value), categories.contains(scalar.properties.generalCategory),
-                  value != 9, value != 10, value != 0x200C, value != 0x200D else { continue }
+            guard let scalar = Unicode.Scalar(value), categories.contains(scalar.properties.generalCategory)
+                  || scalar.properties.isDefaultIgnorableCodePoint else { continue }
             let mark = value == 13 ? "␍" : String(format: "⟨U+%04X⟩", value)
+            let unmarked = [9, 10, 0x200C, 0x200D].contains(value) || scalar.properties.isVariationSelector
             let line = UnifiedDiffLine(kind: .added, text: "before" + String(scalar) + "after\n",
                                        oldLineNumber: nil, newLineNumber: 1)
             let shown = ViewChangesPresentation.lineText(line)
-            XCTAssertEqual(String(shown.characters), "before" + mark + "after", "Hidden scalars must remain visible")
-            XCTAssertEqual(shown.runs.filter { $0.foregroundColor != nil }.count, 1,
+            let literalLine = "before" + (value == 10 ? "\n" : String(scalar)) + "after"
+            XCTAssertEqual(String(shown.characters), unmarked ? literalLine : "before" + mark + "after",
+                           "Hidden scalars must remain visible with only line joining/presentation exemptions")
+            XCTAssertEqual(shown.runs.filter { $0.foregroundColor != nil }.count, unmarked ? 0 : 1,
                            "Each hidden scalar needs a distinctly styled mark")
             XCTAssertTrue(shown.runs.filter { $0.foregroundColor != nil }.allSatisfy {
                 $0.foregroundColor == DesignTokens.diffHiddenCharacter
             }, "Marks must use the semantic hidden-character color")
             let name = ViewChangesPresentation.styledText("name" + String(scalar) + ".txt", filename: true)
-            XCTAssertEqual(String(name.characters), "name" + mark + ".txt", "Names use the same category rule")
+            XCTAssertEqual(String(name.characters), "name" + mark + ".txt", "Names must mark every hiding scalar")
             XCTAssertEqual(name.runs.filter { $0.foregroundColor != nil }.count, 1)
         }
         let literal = UnifiedDiffLine(kind: .added, text: "␍ ⟨U+FEFF⟩\n", oldLineNumber: nil, newLineNumber: 1)
@@ -47,9 +50,28 @@ extension ViewChangesViewModelTests {
             let shown = ViewChangesPresentation.lineText(joined)
             XCTAssertEqual(String(shown.characters), text, "Emoji and word joiners must stay unmarked")
             XCTAssertTrue(shown.runs.allSatisfy { $0.foregroundColor == nil })
-            XCTAssertEqual(String(ViewChangesPresentation.styledText(text, filename: true).characters), text)
         }
+        try assertDefaultIgnorableNamesAndLines()
         try assertLineEndingNotes()
+    }
+
+    private func assertDefaultIgnorableNamesAndLines() throws {
+        for value: UInt32 in [0x200C, 0x200D, 0x3164, 0x034F, 0xFE0F, 0xE0100] {
+            let scalar = try XCTUnwrap(Unicode.Scalar(value))
+            let mark = String(format: "⟨U+%04X⟩", value)
+            XCTAssertEqual(ViewChangesPresentation.visibleText("scripts/inst" + String(scalar) + "all.sh", filename: true),
+                           "scripts/inst" + mark + "all.sh", "Invisible filename marks must prevent path impersonation")
+            let line = UnifiedDiffLine(kind: .added, text: String(scalar) + "base\n", oldLineNumber: nil, newLineNumber: 1)
+            XCTAssertEqual(String(ViewChangesPresentation.lineText(line).characters),
+                           (value == 0x200C || value == 0x200D ? String(scalar) : mark) + "base",
+                           "Default-ignorables without a visible base must be marked in lines")
+        }
+        for text in ["❤️", "👩‍💻", "一\u{E0100}"] {
+            let line = UnifiedDiffLine(kind: .added, text: text + "\n", oldLineNumber: nil, newLineNumber: 1)
+            let shown = ViewChangesPresentation.lineText(line)
+            XCTAssertEqual(String(shown.characters), text, "Emoji joiners and selectors following a visible base stay literal")
+            XCTAssertTrue(shown.runs.allSatisfy { $0.foregroundColor == nil })
+        }
     }
 
     private func assertLineEndingNotes() throws {

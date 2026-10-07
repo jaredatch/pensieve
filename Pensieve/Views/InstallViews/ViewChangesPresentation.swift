@@ -124,11 +124,10 @@ enum ViewChangesPresentation {
     static func styledText(_ text: String, filename: Bool = false) -> AttributedString {
         var result = AttributedString()
         var literal = ""
+        var previous: Unicode.Scalar?
         for scalar in text.unicodeScalars {
-            let category = scalar.properties.generalCategory
-            let hidden = (category == .control && (filename || (scalar.value != 9 && scalar.value != 10)))
-                || (category == .format && scalar.value != 0x200C && scalar.value != 0x200D)
-                || category == .lineSeparator || category == .paragraphSeparator
+            let hidden = isHidden(scalar, filename: filename, previous: previous)
+            previous = scalar
             guard hidden else { literal.unicodeScalars.append(scalar); continue }
             result.append(AttributedString(literal))
             literal = ""
@@ -138,6 +137,23 @@ enum ViewChangesPresentation {
         }
         result.append(AttributedString(literal))
         return result
+    }
+
+    private static func isHidden(_ scalar: Unicode.Scalar, filename: Bool, previous: Unicode.Scalar?) -> Bool {
+        if !filename {
+            if [9, 10, 0x200C, 0x200D].contains(scalar.value) { return false }
+            if scalar.properties.isVariationSelector, let previous, isVisibleBase(previous) { return false }
+        }
+        let category = scalar.properties.generalCategory
+        return category == .control || category == .format || category == .lineSeparator
+            || category == .paragraphSeparator || scalar.properties.isDefaultIgnorableCodePoint
+    }
+
+    private static func isVisibleBase(_ scalar: Unicode.Scalar) -> Bool {
+        let excluded: Set<Unicode.GeneralCategory> = [.control, .format, .lineSeparator, .paragraphSeparator,
+                                                      .nonspacingMark, .spacingMark, .enclosingMark]
+        return !excluded.contains(scalar.properties.generalCategory) && !scalar.properties.isWhitespace
+            && !scalar.properties.isDefaultIgnorableCodePoint
     }
 
     /// Notes have no diff marker or line number. Ending-only pairs get one note after the added line.

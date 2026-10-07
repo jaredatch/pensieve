@@ -66,8 +66,9 @@ final class UpdatesViewModel {
     }
     var selectedCount: Int { selectedSkillIDs.intersection(selectableSkillIDs).count }
     var canApply: Bool {
-        loadPhase == .loaded && !isApplying && recheckingSkillID == nil && selectedCount > 0
-            && selectedSkillIDs.allSatisfy { viewChanges?.isBusy(affecting: $0) != true }
+        let selection = selectedSkillIDs.intersection(selectableSkillIDs)
+        return loadPhase == .loaded && !isApplying && recheckingSkillID == nil && !selection.isEmpty
+            && selection.allSatisfy { viewChanges?.isBusy(affecting: $0) != true }
     }
 
     func canRecheck(_ row: UpdatesRow) -> Bool {

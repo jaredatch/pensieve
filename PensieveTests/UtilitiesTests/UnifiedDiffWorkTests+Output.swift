@@ -15,15 +15,18 @@ extension UnifiedDiffWorkTests {
         XCTAssertNil(preview.files[0].diff)
         XCTAssertEqual(preview.files[1].linesAdded, 1, "An unrendered huge file must leave output room for SKILL.md")
         XCTAssertEqual(preview.files[2].linesAdded, 1, "Later small scripts must still render")
+        let budget = BoundedLineDifference.WorkBudget(maximumWork: 310_032)
         let shared = try PinnedSkillDiff.build(comparison: FileTreeComparison(changes: [
             FileTreeChange(path: "first", kind: .added, content: .text(old: "", new: String(repeating: "\n", count: 40_000))),
             FileTreeChange(path: "second", kind: .added, content: .text(old: "", new: String(repeating: "\n", count: 30_000))),
             changes[1]
-        ], unreadFileCount: 0, bytesRead: 70_008))
+        ], unreadFileCount: 0, bytesRead: 70_008), budget: budget)
         XCTAssertEqual(shared.files[1].content, .diffOutputBoundReached,
                        "A file that fits alone must name the shared output bound when earlier files used its room")
         XCTAssertNil(shared.files[1].diff)
         XCTAssertEqual(shared.files[2].linesAdded, 1, "A refused shared-bound file retains no output allowance")
+        XCTAssertLessThan(budget.consumed, 310_032,
+                          "A refused 30k diff must not spend row work needed by the later SKILL.md")
     }
 
     func testDiffRowsAndHunksSpendTheSharedWorkBudget() throws {

@@ -11,7 +11,7 @@ struct UnifiedDiffView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(diff.hunks.indices, id: \.self) { index in
                         let hunk = diff.hunks[index]
-                        let hunkNotes = notes[index]
+                        let hunkNotes = notes.indices.contains(index) ? notes[index] : [:]
                         diffRow(old: nil, new: nil, marker: "", text: AttributedString(hunk.header),
                                 fill: DesignTokens.diffHunkFill, kind: nil)
                         ForEach(hunk.lines.indices, id: \.self) { index in

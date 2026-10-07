@@ -25,6 +25,8 @@ struct UnifiedDiff: Equatable {
 
     let isTooLarge: Bool
     let isOutputBoundReached: Bool
+    /// Exact emitted count, including context, also available when output admission refuses the diff.
+    let requiredOutputLines: Int
 
     init(old: String, new: String, budget: BoundedLineDifference.WorkBudget = .init(), maximumOutputLines: Int = .max) {
         self = (try? Self.compute(old: old, new: new, budget: budget,
@@ -38,20 +40,22 @@ struct UnifiedDiff: Equatable {
     }
 
     private init(hunks: [UnifiedDiffHunk], linesAdded: Int, linesRemoved: Int,
-                 isTooLarge: Bool, isOutputBoundReached: Bool = false) {
+                 isTooLarge: Bool, isOutputBoundReached: Bool = false, requiredOutputLines: Int = 0) {
         self.hunks = hunks
         self.linesAdded = linesAdded
         self.linesRemoved = linesRemoved
         self.isTooLarge = isTooLarge
         self.isOutputBoundReached = isOutputBoundReached
+        self.requiredOutputLines = requiredOutputLines
     }
 
     private static var exceeded: UnifiedDiff {
         UnifiedDiff(hunks: [], linesAdded: 0, linesRemoved: 0, isTooLarge: true)
     }
 
-    private static var outputExceeded: UnifiedDiff {
-        UnifiedDiff(hunks: [], linesAdded: 0, linesRemoved: 0, isTooLarge: false, isOutputBoundReached: true)
+    private static func outputExceeded(lines: Int) -> UnifiedDiff {
+        UnifiedDiff(hunks: [], linesAdded: 0, linesRemoved: 0, isTooLarge: false,
+                    isOutputBoundReached: true, requiredOutputLines: lines)
     }
 
     private static func compute(old: String, new: String, budget: BoundedLineDifference.WorkBudget,
@@ -65,7 +69,10 @@ struct UnifiedDiff: Equatable {
                                                                   budget: budget, checkpoint: checkpoint) else {
             return exceeded
         }
-        guard difference.removed.count + difference.added.count <= maximumOutputLines else { return outputExceeded }
+        let ranges = Self.hunkRanges(beforeCount: before.count, afterCount: after.count,
+                                     removed: difference.removed, added: difference.added)
+        let emitted = ranges.reduce(0) { $0 + $1.count }
+        guard emitted <= maximumOutputLines else { return outputExceeded(lines: emitted) }
         // Row construction, hunk scanning and position tracking share the preview's work budget too.
         let rowCount = before.count + difference.added.count
         guard rowCount <= budget.remaining / 3 else {
@@ -75,15 +82,14 @@ struct UnifiedDiff: Equatable {
         budget.spend(rowCount * 3)
         let rows = Self.rows(before: before, after: after, removed: difference.removed, added: difference.added)
         try checkpoint(0)
-        guard let hunks = Self.hunks(rows, maximumOutputLines: maximumOutputLines) else { return outputExceeded }
-        let emitted = hunks.reduce(0) { $0 + $1.lines.count }
+        let hunks = Self.hunks(rows, ranges: ranges)
         guard emitted <= budget.remaining / 3 else {
             budget.spend(budget.remaining)
             return exceeded
         }
         budget.spend(emitted * 3)
         return UnifiedDiff(hunks: hunks, linesAdded: difference.added.count,
-                           linesRemoved: difference.removed.count, isTooLarge: false)
+                           linesRemoved: difference.removed.count, isTooLarge: false, requiredOutputLines: emitted)
     }
 
     /// Git counts LF-terminated records, with one last record for an unterminated final line.
@@ -120,17 +126,36 @@ struct UnifiedDiff: Equatable {
         return result
     }
 
-    private static func hunks(_ rows: [UnifiedDiffLine], maximumOutputLines: Int) -> [UnifiedDiffHunk]? {
-        var ranges: [Range<Int>] = []
-        for index in rows.indices where rows[index].kind != .context {
-            let range = max(0, index - 3)..<min(rows.count, index + 4)
-            if let last = ranges.last, range.lowerBound <= last.upperBound {
-                ranges[ranges.count - 1] = last.lowerBound..<max(last.upperBound, range.upperBound)
-            } else {
-                ranges.append(range)
-            }
+    /// Locate the same three-line-context ranges before constructing any line rows.
+    private static func hunkRanges(beforeCount: Int, afterCount: Int,
+                                   removed: Set<Int>, added: Set<Int>) -> [Range<Int>] {
+        let rowCount = beforeCount + added.count
+        if removed.count == beforeCount, added.count == afterCount {
+            return rowCount == 0 ? [] : [0..<rowCount]
         }
-        guard ranges.reduce(0, { $0 + $1.count }) <= maximumOutputLines else { return nil }
+        var ranges: [Range<Int>] = []
+        var old = 0, new = 0, index = 0
+        while old < beforeCount || new < afterCount {
+            let changed: Bool
+            if old < beforeCount, removed.contains(old) {
+                old += 1; changed = true
+            } else if new < afterCount, added.contains(new) {
+                new += 1; changed = true
+            } else {
+                old += 1; new += 1; changed = false
+            }
+            if changed {
+                let range = max(0, index - 3)..<min(rowCount, index + 4)
+                if let last = ranges.last, range.lowerBound <= last.upperBound {
+                    ranges[ranges.count - 1] = last.lowerBound..<max(last.upperBound, range.upperBound)
+                } else { ranges.append(range) }
+            }
+            index += 1
+        }
+        return ranges
+    }
+
+    private static func hunks(_ rows: [UnifiedDiffLine], ranges: [Range<Int>]) -> [UnifiedDiffHunk] {
         var oldPosition = 0
         var newPosition = 0
         var positions: [(Int, Int)] = []

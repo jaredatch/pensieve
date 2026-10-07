@@ -219,8 +219,9 @@ enum DesignTokens {
     static let diffTrailingInset: CGFloat = 16
     static let diffBodyVerticalPadding: CGFloat = 6
 
-    /// Light frame opacities; dark uses the same opacities on system semantic colors, pending the look gate.
     static let diffHiddenCharacter = Color(nsColor: .systemOrange)
+
+    /// Light frame opacities; dark uses the same opacities on system semantic colors, pending the look gate.
     static let diffHunkFill = dynamic(light: 0.04, dark: 0.04)
     static let diffRemovedFill = Color(nsColor: .systemRed).opacity(0.10)
     static let diffAddedFill = Color(nsColor: .systemGreen).opacity(0.12)

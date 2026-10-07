@@ -175,17 +175,20 @@ final class ViewChangesViewModel {
         let diff = operations.diffOperation
         let worker = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
-            return try diff(requested, container)
+            let preview = try diff(requested, container)
+            let notes = Dictionary(preview.files.map { file in
+                (file.path, file.diff?.hunks.map { ViewChangesPresentation.lineNotes($0.lines) } ?? [])
+            }, uniquingKeysWith: { first, _ in first })
+            try Task.checkCancellation()
+            return (preview, notes)
         }
         cancelWorker = { worker.cancel() }
         do {
-            let preview = try await withTaskCancellationHandler {
+            let (preview, notes) = try await withTaskCancellationHandler {
                 try await worker.value
             } onCancel: { worker.cancel() }
             guard sessionID == session, !Task.isCancelled else { return }
-            lineNotes = Dictionary(uniqueKeysWithValues: preview.files.map { file in
-                (file.path, file.diff?.hunks.map { ViewChangesPresentation.lineNotes($0.lines) } ?? [])
-            })
+            lineNotes = notes
             selectedFilePath = preview.files.first?.path
             state = .loaded(preview)
         } catch {
