@@ -80,7 +80,9 @@ class Repository:
     def __init__(self):
         self.temp = tempfile.TemporaryDirectory(prefix='public-hygiene-')
         self.root = Path(self.temp.name)
-        self.env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
+        # Fixture hooks and their copied conf own the repository layout.
+        self.env = {k: v for k, v in os.environ.items()
+                    if not k.startswith('GIT_') and k not in ('RATCHET_ROOT', 'RATCHET_RECORDS')}
         self.env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
                         GIT_AUTHOR_NAME='Fixture', GIT_COMMITTER_NAME='Fixture',
                         GIT_AUTHOR_EMAIL='fixture@example.com', GIT_COMMITTER_EMAIL='fixture@example.com')
@@ -128,7 +130,7 @@ class Repository:
     def install_pre_commit(self):
         # Exercise the actual project-check wiring. Only the app suite is a fixture.
         for name in ('public-hygiene.sh', 'public_hygiene.py', 'ratchet.sh',
-                     'acceptance-extract.awk', 'hooks/pre-commit', 'ratchet.conf'):
+                     'acceptance-extract.awk', 'hooks/pre-commit', 'hooks/pre-push', 'ratchet.conf'):
             target = self.root / 'script' / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(HERE / name, target)
@@ -379,28 +381,57 @@ class HygieneTests(unittest.TestCase):
                 result = repo.git('push', 'origin', 'HEAD:' + ref, check=False)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 result = repo.git('push', 'origin', ':' + ref, check=False)
-                self.assertNotEqual(result.returncode, 0, result.stderr)
-                self.assertIn(b'non-fast-forward', result.stderr)
+                # Exit 0: deleting a non-default ref adds no commits for either check.
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn(b'public hygiene', result.stderr)
+                self.assertEqual(repo.git('ls-remote', 'origin', ref).stdout, b'')
 
     def test_deletions_keep_kit_gates_in_both_layouts(self):
         for public in (False, True):
             repo = Repository()
             self.addCleanup(repo.close)
+            repo.install_pre_commit()
             repo.stage(guard.SETTINGS, json.dumps({'public_repo': public}))
             tip = repo.commit()
-            for ref, allowed, diagnostic in (('master', False, 'RATCHET_ALLOW_PUSH'),
-                                              ('master', True, 'non-fast-forward'),
-                                              ('topic', False, 'non-fast-forward')):
+            # Exit 1 without the default-branch key; otherwise 0 because both
+            # ratchet and the hygiene batch have no added commits to scan.
+            for ref, allowed, expected, diagnostic in (('master', False, 1, 'RATCHET_ALLOW_PUSH'),
+                                                        ('master', True, 0, None),
+                                                        ('topic', False, 0, None)):
                 with self.subTest(public=public, ref=ref, allowed=allowed):
                     env = dict(repo.env, RATCHET_DEFAULT_BRANCH='master')
                     env.pop('RATCHET_ALLOW_PUSH', None)
                     if allowed:
                         env['RATCHET_ALLOW_PUSH'] = '1'
-                    result = subprocess.run(['bash', HERE / 'hooks/pre-push', 'origin', 'unused'],
+                    result = subprocess.run(['bash', repo.root / 'script/hooks/pre-push', 'origin', 'unused'],
                                             cwd=repo.root, env=env, capture_output=True,
                                             input=f'(delete) {"0" * 40} refs/heads/{ref} {tip}\n'.encode())
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    if diagnostic:
+                        self.assertIn(diagnostic.encode(), result.stderr)
+                    self.assertNotIn(b'public hygiene', result.stderr)
+
+    def test_pre_push_refuses_true_non_fast_forward_in_both_layouts(self):
+        for public in (False, True):
+            repo = Repository()
+            self.addCleanup(repo.close)
+            repo.install_pre_commit()
+            repo.stage(guard.SETTINGS, json.dumps({'public_repo': public}))
+            base = repo.commit()
+            repo.stage('tip.txt', 'remote tip')
+            remote_tip = repo.commit()
+            repo.stage('tip.txt', 'local tip')
+            local_tip = repo.commit(parents=[base])
+            self.assertEqual(repo.git('merge-base', '--is-ancestor', remote_tip, local_tip,
+                                      check=False).returncode, 1)
+            for ref in ('master', 'topic'):
+                with self.subTest(public=public, ref=ref):
+                    env = dict(repo.env, RATCHET_DEFAULT_BRANCH='master', RATCHET_ALLOW_PUSH='1')
+                    result = subprocess.run(['bash', repo.root / 'script/hooks/pre-push', 'origin', 'unused'],
+                                            cwd=repo.root, env=env, capture_output=True,
+                                            input=f'HEAD {local_tip} refs/heads/{ref} {remote_tip}\n'.encode())
                     self.assertEqual(result.returncode, 1, result.stderr)
-                    self.assertIn(diagnostic.encode(), result.stderr)
+                    self.assertIn(b'non-fast-forward', result.stderr)
                     self.assertNotIn(b'public hygiene', result.stderr)
 
     def test_binary_decode_falls_back_without_losing_raw_findings(self):
@@ -667,7 +698,6 @@ class HygieneTests(unittest.TestCase):
     def test_pre_push_batches_refs_and_default_lookup(self):
         repo = self.repo
         repo.install_pre_commit()
-        repo.stage('script/hooks/pre-push', (HERE / 'hooks/pre-push').read_bytes())
         repo.terms()
         repo.stage(guard.SETTINGS, '{"public_repo": true}')
         repo.git('branch', '-M', 'master')
@@ -675,6 +705,8 @@ class HygieneTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='hygiene-batch-') as temp:
             remote = Path(temp) / 'remote'
             repo.git('clone', '--bare', '--', str(repo.root), str(remote))
+            # The ratchet must know which commits are already on the remote.
+            repo.git('remote', 'add', '-f', 'origin', str(remote))
             tip = repo.git('rev-parse', 'HEAD').stdout.decode().strip()
             bins = Path(temp) / 'bin'
             bins.mkdir()
@@ -687,7 +719,7 @@ class HygieneTests(unittest.TestCase):
             env = dict(repo.env, PATH=str(bins) + os.pathsep + os.environ['PATH'], CALL_LOG=str(log))
             lines = ''.join(f'HEAD {tip} {ref} {"0" * 40}\n' for ref in
                             ('refs/heads/topic', 'refs/tags/clean', 'refs/notes/proof'))
-            result = subprocess.run(['bash', HERE / 'hooks/pre-push', 'origin', str(remote)],
+            result = subprocess.run(['bash', repo.root / 'script/hooks/pre-push', 'origin', str(remote)],
                                     cwd=repo.root, env=env, input=lines.encode(), capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             calls = log.read_text().splitlines()
