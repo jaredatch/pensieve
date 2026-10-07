@@ -15,7 +15,8 @@ struct DeletionTestDetection: AgentDetectionServiceProtocol {
 final class DeletionTestLinkService: LinkServiceProtocol {
     func removalOperation(skill: Skill, platform: PlatformTarget,
                           projectPath: String?) -> DeployRemovalOperation {
-        adapterRemovalOperation(skill: skill, platform: platform, projectPath: projectPath)
+        adapterRemovalOperation(skill: skill, platform: platform, projectPath: projectPath,
+            foreignArtifactExists: { self.foreignSymlinkPaths.contains(self.path(skill, platform, projectPath)) })
     }
 
     var linkedPaths: Set<String> = []
@@ -65,6 +66,7 @@ final class DeletionTestCursorCompiler: CursorCompilerProtocol {
     }
 
     var ownedProjectPaths: Set<String?> = []
+    var foreignProjectPaths: Set<String?> = []
     private(set) var removeProjectPaths: [String?] = []
     func compile(skill: Skill, projectPath: String?) throws {}
     func remove(skill: Skill, projectPath: String?) throws -> Bool {
@@ -75,7 +77,7 @@ final class DeletionTestCursorCompiler: CursorCompilerProtocol {
 
     func isUpToDate(skill: Skill, projectPath: String?) -> Bool { false }
     func probeRulePresence(skill: Skill, projectPath: String?) throws -> Bool {
-        return ownedProjectPaths.contains(projectPath)
+        return ownedProjectPaths.contains(projectPath) || foreignProjectPaths.contains(projectPath)
     }
     func ownsArtifact(skill: Skill, projectPath: String?) throws -> Bool { ownedProjectPaths.contains(projectPath) }
     func outputPath(skill: Skill, projectPath: String?) -> String {
@@ -239,16 +241,22 @@ final class DeletionCounter {
 // Real filesystem adapters prepare their own direct FileService deletion instead.
 extension LinkServiceProtocol {
     func adapterRemovalOperation(skill: Skill, platform: PlatformTarget,
-                                 projectPath: String?) -> DeployRemovalOperation {
+                                 projectPath: String?,
+                                 foreignArtifactExists: @escaping () -> Bool = { false }) -> DeployRemovalOperation {
         DeployRemovalOperation(classify: {
-            try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath)
+            if try self.ownsArtifact(skill: skill, platform: platform, projectPath: projectPath) { return .owned }
+            // Simple link mocks model owned paths only; fixtures with foreign occupants supply their presence.
+            return foreignArtifactExists() ? .foreign : .absent
         }, delete: { try self.unlink(skill: skill, platform: platform, projectPath: projectPath) })
     }
 }
 
 extension CursorCompilerProtocol {
     func adapterRemovalOperation(skill: Skill, projectPath: String?) -> DeployRemovalOperation {
-        DeployRemovalOperation(classify: { try self.ownsArtifact(skill: skill, projectPath: projectPath) },
+        DeployRemovalOperation(classify: {
+            if try self.ownsArtifact(skill: skill, projectPath: projectPath) { return .owned }
+            return try self.probeRulePresence(skill: skill, projectPath: projectPath) ? .foreign : .absent
+        },
             delete: { try self.remove(skill: skill, projectPath: projectPath) })
     }
 }

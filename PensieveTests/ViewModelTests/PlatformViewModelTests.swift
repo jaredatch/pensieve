@@ -302,10 +302,12 @@ extension PlatformViewModelTests {
         let store = DeployStateStore(fileService: FileService(), appSupportDir: try deletionRoot())
         let skill = Skill(name: "A", directoryName: "a"), link = DeletionTestLinkService()
         let cursor = DeletionTestCursorCompiler(), path = cursor.outputPath(skill: skill, projectPath: nil)
+        cursor.foreignProjectPaths.insert(nil)
         try store.replaceAll([stateRecord(path: path, platform: .cursor)])
         let result = deletionVM(installed: [.cursor], link: link, cursor: cursor, store: store)
             .removeAllDeploys(skill: skill, projects: [], localDeployHistory: { _ in [] }).batch
         XCTAssertEqual(result.successes.count, 1); XCTAssertTrue(cursor.removeProjectPaths.isEmpty)
+        XCTAssertTrue(cursor.foreignProjectPaths.contains(nil))
         XCTAssertTrue(try store.read().records.isEmpty)
     }
 

@@ -80,6 +80,34 @@ final class DeployReconcilerPruneTests: XCTestCase {
         XCTAssertTrue(fileService.isSymlink(at: agentDir + "/live"))
     }
 
+    func testTargetRestoredBeforePruneTurnKeepsLinkAndRecord() throws {
+        let secondDir = tempDir + "/second-agent/skills"
+        let firstPath = agentDir + "/gone"
+        let restoredPath = secondDir + "/restored"
+        let restoredTarget = storeSkillsDir + "/restored"
+        try link("gone", to: storeSkillsDir + "/gone")
+        try fileService.createSymlink(at: restoredPath, pointingTo: restoredTarget)
+        try deployStateStore.replaceAll([record(slug: "gone", artifactPath: firstPath),
+            record(slug: "restored", artifactPath: restoredPath)])
+        let mapped = LinkServiceCanonicalDirectoryFileService(wrapped: fileService,
+            pathMappings: [], physicalSandbox: tempDir)
+        mapped.beforeArtifactDeletion = { path in
+            guard path == firstPath else { return }
+            try self.fileService.createDirectory(at: restoredTarget)
+            try self.fileService.writeFile(at: restoredTarget + "/SKILL.md", content: "Restored skill")
+        }
+        let result = DeployReconciler(fileService: mapped, deployState: deployStateStore,
+            pensieveSkillsDir: storeSkillsDir, agentSkillDirs: [
+                .init(platform: .claudeCode, path: agentDir),
+                .init(platform: .codex, path: secondDir)
+            ]).pruneDangling()
+        XCTAssertEqual(result.removed, [firstPath])
+        XCTAssertFalse(fileService.isSymlink(at: firstPath))
+        XCTAssertTrue(fileService.isSymlink(at: restoredPath))
+        XCTAssertEqual(try fileService.readFile(at: restoredPath + "/SKILL.md"), "Restored skill")
+        XCTAssertEqual(try deployStateStore.read().records.map(\.artifactPath), [restoredPath])
+    }
+
     /// (c) A FOREIGN symlink (target outside the store) is never touched — even when dangling. This is
     ///     the mutation-probe case: dropping the target-under-store guard removes it.
     func testForeignSymlinkSurvives() throws {

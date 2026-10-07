@@ -167,7 +167,7 @@ final class DeployReconciler: DeployReconciling {
         return realDir == realParent + "/" + last
     }
 
-    /// Gather dangling Pensieve links without changing artifacts or their records.
+    /// Gather Pensieve link candidates without changing artifacts or their records.
     private func danglingCandidates(in agent: AgentSkillsDirectory) -> [DeployRemovalCandidate] {
         let agentDir = agent.path
         guard fileService.directoryExists(at: agentDir),
@@ -188,10 +188,12 @@ final class DeployReconciler: DeployReconciling {
             guard DeployArtifactOwnership.ownsLinkTarget(target, skillsDirectory: pensieveSkillsDir, linksFile: false) else {
                 continue
             }
-            // (b) dangling: the canonical target no longer exists → remove the LINK (never the target).
-            guard !fileService.fileExists(at: target), !fileService.directoryExists(at: target) else { continue }
             let operation = DeployRemovalOperation(fileService: fileService, path: link) {
-                try self.ownership.link(at: link, skillsDirectory: self.pensieveSkillsDir, linksFile: false).isOwned
+                guard try self.ownership.link(at: link, skillsDirectory: self.pensieveSkillsDir, linksFile: false).isOwned else {
+                    return false
+                }
+                // These probes follow the freshly checked link, so a restored target keeps its link and record.
+                return !self.fileService.fileExists(at: link) && !self.fileService.directoryExists(at: link)
             }
             var candidate = DeployRemovalCandidate(key: DeployRemovalKey(slug: entry, platform: agent.platform,
                 projectPath: nil, artifactPath: link), evidence: [.danglingLink], operation: operation)

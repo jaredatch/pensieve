@@ -4,6 +4,28 @@ import XCTest
 
 extension CursorOwnershipTests {
     @MainActor
+    func testMockDuplicateSelectionReportsBothInputsAsSuccesses() throws {
+        let h = try contextAndVM()
+        let project = reviewProject(h.context)
+        let second = Skill(name: "Second row", directoryName: skill.directoryName)
+        h.context.insert(second)
+        let link = DeletionTestLinkService()
+        let path = link.path(skill, .claudeCode, project.path)
+        link.linkedPaths.insert(path)
+        try reviewRecord(h.state, path: path, platform: .claudeCode, target: .project(project))
+        let vm = PlatformViewModel(fileService: mapped, linkService: link,
+            agentDetection: DeployStubDetection(installed: [.claudeCode]), deployStateStore: h.state)
+        let result = vm.removeOwnedBatch(pairs: [DeployRemovalPair(skill: skill, platform: .claudeCode),
+            DeployRemovalPair(skill: second, platform: .claudeCode)], target: .project(project))
+        XCTAssertFalse(result.hasFailures)
+        XCTAssertEqual(result.successes.map(\.skillID), [skill.id, second.id])
+        XCTAssertTrue(result.retiredPairs.isEmpty)
+        XCTAssertEqual(link.unlinkCalls.count, 1)
+        XCTAssertTrue(link.linkedPaths.isEmpty)
+        XCTAssertTrue(try h.state.read().records.isEmpty)
+    }
+
+    @MainActor
     func testBatchInspectionCannotDeleteAReplacementFolder() throws {
         let h = try contextAndVM()
         let project = reviewProject(h.context)
