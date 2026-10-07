@@ -40,6 +40,39 @@ final class WaitingRemovalRoundTwoTests: XCTestCase {
         XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty)
     }
 
+    func testLateFailureKeptEntrySettlesWhileProjectStaysRegistered() throws {
+        let h = try WaitingRemovalHarness(persistent: true)
+        defer { h.base.cleanup() }
+        try h.base.files.createDirectory(at: h.base.project.path)
+        try LinkService(fileService: h.mapped).link(skill: h.base.skill, platform: .codex, projectPath: h.base.project.path)
+        try h.base.deployState.upsert(DeployStateRecord(slug: h.base.skill.directoryName, platform: "codex",
+            scope: "project", projectIdentityKey: h.base.project.identityKey,
+            artifactPath: h.base.artifact(.codex), recordedAt: "original"))
+        try h.hideFolder()
+        let fault = ProjectRemovalSaveFault(root: h.base.root)
+        defer { fault.stop() }
+        var savedWaiting: [WaitingRemoval] = []
+        h.base.mapped.beforeDeployStateWrite = { _ in
+            savedWaiting = try h.vm.waitingRemovalStore.read()
+            fault.enabled = true
+        }
+        let result = h.removeProject()
+        h.base.mapped.beforeDeployStateWrite = nil
+        XCTAssertEqual(fault.refusedSaves, 1)
+        XCTAssertTrue(result.operationFailures.contains { $0.contains("Couldn't save project removal") })
+        XCTAssertEqual(try h.base.context.fetchCount(FetchDescriptor<Project>()), 2)
+        XCTAssertTrue(try h.base.deployState.read().records.isEmpty, "State-only evidence was retired")
+        XCTAssertEqual(savedWaiting.count, 1)
+        XCTAssertEqual(try h.vm.waitingRemovalStore.read(), savedWaiting,
+            "A late save failure must preserve the only remaining cleanup evidence")
+        try h.restoreFolder()
+        XCTAssertTrue(h.base.files.isSymlink(at: h.base.artifact(.codex)))
+        XCTAssertFalse(h.vm.reconcileWaitingRemovals(context: h.base.context).hasFailures)
+        XCTAssertFalse(h.base.files.isSymlink(at: h.base.artifact(.codex)))
+        XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty)
+        XCTAssertTrue(try h.base.context.fetch(FetchDescriptor<Project>()).contains { $0.id == h.base.project.id })
+    }
+
     func testWaitingPromiseDriftRefusesConfirmedProjectRemoval() throws {
         for addingEvidence in [false, true] {
             let h = try WaitingRemovalHarness()

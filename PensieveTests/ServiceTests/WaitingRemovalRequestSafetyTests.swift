@@ -113,8 +113,8 @@ final class WaitingRemovalRequestSafetyTests: XCTestCase {
             let waiting = try h.vm.waitingRemovalStore.read()
             let rule = h.vm.artifactPath(skill: h.base.skill, platform: .cursor, target: .project(h.base.project))
             XCTAssertEqual(waiting.count, 2)
-            XCTAssertTrue(h.base.files.isSymlink(at: h.base.artifact(.codex)))
-            XCTAssertFalse(h.base.files.isSymlink(at: rule), identity)
+            XCTAssertTrue(h.base.files.isSymlink(at: h.base.artifact(.codex)), identity)
+            XCTAssertFalse(h.mapped.isSymlink(at: rule), identity)
             let ruleLines = try h.mapped.readFile(at: rule).components(separatedBy: "\n")
             XCTAssertEqual(ruleLines.first, "---", identity)
             let closingLine = try XCTUnwrap(ruleLines.dropFirst().firstIndex(of: "---"), identity)
@@ -123,7 +123,7 @@ final class WaitingRemovalRequestSafetyTests: XCTestCase {
             XCTAssertFalse(try h.base.files.entryExistsWithoutFollowingLinks(at: h.base.artifact(.codex)), identity)
             XCTAssertFalse(try h.base.files.entryExistsWithoutFollowingLinks(at: rule), identity)
             XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty, identity)
-            XCTAssertFalse(h.base.files.fileExists(at: h.base.project.path + "/.pensieve-project"))
+            XCTAssertFalse(h.base.files.fileExists(at: h.base.project.path + "/.pensieve-project"), identity)
         }
     }
 
