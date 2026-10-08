@@ -30,33 +30,50 @@ extension SyncCoordinatorTests {
         }
     }
 
-    func testTriggersCoalesce() async {
-        let firstStarted = expectation(description: "first started")
-        let followupFinished = expectation(description: "one follow-up")
-        let release = AsyncGate()
-        var cycles = 0
-        let model = SyncModel()
-        let scheduler = makeCoalescingScheduler(debounceSeconds: 0.2) { await model.syncAndReport($0) }
-        model.installSyncRequest {
-            scheduler.cycleDidStart()
-            cycles += 1
-            if cycles == 1 {
-                firstStarted.fulfill()
-                await release.wait()
-            } else if cycles == 2 {
-                followupFinished.fulfill()
-            }
+    func testTriggersCoalesce() async throws {
+        let h = try await makeSyncRecoveryHarness(debounceSeconds: 5)
+        h.runtime.scheduler.launchIngestCompleted()
+        await h.waitForCycle(1)
+        h.runtime.syncStateNotifier()
+        h.runtime.scheduler.tick()
+        h.runtime.scheduler.wake()
+        h.release.open()
+        await h.waitForCycle(2)
+        h.release.open()
+        await h.waitForIdle()
+        // Observe beyond the debounce: removing the production start acknowledgement starts a third cycle.
+        try await Task.sleep(for: .milliseconds(5250))
+        XCTAssertEqual(h.engine.count, 2, "runtime admission must cancel the sleeping nudge")
+        await h.finish()
+        try await assertDirectLockedSyncPreservesNudge()
+    }
+
+    private func assertDirectLockedSyncPreservesNudge() async throws {
+        let h = try await makeSyncRecoveryHarness(outcomes: [
+            .success(.synced(pushed: false, warnings: [])), .failure(SyncError.syncInProgress)
+        ])
+        h.runtime.scheduler.launchIngestCompleted()
+        await h.waitForCycle(1)
+        h.release.open()
+        await h.waitForIdle()
+        XCTAssertFalse(h.runtime.scheduler.hasPendingTrigger)
+        let releaseManual = Task {
+            await h.waitForCycle(2)
+            h.release.open()
         }
-        scheduler.coordinatorBecameReady()
-        scheduler.launchIngestCompleted()
-        await fulfillment(of: [firstStarted], timeout: TestWait.hostedActionTimeoutSeconds)
-        scheduler.nudge()
-        scheduler.tick()
-        scheduler.wake()
-        await release.open()
-        await fulfillment(of: [followupFinished], timeout: TestWait.hostedActionTimeoutSeconds)
-        try? await Task.sleep(nanoseconds: 300_000_000)
-        XCTAssertEqual(cycles, 2)
+        h.runtime.syncStateNotifier()
+        // Enter directly on this actor, before the zero-delay nudge task can run. The coordinator
+        // maps the held engine's syncInProgress to locked, which earns no recovery catch-up.
+        await h.runtime.syncModel.syncNowAndReport()
+        await releaseManual.value
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "direct locked sync cancelled the pending edit nudge") {
+            h.engine.count == 3 && h.release.waiterCount == 1
+        }
+        XCTAssertEqual(h.engine.count, 3, "the nudge must start its own cycle after direct Sync Now")
+        if h.engine.count == 3 { h.release.open() }
+        await h.finish()
+        XCTAssertEqual(h.engine.count, 3)
     }
 
     func testManualSyncDuringScheduledCycleCoalesces() async {

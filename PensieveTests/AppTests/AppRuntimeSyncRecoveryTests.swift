@@ -13,7 +13,7 @@ final class AppRuntimeSyncRecoveryTests: XCTestCase {
             .success(.conflicted(["skills/example/SKILL.md"])), .success(.branchless)
         ]
         for (index, outcome) in outcomes.enumerated() {
-            let h = try await makeHarness(outcomes: [outcome])
+            let h = try await makeSyncRecoveryHarness(outcomes: [outcome])
             h.runtime.scheduler.launchIngestCompleted()
             await h.waitForCycle(1)
             if index == outcomes.count - 1 {
@@ -32,7 +32,7 @@ final class AppRuntimeSyncRecoveryTests: XCTestCase {
 
     func testQueuedRequestsAbsorbRecoveryAndRecoveryDuringCatchUpGetsOneMore() async throws {
         for queued in ["manual", "scheduled", "watcher", "none"] {
-            let h = try await makeHarness()
+            let h = try await makeSyncRecoveryHarness()
             h.runtime.scheduler.launchIngestCompleted()
             await h.waitForCycle(1)
             switch queued {
@@ -68,7 +68,7 @@ final class AppRuntimeSyncRecoveryTests: XCTestCase {
                 : .repositoryUnreadable(path: "fixture", detail: "read failed")
             var outcomes: [Result<SyncOutcome, Error>] = [.failure(failure)]
             if retryFails { outcomes.append(.failure(GitError.unusable(.developerToolsMissing))) }
-            let h = try await makeHarness(outcomes: outcomes)
+            let h = try await makeSyncRecoveryHarness(outcomes: outcomes)
             let cycle: Task<Void, Never>?
             if manual {
                 h.preference.enabled = false
@@ -113,7 +113,7 @@ final class AppRuntimeSyncRecoveryTests: XCTestCase {
 
     func testQueuedPrivilegedRequestKeepsStandingWhenItMeetsDirectCycle() async throws {
         for preflight in [false, true] {
-            let h = try await makeHarness()
+            let h = try await makeSyncRecoveryHarness()
             h.preference.enabled = false
             h.runtime.scheduler.launchIngestCompleted()
             let direct = Task { await h.runtime.syncModel.syncNowAndReport() }
@@ -136,6 +136,7 @@ final class AppRuntimeSyncRecoveryTests: XCTestCase {
             h.runtime.scheduler.tick()
             XCTAssertFalse(h.runtime.scheduler.isSyncing, "the bypass must be spent")
         }
+        try await assertConcurrentProbeCannotSuppressStartupFailure()
         try await assertPrivilegedRequestsSurviveGitOutage()
         try await assertRefusedRetryPreservesAbsorbedStanding()
         try await assertRefusedRecoveryDoesNotCancelNudge()
@@ -144,13 +145,40 @@ final class AppRuntimeSyncRecoveryTests: XCTestCase {
 }
 
 private extension AppRuntimeSyncRecoveryTests {
+    func assertConcurrentProbeCannotSuppressStartupFailure() async throws {
+        let started = expectation(description: "startup probe entered")
+        let release = TestWait.Gate(owner: self)
+        let probe = RuleProbe()
+        probe.set {
+            if probe.count == 1 {
+                started.fulfill()
+                try? release.wait()
+            }
+            return .usable
+        }
+        let startup = Task {
+            try await makeSyncRecoveryHarness(probe: probe,
+                initialProbeError: GitError.outputReadFailed(detail: "bootstrap EIO"))
+        }
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
+        await TestWait.until(failureMessage: "startup probe did not block") { release.waiterCount == 1 }
+        let concurrent = await BlockingWork.run(priority: .utility) { probe.run() }
+        XCTAssertEqual(concurrent, .usable)
+        XCTAssertEqual(probe.count, 2, "the other call must finish before startup resumes")
+        release.open()
+        let h = try await startup.value
+        XCTAssertNil(h.runtime.gitUsability, "startup keeps its own failure despite the later shared count")
+        XCTAssertEqual(h.runtime.syncModel.configurationError, "Pensieve couldn’t read git’s output: bootstrap EIO")
+        await h.finish()
+    }
+
     func assertPrivilegedRequestsSurviveGitOutage() async throws {
         for scenario in ["queued manual", "idle manual", "preflight", "first manual", "first preflight"] {
             let outcomes: [Result<SyncOutcome, Error>] = scenario == "queued manual"
                 ? [.failure(GitError.unusable(.developerToolsMissing))] : []
             let probe = RuleProbe()
             let firstAnswer = scenario.hasPrefix("first")
-            let h = try await makeHarness(outcomes: outcomes, probe: probe,
+            let h = try await makeSyncRecoveryHarness(outcomes: outcomes, probe: probe,
                 initialProbeError: firstAnswer ? GitError.outputReadFailed(detail: "bootstrap EIO") : nil)
             h.preference.enabled = scenario == "queued manual"
             h.runtime.scheduler.launchIngestCompleted()
@@ -188,7 +216,9 @@ private extension AppRuntimeSyncRecoveryTests {
     }
 
     func assertRetryExpiresWithUsableEvidence() async throws {
-        let h = try await makeHarness(outcomes: [.failure(GitError.repositoryUnreadable(path: "fixture", detail: "offline"))])
+        let h = try await makeSyncRecoveryHarness(outcomes: [
+            .failure(GitError.repositoryUnreadable(path: "fixture", detail: "offline"))
+        ])
         h.preference.enabled = false
         h.runtime.scheduler.launchIngestCompleted()
         let manual = Task { await h.runtime.syncModel.syncNowAndReport() }
@@ -206,7 +236,7 @@ private extension AppRuntimeSyncRecoveryTests {
 
     func assertRecoveryWhileIneligible() async throws {
         for block in ["conflict", "branchless", "absent"] {
-            let h = try await makeHarness(outcomes: [.failure(GitError.unusable(.developerToolsMissing))])
+            let h = try await makeSyncRecoveryHarness(outcomes: [.failure(GitError.unusable(.developerToolsMissing))])
             h.preference.enabled = false
             h.runtime.scheduler.launchIngestCompleted()
             let manual = Task { await h.runtime.syncModel.syncNowAndReport() }
@@ -246,7 +276,7 @@ private extension AppRuntimeSyncRecoveryTests {
 
 private extension AppRuntimeSyncRecoveryTests {
     func heldRecoveryBeforeIngest() async throws -> RecoveryHarness {
-        let h = try await makeHarness(outcomes: [.failure(GitError.unusable(.developerToolsMissing))])
+        let h = try await makeSyncRecoveryHarness(outcomes: [.failure(GitError.unusable(.developerToolsMissing))])
         h.preference.enabled = false
         XCTAssertFalse(h.runtime.scheduler.isLaunchIngestReady)
         let manual = Task { await h.runtime.syncModel.syncNowAndReport() }
@@ -296,7 +326,7 @@ private extension AppRuntimeSyncRecoveryTests {
     }
 
     func assertRefusedRecoveryDoesNotCancelNudge() async throws {
-        let h = try await makeHarness()
+        let h = try await makeSyncRecoveryHarness()
         h.runtime.scheduler.launchIngestCompleted()
         await h.waitForCycle(1)
         h.release.open()

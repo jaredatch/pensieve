@@ -193,7 +193,7 @@ final class SyncModel {
         }
     }
 
-    func syncAndReport(_ request: SyncRequest) async {
+    func syncAndReport(_ request: SyncRequest, onCycleStart: (() -> Void)? = nil) async {
         guard !redispatchIfRecoveryIsRefused(request) else { return }
         guard !isCycleInFlight else {
             queuedRequest = queuedRequest.map { $0.absorbing(request) } ?? request
@@ -207,6 +207,7 @@ final class SyncModel {
         manualRetry = nil
         defer { finishCycle(request) }
         state = .syncing
+        onCycleStart?()
         await syncRequest()
     }
 

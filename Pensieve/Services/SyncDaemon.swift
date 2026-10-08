@@ -70,8 +70,8 @@ struct SyncDaemon {
     let root: String
     let appSupport: String
     let git: FastForwardGitService
-    /// The daemon supplies its cycle root to the runtime's existing git branch probe.
-    /// This keeps branch observation on the same repository without expanding the git protocol.
+    /// Pass the cycle root to the supplied git branch probe; main supplies GitService.hasLocalBranches.
+    /// This keeps branch observation on the repository being synced without expanding the git protocol.
     let hasLocalBranches: (String) throws -> Bool
     let credentials: CredentialStoreProtocol
     let reconciler: DeployReconciling

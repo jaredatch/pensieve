@@ -143,7 +143,7 @@ final class SyncScheduler {
 
     func drainPendingRequests() { drainIfPossible() }
 
-    /// Only an admitted model cycle covers a nudge; a scheduler hand-off may be refused.
+    /// Cancel a nudge only after this scheduler's request starts a model cycle.
     func cycleDidStart() {
         debounceTask?.cancel()
         debounceTask = nil

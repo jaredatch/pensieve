@@ -3,9 +3,11 @@ import SwiftData
 import XCTest
 @testable import Pensieve
 
-extension AppRuntimeSyncRecoveryTests {
-    func makeHarness(outcomes: [Result<SyncOutcome, Error>] = [],
-                     probe: RuleProbe = RuleProbe(), initialProbeError: Error? = nil) async throws -> RecoveryHarness {
+extension XCTestCase {
+    @MainActor
+    func makeSyncRecoveryHarness(outcomes: [Result<SyncOutcome, Error>] = [],
+                                 probe: RuleProbe = RuleProbe(), initialProbeError: Error? = nil,
+                                 debounceSeconds: TimeInterval = 0) async throws -> RecoveryHarness {
         let fixture = try GitFailureFixture()
         var ready = false
         defer { if !ready { try? fixture.remove() } }
@@ -13,8 +15,10 @@ extension AppRuntimeSyncRecoveryTests {
         let release = TestWait.Gate(owner: self)
         let engine = RecoveryEngine(release: release, outcomes: outcomes)
         let preference = RecoveryPreference()
-        let scheduler = SyncScheduler(debounceSeconds: 0, startAutomatically: false,
+        let scheduler = SyncScheduler(debounceSeconds: debounceSeconds, startAutomatically: false,
                                       backgroundSyncEnabled: { preference.enabled })
+        let errorLock = NSLock()
+        var pendingInitialError = initialProbeError
         let library = SkillLibraryViewModel(
             skillStore: SkillStore(fileService: fixture.files, baseDir: fixture.paths.skillsDir),
             fileService: fixture.files, fileWatchService: RecordingWatcher(), manifestRoot: fixture.root,
@@ -22,8 +26,14 @@ extension AppRuntimeSyncRecoveryTests {
         let runtime = try AppRuntime(library: library, scheduler: scheduler, defaults: isolatedDefaults(),
             launchBackfill: { _ in }, postSyncConvergence: RecoveryConvergence(), paths: fixture.paths,
             gitUsabilityProbe: {
+                // Reserve the failure for this invocation before another probe can change the count.
+                let failure = errorLock.withLock {
+                    let failure = pendingInitialError
+                    pendingInitialError = nil
+                    return failure
+                }
                 let result = probe.run()
-                if let initialProbeError, probe.count == 1 { throw initialProbeError }
+                if let failure { throw failure }
                 return result
             }, coordinatorConfigure: { coordinator in
                 await coordinator.configure(engine: engine, git: IngestRecordingGit(),

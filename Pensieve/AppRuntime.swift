@@ -77,7 +77,6 @@ final class AppRuntime {
                 self.coordinator = coordinator
                 self.syncModel.installSyncRequest { [weak self] in
                     guard let self else { return }
-                    self.scheduler.cycleDidStart()
                     self.library.beginCoordinatorChanges()
                     let evidence = self.gitState.beginEvidence()
                     let result = await Self.runCoordinatorCycle(coordinator, library: self.library, paths: paths)
