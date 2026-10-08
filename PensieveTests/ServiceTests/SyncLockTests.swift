@@ -30,6 +30,12 @@ final class SyncLockTests: XCTestCase {
             "!#acl 1\ngroup:ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C:everyone:12:deny:readattr\n"))
         defer { acl_free(UnsafeMutableRawPointer(acl)) }
         XCTAssertEqual(acl_set_fd_np(descriptor, acl, ACL_TYPE_EXTENDED), 0)
+        XCTAssertThrowsError(try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true),
+                             "The ACL fixture must make Foundation's parent creation fail on this machine")
+        let accessible = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+        XCTAssertGreaterThanOrEqual(accessible, 0, "The same ACL fixture must allow native open")
+        guard accessible >= 0 else { return }
+        close(accessible)
         let held = try XCTUnwrap(SyncLock.tryAcquire(at: path))
         defer { held.release() }
         XCTAssertNil(try SyncLock.tryAcquireReportingErrors(at: path))

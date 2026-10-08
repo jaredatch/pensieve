@@ -190,12 +190,23 @@ final class ImportViewModel {
                 writtenSlugs.append(dirName)
                 importProgress = Double(writtenSlugs.count) / Double(toImport.count)
             } catch {
+                if let slug = occupiedSlug(reportedBy: error) { taken.insert(slug) }
                 self.error = "Failed to import \(discovered.name): \(error.localizedDescription)"
             }
         }
 
         finishImport(context: context, writtenSlugs: writtenSlugs, saveContext: saveContext)
         return .finished
+    }
+
+    /// Exclusive publication reports its occupied destination. Remember that name for the
+    /// remaining batch without another listing; errors for unrelated paths reserve nothing.
+    private func occupiedSlug(reportedBy error: Error) -> String? {
+        let failure = error as NSError
+        guard failure.domain == NSPOSIXErrorDomain, failure.code == Int(POSIXErrorCode.EEXIST.rawValue),
+              let path = failure.userInfo[NSFilePathErrorKey] as? String else { return nil }
+        let slug = (path as NSString).lastPathComponent
+        return path == skillStore.baseDir + "/" + slug ? slug : nil
     }
 
     private func acquireImportLock() -> SyncLock? {
@@ -207,7 +218,9 @@ final class ImportViewModel {
             }
             return lock
         } catch {
-            self.error = "Couldn't access Pensieve's lock file: \(error.localizedDescription). Try importing again."
+            NSLog("Pensieve import lock access failed at %@: %@", lockPath, String(describing: error))
+            self.error = "Couldn't access Pensieve's lock file. Check the App Support folder's permissions " +
+                "and make sure sync.lock is a file. Then try importing again."
             return nil
         }
     }

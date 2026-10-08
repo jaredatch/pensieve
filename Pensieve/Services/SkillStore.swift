@@ -23,7 +23,8 @@ protocol SkillStoreProtocol {
     func prepareImport() throws -> Set<String>
     /// Publish an already prepared SKILL.md from a vendor temp outside the configured store root.
     /// The caller holds sync.lock through preparation, the entire batch, cleanup and metadata saves.
-    /// avoiding contains the batch's disk snapshot, row-held slugs and each successful publication.
+    /// avoiding contains the batch's disk snapshot, row-held slugs, each successful publication
+    /// and destinations that a failed exclusive publication proved occupied.
     func createSkill(name: String, content: String, avoiding: Set<String>) throws -> String
     /// Read the raw SKILL.md content (INCLUDING any frontmatter). Callers that want only the
     /// markdown body must strip via `SkillParser.stripFrontmatter`.

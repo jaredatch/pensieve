@@ -176,6 +176,33 @@ final class ImportPublicationTests: XCTestCase {
             XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).map(\.directoryName), ["good-" + kind])
             try assertOccupant(path, kind: kind, identity: XCTUnwrap(identity))
             XCTAssertTrue(try temps().isEmpty)
+
+            // A writer outside sync.lock claims the first of three names with the same slug.
+            let repeatedName = "Repeat " + kind
+            let repeatedSlug = "repeat-" + kind
+            let repeatedPath = skills + "/" + repeatedSlug
+            let repeatedNames = [repeatedName, repeatedName + "!", repeatedName + "?"]
+            let repeatedService = ImportPublicationFileService()
+            var repeatedIdentity: FileIdentity?
+            repeatedService.afterWrite = { _, _ in
+                guard repeatedIdentity == nil else { return }
+                try self.occupy(repeatedPath, kind: kind)
+                repeatedIdentity = self.files.fileIdentity(at: repeatedPath, followingLinks: false)
+            }
+            let repeated = try self.model(using: repeatedService, names: repeatedNames)
+            repeated.selectedSkills = Set(repeated.discoveredSkills.filter {
+                repeatedNames.contains($0.name)
+            }.map(\.sourcePath))
+            XCTAssertEqual(repeated.selectedSkills.count, 3)
+            let repeatedContext = try self.context()
+            repeated.importSelected(context: repeatedContext)
+            XCTAssertNotNil(repeated.error, "The skill that met the occupant still reports failure")
+            XCTAssertEqual(repeated.importedSkillCount, 2)
+            XCTAssertEqual(Set(try repeatedContext.fetch(FetchDescriptor<Skill>()).map(\.directoryName)),
+                           [repeatedSlug + "-2", repeatedSlug + "-3"])
+            try assertOccupant(repeatedPath, kind: kind, identity: XCTUnwrap(repeatedIdentity))
+            XCTAssertEqual(repeatedService.directoryListings.filter { $0 == skills }.count, 1)
+            XCTAssertTrue(try temps().isEmpty)
         }
     }
 

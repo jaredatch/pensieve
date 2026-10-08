@@ -14,6 +14,8 @@ The suite is **XCTest** only. Its size is the committed `.test-count` — the ra
 
 For offscreen preview comparisons, rendered text allows at most 4 per RGBA byte; decoded images stay exact, and both require equal dimensions and visible pixels.
 
+`ImportWizardHostTests` reads visible text and selection counts from the production wizard's live `NSHostingView._viewDebugData()` tree, including the nested hosts that render list cells. The wrapper forwards `SWIFTUI_VIEW_DEBUG=1` before each host launches. This inspection uses SwiftUI's underscored debug API and reflected SDK fields; missing data fails the UI assertions. It never evaluates a fresh view body or substitutes model state for rendered values. Return key actions drive refusal and retry in a hidden window, without OCR or window activation.
+
 Not present: **network-integration** tests. When one is needed, tag it (§4).
 
 ## 2. Acceptance ↔ tests

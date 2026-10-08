@@ -27,13 +27,11 @@ final class ImportWizardHostTests: XCTestCase {
         XCTAssertTrue(unopenablePressed)
         guard unopenablePressed else { return }
         await TestWait.until(failureMessage: "An unopenable lock must report its error") { model.error != nil }
-        XCTAssertFalse(model.error?.localizedCaseInsensitiveContains("sync is running") == true)
-        XCTAssertTrue(model.error?.localizedCaseInsensitiveContains("lock file") == true)
-        XCTAssertTrue(model.error?.contains(POSIXError(.EISDIR).localizedDescription) == true,
-                      "The lock access message retains open's actual cause")
+        assertLockAccessAdvice(model.error)
         XCTAssertEqual(model.selectedSkills, selection)
         XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<Skill>()).isEmpty)
         XCTAssertFalse(files.directoryExists(at: root + "/store"))
+        try await assertSelectionRendered(model: model, in: fixture.host)
 
         try files.deleteDirectory(at: lockPath)
         let held = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
@@ -47,6 +45,7 @@ final class ImportWizardHostTests: XCTestCase {
         XCTAssertEqual(model.selectedSkills, selection)
         XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<Skill>()).isEmpty)
         XCTAssertFalse(files.directoryExists(at: root + "/store"))
+        try await assertSelectionRendered(model: model, in: fixture.host)
 
         held.release()
         let retryPressed = pressImport(in: fixture.host)
@@ -56,6 +55,7 @@ final class ImportWizardHostTests: XCTestCase {
         XCTAssertEqual(model.selectedSkills, selection)
         XCTAssertEqual(try container.mainContext.fetch(FetchDescriptor<Skill>()).map(\.directoryName), ["chosen"])
         XCTAssertEqual(try files.listDirectory(at: root + "/store/skills"), ["chosen"])
+        await assertDoneRendered(in: fixture.host)
         XCTAssertTrue(pressImport(in: fixture.host))
         XCTAssertEqual(try container.mainContext.fetch(FetchDescriptor<Skill>()).count, 1,
                        "The completed wizard's Return action must not import a second time")
@@ -176,6 +176,79 @@ final class ImportWizardHostTests: XCTestCase {
         [root].compactMap { $0 as? NSScrollView } + root.subviews.flatMap(scrollViews(in:))
     }
 
+    private func assertLockAccessAdvice(_ error: String?) {
+        XCTAssertFalse(error?.localizedCaseInsensitiveContains("sync is running") == true)
+        XCTAssertTrue(error?.localizedCaseInsensitiveContains("lock file") == true)
+        XCTAssertTrue(error?.contains("App Support") == true)
+        XCTAssertTrue(error?.contains("permissions") == true)
+        XCTAssertTrue(error?.contains("sync.lock is a file") == true)
+        XCTAssertFalse(error?.contains(POSIXError(.EISDIR).localizedDescription) == true,
+                       "The advice uses plain sentences; the native cause belongs in the log")
+    }
+
+    private func assertDoneRendered(in host: NSHostingView<AnyView>) async {
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                             failureMessage: "Successful retry must render Done") {
+            self.renderedValues(in: host).compactMap { $0 as? Text }
+                .flatMap(self.renderedStrings).contains("Done")
+        }
+        XCTAssertFalse(renderedValues(in: host).compactMap { $0 as? Text }
+            .flatMap(renderedStrings).contains("Import Selected"))
+    }
+
+    private func assertSelectionRendered(model: ImportViewModel, in host: NSHostingView<AnyView>) async throws {
+        let error = try XCTUnwrap(model.error)
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                             failureMessage: "Refusal must render its message on the retained selection", diagnostics: {
+            let values = self.renderedValues(in: host)
+            return values.compactMap { $0 as? Text }.flatMap(self.renderedStrings).description
+        }, {
+            let values = self.renderedValues(in: host)
+            let strings = values.compactMap { $0 as? Text }.flatMap(self.renderedStrings)
+            return strings.contains("Import Selected") && strings.contains(error)
+        })
+        let values = renderedValues(in: host)
+        XCTAssertFalse(values.compactMap { $0 as? Text }.flatMap(renderedStrings).contains("Done"))
+        let texts = values.compactMap { $0 as? Text }
+        let strings = texts.flatMap(renderedStrings)
+        XCTAssertTrue(strings.contains("Chosen"))
+        XCTAssertTrue(strings.contains("Unselected"))
+        XCTAssertTrue(texts.contains { String(reflecting: $0).contains("\"1 selected\"") },
+                      "The rendered selection count must retain the chosen skill")
+    }
+
+    private func renderedStrings(in text: Text) -> [String] {
+        func strings(_ value: Any, depth: Int) -> [String] {
+            if let string = value as? String {
+                // SwiftUI's render debug values escape apostrophes in their text payloads.
+                return [string.replacingOccurrences(of: "\\'", with: "'")]
+            }
+            guard depth > 0 else { return [] }
+            return Mirror(reflecting: value).children.flatMap { strings($0.value, depth: depth - 1) }
+        }
+        return Mirror(reflecting: text).descendant("storage").map { strings($0, depth: 8) } ?? []
+    }
+
+    /// Read NSHostingView's live render tree. SWIFTUI_VIEW_DEBUG is enabled by the suite wrapper.
+    /// Inspect only rendered values/children; never evaluate a new body or substitute model state.
+    /// Missing debug data or changed SDK fields fail the owning UI assertions instead of passing empty.
+    private func renderedValues(in host: NSHostingView<AnyView>) -> [Any] {
+        host.layoutSubtreeIfNeeded()
+        func values(_ nodes: [_ViewDebug.Data]) -> [Any] {
+            nodes.flatMap { node in
+                let mirror = Mirror(reflecting: node)
+                let properties = mirror.descendant("data") as? [_ViewDebug.Property: Any]
+                let children = mirror.descendant("childData") as? [_ViewDebug.Data] ?? []
+                return [properties?[.value]].compactMap { $0 } + values(children)
+            }
+        }
+        func hostValues(_ view: NSView) -> [Any] {
+            let nodes = (view as? ImportWizardRenderHost)?.importWizardRenderData ?? []
+            return values(nodes) + view.subviews.flatMap(hostValues)
+        }
+        return hostValues(host)
+    }
+
     private func pressImport(in root: NSView) -> Bool {
         guard let window = root.window,
               let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
@@ -203,4 +276,14 @@ private final class ReportScanner: ImportScannerProtocol {
     func isInsideStore(_ path: String) -> Bool { false }
     func scanWithReport() -> ImportScanReport { ImportScanReport(skipped: skipped) }
     func scanFolderWithReport(_ path: String) -> ImportScanReport { ImportScanReport(skipped: skipped) }
+}
+
+// List cells host their own SwiftUI graphs with different generic root types. Inspect each
+// existing host through this test-local adapter; it adds no production hook or model fallback.
+private protocol ImportWizardRenderHost {
+    var importWizardRenderData: [_ViewDebug.Data] { get }
+}
+
+extension NSHostingView: ImportWizardRenderHost {
+    fileprivate var importWizardRenderData: [_ViewDebug.Data] { _viewDebugData() }
 }
