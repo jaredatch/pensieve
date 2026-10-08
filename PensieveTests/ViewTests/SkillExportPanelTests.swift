@@ -5,22 +5,30 @@ import XCTest
 
 @MainActor
 final class SkillExportPanelTests: XCTestCase {
-    private final class RecordingSavePanel: NSSavePanel {
+    private final class RecordingSavePanel: SkillExportSavePanel {
+        var nameFieldStringValue = ""
+        var allowedContentTypes: [UTType] = []
+        var canCreateDirectories = false
+        var message: String?
         var chosenURL: URL?
         var host: NSWindow?
         var completion: ((NSApplication.ModalResponse) -> Void)?
         var modalCalls = 0
         var modalResponse: NSApplication.ModalResponse = .cancel
 
-        override var url: URL? { chosenURL }
+        var url: URL? { chosenURL }
 
-        override func beginSheetModal(for window: NSWindow,
-                                      completionHandler handler: @escaping (NSApplication.ModalResponse) -> Void) {
+        func setExportMessage(_ message: String) {
+            self.message = message
+        }
+
+        func beginSheetModal(for window: NSWindow,
+                             completionHandler handler: @escaping (NSApplication.ModalResponse) -> Void) {
             host = window
             completion = handler
         }
 
-        override func runModal() -> NSApplication.ModalResponse {
+        func runModal() -> NSApplication.ModalResponse {
             modalCalls += 1
             return modalResponse
         }

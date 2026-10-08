@@ -1,6 +1,27 @@
 import AppKit
 import UniformTypeIdentifiers
 
+/// The configuration and presentation surface used by skill export; AppKit supplies the real panel.
+@MainActor
+protocol SkillExportSavePanel: AnyObject {
+    var nameFieldStringValue: String { get set }
+    var allowedContentTypes: [UTType] { get set }
+    var canCreateDirectories: Bool { get set }
+    var url: URL? { get }
+
+    func setExportMessage(_ message: String)
+    func beginSheetModal(for window: NSWindow,
+                         completionHandler handler: @escaping (NSApplication.ModalResponse) -> Void)
+    func runModal() -> NSApplication.ModalResponse
+}
+
+extension NSSavePanel: SkillExportSavePanel {
+    // AppKit's null-resettable message property has different getter and setter types.
+    func setExportMessage(_ message: String) {
+        self.message = message
+    }
+}
+
 /// NSSavePanel supplies the standard filename, folder creation, and replacement confirmation controls.
 /// Export belongs to Pensieve's single main window, even when a context-menu click hasn't made it key.
 @MainActor
@@ -11,11 +32,12 @@ enum SkillExportPanel {
     }
 
     static func present(model: SkillExportModel, on window: NSWindow?,
-                        panel: NSSavePanel = NSSavePanel(), makeAlert: @escaping () -> NSAlert = { NSAlert() }) {
+                        panel: any SkillExportSavePanel = NSSavePanel(),
+                        makeAlert: @escaping () -> NSAlert = { NSAlert() }) {
         panel.nameFieldStringValue = model.suggestedFileName
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
         panel.canCreateDirectories = true
-        panel.message = model.message
+        panel.setExportMessage(model.message)
         let finish: (NSApplication.ModalResponse) -> Void = { response in
             guard response == .OK, let destination = panel.url else { return }
             do {
