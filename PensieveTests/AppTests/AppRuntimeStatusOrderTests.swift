@@ -9,7 +9,7 @@ final class AppRuntimeStatusOrderTests: XCTestCase {
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         XCTAssertFalse(model.canSyncNow)
         var pending = 0, cycles = 0
-        model.installPendingSyncRequest { pending += 1 }
+        model.installPendingSyncRequest { _ in pending += 1 }
         await model.syncNowAndReport()
         XCTAssertEqual(pending, 0, "a pre-coordinator request is refused")
         model.installSyncRequest { cycles += 1 }

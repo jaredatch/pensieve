@@ -23,7 +23,7 @@ extension AppRuntimeStatusOrderTests {
         let release = DispatchSemaphore(value: 0)
         git.remoteRead = {
             reading.fulfill(); release.wait()
-            throw GitError.repositoryUnreadable(path: fixture.root, detail: "temporarily unreadable")
+            throw GitError.repositoryUnreadable(path: fixture.root, detail: "temporarily\nunreadable\u{2028}repository")
         }
         let model = runtime.syncModel
         let cycle = Task { await model.syncNowAndReport() }
@@ -32,7 +32,8 @@ extension AppRuntimeStatusOrderTests {
         XCTAssertEqual(SyncFooterPresentation.make(state: model.state, canResolve: model.canResolve,
                 hovering: true, now: Date())?.action,
                        SyncFooterPresentation.Action.none)
-        XCTAssertTrue(model.conflictedSlugs.isEmpty, "the detail banner cannot offer Resolve yet")
+        XCTAssertEqual(model.state, .syncing)
+        XCTAssertFalse(model.canResolve, "the detail banner cannot offer Resolve yet")
         if hostFails { probe.set { .licenseNotAccepted } }
         if hostFails { await runtime.refreshGitUsability() }
         XCTAssertEqual(model.state, .syncing)
@@ -42,11 +43,11 @@ extension AppRuntimeStatusOrderTests {
         XCTAssertTrue(model.canStartConflictResolution)
         XCTAssertEqual(SyncFooterPresentation.make(state: model.state, canResolve: model.canResolve,
                 hovering: true, now: Date())?.action, .resolve)
-        XCTAssertEqual(model.conflictedSlugs, ["example"])
+        XCTAssertEqual(model.state, .conflicted(["skills/example/SKILL.md"]))
         XCTAssertEqual(runtime.gitUsability, hostFails ? .licenseNotAccepted : .usable)
         if !hostFails {
-            XCTAssertEqual(model.configurationError, GitError.repositoryUnreadable(
-                path: fixture.root, detail: "temporarily unreadable").localizedDescription)
+            XCTAssertEqual(model.configurationError, DisplayTextSanitizer.singleLine(GitError.repositoryUnreadable(
+                path: fixture.root, detail: "temporarily\nunreadable\u{2028}repository").localizedDescription))
         }
         XCTAssertNotNil(model.configurationError, "conflict must win over both host and repository errors")
     }
@@ -74,7 +75,7 @@ extension AppRuntimeStatusOrderTests {
         XCTAssertEqual(runtime.gitUsability, .usable)
     }
 
-    func testRecoveryDuringPostCycleReadDoesNotQueueAnotherCycle() async throws {
+    func testRecoveryDuringPostCycleReadQueuesOneCatchUpCycle() async throws {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         try fixture.seedRepository()
@@ -102,13 +103,13 @@ extension AppRuntimeStatusOrderTests {
         probe.set { .usable }
         await runtime.refreshGitUsability()
         XCTAssertTrue(runtime.syncModel.isCycleInFlight)
-        XCTAssertFalse(runtime.scheduler.isSyncing, "the active cycle already covers recovery")
+        XCTAssertFalse(runtime.scheduler.isSyncing, "catch-up waits for the active callback to finish")
         release.signal()
         await cycle.value
         await TestWait.until(failureMessage: "follow-up did not finish") {
             !runtime.scheduler.isSyncing && !runtime.syncModel.isCycleInFlight
         }
-        XCTAssertEqual(cycles.count, 1, "recovery during the read must not queue a redundant cycle")
+        XCTAssertEqual(cycles.count, 2, "recovery during the read must queue exactly one catch-up cycle")
     }
 
     func completionRuntime(_ fixture: GitFailureFixture, git: IngestRecordingGit, probe: RuleProbe,

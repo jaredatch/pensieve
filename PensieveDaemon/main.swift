@@ -12,10 +12,12 @@ let outcome = DaemonCLI.execute(
     readFile: { FileManager.default.contents(atPath: $0) },
     runCycle: {
         let fileService = FileService()
+        let git = GitService()
         return SyncDaemon(
             root: PathConstants.pensieveBaseDir,
             appSupport: PathConstants.pensieveAppSupportDir,
-            git: GitService(),
+            git: git,
+            hasLocalBranches: { try git.hasLocalBranches(at: PathConstants.pensieveBaseDir) },
             credentials: KeychainCredentialStore(),
             reconciler: DeployReconciler(
                 fileService: fileService,

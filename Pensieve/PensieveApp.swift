@@ -180,13 +180,14 @@ private struct PensieveMenuBarView: View {
         case .conflicted: return "Conflict needs attention"
         case .error: return "Sync failed"
         case .unconfigured: return "Sync not configured"
+        case .branchless: return "Can't sync yet: the store has no branch"
         }
     }
 
     private var syncSymbol: String {
         switch runtime.syncModel.state {
         case .synced: return "checkmark.circle"
-        case .conflicted, .error: return "exclamationmark.triangle"
+        case .conflicted, .error, .branchless: return "exclamationmark.triangle"
         case .unconfigured: return "arrow.triangle.branch"
         case .idle, .syncing: return "arrow.triangle.2.circlepath"
         }

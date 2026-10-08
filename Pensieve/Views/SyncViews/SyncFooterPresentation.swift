@@ -24,6 +24,10 @@ struct SyncFooterPresentation: Equatable {
         switch state {
         case .unconfigured:
             return nil
+        case .branchless:
+            return SyncFooterPresentation(symbol: "exclamationmark.triangle", showsSpinner: false,
+                                          label: "Can't sync yet: the store has no branch", emphasized: true,
+                                          action: .none, help: "Can't sync yet: the store has no branch")
         case .syncing:
             return SyncFooterPresentation(symbol: "arrow.triangle.2.circlepath", showsSpinner: true,
                                           label: "Syncing…", emphasized: hovering, action: .none, help: nil)

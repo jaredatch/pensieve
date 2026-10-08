@@ -130,7 +130,7 @@ final class ConflictResolutionModel {
                 phase = .done
             case .conflicted:
                 await loadAndReport(context: context)
-            case .noRemote:
+            case .noRemote, .branchless:
                 phase = .empty
             }
         } catch SyncError.conflictsChanged {

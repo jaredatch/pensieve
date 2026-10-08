@@ -93,6 +93,8 @@ final class SyncModelTests: XCTestCase {
                 model.apply(.synced(pushed: pushed, warnings: warnings, completedAt: Date()))
             case let .conflicted(paths):
                 model.apply(.conflicted(paths))
+            case .branchless:
+                model.apply(.branchless)
             case .noRemote:
                 model.apply(.noRemote)
             }

@@ -5,6 +5,7 @@ enum SyncCycleResult: Equatable {
     case synced(pushed: Bool, warnings: [String], completedAt: Date, headAdvanced: Bool = false)
     case conflicted([String])
     case noRemote
+    case branchless
     case locked
     case failed(String)
     case storeUnreadable(String)
@@ -12,7 +13,7 @@ enum SyncCycleResult: Equatable {
     var provesGitUsable: Bool {
         switch self {
         // Credential resolution probes git before entering the engine, including its lock and store checks.
-        case .synced, .conflicted, .noRemote, .locked, .storeUnreadable: true
+        case .synced, .conflicted, .noRemote, .branchless, .locked, .storeUnreadable: true
         case .failed: false
         }
     }
@@ -25,6 +26,8 @@ enum SyncCycleResult: Equatable {
             return ("skipped", "conflicted")
         case .noRemote:
             return ("skipped", "noRemote")
+        case .branchless:
+            return ("skipped", "branchless")
         case .locked:
             return ("skipped", "locked")
         case .failed:
@@ -160,6 +163,8 @@ actor SyncCoordinator {
             return .conflicted(paths)
         case .noRemote:
             return .noRemote
+        case .branchless:
+            return .branchless
         }
     }
 

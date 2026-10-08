@@ -8,6 +8,7 @@ enum SkillHistorySyncSignal: Hashable {
     case conflicted([String])
     case error(String)
     case unconfigured
+    case branchless
 
     init(_ state: SyncModel.SyncState) {
         switch state {
@@ -17,6 +18,7 @@ enum SkillHistorySyncSignal: Hashable {
         case let .conflicted(paths): self = .conflicted(paths)
         case let .error(message): self = .error(message)
         case .unconfigured: self = .unconfigured
+        case .branchless: self = .branchless
         }
     }
 }

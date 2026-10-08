@@ -120,15 +120,19 @@ final class AppRuntimePathsTests: XCTestCase {
         XCTAssertTrue(defaults.bool(forKey: key))
         XCTAssertNil(UserDefaults.standard.object(forKey: key))
     }
+}
 
+extension AppRuntimePathsTests {
     func testRetryDrivenSyncCycleTouchesOnlyTheInjectedPaths() async throws {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         let paths = fixture.paths
-        // A configured unborn repository passes the scheduler gate, then stops before store writes or network I/O.
-        try GitService().initRepository(at: paths.storeRoot)
-        try GitService().setRemote("https://fixture.test/store.git", at: paths.storeRoot)
-        let before = try fixture.snapshot()
+        // Observe a born branch, then remove it before the retry-driven cycle. The real engine must
+        // report branchless before preparation or network I/O, without changing the store or .git.
+        let git = GitService()
+        try git.initRepository(at: paths.storeRoot)
+        _ = try git.runOrThrow(["-C", paths.storeRoot, "commit", "--allow-empty", "-m", "fixture"], in: nil)
+        try git.setRemote("https://fixture.test/store.git", at: paths.storeRoot)
         let container = try AppRuntime.makeContainer(
             configuration: ModelConfiguration(isStoredInMemoryOnly: true)
         )
@@ -153,14 +157,18 @@ final class AppRuntimePathsTests: XCTestCase {
             paths: paths,
             gitUsabilityProbe: { .usable }
         )
+        await runtime.bootstrapTask.value
+        try fixture.files.deleteFile(at: paths.storeRoot + "/.git/refs/heads/main")
+        XCTAssertTrue(runtime.syncModel.canSyncNow, "branchlessness has not been observed yet")
+        let before = try fixture.snapshot()
         runtime.performLaunchWorkIfNeeded(context: ModelContext(container))
 
         let auditPath = paths.appSupportDir + "/daemon.log"
-        let audit = try await waitForRetryCycle(runtime, auditPath: auditPath)
+        let audit = try await waitForRetryCycle(runtime, auditPath: auditPath, detail: "branchless")
 
         XCTAssertFalse(runtime.syncModel.isCycleInFlight, "the model cycle must finish before inspecting its paths")
         XCTAssertFalse(runtime.scheduler.isSyncing, "the retry-driven cycle must finish before inspecting its paths")
-        XCTAssertTrue(audit.contains("skipped noRemote"), "the cycle ran against the injected App Support: \(audit)")
+        XCTAssertTrue(audit.contains("skipped branchless"), "the cycle ran against the injected App Support: \(audit)")
         XCTAssertFalse(try fixture.files.entryExistsWithoutFollowingLinks(at: paths.storeRoot + "/manifest"))
         XCTAssertEqual(try fixture.snapshot(), before, "the cycle must preserve all store entries and bytes, including .git")
     }
@@ -168,8 +176,10 @@ final class AppRuntimePathsTests: XCTestCase {
     func testPathSnapshotWaitIncludesModelCycleAfterScheduledFollowUpQueues() async throws {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
-        try GitService().initRepository(at: fixture.root)
-        try GitService().setRemote("https://fixture.test/store.git", at: fixture.root)
+        let git = GitService()
+        try git.initRepository(at: fixture.root)
+        _ = try git.runOrThrow(["-C", fixture.root, "commit", "--allow-empty", "-m", "fixture"], in: nil)
+        try git.setRemote("https://fixture.test/store.git", at: fixture.root)
         let runtime = try AppRuntime(
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { true }),
             defaults: isolatedDefaults(), paths: fixture.paths, gitUsabilityProbe: { .usable }
@@ -210,13 +220,13 @@ final class AppRuntimePathsTests: XCTestCase {
         XCTAssertTrue(returned)
     }
 
-    private func waitForRetryCycle(_ runtime: AppRuntime, auditPath: String) async throws -> String {
+    private func waitForRetryCycle(_ runtime: AppRuntime, auditPath: String, detail: String = "noRemote") async throws -> String {
         var audit = ""
         // The audit precedes the runtime's final git status, which briefly creates .git/index.lock.
         // The scheduler can finish while a model cycle queues a follow-up. Wait for the model itself too.
-        for _ in 0..<60 where !audit.contains("noRemote") || runtime.syncModel.isCycleInFlight || runtime.scheduler.isSyncing {
+        for _ in 0..<60 where !audit.contains(detail) || runtime.syncModel.isCycleInFlight || runtime.scheduler.isSyncing {
             try await Task.sleep(nanoseconds: 50_000_000)
-            audit = (try? String(contentsOfFile: auditPath, encoding: .utf8)) ?? ""
+            audit = (try? FileService().readFile(at: auditPath)) ?? ""
         }
 
         return audit

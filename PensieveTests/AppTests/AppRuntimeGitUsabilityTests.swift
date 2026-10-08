@@ -62,7 +62,7 @@ final class AppRuntimeGitUsabilityTests: XCTestCase {
         let model = SyncModel(git: git, root: "/unused-test-root")
         let state = RuntimeGitState(probe: { throw GitError.outputReadFailed(detail: "probe EIO") })
         model.observeGitState(state)
-        model.applyConfiguration(.success(nil), order: model.beginConfiguration())
+        model.applyConfiguration(.success(.init(remoteURL: nil, hasLocalBranches: true)), order: model.beginConfiguration())
         _ = state.accept(unusable, order: state.beginEvidence(), model: model)
         _ = await state.refresh(probingGit: true, model: model)
         XCTAssertEqual(state.usability, unusable)

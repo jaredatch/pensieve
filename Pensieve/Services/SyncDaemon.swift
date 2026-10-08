@@ -10,7 +10,7 @@ enum DaemonCycleResult: Equatable {
     case failed(FailureReason)
 
     enum SkipReason: String, Equatable {
-        case locked, noRemote, rejectedRemote, dirtyTree, diverged
+        case locked, noRemote, branchless, rejectedRemote, dirtyTree, diverged
     }
     enum FailureReason: Equatable {
         case authentication, gitError
@@ -70,6 +70,8 @@ struct SyncDaemon {
     let root: String
     let appSupport: String
     let git: FastForwardGitService
+    /// The runtime supplies the existing git branch probe without expanding the daemon's git protocol.
+    let hasLocalBranches: () throws -> Bool
     let credentials: CredentialStoreProtocol
     let reconciler: DeployReconciling
     let now: () -> Date
@@ -96,6 +98,7 @@ struct SyncDaemon {
         do {
             try git.probeUsability().requireUsable()
             guard let remote = try git.remoteURL(at: root) else { return finish(.skipped(.noRemote)) }
+            guard try hasLocalBranches() else { return finish(.skipped(.branchless)) }
             origin = remote
         } catch {
             return finish(.failed(.preflight(error.localizedDescription)))

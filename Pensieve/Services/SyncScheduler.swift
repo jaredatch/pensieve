@@ -37,8 +37,17 @@ struct SyncedStateMutationError: LocalizedError {
     }
 }
 
-/// Main-actor trigger coordinator. Triggers coalesce into one follow-up cycle; pending manual and
-/// launch-preflight flags retain the priority and preference bypass needed when that work is admitted.
+/// Request standing survives coalescing and a hand-off through a busy SyncModel. A recovery retry
+/// bypasses background-off like Sync Now, but cannot re-arm the user's spent retry.
+enum SyncRequest: Int {
+    case scheduled, launchPreflight, manualRecovery, manual
+
+    var isManual: Bool { self == .manual || self == .manualRecovery }
+    func absorbing(_ other: SyncRequest) -> SyncRequest { rawValue >= other.rawValue ? self : other }
+}
+
+/// Main-actor trigger coordinator. Triggers coalesce into one follow-up cycle; the pending request
+/// retains its priority and preference bypass when that work is admitted.
 @MainActor
 @Observable
 final class SyncScheduler {
@@ -46,8 +55,7 @@ final class SyncScheduler {
     private(set) var isCoordinatorReady = false
     private(set) var isLaunchIngestReady = false
     private(set) var isSyncing = false
-    private var hasPendingManualTrigger = false
-    private var hasPendingLaunchPreflight = false
+    private var pendingRequest: SyncRequest = .scheduled
 
     @ObservationIgnored @AppStorage("backgroundSyncEnabled")
     private var storedBackgroundSyncEnabled = true
@@ -58,7 +66,7 @@ final class SyncScheduler {
     private let interval: TimeInterval
     private let debounceNanoseconds: UInt64
     private let backgroundSyncOverride: (() -> Bool)?
-    private var syncAction: (() async -> Void)?
+    private var syncAction: ((SyncRequest) async -> Void)?
     private var hasRemote: () -> Bool = { true }
     private var isConflicted: () -> Bool = { false }
 
@@ -87,7 +95,7 @@ final class SyncScheduler {
     func installDrain(
         hasRemote: @escaping () -> Bool = { true },
         isConflicted: @escaping () -> Bool = { false },
-        action: @escaping () async -> Void
+        action: @escaping (SyncRequest) async -> Void
     ) {
         self.hasRemote = hasRemote
         self.isConflicted = isConflicted
@@ -129,20 +137,13 @@ final class SyncScheduler {
         drainIfPossible()
     }
 
-    func enqueueTrigger() {
-        hasPendingTrigger = true
-        drainIfPossible()
-    }
+    func enqueueTrigger() { enqueue(.scheduled) }
+    func enqueueManualTrigger() { enqueue(.manual) }
+    func enqueueLaunchPreflight() { enqueue(.launchPreflight) }
 
-    func enqueueManualTrigger() {
+    func enqueue(_ request: SyncRequest) {
         hasPendingTrigger = true
-        hasPendingManualTrigger = true
-        drainIfPossible()
-    }
-
-    func enqueueLaunchPreflight() {
-        hasPendingTrigger = true
-        hasPendingLaunchPreflight = true
+        pendingRequest = pendingRequest.absorbing(request)
         drainIfPossible()
     }
 
@@ -169,11 +170,10 @@ final class SyncScheduler {
               isLaunchIngestReady,
               !isSyncing,
               let syncAction else { return }
-        guard backgroundSyncEnabled || hasPendingManualTrigger || hasPendingLaunchPreflight else { return }
+        guard backgroundSyncEnabled || pendingRequest != .scheduled else { return }
         guard hasRemote(), !isConflicted() else {
             hasPendingTrigger = false
-            hasPendingManualTrigger = false
-            hasPendingLaunchPreflight = false
+            pendingRequest = .scheduled
             return
         }
 
@@ -184,13 +184,13 @@ final class SyncScheduler {
         debounceTask = nil
         // Main-actor callbacks inherit UI priority. Background cycles retain the previous default QoS;
         // a queued Sync Now keeps its manual priority even when background triggers coalesce with it.
-        let priority: TaskPriority = hasPendingManualTrigger ? .userInitiated : .medium
+        let request = pendingRequest
+        let priority: TaskPriority = request.isManual ? .userInitiated : .medium
         hasPendingTrigger = false
-        hasPendingManualTrigger = false
-        hasPendingLaunchPreflight = false
+        pendingRequest = .scheduled
         isSyncing = true
         Task(priority: priority) { [weak self] in
-            await syncAction()
+            await syncAction(request)
             guard let self else { return }
             self.isSyncing = false
             self.drainIfPossible()

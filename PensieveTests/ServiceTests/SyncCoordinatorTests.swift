@@ -117,7 +117,7 @@ final class SyncCoordinatorTests: XCTestCase {
             startAutomatically: false,
             backgroundSyncEnabled: { true }
         )
-        scheduler.installDrain(hasRemote: { false }, action: { cycles += 1 })
+        scheduler.installDrain(hasRemote: { false }, action: { _ in cycles += 1 })
         scheduler.coordinatorBecameReady()
         scheduler.launchIngestCompleted()
         scheduler.tick()
@@ -149,7 +149,7 @@ final class SyncCoordinatorTests: XCTestCase {
             startAutomatically: false,
             backgroundSyncEnabled: { true }
         )
-        scheduler.installDrain(isConflicted: { true }, action: { cycles += 1 })
+        scheduler.installDrain(isConflicted: { true }, action: { _ in cycles += 1 })
         scheduler.coordinatorBecameReady()
         scheduler.launchIngestCompleted()
         scheduler.tick()
@@ -226,7 +226,7 @@ extension SyncCoordinatorTests {
             startAutomatically: false,
             backgroundSyncEnabled: { true }
         )
-        scheduler.installDrain(action: action)
+        scheduler.installDrain { _ in await action() }
         return scheduler
     }
 

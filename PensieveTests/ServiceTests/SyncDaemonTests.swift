@@ -118,6 +118,7 @@ final class SyncDaemonTests: XCTestCase {
             root: root,
             appSupport: appSupport,
             git: git,
+            hasLocalBranches: { true },
             credentials: credentials,
             reconciler: reconciler,
             now: clock

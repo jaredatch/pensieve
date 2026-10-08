@@ -13,6 +13,7 @@ final class SyncModel {
         case conflicted([String])
         case error(String)
         case unconfigured
+        case branchless
     }
 
     private(set) var state: SyncState
@@ -21,7 +22,13 @@ final class SyncModel {
     var configurationError: String? {
         gitState?.usability?.message ?? remoteReadError
     }
+    struct Configuration {
+        let remoteURL: String?
+        let hasLocalBranches: Bool
+    }
+
     private var knownAbsent = false
+    private var knownBranchless = false
     private var gitState: RuntimeGitState?
     private var configurationOrder = 0
     private var appliedConfigurationOrder = 0
@@ -31,13 +38,12 @@ final class SyncModel {
     private let git: GitServiceProtocol
     private let root: String
     private var syncRequest: (() async -> Void)?
-    private var pendingManualSyncRequest: (() -> Void)?
-    private var pendingScheduledSyncRequest: (() -> Void)?
+    private var pendingSyncRequest: ((SyncRequest) -> Void)?
     private(set) var isCycleInFlight = false
-    private var hasQueuedManualFollowUp = false
-    private var hasQueuedScheduledFollowUp = false
+    private var queuedRequest: SyncRequest?
     private var recoveredDuringCycle = false
-    private var cycleProvedGitUsable = false
+    private var cycleFailed = false
+    private var failedManualNeedsRecovery = false
 
     /// The skill slugs currently in conflict, for row/detail badges. Strips `skills/<slug>/SKILL.md` and
     /// `manifest/skills/<slug>.yaml` to `<slug>`; category/project manifest paths are not skills.
@@ -60,6 +66,7 @@ final class SyncModel {
         self.git = git
         self.root = root
         self.state = initialState
+        self.knownBranchless = initialState == .branchless
     }
 
     /// Body-safe: derives from observed configuration, never from a live git read.
@@ -81,7 +88,8 @@ final class SyncModel {
         return false
     }
 
-    var canSyncNow: Bool { isConfigured && !isConflicted && !isCycleInFlight }
+    var canSyncNow: Bool { isConfigured && !knownBranchless && !isConflicted && !isCycleInFlight }
+    var canScheduleSync: Bool { isConfigured && !knownBranchless && !isConflicted }
     var canResolve: Bool { isConflicted && canStartConflictResolution }
     var canStartConflictResolution: Bool { !isCycleInFlight }
 
@@ -89,19 +97,19 @@ final class SyncModel {
         syncRequest = request
     }
 
-    func installPendingSyncRequest(_ request: @escaping () -> Void) {
-        pendingManualSyncRequest = request
-    }
-
-    func installPendingScheduledSyncRequest(_ request: @escaping () -> Void) {
-        pendingScheduledSyncRequest = request
+    func installPendingSyncRequest(_ request: @escaping (SyncRequest) -> Void) {
+        pendingSyncRequest = request
     }
 
     /// Captures leaf collaborators for the runtime's off-main configuration read.
-    func configurationRead() -> () -> Result<String?, Error> {
+    func configurationRead() -> () -> Result<Configuration, Error> {
         let git = git
         let root = root
-        return { Result { try git.remoteURL(at: root) } }
+        return { Result {
+            let remote = try git.remoteURL(at: root)
+            let hasBranches = remote == nil ? true : try git.hasLocalBranches(at: root)
+            return Configuration(remoteURL: remote, hasLocalBranches: hasBranches)
+        } }
     }
 
     func observeGitState(_ state: RuntimeGitState) { gitState = state }
@@ -115,7 +123,7 @@ final class SyncModel {
         return configurationOrder
     }
 
-    func applyConfiguration(_ remote: Result<String?, Error>, order: Int) {
+    func applyConfiguration(_ remote: Result<Configuration, Error>, order: Int) {
         guard order > appliedConfigurationOrder else { return }
         appliedConfigurationOrder = order
         let wasUnavailable = configurationError != nil
@@ -123,9 +131,10 @@ final class SyncModel {
         case let .failure(error):
             knownAbsent = false
             remoteReadError = DisplayTextSanitizer.singleLine(error.localizedDescription)
-        case let .success(url):
-            knownAbsent = url == nil
-            remoteURL = url
+        case let .success(configuration):
+            knownAbsent = configuration.remoteURL == nil
+            knownBranchless = !knownAbsent && !configuration.hasLocalBranches
+            remoteURL = configuration.remoteURL
             remoteReadError = nil
         }
         updateConfigurationState(wasUnavailable: wasUnavailable)
@@ -137,7 +146,9 @@ final class SyncModel {
             state = .error(configurationError)
         } else if knownAbsent {
             state = .unconfigured
-        } else if wasUnavailable || state == .unconfigured {
+        } else if knownBranchless {
+            state = .branchless
+        } else if wasUnavailable || state == .unconfigured || state == .branchless {
             state = lastSyncedAt.map { .synced(at: $0) } ?? .idle
         }
     }
@@ -155,58 +166,54 @@ final class SyncModel {
         await syncNowAndReport()
     }
 
-    func syncNowAndReport() async {
-        await requestSync(isScheduled: false)
-    }
+    func syncNowAndReport() async { await syncAndReport(.manual) }
 
-    func syncScheduledAndReport() async {
-        await requestSync(isScheduled: true)
-    }
+    func syncScheduledAndReport() async { await syncAndReport(.scheduled) }
 
     func resumeAfterGitRecovery() {
         if isCycleInFlight {
             recoveredDuringCycle = true
         } else {
-            pendingScheduledSyncRequest?()
+            let request: SyncRequest = failedManualNeedsRecovery ? .manualRecovery : .scheduled
+            failedManualNeedsRecovery = false
+            if canScheduleSync { pendingSyncRequest?(request) }
         }
     }
 
-    private func requestSync(isScheduled: Bool) async {
+    func syncAndReport(_ request: SyncRequest) async {
         guard !isCycleInFlight else {
-            if isScheduled {
-                hasQueuedScheduledFollowUp = true
-            } else {
-                hasQueuedManualFollowUp = true
-            }
+            queuedRequest = queuedRequest.map { $0.absorbing(request) } ?? request
             return
         }
         guard canSyncNow else { return }
-        guard let syncRequest else {
-            (isScheduled ? pendingScheduledSyncRequest : pendingManualSyncRequest)?()
-            return
-        }
+        guard let syncRequest else { pendingSyncRequest?(request); return }
         isCycleInFlight = true
         recoveredDuringCycle = false
-        cycleProvedGitUsable = false
-        defer {
-            if recoveredDuringCycle && !cycleProvedGitUsable { hasQueuedScheduledFollowUp = true }
-            recoveredDuringCycle = false
-            isCycleInFlight = false
-            if hasQueuedManualFollowUp {
-                hasQueuedManualFollowUp = false
-                hasQueuedScheduledFollowUp = false
-                if canSyncNow { pendingManualSyncRequest?() }
-            } else if hasQueuedScheduledFollowUp {
-                hasQueuedScheduledFollowUp = false
-                if canSyncNow { pendingScheduledSyncRequest?() }
-            }
-        }
+        cycleFailed = false
+        failedManualNeedsRecovery = false
+        defer { finishCycle(request) }
         state = .syncing
         await syncRequest()
     }
 
+    private func finishCycle(_ request: SyncRequest) {
+        failedManualNeedsRecovery = request == .manual && cycleFailed
+        if recoveredDuringCycle {
+            let catchUp: SyncRequest = request == .manual && cycleFailed ? .manualRecovery : .scheduled
+            queuedRequest = queuedRequest.map { $0.absorbing(catchUp) } ?? catchUp
+            failedManualNeedsRecovery = false
+        }
+        recoveredDuringCycle = false
+        isCycleInFlight = false
+        let followUp = queuedRequest
+        queuedRequest = nil
+        if let followUp, canSyncNow { pendingSyncRequest?(followUp) }
+    }
+
     func apply(_ result: SyncCycleResult) {
-        if isCycleInFlight { cycleProvedGitUsable = result.provesGitUsable }
+        if isCycleInFlight {
+            if case .failed = result { cycleFailed = true }
+        }
         defer {
             // Usability keeps its own clock, including when no configuration read follows.
             if let message = gitState?.usability?.message, state != .syncing, !isConflicted {
@@ -215,15 +222,19 @@ final class SyncModel {
         }
         switch result {
         case let .synced(_, warnings, completedAt, _):
+            knownBranchless = false
             lastSyncedAt = completedAt
             lastWarnings = warnings
             state = .synced(at: completedAt)
         case let .conflicted(paths):
             state = .conflicted(paths)
         case .noRemote:
-            // Branchless stores also return noRemote. Only a configuration read answers whether origin is absent.
+            // Only a configuration read answers whether origin is absent.
             state = configurationError.map { .error($0) }
                 ?? (knownAbsent ? .unconfigured : lastSyncedAt.map { .synced(at: $0) } ?? .idle)
+        case .branchless:
+            knownBranchless = true
+            state = .branchless
         case .locked:
             state = configurationError.map { .error($0) } ?? lastSyncedAt.map { .synced(at: $0) } ?? .idle
         case let .failed(message):

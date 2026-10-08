@@ -10,8 +10,7 @@ struct SkillDetailHeader: View {
     let skill: Skill
     let provenance: SkillProvenance?
     let tagsInUse: [String]
-    let syncConflicted: Bool
-    let canResolve: Bool
+    let syncModel: SyncModel
     let driftError: String?
     let isChecking: Bool
     @Bindable var library: SkillLibraryViewModel
@@ -108,14 +107,19 @@ struct SkillDetailHeader: View {
                 .font(.caption)
                 .foregroundStyle(.orange)
         }
-        if syncConflicted {
+        if syncModel.state == .branchless {
+            Label("Can't sync yet: the store has no branch", systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+        if syncModel.conflictedSlugs.contains(skill.directoryName) {
             HStack(spacing: Spacing.sm) {
                 Label("Sync conflict — resolve to continue", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.orange)
                 Button("Resolve…", action: onResolve)
                     .controlSize(.small)
-                    .disabled(!canResolve)
+                    .disabled(!syncModel.canResolve)
             }
         }
     }

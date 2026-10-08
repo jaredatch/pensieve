@@ -125,6 +125,7 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
         XCTAssertFalse(runtime.syncModel.configurationError?.contains("couldn’t be opened") == true)
         XCTAssertNotEqual(runtime.syncModel.state, .unconfigured)
         let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: GitService(),
+                                hasLocalBranches: { try GitService().hasLocalBranches(at: fixture.root) },
                                 credentials: InMemoryCredentialStore(), reconciler: NoPresentationReconciler(), now: Date.init)
         XCTAssertTrue(daemon.runOnce().detail.contains("store folder can't be found"))
     }

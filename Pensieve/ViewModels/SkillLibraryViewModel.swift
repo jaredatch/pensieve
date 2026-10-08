@@ -254,7 +254,7 @@ extension SkillLibraryViewModel {
         switch result {
         case .synced, .conflicted: applyFence(false)
         case .storeUnreadable: applyFence(true)
-        case .noRemote, .locked, .failed: break
+        case .noRemote, .branchless, .locked, .failed: break
         }
     }
 

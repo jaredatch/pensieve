@@ -135,8 +135,7 @@ struct DetailView: View {
     @ViewBuilder private var detailChrome: some View {
         let showsUpdateBanner = UpdatesViewModel.isEligibleForUpdates(skill)
         SkillDetailHeader(skill: skill, provenance: skillProvenance, tagsInUse: tagsInUse,
-                          syncConflicted: syncModel.conflictedSlugs.contains(skill.directoryName),
-                          canResolve: syncModel.canResolve,
+                          syncModel: syncModel,
                           driftError: provenance.driftError(for: skill.id),
                           isChecking: provenance.isChecking(skillID: skill.id),
                           library: library, onResolve: onResolve, onCommitTags: commitTags)

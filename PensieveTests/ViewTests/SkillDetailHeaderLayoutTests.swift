@@ -17,8 +17,8 @@ final class SkillDetailHeaderLayoutTests: XCTestCase {
         let provenance = SkillProvenance(installedAt: nil, updatedAt: nil, trackedRef: "main", shortCommit: "d3cc757",
                                          repositoryURL: URL(string: "https://github.com/basecamp/basecamp-cli"),
                                          skillURL: nil, localEditNote: nil, checkError: nil, updateAvailable: false)
-        let header = SkillDetailHeader(skill: skill, provenance: provenance, tagsInUse: [], syncConflicted: false,
-                                       canResolve: false,
+        let header = SkillDetailHeader(skill: skill, provenance: provenance, tagsInUse: [],
+                                       syncModel: SyncModel(git: IngestRecordingGit(), root: base),
                                        driftError: nil, isChecking: false, library: library,
                                        onResolve: {}, onCommitTags: { _ in })
         let host = NSHostingView(rootView: header.frame(width: 644))

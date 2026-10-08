@@ -218,6 +218,7 @@ final class GitFailureSyncTests: XCTestCase {
 
     private func runDaemon(_ fixture: GitFailureFixture, git: GitService) -> CLIOutcome {
         let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: git,
+                                hasLocalBranches: { try git.hasLocalBranches(at: fixture.root) },
                                 credentials: InMemoryCredentialStore(), reconciler: GitFailureReconciler(), now: Date.init)
         return DaemonCLI.execute(["run"], appSupport: fixture.support,
                                  readFile: { try? fixture.files.readData(at: $0) }, runCycle: daemon.runOnce, now: Date.init)

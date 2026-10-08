@@ -10,6 +10,7 @@ enum SyncOutcome: Equatable {
     case synced(pushed: Bool, warnings: [String], ingestedHeadStamp: String? = nil)
     case conflicted([String])
     case noRemote
+    case branchless
 
     static func == (lhs: SyncOutcome, rhs: SyncOutcome) -> Bool {
         switch (lhs, rhs) {
@@ -17,7 +18,7 @@ enum SyncOutcome: Equatable {
             return leftPushed == rightPushed && leftWarnings == rightWarnings
         case let (.conflicted(left), .conflicted(right)):
             return left == right
-        case (.noRemote, .noRemote):
+        case (.noRemote, .noRemote), (.branchless, .branchless):
             return true
         default:
             return false
@@ -109,7 +110,7 @@ struct SyncEngine: SyncEngineProtocol {
         try gitService.probeUsability().requireUsable()
         // Ask about the remote before any write, so an unconfigured store is never changed.
         guard try gitService.remoteURL(at: root) != nil else { return .noRemote }
-        guard try gitService.hasLocalBranches(at: root) else { return .noRemote }
+        guard try gitService.hasLocalBranches(at: root) else { return .branchless }
         try requireAcceptableRemote(at: root)
 
         // Guard BEFORE any write: if the on-disk manifest is newer/unreadable (e.g. a clone of a remote
@@ -207,7 +208,7 @@ struct SyncEngine: SyncEngineProtocol {
         defer { lock.release() }
         try gitService.probeUsability().requireUsable()
         guard try gitService.remoteURL(at: root) != nil else { return .noRemote }
-        guard try gitService.hasLocalBranches(at: root) else { return .noRemote }
+        guard try gitService.hasLocalBranches(at: root) else { return .branchless }
         try requireAcceptableRemote(at: root)
         try GitError.preservingUnusability { try gitService.abortRebase(at: root) }
         do {

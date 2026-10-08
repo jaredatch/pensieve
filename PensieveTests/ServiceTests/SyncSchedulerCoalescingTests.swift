@@ -9,7 +9,7 @@ extension SyncCoordinatorTests {
             var isConflicted = conflicted
             var cycles = 0
             let scheduler = SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false })
-            scheduler.installDrain(hasRemote: { hasRemote }, isConflicted: { isConflicted }, action: { cycles += 1 })
+            scheduler.installDrain(hasRemote: { hasRemote }, isConflicted: { isConflicted }, action: { _ in cycles += 1 })
             scheduler.coordinatorBecameReady()
             scheduler.launchIngestCompleted()
             scheduler.enqueueLaunchPreflight()
@@ -35,7 +35,7 @@ extension SyncCoordinatorTests {
         let followupFinished = expectation(description: "one follow-up")
         let release = AsyncGate()
         var cycles = 0
-        let scheduler = makeCoalescingScheduler(debounceSeconds: 0.2) {
+        let scheduler = makeCoalescingScheduler(debounceSeconds: 0.2) { _ in
             cycles += 1
             if cycles == 1 {
                 firstStarted.fulfill()
@@ -61,14 +61,13 @@ extension SyncCoordinatorTests {
         let followupFinished = expectation(description: "queued follow-up finished")
         let release = AsyncGate()
         let model = SyncModel()
-        let scheduler = makeCoalescingScheduler { await model.syncScheduledAndReport() }
+        let scheduler = makeCoalescingScheduler { await model.syncAndReport($0) }
         var cycles = 0
         var activeCycles = 0
         var maximumActiveCycles = 0
         var beginCount = 0
         var finishCount = 0
-        model.installPendingSyncRequest { scheduler.enqueueManualTrigger() }
-        model.installPendingScheduledSyncRequest { scheduler.enqueueTrigger() }
+        model.installPendingSyncRequest { scheduler.enqueue($0) }
         model.installSyncRequest {
             cycles += 1
             activeCycles += 1
@@ -106,9 +105,8 @@ extension SyncCoordinatorTests {
             startAutomatically: false,
             backgroundSyncEnabled: { false }
         )
-        scheduler.installDrain { await model.syncScheduledAndReport() }
-        model.installPendingSyncRequest { scheduler.enqueueManualTrigger() }
-        model.installPendingScheduledSyncRequest { scheduler.enqueueTrigger() }
+        scheduler.installDrain { await model.syncAndReport($0) }
+        model.installPendingSyncRequest { scheduler.enqueue($0) }
         var cycles = 0
         model.installSyncRequest {
             cycles += 1
@@ -134,7 +132,7 @@ extension SyncCoordinatorTests {
 
     private func makeCoalescingScheduler(
         debounceSeconds: TimeInterval = 0,
-        action: @escaping () async -> Void
+        action: @escaping (SyncRequest) async -> Void
     ) -> SyncScheduler {
         let scheduler = SyncScheduler(
             debounceSeconds: debounceSeconds,

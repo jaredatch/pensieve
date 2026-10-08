@@ -211,7 +211,7 @@ final class IngestPreflightTests: XCTestCase {
             startAutomatically: false,
             backgroundSyncEnabled: { true }
         )
-        scheduler.installDrain {
+        scheduler.installDrain { _ in
             if let context {
                 _ = try? engine.sync(
                     root: self.tempDir,
