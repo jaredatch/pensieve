@@ -116,7 +116,6 @@ protocol SkillInstallServiceProtocol {
 }
 
 struct SkillInstallService: SkillInstallServiceProtocol {
-    static let defaultScratchRoot = PathConstants.pensieveAppSupportDir + "/skill-install-scratch"
 
     static let invalidFrontmatterReason =
         "SKILL.md needs parseable frontmatter with non-empty name and description"
@@ -193,7 +192,7 @@ struct SkillInstallService: SkillInstallServiceProtocol {
 
 extension SkillInstallService {
     static func cleanupScratchRoot(fileService: FileServiceProtocol = FileService(),
-                                   scratchRoot: String = Self.defaultScratchRoot) {
+                                   scratchRoot: String) {
         if fileService.directoryExists(at: scratchRoot) || fileService.isSymlink(at: scratchRoot) {
             try? fileService.deleteDirectory(at: scratchRoot)
         } else if fileService.fileExists(at: scratchRoot) {

@@ -64,8 +64,8 @@ extension SkillInstallService {
 
     static func cleanupVendorTemps(
         fileService: FileServiceProtocol = FileService(),
-        storeRoot: String = Constants.pensieveBaseDir,
-        lockPath: String = PathConstants.pensieveAppSupportDir + "/sync.lock"
+        storeRoot: String,
+        lockPath: String
     ) {
         guard let lock = SyncLock.tryAcquire(at: lockPath) else { return }
         defer { lock.release() }
@@ -79,7 +79,7 @@ extension SkillInstallService {
         for entry in entries
         where entry.hasPrefix(prefix) && entry.hasSuffix(".tmp") {
             // Only the exact UUID namespace vendor() emits: this sweep runs against the store
-            // PARENT (the user's home for the default root), where a prefix match alone would
+            // PARENT (the user's home for the production root), where a prefix match alone would
             // recursively delete a user's own `.pensieve.vendor-backup.tmp`-style sibling.
             let middle = String(entry.dropFirst(prefix.count).dropLast(".tmp".count))
             guard UUID(uuidString: middle) != nil else { continue }

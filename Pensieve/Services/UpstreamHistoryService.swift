@@ -149,7 +149,6 @@ protocol UpstreamHistoryGitServing {
 extension GitService: UpstreamHistoryGitServing {}
 
 struct UpstreamHistoryService {
-    static let defaultScratchRoot = PathConstants.pensieveAppSupportDir + "/upstream-history-scratch"
     static let commitWindow = 200
     static let rowWindow = 20
     static let textByteLimit = 256 * 1_024
@@ -270,7 +269,7 @@ struct UpstreamHistoryService {
 
     static func cleanupScratchRoot(
         fileService: FileServiceProtocol = FileService(),
-        scratchRoot: String = Self.defaultScratchRoot
+        scratchRoot: String
     ) {
         if fileService.directoryExists(at: scratchRoot) || fileService.isSymlink(at: scratchRoot) {
             try? fileService.deleteDirectory(at: scratchRoot)

@@ -62,6 +62,10 @@ final class AppRuntimePathsTests: XCTestCase {
             paths: paths,
             usesMemoryCredentials: true
         )
+        try assertLaunchCleanup(paths: paths, scratchRoots: [
+            updateOperations.skillInstallService.scratchRoot, updateOperations.updateCheckService.scratchRoot,
+            upstreamHistoryService.scratchRoot
+        ])
     }
 
     func testProductionUpdateAndProvenanceOperationsMatchServiceDefaults() throws {
@@ -90,8 +94,6 @@ final class AppRuntimePathsTests: XCTestCase {
             paths: paths,
             usesMemoryCredentials: false
         )
-        XCTAssertEqual(UpdateCheckService.defaultScratchRoot, paths.appSupportDir + "/update-check-scratch")
-        XCTAssertEqual(SkillInstallService.defaultScratchRoot, paths.appSupportDir + "/skill-install-scratch")
     }
 
     func testHistoryCacheUsesInjectedAppSupportOutsideStoreAndScratch() throws {

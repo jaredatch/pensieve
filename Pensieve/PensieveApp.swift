@@ -50,10 +50,8 @@ struct PensieveApp: App {
 
     init() {
         WindowPolicy.apply()
-        SkillInstallService.cleanupScratchRoot()
-        SkillInstallService.cleanupVendorTemps()
-        UpdateCheckService.cleanupScratchRoot()
-        UpstreamHistoryService.cleanupScratchRoot()
+        let paths = AppRuntimePaths.production
+        paths.cleanupGitHubSkillTemps()
 
         let updaterDelegate = UpdaterDelegate()
         self.updaterDelegate = updaterDelegate
@@ -64,7 +62,7 @@ struct PensieveApp: App {
         )
 
         do {
-            runtime = try AppRuntime()
+            runtime = try AppRuntime(paths: paths)
         } catch {
             fatalError("Unable to initialize Pensieve's data store: \(error.localizedDescription)")
         }

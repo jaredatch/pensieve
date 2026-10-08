@@ -82,7 +82,6 @@ enum UpdateCheckError: LocalizedError, Equatable {
 }
 
 struct UpdateCheckService {
-    static let defaultScratchRoot = PathConstants.pensieveAppSupportDir + "/update-check-scratch"
 
     struct Snapshot {
         let id: UUID
@@ -167,7 +166,7 @@ struct UpdateCheckService {
     }
 
     static func cleanupScratchRoot(fileService: FileServiceProtocol = FileService(),
-                                   scratchRoot: String = Self.defaultScratchRoot) {
+                                   scratchRoot: String) {
         if fileService.directoryExists(at: scratchRoot) || fileService.isSymlink(at: scratchRoot) {
             try? fileService.deleteDirectory(at: scratchRoot)
         } else if fileService.fileExists(at: scratchRoot) {

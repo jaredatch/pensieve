@@ -10,7 +10,11 @@ final class GitHubServiceConstructionTests: XCTestCase {
         ("UpdateCheckService", [("gitService", "git"), ("credentialStore", "credentials"),
                                 ("contentHasher", "hasher"), ("scratchRoot", "root"), ("storeRoot", "root")]),
         ("UpstreamHistoryService", [("gitService", "git"), ("credentialStore", "credentials"),
-                                    ("contentHasher", "hasher"), ("scratchRoot", "root")])
+                                    ("contentHasher", "hasher"), ("scratchRoot", "root")]),
+        ("SkillInstallService.cleanupScratchRoot", [("scratchRoot", "root")]),
+        ("UpdateCheckService.cleanupScratchRoot", [("scratchRoot", "root")]),
+        ("UpstreamHistoryService.cleanupScratchRoot", [("scratchRoot", "root")]),
+        ("SkillInstallService.cleanupVendorTemps", [("storeRoot", "root"), ("lockPath", "root")])
     ]
 
     func testGitHubServicesRequireTheirCallersDependencies() throws {

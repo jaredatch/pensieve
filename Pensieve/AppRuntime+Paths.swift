@@ -68,6 +68,12 @@ struct AppRuntimePaths {
 
     var gitAskpassHelperPath: String { appSupportDir + "/git-askpass.sh" }
 
+    var skillInstallScratchRoot: String { appSupportDir + "/skill-install-scratch" }
+
+    var updateCheckScratchRoot: String { appSupportDir + "/update-check-scratch" }
+
+    var upstreamHistoryScratchRoot: String { appSupportDir + "/upstream-history-scratch" }
+
     var skillsDir: String { storeRoot + "/skills" }
 
     var upstreamHistoryCacheDir: String { appSupportDir + "/upstream-history-cache" }
@@ -208,6 +214,14 @@ struct AppRuntimePaths {
 }
 
 extension AppRuntimePaths {
+    /// Launch sweeps the same paths the services use, before the runtime starts its work.
+    func cleanupGitHubSkillTemps(fileService: FileServiceProtocol = FileService()) {
+        SkillInstallService.cleanupScratchRoot(fileService: fileService, scratchRoot: skillInstallScratchRoot)
+        SkillInstallService.cleanupVendorTemps(fileService: fileService, storeRoot: storeRoot, lockPath: syncLockPath)
+        UpdateCheckService.cleanupScratchRoot(fileService: fileService, scratchRoot: updateCheckScratchRoot)
+        UpstreamHistoryService.cleanupScratchRoot(fileService: fileService, scratchRoot: upstreamHistoryScratchRoot)
+    }
+
     @MainActor
     func makeUpstreamHistoryViewModel() -> UpstreamHistoryViewModel {
         let fileService = FileService()
@@ -231,7 +245,7 @@ extension AppRuntimePaths {
                 credentialStore: credentials,
                 fileService: fileService
             ),
-            scratchRoot: appSupportDir + "/upstream-history-scratch"
+            scratchRoot: upstreamHistoryScratchRoot
         )
     }
 
@@ -310,7 +324,7 @@ extension AppRuntimePaths {
             credentialStore: credentialStore,
             fileService: fileService,
             contentHasher: contentHasher,
-            scratchRoot: appSupportDir + "/update-check-scratch",
+            scratchRoot: updateCheckScratchRoot,
             storeRoot: storeRoot
         )
     }
@@ -323,7 +337,7 @@ extension AppRuntimePaths {
             gitService: makeGitService(fileService: fileService),
             credentialStore: credentialStore,
             fileService: fileService,
-            scratchRoot: appSupportDir + "/skill-install-scratch",
+            scratchRoot: skillInstallScratchRoot,
             storeRoot: storeRoot,
             lockPath: syncLockPath
         )

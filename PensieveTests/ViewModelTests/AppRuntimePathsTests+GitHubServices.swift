@@ -4,6 +4,35 @@ import XCTest
 
 @MainActor
 extension AppRuntimePathsTests {
+    func assertLaunchCleanup(paths: AppRuntimePaths, scratchRoots: [String]) throws {
+        let sandbox = (paths.storeRoot as NSString).deletingLastPathComponent
+        let files = LinkServiceCanonicalDirectoryFileService(
+            wrapped: FileService(), pathMappings: [], physicalSandbox: sandbox
+        )
+        let otherPaths = AppRuntimePaths(storeRoot: sandbox + "/other-store", appSupportDir: sandbox + "/other-support")
+        let vendorTemp = paths.storeRoot + ".vendor-" + UUID().uuidString + ".tmp"
+        let sentinels = [
+            otherPaths.skillInstallScratchRoot + "/leftover",
+            otherPaths.updateCheckScratchRoot + "/leftover",
+            otherPaths.upstreamHistoryScratchRoot + "/leftover",
+            otherPaths.storeRoot + ".vendor-" + UUID().uuidString + ".tmp/leftover",
+            paths.skillsDir + "/keep/SKILL.md", paths.gitAskpassHelperPath,
+            paths.upstreamHistoryCacheDir + "/cached"
+        ]
+        for path in sentinels { try files.writeFile(at: path, content: "keep") }
+        for scratch in scratchRoots { try files.writeFile(at: scratch + "/leftover", content: "abandoned") }
+        try files.writeFile(at: vendorTemp + "/leftover", content: "abandoned")
+        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: paths.syncLockPath))
+        defer { lock.release() }
+        paths.cleanupGitHubSkillTemps(fileService: files)
+        for scratch in scratchRoots { XCTAssertFalse(files.directoryExists(at: scratch), scratch) }
+        XCTAssertTrue(files.directoryExists(at: vendorTemp), "The runtime's held lock must protect vendor temps")
+        lock.release()
+        paths.cleanupGitHubSkillTemps(fileService: files)
+        XCTAssertFalse(files.directoryExists(at: vendorTemp))
+        for path in sentinels { XCTAssertEqual(try files.readFile(at: path), "keep", path) }
+    }
+
     private struct LocalRemote {
         let git: GitService
         let files: FileServiceProtocol
