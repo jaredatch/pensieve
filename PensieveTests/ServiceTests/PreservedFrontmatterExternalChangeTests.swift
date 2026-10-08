@@ -26,7 +26,7 @@ final class PreservedFrontmatterExternalChangeTests: XCTestCase {
 
     func testExternalChangeKeepsDraftAndFingerprintBehaviorUnchanged() throws {
         let watcher = StubWatcher()
-        let store = SkillStore(fileService: fileService, baseDir: tempRoot)
+        let store = SkillStore(fileService: fileService, baseDir: tempRoot, storeRoot: tempRoot)
         let viewModel = SkillLibraryViewModel(skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot)
         var prompts: [(UnsavedChangesPrompt, (UnsavedChangesChoice) -> Void)] = []
         viewModel.unsavedChangesPresenter = { prompt, resolve in prompts.append((prompt, resolve)) }

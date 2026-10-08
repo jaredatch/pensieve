@@ -65,7 +65,7 @@ extension UpstreamHistoryServiceTests {
         let bytes = Data("\u{feff}---\r\nname: Example\r\ndescription: Test\r\n---\r\nBody\r\n".utf8)
         let content = try decodedHistoricalContent(bytes)
         guard case let .text(document) = content else { return XCTFail("expected UTF-8 text") }
-        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/restored")
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/restored", storeRoot: tempDir + "/restored")
         let skill = Skill(name: "Example", directoryName: "example")
         try restoreSkillHistoryVersion(skill: skill, body: document, store: store, library: nil, notifier: {})
         XCTAssertEqual(try store.readData(directoryName: skill.directoryName), bytes)

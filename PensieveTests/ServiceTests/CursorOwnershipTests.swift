@@ -11,7 +11,7 @@ final class CursorOwnershipTests: XCTestCase {
 
     override func setUpWithError() throws {
         root = TestTemporaryDirectory.path + "CursorOwnership-\(UUID().uuidString)"
-        store = SkillStore(fileService: files, baseDir: root + "/store/skills")
+        store = SkillStore(fileService: files, baseDir: root + "/store/skills", storeRoot: root + "/store")
         let slug = try store.createSkill(name: "Owned", description: "Description", body: "# Body")
         skill = Skill(name: "Owned", skillDescription: "Description", directoryName: slug)
         let mappings: [(logical: String, physical: String)] = [

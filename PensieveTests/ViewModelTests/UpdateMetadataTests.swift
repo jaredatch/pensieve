@@ -39,7 +39,7 @@ final class UpdateMetadataTests: XCTestCase {
     private func makeLibrary(notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed) throws
         -> Fixture {
         let context = try makeContext()
-        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let library = SkillLibraryViewModel(
             skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
             manifestService: manifest, manifestRoot: tempDir,

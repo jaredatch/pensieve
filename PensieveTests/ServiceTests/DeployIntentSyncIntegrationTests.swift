@@ -15,7 +15,7 @@ extension DeployIntentModelTests {
 
         _ = LaunchReconciler(
             migrationService: StoreMigrationService(skillStore: SkillStore(fileService: FileService(),
-                baseDir: TestPaths.skillsDir)),
+                baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot)),
             root: harness.root,
             lockPath: lockPath,
             git: TestPaths.git

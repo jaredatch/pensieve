@@ -96,7 +96,7 @@ final class ProjectFolderSecondFixTests: XCTestCase {
         let links = TestPaths.linkService(fileService: files)
         let cursor = CursorCompiler(
             fileService: files,
-            skillStore: SkillStore(fileService: files, baseDir: "/fixture"),
+            skillStore: SkillStore(fileService: files, baseDir: "/fixture", storeRoot: "/fixture"),
             userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
         )
         for path in ["code/app", "~/code/app", "", "~fixture/code"] {

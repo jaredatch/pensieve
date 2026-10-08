@@ -109,7 +109,7 @@ final class DaemonEndToEndTests: XCTestCase {
             migrationService: StoreMigrationService(
                 fileService: fileService,
                 manifestService: manifest,
-                skillStore: SkillStore(fileService: fileService, baseDir: cloneB + "/skills")
+                skillStore: SkillStore(fileService: fileService, baseDir: cloneB + "/skills", storeRoot: cloneB)
             ),
             fileService: fileService,
             manifestService: manifest,

@@ -12,7 +12,7 @@ final class SkillDetailHeaderLayoutTests: XCTestCase {
     func testALinkedSkillsHeaderMatchesTheFramesRhythm() {
         let base = TestTemporaryDirectory.path + "SkillDetailHeaderLayoutTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills"),
+            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills", storeRoot: base),
             fileWatchService: FileWatchService(rootDir: base + "/skills"), manifestRoot: base
         )
         let skill = Skill(name: "basecamp", directoryName: "basecamp")

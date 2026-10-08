@@ -98,7 +98,8 @@ final class AppRuntimeTests: XCTestCase {
         )
         let defaults = try isolatedDefaults(defaultsLabel)
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir), fileWatchService: watcher,
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir,
+                storeRoot: TestPaths.storeRoot), fileWatchService: watcher,
             manifestRoot: TestPaths.storeRoot
         )
         let platformVM = neutralPlatformVM()

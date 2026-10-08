@@ -180,7 +180,7 @@ final class ImportBoundedReadTests: XCTestCase {
         try spy.files.createDirectory(at: root + "/claude/empty-folder")
         let model = ImportViewModel(
             scanner: makeScanner(),
-            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestRoot: TestPaths.storeRoot
         )
@@ -210,7 +210,7 @@ extension ImportBoundedReadTests {
         try spy.files.createSymlink(at: collection + "/SKILL.md", pointingTo: root + "/absent")
         let model = ImportViewModel(
             scanner: makeScanner(),
-            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestRoot: TestPaths.storeRoot
         )
@@ -234,7 +234,7 @@ extension ImportBoundedReadTests {
             )
             let model = ImportViewModel(
                 scanner: scanner,
-                skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
+                skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
                 lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestRoot: TestPaths.storeRoot
             )

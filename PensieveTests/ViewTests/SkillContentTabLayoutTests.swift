@@ -14,7 +14,7 @@ final class SkillContentTabLayoutTests: XCTestCase {
                                     SkillBundleInventory.File(relativePath: long, bytes: 10, tokens: 3)]
         let base = TestTemporaryDirectory.path + "SkillContentTabLayoutTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills"),
+            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills", storeRoot: base),
             fileWatchService: FileWatchService(rootDir: base + "/skills"), manifestRoot: base
         )
         let presentation = SkillContentPresentation.resolve(
@@ -44,7 +44,7 @@ final class SkillContentTabLayoutTests: XCTestCase {
     func testThePulldownWidensWhenTheListArrives() throws {
         let base = TestTemporaryDirectory.path + "SkillContentTabLayoutTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills"),
+            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills", storeRoot: base),
             fileWatchService: FileWatchService(rootDir: base + "/skills"), manifestRoot: base
         )
         let skill = Skill(name: "Example", directoryName: "example")
@@ -133,7 +133,7 @@ final class SkillContentTabLayoutTests: XCTestCase {
         let base = TestTemporaryDirectory.path + "SkillContentTabLayoutTests-\(UUID().uuidString)"
         fileService.contents[base + "/skills/example/scripts/x.sh"] = "echo hi"
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: base + "/skills"),
+            skillStore: SkillStore(fileService: fileService, baseDir: base + "/skills", storeRoot: base),
             fileService: fileService, fileWatchService: FileWatchService(rootDir: base + "/skills"),
             manifestRoot: base
         )

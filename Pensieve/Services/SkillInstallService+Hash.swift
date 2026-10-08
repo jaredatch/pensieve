@@ -38,9 +38,7 @@ extension SkillInstallService {
             at: sourceDirectory,
             excludingTopLevelGitMetadata: excludingTopLevelGitMetadata
         )
-        let parent = (storeRoot as NSString).deletingLastPathComponent
-        let base = (storeRoot as NSString).lastPathComponent
-        let temp = parent + "/" + base + ".vendor-" + UUID().uuidString + ".tmp"
+        let temp = VendorTemporaryDirectory.makePath(storeRoot: storeRoot)
         do {
             try fileService.createDirectory(at: temp)
             for entry in entries where entry.isDirectory {
@@ -71,20 +69,14 @@ extension SkillInstallService {
         let lock = externallyHeldLock ? nil : SyncLock.tryAcquire(at: lockPath)
         guard externallyHeldLock || lock != nil else { return }
         defer { lock?.release() }
-        let parent = (storeRoot as NSString).deletingLastPathComponent
-        let prefix = (storeRoot as NSString).lastPathComponent + ".vendor-"
+        let (parent, prefix) = VendorTemporaryDirectory.namespace(storeRoot: storeRoot)
         guard !fileService.isSymlink(at: parent),
               fileService.directoryExists(at: parent),
               let entries = try? fileService.listDirectory(at: parent) else {
             return
         }
-        for entry in entries
-        where entry.hasPrefix(prefix) && entry.hasSuffix(".tmp") {
-            // Only the exact UUID namespace vendor() emits: this sweep runs against the store
-            // PARENT (the user's home for the production root), where a prefix match alone would
-            // recursively delete a user's own `.pensieve.vendor-backup.tmp`-style sibling.
-            let middle = String(entry.dropFirst(prefix.count).dropLast(".tmp".count))
-            guard UUID(uuidString: middle) != nil else { continue }
+        // Match only our UUID namespace, never a user's similarly named sibling.
+        for entry in entries where VendorTemporaryDirectory.contains(entry, prefix: prefix) {
             let path = parent + "/" + entry
             if fileService.directoryExists(at: path) || fileService.isSymlink(at: path) {
                 try? fileService.deleteDirectory(at: path)

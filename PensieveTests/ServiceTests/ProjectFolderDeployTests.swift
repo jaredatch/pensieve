@@ -13,7 +13,7 @@ final class ProjectFolderDeployTests: XCTestCase {
 
     override func setUpWithError() throws {
         root = TestTemporaryDirectory.path + "ProjectFolderDeployTests-\(UUID().uuidString)"
-        let store = SkillStore(fileService: files, baseDir: root + "/store")
+        let store = SkillStore(fileService: files, baseDir: root + "/store", storeRoot: root + "/store")
         let slug = try store.createSkill(name: "test-skill", description: "Test", body: "# Body")
         skill = Skill(name: "Test", directoryName: slug)
         var mappings = [(logical: TestPaths.skillsDir, physical: root + "/store")]

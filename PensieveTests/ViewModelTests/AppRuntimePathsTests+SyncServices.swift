@@ -27,7 +27,7 @@ extension AppRuntimePathsTests {
         try git.stageAllAndCommit(at: paths.storeRoot, message: "fixture")
         try git.setRemote(url, at: paths.storeRoot)
         _ = try git.runOrThrow(["-C", paths.storeRoot, "push", "-u", "origin", "main"], in: nil)
-        let skillStore = SkillStore(fileService: files, baseDir: paths.skillsDir)
+        let skillStore = SkillStore(fileService: files, baseDir: paths.skillsDir, storeRoot: paths.skillsDir)
         let slug = try skillStore.createSkill(name: "Runtime", description: "Sync fixture", body: "local sync body")
         context.insert(Skill(name: "Runtime", skillDescription: "Sync fixture", directoryName: slug))
         try context.save()

@@ -166,7 +166,8 @@ extension SyncCoordinatorTests {
 
     private func priorityLibrary(_ fixture: GitFailureFixture, watcher: RecordingWatcher = RecordingWatcher(),
                                  notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed) -> SkillLibraryViewModel {
-        SkillLibraryViewModel(skillStore: SkillStore(fileService: fixture.files, baseDir: fixture.paths.skillsDir),
+        SkillLibraryViewModel(skillStore: SkillStore(fileService: fixture.files, baseDir: fixture.paths.skillsDir,
+            storeRoot: fixture.paths.skillsDir),
                               fileService: fixture.files, fileWatchService: watcher, manifestRoot: fixture.root,
                               notifier: notifier)
     }

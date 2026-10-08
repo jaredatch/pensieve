@@ -39,7 +39,7 @@ extension StoreRebuildServiceTests {
         try manifest.write(manifest.snapshot(from: context), toRoot: tempDir)
         XCTAssertEqual(try installedOriginBlock(slug: "pdf"), originalOriginBlock)
 
-        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let viewModel = SkillLibraryViewModel(
             skillStore: store,
             fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),

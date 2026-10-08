@@ -8,7 +8,7 @@ final class SkillSaveRevisionTests: XCTestCase {
         let files = FileService()
         let root = TestTemporaryDirectory.path + "DescriptionGuard-" + UUID().uuidString
         defer { try? files.deleteDirectory(at: root) }
-        let store = SkillStore(fileService: files, baseDir: root)
+        let store = SkillStore(fileService: files, baseDir: root, storeRoot: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Body")
         let container = try ModelContainer(
             for: Skill.self, Project.self, SkillProjectAssignment.self, IntentAssignment.self,
@@ -32,7 +32,7 @@ final class SkillSaveRevisionTests: XCTestCase {
         let files = FileService()
         let root = TestTemporaryDirectory.path + "CleanCRLF-" + UUID().uuidString
         defer { try? files.deleteDirectory(at: root) }
-        let store = SkillStore(fileService: files, baseDir: root)
+        let store = SkillStore(fileService: files, baseDir: root, storeRoot: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Old")
         try files.writeFile(at: root + "/" + slug + "/SKILL.md",
                             content: "---\r\nname: Test\r\ndescription: D\r\n---\r\n\r\nOld\r\n")
@@ -62,7 +62,7 @@ final class SkillSaveRevisionTests: XCTestCase {
         let files = PreviewImageFileSpy()
         let root = TestTemporaryDirectory.path + "NoOpSave-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: root) }
-        let store = SkillStore(fileService: files, baseDir: root)
+        let store = SkillStore(fileService: files, baseDir: root, storeRoot: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Body")
         let path = root + "/" + slug + "/SKILL.md"
         try files.files.touchRegularFile(at: path, date: Date(timeIntervalSince1970: 1_000))
@@ -103,7 +103,7 @@ final class SkillSaveRevisionTests: XCTestCase {
         let files = PreviewImageFileSpy()
         let root = TestTemporaryDirectory.path + "CaughtUpSave-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: root) }
-        let store = SkillStore(fileService: files, baseDir: root)
+        let store = SkillStore(fileService: files, baseDir: root, storeRoot: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Old")
         let path = root + "/" + slug + "/SKILL.md"
         let skill = Skill(name: "Test", skillDescription: "D", directoryName: slug)
@@ -134,7 +134,7 @@ final class SkillSaveRevisionTests: XCTestCase {
                 let files = PreviewImageFileSpy()
                 let root = TestTemporaryDirectory.path + "NoOpDescription-" + UUID().uuidString
                 defer { try? files.files.deleteDirectory(at: root) }
-                let store = SkillStore(fileService: files, baseDir: root)
+                let store = SkillStore(fileService: files, baseDir: root, storeRoot: root)
                 let slug = try store.createSkill(name: "Fallback", description: "D", body: "Old")
                 let skill = Skill(name: "Fallback", skillDescription: description, directoryName: slug)
                 var nudges = 0
@@ -171,7 +171,7 @@ final class SkillSaveRevisionTests: XCTestCase {
         let files = PreviewImageFileSpy()
         let root = TestTemporaryDirectory.path + "RewriteReport-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: root) }
-        let store = SkillStore(fileService: files, baseDir: root)
+        let store = SkillStore(fileService: files, baseDir: root, storeRoot: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Body")
         for body in ["Body\n", "Edited"] {
             let parsed = SkillParser.parse(try store.readBody(directoryName: slug))
@@ -208,7 +208,7 @@ final class SkillSaveRevisionTests: XCTestCase {
         let files = FileService()
         let root = TestTemporaryDirectory.path + "WriteOutcome-" + UUID().uuidString
         defer { try? files.deleteDirectory(at: root) }
-        let store = SkillStore(fileService: files, baseDir: root)
+        let store = SkillStore(fileService: files, baseDir: root, storeRoot: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Body")
         let skill = Skill(name: "Test", skillDescription: "D", directoryName: slug)
         var publishedDirty: [Bool] = []

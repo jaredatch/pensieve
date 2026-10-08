@@ -86,7 +86,7 @@ final class LaunchReconcilerHeadRetryTests: XCTestCase {
         migrationService = StoreMigrationService(
             fileService: fileService,
             manifestService: manifest,
-            skillStore: SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+            skillStore: SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         )
     }
 

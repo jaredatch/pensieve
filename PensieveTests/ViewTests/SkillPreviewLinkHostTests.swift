@@ -316,7 +316,7 @@ extension SkillPreviewLinkHostTests {
         files.contents[skillsDirectory + "/link-test/references/x.md"] = otherMarkdown
         files.contents[skillsDirectory + "/link-test/scripts/x.sh"] = "echo hi"
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: files, baseDir: skillsDirectory),
+            skillStore: SkillStore(fileService: files, baseDir: skillsDirectory, storeRoot: skillsDirectory),
             fileService: files, fileWatchService: FileWatchService(rootDir: skillsDirectory), manifestRoot: base
         )
         let skill = Skill(name: "Link test", directoryName: "link-test")

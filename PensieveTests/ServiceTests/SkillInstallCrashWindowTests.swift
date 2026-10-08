@@ -81,7 +81,7 @@ extension SkillInstallServiceTests {
         let migration = StoreMigrationService(
             fileService: fileService,
             manifestService: durableManifest,
-            skillStore: SkillStore(fileService: fileService, baseDir: root + "/skills")
+            skillStore: SkillStore(fileService: fileService, baseDir: root + "/skills", storeRoot: root)
         )
         let outcome = LaunchReconciler(
             rebuildService: rebuild,

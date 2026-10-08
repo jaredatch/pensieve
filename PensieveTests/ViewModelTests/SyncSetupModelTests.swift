@@ -1102,7 +1102,7 @@ extension SyncSetupModelTests {
         let context = try makeContext()
         let launch = LaunchReconciler(
             migrationService: StoreMigrationService(skillStore: SkillStore(fileService: FileService(),
-                baseDir: TestPaths.skillsDir)),
+                baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot)),
             fileService: FileService(),
             manifestService: ManifestService(),
             root: root,
@@ -1145,7 +1145,7 @@ extension SyncSetupModelTests {
         let context = try makeContext()
         let launch = LaunchReconciler(
             migrationService: StoreMigrationService(skillStore: SkillStore(fileService: FileService(),
-                baseDir: TestPaths.skillsDir)),
+                baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot)),
             fileService: FileService(),
             manifestService: ManifestService(),
             root: root,
@@ -1168,7 +1168,7 @@ extension SyncSetupModelTests {
         let context = try makeContext()
         let launch = LaunchReconciler(
             migrationService: StoreMigrationService(skillStore: SkillStore(fileService: FileService(),
-                baseDir: TestPaths.skillsDir)),
+                baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot)),
             fileService: FileService(),
             manifestService: ManifestService(),
             root: root,

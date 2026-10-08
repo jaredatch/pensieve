@@ -101,7 +101,6 @@ targets:
       - path: PensieveTests/Fixtures/FakeGitScript.swift
       - path: PensieveTests/Fixtures/ImportPublicationFileService.swift
       - path: PensieveTests/Fixtures/GitProcessProbe
-      - path: Pensieve/Services/SkillStore+Import.swift
       - path: Pensieve/Services/SkillStore.swift
       - path: Pensieve/Services/SkillParser.swift
       - path: Pensieve/Services/SkillParser+Preservation.swift
@@ -119,6 +118,7 @@ targets:
       - path: Pensieve/Services/GitServiceConflict.swift
       - path: Pensieve/Services/FileService.swift
       - path: Pensieve/Services/FileService+Publication.swift
+      - path: Pensieve/Services/VendorTemporaryDirectory.swift
       - path: Pensieve/Services/FileService+ProjectFolder.swift
       - path: Pensieve/Services/ProjectFolderError.swift
       - path: Pensieve/Services/FileService+BoundedRead.swift
@@ -149,6 +149,7 @@ targets:
       - path: PensieveDaemon
       - path: Pensieve/Services/FileService.swift
       - path: Pensieve/Services/FileService+Publication.swift
+      - path: Pensieve/Services/VendorTemporaryDirectory.swift
       - path: Pensieve/Services/FileService+ProjectFolder.swift
       - path: Pensieve/Services/ProjectFolderError.swift
       - path: Pensieve/Services/FileService+BoundedRead.swift
@@ -174,7 +175,6 @@ targets:
       - path: Pensieve/Services/SkillParser+Preservation.swift
       - path: Pensieve/Services/SkillSerializer.swift
       - path: Pensieve/Services/SkillStore.swift
-      - path: Pensieve/Services/SkillStore+Import.swift
       - path: Pensieve/Services/ManifestTypes.swift
       - path: Pensieve/Services/ManifestService.swift
       - path: Pensieve/Services/ManifestService+DeployIntents.swift

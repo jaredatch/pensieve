@@ -40,7 +40,7 @@ private final class ReplacementRemovalAdapter: LinkServiceProtocol, CursorCompil
         links = TestPaths.linkService(fileService: files)
         cursor = CursorCompiler(
             fileService: files,
-            skillStore: SkillStore(fileService: files, baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: files, baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
         )
     }

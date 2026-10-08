@@ -20,7 +20,8 @@ extension XCTestCase {
         let errorLock = NSLock()
         var pendingInitialError = initialProbeError
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fixture.files, baseDir: fixture.paths.skillsDir),
+            skillStore: SkillStore(fileService: fixture.files, baseDir: fixture.paths.skillsDir,
+                storeRoot: fixture.paths.skillsDir),
             fileService: fixture.files, fileWatchService: RecordingWatcher(), manifestRoot: fixture.root,
             notifier: SyncStateNotifier.suppressed)
         let runtime = try AppRuntime(library: library, scheduler: scheduler, defaults: isolatedDefaults(),

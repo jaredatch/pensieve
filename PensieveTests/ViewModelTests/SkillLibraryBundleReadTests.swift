@@ -22,7 +22,7 @@ final class SkillLibraryBundleReadTests: XCTestCase {
     }
 
     func testBundleFileTextReadsARegularTextFile() {
-        let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: fileService, baseDir: base),
+        let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: fileService, baseDir: base, storeRoot: base),
             fileService: fileService, fileWatchService: FileWatchService(rootDir: base), manifestRoot: base + "/manifest-store")
         let skill = Skill(name: "Bundle", directoryName: slug)
         XCTAssertEqual(library.bundleFileText(skill, relativePath: "references/voice.md"), "Voice notes")

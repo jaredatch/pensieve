@@ -116,7 +116,7 @@ extension UpstreamHistoryServiceTests {
         try write("SKILL.md", text: original, in: localDirectory)
         let installedHash = try stableHash(at: localDirectory)
         let parsed = SkillParser.parse(original)
-        let store = SkillStore(fileService: fileService, baseDir: tempDir)
+        let store = SkillStore(fileService: fileService, baseDir: tempDir, storeRoot: tempDir)
         try store.rewriteSkill(
             directoryName: "local",
             body: "Edited body",

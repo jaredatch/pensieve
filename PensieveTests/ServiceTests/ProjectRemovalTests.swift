@@ -233,7 +233,7 @@ final class ProjectRemovalTests: XCTestCase {
             try CursorCompiler(
                 fileService: h.mapped,
                 skillStore: SkillStore(fileService: h.files,
-                baseDir: h.root + "/store/skills"),
+                baseDir: h.root + "/store/skills", storeRoot: h.root + "/store"),
                 userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
             ).compile(skill: h.skill, projectPath: h.project.path)
         } else {

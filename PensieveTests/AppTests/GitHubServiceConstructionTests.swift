@@ -30,7 +30,7 @@ final class GitHubServiceConstructionTests: XCTestCase {
     func testRuntimeServicesRequireExplicitPaths() throws {
         try assertRequiredArguments([
             ("GitService", [("askpassHelperPath", "root")]),
-            ("SkillStore", [("fileService", "files"), ("baseDir", "root")]),
+            ("SkillStore", [("fileService", "files"), ("baseDir", "root"), ("storeRoot", "root")]),
             ("SyncEngine", [("gitService", "git"), ("lockPath", "root")]),
             ("SyncModel", [("git", "git"), ("root", "root")]),
             ("SyncAudit", [("appSupport", "root")]),
@@ -79,7 +79,7 @@ final class GitHubServiceConstructionTests: XCTestCase {
             let git = GitService(askpassHelperPath: root)
             let credentials = InMemoryCredentialStore()
             let files = FileService()
-            let store = SkillStore(fileService: files, baseDir: root)
+            let store = SkillStore(fileService: files, baseDir: root, storeRoot: root)
             let paths = AppRuntimePaths(storeRoot: root, appSupportDir: root)
             let engine = paths.makeSyncEngine()
             let detection = AgentDetectionService(homeDirectory: root)

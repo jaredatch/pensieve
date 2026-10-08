@@ -17,7 +17,7 @@ final class SkillDetailTabResetTests: XCTestCase {
         let git = SkillDetailTabResetGit(thirdCommit: thirdCommit)
         let base = TestTemporaryDirectory.path + "SkillDetailTabResetTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills"),
+            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills", storeRoot: base),
             fileWatchService: FileWatchService(rootDir: base + "/skills"), manifestRoot: base
         )
         let history = UpstreamHistoryViewModel(

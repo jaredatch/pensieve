@@ -11,7 +11,7 @@ final class StoreUnreadableFenceTests: XCTestCase {
         tempDir = TestTemporaryDirectory.path + "PensieveFenceTests-" + UUID().uuidString
         try FileService().createDirectory(at: tempDir)
         library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: tempDir),
+            skillStore: SkillStore(fileService: FileService(), baseDir: tempDir, storeRoot: tempDir),
             fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
         )
     }
@@ -30,7 +30,8 @@ final class StoreUnreadableFenceTests: XCTestCase {
 
     private func makeRuntime(label: String, outcome: LaunchReconcileOutcome) throws -> AppRuntime {
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: tempDir), fileWatchService: FenceStubWatcher(),
+            skillStore: SkillStore(fileService: FileService(), baseDir: tempDir,
+                storeRoot: tempDir), fileWatchService: FenceStubWatcher(),
             manifestRoot: TestPaths.storeRoot
         )
         return try AppRuntime(

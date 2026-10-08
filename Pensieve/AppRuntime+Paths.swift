@@ -143,7 +143,8 @@ struct AppRuntimePaths {
         if isProduction {
             let files = FileService()
             return PlatformViewModel(fileService: files, linkService: LinkService(fileService: files, paths: deployPaths),
-                cursorCompiler: CursorCompiler(fileService: files, skillStore: SkillStore(fileService: files, baseDir: skillsDir),
+                cursorCompiler: CursorCompiler(fileService: files, skillStore: SkillStore(fileService: files, baseDir: skillsDir,
+                    storeRoot: storeRoot),
                     userRulesDirectory: cursorRulesDir), agentDetection: makeAgentDetection(),
                 deployStateStore: DeployStateStore(fileService: files, appSupportDir: appSupportDir), skillsDirectory: skillsDir)
         }
@@ -182,7 +183,7 @@ struct AppRuntimePaths {
             let migrationService = StoreMigrationService(
                 fileService: fileService,
                 manifestService: ManifestService(),
-                skillStore: SkillStore(fileService: fileService, baseDir: skillsDir)
+                skillStore: SkillStore(fileService: fileService, baseDir: skillsDir, storeRoot: storeRoot)
             )
             return LaunchReconciler(
                 migrationService: migrationService,
@@ -221,7 +222,7 @@ struct AppRuntimePaths {
     ) -> SkillLibraryViewModel {
         let fileService = FileService()
         return SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: skillsDir),
+            skillStore: SkillStore(fileService: fileService, baseDir: skillsDir, storeRoot: storeRoot),
             fileService: fileService,
             fileWatchService: fileWatchService ?? FileWatchService(rootDir: skillsDir),
             manifestService: ManifestService(),

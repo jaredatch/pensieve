@@ -11,7 +11,8 @@ extension SyncCoordinatorTests {
         let git = harness.allowlistedGit
         let paths = AppRuntimePaths(storeRoot: harness.clone, appSupportDir: block.root + "/support")
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: block.files, baseDir: paths.skillsDir), fileService: block.files,
+            skillStore: SkillStore(fileService: block.files, baseDir: paths.skillsDir,
+                storeRoot: paths.skillsDir), fileService: block.files,
             fileWatchService: FileWatchService(rootDir: paths.skillsDir), manifestRoot: paths.storeRoot
         )
         let context = harness.container.mainContext

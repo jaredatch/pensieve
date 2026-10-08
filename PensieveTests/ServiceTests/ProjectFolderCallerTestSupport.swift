@@ -23,7 +23,7 @@ struct ProjectFolderCallerHarness {
          persistent: Bool = false) throws {
         self.files = files
         root = TestTemporaryDirectory.path + "ProjectFolderCallers-\(UUID().uuidString)"
-        let store = SkillStore(fileService: files, baseDir: root + "/store/skills")
+        let store = SkillStore(fileService: files, baseDir: root + "/store/skills", storeRoot: root + "/store")
         let slug = try store.createSkill(name: "Caller Skill", description: "Caller", body: "# Body")
         mapped = LinkServiceCanonicalDirectoryFileService(
             wrapped: files,
@@ -80,7 +80,7 @@ struct ProjectFolderCallerHarness {
     }
 
     func addDirectSkill(platforms: [PlatformTarget]) throws -> Skill {
-        let slug = try SkillStore(fileService: files, baseDir: root + "/store/skills")
+        let slug = try SkillStore(fileService: files, baseDir: root + "/store/skills", storeRoot: root + "/store")
             .createSkill(name: "Direct Skill", description: "Direct", body: "# Direct")
         let direct = Skill(name: "Direct Skill", directoryName: slug)
         context.insert(direct)

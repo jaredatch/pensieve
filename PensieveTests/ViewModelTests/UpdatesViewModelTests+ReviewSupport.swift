@@ -15,7 +15,8 @@ extension UpdatesViewModelTests {
         fixture: RealFixture, service: SkillInstallService? = nil
     ) -> (UpdatesViewModel.DefaultOperations, SkillLibraryViewModel) {
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: fixture.storeRoot + "/skills"), fileService: fileService,
+            skillStore: SkillStore(fileService: fileService, baseDir: fixture.storeRoot + "/skills",
+                storeRoot: fixture.storeRoot), fileService: fileService,
             fileWatchService: FileWatchService(rootDir: fixture.storeRoot + "/skills"), manifestRoot: fixture.storeRoot
         )
         let installer = service ?? fixture.service

@@ -38,7 +38,7 @@ final class ExternalChangeTests: XCTestCase {
     }
 
     private func makeViewModel(watcher: StubWatcher) -> SkillLibraryViewModel {
-        let store = SkillStore(fileService: FileService(), baseDir: tempRoot)
+        let store = SkillStore(fileService: FileService(), baseDir: tempRoot, storeRoot: tempRoot)
         return SkillLibraryViewModel(skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot)
     }
 
@@ -69,7 +69,7 @@ final class ExternalChangeTests: XCTestCase {
         let directoryName = "deleted-skill"
         try writeSkill(directoryName, body: "Original body")
         let watcher = StubWatcher()
-        let store = SkillStore(fileService: FileService(), baseDir: tempRoot)
+        let store = SkillStore(fileService: FileService(), baseDir: tempRoot, storeRoot: tempRoot)
         var nudges = 0
         let viewModel = SkillLibraryViewModel(
             skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot,
@@ -120,7 +120,7 @@ final class ExternalChangeTests: XCTestCase {
         // file's exact text is clean (batch Layer-2, round 4: the raw "A\n" fingerprint left a phantom draft).
         let directoryName = "bare-skill"
         try writeSkill(directoryName, body: "A")
-        let store = SkillStore(fileService: FileService(), baseDir: tempRoot)
+        let store = SkillStore(fileService: FileService(), baseDir: tempRoot, storeRoot: tempRoot)
         let viewModel = SkillLibraryViewModel(skillStore: store, fileWatchService: StubWatcher(),
             manifestRoot: TestPaths.storeRoot)
         let skill = Skill(name: "Bare Skill", directoryName: directoryName)
@@ -323,7 +323,7 @@ extension ExternalChangeTests {
         let directoryName = "bundle-skill"
         try writeSkill(directoryName, body: "Original body")
         let watcher = StubWatcher()
-        let store = SkillStore(fileService: FileService(), baseDir: tempRoot)
+        let store = SkillStore(fileService: FileService(), baseDir: tempRoot, storeRoot: tempRoot)
         var nudges = 0
         let viewModel = SkillLibraryViewModel(skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot,
             notifier: { nudges += 1 })

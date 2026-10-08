@@ -53,7 +53,7 @@ final class SafeSkillFileGUISinkTests: XCTestCase {
         let result = StoreMigrationService(
             fileService: fileService,
             manifestService: ManifestService(fileService: fileService),
-            skillStore: SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+            skillStore: SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         ).migrateIfNeeded(fromRoot: tempDir, context: context)
 
         XCTAssertEqual(result.skillsMigrated, 0)
@@ -74,7 +74,7 @@ final class SafeSkillFileGUISinkTests: XCTestCase {
     func testReadBodyThrowsUnsafeLeafInsteadOfReturningForeignBytes() throws {
         let foreign = "FOREIGN-BYTES-SHOULD-NOT-LOAD"
         try plantSymlinkedLeaf(slug: "victim", foreign: foreign)
-        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
 
         do {
             let body = try store.readBody(directoryName: "victim")
@@ -87,7 +87,7 @@ final class SafeSkillFileGUISinkTests: XCTestCase {
     func testCursorCompilerIsUpToDateFalseAndCompileThrowsForSymlinkLeaf() throws {
         let foreign = foreignSkill(name: "Foreign", description: "pwned")
         try plantSymlinkedLeaf(slug: "victim", foreign: foreign)
-        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let compiler = CursorCompiler(
             fileService: fileService,
             skillStore: store,

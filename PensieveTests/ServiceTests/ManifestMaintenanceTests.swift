@@ -80,7 +80,7 @@ final class ManifestMaintenanceTests: XCTestCase {
     @MainActor
     func testCreatingSkillWritesOverlay() throws {
         let context = try makeContext()
-        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let vm = SkillLibraryViewModel(
             skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
             manifestService: manifest, manifestRoot: tempDir
@@ -94,7 +94,7 @@ final class ManifestMaintenanceTests: XCTestCase {
     @MainActor
     func testCreatingSkillUsesUserScopeInRecordAndOverlay() throws {
         let context = try makeContext()
-        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let vm = SkillLibraryViewModel(
             skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
             manifestService: manifest, manifestRoot: tempDir
@@ -117,7 +117,7 @@ final class ManifestMaintenanceTests: XCTestCase {
     func testImportWritesOverlayWithCursorAndOrigin() throws {
         let context = try makeContext()
         try seedProjectIntent(context)
-        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let vm = ImportViewModel(scanner: TestPaths.scanner, skillStore: store,
             lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestService: manifest, manifestRoot: tempDir)
@@ -148,7 +148,7 @@ final class ManifestMaintenanceTests: XCTestCase {
     func testUpdatingMetadataReflectsInOverlay() throws {
         let context = try makeContext()
         try seedProjectIntent(context)
-        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let vm = SkillLibraryViewModel(
             skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
             manifestService: manifest, manifestRoot: tempDir
@@ -165,7 +165,7 @@ final class ManifestMaintenanceTests: XCTestCase {
     @MainActor
     func testDeletingSkillPrunesOverlay() throws {
         let context = try makeContext()
-        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let vm = SkillLibraryViewModel(
             skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
             manifestService: manifest, manifestRoot: tempDir
@@ -193,7 +193,7 @@ final class ManifestMaintenanceTests: XCTestCase {
     @MainActor
     func testManifestFailureIsSurfacedButMutationSucceeds() throws {
         let context = try makeContext()
-        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let failing = ManifestService(fileService: ThrowingWriteFileService())
         let vm = SkillLibraryViewModel(
             skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),

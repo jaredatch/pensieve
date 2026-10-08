@@ -13,7 +13,7 @@ final class CursorCompilerTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: skillsDir, withIntermediateDirectories: true)
 
         fileService = FileService()
-        skillStore = SkillStore(fileService: fileService, baseDir: skillsDir)
+        skillStore = SkillStore(fileService: fileService, baseDir: skillsDir, storeRoot: skillsDir)
         compiler = CursorCompiler(
             fileService: fileService,
             skillStore: skillStore,

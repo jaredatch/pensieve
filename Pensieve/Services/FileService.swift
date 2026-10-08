@@ -205,25 +205,6 @@ extension FileServiceProtocol {
         }
     }
 
-    /// A directory rename is atomic and refuses a nonempty directory or any non-directory occupant.
-    /// Unlike a swap, it cannot discard destination contents that appeared while the source was built.
-    func publishDirectory(at sourcePath: String, to destinationPath: String) throws {
-        guard try entryTypeWithoutFollowingLinks(at: sourcePath) == .directory else {
-            throw DescriptorFileCopy.error("publish directory", path: sourcePath, code: ENOTDIR)
-        }
-        guard Darwin.rename(sourcePath, destinationPath) == 0 else {
-            let code = errno
-            if code == ENOTEMPTY || code == EEXIST || code == ENOTDIR {
-                throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [
-                    NSFilePathErrorKey: destinationPath,
-                    NSLocalizedDescriptionKey:
-                        "The store destination '\(destinationPath)' already exists and is not an empty directory."
-                ])
-            }
-            throw DescriptorFileCopy.error("publish directory", path: destinationPath, code: code)
-        }
-    }
-
     /// True iff `path` is a REGULAR file that exists — not a symlink, directory, FIFO, socket, or device
     /// node. Uses `attributesOfItem` (lstat semantics — does NOT follow the final component), so a
     /// SYMLINKED leaf resolves as `.typeSymbolicLink`, not `.typeRegular`, and is rejected WITHOUT being

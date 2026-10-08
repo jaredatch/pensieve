@@ -10,7 +10,7 @@ final class SkillLibrarySaveTests: XCTestCase {
         let files = FileService()
         let root = TestTemporaryDirectory.path + "CRLFSave-" + UUID().uuidString
         defer { try? files.deleteDirectory(at: root) }
-        let store = SkillStore(fileService: files, baseDir: root)
+        let store = SkillStore(fileService: files, baseDir: root, storeRoot: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Old")
         try files.writeFile(at: root + "/" + slug + "/SKILL.md",
                             content: "---\r\nname: Test\r\ndescription: D\r\n---\r\n\r\nOld\r\n")

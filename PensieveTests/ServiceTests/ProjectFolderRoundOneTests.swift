@@ -111,7 +111,7 @@ final class ProjectFolderRoundOneTests: XCTestCase {
         let compiler = CursorCompiler(
             fileService: h.mapped,
             skillStore: SkillStore(fileService: h.files,
-            baseDir: h.root + "/store/skills"),
+            baseDir: h.root + "/store/skills", storeRoot: h.root + "/store"),
             userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
         )
         let path = compiler.outputPath(skill: h.skill, projectPath: h.project.path)

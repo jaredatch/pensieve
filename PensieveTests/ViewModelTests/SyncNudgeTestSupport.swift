@@ -21,20 +21,16 @@ final class MemorySkillStore: SkillStoreProtocol {
     var bodies: [String: String] = [:]
 
     func createSkill(name: String, description: String, body: String) throws -> String {
-        let slug = SkillStore.slugify(name)
-        bodies[slug] = SkillSerializer.serialize(name: name, description: description, body: body)
-        return slug
+        try createSkill(name: name, description: description, body: body, avoiding: [])
+    }
+
+    func createSkill(name: String, description: String, body: String, avoiding: Set<String>) throws -> String {
+        try createSkill(name: name, content: SkillSerializer.serialize(name: name, description: description, body: body),
+                        avoiding: avoiding)
     }
 
     func createSkill(name: String, content: String, avoiding: Set<String>) throws -> String {
-        let slug = SkillStore.slugify(name)
-        let taken = Set(bodies.keys.map { $0.lowercased() }).union(avoiding.map { $0.lowercased() })
-        var candidate = slug
-        var suffix = 2
-        while taken.contains(candidate) {
-            candidate = slug + "-\(suffix)"
-            suffix += 1
-        }
+        let candidate = SkillStore.availableDirectoryName(for: name, occupied: Set(bodies.keys).union(avoiding))
         bodies[candidate] = content
         return candidate
     }

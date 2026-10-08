@@ -14,7 +14,7 @@ final class UpdateReviewFixture {
         container = try ModelContainer(for: Skill.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         context = ModelContext(container)
         library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: files, baseDir: root + "/skills"), fileService: files,
+            skillStore: SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root), fileService: files,
             fileWatchService: FileWatchService(rootDir: root + "/skills"), manifestRoot: root
         )
         try files.createDirectory(at: root)

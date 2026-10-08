@@ -59,7 +59,8 @@ final class CursorMDCTests: XCTestCase {
         )
         let compiler = CursorCompiler(
             fileService: FileService(),
-            skillStore: SkillStore(fileService: FileService(), baseDir: TestTemporaryDirectory.path),
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestTemporaryDirectory.path,
+                storeRoot: TestTemporaryDirectory.path),
             userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
         )
         let body = "# TS Rules"

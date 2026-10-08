@@ -145,7 +145,7 @@ final class DetailContentSnapshotTests: XCTestCase {
         let fileService = SnapshotFileService(document: document)
         let skill = Skill(name: "Snapshot Skill", directoryName: "snapshot-skill")
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
             manifestRoot: TestPaths.storeRoot
         )
@@ -168,7 +168,7 @@ final class DetailContentSnapshotTests: XCTestCase {
         let fileService = SnapshotFileService(document: document)
         let skill = Skill(name: "Snapshot Skill", directoryName: "snapshot-skill")
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
             manifestRoot: TestPaths.storeRoot
         )
@@ -187,7 +187,7 @@ final class DetailContentSnapshotTests: XCTestCase {
         let fileService = SnapshotFileService(document: document)
         let skill = Skill(name: "Snapshot Skill", directoryName: "snapshot-skill")
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
             manifestRoot: TestPaths.storeRoot
         )
@@ -206,7 +206,7 @@ final class DetailContentSnapshotTests: XCTestCase {
         let alpha = Project(name: "Alpha", path: "/tmp/alpha")
         let beta = Project(name: "Beta", path: "/tmp/beta")
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
             manifestRoot: TestPaths.storeRoot
         )
@@ -229,7 +229,7 @@ final class DetailContentSnapshotTests: XCTestCase {
         let skill = Skill(name: "Snapshot Skill", directoryName: "snapshot-skill")
         let project = Project(name: "Alpha", path: "/tmp/alpha")
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
             manifestRoot: TestPaths.storeRoot
         )
@@ -246,7 +246,7 @@ final class DetailContentSnapshotTests: XCTestCase {
         let fileService = InventoryFileService(document: document, entries: ["SKILL.md", "notes.md"])
         let skill = Skill(name: "Snapshot Skill", directoryName: "snapshot-skill")
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
             manifestRoot: TestPaths.storeRoot
         )
@@ -272,7 +272,7 @@ final class DetailContentSnapshotTests: XCTestCase {
     func testAppWriteRevisionCoalescesQueuedPublishes() {
         let fileService = SnapshotFileService(document: document)
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
             manifestRoot: TestPaths.storeRoot
         )

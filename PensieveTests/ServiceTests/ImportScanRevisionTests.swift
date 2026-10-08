@@ -16,7 +16,7 @@ final class ImportScanRevisionTests: XCTestCase {
         scanner.report = ImportScanReport(skipped: [.init(path: "skip", reason: .tooLarge)])
         let model = ImportViewModel(
             scanner: scanner,
-            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestRoot: TestPaths.storeRoot
         )
@@ -30,7 +30,7 @@ final class ImportScanRevisionTests: XCTestCase {
         let scanner = RevisionReportScanner()
         let model = ImportViewModel(
             scanner: scanner,
-            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestRoot: TestPaths.storeRoot
         )
@@ -48,7 +48,7 @@ final class ImportScanRevisionTests: XCTestCase {
         scanner.report = ImportScanReport(skipped: [.init(path: "one", reason: .invalidUTF8)])
         let fresh = ImportViewModel(
             scanner: scanner,
-            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestRoot: TestPaths.storeRoot
         )
@@ -66,7 +66,7 @@ final class ImportScanRevisionTests: XCTestCase {
         let scanner = RevisionReportScanner()
         let model = ImportViewModel(
             scanner: scanner,
-            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestRoot: TestPaths.storeRoot
         )
@@ -198,7 +198,7 @@ final class ImportScanRevisionTests: XCTestCase {
         scanner.report = ImportScanReport(skipped: (0..<3).map { .init(path: "skip-\($0)", reason: .notRegular) })
         let model = ImportViewModel(
             scanner: scanner,
-            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestRoot: TestPaths.storeRoot
         )
@@ -222,7 +222,7 @@ extension ImportScanRevisionTests {
         let root = TestTemporaryDirectory.path + "ImportDone-" + UUID().uuidString
         let files = ImportPublicationFileService()
         defer { try? files.files.deleteDirectory(at: root) }
-        let store = SkillStore(fileService: files, baseDir: root + "/skills")
+        let store = SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root)
         files.beforeWrite = { _, content in
             if content.contains("name: skill-1\n") || content.contains("name: skill-3\n") {
                 throw CocoaError(.fileWriteNoPermission)
@@ -254,7 +254,7 @@ extension ImportScanRevisionTests {
         let root = TestTemporaryDirectory.path + "ImportSave-" + UUID().uuidString
         let files = FileService()
         defer { try? files.deleteDirectory(at: root) }
-        let store = SkillStore(fileService: files, baseDir: root + "/skills")
+        let store = SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root)
         var notifications = 0
         var echoes: [[String]] = []
         let model = ImportViewModel(
@@ -295,7 +295,7 @@ extension ImportScanRevisionTests {
         let files = FileService()
         defer { try? files.deleteDirectory(at: root) }
         let model = ImportViewModel(scanner: scanner,
-            skillStore: SkillStore(fileService: files, baseDir: root + "/skills"),
+            skillStore: SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root),
             lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestRoot: root)
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))

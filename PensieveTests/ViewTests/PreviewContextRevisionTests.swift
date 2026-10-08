@@ -33,7 +33,7 @@ final class PreviewContextRevisionTests: XCTestCase {
         let files = FileService()
         let base = TestTemporaryDirectory.path + "ScopedImages-" + UUID().uuidString
         defer { try? files.deleteDirectory(at: base) }
-        let store = SkillStore(fileService: files, baseDir: base)
+        let store = SkillStore(fileService: files, baseDir: base, storeRoot: base)
         let slug = try store.createSkill(name: "Skill", description: "D", body: "Body")
         let other = try store.createSkill(name: "Other", description: "D", body: "Other body")
         let watcher = RecordingWatcher()

@@ -31,7 +31,7 @@ final class SkillWritePathTests: XCTestCase {
         tempDir = TestTemporaryDirectory.path + "PensieveWritePathTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
-        store = SkillStore(fileService: fileService, baseDir: tempDir)
+        store = SkillStore(fileService: fileService, baseDir: tempDir, storeRoot: tempDir)
     }
 
     override func tearDownWithError() throws {

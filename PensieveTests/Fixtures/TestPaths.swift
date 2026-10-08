@@ -32,7 +32,7 @@ enum TestPaths {
 
     static func cursorCompiler(fileService: FileServiceProtocol) -> CursorCompiler {
         CursorCompiler(fileService: fileService,
-            skillStore: SkillStore(fileService: fileService, baseDir: skillsDir),
+            skillStore: SkillStore(fileService: fileService, baseDir: skillsDir, storeRoot: skillsDir),
             userRulesDirectory: deployPaths.cursorUserRulesDirectory)
     }
 

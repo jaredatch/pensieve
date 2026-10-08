@@ -110,7 +110,7 @@ final class LaunchReconcilerTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         manifest = ManifestService(fileService: fileService)
-        skillStore = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        skillStore = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         rebuildService = StoreRebuildService(fileService: fileService, manifestService: manifest)
         migrationService = StoreMigrationService(fileService: fileService, manifestService: manifest,
                                                  skillStore: skillStore)
@@ -485,7 +485,8 @@ extension LaunchReconcilerTests {
         let faulty = UnlistableDirFileService(real: fileService, unlistableSuffix: "/manifest/skills")
         let rebuild = StoreRebuildService(fileService: faulty, manifestService: ManifestService(fileService: faulty))
         let migration = StoreMigrationService(fileService: faulty, manifestService: ManifestService(fileService: faulty),
-                                              skillStore: SkillStore(fileService: faulty, baseDir: tempDir + "/skills"))
+                                              skillStore: SkillStore(fileService: faulty, baseDir: tempDir + "/skills",
+                                                  storeRoot: tempDir))
         let rec = LaunchReconciler(
             rebuildService: rebuild,
             migrationService: migration,

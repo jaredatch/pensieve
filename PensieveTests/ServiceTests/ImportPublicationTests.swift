@@ -8,7 +8,8 @@ final class ImportPublicationTests: XCTestCase {
     private var root = ""
     private let files = FileService()
     private var storeRoot: String { root + "/store" }
-    private var skills: String { storeRoot + "/skills" }
+    private var skillsOverride: String?
+    private var skills: String { skillsOverride ?? storeRoot + "/skills" }
     private var lockPath: String { root + "/sync.lock" }
 
     override func setUpWithError() throws {
@@ -33,7 +34,7 @@ final class ImportPublicationTests: XCTestCase {
             grokSkillsDir: root + "/grok", cursorRulesDir: root + "/cursor", codexSkillsDir: root + "/codex",
             storeRoot: storeRoot)
         let model = ImportViewModel(scanner: scanner,
-            skillStore: SkillStore(fileService: service, baseDir: skills), lockPath: lockPath,
+            skillStore: SkillStore(fileService: service, baseDir: skills, storeRoot: storeRoot), lockPath: lockPath,
             manifestRoot: manifestRoot ?? storeRoot)
         model.scan()
         return model
@@ -48,6 +49,7 @@ final class ImportPublicationTests: XCTestCase {
     }
 
     func testReadersSeeOnlyCompleteSkillsAndLiveTempsSurviveSweepForTheBatch() throws {
+        skillsOverride = root + "/alternate/library"
         let service = ImportPublicationFileService()
         var beforeNames: [String] = []
         var afterNames: [String] = []
@@ -75,6 +77,8 @@ final class ImportPublicationTests: XCTestCase {
         XCTAssertNil(model.error)
         XCTAssertEqual(Set(beforeNames), ["one", "two"])
         XCTAssertEqual(Set(afterNames), ["one", "two"])
+        XCTAssertEqual(service.directoryListings.filter { $0 == skills }.count, 1,
+                       "One disk snapshot serves the locked batch")
         XCTAssertEqual(Set(try files.listDirectory(at: skills)), ["one", "two"])
         for name in ["One", "Two"] {
             XCTAssertEqual(try files.listDirectory(at: skills + "/" + name.lowercased()), ["SKILL.md"])
@@ -123,7 +127,7 @@ final class ImportPublicationTests: XCTestCase {
         released.release()
 
         let launch = LaunchReconciler(migrationService: StoreMigrationService(
-            skillStore: SkillStore(fileService: files, baseDir: skills)),
+            skillStore: SkillStore(fileService: files, baseDir: skills, storeRoot: storeRoot)),
             root: storeRoot, lockPath: lockPath, git: GitService(askpassHelperPath: root + "/askpass"))
         _ = launch.reconcileOnLaunch(context: try context(), alreadyMigrated: true)
         XCTAssertTrue(try temps().isEmpty)

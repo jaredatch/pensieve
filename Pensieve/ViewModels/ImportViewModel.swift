@@ -159,7 +159,7 @@ final class ImportViewModel {
 
         var taken: Set<String>
         do {
-            taken = try takenSlugs(context)
+            taken = try takenSlugs(context).union(skillStore.prepareImport())
         } catch {
             self.error = "Failed to import: couldn't read the library (\(error.localizedDescription))"
             return .refused
@@ -207,8 +207,7 @@ final class ImportViewModel {
             }
             return lock
         } catch {
-            self.error = "Couldn't access Pensieve's lock file. " +
-                "Check the App Support folder's permissions, then try again."
+            self.error = "Couldn't access Pensieve's lock file: \(error.localizedDescription). Try importing again."
             return nil
         }
     }

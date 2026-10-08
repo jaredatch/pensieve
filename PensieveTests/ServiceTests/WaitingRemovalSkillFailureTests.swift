@@ -96,7 +96,7 @@ final class WaitingRemovalSkillFailureTests: XCTestCase {
             let manifest = RecordingDeletionManifest()
             manifest.failingWrites = [1, 2]
             let library = SkillLibraryViewModel(
-                skillStore: SkillStore(fileService: h.mapped, baseDir: TestPaths.skillsDir),
+                skillStore: SkillStore(fileService: h.mapped, baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
                 fileService: h.mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
                 manifestService: manifest, manifestRoot: h.base.root + "/store",
                 notifier: {}

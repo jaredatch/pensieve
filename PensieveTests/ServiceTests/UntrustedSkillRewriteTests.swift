@@ -21,7 +21,7 @@ final class UntrustedSkillRewriteTests: XCTestCase {
         ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
     }
 
-    private var store: SkillStore { SkillStore(fileService: files, baseDir: root + "/store/skills") }
+    private var store: SkillStore { SkillStore(fileService: files, baseDir: root + "/store/skills", storeRoot: root + "/store") }
 
     @MainActor
     func testGeneratedMigrationSweepPreservesRefusedFilesAndWarns() throws {

@@ -10,6 +10,7 @@ final class ImportPublicationFileService: FileServiceProtocol {
     let files = FileService()
     var beforeWrite: (String, String) throws -> Void = { _, _ in }
     var afterWrite: (String, String) throws -> Void = { _, _ in }
+    var directoryListings: [String] = []
     func readFile(at path: String) throws -> String { try files.readFile(at: path) }
     func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws -> RegularFileCopyReceipt {
         try files.copyRegularFiles(fromDirectory: source, toDirectory: destination)
@@ -33,6 +34,9 @@ final class ImportPublicationFileService: FileServiceProtocol {
     }
     func symlinkTarget(at path: String) throws -> String { try files.symlinkTarget(at: path) }
     func isSymlink(at path: String) -> Bool { files.isSymlink(at: path) }
-    func listDirectory(at path: String) throws -> [String] { try files.listDirectory(at: path) }
+    func listDirectory(at path: String) throws -> [String] {
+        directoryListings.append(path)
+        return try files.listDirectory(at: path)
+    }
     func contentsHash(at path: String) throws -> String { try files.contentsHash(at: path) }
 }

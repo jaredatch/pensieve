@@ -74,7 +74,7 @@ final class SkillExportModelTests: XCTestCase {
     }
 
     func testUnsavedMessageTracksOnlyTheExportedSkillsDraft() throws {
-        let store = SkillStore(fileService: fileService, baseDir: skillsBase)
+        let store = SkillStore(fileService: fileService, baseDir: skillsBase, storeRoot: skillsBase)
         let library = SkillLibraryViewModel(
             skillStore: store,
             fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: root
@@ -113,7 +113,7 @@ final class SkillExportModelTests: XCTestCase {
 
     private func makeModel() -> SkillExportModel {
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: skillsBase),
+            skillStore: SkillStore(fileService: fileService, baseDir: skillsBase, storeRoot: skillsBase),
             fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: root
         )
         return SkillExportModel(skill: Skill(name: "Export", directoryName: "export-skill"), library: library)

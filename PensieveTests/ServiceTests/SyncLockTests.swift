@@ -7,33 +7,35 @@ final class SyncLockTests: XCTestCase {
         TestTemporaryDirectory.path + "PensieveSyncLockTests-\(UUID().uuidString)/sync.lock"
     }
 
-    func testSecondAcquireIsNilWhileHeldThenSucceedsAfterRelease() throws {
+    func testSecondAcquireIsNilWhileHeldThenSucceedsAfterRelease() {
+        let path = tempLockPath()
+        let first = SyncLock.tryAcquire(at: path)
+        XCTAssertNotNil(first, "first acquire should succeed")
+        XCTAssertNil(SyncLock.tryAcquire(at: path), "second acquire while held must be nil")
+        first?.release()
+        let third = SyncLock.tryAcquire(at: path)
+        XCTAssertNotNil(third, "acquire after release should succeed")
+        third?.release()
+    }
+
+    func testExistingParentACLDoesNotRefuseAnAccessibleLock() throws {
         let path = tempLockPath()
         let parent = (path as NSString).deletingLastPathComponent
-        let target = parent + "-acl"
-        let files = FileService()
-        try files.createDirectory(at: target)
-        defer {
-            try? chmodACL(["-N"], at: target)
-            try? files.deleteDirectory(at: target)
-            try? files.deleteDirectory(at: parent)
-        }
-        try chmodACL(["+a", "everyone deny readattr"], at: target)
-        // This ACL prevents Foundation's mkdir check; search and child creation still permit open/flock.
-        XCTAssertThrowsError(try FileManager.default.createDirectory(atPath: target, withIntermediateDirectories: true),
-                             "fixture must exercise a mkdir error on an accessible lock parent")
-        for path in [path, target + "/sync.lock"] {
-            let first = SyncLock.tryAcquire(at: path)
-            XCTAssertNotNil(first, "first acquire should succeed")
-            XCTAssertNil(SyncLock.tryAcquire(at: path), "second acquire while held must be nil")
-            XCTAssertNil(try SyncLock.tryAcquireReportingErrors(at: path), "reporting acquire also refuses contention")
-            first?.release()
-            let third = SyncLock.tryAcquire(at: path)
-            XCTAssertNotNil(third, "acquire after release should succeed")
-            third?.release()
-            let reporting = try XCTUnwrap(SyncLock.tryAcquireReportingErrors(at: path))
-            reporting.release()
-        }
+        try FileService().createDirectory(at: parent)
+        let descriptor = open(parent, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        XCTAssertGreaterThanOrEqual(descriptor, 0)
+        guard descriptor >= 0 else { return }
+        defer { clearACLAndRemoveLockParent(parent, descriptor: descriptor) }
+        let acl = try XCTUnwrap(acl_from_text(
+            "!#acl 1\ngroup:ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C:everyone:12:deny:readattr\n"))
+        defer { acl_free(UnsafeMutableRawPointer(acl)) }
+        XCTAssertEqual(acl_set_fd_np(descriptor, acl, ACL_TYPE_EXTENDED), 0)
+        let held = try XCTUnwrap(SyncLock.tryAcquire(at: path))
+        defer { held.release() }
+        XCTAssertNil(try SyncLock.tryAcquireReportingErrors(at: path))
+        held.release()
+        let reporting = try XCTUnwrap(SyncLock.tryAcquireReportingErrors(at: path))
+        reporting.release()
     }
 
     func testReleaseIsIdempotent() {
@@ -56,20 +58,16 @@ final class SyncLockTests: XCTestCase {
         }
     }
 
-    /// Only changes ACLs in the test's fresh tree. The real chmod has a finite wait and is reaped on timeout.
-    private func chmodACL(_ arguments: [String], at path: String) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/chmod")
-        process.arguments = arguments + [path]
-        let exited = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in exited.signal() }
-        try process.run()
-        let completed = exited.wait(timeout: .now() + TestWait.hostedActionTimeoutSeconds) == .success
-        if !completed {
-            kill(process.processIdentifier, SIGKILL)
-            process.waitUntilExit()
+    /// Restore through the owned directory descriptor. Cleanup uses unlinkat/rmdir even if ACL
+    /// clearing fails: it needs search/delete permissions, not the readattr permission we denied.
+    private func clearACLAndRemoveLockParent(_ parent: String, descriptor: Int32) {
+        if let empty = acl_init(0) {
+            _ = acl_set_fd_np(descriptor, empty, ACL_TYPE_EXTENDED)
+            acl_free(UnsafeMutableRawPointer(empty))
         }
-        XCTAssertTrue(completed, "fixture chmod must finish within the shared wait bound")
-        XCTAssertEqual(process.terminationStatus, 0, "fixture chmod must succeed")
+        let removed = unlinkat(descriptor, "sync.lock", 0)
+        XCTAssertTrue(removed == 0 || errno == ENOENT)
+        close(descriptor)
+        XCTAssertEqual(rmdir(parent), 0, "ACL fixture must leave no directory even if clearing fails")
     }
 }

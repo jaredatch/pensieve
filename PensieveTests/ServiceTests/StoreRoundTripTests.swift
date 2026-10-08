@@ -22,7 +22,7 @@ final class StoreRoundTripTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         manifest = ManifestService(fileService: fileService)
-        skillStore = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        skillStore = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         migration = StoreMigrationService(fileService: fileService, manifestService: manifest, skillStore: skillStore)
         rebuildService = StoreRebuildService(fileService: fileService, manifestService: manifest)
     }

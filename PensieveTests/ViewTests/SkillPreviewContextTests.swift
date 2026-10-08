@@ -14,7 +14,7 @@ final class SkillPreviewContextTests: XCTestCase {
         try files.files.writeData(at: root + "/references/diagram.png", data: PreviewImageFixture.png())
         try files.files.writeData(at: base + "/outside.png", data: PreviewImageFixture.png())
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: files, baseDir: base),
+            skillStore: SkillStore(fileService: files, baseDir: base, storeRoot: base),
             fileService: files, fileWatchService: FileWatchService(rootDir: base), manifestRoot: base
         )
         let preview = tab(library, file: "references/guide.md")
@@ -40,7 +40,7 @@ final class SkillPreviewContextTests: XCTestCase {
             skill: skill,
             git: TestPaths.git,
             fileService: files,
-            store: SkillStore(fileService: files, baseDir: base + "/skills"),
+            store: SkillStore(fileService: files, baseDir: base + "/skills", storeRoot: base),
             workingDir: base,
             onDismiss: {}
         )
@@ -60,7 +60,7 @@ final class SkillPreviewContextTests: XCTestCase {
         let files = PreviewImageFileSpy()
         let base = files.files.realPath(at: TestTemporaryDirectory.path) + "/ImageRefresh-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: base) }
-        let store = SkillStore(fileService: files, baseDir: base)
+        let store = SkillStore(fileService: files, baseDir: base, storeRoot: base)
         let slug = try store.createSkill(name: "Skill", description: "D", body: "Body")
         XCTAssertEqual(slug, "skill")
         let imagePath = base + "/skill/diagram.png"

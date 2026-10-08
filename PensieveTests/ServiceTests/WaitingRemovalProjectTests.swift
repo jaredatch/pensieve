@@ -20,7 +20,8 @@ final class WaitingRemovalProjectTests: XCTestCase {
                     } else {
                         try CursorCompiler(
                             fileService: h.mapped,
-                            skillStore: SkillStore(fileService: h.mapped, baseDir: TestPaths.skillsDir),
+                            skillStore: SkillStore(fileService: h.mapped, baseDir: TestPaths.skillsDir,
+                                storeRoot: TestPaths.storeRoot),
                             userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
                         )
                             .compile(skill: h.base.skill, projectPath: h.base.project.path)

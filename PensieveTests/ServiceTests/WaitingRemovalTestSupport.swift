@@ -29,7 +29,7 @@ struct WaitingRemovalHarness {
             waitingRemovalStore: WaitingRemovalStore(fileService: mapped, appSupportDir: base.root + "/support")
         )
         library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: mapped, baseDir: TestPaths.skillsDir),
+            skillStore: SkillStore(fileService: mapped, baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
             manifestService: ManifestService(fileService: base.files), manifestRoot: base.root + "/store",
             notifier: {}
