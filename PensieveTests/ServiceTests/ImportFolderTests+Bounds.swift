@@ -9,6 +9,10 @@ extension ImportFolderTests {
         for index in 0..<1_200 { try files.writeFile(at: oversized + "/entry-\(index)", content: "") }
         let good = try source("Good")
         try files.writeFile(at: good + "/retained", content: "good bytes")
+        var expected = try addEnvironmentTemplates(at: good)
+        expected["SKILL.md"] = Data(body.replacingOccurrences(of: "Folder", with: "Good").utf8)
+        expected["retained"] = Data("good bytes".utf8)
+        try addLargeDependencyTrees(at: good)
         let spy = ImportPublicationFileService()
         var entries = 0
         spy.importCheckpoint = { checkpoint in
@@ -16,20 +20,29 @@ extension ImportFolderTests {
         }
         let model = model(using: spy)
         model.scan()
-        model.importSelected(context: try context())
+        let context = try context()
+        model.importSelected(context: context)
         XCTAssertEqual(model.importedSkillCount, 1)
-        XCTAssertEqual(entries, 1_001 + 2, "The oversized skill stops before reading entry 1,002")
+        XCTAssertEqual(entries, 1_001 + 11, "The oversized skill stops before reading entry 1,002")
         XCTAssertEqual(try files.listDirectory(at: store + "/skills"), ["good"])
         XCTAssertEqual(try files.readFile(at: store + "/skills/good/retained"), "good bytes")
         let notice = "Oversized: The skill folder is too large (more than 1,000 entries)."
         XCTAssertTrue(model.importNotices.contains(notice))
-        try await assertRendered([notice], model: model)
+        let dependencyNotices = ["Good: Skipped node_modules: excluded from sync.",
+                                 "Good: Skipped references/node_modules: excluded from sync."]
+        XCTAssertTrue(Set(dependencyNotices).isSubset(of: Set(model.importNotices)))
+        try await assertRendered([notice] + dependencyNotices, model: model)
+        try assertFreshCheckout(expected: expected, slug: "good", context: context)
+        for prefix in ["", "references/"] {
+            XCTAssertFalse(files.directoryExists(at: store + "/skills/good/" + prefix + "node_modules"))
+            XCTAssertFalse(files.directoryExists(at: root + "/fresh/skills/good/" + prefix + "node_modules"))
+        }
         try assertNoTemps()
 
         let exact = try source("Exact")
         for index in 0..<999 { try files.writeFile(at: exact + "/entry-\(index)", content: "") }
         XCTAssertEqual(model.scanFolder(exact), .found(1))
-        model.importSelected(context: try context())
+        model.importSelected(context: try self.context())
         XCTAssertNil(model.error, "Exactly 1,000 entries is admitted")
         XCTAssertEqual(try files.listDirectory(at: store + "/skills/exact").count, 1_000)
     }

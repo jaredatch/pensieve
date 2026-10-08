@@ -9,6 +9,7 @@ struct SkillFolderImportResult {
 struct SkillFolderCopySkip: Equatable {
     enum Reason: String {
         case dotEntry = "dot-entry", link = "a link", special = "a special file", changed = "changed during the copy"
+        case syncExcluded = "excluded from sync"
     }
     let path: String
     let reason: Reason
@@ -34,7 +35,7 @@ extension FileService {
     }
 
     /// Resolves the selected folder once, then traverses and reopens children relative to admitted
-    /// directory descriptors. Dot subtrees and nonregular leaves are never opened. Inventory and
+    /// directory descriptors. Excluded subtrees and nonregular leaves are never opened. Inventory and
     /// descriptor reads enforce one folder budget; the caller owns temp cleanup and publication.
     func copyImportedSkillContents(fromDirectory source: String,
                                    toDirectory destination: String) throws -> [SkillFolderCopySkip] {
@@ -103,11 +104,20 @@ private final class ImportCopyInventory {
             guard entries <= FileService.maximumImportEntries else { throw SkillFolderCopyError.tooManyEntries }
         }, body: { name, status in
             let path = relative.isEmpty ? name : relative + "/" + name
-            if name.utf8.first == 0x2E {
+            let kind = status.st_mode & S_IFMT
+            let nameBytes = Data(name.utf8)
+            let excluded = kind == S_IFDIR
+                ? StoreExclusions.isExcludedDirectory(nameBytes[...])
+                : StoreExclusions.isExcludedFile(Data(path.utf8)[...])
+            if excluded {
+                skipped.append(SkillFolderCopySkip(path: path, reason: .syncExcluded))
+                return
+            }
+            if name.utf8.first == 0x2E, kind != S_IFREG || !StoreExclusions.isTemplateFile(nameBytes[...]) {
                 skipped.append(SkillFolderCopySkip(path: path, reason: .dotEntry))
                 return
             }
-            switch status.st_mode & S_IFMT {
+            switch kind {
             case S_IFDIR:
                 directories.append(path)
                 let child = try ComparisonDirectory(path: directory.path + "/" + name, name: name, parent: directory)
