@@ -45,7 +45,7 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
     }
     func abortRebase(at path: String) throws { try wrapped.abortRebase(at: path) }
     func conflictedFiles(at path: String) throws -> [String] { try wrapped.conflictedFiles(at: path) }
-    func blob(atStage stage: Int, path: String, in workingDir: String) throws -> String? {
+    func blob(atStage stage: Int, path: String, in workingDir: String) throws -> Data? {
         try wrapped.blob(atStage: stage, path: path, in: workingDir)
     }
     func continueRebase(at path: String) throws -> PullResult { try wrapped.continueRebase(at: path) }

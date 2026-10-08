@@ -135,7 +135,7 @@ struct ConflictResolutionView: View {
         switch item.kind {
         case .body:
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                LineDiffView(this: item.thisMachine ?? "", other: item.otherMachine ?? "")
+                ConflictFileComparison(item: item)
                 if let skill = bodySkill(for: item) {
                     Button("See history") { historySkill = skill }
                         .buttonStyle(.link)
@@ -200,5 +200,45 @@ struct ConflictResolutionView: View {
         let end = path.index(path.endIndex, offsetBy: -"/SKILL.md".count)
         guard start < end else { return nil }
         return String(path[start..<end])
+    }
+}
+
+/// The sheet's file comparison, separate from grouping and resolution controls.
+struct ConflictFileComparison: View {
+    let item: ConflictItem
+
+    var body: some View {
+        if let this = text(item.thisMachine), let other = text(item.otherMachine) {
+            LineDiffView(this: this, other: other)
+        } else {
+            HStack(alignment: .top, spacing: Spacing.md) {
+                side("This Mac", bytes: item.thisMachine)
+                side("Other Mac", bytes: item.otherMachine)
+            }
+        }
+    }
+
+    @ViewBuilder private func side(_ title: String, bytes: Data?) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            if let bytes {
+                if let text = text(bytes) {
+                    Text(text.isEmpty ? "Empty file" : text)
+                        .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                } else {
+                    Text("This file can’t be shown as text.").foregroundStyle(.secondary)
+                    Text("\(bytes.count) \(bytes.count == 1 ? "byte" : "bytes")").font(.caption)
+                }
+            } else {
+                Text("Deleted").foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func text(_ bytes: Data?) -> String? {
+        guard let bytes else { return "" }
+        guard !bytes.contains(0) else { return nil }
+        return String(bytes: bytes, encoding: .utf8)
     }
 }

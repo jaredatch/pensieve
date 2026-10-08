@@ -301,7 +301,7 @@ struct SyncEngine: SyncEngineProtocol {
             }
             let chosen = pick.side == .thisMachine ? this : other
             if let chosen {
-                try fileService.writeFile(at: full, content: chosen)
+                try fileService.writeData(at: full, data: chosen)
             } else {
                 try fileService.deleteFile(at: full)
             }

@@ -117,7 +117,7 @@ final class GitCompletionReviewTests: XCTestCase {
         let engine = SyncEngine(gitService: git, lockPath: fixture.support + "/sync.lock")
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         let picks = ["skills/example/SKILL.md": ResolutionPick(side: .thisMachine,
-            expectedThis: "current", expectedOther: "remote")]
+            expectedThis: Data("current".utf8), expectedOther: Data("remote".utf8))]
         XCTAssertThrowsError(try engine.resolveConflicts(root: fixture.root, picks: picks,
             credential: nil, context: container.mainContext)) {
             XCTAssertEqual($0 as? GitError, .unusable(.licenseNotAccepted))

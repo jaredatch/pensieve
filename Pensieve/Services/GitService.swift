@@ -93,7 +93,7 @@ protocol GitServiceProtocol {
     func push(at path: String, credential: GitCredential?) throws
     func abortRebase(at path: String) throws
     func conflictedFiles(at path: String) throws -> [String]
-    func blob(atStage stage: Int, path: String, in workingDir: String) throws -> String?
+    func blob(atStage stage: Int, path: String, in workingDir: String) throws -> Data?
     func continueRebase(at path: String) throws -> PullResult
     func skipRebase(at path: String) throws -> PullResult
     func stagePath(_ path: String, at root: String) throws

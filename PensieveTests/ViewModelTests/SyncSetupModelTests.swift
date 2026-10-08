@@ -126,7 +126,7 @@ final class SyncSetupModelTests: XCTestCase {
 
         func abortRebase(at path: String) throws { calls.append("abort") }
         func conflictedFiles(at path: String) -> [String] { [] }
-        func blob(atStage stage: Int, path: String, in workingDir: String) -> String? { nil }
+        func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
         func continueRebase(at path: String) throws -> PullResult { .upToDate }
         func skipRebase(at path: String) throws -> PullResult { .upToDate }
         func stagePath(_ path: String, at root: String) throws {}
@@ -958,6 +958,9 @@ extension SyncSetupModelTests {
                 toFile: seed + "/manifest/categories", atomically: true, encoding: .utf8
             )
             try "remote ds\n".write(toFile: seed + "/.DS_Store", atomically: true, encoding: .utf8)
+            // Model an older build's tracked file independently of Pensieve's new-file exclusions.
+            try fixtureGit(["-C", seed, "add", "--force", "--", ".DS_Store"])
+            try fixtureGit(["-C", seed, "commit", "-m", "older build tracked Finder metadata"])
         }
         XCTAssertTrue(try git.stageAllAndCommit(at: seed, message: "seed"))
         try fixtureGit(["init", "--bare", bare])

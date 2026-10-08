@@ -55,7 +55,7 @@ final class SyncEngineTests: XCTestCase {
         func push(at path: String, credential: GitCredential?) throws { calls.append("push") }
         func abortRebase(at path: String) throws { calls.append("abort") }
         func conflictedFiles(at path: String) -> [String] { [] }
-        func blob(atStage stage: Int, path: String, in workingDir: String) -> String? { nil }
+        func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
         func continueRebase(at path: String) throws -> PullResult { .upToDate }
         func skipRebase(at path: String) throws -> PullResult { .upToDate }
         func stagePath(_ path: String, at root: String) throws {}

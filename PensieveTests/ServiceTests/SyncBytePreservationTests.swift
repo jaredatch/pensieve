@@ -6,9 +6,9 @@ import XCTest
 /// the rewritten fixture URL and connects to a local bare repository; it never opens the network.
 @MainActor
 final class SyncBytePreservationTests: XCTestCase {
-    private var base: String!
-    private let files = FileService()
-    private let remoteURL = "https://github.com/fixture/store.git"
+    var base: String!
+    let files = FileService()
+    let remoteURL = "https://github.com/fixture/store.git"
 
     override func setUpWithError() throws {
         base = TestTemporaryDirectory.path + "SyncBytes-" + UUID().uuidString
@@ -102,11 +102,11 @@ final class SyncBytePreservationTests: XCTestCase {
         }
     }
 
-    private func engine(git: GitService) -> SyncEngine {
+    func engine(git: GitService) -> SyncEngine {
         SyncEngine(gitService: git, lockPath: base + "/sync.lock")
     }
 
-    private func seedRemote(git: GitService, remote: String) throws {
+    func seedRemote(git: GitService, remote: String) throws {
         try git.runOrThrow(["init", "--bare", "--initial-branch=main", remote], in: nil)
         let seed = base + "/seed"
         try files.createDirectory(at: seed)
@@ -163,13 +163,13 @@ final class SyncBytePreservationTests: XCTestCase {
         XCTAssertFalse(tree.stdout.contains(".DS_Store"))
     }
 
-    private func makeContext() throws -> ModelContext {
+    func makeContext() throws -> ModelContext {
         let container = try ModelContainer(for: Skill.self, Project.self, Pensieve.Category.self,
             MachineDeployIntent.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         return ModelContext(container)
     }
 
-    private func userGit(_ name: String, remote: String, skillRules: Bool) throws -> GitService {
+    func userGit(_ name: String, remote: String, skillRules: Bool) throws -> GitService {
         let home = base + "/" + name
         let helpers = home + "/helpers"
         try files.createDirectory(at: home)

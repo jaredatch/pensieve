@@ -14,12 +14,12 @@ enum ConflictKind: Equatable {
 
 /// One conflicted path with both sides' blobs. `thisMachine` = git stage 3 (the replayed local
 /// commit - THIS machine); `otherMachine` = git stage 2 (origin/main - the OTHER machine).
-/// nil = that side is absent, DISTINCT from "" (empty).
+/// nil = that side is absent, DISTINCT from empty data.
 struct ConflictItem: Equatable {
     let path: String
     let kind: ConflictKind
-    let thisMachine: String?
-    let otherMachine: String?
+    let thisMachine: Data?
+    let otherMachine: Data?
 }
 
 struct ConflictSet: Equatable {
@@ -30,8 +30,8 @@ struct ConflictSet: Equatable {
 /// world didn't move under the choice. Single unified payload type.
 struct ResolutionPick: Equatable {
     let side: ConflictSide
-    let expectedThis: String?
-    let expectedOther: String?
+    let expectedThis: Data?
+    let expectedOther: Data?
 }
 
 /// Result of inspecting: real conflicts to show, or the conflict cleared itself upstream.

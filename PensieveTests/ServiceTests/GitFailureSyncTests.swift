@@ -278,7 +278,8 @@ private final class GitFailureEngineSpy: SyncEngineProtocol {
     func inspectConflicts(root: String, credential: GitCredential?, context: ModelContext) throws -> ConflictInspection {
         calls += 1
         return .conflicts(ConflictSet(items: [
-            ConflictItem(path: "skills/example/SKILL.md", kind: .body, thisMachine: "local", otherMachine: "remote")
+            ConflictItem(path: "skills/example/SKILL.md", kind: .body,
+                         thisMachine: Data("local".utf8), otherMachine: Data("remote".utf8))
         ]))
     }
     func resolveConflicts(root: String, picks: [String: ResolutionPick], credential: GitCredential?,

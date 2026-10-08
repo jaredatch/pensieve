@@ -54,7 +54,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         func push(at path: String, credential: GitCredential?) throws {}
         func abortRebase(at path: String) throws {}
         func conflictedFiles(at path: String) -> [String] { [] }
-        func blob(atStage stage: Int, path: String, in workingDir: String) -> String? { nil }
+        func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
         func continueRebase(at path: String) throws -> PullResult { .upToDate }
         func skipRebase(at path: String) throws -> PullResult { .upToDate }
         func stagePath(_ path: String, at root: String) throws {}
@@ -133,8 +133,8 @@ final class ConflictResolutionModelTests: XCTestCase {
         XCTAssertEqual(model.phase, .done)
         XCTAssertEqual(engine.resolveCallCount, 1)
         let pick = try XCTUnwrap(engine.resolvedPicks["skills/alpha/SKILL.md"])
-        XCTAssertEqual(pick, ResolutionPick(side: .thisMachine, expectedThis: "this body",
-                                            expectedOther: "other body"))
+        XCTAssertEqual(pick, ResolutionPick(side: .thisMachine, expectedThis: Data("this body".utf8),
+                                            expectedOther: Data("other body".utf8)))
     }
 
     func testSuccessfulResolveFiresOnResolved() async throws {
@@ -233,12 +233,12 @@ final class ConflictResolutionModelTests: XCTestCase {
 
     private func bodyItem(slug: String) -> ConflictItem {
         ConflictItem(path: "skills/\(slug)/SKILL.md", kind: .body,
-                     thisMachine: "this body", otherMachine: "other body")
+                     thisMachine: Data("this body".utf8), otherMachine: Data("other body".utf8))
     }
 
     private func overlayItem(slug: String) -> ConflictItem {
         ConflictItem(path: "manifest/skills/\(slug).yaml", kind: .overlay,
-                     thisMachine: "this overlay", otherMachine: "other overlay")
+                     thisMachine: Data("this overlay".utf8), otherMachine: Data("other overlay".utf8))
     }
 
     private func readyGroups(from phase: ConflictResolutionModel.Phase) throws

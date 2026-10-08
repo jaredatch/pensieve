@@ -123,14 +123,28 @@ struct StoreGitOperation {
     /// Git reports an untracked nested repository as a slash-terminated entry rather than its files.
     /// Already indexed directories keep their ordinary files even after gaining their own .git.
     private func untrackedFiles(_ args: [String]) throws -> Data {
+        var args = args
+        // Prune dependency trees during git's walk; the byte filter also protects both enumerations
+        // from lower-priority ignore rules that re-include excluded names.
+        args.insert("--exclude=node_modules/", at: args.firstIndex(of: "--") ?? args.endIndex)
         let result = try runData(args)
         guard result.exit == 0 else { throw git.dataCommandError(result, args: ["-C", root] + args) }
         var files = Data()
-        for path in result.stdout.split(separator: 0) where path.last != 0x2F {
+        for path in result.stdout.split(separator: 0) where path.last != 0x2F && !isExcludedUntrackedFile(path) {
             files.append(contentsOf: path)
             files.append(0)
         }
         return files
+    }
+
+    /// Only new files are excluded. Native tracked updates never remove or suppress legacy files.
+    /// Compare path bytes so names that are not UTF-8 retain their usual staging behavior.
+    private func isExcludedUntrackedFile(_ path: Data.SubSequence) -> Bool {
+        let components = path.split(separator: 0x2F)
+        guard let name = components.last else { return false }
+        return name.elementsEqual(".env".utf8) || name.starts(with: ".env.".utf8)
+            || name.elementsEqual(".DS_Store".utf8)
+            || components.dropLast().contains { $0.elementsEqual("node_modules".utf8) }
     }
 
     /// Update tracked paths natively before enumerating new files, so stale children beneath a

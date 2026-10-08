@@ -7,10 +7,12 @@ import Foundation
 // machine (the replayed local commit). Invert this and every diff side is labeled backwards.
 extension GitService {
 
-    /// `git show :<stage>:<path>` — the blob text at a conflict stage, or nil when that stage is
-    /// absent. Absent => nil, distinct from present-but-empty => "".
-    func blob(atStage stage: Int, path: String, in workingDir: String) throws -> String? {
-        guard let r = try runBestEffort(["-C", workingDir, "show", ":\(stage):\(path)"], in: nil), r.exit == 0 else {
+    /// `git show :<stage>:<path>` — exact bytes, or nil when that stage is absent. Empty data is
+    /// a present empty file. Optional-read fallbacks preserve host and local output-read failures.
+    func blob(atStage stage: Int, path: String, in workingDir: String) throws -> Data? {
+        guard let r = try GitError.preservingUnusability({
+            try runData(["-C", workingDir, "show", ":\(stage):\(path)"], in: nil)
+        }), r.exit == 0 else {
             return nil
         }
         return r.stdout

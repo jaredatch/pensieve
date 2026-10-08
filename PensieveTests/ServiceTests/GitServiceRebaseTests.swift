@@ -109,8 +109,8 @@ final class GitServiceRebaseTests: XCTestCase {
 
     func testStageMappingAndContinueRebase() throws {
         let (cloneB, path) = try makeTwoCloneConflict(aBody: "OTHER machine line", bBody: "THIS machine line")
-        XCTAssertEqual(try git.blob(atStage: 2, path: path, in: cloneB), skillMarkdown(body: "OTHER machine line"))
-        XCTAssertEqual(try git.blob(atStage: 3, path: path, in: cloneB), skillMarkdown(body: "THIS machine line"))
+        XCTAssertEqual(try git.blob(atStage: 2, path: path, in: cloneB), Data(skillMarkdown(body: "OTHER machine line").utf8))
+        XCTAssertEqual(try git.blob(atStage: 3, path: path, in: cloneB), Data(skillMarkdown(body: "THIS machine line").utf8))
 
         try write(path, skillMarkdown(body: "THIS machine line"), in: cloneB)
         try git.stagePath(path, at: cloneB)
@@ -121,12 +121,12 @@ final class GitServiceRebaseTests: XCTestCase {
     func testKeepOtherEmptyCommitSkipsAndLeavesNothingToPush() throws {
         let (cloneB, path) = try makeTwoCloneConflict(aBody: "Other wins", bBody: "This loses")
         let otherSide = try XCTUnwrap(git.blob(atStage: 2, path: path, in: cloneB))
-        try write(path, otherSide, in: cloneB)
+        try FileService().writeData(at: cloneB + "/" + path, data: otherSide)
         try git.stagePath(path, at: cloneB)
 
         XCTAssertEqual(try git.continueRebase(at: cloneB), .merged)
         XCTAssertFalse(try git.hasCommitsToPush(at: cloneB))
-        XCTAssertEqual(try String(contentsOfFile: cloneB + "/" + path, encoding: .utf8), otherSide)
+        XCTAssertEqual(try FileService().readData(at: cloneB + "/" + path), otherSide)
     }
 
     func testAddAddAndDeleteModifyBlobShapes() throws {

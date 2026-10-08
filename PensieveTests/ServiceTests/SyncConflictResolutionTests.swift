@@ -28,8 +28,8 @@ final class SyncConflictResolutionTests: XCTestCase {
         XCTAssertEqual(set.items.count, 1)
         XCTAssertEqual(item.kind, .body)
         XCTAssertEqual(item.path, Self.skillPath)
-        XCTAssertEqual(item.thisMachine, fixture.thisText)
-        XCTAssertEqual(item.otherMachine, fixture.otherText)
+        XCTAssertEqual(item.thisMachine, Data(fixture.thisText.utf8))
+        XCTAssertEqual(item.otherMachine, Data(fixture.otherText.utf8))
         XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.cloneB))
         XCTAssertEqual(try rawGit(["-C", fixture.cloneB, "status", "--porcelain"]), "")
     }
@@ -105,7 +105,7 @@ final class SyncConflictResolutionTests: XCTestCase {
         let finalThis = try writeSkillFile(root: fixture.cloneB, body: "This body final")
         XCTAssertTrue(try fixture.git.stageAllAndCommit(at: fixture.cloneB, message: "B two"))
         let item = try inspectedItem(in: fixture)
-        XCTAssertEqual(item.thisMachine, finalThis)
+        XCTAssertEqual(item.thisMachine, Data(finalThis.utf8))
         let outcome = try fixture.engine.resolveConflicts(
             root: fixture.cloneB,
             picks: [item.path: ResolutionPick(side: .thisMachine, expectedThis: item.thisMachine,
@@ -300,8 +300,8 @@ extension SyncConflictResolutionTests {
         func push(at path: String, credential: GitCredential?) throws {}
         func abortRebase(at path: String) throws { if pullAttempted { abortsAfterPull += 1 } }
         func conflictedFiles(at path: String) -> [String] { [conflictPath] }
-        func blob(atStage stage: Int, path: String, in workingDir: String) -> String? {
-            stage == 3 ? "this" : "other"
+        func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? {
+            Data((stage == 3 ? "this" : "other").utf8)
         }
         func continueRebase(at path: String) throws -> PullResult { .merged }
         func skipRebase(at path: String) throws -> PullResult { .merged }
@@ -317,7 +317,7 @@ extension SyncConflictResolutionTests {
         let git = StubGit(conflictPath: path)
         let engine = SyncEngine(gitService: git, manifestService: ManifestService(),
                                 storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)
-        let pick = ResolutionPick(side: .thisMachine, expectedThis: "this", expectedOther: "other")
+        let pick = ResolutionPick(side: .thisMachine, expectedThis: Data("this".utf8), expectedOther: Data("other".utf8))
         XCTAssertThrowsError(try engine.resolveConflicts(root: root, picks: [path: pick],
                                                          credential: nil, context: makeContext()),
                              line: line) { error in
