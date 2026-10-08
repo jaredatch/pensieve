@@ -1,5 +1,12 @@
 import Foundation
 
+/// A present index entry that cannot be read or restored as a file. Its identity lets resolution
+/// detect drift without treating unavailable bytes as an absent (deleted) side.
+struct UnavailableConflictSide: Error, Equatable {
+    let mode: String
+    let objectID: String
+}
+
 // Stage mapping during `git pull --rebase origin main` is OPPOSITE a plain merge:
 //   stage 2 (:2:) = origin/main = the OTHER machine
 //   stage 3 (:3:) = the replayed local commit = THIS machine
@@ -8,22 +15,31 @@ import Foundation
 extension GitService {
 
     /// `git show :<stage>:<path>` — exact bytes, or nil when that stage is absent. Empty data is
-    /// a present empty file. Read failures propagate; only an absent index stage is a deletion.
+    /// a present empty file. Non-file or missing objects throw UnavailableConflictSide; command
+    /// failures propagate. Only an absent index stage is a deletion.
     func blob(atStage stage: Int, path: String, in workingDir: String) throws -> Data? {
-        let args = ["-C", workingDir, "show", ":\(stage):\(path)"]
-        let result = try runData(args, in: nil)
-        if result.exit == 0 { return result.stdout }
-        // Only the index can establish deletion. A rejected show of an existing stage is an error.
         let indexArgs = ["--literal-pathspecs", "-C", workingDir, "ls-files", "--stage", "-z", "--", path]
         let index = try runData(indexArgs, in: nil)
         guard index.exit == 0 else { throw dataCommandError(index, args: indexArgs) }
-        let present = index.stdout.split(separator: 0).contains { record in
+        let entry = index.stdout.split(separator: 0).compactMap { record -> UnavailableConflictSide? in
             let fields = record.split(separator: 9, maxSplits: 1)
-            return fields.count == 2 && fields[1].elementsEqual(path.utf8)
-                && fields[0].split(separator: 32).last?.elementsEqual(String(stage).utf8) == true
-        }
-        guard !present else { throw dataCommandError(result, args: args) }
-        return nil
+            guard fields.count == 2, fields[1].elementsEqual(path.utf8) else { return nil }
+            let header = fields[0].split(separator: 32)
+            guard header.count == 3, header[2].elementsEqual(String(stage).utf8) else { return nil }
+            guard let mode = String(bytes: header[0], encoding: .ascii),
+                  let objectID = String(bytes: header[1], encoding: .ascii) else { return nil }
+            return UnavailableConflictSide(mode: mode, objectID: objectID)
+        }.first
+        guard let entry else { return nil }
+        guard entry.mode != "160000" else { throw entry }
+        let args = ["-C", workingDir, "show", ":\(stage):\(path)"]
+        let result = try runData(args, in: nil)
+        if result.exit == 0 { return result.stdout }
+        let objectArgs = ["-C", workingDir, "cat-file", "-e", entry.objectID]
+        let object = try runData(objectArgs, in: nil)
+        if object.exit == 1 && object.stdout.isEmpty && object.stderr.isEmpty { throw entry }
+        guard object.exit == 0 else { throw dataCommandError(object, args: objectArgs) }
+        throw dataCommandError(result, args: args)
     }
 
     /// True iff a rebase is mid-flight. Git owns `.git`; this structural probe stays inside GitService.

@@ -5,6 +5,12 @@ import XCTest
 /// Real divergent clones and sync inspection. No network or scripted conflict receipts.
 @MainActor
 struct SyncConflictByteFixture {
+    enum Entry {
+        case file(Data)
+        case gitlink(String)
+        case deleted
+    }
+
     struct Payload {
         let name: String
         let this: Data
@@ -31,6 +37,11 @@ struct SyncConflictByteFixture {
     let files = FileService()
 
     init(name: String, this: Data?, other: Data?) throws {
+        try self.init(name: name, initial: .file(Data([0, 255, 99])),
+                      this: this.map(Entry.file) ?? .deleted, other: other.map(Entry.file) ?? .deleted)
+    }
+
+    init(name: String, initial: Entry, this: Entry, other: Entry) throws {
         root = TestTemporaryDirectory.path + "ConflictBytes-" + UUID().uuidString
         remote = root + "/remote.git"
         storeA = root + "/A"
@@ -48,7 +59,7 @@ struct SyncConflictByteFixture {
             try git.initRepository(at: seed)
             try files.writeFile(at: seed + "/skills/conflict/SKILL.md",
                                 content: "---\nname: Conflict\ndescription: Byte fixture\n---\nbody\n")
-            try files.writeData(at: seed + "/" + path, data: Data([0, 255, 99]))
+            try change(initial, at: seed)
             contextA.insert(Skill(name: "Conflict", skillDescription: "Byte fixture", directoryName: "conflict"))
             try contextA.save()
             let manifest = ManifestService()
@@ -82,11 +93,36 @@ struct SyncConflictByteFixture {
     }
 
     func change(_ bytes: Data?, at store: String) throws {
-        if let bytes {
-            try files.writeData(at: store + "/" + path, data: bytes)
-        } else {
-            try files.deleteFile(at: store + "/" + path)
+        try change(bytes.map(Entry.file) ?? .deleted, at: store)
+    }
+
+    func change(_ entry: Entry, at store: String) throws {
+        let full = store + "/" + path
+        switch entry {
+        case let .file(bytes):
+            try files.writeData(at: full, data: bytes)
+        case let .gitlink(object):
+            try files.createDirectory(at: full)
+            try git.runOrThrow(["-C", store, "update-index", "--add", "--cacheinfo", "160000," + object + "," + path], in: nil)
+        case .deleted:
+            if files.directoryExists(at: full) { try files.deleteDirectory(at: full) } else { try files.deleteFile(at: full) }
         }
+    }
+
+    static func gitlinkConflict() throws -> Self {
+        let root = TestTemporaryDirectory.path + "GitlinkSource-" + UUID().uuidString
+        let files = FileService()
+        let git = TestPaths.git
+        try files.createDirectory(at: root)
+        defer { try? files.deleteDirectory(at: root) }
+        try git.initRepository(at: root)
+        try files.writeFile(at: root + "/source.txt", content: "first nested commit\n")
+        try git.stageAllAndCommit(at: root, message: "first nested commit")
+        let first = try git.commitSHA(at: root)
+        try files.writeFile(at: root + "/source.txt", content: "second nested commit\n")
+        try git.stageAllAndCommit(at: root, message: "second nested commit")
+        let second = try git.commitSHA(at: root)
+        return try Self(name: "legacy-link", initial: .gitlink(first), this: .gitlink(second), other: .deleted)
     }
 
     func assertPublished(_ expected: Data?, line: UInt = #line) throws {

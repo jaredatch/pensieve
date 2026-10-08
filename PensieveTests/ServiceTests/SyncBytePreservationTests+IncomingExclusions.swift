@@ -48,7 +48,7 @@ extension SyncBytePreservationTests {
         }
         try assertLegacyDependencyUpdatesRemainAdmitted(root: root, store: store, native: native)
         XCTAssertEqual(try files.readData(at: trace + "-cached"), Data("node_modules/legacy.js\0".utf8),
-                       "The index inventory must exclude ordinary tracked skill files")
+                       "The replacement inventory must exclude ordinary tracked skill files")
     }
 
     private func assertLegacyDependencyUpdatesRemainAdmitted(root: String, store: StoreGitOperation,
@@ -123,10 +123,46 @@ extension SyncBytePreservationTests {
         XCTAssertFalse(git.isRebaseInProgress(at: fixture.storeB))
     }
 
+    func testLegacyDependencyInventoryGitRunsStayBoundedAsTheIndexGrows() throws {
+        var counts: [Int] = []
+        for count in [1, 2048] {
+            let root = base + "/legacy-inventory-\(count)"
+            let native = TestPaths.git
+            try files.createDirectory(at: root)
+            try native.initRepository(at: root)
+            for index in 0..<count {
+                let path = "node_modules/package-with-a-long-legacy-name-\(index)/dist/nested/legacy-output-for-inventory.js"
+                try files.writeFile(at: root + "/" + path, content: "legacy dependency\n")
+            }
+            try native.runOrThrow(["-C", root, "add", "--force", "--", "node_modules"], in: nil)
+            try native.runOrThrow(["-C", root, "commit", "-m", "older build's dependency tree"], in: nil)
+            try files.writeFile(at: root + "/node_modules/new-package/output.js", content: "new local dependency\n")
+            let trace = base + "/legacy-inventory-\(count)-trace"
+            let recording = try inventoryRecordingGit(trace: trace)
+            let store = try recording.storeOperation(at: root)
+            try files.writeFile(at: trace + "-calls", content: "")
+            XCTAssertEqual(try store.excludedUntrackedPaths(), [Data("node_modules/new-package/".utf8)])
+            let calls = try files.readFile(at: trace + "-calls").split(separator: "\n").count
+            counts.append(calls)
+            XCTAssertLessThanOrEqual(calls, 4, "Unchanged indexed files must not become batches of pathspecs")
+            let replaced = "node_modules/package-with-a-long-legacy-name-0/dist/nested/legacy-output-for-inventory.js"
+            try files.deleteFile(at: root + "/" + replaced)
+            try files.writeFile(at: root + "/" + replaced + "/generated.js", content: "protected local child\n")
+            try files.writeFile(at: trace + "-calls", content: "")
+            XCTAssertTrue(try store.excludedUntrackedPaths().contains(Data((replaced + "/generated.js").utf8)))
+            XCTAssertLessThanOrEqual(try files.readFile(at: trace + "-calls").split(separator: "\n").count, 4)
+            XCTAssertThrowsError(try store.requireNoExcludedCollision(with: native.commitSHA(at: root))) { error in
+                XCTAssertEqual(error as? StoreUpdateError, .excludedLocalFile(path: replaced + "/generated.js"))
+            }
+        }
+        XCTAssertEqual(counts.first, counts.last, "The number of inventory git runs must not grow with the legacy index")
+    }
+
     private func inventoryRecordingGit(trace: String) throws -> GitService {
         let executable = base + "/inventory-git"
         try files.writeExecutableFile(at: executable, content: """
             #!/bin/sh
+            printf 'git\\n' >> '\(trace)-calls'
             is_inventory() {
                 \(FakeGitScript.skipGlobalOptions)
                 [ "$1" = ls-files ] || return 1
@@ -134,8 +170,8 @@ extension SyncBytePreservationTests {
             }
             is_cached() {
                 \(FakeGitScript.skipGlobalOptions)
-                [ "$1" = ls-files ] || return 1
-                case "$*" in *--cached*) return 0 ;; *) return 1 ;; esac
+                [ "$1" = diff ] || return 1
+                case "$*" in *--diff-filter=D*) return 0 ;; *) return 1 ;; esac
             }
             if is_cached "$@"; then
                 /usr/bin/git "$@" > '\(trace)-cached'

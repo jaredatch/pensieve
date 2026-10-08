@@ -59,13 +59,49 @@ extension ConflictResolutionModelTests {
         let strings = await renderedComparison(try bom.inspect())
         XCTAssertTrue(strings.contains("\u{FEFF}same"), "The comparison must preserve the leading BOM")
         XCTAssertTrue(strings.contains("same"))
-        let text = (1...405).map { "preview line \($0)" }.joined(separator: "\n")
-        let large = try SyncConflictByteFixture(name: "large.txt", this: Data(text.utf8), other: Data([0, 255]))
-        defer { try? large.files.deleteDirectory(at: large.root) }
-        let preview = await renderedComparison(try large.inspect())
-        XCTAssertTrue(preview.contains { $0.contains("preview line 400") })
-        XCTAssertFalse(preview.contains { $0.contains("preview line 401") }, "Fallback must cap the rendered text")
-        XCTAssertTrue(preview.contains("... preview truncated - 5 more lines"))
+        for (count, trailingNewline) in [(405, false), (400, true), (401, true), (405, true)] {
+            let text = (1...count).map { "preview line \($0)" }.joined(separator: "\n") + (trailingNewline ? "\n" : "")
+            let large = try SyncConflictByteFixture(name: "large.txt", this: Data(text.utf8), other: Data([0, 255]))
+            defer { try? large.files.deleteDirectory(at: large.root) }
+            let preview = await renderedComparison(try large.inspect())
+            XCTAssertTrue(preview.contains { $0.contains("preview line 400") })
+            XCTAssertFalse(preview.contains { $0.contains("preview line 401") }, "Fallback must cap the rendered text")
+            let notice = preview.filter { $0.hasPrefix("Showing the first") || $0.hasPrefix("... preview truncated") }
+            if count == 400 {
+                XCTAssertTrue(notice.isEmpty, "A trailing newline is not a hidden line")
+            } else {
+                let expected = count == 401 ? "Showing the first 400 lines. 1 more isn’t shown."
+                    : "Showing the first 400 lines. 5 more aren’t shown."
+                XCTAssertEqual(notice, [expected])
+            }
+        }
+    }
+
+    func testLegacyGitlinkConflictReachesTheSheetAndKeepsTheOtherSideAvailable() async throws {
+        let fixture = try SyncConflictByteFixture.gitlinkConflict()
+        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+        let model = ConflictResolutionModel(engine: fixture.engine, git: fixture.git,
+            credentials: InMemoryCredentialStore(), root: fixture.storeB)
+        await model.loadAndReport(context: fixture.contextB)
+        guard case let .ready(groups) = model.phase else { return XCTFail("A non-file side must not block the sheet") }
+        let group = try XCTUnwrap(groups.first)
+        let item = try XCTUnwrap(group.items.first)
+        let strings = await renderedComparison(item)
+        XCTAssertTrue(strings.contains("This version can’t be shown or kept as a file. You can keep the other version."))
+        XCTAssertEqual(strings.filter { $0 == "Deleted" }.count, 1, "Only the genuinely absent side is Deleted")
+        model.choose(group.id, .thisMachine)
+        XCTAssertFalse(model.canApply, "An unavailable version must never turn into a deletion pick")
+        XCTAssertEqual(model.selectionError,
+                       "Pensieve can’t keep this version of \(item.path) as a file. Choose the other version.")
+        await model.applyAndReport(context: fixture.contextB)
+        guard case .ready = model.phase else { return XCTFail("The other side must remain available") }
+        XCTAssertTrue(fixture.files.directoryExists(at: fixture.storeB + "/" + fixture.path))
+        model.choose(group.id, .otherMachine)
+        XCTAssertNil(model.selectionError)
+        XCTAssertTrue(model.canApply)
+        await model.applyAndReport(context: fixture.contextB)
+        XCTAssertEqual(model.phase, .done)
+        try fixture.assertPublished(nil)
     }
 
     private func renderedComparison(_ item: ConflictItem) async -> [String] {

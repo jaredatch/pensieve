@@ -59,6 +59,11 @@ struct ConflictResolutionView: View {
             ProgressView()
                 .frame(maxWidth: .infinity, alignment: .center)
         case let .ready(groups):
+            if let message = model.selectionError {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.callout).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.md) {
                     ForEach(groups) { group in
@@ -207,16 +212,19 @@ struct ConflictResolutionView: View {
 struct ConflictFileComparison: View {
     private enum Side {
         case deleted
+        case unavailable
         case text(String, preview: String, hiddenLines: Int)
         case nonText(bytes: Int)
 
-        init(_ bytes: Data?) {
+        init(_ bytes: Data?, unavailable: UnavailableConflictSide?) {
+            guard unavailable == nil else { self = .unavailable; return }
             guard let bytes else { self = .deleted; return }
             guard !bytes.contains(0), let text = UpstreamHistoryFileContent.utf8PreservingBOM(bytes) else {
                 self = .nonText(bytes: bytes.count)
                 return
             }
-            let lines = text.components(separatedBy: "\n")
+            var lines = text.components(separatedBy: "\n")
+            if text.hasSuffix("\n") { lines.removeLast() }
             let visible = lines.prefix(LineDiffView.defaultMaxRows)
             self = .text(text, preview: visible.joined(separator: "\n"), hiddenLines: lines.count - visible.count)
         }
@@ -226,8 +234,8 @@ struct ConflictFileComparison: View {
     private let other: Side
 
     init(item: ConflictItem) {
-        this = Side(item.thisMachine)
-        other = Side(item.otherMachine)
+        this = Side(item.thisMachine, unavailable: item.thisUnavailable)
+        other = Side(item.otherMachine, unavailable: item.otherUnavailable)
     }
 
     var body: some View {
@@ -248,11 +256,15 @@ struct ConflictFileComparison: View {
             switch content {
             case .deleted:
                 Text("Deleted").foregroundStyle(.secondary)
+            case .unavailable:
+                Text("This version can’t be shown or kept as a file. You can keep the other version.")
+                    .foregroundStyle(.secondary)
             case let .text(text, preview, hiddenLines):
                 Text(text.isEmpty ? "Empty file" : preview)
                     .font(.system(.body, design: .monospaced)).textSelection(.enabled)
                 if hiddenLines > 0 {
-                    Text(verbatim: "... preview truncated - \(hiddenLines) more lines")
+                    Text(verbatim: "Showing the first \(LineDiffView.defaultMaxRows) lines. "
+                         + "\(hiddenLines) more \(hiddenLines == 1 ? "isn’t" : "aren’t") shown.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             case let .nonText(bytes):

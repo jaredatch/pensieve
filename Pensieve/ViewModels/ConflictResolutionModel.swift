@@ -27,6 +27,7 @@ final class ConflictResolutionModel {
     }
 
     private(set) var phase: Phase = .loading
+    private(set) var selectionError: String?
 
     private let engine: SyncEngineProtocol
     private let git: GitServiceProtocol
@@ -66,6 +67,7 @@ final class ConflictResolutionModel {
     /// Awaitable seam (tests await this; the sheet goes through `load`).
     func loadAndReport(context: ModelContext) async {
         phase = .loading
+        selectionError = nil
         let previousHeadStamp = headStamp()
         do {
             let onResolved = try onResolutionStarted()
@@ -90,6 +92,13 @@ final class ConflictResolutionModel {
     func choose(_ groupID: String, _ side: ConflictSide) {
         guard case var .ready(groups) = phase,
               let index = groups.firstIndex(where: { $0.id == groupID }) else { return }
+        if let unavailable = groups[index].items.first(where: {
+            (side == .thisMachine ? $0.thisUnavailable : $0.otherUnavailable) != nil
+        }) {
+            selectionError = SyncError.conflictSideUnavailable(path: unavailable.path).errorDescription
+            return
+        }
+        selectionError = nil
         groups[index].chosen = side
         phase = .ready(groups)
     }
@@ -115,7 +124,9 @@ final class ConflictResolutionModel {
             guard let side = group.chosen else { return }
             for item in group.items {
                 partial[item.path] = ResolutionPick(side: side, expectedThis: item.thisMachine,
-                                                    expectedOther: item.otherMachine)
+                                                    expectedOther: item.otherMachine,
+                                                    expectedThisUnavailable: item.thisUnavailable,
+                                                    expectedOtherUnavailable: item.otherUnavailable)
             }
         }
         let previousHeadStamp = headStamp()
@@ -135,6 +146,9 @@ final class ConflictResolutionModel {
             }
         } catch SyncError.conflictsChanged {
             await loadAndReport(context: context)
+        } catch SyncError.conflictSideUnavailable(let path) {
+            selectionError = SyncError.conflictSideUnavailable(path: path).errorDescription
+            phase = .ready(groups)
         } catch let error as LocalizedError {
             phase = .error(error.errorDescription ?? "Couldn't resolve conflicts.")
         } catch {

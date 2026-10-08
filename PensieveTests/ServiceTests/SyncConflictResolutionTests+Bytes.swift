@@ -3,6 +3,39 @@ import XCTest
 
 extension SyncConflictResolutionTests {
     @MainActor
+    func testUnreadableGitlinkPickCannotDeleteThePathAndOtherPickStillResolves() throws {
+        let fixture = try SyncConflictByteFixture.gitlinkConflict()
+        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+        let item = try fixture.inspect()
+        XCTAssertNotNil(item.thisUnavailable)
+        XCTAssertNil(item.otherUnavailable)
+        let remote = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout
+        let stale = UnavailableConflictSide(mode: "160000", objectID: String(repeating: "0", count: 40))
+        XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB,
+            picks: [item.path: ResolutionPick(side: .otherMachine, expectedThis: item.thisMachine,
+                                              expectedOther: item.otherMachine, expectedThisUnavailable: stale)],
+            credential: nil, context: fixture.contextB)) { error in
+            XCTAssertEqual(error as? SyncError, .conflictsChanged, "Unavailable entries must still detect a stale pick")
+        }
+        XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB,
+            picks: [item.path: ResolutionPick(side: .thisMachine, expectedThis: item.thisMachine,
+                                              expectedOther: item.otherMachine,
+                                              expectedThisUnavailable: item.thisUnavailable)],
+            credential: nil, context: fixture.contextB)) { error in
+            XCTAssertEqual(error as? SyncError, .conflictSideUnavailable(path: item.path))
+        }
+        XCTAssertTrue(fixture.files.directoryExists(at: fixture.storeB + "/" + item.path))
+        XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
+        XCTAssertEqual(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout, remote)
+        _ = try fixture.engine.resolveConflicts(root: fixture.storeB,
+            picks: [item.path: ResolutionPick(side: .otherMachine, expectedThis: item.thisMachine,
+                                              expectedOther: item.otherMachine,
+                                              expectedThisUnavailable: item.thisUnavailable)],
+            credential: nil, context: fixture.contextB)
+        try fixture.assertPublished(nil)
+    }
+
+    @MainActor
     func testBinaryAndUTF16PicksKeepExactBytesAcrossRemoteAndFreshClone() throws {
         for payload in SyncConflictByteFixture.payloads {
             for side in [ConflictSide.thisMachine, .otherMachine] {

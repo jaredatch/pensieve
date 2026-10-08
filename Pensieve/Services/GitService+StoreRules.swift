@@ -219,17 +219,19 @@ struct StoreGitOperation {
             + StoreExclusions.directoryArguments + ["--"] + StoreExclusions.directoryPathspecs
         let directories = try runData(args)
         guard directories.exit == 0 else { throw git.dataCommandError(directories, args: ["-C", root] + args) }
-        let cachedArgs = ["ls-files", "--cached", "-z", "--"] + StoreExclusions.directoryPathspecs
-        let cached = try runData(cachedArgs)
-        guard cached.exit == 0 else { throw git.dataCommandError(cached, args: ["-C", root] + cachedArgs) }
+        // --directory omits an indexed file replaced by a folder. Ask git for deleted worktree
+        // entries first, so an unchanged legacy dependency tree never expands into pathspec batches.
+        let replacedArgs = ["diff", "--name-only", "-z", "--diff-filter=D", "--"] + StoreExclusions.directoryPathspecs
+        let replaced = try runData(replacedArgs)
+        guard replaced.exit == 0 else { throw git.dataCommandError(replaced, args: ["-C", root] + replacedArgs) }
         paths += directories.stdout.split(separator: 0).map { Data($0) }
-        paths += try excludedFiles(beneath: cached.stdout.split(separator: 0).map { Data($0) })
+        paths += try excludedFiles(beneath: replaced.stdout.split(separator: 0).map { Data($0) })
         return paths
     }
 
     private func excludedFiles(beneath tracked: [Data]) throws -> [Data] {
         // --directory already collapsed every wholly untracked subtree. Its one omission is an
-        // indexed file replaced by a directory: inspect only indexed paths inside excluded folders.
+        // indexed file replaced by a directory: inspect only deleted paths inside excluded folders.
         let names = try Set(tracked.map { path -> String in
             if let name = String(bytes: path, encoding: .utf8) { return name }
             guard let folder = StoreExclusions.folderContainingFile(path),

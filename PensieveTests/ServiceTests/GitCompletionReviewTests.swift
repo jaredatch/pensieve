@@ -99,6 +99,8 @@ final class GitCompletionReviewTests: XCTestCase {
         try fixture.seedRepository()
         // The successful fake fetch below leaves a real fetched commit for the guarded rebase.
         try TestPaths.git.runOrThrow(["-C", fixture.root, "fetch", ".", "HEAD:refs/remotes/origin/main"], in: nil)
+        let blob = try TestPaths.git.runOrThrow(["-C", fixture.root, "rev-parse", "HEAD:skills/example/SKILL.md"], in: nil)
+            .stdout.trimmingCharacters(in: .newlines)
         let git = try fixture.executable("""
             simulate_failure() {
                 \(FakeGitScript.skipGlobalOptions)
@@ -109,7 +111,13 @@ final class GitCompletionReviewTests: XCTestCase {
                 case "$1" in
                   --version) echo 'git version fixture'; exit 0 ;;
                   fetch) exit 0 ;;
-                  rebase) exit 1 ;;
+                  rebase)
+                    printf '%s\\n' \\
+                      '0 0000000000000000000000000000000000000000\tskills/example/SKILL.md' \\
+                      '100644 \(blob) 2\tskills/example/SKILL.md' \\
+                      '100644 \(blob) 3\tskills/example/SKILL.md' |
+                      /usr/bin/git -C '\(fixture.root)' update-index --index-info
+                    exit 1 ;;
                   diff) if [ "$2" = '--name-only' ]; then printf 'skills/example/SKILL.md\\0'; exit 0; fi ;;
                 esac
             }

@@ -32,6 +32,7 @@ enum SyncOutcome: Equatable {
 enum SyncError: LocalizedError, Equatable {
     case storeUnreadable([String])
     case conflictsChanged
+    case conflictSideUnavailable(path: String)
     case rejectedRemote(String)
     case syncInProgress
 
@@ -42,6 +43,8 @@ enum SyncError: LocalizedError, Equatable {
                 + "Pensieve. Update Pensieve, then sync again."
         case .conflictsChanged:
             return "The conflict changed while you were resolving it — reopen to see the latest."
+        case let .conflictSideUnavailable(path):
+            return "Pensieve can’t keep this version of \(path) as a file. Choose the other version."
         case .rejectedRemote:
             return "This store's git remote uses an unsupported form. Reconnect with an https:// URL "
                 + "or an ssh remote (git@host:path)."
@@ -191,9 +194,11 @@ struct SyncEngine: SyncEngineProtocol {
                 return .cleared(try finishSync(root: root, credential: credential, context: context))
             case let .conflicted(paths):
                 let items = try paths.map { path in
-                    try ConflictItem(path: path, kind: Self.kind(for: path),
-                                 thisMachine: gitService.blob(atStage: 3, path: path, in: root),
-                                 otherMachine: gitService.blob(atStage: 2, path: path, in: root))
+                    let this = try ConflictVersion { try gitService.blob(atStage: 3, path: path, in: root) }
+                    let other = try ConflictVersion { try gitService.blob(atStage: 2, path: path, in: root) }
+                    return ConflictItem(path: path, kind: Self.kind(for: path),
+                                        thisMachine: this.bytes, otherMachine: other.bytes,
+                                        thisUnavailable: this.unavailable, otherUnavailable: other.unavailable)
                 }
                 try gitService.abortRebase(at: root)
                 return .conflicts(ConflictSet(items: items))
@@ -299,19 +304,21 @@ struct SyncEngine: SyncEngineProtocol {
                                         root: String) throws {
         guard Set(paths) == Set(picks.keys) else { throw SyncError.conflictsChanged }
         for path in paths {
-            let this = try gitService.blob(atStage: 3, path: path, in: root)
-            let other = try gitService.blob(atStage: 2, path: path, in: root)
+            let this = try ConflictVersion { try gitService.blob(atStage: 3, path: path, in: root) }
+            let other = try ConflictVersion { try gitService.blob(atStage: 2, path: path, in: root) }
             guard let pick = picks[path],
-                  pick.expectedThis == this,
-                  pick.expectedOther == other else {
+                  pick.expectedThis == this.bytes, pick.expectedOther == other.bytes,
+                  pick.expectedThisUnavailable == this.unavailable,
+                  pick.expectedOtherUnavailable == other.unavailable else {
                 throw SyncError.conflictsChanged
             }
             guard let full = validatedWorktreePath(path, root: root) else {
                 throw SyncError.conflictsChanged
             }
             let chosen = pick.side == .thisMachine ? this : other
-            if let chosen {
-                try fileService.writeData(at: full, data: chosen)
+            guard chosen.unavailable == nil else { throw SyncError.conflictSideUnavailable(path: path) }
+            if let bytes = chosen.bytes {
+                try fileService.writeData(at: full, data: bytes)
             } else {
                 try fileService.deleteFile(at: full)
             }
