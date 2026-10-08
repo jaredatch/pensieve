@@ -20,6 +20,43 @@ final class CredentialStoreTests: XCTestCase {
         XCTAssertEqual(token, "tok")
         try store.delete(forHost: "example.com")
         XCTAssertNil(store.credential(forHost: "example.com"))
+
+        assertConcurrentAccess(to: store)
+    }
+
+    private func assertConcurrentAccess(to store: InMemoryCredentialStore) {
+        let workerCount = 8
+        let failuresLock = NSLock()
+        var failures: [String] = []
+        DispatchQueue.concurrentPerform(iterations: workerCount) { worker in
+            let host = "worker-\(worker).invalid"
+            do {
+                for iteration in 0..<128 {
+                    let value = "worker-\(worker)-\(iteration)"
+                    try store.store(token: value, username: value, forHost: host)
+                    if store.credential(forHost: host) != .httpsToken(username: value, token: value) {
+                        failuresLock.withLock { failures.append("\(host) lost its stored credential") }
+                    }
+                    try store.delete(forHost: host)
+                    if store.credential(forHost: host) != nil {
+                        failuresLock.withLock { failures.append("\(host) kept its deleted credential") }
+                    }
+                    try store.store(token: value, username: value, forHost: "shared.invalid")
+                    if case let .httpsToken(username, token) = store.credential(forHost: "shared.invalid"), username != token {
+                        failuresLock.withLock { failures.append("shared credential mixed two writes") }
+                    }
+                    try store.delete(forHost: "shared.invalid")
+                }
+                try store.store(token: "final-\(worker)", username: "worker", forHost: host)
+            } catch {
+                failuresLock.withLock { failures.append("\(host): \(error)") }
+            }
+        }
+        XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n"))
+        for worker in 0..<workerCount {
+            XCTAssertEqual(store.credential(forHost: "worker-\(worker).invalid"),
+                           .httpsToken(username: "worker", token: "final-\(worker)"))
+        }
     }
 
     // MARK: Real Keychain (throwaway host)

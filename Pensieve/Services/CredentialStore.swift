@@ -87,26 +87,29 @@ struct KeychainCredentialStore: CredentialStoreProtocol {
     }
 }
 
-/// Test double: a plain dictionary. Used by unit tests (and higher-layer tests in 08.3/08.4) so no
-/// test hits the real login keychain.
+/// In-memory credentials for tests and temporary runtimes. One lock protects all dictionary access
+/// when a runtime shares this store across its services and the sync coordinator.
 final class InMemoryCredentialStore: CredentialStoreProtocol {
     private struct Entry {
         let username: String
         let token: String
     }
 
+    private let lock = NSLock()
     private var entries: [String: Entry] = [:]
 
     func store(token: String, username: String, forHost host: String) throws {
-        entries[host] = Entry(username: username, token: token)
+        lock.withLock { entries[host] = Entry(username: username, token: token) }
     }
 
     func credential(forHost host: String) -> GitCredential? {
-        guard let entry = entries[host] else { return nil }
-        return .httpsToken(username: entry.username, token: entry.token)
+        lock.withLock {
+            guard let entry = entries[host] else { return nil }
+            return .httpsToken(username: entry.username, token: entry.token)
+        }
     }
 
     func delete(forHost host: String) throws {
-        entries.removeValue(forKey: host)
+        lock.withLock { _ = entries.removeValue(forKey: host) }
     }
 }
