@@ -99,9 +99,9 @@ private struct StubFileService: FileServiceProtocol {
 }
 
 private final class RecordingSkillStore: SkillStoreProtocol {
+    let baseDir = TestPaths.skillsDir
     private(set) var deletedDirectoryNames: [String] = []
     private(set) var writeCount = 0
-
     func createSkill(name: String, description: String, body: String) throws -> String { "created" }
     func readBody(directoryName: String) throws -> String { "" }
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,

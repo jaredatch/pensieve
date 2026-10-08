@@ -91,8 +91,7 @@ final class DeployReconciler: DeployReconciling {
             let mdcPath = cursorRulesDir + "/" + entry
             guard let slug = DeployPaths(skillsDirectory: pensieveSkillsDir, userSkillsDirectories: [:],
                                               cursorUserRulesDirectory: cursorRulesDir).slug(artifactPath: mdcPath,
-                                                  platform: .cursor, projectPath: nil,
-                                              cursorUserRulesDirectory: cursorRulesDir) else { continue }
+                                                  platform: .cursor, projectPath: nil) else { continue }
             guard records.contains(where: {
                 $0.artifactPath == mdcPath
                     && $0.scope == "user"

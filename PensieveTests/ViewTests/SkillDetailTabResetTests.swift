@@ -17,8 +17,8 @@ final class SkillDetailTabResetTests: XCTestCase {
         let git = SkillDetailTabResetGit(thirdCommit: thirdCommit)
         let base = TestTemporaryDirectory.path + "SkillDetailTabResetTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: base),
-            fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills"),
+            fileWatchService: FileWatchService(rootDir: base + "/skills"), manifestRoot: base
         )
         let history = UpstreamHistoryViewModel(
             readOperation: { _, _, _ in historyResult() },
@@ -140,7 +140,7 @@ private struct SkillHistoryTabResetHarness: View {
             onOpenUpdates: {},
             onUpdateCheck: { _ in },
             git: git,
-            store: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
+            store: library.skillStore,
             workingDir: workingDir,
             hostedPresentation: presentation
         )

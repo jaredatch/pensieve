@@ -87,6 +87,7 @@ final class SkillHistoryPresentationTests: XCTestCase {
 }
 
 private final class RecordingHistorySkillStore: SkillStoreProtocol {
+    let baseDir = TestPaths.skillsDir
     private(set) var writtenBodies: [String: String] = [:]
     var writeBodyFails = false
 

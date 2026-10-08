@@ -89,13 +89,42 @@ def tokens(source):
             pos += 1
 
 
-def static_members(lexed):
-    """Read direct static declarations in the constants types and their extensions."""
+# Swift keywords distinguish an expression receiver/callee from syntax such as `while (` or `in (`.
+# This is lexical recognition, not type or data-flow inference.
+KEYWORDS = set("""associatedtype class deinit enum extension fileprivate func import init inout internal
+let open operator private precedencegroup protocol public rethrows static struct subscript typealias var
+break case continue default defer do else fallthrough for guard if in repeat return switch where while
+as Any catch false is nil super self Self throw throws true try async await some any""".split())
+
+
+def ends_expression(word):
+    return (bool(re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', word)) and word not in KEYWORDS) or word in {')', ']', '!', '?', 'self', 'super', 'Self'}
+
+
+def constant_shadows(words):
+    """Nested constants names shadow the global type throughout their enclosing lexical scope."""
+    stack, pairs, shadows = [], {}, []
+    for index, word in enumerate(words):
+        if word == '{':
+            stack.append(index)
+        elif word == '}' and stack:
+            pairs[stack.pop()] = index
+    for index, word in enumerate(words):
+        if word == '{':
+            stack.append(index)
+        elif word == '}' and stack:
+            stack.pop()
+        elif word in {'enum', 'struct', 'class'} and words[index + 1:index + 2] and words[index + 1] in CONSTANT_TYPES and stack:
+            shadows.append((words[index + 1], stack[-1], pairs.get(stack[-1], len(words))))
+    return shadows
+
+
+def static_members(words, lexed):
+    """Read direct static declarations in top-level constants types and unqualified extensions."""
     depth, scopes, pending = 0, [], None
-    for index, (token, offset) in enumerate(lexed):
-        following = [item[0] for item in lexed[index + 1:index + 4]]
-        if token in {'enum', 'struct', 'class', 'extension'} and following[:1] and following[0] in CONSTANT_TYPES:
-            pending = following[0]
+    for index, token in enumerate(words):
+        if depth == 0 and token in {'enum', 'struct', 'class', 'extension'} and words[index + 1:index + 2] and words[index + 1] in CONSTANT_TYPES:
+            pending = words[index + 1]
         if token == '{':
             depth += 1
             if pending:
@@ -106,29 +135,47 @@ def static_members(lexed):
                 scopes.pop()
             depth -= 1
         elif token == 'static' and scopes and scopes[-1][0] == depth:
-            name = following[1] if len(following) >= 2 and following[0] in {'let', 'var', 'func', 'subscript'} else '<declaration>'
-            yield scopes[-1][1] + '.' + name, name, offset
+            # Access modifiers may contain parentheses, e.g. `static private(set) var foo`.
+            cursor, parentheses, name = index + 1, 0, None
+            while cursor < len(words):
+                word = words[cursor]
+                if parentheses == 0 and word in {'let', 'var', 'func', 'subscript'}:
+                    name = word if word == 'subscript' else words[cursor + 1]
+                    break
+                if parentheses == 0 and word in {'{', '}', ';', '='}:
+                    break
+                parentheses += (word == '(') - (word == ')')
+                cursor += 1
+            # An unparsed declaration can never be excused by listing its diagnostic placeholder.
+            yield scopes[-1][1] + '.' + (name or '<unparsed static declaration>'), name, lexed[index][1]
 
 
-def permitted_production(lexed, index):
-    """Allow a case pattern or a direct comparison operand, including parentheses."""
-    words = [item[0] for item in lexed]
+def paths_production(words, lexed, index):
+    """Fence implicit production and the two paths types, leaving other receivers alone."""
+    previous = words[index - 1] if index else ''
+    if previous in {'RuntimePaths', 'AppRuntimePaths'}:
+        return True
+    if previous in {'?', '!'}:
+        # Optional chaining is adjacent; the separated `? .production` is a ternary operand.
+        return lexed[index - 1][1] + len(previous) != lexed[index][1]
+    return not ends_expression(previous)
+
+
+def permitted_production(words, index):
+    """Allow a case pattern or a direct comparison operand, including grouping parentheses."""
     for token in reversed(words[:index]):
-        if token in {'=', ':', ';', '{', '}', 'where'}:
+        if token in {'in', '=', ':', ';', '{', '}', 'where'}:
             break
         if token == 'case':
             return True
     start, end = index, index + 2
-    while start > 0 and re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', words[start - 1]):
+    if start > 0 and words[start - 1] in {'RuntimePaths', 'AppRuntimePaths'}:
         start -= 1
-        if start > 0 and words[start - 1] == '.':
-            start -= 1
-        else:
-            break
+        while start >= 2 and words[start - 1] == '.' and ends_expression(words[start - 2]):
+            start -= 2
     while start > 0 and end < len(words) and words[start - 1] == '(' and words[end] == ')':
-        prefix = words[start - 2] if start >= 2 else ''
-        if prefix in {')', ']', '>', '?', '!'} or (re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', prefix)
-                                                  and prefix not in {'return', 'throw', 'if', 'guard', 'switch', 'case'}):
+        # Grouping is one operand. A call's argument is not the call's comparison result.
+        if start >= 2 and ends_expression(words[start - 2]):
             break
         start -= 1
         end += 1
@@ -140,8 +187,10 @@ def permitted_production(lexed, index):
 def violations(source, relative, locations, neutral):
     found = []
     lexed = list(tokens(source))
+    words = [item[0] for item in lexed]
+    shadows = constant_shadows(words)
     classified = locations | neutral
-    for qualified, member, offset in static_members(lexed):
+    for qualified, member, offset in static_members(words, lexed):
         if member not in classified:
             line = source.count('\n', 0, offset) + 1
             found.append(f'{relative}:{line}: unclassified static member {qualified}; classify it in {INVENTORY}')
@@ -150,7 +199,8 @@ def violations(source, relative, locations, neutral):
     for index, (token, offset) in enumerate(lexed):
         tail = [item[0] for item in lexed[index:index + 3]]
         reason = None
-        if len(tail) == 3 and token in CONSTANT_TYPES and tail[1] == '.':
+        if len(tail) == 3 and token in CONSTANT_TYPES and tail[1] == '.' and not any(
+                name == token and start < index < end for name, start, end in shadows):
             if tail[2] == 'self':
                 reason = 'constants metatypes must not escape runtime resolution'
             elif tail[2] in locations:
@@ -159,7 +209,7 @@ def violations(source, relative, locations, neutral):
                 reason = f'unclassified member {token}.{tail[2]}; classify it in {INVENTORY}'
         elif token == "KeychainCredentialStore" and (tail[1:2] == ["("] or tail[1:] == [".", "init"]):
             reason = "real Keychain store must come from runtime resolution"
-        elif tail[:2] == ['.', 'production'] and relative not in PRODUCTION_CALLERS and not permitted_production(lexed, index):
+        elif tail[:2] == ['.', 'production'] and relative not in PRODUCTION_CALLERS and paths_production(words, lexed, index) and not permitted_production(words, index):
             reason = 'production paths must be selected by the process runtime'
         elif token in {"NSHomeDirectory", "homeDirectoryForCurrentUser"}:
             reason = "home resolution belongs to the runtime's path definitions"

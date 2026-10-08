@@ -57,7 +57,11 @@ final class RuntimePathGuardTests: XCTestCase {
              "func make() -> RuntimePaths { .production }",
              "let p: RuntimePaths = .`production`",
              "let x = root == RuntimePaths.production.storeRoot",
-             "let x = root == .production.storeRoot"]
+             "let x = root == .production.storeRoot",
+             "let x = wrap(.production) == e",
+             "func visit() { for case let p in [RuntimePaths.production] {} }",
+             "func visit() { for case let p in [AppRuntimePaths.production] {} }",
+             "func visit() { for case let p in [.production] {} }"]
     }
 
     private func fixtureInventory(in directory: URL) throws -> [String: [String]] {
@@ -75,13 +79,17 @@ final class RuntimePathGuardTests: XCTestCase {
             let relative = "Pensieve/Utilities/" + type + ".swift"
             let path = directory.appendingPathComponent(relative)
             try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
-            for member in ["geminiUserSkillsDir", "newSafeLimit"] {
-                try ("enum " + type + " {\nstatic let " + member + " = 8\n}\n").write(
+            let declarations = [("static let geminiUserSkillsDir = 8", "geminiUserSkillsDir"),
+                                ("static let newSafeLimit = 8", "newSafeLimit"),
+                                ("static private(set) var foo = 1", "foo"),
+                                ("static subscript(i: Int) -> Int { i }", "subscript")]
+            for (declaration, member) in declarations {
+                try ("enum " + type + " {\n" + declaration + "\n}\n").write(
                     to: path, atomically: true, encoding: .utf8)
                 let result = try runGuard(root: directory)
                 XCTAssertEqual(result.status, 1, result.output)
                 XCTAssertTrue(result.output.contains(relative + ":2:"), result.output)
-                XCTAssertTrue(result.output.contains(member), result.output)
+                XCTAssertTrue(result.output.contains(type + "." + member + ";"), result.output)
             }
             try FileManager.default.removeItem(at: path)
         }
@@ -118,7 +126,17 @@ final class RuntimePathGuardTests: XCTestCase {
             "let z = a+// Constants.homeDirectory\n",
             "let z = a+/* \" Constants.homeDirectory */b",
             "let n = Constants.maxBodyBytes",
-            "let n = PathConstants.maxBodyBytes"
+            "let n = PathConstants.maxBodyBytes",
+            "let value = settings.production",
+            "let value = config?.production",
+            "let value = settings!.production",
+            "let value = self.production",
+            "let value = settings().production",
+            "func isLive(_ e: Env) -> Bool { e == (Pensieve.RuntimePaths.production) }",
+            "func loop(_ e: Env) { while (.production) != e {} }",
+            "let compare = { e in (.production) == e }",
+            "struct V { private enum Constants { static let fade = 0.2 }; let d = Constants.fade }",
+            "struct V { private enum PathConstants { static let fade = 0.2 }; let d = PathConstants.fade }"
         ]
         for source in permitted {
             try ("struct NewCollaborator {\n" + source + "\n}\n").write(to: path, atomically: true, encoding: .utf8)

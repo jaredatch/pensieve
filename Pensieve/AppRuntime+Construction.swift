@@ -3,7 +3,7 @@ import SwiftData
 
 extension AppRuntimePaths {
     func makeGitService(fileService: FileServiceProtocol = FileService()) -> GitService {
-        GitService(fileService: fileService, askpassHelperPath: gitAskpassHelperPath)
+        runtimePaths.makeGitService(fileService: fileService)
     }
 
     @MainActor
@@ -14,7 +14,7 @@ extension AppRuntimePaths {
     ) -> PostSyncConvergence {
         PostSyncConvergence(
             root: storeRoot,
-            deployReconciler: makeDeployReconciler(),
+            deployReconciler: runtimePaths.makeDeployReconciler(),
             contextFactory: { ModelContext(container) },
             categoryReconciler: CategoryReconciler(platformVM: platformVM),
             intentReconciler: intentReconciler,
@@ -23,13 +23,14 @@ extension AppRuntimePaths {
         )
     }
 
-    func makeAgentDetection() -> AgentDetectionService {
-        AgentDetectionService(homeDirectory: homeDirectory)
+    func makeAgentDetection(fileService: FileServiceProtocol = FileService()) -> AgentDetectionServiceProtocol {
+        guard runtimePaths.isProduction else { return NoAgentDetection() }
+        return AgentDetectionService(probe: SystemEnvironmentProbe(fileService: fileService), homeDirectory: homeDirectory)
     }
 
     func makeMachineStateService(defaults: UserDefaults,
                                  fileService files: FileServiceProtocol = FileService()) -> MachineStateService {
-        return MachineStateService(fileService: files, agentDetection: makeAgentDetection(),
+        return MachineStateService(fileService: files, agentDetection: makeAgentDetection(fileService: files),
             defaults: defaults,
             deployState: { try DeployStateStore(fileService: files, appSupportDir: appSupportDir).read() },
             homeDirectory: homeDirectory)
@@ -79,15 +80,5 @@ extension AppRuntimePaths {
     ) -> ConflictResolutionModel {
         ConflictResolutionModel(engine: makeSyncEngine(), git: makeGitService(), credentials: makeCredentialStore(),
             root: storeRoot, onResolutionStarted: onResolutionStarted)
-    }
-    private func makeDeployReconciler() -> DeployReconciler {
-        let fileService = FileService()
-        return DeployReconciler(
-            fileService: fileService,
-            deployState: DeployStateStore(fileService: fileService, appSupportDir: appSupportDir),
-            pensieveSkillsDir: skillsDir,
-            agentSkillDirs: runtimePaths.isProduction ? DeployReconciler.agentSkillDirs(paths: deployPaths) : [],
-            cursorRulesDir: deployPaths.cursorUserRulesDirectory
-        )
     }
 }

@@ -14,8 +14,8 @@ final class SkillPreviewContextTests: XCTestCase {
         try files.files.writeData(at: root + "/references/diagram.png", data: PreviewImageFixture.png())
         try files.files.writeData(at: base + "/outside.png", data: PreviewImageFixture.png())
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: files, baseDir: TestPaths.skillsDir),
-            fileService: files, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: base
+            skillStore: SkillStore(fileService: files, baseDir: base),
+            fileService: files, fileWatchService: FileWatchService(rootDir: base), manifestRoot: base
         )
         let preview = tab(library, file: "references/guide.md")
             .preview(markdownBody: "", skillsBase: base, onSelectFile: { _ in })

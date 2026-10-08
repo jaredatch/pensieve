@@ -17,6 +17,7 @@ final class Counter {
 }
 
 final class MemorySkillStore: SkillStoreProtocol {
+    let baseDir = TestPaths.skillsDir
     var bodies: [String: String] = [:]
 
     func createSkill(name: String, description: String, body: String) throws -> String {

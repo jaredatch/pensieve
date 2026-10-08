@@ -4,11 +4,6 @@ import XCTest
 
 final class DeployPlatformCoverageTests: XCTestCase {
     private let paths = RuntimePaths.production
-    private var backfillPaths: DeployStateBackfillPaths {
-        DeployStateBackfillPaths(pensieveSkillsDir: paths.skillsDir,
-            cursorUserRulesDir: paths.deployPaths.cursorUserRulesDirectory,
-            userSkillsRoot: paths.deployPaths.userSkillsRoot)
-    }
     func testEverySymlinkPlatformRootMatchesItsLinkPathParent() throws {
         for platform in PlatformTarget.allCases where platform.usesSymlinks {
             let root = try XCTUnwrap(paths.deployPaths.userSkillsRoot(for: platform))
@@ -31,7 +26,7 @@ final class DeployPlatformCoverageTests: XCTestCase {
     }
 
     func testEverySymlinkPlatformInBackfillCandidates() throws {
-        let directories = DeployStateBackfill.userWideSymlinkDirectories(paths: backfillPaths)
+        let directories = DeployStateBackfill.userWideSymlinkDirectories(paths: paths.deployPaths)
         for platform in PlatformTarget.allCases where platform.usesSymlinks {
             let root = try XCTUnwrap(paths.deployPaths.userSkillsRoot(for: platform))
             XCTAssertTrue(
@@ -47,7 +42,7 @@ final class DeployPlatformCoverageTests: XCTestCase {
             $0.path == PathConstants.cursorUserRulesDir
         })
         XCTAssertFalse(
-            DeployStateBackfill.userWideSymlinkDirectories(paths: backfillPaths).contains { $0.platform == .cursor }
+            DeployStateBackfill.userWideSymlinkDirectories(paths: paths.deployPaths).contains { $0.platform == .cursor }
         )
     }
 

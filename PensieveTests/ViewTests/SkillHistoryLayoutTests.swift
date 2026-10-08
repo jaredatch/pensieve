@@ -15,7 +15,7 @@ final class SkillHistoryLayoutTests: XCTestCase {
 
     func testAuthoredRowsKeep24PointGapsAtShortAndTallHeights() async throws {
         let base = TestTemporaryDirectory.path + "SkillHistoryLayoutTests-\(UUID().uuidString)"
-        let store = SkillStore(fileService: FileService(), baseDir: base)
+        let store = SkillStore(fileService: FileService(), baseDir: base + "/skills")
         let git = SkillHistoryRecordingGit()
         git.commits = (0..<4).map { index in
             GitCommit(sha: "sha-\(index)", author: "Author", date: Date(), subject: subject(index))
@@ -24,8 +24,8 @@ final class SkillHistoryLayoutTests: XCTestCase {
             skill: Skill(name: "Example", directoryName: "example"),
             currentBody: "# Current",
             library: SkillLibraryViewModel(
-                skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-                manifestRoot: TestPaths.storeRoot
+                skillStore: store, fileWatchService: FileWatchService(rootDir: store.baseDir),
+                manifestRoot: base
             ),
             upstreamHistory: historyOwner(read: { _, _, _ in historyResult() }),
             localRevision: .initial,

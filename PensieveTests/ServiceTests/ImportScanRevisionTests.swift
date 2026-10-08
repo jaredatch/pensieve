@@ -308,6 +308,7 @@ private final class RevisionReportScanner: ImportScannerProtocol {
 }
 
 private final class RevisionSkillStore: SkillStoreProtocol {
+    let baseDir = TestPaths.skillsDir
     var failures: Set<String> = []
     private(set) var createdNames: [String] = []
     func createSkill(name: String, description: String, body: String) throws -> String {

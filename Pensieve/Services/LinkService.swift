@@ -59,6 +59,7 @@ final class LinkService: LinkServiceProtocol {
         let projectDirectory = try projectPath.map { try fileService.requireProjectDirectory(at: $0) }
 
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
+        guard !link.isEmpty else { throw LinkError.missingUserSkillsRoot(platform) }
         let target = targetPath(skill: skill, platform: platform, projectPath: projectPath)
 
         // Verify the target exists
@@ -98,8 +99,10 @@ final class LinkService: LinkServiceProtocol {
         try Self.validatePathComponent(skill.directoryName)
         if platform == .hermes { try Self.validatePathComponent(Constants.hermesDefaultCategory) }
         guard ProjectDirectory.canAccess(projectPath) else { return .foreign }
+        let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
+        guard !link.isEmpty else { return .foreign }
         return try ownership.link(
-            at: linkPath(skill: skill, platform: platform, projectPath: projectPath),
+            at: link,
             skillsDirectory: paths.skillsDirectory, linksFile: platform == .codex && projectPath != nil
         )
     }
@@ -108,7 +111,7 @@ final class LinkService: LinkServiceProtocol {
         guard projectPath == nil || platform.supportsProjectScope else { return false }
         guard ProjectDirectory.canAccess(projectPath) else { return false }
         let link = linkPath(skill: skill, platform: platform, projectPath: projectPath)
-        guard platform.usesSymlinks, fileService.isSymlink(at: link) else { return false }
+        guard platform.usesSymlinks, !link.isEmpty, fileService.isSymlink(at: link) else { return false }
         let expected = targetPath(skill: skill, platform: platform, projectPath: projectPath)
         guard let actual = try? fileService.symlinkTarget(at: link) else { return false }
         return actual == expected
@@ -167,9 +170,12 @@ enum LinkError: LocalizedError {
     case projectScopeUnsupported(PlatformTarget)
     case invalidPathComponent(String)
     case occupiedByRealPath(String)
+    case missingUserSkillsRoot(PlatformTarget)
 
     var errorDescription: String? {
         switch self {
+        case .missingUserSkillsRoot(let platform):
+            "No user skills directory configured for \(platform.displayName)."
         case .platformDoesNotUseSymlinks(let p):
             "\(p.displayName) uses compiled output, not symlinks. Use CursorCompiler instead."
         case .targetDoesNotExist(let path):

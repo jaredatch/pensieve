@@ -54,7 +54,7 @@ final class SkillLibraryViewModel {
     let fileWatchService: FileWatchServiceProtocol
     private let manifestService: ManifestSnapshotting?
     let manifestRoot: String
-    var skillsDirectory: String { manifestRoot + "/skills" }
+    var skillsDirectory: String { skillStore.baseDir }
     private var lastManifestError: String?
     let notifier: SyncStateNotifying
     var isWatching = false

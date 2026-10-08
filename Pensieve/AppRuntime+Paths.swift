@@ -7,7 +7,7 @@ import SwiftData
 /// the suite synced the developer's live store through one harness gap). Lives beside `AppRuntime.swift`
 /// for the file's and the initializer's lint budgets (PLAN-29's precedent, `AppRuntime+DeployIndex.swift`).
 struct AppRuntimePaths {
-    private struct NoAgentDetection: AgentDetectionServiceProtocol {
+    struct NoAgentDetection: AgentDetectionServiceProtocol {
         func isInstalled(_ platform: PlatformTarget) -> Bool { false }
         func installedPlatforms() -> [PlatformTarget] { [] }
     }
@@ -71,9 +71,9 @@ struct AppRuntimePaths {
         appSupportDir: RuntimePaths.production.appSupportDir
     )
 
-    var syncLockPath: String { appSupportDir + "/sync.lock" }
+    var syncLockPath: String { runtimePaths.syncLockPath }
 
-    var gitAskpassHelperPath: String { appSupportDir + "/git-askpass.sh" }
+    var gitAskpassHelperPath: String { runtimePaths.gitAskpassHelperPath }
 
     var skillInstallScratchRoot: String { appSupportDir + "/skill-install-scratch" }
 
@@ -81,12 +81,11 @@ struct AppRuntimePaths {
 
     var upstreamHistoryScratchRoot: String { appSupportDir + "/upstream-history-scratch" }
 
-    var skillsDir: String { storeRoot + "/skills" }
+    var skillsDir: String { runtimePaths.skillsDir }
 
     var upstreamHistoryCacheDir: String { appSupportDir + "/upstream-history-cache" }
 
-    /// The agent directories (`~/.claude/skills`, Cursor's rules, …) sit outside both roots, so only the
-    /// production pair may reach them; any other pair gets none, and a Cursor rules directory of its own.
+    /// Only the production pair reaches user-wide roots. Other pairs select sandboxed agent and Cursor roots.
     private var isProduction: Bool {
         runtimePaths.isProduction
     }
@@ -153,7 +152,7 @@ struct AppRuntimePaths {
             fileService: fileService,
             linkService: NoDeploymentLinkService(outputRoot: appSupportDir + "/agent-links"),
             cursorCompiler: NoDeploymentCursorCompiler(outputRoot: cursorRulesDir),
-            agentDetection: NoAgentDetection(),
+            agentDetection: makeAgentDetection(fileService: fileService),
             deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: appSupportDir),
             skillsDirectory: skillsDir
         )
@@ -161,7 +160,7 @@ struct AppRuntimePaths {
 
     /// A `@ModelActor` takes only its container; its collaborators arrive through `configure`. Every
     /// path-bearing one is set here, before any injected `coordinatorConfigure` runs.
-    func configureCoordinator(_ coordinator: SyncCoordinator, machineStateService: MachineStateServicing,
+    func configureCoordinator(_ coordinator: SyncCoordinator, defaults: UserDefaults,
                               fileService: FileServiceProtocol = FileService()) async {
         await coordinator.configure(
             engine: makeSyncEngine(fileService: fileService),
@@ -171,7 +170,7 @@ struct AppRuntimePaths {
             root: storeRoot,
             audit: SyncAudit(appSupport: appSupportDir, fileService: fileService),
             machine: (identity: MachineIdentity(fileService: fileService, appSupportDir: appSupportDir),
-                stateService: machineStateService)
+                stateService: makeMachineStateService(defaults: defaults, fileService: fileService))
         )
     }
 
@@ -199,14 +198,12 @@ struct AppRuntimePaths {
         }
     }
 
-    /// The launch backfill writes `deploy-state.json` in App Support and reads the store's skills; the
-    /// user-wide agent roots it probes are reachable only from the production pair.
+    /// Backfill probes the runtime's roots: user-wide in production, under App Support for temporary pairs.
     func makeLaunchBackfill() -> AppRuntime.LaunchBackfill {
         { context in
             let fileService = FileService()
-            var backfillPaths = DeployStateBackfillPaths(pensieveSkillsDir: skillsDir, cursorUserRulesDir: cursorRulesDir,
+            let backfillPaths = DeployStateBackfillPaths(pensieveSkillsDir: skillsDir, cursorUserRulesDir: cursorRulesDir,
                 userSkillsRoot: deployPaths.userSkillsRoot)
-            if !isProduction { backfillPaths.userSkillsRoot = { _ in nil } }
             DeployStateBackfill(
                 fileService: fileService,
                 store: DeployStateStore(fileService: fileService, appSupportDir: appSupportDir),

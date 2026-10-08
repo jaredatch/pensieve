@@ -31,11 +31,19 @@ extension AppRuntimePathsTests {
         let slug = try skillStore.createSkill(name: "Runtime", description: "Sync fixture", body: "local sync body")
         context.insert(Skill(name: "Runtime", skillDescription: "Sync fixture", directoryName: slug))
         try context.save()
+        try assertTemporaryDeploymentFactories(paths: paths, files: files, context: context)
         let coordinator = SyncCoordinator(modelContainer: context.container)
-        let machineState = paths.makeMachineStateService(defaults: try isolatedDefaults(), fileService: files)
-        await paths.configureCoordinator(coordinator, machineStateService: machineState, fileService: files)
+        var machineWrites: [String] = []
+        files.beforeFileWrite = { if $0.contains(".machine-state-") { machineWrites.append($0) } }
+        defer { files.beforeFileWrite = nil }
+        await paths.configureCoordinator(coordinator, defaults: try isolatedDefaults(), fileService: files)
         let result = await coordinator.runCycle()
         guard case .synced = result else { return XCTFail("Temporary runtime cycle failed: \(result)") }
+        XCTAssertEqual(machineWrites.count, 1, "Coordinator machine-state writes must use its supplied file service")
+        let states = paths.makeMachineStateService(defaults: try isolatedDefaults(), fileService: files)
+            .readAll(fromRoot: paths.storeRoot)
+        XCTAssertEqual(states.count, 1)
+        XCTAssertEqual(states.first?.agents, [])
         XCTAssertTrue(try git.runOrThrow(["--git-dir", remote, "show", "HEAD:skills/runtime/SKILL.md"], in: nil)
             .stdout.contains("local sync body"))
         XCTAssertTrue(files.isExecutableFile(at: paths.gitAskpassHelperPath))
@@ -47,6 +55,28 @@ extension AppRuntimePathsTests {
         let rebuilt = paths.makeStoreRebuildService(fileService: files).rebuild(fromRoot: paths.storeRoot, context: context)
         XCTAssertFalse(rebuilt.storeUnreadable)
         XCTAssertTrue(try context.fetch(FetchDescriptor<Skill>()).contains { $0.directoryName == slug })
+    }
+
+    private func assertTemporaryDeploymentFactories(
+        paths: AppRuntimePaths, files: FileServiceProtocol, context: ModelContext
+    ) throws {
+        try files.createDirectory(at: paths.homeDirectory + "/.claude")
+        XCTAssertFalse(paths.makeAgentDetection().isInstalled(.claudeCode))
+        XCTAssertEqual(paths.makeAgentDetection().installedPlatforms(), [])
+        let root = try XCTUnwrap(paths.deployPaths.userSkillsRoot(for: .claudeCode))
+        let owned = root + "/runtime"
+        try files.createSymlink(at: owned, pointingTo: paths.skillsDir + "/runtime")
+        paths.makeLaunchBackfill()(context)
+        let state = DeployStateStore(fileService: files, appSupportDir: paths.appSupportDir)
+        XCTAssertEqual(try state.read().records.map(\.artifactPath), [owned])
+        let dangling = root + "/gone"
+        try files.createSymlink(at: dangling, pointingTo: paths.skillsDir + "/gone")
+        let platform = paths.makePlatformViewModel()
+        let intent = AppRuntime.makeLaunchIntentReconciler(platformVM: platform, paths: paths)
+        paths.makeConvergence(container: context.container, platformVM: platform, intentReconciler: intent)
+            .run(after: .synced(pushed: false, warnings: [], completedAt: Date(), headAdvanced: false))
+        XCTAssertFalse(files.isSymlink(at: dangling), "App convergence must prune its sandboxed agent roots")
+        XCTAssertTrue(files.isSymlink(at: owned))
     }
 
     private func localSyncTransport(

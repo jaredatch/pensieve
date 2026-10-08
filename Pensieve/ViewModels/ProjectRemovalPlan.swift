@@ -208,8 +208,7 @@ struct ProjectRemovalPlan {
         let projectID = project.id
         let history = try context.fetch(FetchDescriptor<DeployRecord>(predicate: #Predicate { $0.projectID == projectID }))
         for row in history where row.targetPath.hasPrefix(project.path + "/") {
-            guard let slug = DeployPaths(skillsDirectory: "", userSkillsDirectories: [:],
-                cursorUserRulesDirectory: "").slug(artifactPath: row.targetPath, platform: row.platform,
+            guard let slug = DeployPaths.projectSlug(artifactPath: row.targetPath, platform: row.platform,
                                               projectPath: project.path) else { continue }
             guard (try? LinkService.validatePathComponent(slug)) != nil else { continue }
             let matchingSkill = evidence.byID[row.skillID].flatMap { skill in

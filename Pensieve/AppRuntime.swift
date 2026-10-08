@@ -68,11 +68,11 @@ final class AppRuntime {
         let container = container
         let configure = coordinatorConfigure
         let paths = paths
-        let machineStateService = machineObservability.stateService
+        let defaults = defaults
         return Task.detached { [weak self] in
             await self?.refreshGitUsability()
             let coordinator = SyncCoordinator(modelContainer: container)
-            await paths.configureCoordinator(coordinator, machineStateService: machineStateService)
+            await paths.configureCoordinator(coordinator, defaults: defaults)
             await configure(coordinator)
             await MainActor.run { [weak self] in
                 guard let self else { return }

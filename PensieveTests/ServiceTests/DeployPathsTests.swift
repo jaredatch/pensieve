@@ -26,9 +26,10 @@ final class DeployPathsTests: XCTestCase {
         }
         for slug in slugs {
             let customRoot = "/tmp/user rules"
-            let path = TestPaths.deployPaths.cursorPath(directoryName: slug, projectPath: nil, userRulesDirectory: customRoot)
-            XCTAssertEqual(TestPaths.deployPaths.slug(artifactPath: path, platform: .cursor, projectPath: nil,
-                                           cursorUserRulesDirectory: customRoot), slug)
+            let custom = DeployPaths(skillsDirectory: TestPaths.skillsDir, userSkillsDirectories: [:],
+                                     cursorUserRulesDirectory: customRoot)
+            let path = custom.cursorPath(directoryName: slug, projectPath: nil)
+            XCTAssertEqual(custom.slug(artifactPath: path, platform: .cursor, projectPath: nil), slug)
             XCTAssertNil(TestPaths.deployPaths.slug(artifactPath: path, platform: .cursor, projectPath: nil))
         }
     }
@@ -40,6 +41,12 @@ final class DeployPathsTests: XCTestCase {
     }
 
     func testLinkPathCases() {
+        let missing = DeployPaths(skillsDirectory: TestPaths.skillsDir, userSkillsDirectories: [:],
+                                  cursorUserRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory)
+        for platform in PlatformTarget.allCases where platform.usesSymlinks {
+            XCTAssertEqual(missing.linkPath(directoryName: "x", platform: platform, projectPath: nil), "")
+            XCTAssertNil(missing.slug(artifactPath: "/x", platform: platform, projectPath: nil))
+        }
         XCTAssertEqual(
             TestPaths.deployPaths.linkPath(directoryName: "x", platform: .claudeCode, projectPath: nil),
             TestPaths.deployPaths.userSkillsRoot(for: .claudeCode)! + "/x"

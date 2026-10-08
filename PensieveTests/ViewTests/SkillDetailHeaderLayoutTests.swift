@@ -12,8 +12,8 @@ final class SkillDetailHeaderLayoutTests: XCTestCase {
     func testALinkedSkillsHeaderMatchesTheFramesRhythm() {
         let base = TestTemporaryDirectory.path + "SkillDetailHeaderLayoutTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: base),
-            fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills"),
+            fileWatchService: FileWatchService(rootDir: base + "/skills"), manifestRoot: base
         )
         let skill = Skill(name: "basecamp", directoryName: "basecamp")
         skill.skillDescription = String(repeating: "Interact with Basecamp via the Basecamp CLI. ", count: 8)

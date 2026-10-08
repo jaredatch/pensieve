@@ -10,6 +10,8 @@ enum SkillStoreError: Error, Equatable {
 // MARK: - Protocol
 
 protocol SkillStoreProtocol {
+    /// The canonical skills folder used by this store and its library's file reads.
+    var baseDir: String { get }
     /// Create a new skill directory and write a canonical, self-describing SKILL.md
     /// (`name`/`description` frontmatter + body). Returns the directory name (slug).
     func createSkill(name: String, description: String, body: String) throws -> String
@@ -57,7 +59,7 @@ extension SkillStoreProtocol {
 
 final class SkillStore: SkillStoreProtocol {
     private let fileService: FileServiceProtocol
-    private let baseDir: String
+    let baseDir: String
 
     init(fileService: FileServiceProtocol, baseDir: String) {
         self.fileService = fileService

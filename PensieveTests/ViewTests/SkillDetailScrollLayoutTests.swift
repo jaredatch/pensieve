@@ -179,8 +179,8 @@ extension SkillDetailScrollLayoutTests {
         let base = TestTemporaryDirectory.path + "SkillDetailScrollLayoutTests-\(UUID().uuidString)"
         let skill = Skill(name: "Example", directoryName: "example")
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: base),
-            fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills"),
+            fileWatchService: FileWatchService(rootDir: base + "/skills"), manifestRoot: base
         )
         let history = UpstreamHistoryViewModel(
             readOperation: { _, _, _ in historyResult() },
@@ -199,7 +199,7 @@ extension SkillDetailScrollLayoutTests {
                 onOpenUpdates: {},
                 onUpdateCheck: { _ in },
                 git: TestPaths.git,
-                store: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
+                store: library.skillStore,
                 workingDir: base
             ))),
             ("Installed History", AnyView(InstalledSkillHistoryView(

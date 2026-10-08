@@ -30,11 +30,8 @@ struct WaitingRemoval: Codable, Equatable {
     var isValid: Bool {
         guard projectPath.hasPrefix("/"), platform.supportsProjectScope,
               (try? LinkService.validatePathComponent(slug)) != nil, !source.isEmpty else { return false }
-        let expected = platform == .cursor
-            ? DeployPaths(skillsDirectory: "", userSkillsDirectories: [:],
-                cursorUserRulesDirectory: "").cursorPath(directoryName: slug, projectPath: projectPath)
-            : DeployPaths(skillsDirectory: "", userSkillsDirectories: [:],
-                cursorUserRulesDirectory: "").linkPath(directoryName: slug, platform: platform, projectPath: projectPath)
+        guard let expected = DeployPaths.projectArtifactPath(directoryName: slug, platform: platform,
+                                                              projectPath: projectPath) else { return false }
         guard artifactPath == expected else { return false }
         if let fingerprint = legacyFingerprint {
             return platform == .cursor && fingerprint.byteCount >= 0 && fingerprint.digest.utf8.count == 64

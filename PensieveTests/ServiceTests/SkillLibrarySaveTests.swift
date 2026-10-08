@@ -285,6 +285,7 @@ private struct FilesGone: Error {}
 
 /// A store whose canonical writer refuses every write; reads answer "A".
 final class ThrowingSkillStore: SkillStoreProtocol {
+    let baseDir = TestPaths.skillsDir
     func createSkill(name: String, description: String, body: String) throws -> String { "created-skill" }
     func readBody(directoryName: String) throws -> String { "A" }
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
@@ -295,6 +296,7 @@ final class ThrowingSkillStore: SkillStoreProtocol {
 }
 
 final class CountingSkillStore: SkillStoreProtocol {
+    let baseDir = TestPaths.skillsDir
     private(set) var writeCount = 0
     private(set) var lastWrittenBody: String?
     /// The skill's files removed from under the app: every read fails, as `FileService` would.

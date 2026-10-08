@@ -14,8 +14,8 @@ final class SkillContentTabLayoutTests: XCTestCase {
                                     SkillBundleInventory.File(relativePath: long, bytes: 10, tokens: 3)]
         let base = TestTemporaryDirectory.path + "SkillContentTabLayoutTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: base),
-            fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills"),
+            fileWatchService: FileWatchService(rootDir: base + "/skills"), manifestRoot: base
         )
         let presentation = SkillContentPresentation.resolve(
             selectedFile: "SKILL.md", requestedMode: .rendered, inventory: snapshot.inventory
@@ -44,8 +44,8 @@ final class SkillContentTabLayoutTests: XCTestCase {
     func testThePulldownWidensWhenTheListArrives() throws {
         let base = TestTemporaryDirectory.path + "SkillContentTabLayoutTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: base),
-            fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills"),
+            fileWatchService: FileWatchService(rootDir: base + "/skills"), manifestRoot: base
         )
         let skill = Skill(name: "Example", directoryName: "example")
         func tab(_ paths: [String]) -> AnyView {
@@ -130,12 +130,12 @@ final class SkillContentTabLayoutTests: XCTestCase {
     ) -> (host: NSHostingView<AnyView>, window: NSWindow) {
         let skill = Skill(name: "Example", directoryName: "example")
         let fileService = DeployRecordingFileService()
-        fileService.contents[TestPaths.skillsDir + "/example/scripts/x.sh"] = "echo hi"
         let base = TestTemporaryDirectory.path + "SkillContentTabLayoutTests-\(UUID().uuidString)"
+        fileService.contents[base + "/skills/example/scripts/x.sh"] = "echo hi"
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: base),
-            fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestRoot: TestPaths.storeRoot
+            skillStore: SkillStore(fileService: fileService, baseDir: base + "/skills"),
+            fileService: fileService, fileWatchService: FileWatchService(rootDir: base + "/skills"),
+            manifestRoot: base
         )
         var snapshot = DetailContentSnapshot()
         snapshot.inventory.files = [

@@ -109,8 +109,8 @@ final class CursorCompiler: CursorCompilerProtocol {
     }
 
     func outputPath(skill: Skill, projectPath: String?) -> String {
-        DeployPaths(skillsDirectory: "", userSkillsDirectories: [:], cursorUserRulesDirectory: userRulesDirectory)
-            .cursorPath(directoryName: skill.directoryName, projectPath: projectPath)
+        DeployPaths.cursorPath(directoryName: skill.directoryName,
+            rulesDirectory: projectPath.map { $0 + "/.cursor/rules" } ?? userRulesDirectory)
     }
 
     // MARK: - MDC Generation
