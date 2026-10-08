@@ -86,6 +86,9 @@ final class SyncBytePreservationTests: XCTestCase {
         _ = try engine(git: gitB).sync(root: storeB, message: "B sync-in", credential: nil, context: contextB)
         XCTAssertEqual(try inventory(at: storeB + "/skills"), expected)
 
+        if nestedRepositories {
+            try assertTrackedRepositoriesKeepSyncing(gitA: gitA, gitB: gitB, context: contextA, expected: expected)
+        }
         if fastForward { try assertExistingStorePull(gitA: gitA, gitB: gitB, context: contextA) }
         try assertRewrittenTransport()
     }
@@ -134,6 +137,16 @@ final class SyncBytePreservationTests: XCTestCase {
         try files.writeFile(at: storeB + "/skills/bytes/assets/ignored.bin", content: "untracked skill bytes")
         XCTAssertFalse(gitB.isWorktreeClean(at: storeB), "Skill ignores cannot hide pending store changes")
         try files.deleteFile(at: storeB + "/skills/bytes/assets/ignored.bin")
+        for relative in nestedRoots {
+            let nested = storeB + "/skills/" + relative
+            try files.createDirectory(at: nested)
+            try gitB.initRepository(at: nested)
+            try files.writeFile(at: nested + "/nested.txt", content: "local repository\n")
+            try gitB.stageAllAndCommit(at: nested, message: "local")
+        }
+        XCTAssertTrue(gitB.isWorktreeClean(at: storeB), "Omitted nested repositories must not park the daemon")
+        XCTAssertFalse(try gitB.stageAllAndCommit(at: storeB, message: "omitted repositories"))
+        XCTAssertTrue(gitB.isWorktreeClean(at: storeB), "Manual staging and daemon cleanliness must agree")
         guard case .fastForwarded = try gitB.fastForwardOnly(at: storeB, credential: nil) else {
             return XCTFail("Expected fast-forward")
         }
@@ -274,6 +287,40 @@ extension SyncBytePreservationTests {
 
 extension SyncBytePreservationTests {
     private var nestedRoots: [String] { ["bytes/assets/vendor", "authored/vendor"] }
+
+    private func assertTrackedRepositoriesKeepSyncing(gitA: GitService, gitB: GitService,
+                                                      context: ModelContext, expected: [String: Data]) throws {
+        let store = base + "/storeA"
+        var expected = expected
+        for (relative, validRepository) in [("skills/bytes", true), ("skills", true), ("skills/authored", false)] {
+            try assertRemoteBytes(expected, git: gitA, remote: base + "/remote.git")
+            let marker = store + "/" + relative + "/.git"
+            if validRepository {
+                try gitA.initRepository(at: store + "/" + relative)
+            } else {
+                try files.writeFile(at: marker, content: "a stray fixture, not a repository\n")
+            }
+            let bytes = Data("updated with \(relative) repository=\(validRepository)\n".utf8)
+            expected["bytes/assets/payload.bin"] = bytes
+            try files.writeData(at: store + "/skills/bytes/assets/payload.bin", data: bytes)
+            XCTAssertNoThrow(try gitA.stagePath(relative, at: store))
+            XCTAssertEqual(try engine(git: gitA).sync(root: store, message: "tracked nested repository", credential: nil,
+                context: context), .synced(pushed: true, warnings: []))
+            try assertRemoteBytes(expected, git: gitA, remote: base + "/remote.git")
+            let tree = try gitA.runOrThrow(["--git-dir", base + "/remote.git", "ls-tree", "-r", "main"], in: nil)
+            XCTAssertFalse(tree.stdout.contains("160000"), "A tracked skill must stay files, never a gitlink")
+            _ = try gitB.fastForwardOnly(at: base + "/storeB", credential: nil)
+            for (path, content) in expected {
+                XCTAssertEqual(try? files.readData(at: base + "/storeB/skills/" + path), content,
+                               "Another machine lost \(path) after \(relative) gained .git")
+            }
+            if validRepository { try files.deleteDirectory(at: marker) } else { try files.deleteFile(at: marker) }
+            // Restore both stores before the next case, so each marker independently threatens
+            // files that were already synced rather than inheriting the preceding case's loss.
+            _ = try engine(git: gitA).sync(root: store, message: "nested metadata removed", credential: nil, context: context)
+            _ = try gitB.fastForwardOnly(at: base + "/storeB", credential: nil)
+        }
+    }
 
     private func prepareInventory(store: String, git: GitService, nestedRepositories: Bool) throws -> [String: Data] {
         if nestedRepositories {

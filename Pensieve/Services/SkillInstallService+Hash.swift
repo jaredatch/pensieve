@@ -65,10 +65,12 @@ extension SkillInstallService {
     static func cleanupVendorTemps(
         fileService: FileServiceProtocol = FileService(),
         storeRoot: String,
-        lockPath: String
+        lockPath: String,
+        externallyHeldLock: Bool = false
     ) {
-        guard let lock = SyncLock.tryAcquire(at: lockPath) else { return }
-        defer { lock.release() }
+        let lock = externallyHeldLock ? nil : SyncLock.tryAcquire(at: lockPath)
+        guard externallyHeldLock || lock != nil else { return }
+        defer { lock?.release() }
         let parent = (storeRoot as NSString).deletingLastPathComponent
         let prefix = (storeRoot as NSString).lastPathComponent + ".vendor-"
         guard !fileService.isSymlink(at: parent),

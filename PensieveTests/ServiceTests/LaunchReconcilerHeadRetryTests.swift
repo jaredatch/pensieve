@@ -241,10 +241,19 @@ final class LaunchReconcilerHeadRetryTests: XCTestCase {
         let outerLock = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
         defer { outerLock.release() }
 
+        let parent = (tempDir as NSString).deletingLastPathComponent
+        let cloneTemp = parent + "/.pensieve-clone-" + UUID().uuidString
+        let vendorTemp = tempDir + ".vendor-" + UUID().uuidString + ".tmp"
+        let sentinel = parent + "/.pensieve-clone-backup-" + UUID().uuidString
+        for path in [cloneTemp, vendorTemp, sentinel] { try fileService.writeFile(at: path + "/keep", content: "bytes") }
+        defer { for path in [cloneTemp, vendorTemp, sentinel] { try? fileService.deleteDirectory(at: path) } }
+
         // Without the vouch, validation self-conflicts against the outer lock: needs-retry forever.
         let conflicted = rec.reconcileOnLaunch(context: ctx, alreadyMigrated: true)
         XCTAssertTrue(conflicted.ingestionNeedsRetry)
         XCTAssertNil(conflicted.ingestedHeadStamp)
+        XCTAssertTrue(fileService.directoryExists(at: cloneTemp))
+        XCTAssertTrue(fileService.directoryExists(at: vendorTemp))
 
         // With the vouch, ingestion completes under the caller's lock.
         let completed = rec.reconcileOnLaunch(
@@ -252,6 +261,10 @@ final class LaunchReconcilerHeadRetryTests: XCTestCase {
         )
         XCTAssertFalse(completed.ingestionNeedsRetry)
         XCTAssertNotNil(completed.ingestedHeadStamp)
+        XCTAssertFalse(fileService.directoryExists(at: cloneTemp), "Launch must sweep under its caller's held lock")
+        XCTAssertFalse(fileService.directoryExists(at: vendorTemp), "Vendor cleanup shares the held-lock contract")
+        XCTAssertEqual(try fileService.readFile(at: sentinel + "/keep"), "bytes")
+        XCTAssertNil(SyncLock.tryAcquire(at: lockPath), "Cleanup must not release the caller's lock")
     }
 
     private func seedManifestAndHead() throws -> String {

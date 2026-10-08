@@ -220,6 +220,28 @@ final class GitServiceTests: XCTestCase {
         let remote = try seededRemote()
         let a = try clone(remote, "a")
         XCTAssertFalse(try git.stageAllAndCommit(at: a, message: "noop"))
+
+        let files = FileService()
+        let blocked = a + "/skills/bytes/cache"
+        try files.createDirectory(at: blocked)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: blocked)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: blocked) }
+        XCTAssertThrowsError(try files.listDirectory(at: blocked), "The fixture must actually be unreadable")
+        XCTAssertNoThrow(try git.stageAllAndCommit(at: a, message: "unreadable directory"))
+        XCTAssertNoThrow(try git.stagePath("README.md", at: a))
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: blocked)
+
+        let assets = a + "/skills/bytes/assets"
+        try files.writeFile(at: assets + "/a", content: "tracked asset")
+        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "assets"))
+        try files.deleteDirectory(at: assets)
+        try files.createSymlink(at: assets, pointingTo: "cache")
+        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "directory becomes symlink"))
+        XCTAssertFalse(try git.stageAllAndCommit(at: a, message: "symlink noop"))
+        try git.push(at: a, credential: nil)
+        let b = try clone(remote, "b")
+        XCTAssertTrue(files.isSymlink(at: b + "/skills/bytes/assets"))
+        XCTAssertEqual(try files.symlinkTarget(at: b + "/skills/bytes/assets"), "cache")
     }
 
     func testPullRebaseUpToDate() throws {

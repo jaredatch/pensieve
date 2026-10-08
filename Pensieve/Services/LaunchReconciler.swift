@@ -95,12 +95,7 @@ struct LaunchReconciler {
         }
         // App init makes the first best-effort sweep. Retry immediately before rebuild because a
         // daemon may have held sync.lock during init.
-        GitService.cleanupCloneTemps(fileService: fileService, storeRoot: root, lockPath: lockPath)
-        SkillInstallService.cleanupVendorTemps(
-            fileService: fileService,
-            storeRoot: root,
-            lockPath: lockPath
-        )
+        cleanupTemps(externallyHeldLock: externallyHeldLock)
 
         // Rebuild-from-disk only when there's an authoritative manifest to rebuild FROM (`shouldRebuildOnLaunch`):
         // a readable-and-COMPLETE manifest (a daemon pull / established store — ingest it), OR an
@@ -153,6 +148,13 @@ struct LaunchReconciler {
             ingestedHeadStamp: validation.ingestedHeadStamp,
             ingestionNeedsRetry: validation.ingestionNeedsRetry
         )
+    }
+
+    private func cleanupTemps(externallyHeldLock: Bool) {
+        GitService.cleanupCloneTemps(fileService: fileService, storeRoot: root, lockPath: lockPath,
+                                     externallyHeldLock: externallyHeldLock)
+        SkillInstallService.cleanupVendorTemps(fileService: fileService, storeRoot: root, lockPath: lockPath,
+                                               externallyHeldLock: externallyHeldLock)
     }
 
     private func quarantinedOutcome() -> LaunchReconcileOutcome {

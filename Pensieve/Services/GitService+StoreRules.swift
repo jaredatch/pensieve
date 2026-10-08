@@ -12,9 +12,10 @@ extension GitService {
     }
 
     static func cleanupCloneTemps(fileService: FileServiceProtocol = FileService(),
-                                  storeRoot: String, lockPath: String) {
-        guard let lock = SyncLock.tryAcquire(at: lockPath) else { return }
-        defer { lock.release() }
+                                  storeRoot: String, lockPath: String, externallyHeldLock: Bool = false) {
+        let lock = externallyHeldLock ? nil : SyncLock.tryAcquire(at: lockPath)
+        guard externallyHeldLock || lock != nil else { return }
+        defer { lock?.release() }
         let parent = (storeRoot as NSString).deletingLastPathComponent
         let prefix = ".pensieve-clone-"
         guard !fileService.isSymlink(at: parent), fileService.directoryExists(at: parent),
@@ -102,64 +103,61 @@ struct StoreGitOperation {
     }
 
     func unstagedSkillPaths() throws -> Data {
-        var args = ["ls-files", "--others", "-z"]
+        try untrackedPaths("skills")
+    }
+
+    private func untrackedPaths(_ path: String) throws -> Data {
+        var args = ["--literal-pathspecs", "ls-files", "--others", "-z"]
         for path in [root + "/.gitignore", infoDirectory + "/exclude"]
             where git.fileService.fileExists(at: path) {
             args.append("--exclude-from=" + path)
         }
-        args += ["--", "skills"]
-        let result = try runData(args)
-        guard result.exit == 0 else { throw git.dataCommandError(result, args: ["-C", root] + args) }
-        return result.stdout
+        args += ["--", path]
+        return try untrackedFiles(args)
     }
 
-    /// Nested repositories stay local: exclude their whole tree instead of creating orphan gitlinks.
-    /// Root/info excludes still apply; other skill files are force-staged using literal NUL pathspecs.
-    func stage() throws {
-        let nested = try nestedRepositories(in: "skills")
-        let args = ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]
-        let ordinary = try runData(args)
-        guard ordinary.exit == 0 else { throw git.dataCommandError(ordinary, args: ["-C", root] + args) }
-        try stage(ordinary.stdout, excluding: nested)
-        if !nested.isEmpty {
-            try runOrThrow(["--literal-pathspecs", "rm", "-r", "--cached", "--force", "--ignore-unmatch", "--"] + nested)
+    func ordinaryUntrackedPaths() throws -> Data {
+        try untrackedFiles(["ls-files", "--others", "--exclude-standard", "-z"])
+    }
+
+    /// Git reports an untracked nested repository as a slash-terminated entry rather than its files.
+    /// Already indexed directories keep their ordinary files even after gaining their own .git.
+    private func untrackedFiles(_ args: [String]) throws -> Data {
+        let result = try runData(args)
+        guard result.exit == 0 else { throw git.dataCommandError(result, args: ["-C", root] + args) }
+        var files = Data()
+        for path in result.stdout.split(separator: 0) where path.last != 0x2F {
+            files.append(contentsOf: path)
+            files.append(0)
         }
-        try stage(unstagedSkillPaths(), excluding: nested)
+        return files
+    }
+
+    /// Update tracked paths natively before enumerating new files, so stale children beneath a
+    /// replacement symlink are removed. Git's enumeration omits new nested repositories; no extra
+    /// filesystem walk or index removal is needed. Force-stage skill files hidden by skill ignores.
+    func stage() throws {
+        try runOrThrow(["--literal-pathspecs", "add", "--update"])
+        try stage(ordinaryUntrackedPaths())
+        try stage(unstagedSkillPaths())
     }
 
     func stagePath(_ path: String) throws {
-        let nested = try nestedRepositories(in: "skills")
-        if let repository = nested.first(where: { path == $0 || path.hasPrefix($0 + "/") }) {
-            try runOrThrow(["--literal-pathspecs", "rm", "-r", "--cached", "--force", "--ignore-unmatch", "--", repository])
-        } else {
-            try runOrThrow(["--literal-pathspecs", "add", "--force", "--", path])
+        let args = ["--literal-pathspecs", "ls-files", "--cached", "-z", "--", path]
+        let cached = try runData(args)
+        guard cached.exit == 0 else { throw git.dataCommandError(cached, args: ["-C", root] + args) }
+        if !cached.stdout.isEmpty {
+            try runOrThrow(["--literal-pathspecs", "add", "--update", "--", path])
         }
+        try stage(untrackedPaths(path))
     }
 
-    private func stage(_ paths: Data, excluding nested: [String]) throws {
-        let paths = paths.split(separator: 0).filter { bytes in
-            guard let path = String(bytes: bytes, encoding: .utf8) else { return true }
-            return !nested.contains { path == $0 || path.hasPrefix($0 + "/") }
-        }
+    private func stage(_ paths: Data) throws {
         guard !paths.isEmpty else { return }
-        var data = Data()
-        for path in paths { data.append(contentsOf: path); data.append(0) }
         let pathspec = infoDirectory + "/pensieve-stage-" + UUID().uuidString
-        try git.fileService.writeData(at: pathspec, data: data)
+        try git.fileService.writeData(at: pathspec, data: paths)
         defer { try? git.fileService.deleteFile(at: pathspec) }
         try runOrThrow(["--literal-pathspecs", "add", "--force", "--all",
                         "--pathspec-from-file=" + pathspec, "--pathspec-file-nul"])
-    }
-
-    private func nestedRepositories(in relative: String) throws -> [String] {
-        let files = git.fileService
-        let directory = root + "/" + relative
-        guard !files.isSymlink(at: directory), files.directoryExists(at: directory) else { return [] }
-        if files.directoryExists(at: directory + "/.git") || files.fileExists(at: directory + "/.git") {
-            return [relative]
-        }
-        return try files.listDirectory(at: directory).flatMap { entry in
-            try nestedRepositories(in: relative + "/" + entry)
-        }
     }
 }

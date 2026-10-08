@@ -184,10 +184,20 @@ final class GitServiceRebaseTests: XCTestCase {
         try write("two.txt", "two\n", in: cloneB)
         XCTAssertTrue(try git.stageAllAndCommit(at: cloneB, message: "two"))
 
+        let files = FileService()
+        let assets = cloneB + "/skills/bytes/assets"
+        try files.writeFile(at: assets + "/a", content: "asset")
+        XCTAssertTrue(try git.stageAllAndCommit(at: cloneB, message: "assets"))
+        try files.deleteDirectory(at: assets)
+        try files.createSymlink(at: assets, pointingTo: "../../other")
+
         XCTAssertTrue(try git.collapseToSingleCommit(at: cloneB, message: "collapsed", credential: nil))
         let count = try rawGit(["rev-list", "--count", "origin/main..HEAD"], in: cloneB).out
             .trimmingCharacters(in: .whitespacesAndNewlines)
         XCTAssertEqual(count, "1")
+        let tree = try rawGit(["ls-tree", "HEAD", "--", "skills/bytes/assets"], in: cloneB)
+        XCTAssertTrue(tree.out.hasPrefix("120000 blob"), "Collapse must stage the replacement symlink")
+        XCTAssertEqual(try rawGit(["show", "HEAD:skills/bytes/assets"], in: cloneB).out, "../../other")
     }
 
     func testNonEmptyContinueFailureDoesNotSkip() throws {

@@ -15,12 +15,15 @@ enum FastForwardResult: Equatable {
 /// `GitServiceProtocol` exposure lands in Stage 12.6, when the daemon injects a stub for its
 /// branch tests.
 extension GitService {
-    /// True iff the worktree has no uncommitted changes (tracked OR untracked). A failed/non-zero
+    /// True iff the worktree has no uncommitted changes sync would stage. New nested repositories
+    /// stay local; tracked files and ordinary untracked files (including skill-ignored ones) count.
+    /// A failed/non-zero
     /// `status` (e.g. the path is not a repo) is treated as NOT clean — the conservative default that
     /// keeps a downstream puller from fast-forwarding over a worktree it could not inspect.
     func isWorktreeClean(at path: String) -> Bool {
         guard let store = try? storeOperation(at: path),
-              let r = try? store.run(["status", "--porcelain"]), r.exit == 0,
+              let r = try? store.run(["status", "--porcelain", "--untracked-files=no"]), r.exit == 0,
+              let ordinary = try? store.ordinaryUntrackedPaths(), ordinary.isEmpty,
               let unstaged = try? store.unstagedSkillPaths(), unstaged.isEmpty else { return false }
         return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
