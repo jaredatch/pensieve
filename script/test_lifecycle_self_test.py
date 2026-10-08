@@ -192,7 +192,7 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
                     self.assertEqual(len(bundles), 1)
                     self.assertEqual((bundles[0] / 'marker').read_text(), 'preserved evidence')
 
-    def test_sweep_removes_only_old_empty_uppercase_uuid_directories(self):
+    def test_sweep_removes_only_old_matching_temp_artifacts(self):
         old_empty, nonempty, young = [self.system_temp / str(uuid.UUID(int=index)).upper() for index in (10, 11, 12)]
         unrelated = self.system_temp / "ordinary-folder"
         lowercase = self.system_temp / "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
@@ -239,11 +239,125 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
                      nested_process, *invalid_process_paths):
             os.utime(path, (1, 1))
 
+        # Reap a real child, then prove its PID is dead. The live control is this test's PID.
+        exited = subprocess.run(["python3", "-c", "import os; print(os.getpid())"],
+                                capture_output=True, text=True, check=True)
+        dead_pid = int(exited.stdout)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(dead_pid, 0)
+        icon_name = f"Pensieve1024x1024_NSAppearanceNameSystem_{process_uuid}-{dead_pid}-aBc09F.png"
+        live_icon = icon_name.replace(f"-{dead_pid}-", f"-{os.getpid()}-")
+        outside_file = self.root / "outside-file"
+        outside_file.touch()
+        (target / icon_name).write_text("keep outside icon")
+        linked_targets = {target}
+        cases = []
+
+        def artifact(kind, label, remove=False, content=None, leaf_kind="file", extra=False,
+                     young=False, leaf_name=None, directory_name=None, root_kind="directory"):
+            index = 100 + len(cases)
+            name = directory_name or (f"TemporaryDirectory.{index:06d}" if kind == "temporary"
+                                      else str(uuid.UUID(int=index)).upper() if kind == "icon"
+                                      else f"{process_uuid}-{20000 + index}-aBc09F")
+            path = self.system_temp / name
+            leaf_name = leaf_name or (".keep-directory" if kind == "temporary"
+                                     else icon_name if kind == "icon" else "marker")
+            if root_kind == "link":
+                linked_target = target / f"{kind}-{index}"
+                linked_target.mkdir()
+                if kind in ("temporary", "icon"):
+                    (linked_target / leaf_name).touch()
+                os.utime(linked_target, (1, 1))
+                linked_targets.add(linked_target)
+                path.symlink_to(linked_target, target_is_directory=True)
+            elif root_kind == "file":
+                path.touch()
+            else:
+                path.mkdir()
+                if content is not None:
+                    leaf = path / leaf_name
+                    if leaf_kind == "link":
+                        leaf.symlink_to(outside_file)
+                    elif leaf_kind == "directory":
+                        leaf.mkdir()
+                    elif leaf_kind == "fifo":
+                        os.mkfifo(leaf)
+                    else:
+                        leaf.write_text(content)
+                if extra:
+                    (path / "other-entry").write_text("keep extra data")
+            if not young:
+                os.utime(path, (1, 1), follow_symlinks=False)
+            cases.append((label, path, remove, root_kind))
+            return path
+
+        artifact("process", "populated process folder", content="keep process data")
+        artifact("process", "young process folder", young=True)
+        artifact("process", "process root file", root_kind="file")
+        artifact("process", "process root symlink", root_kind="link")
+        for name in invalid_process_names - {process_uuid, "ordinary-folder"}:
+            artifact("process", "invalid process name " + name, directory_name=name)
+
+        artifact("temporary", "empty replacement folder", remove=True)
+        artifact("temporary", "empty replacement marker", remove=True, content="")
+        artifact("temporary", "replacement marker beside another entry", content="", extra=True)
+        artifact("temporary", "nonempty replacement marker", content="keep marker data")
+        artifact("temporary", "replacement marker directory", content="", leaf_kind="directory")
+        artifact("temporary", "replacement marker symlink", content="", leaf_kind="link")
+        artifact("temporary", "replacement marker FIFO", content="", leaf_kind="fifo")
+        artifact("temporary", "different replacement file", content="", leaf_name="keep-directory")
+        artifact("temporary", "young empty replacement folder", young=True)
+        artifact("temporary", "young replacement marker", content="", young=True)
+        artifact("temporary", "replacement root symlink", root_kind="link")
+        artifact("temporary", "replacement root file", root_kind="file")
+        for suffix in ("", "abc12", "abc1234", "abc_12", "abc123-extra"):
+            artifact("temporary", "invalid replacement suffix " + suffix,
+                     directory_name="TemporaryDirectory." + suffix)
+
+        artifact("icon", "dead process icon", remove=True, content="rendered icon")
+        artifact("icon", "other appearance icon", remove=True, content="rendered dark icon",
+                 leaf_name=icon_name.replace("NSAppearanceNameSystem", "NSAppearanceNameDarkAqua"))
+        artifact("icon", "icon beside another entry", content="rendered icon", extra=True)
+        artifact("icon", "icon directory", content="", leaf_kind="directory")
+        artifact("icon", "icon symlink", content="", leaf_kind="link")
+        artifact("icon", "icon FIFO", content="", leaf_kind="fifo")
+        artifact("icon", "live process icon", content="live icon", leaf_name=live_icon)
+        artifact("icon", "young icon", content="young icon", young=True)
+        artifact("icon", "icon root symlink", root_kind="link")
+        artifact("icon", "icon root file", root_kind="file")
+        for name in ("Other1024x1024" + icon_name[len("Pensieve1024x1024"):],
+                     icon_name.replace("NSAppearanceNameSystem", ""),
+                     icon_name.replace(process_uuid, process_uuid.lower()),
+                     icon_name.replace(f"-{dead_pid}-", "-pid-"),
+                     icon_name.replace("-aBc09F.png", "-xyz.png"),
+                     icon_name + ".extra"):
+            artifact("icon", "invalid icon name " + name, content="keep foreign image", leaf_name=name)
+        artifact("process", "icon inside a process folder", content="keep misplaced image", leaf_name=icon_name)
+
+        def inventory(path):
+            if path.is_symlink():
+                return ("link", os.readlink(path))
+            if path.is_file():
+                return ("file", path.read_bytes())
+            if path.is_dir():
+                return {child.name: inventory(child) for child in path.iterdir()}
+            return ("special", path.lstat().st_mode)
+
+        preserved = {path: inventory(path) for _, path, remove, _ in cases if not remove}
+        outside_before = {path: inventory(path) for path in linked_targets}
         self.failed_run()
         self.assertFalse(old_empty.exists())
         self.assertFalse(process_old.exists(), "old empty Foundation process folder survived")
+        with self.subTest(kind="root process"):
+            self.assertFalse(misplaced.exists(), "old empty root process folder survived")
+        for label, path, remove, _ in cases:
+            with self.subTest(kind=label):
+                if remove:
+                    self.assertFalse(path.exists(), label + " survived")
+                else:
+                    self.assertEqual(inventory(path), preserved[path], label + " changed")
         self.assertEqual(set(self.system_temp.iterdir()),
-                         {nonempty, young, unrelated, lowercase, linked, regular, debug_temp, misplaced, other_app})
+                         {nonempty, young, unrelated, lowercase, linked, regular, debug_temp, other_app, *preserved})
         self.assertEqual(set(debug_temp.iterdir()),
                          {process_nonempty, process_young, process_regular, process_linked, *invalid_process_paths})
         self.assertEqual((nonempty / "marker").read_text(), "keep data")
@@ -251,6 +365,35 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
         self.assertEqual(set(other_app.iterdir()), {other_process})
         self.assertTrue(nested_process.is_dir())
         self.assertTrue(target.is_dir())
+        self.assertEqual(outside_file.read_bytes(), b"", "sweep changed a linked file target")
+        for path, before in outside_before.items():
+            self.assertEqual(inventory(path), before, "sweep followed a root symlink")
+
+        # Inject an arriving entry at the last removal boundary, using only this fake temp root.
+        import test_temp_cleanup as cleanup
+        race_root = self.root / "race-temp"
+        race_root.mkdir()
+        raced = {race_root / str(uuid.UUID(int=300)).upper(), race_root / process_name,
+                 race_root / "TemporaryDirectory.aBc123", race_root / str(uuid.UUID(int=301)).upper()}
+        for path in raced:
+            path.mkdir()
+        (race_root / "TemporaryDirectory.aBc123" / ".keep-directory").touch()
+        (race_root / str(uuid.UUID(int=301)).upper() / icon_name).write_text("raced icon")
+        for path in raced:
+            os.utime(path, (1, 1))
+        rmdir = os.rmdir
+
+        def add_entry_before_rmdir(name, *, dir_fd):
+            path = race_root / name
+            if path in raced:
+                (path / "arrived").write_text("keep racing data")
+            rmdir(name, dir_fd=dir_fd)
+
+        with patch.object(cleanup.os, "rmdir", side_effect=add_entry_before_rmdir):
+            cleanup.sweep(str(race_root))
+        self.assertEqual(set(race_root.iterdir()), raced)
+        for path in raced:
+            self.assertEqual((path / "arrived").read_text(), "keep racing data")
 
         # A symlink at the debug folder itself must not send the sweep outside its scope.
         linked_temp = self.root / "linked-system-temp"
