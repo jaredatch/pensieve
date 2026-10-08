@@ -23,10 +23,12 @@ final class AddProjectSheetHostTests: XCTestCase {
         ).modelContainer(container).background(Color(nsColor: .windowBackgroundColor)))
         let window = mount(host)
         defer { window.close() }
+        // Match the words recognition reads reliably. On the CI runner it read the caption as
+        // "Project tolder is missing at /Us…", and the path is truncated, so neither is matched.
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "The sheet must render the missing-folder reason",
                             diagnostics: { self.sheetDiagnostics(host, model) }, {
-            (try? self.renderedText(in: host).contains { $0.text.contains("Project folder is missing") }) == true
+            (try? self.renderedText(in: host).contains { $0.text.contains("missing at") }) == true
         })
         try clickAdd(in: host, window: window)
         try await Task.sleep(for: .milliseconds(50))
