@@ -18,7 +18,7 @@ struct AppRuntimePaths {
             DeployRemovalOperation(classify: { false }, delete: { false })
         }
 
-        let outputRoot: String
+        let paths: DeployPaths
 
         func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
         func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
@@ -26,10 +26,10 @@ struct AppRuntimePaths {
 
         func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
         func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
-            outputRoot + "/" + platform.rawValue + "/" + skill.directoryName
+            paths.linkPath(directoryName: skill.directoryName, platform: platform, projectPath: projectPath)
         }
         func targetPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
-            outputRoot + "/targets/" + skill.directoryName
+            paths.targetPath(directoryName: skill.directoryName, platform: platform, projectPath: projectPath)
         }
         func validateAll(skills: [Skill]) -> [BrokenLink] { [] }
     }
@@ -150,7 +150,7 @@ struct AppRuntimePaths {
         let fileService = FileService()
         return PlatformViewModel(
             fileService: fileService,
-            linkService: NoDeploymentLinkService(outputRoot: appSupportDir + "/agent-links"),
+            linkService: NoDeploymentLinkService(paths: deployPaths),
             cursorCompiler: NoDeploymentCursorCompiler(outputRoot: cursorRulesDir),
             agentDetection: makeAgentDetection(fileService: fileService),
             deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: appSupportDir),

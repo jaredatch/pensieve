@@ -63,20 +63,36 @@ extension AppRuntimePathsTests {
         try files.createDirectory(at: paths.homeDirectory + "/.claude")
         XCTAssertFalse(paths.makeAgentDetection().isInstalled(.claudeCode))
         XCTAssertEqual(paths.makeAgentDetection().installedPlatforms(), [])
-        let root = try XCTUnwrap(paths.deployPaths.userSkillsRoot(for: .claudeCode))
-        let owned = root + "/runtime"
-        try files.createSymlink(at: owned, pointingTo: paths.skillsDir + "/runtime")
+        let skill = try XCTUnwrap(context.fetch(FetchDescriptor<Skill>()).first { $0.directoryName == "runtime" })
+        let platform = paths.makePlatformViewModel()
+        var ownedPaths: [String] = []
+        var danglingPaths: [String] = []
+        for target: PlatformTarget in [.claudeCode, .hermes] {
+            let category = target == .hermes ? "/" + PathConstants.hermesDefaultCategory : ""
+            let root = paths.appSupportDir + "/agent-skills/" + target.rawValue + category
+            XCTAssertEqual(paths.deployPaths.userSkillsRoot(for: target), root)
+            let owned = root + "/runtime"
+            XCTAssertEqual(platform.artifactPath(skill: skill, platform: target, target: .userWide), owned)
+            XCTAssertEqual(platform.linkService.targetPath(skill: skill, platform: target, projectPath: nil),
+                           paths.skillsDir + "/runtime")
+            try files.createSymlink(at: owned, pointingTo: paths.skillsDir + "/runtime")
+            ownedPaths.append(owned)
+            let dangling = root + "/gone"
+            try files.createSymlink(at: dangling, pointingTo: paths.skillsDir + "/gone")
+            danglingPaths.append(dangling)
+        }
         paths.makeLaunchBackfill()(context)
         let state = DeployStateStore(fileService: files, appSupportDir: paths.appSupportDir)
-        XCTAssertEqual(try state.read().records.map(\.artifactPath), [owned])
-        let dangling = root + "/gone"
-        try files.createSymlink(at: dangling, pointingTo: paths.skillsDir + "/gone")
-        let platform = paths.makePlatformViewModel()
+        let artifacts = try state.read().records.map(\.artifactPath)
+        XCTAssertEqual(artifacts.count, ownedPaths.count)
+        XCTAssertEqual(Set(artifacts), Set(ownedPaths))
         let intent = AppRuntime.makeLaunchIntentReconciler(platformVM: platform, paths: paths)
         paths.makeConvergence(container: context.container, platformVM: platform, intentReconciler: intent)
             .run(after: .synced(pushed: false, warnings: [], completedAt: Date(), headAdvanced: false))
-        XCTAssertFalse(files.isSymlink(at: dangling), "App convergence must prune its sandboxed agent roots")
-        XCTAssertTrue(files.isSymlink(at: owned))
+        for dangling in danglingPaths {
+            XCTAssertFalse(files.isSymlink(at: dangling), "App convergence must prune its sandboxed agent roots")
+        }
+        for owned in ownedPaths { XCTAssertTrue(files.isSymlink(at: owned)) }
     }
 
     private func localSyncTransport(

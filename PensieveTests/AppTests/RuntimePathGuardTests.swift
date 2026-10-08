@@ -59,6 +59,16 @@ final class RuntimePathGuardTests: XCTestCase {
              "let x = root == RuntimePaths.production.storeRoot",
              "let x = root == .production.storeRoot",
              "let x = wrap(.production) == e",
+             "static func live() -> AppRuntimePaths { Self.production }",
+             "extension AppRuntimePaths { static func live() -> AppRuntimePaths { self.production } }",
+             "let p = RuntimePaths.self.production",
+             "let p = AppRuntimePaths.self.production",
+             "let p = (RuntimePaths.self).production",
+             "let live = type(of: p).production",
+             "let live = (type(of: p)).production",
+             "let live = Wrapper<RuntimePaths>(.production) == expected",
+             "let live = Wrapper<Box<RuntimePaths>>((.production)) != expected",
+             "let regex = #/{/#; enum Constants { static let homeDirectory = \"root\" }; let root = Constants.homeDirectory",
              "func visit() { for case let p in [RuntimePaths.production] {} }",
              "func visit() { for case let p in [AppRuntimePaths.production] {} }",
              "func visit() { for case let p in [.production] {} }"]
@@ -84,12 +94,15 @@ final class RuntimePathGuardTests: XCTestCase {
                                 ("static private(set) var foo = 1", "foo"),
                                 ("static subscript(i: Int) -> Int { i }", "subscript")]
             for (declaration, member) in declarations {
-                try ("enum " + type + " {\n" + declaration + "\n}\n").write(
-                    to: path, atomically: true, encoding: .utf8)
-                let result = try runGuard(root: directory)
-                XCTAssertEqual(result.status, 1, result.output)
-                XCTAssertTrue(result.output.contains(relative + ":2:"), result.output)
-                XCTAssertTrue(result.output.contains(type + "." + member + ";"), result.output)
+                for prefix in ["", "let regex = #/{/#\n", "}\n"] {
+                    try (prefix + "enum " + type + " {\n" + declaration + "\n}\n").write(
+                        to: path, atomically: true, encoding: .utf8)
+                    let result = try runGuard(root: directory)
+                    XCTAssertEqual(result.status, 1, result.output)
+                    let line = prefix.isEmpty ? 2 : 3
+                    XCTAssertTrue(result.output.contains(relative + ":\(line):"), result.output)
+                    XCTAssertTrue(result.output.contains(type + "." + member + ";"), result.output)
+                }
             }
             try FileManager.default.removeItem(at: path)
         }
@@ -121,6 +134,8 @@ final class RuntimePathGuardTests: XCTestCase {
             "func isLive(_ e: Env) -> Bool { .production == e }",
             "func isLive(_ e: Env) -> Bool { (.production) != e }",
             "func isLive(_ e: Env) -> Bool { e == (.production) }",
+            "func check(_ e: Env) { guard e == .production else { return } }",
+            "func check(_ e: Env) { guard e != (.production) else { return } }",
             "func isLive(_ e: Env) -> Bool { switch e { case .production: return true; default: return false } }",
             "func isLive(_ e: Env) -> Bool { if case .production = e { return true }; return false }",
             "let z = a+// Constants.homeDirectory\n",

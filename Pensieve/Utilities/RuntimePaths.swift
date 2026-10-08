@@ -27,7 +27,8 @@ struct RuntimePaths {
             ]
         } else {
             userRoots = Dictionary(uniqueKeysWithValues: PlatformTarget.allCases.filter(\.usesSymlinks).map {
-                ($0, appSupportDir + "/agent-skills/" + $0.rawValue)
+                let category = $0 == .hermes ? "/" + PathConstants.hermesDefaultCategory : ""
+                return ($0, appSupportDir + "/agent-skills/" + $0.rawValue + category)
             })
         }
         deployPaths = DeployPaths(skillsDirectory: storeRoot + "/skills", userSkillsDirectories: userRoots,
