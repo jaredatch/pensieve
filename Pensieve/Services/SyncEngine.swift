@@ -256,7 +256,7 @@ struct SyncEngine: SyncEngineProtocol {
 
     private static let resolveMessage = "Pensieve sync (resolve)"
 
-    private func pullRebase(root: String, credential: GitCredential?, incoming: String?) throws -> PullResult {
+    private func pullRebase(root: String, credential: GitCredential?, incoming: FetchedStoreRevision?) throws -> PullResult {
         if let incoming {
             return try gitService.pullRebase(at: root, credential: credential, fetchedRevision: incoming)
         }

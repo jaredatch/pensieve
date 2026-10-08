@@ -12,6 +12,12 @@ enum StoreUpdateError: LocalizedError, Equatable {
     }
 }
 
+/// The checked tree and the local branch's fork point observed before fetching its replacement.
+struct FetchedStoreRevision {
+    let commit: String
+    let forkPoint: String?
+}
+
 extension GitService {
     /// Narrow overrides retain identity, URL rewrites, credentials and unrelated configuration.
     static let storeConfigurationArgs = [
@@ -25,19 +31,22 @@ extension GitService {
 
     /// Only a store with protected local additions needs the app's pre-snapshot fetch. Return the
     /// checked commit so the later pull cannot fetch a different tree after the snapshot is written.
-    func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> String? {
+    func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision? {
         let store = try storeOperation(at: path)
         let excluded = try store.excludedUntrackedPaths()
         guard !excluded.isEmpty else { return nil }
         let revision = try fetchStoreRevision(at: path, credential: credential)
-        try store.requireNoExcludedCollision(with: revision, localPaths: excluded)
+        try store.requireNoExcludedCollision(with: revision.commit, localPaths: excluded)
         return revision
     }
 
-    func fetchStoreRevision(at path: String, credential: GitCredential?) throws -> String {
+    func fetchStoreRevision(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision {
+        let fork = try runBestEffort(["-C", path, "merge-base", "--fork-point", "refs/remotes/origin/main", "HEAD"], in: nil)
+        let forkPoint = fork?.exit == 0 ? fork?.stdout.trimmingCharacters(in: .newlines) : nil
         try fetch(at: path, credential: credential)
-        return try runOrThrow(["-C", path, "rev-parse", "--verify", "FETCH_HEAD^{commit}"], in: nil)
+        let commit = try runOrThrow(["-C", path, "rev-parse", "--verify", "FETCH_HEAD^{commit}"], in: nil)
             .stdout.trimmingCharacters(in: .newlines)
+        return FetchedStoreRevision(commit: commit, forkPoint: forkPoint?.isEmpty == false ? forkPoint : nil)
     }
 
     /// `git -C <path> fetch origin main`. Advances FETCH_HEAD and (opportunistically) the `origin/main`
@@ -146,6 +155,26 @@ struct StoreGitOperation {
         return true
     }
 
+    /// A rewritten upstream uses the pre-fetch fork point, as git pull does. Ordinary pulls keep
+    /// their existing configuration behavior; the local fetch still names only the checked commit.
+    func pullArguments(for revision: FetchedStoreRevision) throws -> [String] {
+        let ordinary = ["pull", "--rebase", ".", revision.commit]
+        guard let fork = revision.forkPoint else { return ordinary }
+        let args = ["merge-base", "--is-ancestor", fork, revision.commit]
+        let ancestor = try run(args)
+        if ancestor.exit == 0 { return ordinary }
+        guard ancestor.exit == 1 else {
+            throw GitError.commandFailed(args: ["-C", root] + args, exitCode: ancestor.exit,
+                stderr: ancestor.stderr.isEmpty ? ancestor.stdout : ancestor.stderr, confirmingProbe: ancestor.confirmingProbe)
+        }
+        // pull.ff=only refuses divergence before rebase, including after an upstream rewrite.
+        let ff = try git.runBestEffort(["-C", root, "config", "--get", "pull.ff"], in: nil)
+        if ff?.stdout.trimmingCharacters(in: .newlines) == "only" {
+            return ["merge", "--ff-only", revision.commit]
+        }
+        return ["rebase", "--onto", revision.commit, fork]
+    }
+
     func unstagedSkillPaths() throws -> Data {
         try untrackedPaths("skills")
     }
@@ -194,15 +223,27 @@ struct StoreGitOperation {
     /// Git lists even skill-ignored protected files, without treating the skill's other ignores as
     /// exclusions. Tracked legacy files never enter this inventory. Keep paths as bytes for matching.
     func excludedUntrackedPaths() throws -> [Data] {
-        let args = ["ls-files", "--others", "--ignored", "-z", "--exclude=.env", "--exclude=.env.*",
-                    "--exclude=.DS_Store", "--exclude=node_modules/"]
-        let result = try runData(args)
-        guard result.exit == 0 else { throw git.dataCommandError(result, args: ["-C", root] + args) }
-        return result.stdout.split(separator: 0).filter {
-            isExcludedUntrackedFile($0) && ($0.last != 0x2F || $0.split(separator: 0x2F).contains {
-                $0.elementsEqual("node_modules".utf8)
-            })
-        }.map { Data($0.last == 0x2F ? $0.dropLast() : $0) }
+        let fileArgs = ["ls-files", "--others", "-z", "--exclude=node_modules/"]
+        let files = try runData(fileArgs)
+        guard files.exit == 0 else { throw git.dataCommandError(files, args: ["-C", root] + fileArgs) }
+        var paths = files.stdout.split(separator: 0).filter { $0.last != 0x2F && isExcludedUntrackedFile($0) }.map { Data($0) }
+        // The pathspec prevents --directory from collapsing an untracked parent above a dependency
+        // folder. Without --ignored on the file listing, git prunes dependencies rather than entering them.
+        let args = ["ls-files", "--others", "--ignored", "--directory", "--no-empty-directory", "-z",
+                    "--exclude=node_modules/", "--", ":(glob)**/node_modules/**"]
+        let directories = try runData(args)
+        guard directories.exit == 0 else { throw git.dataCommandError(directories, args: ["-C", root] + args) }
+        var seen = Set(paths)
+        for path in directories.stdout.split(separator: 0) {
+            let components = path.split(separator: 0x2F)
+            guard let index = components.firstIndex(where: { $0.elementsEqual("node_modules".utf8) }) else { continue }
+            let folder = components.prefix(through: index).reduce(into: Data()) { result, component in
+                if !result.isEmpty { result.append(0x2F) }
+                result.append(contentsOf: component)
+            }
+            if seen.insert(folder).inserted { paths.append(folder) }
+        }
+        return paths
     }
 
     /// Refuse both exact paths and file/directory replacements that would remove protected children.
@@ -213,6 +254,10 @@ struct StoreGitOperation {
         let args = ["ls-tree", "-r", "--name-only", "-z", revision]
         let incoming = try runData(args)
         guard incoming.exit == 0 else { throw git.dataCommandError(incoming, args: ["-C", root] + args) }
+        let cachedArgs = ["ls-files", "--cached", "-z"]
+        let cached = try runData(cachedArgs)
+        guard cached.exit == 0 else { throw git.dataCommandError(cached, args: ["-C", root] + cachedArgs) }
+        let tracked = Set(cached.stdout.split(separator: 0).map { Data($0) })
         let localSet = Set(local)
         var containingPaths: [Data: Data] = [:]
         for path in local {
@@ -221,12 +266,20 @@ struct StoreGitOperation {
             }
         }
         for path in incoming.stdout.split(separator: UInt8(0)).map({ Data($0) }) {
-            let collision = containingPaths[path] ?? pathPrefixes(path).first { localSet.contains($0) }
-            if let collision {
-                let path = String(bytes: collision, encoding: .utf8)
-                    ?? collision.map { String(format: "%%%02X", $0) }.joined()
-                throw StoreUpdateError.excludedLocalFile(path: path)
+            guard let collision = containingPaths[path] ?? pathPrefixes(path).first(where: { localSet.contains($0) })
+            else { continue }
+            let displayPath = String(bytes: collision, encoding: .utf8)
+                ?? collision.map { String(format: "%%%02X", $0) }.joined()
+            // A folder receipt also covers legacy tracked descendants, whose ordinary updates are
+            // allowed. Replacing a protected folder (or one of its parents) must still stop.
+            if tracked.contains(path), containingPaths[path] == nil {
+                guard let spelling = String(bytes: path, encoding: .utf8),
+                      try git.fileService.entryTypeWithoutFollowingLinks(at: root + "/" + spelling) != .directory else {
+                    throw StoreUpdateError.excludedLocalFile(path: displayPath)
+                }
+                continue
             }
+            throw StoreUpdateError.excludedLocalFile(path: displayPath)
         }
     }
 

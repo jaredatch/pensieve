@@ -89,9 +89,9 @@ protocol GitServiceProtocol {
     func hasRemoteOriginConfigured(at path: String) throws -> Bool
     @discardableResult
     func stageAllAndCommit(at path: String, message: String) throws -> Bool
-    func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> String?
+    func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision?
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult
-    func pullRebase(at path: String, credential: GitCredential?, fetchedRevision: String) throws -> PullResult
+    func pullRebase(at path: String, credential: GitCredential?, fetchedRevision: FetchedStoreRevision) throws -> PullResult
     func push(at path: String, credential: GitCredential?) throws
     func abortRebase(at path: String) throws
     func conflictedFiles(at path: String) throws -> [String]
@@ -106,8 +106,8 @@ protocol GitServiceProtocol {
 }
 
 extension GitServiceProtocol {
-    func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> String? { nil }
-    func pullRebase(at path: String, credential: GitCredential?, fetchedRevision: String) throws -> PullResult {
+    func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision? { nil }
+    func pullRebase(at path: String, credential: GitCredential?, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
         try pullRebase(at: path, credential: credential)
     }
     /// Inert default for doubles that do not model the host environment.
@@ -612,11 +612,11 @@ extension GitService {
 
     /// Pull the already fetched and checked commit from this repository. A second remote fetch could
     /// introduce a colliding path after the app's pre-write guard, so it must not happen here.
-    func pullRebase(at path: String, credential: GitCredential?, fetchedRevision: String) throws -> PullResult {
+    func pullRebase(at path: String, credential: GitCredential?, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
         let store = try storeOperation(at: path)
-        try store.requireNoExcludedCollision(with: fetchedRevision)
+        try store.requireNoExcludedCollision(with: fetchedRevision.commit)
         let before = try headSHA(at: path)
-        let args = ["-C", path, "pull", "--rebase", ".", fetchedRevision]
+        let args = ["-C", path] + (try store.pullArguments(for: fetchedRevision))
         let r = try store.run(Array(args.dropFirst(2)), credential: credential)
         if r.exit == 0 {
             let after = try headSHA(at: path)

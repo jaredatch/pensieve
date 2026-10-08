@@ -68,7 +68,8 @@ struct ExcludedFileCollisionFixture {
     }
 
     var message: String {
-        "Sync paused so it won't overwrite \(path) on this Mac. Another Mac already synced a file there. "
+        let obstruction = path == "skills/x/node_modules/pkg/index.js" ? "skills/x/node_modules" : path
+        return "Sync paused so it won't overwrite \(obstruction) on this Mac. Another Mac already synced a file there. "
             + "Move or rename this one, then sync again."
     }
 

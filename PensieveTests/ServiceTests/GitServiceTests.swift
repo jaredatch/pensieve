@@ -264,6 +264,70 @@ final class GitServiceTests: XCTestCase {
         XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .merged)
         XCTAssertTrue(FileManager.default.fileExists(atPath: b + "/a.txt"))   // A's change arrived
     }
+
+}
+
+extension GitServiceTests {
+    func testPullRebaseDropsRewrittenUpstreamCommitsAndKeepsTheCheckedTree() throws {
+        let remote = try seededRemote()
+        let a = try clone(remote, "rewrite-a")
+        let base = try git.commitSHA(at: a)
+        try write("purged.txt", "removed upstream fixture\n", in: a)
+        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "upstream commit to purge"))
+        try git.push(at: a, credential: nil)
+        let b = try clone(remote, "rewrite-b")
+        let pinned = try clone(remote, "rewrite-pinned")
+        let control = try clone(remote, "rewrite-control")
+        for (root, name) in [(b, "b.txt"), (pinned, "pinned.txt"), (control, "control.txt")] {
+            try write(name, "local sync commit\n", in: root)
+            XCTAssertTrue(try git.stageAllAndCommit(at: root, message: "local sync commit"))
+        }
+        let reset = try rawGit(["reset", "--hard", base], in: a)
+        XCTAssertEqual(reset.code, 0, reset.err)
+        try write("rewritten.txt", "safe rewritten upstream\n", in: a)
+        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "rewritten upstream"))
+        let force = try rawGit(["push", "--force", "origin", "main"], in: a)
+        XCTAssertEqual(force.code, 0, force.err)
+        // Independent control: the original git pull drops the purged upstream commit.
+        let oldPull = try rawGit(["pull", "--rebase", "origin", "main"], in: control)
+        XCTAssertEqual(oldPull.code, 0, oldPull.err)
+        let files = FileService()
+        XCTAssertFalse(files.fileExists(at: control + "/purged.txt"))
+        try assertFastForwardOnlyRefusesRewrite(at: b)
+        XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .merged)
+        XCTAssertFalse(files.fileExists(at: b + "/purged.txt"), "A purged upstream commit must not replay")
+        XCTAssertEqual(try files.readFile(at: b + "/b.txt"), "local sync commit\n")
+        try git.push(at: b, credential: nil)
+        let bare = String(remote.dropFirst("file://".count))
+        let tree = try git.runOrThrow(["--git-dir", bare, "ls-tree", "-r", "--name-only", "main"], in: nil)
+        XCTAssertFalse(tree.stdout.split(separator: "\n").contains("purged.txt"), "Push must not restore the purge")
+
+        try files.writeFile(at: pinned + "/.env", content: "local excluded fixture\n")
+        let checked = try XCTUnwrap(git.preflightStoreUpdate(at: pinned, credential: nil))
+        let checkedHead = try git.runOrThrow(["-C", pinned, "rev-parse", "origin/main"], in: nil).stdout
+        _ = try git.pullRebase(at: a, credential: nil)
+        try files.writeFile(at: a + "/.env", content: "later upstream fixture\n")
+        try git.runOrThrow(["-C", a, "add", "--force", ".env"], in: nil)
+        try git.runOrThrow(["-C", a, "commit", "-m", "later unchecked tree"], in: nil)
+        try git.push(at: a, credential: nil)
+        XCTAssertEqual(try git.pullRebase(at: pinned, credential: nil, fetchedRevision: checked), .merged)
+        XCTAssertFalse(files.fileExists(at: pinned + "/purged.txt"))
+        XCTAssertEqual(try files.readFile(at: pinned + "/pinned.txt"), "local sync commit\n")
+        XCTAssertEqual(try files.readFile(at: pinned + "/.env"), "local excluded fixture\n")
+        XCTAssertEqual(try git.runOrThrow(["-C", pinned, "rev-parse", "origin/main"], in: nil).stdout, checkedHead,
+                       "The guarded update must not fetch the later remote tree")
+        XCTAssertFalse(git.isRebaseInProgress(at: pinned))
+    }
+
+    private func assertFastForwardOnlyRefusesRewrite(at root: String) throws {
+        let before = try git.commitSHA(at: root)
+        try git.runOrThrow(["-C", root, "config", "pull.ff", "only"], in: nil)
+        XCTAssertThrowsError(try git.pullRebase(at: root, credential: nil))
+        XCTAssertEqual(try git.commitSHA(at: root), before)
+        XCTAssertFalse(git.isRebaseInProgress(at: root))
+        try git.runOrThrow(["-C", root, "config", "--unset", "pull.ff"], in: nil)
+    }
+
 }
 
 // MARK: PLAN-24 / 24.2 git-state and adoption seams
