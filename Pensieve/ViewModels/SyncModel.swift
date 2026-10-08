@@ -43,7 +43,8 @@ final class SyncModel {
     private var queuedRequest: SyncRequest?
     private var recoveredDuringCycle = false
     private var cycleFailed = false
-    private var failedManualNeedsRecovery = false
+    private enum ManualRetry { case awaitingOutage, inOutage, ready, queued }
+    private var manualRetry: ManualRetry?
 
     /// The skill slugs currently in conflict, for row/detail badges. Strips `skills/<slug>/SKILL.md` and
     /// `manifest/skills/<slug>.yaml` to `<slug>`; category/project manifest paths are not skills.
@@ -88,7 +89,8 @@ final class SyncModel {
         return false
     }
 
-    var canSyncNow: Bool { isConfigured && !knownBranchless && !isConflicted && !isCycleInFlight }
+    var canSyncNow: Bool { isConfigured && !isConflicted && !isCycleInFlight }
+    /// Recovery catch-ups refuse known branchlessness; ordinary requests can discover an external branch.
     var canScheduleSync: Bool { isConfigured && !knownBranchless && !isConflicted }
     var canResolve: Bool { isConflicted && canStartConflictResolution }
     var canStartConflictResolution: Bool { !isCycleInFlight }
@@ -114,7 +116,14 @@ final class SyncModel {
 
     func observeGitState(_ state: RuntimeGitState) { gitState = state }
 
-    func gitUsabilityDidChange(wasUnavailable: Bool) {
+    func gitUsabilityDidChange(wasUnavailable: Bool, recovered: Bool) {
+        if gitState?.usability == .usable {
+            manualRetry = recovered && manualRetry == .inOutage ? .ready : nil
+        } else if manualRetry == .awaitingOutage {
+            manualRetry = .inOutage
+        } else if manualRetry == .ready || manualRetry == .queued {
+            manualRetry = nil
+        }
         updateConfigurationState(wasUnavailable: wasUnavailable)
     }
 
@@ -130,6 +139,7 @@ final class SyncModel {
         switch remote {
         case let .failure(error):
             knownAbsent = false
+            knownBranchless = false
             remoteReadError = DisplayTextSanitizer.singleLine(error.localizedDescription)
         case let .success(configuration):
             knownAbsent = configuration.remoteURL == nil
@@ -138,6 +148,7 @@ final class SyncModel {
             remoteReadError = nil
         }
         updateConfigurationState(wasUnavailable: wasUnavailable)
+        enqueueManualRetryIfPossible()
     }
 
     private func updateConfigurationState(wasUnavailable: Bool) {
@@ -174,9 +185,11 @@ final class SyncModel {
         if isCycleInFlight {
             recoveredDuringCycle = true
         } else {
-            let request: SyncRequest = failedManualNeedsRecovery ? .manualRecovery : .scheduled
-            failedManualNeedsRecovery = false
-            if canScheduleSync { pendingSyncRequest?(request) }
+            if manualRetry != nil {
+                enqueueManualRetryIfPossible()
+            } else if canScheduleSync {
+                pendingSyncRequest?(.scheduled)
+            }
         }
     }
 
@@ -185,29 +198,39 @@ final class SyncModel {
             queuedRequest = queuedRequest.map { $0.absorbing(request) } ?? request
             return
         }
+        if request == .manualRecovery {
+            guard manualRetry == .ready || manualRetry == .queued else { return }
+            manualRetry = .ready
+            guard canScheduleSync else { return }
+        }
         guard canSyncNow else { return }
         guard let syncRequest else { pendingSyncRequest?(request); return }
         isCycleInFlight = true
         recoveredDuringCycle = false
         cycleFailed = false
-        failedManualNeedsRecovery = false
+        manualRetry = nil
         defer { finishCycle(request) }
         state = .syncing
         await syncRequest()
     }
 
     private func finishCycle(_ request: SyncRequest) {
-        failedManualNeedsRecovery = request == .manual && cycleFailed
-        if recoveredDuringCycle {
-            let catchUp: SyncRequest = request == .manual && cycleFailed ? .manualRecovery : .scheduled
+        if request == .manual && cycleFailed {
+            manualRetry = recoveredDuringCycle ? .ready
+                : gitState?.usability?.message != nil ? .inOutage : .awaitingOutage
+        }
+        if recoveredDuringCycle && canScheduleSync {
+            let catchUp: SyncRequest = manualRetry == .ready ? .manualRecovery : .scheduled
             queuedRequest = queuedRequest.map { $0.absorbing(catchUp) } ?? catchUp
-            failedManualNeedsRecovery = false
         }
         recoveredDuringCycle = false
         isCycleInFlight = false
         let followUp = queuedRequest
         queuedRequest = nil
-        if let followUp, canSyncNow { pendingSyncRequest?(followUp) }
+        if let followUp, canSyncNow {
+            if followUp == .manualRecovery { manualRetry = .queued }
+            pendingSyncRequest?(followUp)
+        }
     }
 
     func apply(_ result: SyncCycleResult) {
@@ -254,6 +277,16 @@ final class SyncModel {
         let now = Date()
         lastSyncedAt = now
         state = configurationError.map { .error($0) } ?? .synced(at: now)
+        enqueueManualRetryIfPossible()
     }
 
+}
+
+private extension SyncModel {
+    func enqueueManualRetryIfPossible() {
+        guard manualRetry == .ready, !isCycleInFlight, canScheduleSync,
+              gitState?.usability == .usable, let pendingSyncRequest else { return }
+        manualRetry = .queued
+        pendingSyncRequest(.manualRecovery)
+    }
 }

@@ -56,8 +56,9 @@ extension AppRuntime {
         scheduler.installDrain(
             hasRemote: { [weak self] in
                 guard let self else { return false }
-                return gitUsability == .usable && syncModel.canScheduleSync
+                return syncModel.isConfigured
             },
+            isGitUsable: { [weak self] in self?.gitUsability == .usable },
             isConflicted: { [weak syncModel] in syncModel?.isConflicted ?? false },
             action: { [weak syncModel] request in await syncModel?.syncAndReport(request) }
         )

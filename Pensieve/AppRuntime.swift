@@ -356,6 +356,7 @@ extension AppRuntime {
         automaticUpdateRetryDeferred = false
         if retry { checkForSkillUpdatesIfDue() }
         syncModel.resumeAfterGitRecovery()
+        scheduler.resumePendingTriggers()
     }
 
     private func startUpdateCheck(at checkedAt: Date? = nil, showsFailureAlert: Bool, automatic: Bool = false) {

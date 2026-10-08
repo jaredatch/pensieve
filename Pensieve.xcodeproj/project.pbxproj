@@ -836,6 +836,7 @@
 		F128BA83A0023B66FD7A7261 /* SkillHistoryPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E7E298FD3885226AD4C9CC1 /* SkillHistoryPresentationTests.swift */; };
 		F16C47564C69574B0299DE8B /* DaemonCLI+Deployed.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F2DDE8B4F2A8D3EDE5AF947 /* DaemonCLI+Deployed.swift */; };
 		F26A702AC21E4A7F092BA2D5 /* SkillLibraryViewModel+Write.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12D7456AC67896DBEAEBE6F /* SkillLibraryViewModel+Write.swift */; };
+		F292794706BBA6E220DBDDC6 /* AppRuntimeSyncRecoveryTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 846D612C2C6235777CF39BBF /* AppRuntimeSyncRecoveryTestSupport.swift */; };
 		F2AA5EABED26D16E5E0BBB09 /* ImportBoundedReadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1369E3C58E99BF763244A08 /* ImportBoundedReadTests.swift */; };
 		F307DE69126F513C138C04E3 /* CursorOwnershipTests+Routes.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF13118CFE46D741A5E9F351 /* CursorOwnershipTests+Routes.swift */; };
 		F356923F414405E27B8265F5 /* UpstreamHistorySequenceHarness+Diagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1104149410CE16327DFBD09 /* UpstreamHistorySequenceHarness+Diagnostics.swift */; };
@@ -1366,6 +1367,7 @@
 		830119F8AA285AE4D2FEEB31 /* CursorOwnershipTests+ReviewDeletion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CursorOwnershipTests+ReviewDeletion.swift"; sourceTree = "<group>"; };
 		83387E8D0C30A3C13EAB7401 /* ManifestServiceTests+YAMLSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ManifestServiceTests+YAMLSafety.swift"; sourceTree = "<group>"; };
 		83ADCED3BC385EA4DFAED81B /* ProjectFolderConvergenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFolderConvergenceTests.swift; sourceTree = "<group>"; };
+		846D612C2C6235777CF39BBF /* AppRuntimeSyncRecoveryTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeSyncRecoveryTestSupport.swift; sourceTree = "<group>"; };
 		848D11E7374FE5538FAB45D2 /* UpdatesViewModelTests+FolderPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UpdatesViewModelTests+FolderPreview.swift"; sourceTree = "<group>"; };
 		84A04480BA5796CA201D60DE /* SyncScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncScheduler.swift; sourceTree = "<group>"; };
 		84A2492D4B447B089CA9BDFB /* DisplayTextSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayTextSanitizer.swift; sourceTree = "<group>"; };
@@ -2058,6 +2060,7 @@
 				7D52BB22884198779082E61C /* AppRuntimeStatusOrderTests+Completion.swift */,
 				731B6B160A9946604D7743C3 /* AppRuntimeStatusOrderTests+Recovery.swift */,
 				FC81225B450BEA49913BEAE7 /* AppRuntimeSyncRecoveryTests.swift */,
+				846D612C2C6235777CF39BBF /* AppRuntimeSyncRecoveryTestSupport.swift */,
 				DA8313BD4BF82C7A67ADC035 /* AppRuntimeUpdateEnvironmentTests.swift */,
 				EA6CC007048F440FE74BD142 /* AppRuntimeUpdateRulesTests.swift */,
 				AA071EB4ED57434BDD85832A /* DeleteSkillCommandRuleTests.swift */,
@@ -3117,6 +3120,7 @@
 				A794272549B835ABC7F590F6 /* AppRuntimeStatusOrderTests+Completion.swift in Sources */,
 				657F33921B3CA7B0A14483B9 /* AppRuntimeStatusOrderTests+Recovery.swift in Sources */,
 				BA503B3CACA118715D6A4DE5 /* AppRuntimeStatusOrderTests.swift in Sources */,
+				F292794706BBA6E220DBDDC6 /* AppRuntimeSyncRecoveryTestSupport.swift in Sources */,
 				B7EA3F1C89F20E57BE187C30 /* AppRuntimeSyncRecoveryTests.swift in Sources */,
 				02C0D9BFCE2863CF6E4C064A /* AppRuntimeTests.swift in Sources */,
 				72C03CDE0BAAD8C3D641AC5A /* AppRuntimeUpdateCheckTests.swift in Sources */,

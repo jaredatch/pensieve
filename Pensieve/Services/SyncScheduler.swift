@@ -68,6 +68,7 @@ final class SyncScheduler {
     private let backgroundSyncOverride: (() -> Bool)?
     private var syncAction: ((SyncRequest) async -> Void)?
     private var hasRemote: () -> Bool = { true }
+    private var isGitUsable: () -> Bool = { true }
     private var isConflicted: () -> Bool = { false }
 
     init(
@@ -94,10 +95,12 @@ final class SyncScheduler {
 
     func installDrain(
         hasRemote: @escaping () -> Bool = { true },
+        isGitUsable: @escaping () -> Bool = { true },
         isConflicted: @escaping () -> Bool = { false },
         action: @escaping (SyncRequest) async -> Void
     ) {
         self.hasRemote = hasRemote
+        self.isGitUsable = isGitUsable
         self.isConflicted = isConflicted
         syncAction = action
         drainIfPossible()
@@ -137,6 +140,8 @@ final class SyncScheduler {
         drainIfPossible()
     }
 
+    func resumePendingTriggers() { drainIfPossible() }
+
     func enqueueTrigger() { enqueue(.scheduled) }
     func enqueueManualTrigger() { enqueue(.manual) }
     func enqueueLaunchPreflight() { enqueue(.launchPreflight) }
@@ -174,6 +179,11 @@ final class SyncScheduler {
         guard hasRemote(), !isConflicted() else {
             hasPendingTrigger = false
             pendingRequest = .scheduled
+            return
+        }
+        // Host unavailability holds privileged requests; scheduled-only work is still dropped.
+        guard isGitUsable() else {
+            if pendingRequest == .scheduled { hasPendingTrigger = false }
             return
         }
 

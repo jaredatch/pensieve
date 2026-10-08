@@ -36,7 +36,7 @@ final class RuntimeGitState {
         let recovered = usability != nil && usability != .usable && value == .usable
         let wasUnavailable = model.configurationError != nil
         usability = value
-        model.gitUsabilityDidChange(wasUnavailable: wasUnavailable)
+        model.gitUsabilityDidChange(wasUnavailable: wasUnavailable, recovered: recovered)
         return Change(usability: value, recovered: recovered)
     }
 
