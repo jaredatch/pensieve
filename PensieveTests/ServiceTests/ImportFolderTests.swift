@@ -87,6 +87,7 @@ final class ImportFolderTests: XCTestCase {
         try assertFreshCheckout(expected: expected, slug: "folder", context: context)
         try assertNoTemps()
         try assertCaseCollisionsFailWithoutReplacingFiles()
+        try assertLoneCaseVariantManifestImports()
     }
 
     func assertFreshCheckout(expected: [String: Data], slug: String, context: ModelContext) throws {

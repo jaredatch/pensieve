@@ -89,7 +89,7 @@ extension FileService {
                 continue
             }
             try validateImportSize(opened, maximumBytes: remaining)
-            if try importSourceChanged(opened) {
+            if opened.changedSinceInventory {
                 inventory.skipped.append(SkillFolderCopySkip(path: path, reason: .changed))
                 continue
             }
@@ -142,7 +142,7 @@ private final class ImportCopyInventory {
     var directories: [String] = []
     var files: [(String, ComparisonFile)] = []
     var skipped: [SkillFolderCopySkip] = []
-    private var casePaths = ["skill.md": "SKILL.md"]
+    private var casePaths: [String: String] = [:]
 
     func admit(_ directory: ComparisonDirectory, name: String, path: String, status: stat) throws -> Bool {
         let kind = status.st_mode & S_IFMT
@@ -159,12 +159,13 @@ private final class ImportCopyInventory {
             skipped.append(SkillFolderCopySkip(path: path, reason: .dotEntry))
             return false
         }
-        if kind == S_IFDIR || kind == S_IFREG {
-            if let first = casePaths[path.lowercased()], first != path {
+        let folded = path.lowercased()
+        if kind == S_IFDIR || kind == S_IFREG || folded == "skill.md" {
+            if let first = casePaths[folded], first != path {
                 let paths = [first, path].sorted()
                 throw SkillFolderCopyError.caseCollision(paths[0], paths[1])
             }
-            casePaths[path.lowercased()] = path
+            casePaths[folded] = path
         }
         switch kind {
         case S_IFDIR:
@@ -175,7 +176,7 @@ private final class ImportCopyInventory {
                 throw SkillFolderCopyError.tooManyBytes
             }
             bytes += Int(status.st_size)
-            if path == "SKILL.md" {
+            if folded == "skill.md" {
                 skillBytes = Int(status.st_size)
             } else {
                 files.append((path, ComparisonFile(directory: directory.reference, name: name, status: status)))

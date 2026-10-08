@@ -149,6 +149,7 @@ final class ComparisonOpenedFile {
         self.initial = initial
     }
     deinit { close(descriptor) }
+    var changedSinceInventory: Bool { !Self.same(initial, entry.status) }
 
     func changed() throws -> Bool {
         try directory.validate()
@@ -163,7 +164,7 @@ final class ComparisonOpenedFile {
         guard named.st_mode & S_IFMT == S_IFREG else {
             throw DescriptorFileCopy.error("file type changed", path: entry.path, code: EFTYPE)
         }
-        return !Self.same(initial, current) || !Self.same(initial, named) || !Self.same(initial, entry.status)
+        return !Self.same(initial, current) || !Self.same(initial, named) || changedSinceInventory
     }
 
     private static func same(_ left: stat, _ right: stat) -> Bool {

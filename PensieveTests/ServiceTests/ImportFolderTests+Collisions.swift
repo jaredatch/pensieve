@@ -3,6 +3,36 @@ import XCTest
 @testable import Pensieve
 
 extension ImportFolderTests {
+    func assertLoneCaseVariantManifestImports() throws {
+        for (name, spelling) in [("LoneMixed", "Skill.md"), ("LoneLower", "skill.md")] {
+            let folder = sources + "/" + name
+            let prepared = body.replacingOccurrences(of: "Folder", with: name)
+            let original = "\u{FEFF}" + prepared
+            try files.writeFile(at: folder + "/" + spelling, content: original)
+            XCTAssertEqual(try files.listDirectory(at: folder), [spelling])
+            XCTAssertNotNil(files.fileIdentity(at: folder + "/" + spelling, followingLinks: false))
+            XCTAssertEqual(files.fileIdentity(at: folder + "/SKILL.md", followingLinks: false),
+                           files.fileIdentity(at: folder + "/" + spelling, followingLinks: false),
+                           "The default source volume resolves the canonical spelling to the lone manifest")
+            try files.writeFile(at: folder + "/references/Skill.md", content: "nested manifest bytes")
+            try files.writeFile(at: folder + "/retained", content: "included")
+            let model = model()
+            XCTAssertEqual(model.scanFolder(folder), .found(1), spelling)
+            model.importSelected(context: try context())
+            XCTAssertNil(model.error, spelling)
+            XCTAssertEqual(model.importedSkillCount, 1, spelling)
+            XCTAssertEqual(model.importNotices, [], spelling)
+            let imported = store + "/skills/" + name.lowercased()
+            XCTAssertEqual(try files.listDirectory(at: imported).sorted(), ["SKILL.md", "references", "retained"], spelling)
+            XCTAssertEqual(try files.readFile(at: imported + "/SKILL.md"), prepared, spelling)
+            XCTAssertEqual(try files.listDirectory(at: imported + "/references"), ["Skill.md"], spelling)
+            XCTAssertEqual(try files.readFile(at: imported + "/references/Skill.md"), "nested manifest bytes", spelling)
+            XCTAssertEqual(try files.readFile(at: imported + "/retained"), "included", spelling)
+            XCTAssertEqual(try files.readData(at: folder + "/" + spelling), Data(original.utf8), spelling)
+            try assertNoTemps()
+        }
+    }
+
     func assertCaseCollisionsFailWithoutReplacingFiles() throws {
         // A real case-sensitive source is needed to keep both spellings as distinct inodes.
         let image = root + "/case-source.sparseimage"
