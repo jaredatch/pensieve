@@ -2,20 +2,23 @@ import Foundation
 
 enum StoreUpdateError: LocalizedError, Equatable {
     case excludedLocalFile(path: String)
+    case excludedLocalFolder(path: String)
 
     var errorDescription: String? {
         switch self {
         case let .excludedLocalFile(path):
             return "Sync paused so it won't overwrite \(path) on this Mac. Another Mac already synced a file there. "
                 + "Move or rename this one, then sync again."
+        case let .excludedLocalFolder(path):
+            return "Sync paused so it won't overwrite \(path) on this Mac. Another Mac already synced files there. "
+                + "Move or rename this folder, then sync again."
         }
     }
 }
 
-/// The checked tree and the local branch's fork point observed before fetching its replacement.
+/// The fetched tree checked for collisions before a store update.
 struct FetchedStoreRevision {
     let commit: String
-    let forkPoint: String?
 }
 
 extension GitService {
@@ -41,12 +44,10 @@ extension GitService {
     }
 
     func fetchStoreRevision(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision {
-        let fork = try runBestEffort(["-C", path, "merge-base", "--fork-point", "refs/remotes/origin/main", "HEAD"], in: nil)
-        let forkPoint = fork?.exit == 0 ? fork?.stdout.trimmingCharacters(in: .newlines) : nil
         try fetch(at: path, credential: credential)
         let commit = try runOrThrow(["-C", path, "rev-parse", "--verify", "FETCH_HEAD^{commit}"], in: nil)
             .stdout.trimmingCharacters(in: .newlines)
-        return FetchedStoreRevision(commit: commit, forkPoint: forkPoint?.isEmpty == false ? forkPoint : nil)
+        return FetchedStoreRevision(commit: commit)
     }
 
     /// `git -C <path> fetch origin main`. Advances FETCH_HEAD and (opportunistically) the `origin/main`
@@ -155,24 +156,17 @@ struct StoreGitOperation {
         return true
     }
 
-    /// A rewritten upstream uses the pre-fetch fork point, as git pull does. Ordinary pulls keep
-    /// their existing configuration behavior; the local fetch still names only the checked commit.
+    /// Git owns fork-point selection from origin/main's reflog. Explicit rebase ignores pull policy,
+    /// while --onto keeps the update pinned to the tree checked before app preparation.
     func pullArguments(for revision: FetchedStoreRevision) throws -> [String] {
-        let ordinary = ["pull", "--rebase", ".", revision.commit]
-        guard let fork = revision.forkPoint else { return ordinary }
-        let args = ["merge-base", "--is-ancestor", fork, revision.commit]
-        let ancestor = try run(args)
-        if ancestor.exit == 0 { return ordinary }
-        guard ancestor.exit == 1 else {
-            throw GitError.commandFailed(args: ["-C", root] + args, exitCode: ancestor.exit,
-                stderr: ancestor.stderr.isEmpty ? ancestor.stdout : ancestor.stderr, confirmingProbe: ancestor.confirmingProbe)
+        let upstream = "refs/remotes/origin/main"
+        let args = ["rev-parse", "--verify", upstream + "^{commit}"]
+        let head = try runOrThrow(args).stdout.trimmingCharacters(in: .newlines)
+        guard head == revision.commit else {
+            throw GitError.commandFailed(args: ["-C", root] + args, exitCode: 1,
+                stderr: "The fetched branch no longer matches the checked commit. Sync again.")
         }
-        // pull.ff=only refuses divergence before rebase, including after an upstream rewrite.
-        let ff = try git.runBestEffort(["-C", root, "config", "--get", "pull.ff"], in: nil)
-        if ff?.stdout.trimmingCharacters(in: .newlines) == "only" {
-            return ["merge", "--ff-only", revision.commit]
-        }
-        return ["rebase", "--onto", revision.commit, fork]
+        return ["rebase", "--fork-point", "--onto", revision.commit, upstream]
     }
 
     func unstagedSkillPaths() throws -> Data {
@@ -199,65 +193,70 @@ struct StoreGitOperation {
         var args = args
         // Prune dependency trees during git's walk; the byte filter also protects both enumerations
         // from lower-priority ignore rules that re-include excluded names.
-        args.insert("--exclude=node_modules/", at: args.firstIndex(of: "--") ?? args.endIndex)
+        args.insert(contentsOf: StoreExclusions.directoryArguments, at: args.firstIndex(of: "--") ?? args.endIndex)
         let result = try runData(args)
         guard result.exit == 0 else { throw git.dataCommandError(result, args: ["-C", root] + args) }
         var files = Data()
-        for path in result.stdout.split(separator: 0) where path.last != 0x2F && !isExcludedUntrackedFile(path) {
+        for path in result.stdout.split(separator: 0) where path.last != 0x2F && !StoreExclusions.isExcludedFile(path) {
             files.append(contentsOf: path)
             files.append(0)
         }
         return files
     }
 
-    /// Only new files are excluded. Native tracked updates never remove or suppress legacy files.
-    /// Compare path bytes so names that are not UTF-8 retain their usual staging behavior.
-    private func isExcludedUntrackedFile(_ path: Data.SubSequence) -> Bool {
-        let components = path.split(separator: 0x2F)
-        guard let name = components.last else { return false }
-        return name.elementsEqual(".env".utf8) || name.starts(with: ".env.".utf8)
-            || name.elementsEqual(".DS_Store".utf8)
-            || components.dropLast().contains { $0.elementsEqual("node_modules".utf8) }
-    }
-
-    /// Git lists even skill-ignored protected files, without treating the skill's other ignores as
-    /// exclusions. Tracked legacy files never enter this inventory. Keep paths as bytes for matching.
+    /// Native --directory receipts collapse only wholly untracked subtrees. Partly tracked folders
+    /// retain individual new paths; never widen them to the excluded ancestor.
     func excludedUntrackedPaths() throws -> [Data] {
-        let fileArgs = ["ls-files", "--others", "-z", "--exclude=node_modules/"]
+        let fileArgs = ["ls-files", "--others", "-z"] + StoreExclusions.directoryArguments
         let files = try runData(fileArgs)
         guard files.exit == 0 else { throw git.dataCommandError(files, args: ["-C", root] + fileArgs) }
-        var paths = files.stdout.split(separator: 0).filter { $0.last != 0x2F && isExcludedUntrackedFile($0) }.map { Data($0) }
-        // The pathspec prevents --directory from collapsing an untracked parent above a dependency
-        // folder. Without --ignored on the file listing, git prunes dependencies rather than entering them.
-        let args = ["ls-files", "--others", "--ignored", "--directory", "--no-empty-directory", "-z",
-                    "--exclude=node_modules/", "--", ":(glob)**/node_modules/**"]
+        var paths = files.stdout.split(separator: 0).filter {
+            $0.last != 0x2F && StoreExclusions.isExcludedFile($0)
+        }.map { Data($0) }
+        // The pathspec prevents --directory from collapsing an untracked parent above an excluded
+        // folder. Without --ignored on the file listing, git prunes those folders during its walk.
+        let args = ["ls-files", "--others", "--ignored", "--directory", "--no-empty-directory", "-z"]
+            + StoreExclusions.directoryArguments + ["--"] + StoreExclusions.directoryPathspecs
         let directories = try runData(args)
         guard directories.exit == 0 else { throw git.dataCommandError(directories, args: ["-C", root] + args) }
-        var seen = Set(paths)
-        for path in directories.stdout.split(separator: 0) {
-            let components = path.split(separator: 0x2F)
-            guard let index = components.firstIndex(where: { $0.elementsEqual("node_modules".utf8) }) else { continue }
-            let folder = components.prefix(through: index).reduce(into: Data()) { result, component in
-                if !result.isEmpty { result.append(0x2F) }
-                result.append(contentsOf: component)
-            }
-            if seen.insert(folder).inserted { paths.append(folder) }
-        }
+        let cachedArgs = ["ls-files", "--cached", "-z"]
+        let cached = try runData(cachedArgs)
+        guard cached.exit == 0 else { throw git.dataCommandError(cached, args: ["-C", root] + cachedArgs) }
+        let partial = Set(cached.stdout.split(separator: 0).compactMap { StoreExclusions.folderContainingFile($0) })
+        paths += directories.stdout.split(separator: 0).filter { path in
+            !partial.contains { path.starts(with: $0 + Data([0x2F])) }
+        }.map { Data($0) }
+        paths += try excludedFiles(in: partial)
         return paths
+    }
+
+    private func excludedFiles(in folders: Set<Data>) throws -> [Data] {
+        guard !folders.isEmpty else { return [] }
+        let names = try folders.map { folder -> String in
+            guard let name = String(bytes: folder, encoding: .utf8) else {
+                throw GitError.repositoryUnreadable(path: root, detail: "An excluded folder name isn't valid UTF-8.")
+            }
+            return name
+        }
+        // Limit the detailed walk to partly indexed folders. It also sees children below a tracked
+        // file replaced by a directory, which --directory omits. Untracked folder trees stay pruned.
+        let args = ["--literal-pathspecs", "ls-files", "--others", "--ignored", "-z"]
+            + StoreExclusions.directoryArguments + ["--"] + names
+        let result = try runData(args)
+        guard result.exit == 0 else { throw git.dataCommandError(result, args: ["-C", root] + args) }
+        return result.stdout.split(separator: 0).map { Data($0) }
     }
 
     /// Refuse both exact paths and file/directory replacements that would remove protected children.
     /// Native inventories avoid following links or opening secret bytes; no extra filesystem walk.
     func requireNoExcludedCollision(with revision: String, localPaths: [Data]? = nil) throws {
-        let local = try localPaths ?? excludedUntrackedPaths()
-        guard !local.isEmpty else { return }
+        let inventory = try localPaths ?? excludedUntrackedPaths()
+        guard !inventory.isEmpty else { return }
+        let folders = Set(inventory.filter { $0.last == 0x2F }.map { Data($0.dropLast()) })
+        let local = inventory.map { $0.last == 0x2F ? Data($0.dropLast()) : $0 }
         let args = ["ls-tree", "-r", "--name-only", "-z", revision]
         let incoming = try runData(args)
         guard incoming.exit == 0 else { throw git.dataCommandError(incoming, args: ["-C", root] + args) }
-        let cachedArgs = ["ls-files", "--cached", "-z"]
-        let cached = try runData(cachedArgs)
-        guard cached.exit == 0 else { throw git.dataCommandError(cached, args: ["-C", root] + cachedArgs) }
-        let tracked = Set(cached.stdout.split(separator: 0).map { Data($0) })
         let localSet = Set(local)
         var containingPaths: [Data: Data] = [:]
         for path in local {
@@ -270,15 +269,7 @@ struct StoreGitOperation {
             else { continue }
             let displayPath = String(bytes: collision, encoding: .utf8)
                 ?? collision.map { String(format: "%%%02X", $0) }.joined()
-            // A folder receipt also covers legacy tracked descendants, whose ordinary updates are
-            // allowed. Replacing a protected folder (or one of its parents) must still stop.
-            if tracked.contains(path), containingPaths[path] == nil {
-                guard let spelling = String(bytes: path, encoding: .utf8),
-                      try git.fileService.entryTypeWithoutFollowingLinks(at: root + "/" + spelling) != .directory else {
-                    throw StoreUpdateError.excludedLocalFile(path: displayPath)
-                }
-                continue
-            }
+            if folders.contains(collision) { throw StoreUpdateError.excludedLocalFolder(path: displayPath) }
             throw StoreUpdateError.excludedLocalFile(path: displayPath)
         }
     }
@@ -318,5 +309,35 @@ struct StoreGitOperation {
         defer { try? git.fileService.deleteFile(at: pathspec) }
         try runOrThrow(["--literal-pathspecs", "add", "--force", "--all",
                         "--pathspec-from-file=" + pathspec, "--pathspec-file-nul"])
+    }
+}
+
+/// The same new-file policy drives staging, daemon cleanliness and incoming-path protection.
+private enum StoreExclusions {
+    static let directories = ["node_modules", ".env", ".venv"]
+    static let templates = [".env.example", ".env.sample", ".env.template"]
+    static let directoryArguments = directories.map { "--exclude=" + $0 + "/" }
+    static let directoryPathspecs = directories.map { ":(glob)**/" + $0 + "/**" }
+
+    static func folderContainingFile(_ path: Data.SubSequence) -> Data? {
+        let components = path.split(separator: 0x2F)
+        guard let index = components.dropLast().firstIndex(where: { component in
+            directories.contains { component.elementsEqual($0.utf8) }
+        }) else { return nil }
+        return components.prefix(through: index).reduce(into: Data()) { result, component in
+            if !result.isEmpty { result.append(0x2F) }
+            result.append(contentsOf: component)
+        }
+    }
+
+    static func isExcludedFile(_ path: Data.SubSequence) -> Bool {
+        let components = path.split(separator: 0x2F)
+        guard let name = components.last else { return false }
+        if components.dropLast().contains(where: { component in
+            directories.contains { component.elementsEqual($0.utf8) }
+        }) { return true }
+        if templates.contains(where: { name.elementsEqual($0.utf8) }) { return false }
+        return name.elementsEqual(".env".utf8) || name.starts(with: ".env.".utf8)
+            || name.elementsEqual(".DS_Store".utf8)
     }
 }

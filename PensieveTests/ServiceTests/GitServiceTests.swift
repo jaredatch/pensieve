@@ -279,6 +279,7 @@ extension GitServiceTests {
         let pinned = try clone(remote, "rewrite-pinned")
         let control = try clone(remote, "rewrite-control")
         for (root, name) in [(b, "b.txt"), (pinned, "pinned.txt"), (control, "control.txt")] {
+            try configureNativeRebaseDefaults(at: root)
             try write(name, "local sync commit\n", in: root)
             XCTAssertTrue(try git.stageAllAndCommit(at: root, message: "local sync commit"))
         }
@@ -293,7 +294,6 @@ extension GitServiceTests {
         XCTAssertEqual(oldPull.code, 0, oldPull.err)
         let files = FileService()
         XCTAssertFalse(files.fileExists(at: control + "/purged.txt"))
-        try assertFastForwardOnlyRefusesRewrite(at: b)
         XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .merged)
         XCTAssertFalse(files.fileExists(at: b + "/purged.txt"), "A purged upstream commit must not replay")
         XCTAssertEqual(try files.readFile(at: b + "/b.txt"), "local sync commit\n")
@@ -319,13 +319,9 @@ extension GitServiceTests {
         XCTAssertFalse(git.isRebaseInProgress(at: pinned))
     }
 
-    private func assertFastForwardOnlyRefusesRewrite(at root: String) throws {
-        let before = try git.commitSHA(at: root)
+    private func configureNativeRebaseDefaults(at root: String) throws {
         try git.runOrThrow(["-C", root, "config", "pull.ff", "only"], in: nil)
-        XCTAssertThrowsError(try git.pullRebase(at: root, credential: nil))
-        XCTAssertEqual(try git.commitSHA(at: root), before)
-        XCTAssertFalse(git.isRebaseInProgress(at: root))
-        try git.runOrThrow(["-C", root, "config", "--unset", "pull.ff"], in: nil)
+        try git.runOrThrow(["-C", root, "config", "pull.rebase", "false"], in: nil)
     }
 
 }
@@ -588,7 +584,7 @@ extension GitServiceTests {
             .init("remoteHead", "ls-remote", { _ = try service.remoteHead(remote: remote, ref: "main", credential: credential) }),
             .init("fetch", "fetch", { try service.fetch(at: root, credential: credential) }),
             .init("fetchBranch", "fetch", { try service.fetchBranch("main", at: root, credential: credential) }),
-            .init("pullRebase", "pull", { _ = try service.pullRebase(at: root, credential: credential) }),
+            .init("pullRebase", "fetch", { _ = try service.pullRebase(at: root, credential: credential) }),
             .init("push", "push", { try service.push(at: root, credential: credential) }),
             .init("collapseToSingleCommit", "fetch", {
                 _ = try service.collapseToSingleCommit(at: root, message: "collapsed", credential: credential)

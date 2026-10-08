@@ -6,12 +6,13 @@ import XCTest
 @MainActor
 struct ExcludedFileCollisionFixture {
     static let paths = ["skills/x/.env", "skills/x/.env.local", "skills/x/.DS_Store",
-                        "skills/x/node_modules/pkg/index.js"]
+                        "skills/x/node_modules/pkg/index.js", "skills/x/.venv/pkg/index.js", "skills/x/.env/pkg/index.js"]
     let root: String
     let remote: String
     let storeA: String
     let storeB: String
     let path: String
+    let incomingPath: String
     let context: ModelContext
     let git = TestPaths.git
     let files = FileService()
@@ -20,12 +21,13 @@ struct ExcludedFileCollisionFixture {
     let beforeHead: String
     let beforeManifest: Data
 
-    init(path: String, hidden: Bool, localCommit: Bool) throws {
+    init(path: String, hidden: Bool, localCommit: Bool, incomingPath: String? = nil, legacyPath: String? = nil) throws {
         root = TestTemporaryDirectory.path + "ExcludedCollision-" + UUID().uuidString
         remote = root + "/remote.git"
         storeA = root + "/A"
         storeB = root + "/B"
         self.path = path
+        self.incomingPath = incomingPath ?? path
         let container = try ModelContainer(for: Skill.self, Project.self, Pensieve.Category.self,
             MachineDeployIntent.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         context = ModelContext(container)
@@ -38,12 +40,16 @@ struct ExcludedFileCollisionFixture {
             try files.writeFile(at: seed + "/skills/x/SKILL.md",
                                 content: "---\nname: X\ndescription: Collision fixture\n---\nbody\n")
             try files.writeFile(at: seed + "/skills/x/.gitignore",
-                                content: hidden ? ".env\n.env.*\n.DS_Store\nnode_modules/\n" : "")
+                                content: hidden ? ".env\n.env.*\n.DS_Store\nnode_modules/\n.venv/\n" : "")
             try files.writeFile(at: seed + "/.gitignore", content: ".DS_Store\n")
             context.insert(Skill(name: "X", skillDescription: "Collision fixture", directoryName: "x"))
             try context.save()
             let manifest = ManifestService()
             try manifest.write(manifest.snapshot(from: context), toRoot: seed)
+            if let legacyPath {
+                try files.writeData(at: seed + "/" + legacyPath, data: Data([5, 255]))
+                try git.runOrThrow(["-C", seed, "add", "--force", "--", legacyPath], in: nil)
+            }
             try git.stageAllAndCommit(at: seed, message: "base")
             try git.setRemote("file://" + remote, at: seed)
             try git.push(at: seed, credential: nil)
@@ -54,9 +60,9 @@ struct ExcludedFileCollisionFixture {
                 try git.stageAllAndCommit(at: storeB, message: "local ordinary commit")
             }
             try files.writeData(at: storeB + "/" + path, data: localBytes)
-            try files.writeData(at: storeA + "/" + path, data: remoteBytes)
+            try files.writeData(at: storeA + "/" + self.incomingPath, data: remoteBytes)
             // Seed a legacy tracked blob independently of the new staging policy.
-            try git.runOrThrow(["-C", storeA, "add", "--force", "--", path], in: nil)
+            try git.runOrThrow(["-C", storeA, "add", "--force", "--", self.incomingPath], in: nil)
             try git.runOrThrow(["-C", storeA, "commit", "-m", "older build tracked file"], in: nil)
             try git.push(at: storeA, credential: nil)
             beforeHead = try XCTUnwrap(git.headSHA(at: storeB))
@@ -68,8 +74,13 @@ struct ExcludedFileCollisionFixture {
     }
 
     var message: String {
-        let obstruction = path == "skills/x/node_modules/pkg/index.js" ? "skills/x/node_modules" : path
-        return "Sync paused so it won't overwrite \(obstruction) on this Mac. Another Mac already synced a file there. "
+        if let folder = ["skills/x/node_modules", "skills/x/.env", "skills/x/.venv"].first(where: {
+            path.hasPrefix($0 + "/")
+        }) {
+            return "Sync paused so it won't overwrite \(folder) on this Mac. Another Mac already synced files there. "
+                + "Move or rename this folder, then sync again."
+        }
+        return "Sync paused so it won't overwrite \(path) on this Mac. Another Mac already synced a file there. "
             + "Move or rename this one, then sync again."
     }
 

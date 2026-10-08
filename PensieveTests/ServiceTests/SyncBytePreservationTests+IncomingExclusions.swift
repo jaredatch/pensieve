@@ -9,23 +9,25 @@ extension SyncBytePreservationTests {
         try native.initRepository(at: root)
         try files.writeFile(at: root + "/skills/x/SKILL.md", content: "tracked skill\n")
         try native.stageAllAndCommit(at: root, message: "base")
-        let folders = ["node_modules", "skills/x/node_modules", "skills/new/node_modules"]
+        let folders = ["node_modules", "skills/x/node_modules", "skills/new/node_modules",
+                       ".env", "skills/x/.env", "skills/new/.env", ".venv", "skills/x/.venv", "skills/new/.venv"]
         for folder in folders {
             for name in ["package/index.js", "package/deep/other.js"] {
                 try files.writeFile(at: root + "/" + folder + "/" + name, content: "local dependency\n")
             }
         }
-        try files.writeFile(at: root + "/skills/x/.env", content: "local env\n")
+        try files.writeFile(at: root + "/skills/x/sub/.env", content: "local env\n")
         let trace = base + "/inventory-output"
         let recording = try inventoryRecordingGit(trace: trace)
         let store = try recording.storeOperation(at: root)
         let inventory = try store.excludedUntrackedPaths()
-        XCTAssertEqual(Set(inventory), Set((folders + ["skills/x/.env"]).map { Data($0.utf8) }))
+        XCTAssertEqual(Set(inventory), Set((folders.map { $0 + "/" } + ["skills/x/sub/.env"]).map { Data($0.utf8) }))
         let nativeInventory = try files.readData(at: trace).split(separator: 0)
         XCTAssertFalse(nativeInventory.isEmpty)
         XCTAssertTrue(nativeInventory.allSatisfy { $0.last == 0x2F },
                       "Git must report dependency directories, never walk their files")
-        try files.deleteFile(at: root + "/skills/x/.env")
+        try files.deleteFile(at: root + "/skills/x/sub/.env")
+        for folder in folders where !folder.contains("node_modules") { try files.deleteDirectory(at: root + "/" + folder) }
         for (index, path) in ["skills/x/node_modules/package/incoming.js", "skills/x/node_modules", "skills/x"].enumerated() {
             let incoming = base + "/incoming-\(index)"
             try files.createDirectory(at: incoming)
@@ -37,7 +39,9 @@ extension SyncBytePreservationTests {
             let revision = try native.runOrThrow(["-C", root, "rev-parse", "FETCH_HEAD"], in: nil)
                 .stdout.trimmingCharacters(in: .newlines)
             XCTAssertThrowsError(try store.requireNoExcludedCollision(with: revision)) { error in
-                XCTAssertEqual(error as? StoreUpdateError, .excludedLocalFile(path: "skills/x/node_modules"))
+                XCTAssertEqual(error.localizedDescription,
+                               "Sync paused so it won't overwrite skills/x/node_modules on this Mac. "
+                               + "Another Mac already synced files there. Move or rename this folder, then sync again.")
             }
             XCTAssertEqual(try files.readFile(at: root + "/skills/x/node_modules/package/index.js"), "local dependency\n")
             XCTAssertFalse(native.isRebaseInProgress(at: root))
@@ -57,9 +61,60 @@ extension SyncBytePreservationTests {
         try files.deleteFile(at: legacy)
         try files.writeFile(at: legacy + "/generated.js", content: "protected local dependency\n")
         XCTAssertThrowsError(try store.requireNoExcludedCollision(with: incoming)) { error in
-            XCTAssertEqual(error as? StoreUpdateError, .excludedLocalFile(path: "node_modules"))
+            XCTAssertEqual(error as? StoreUpdateError, .excludedLocalFile(path: "node_modules/legacy.js/generated.js"))
         }
         XCTAssertEqual(try files.readFile(at: legacy + "/generated.js"), "protected local dependency\n")
+    }
+
+    func testPartlyTrackedExcludedFoldersAdmitIncomingSiblingsAndProtectLocalFiles() throws {
+        for folder in ["node_modules", ".env", ".venv"] {
+            for hidden in [false, true] {
+                for app in [false, true] {
+                    do {
+                        try assertPartlyTrackedFolder(folder: folder, hidden: hidden, app: app)
+                    } catch {
+                        XCTFail("\(folder), hidden=\(hidden), app=\(app): \(error)")
+                    }
+                }
+            }
+        }
+    }
+
+    private func assertPartlyTrackedFolder(folder: String, hidden: Bool, app: Bool) throws {
+        let prefix = "skills/x/" + folder
+        let local = prefix + "/new.js"
+        let incoming = prefix + "/other.js"
+        let legacy = prefix + "/legacy.js"
+        let fixture = try ExcludedFileCollisionFixture(path: local, hidden: hidden, localCommit: app,
+                                                       incomingPath: incoming, legacyPath: legacy)
+        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+        let git = fixture.git
+        let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: git), lockPath: fixture.root + "/sync.lock")
+        if app {
+            guard case .synced = try engine.sync(root: fixture.storeB, message: "sibling", credential: nil,
+                                                 context: fixture.context) else { return XCTFail("Sibling must sync") }
+        } else {
+            XCTAssertTrue(git.isWorktreeClean(at: fixture.storeB))
+            guard case .fastForwarded = try git.fastForwardOnly(at: fixture.storeB, credential: nil)
+            else { return XCTFail("Sibling must fast-forward") }
+        }
+        XCTAssertEqual(try files.readData(at: fixture.storeB + "/" + incoming), fixture.remoteBytes)
+        XCTAssertEqual(try files.readData(at: fixture.storeB + "/" + local), fixture.localBytes)
+        XCTAssertEqual(try files.readData(at: fixture.storeB + "/" + legacy), Data([5, 255]))
+        let unpublished = try git.runData(["--git-dir", fixture.remote, "show", "main:" + local], in: nil)
+        XCTAssertNotEqual(unpublished.exit, 0, "The new local excluded file must not reach the remote")
+        _ = try git.pullRebase(at: fixture.storeA, credential: nil)
+        try files.writeData(at: fixture.storeA + "/" + local, data: fixture.remoteBytes)
+        try git.runOrThrow(["-C", fixture.storeA, "add", "--force", "--", local], in: nil)
+        try git.runOrThrow(["-C", fixture.storeA, "commit", "-m", "older writer's colliding file"], in: nil)
+        try git.push(at: fixture.storeA, credential: nil)
+        let before = try git.headSHA(at: fixture.storeB)
+        XCTAssertThrowsError(try git.fastForwardOnly(at: fixture.storeB, credential: nil)) { error in
+            XCTAssertEqual(error as? StoreUpdateError, .excludedLocalFile(path: local))
+        }
+        XCTAssertEqual(try git.headSHA(at: fixture.storeB), before)
+        XCTAssertEqual(try files.readData(at: fixture.storeB + "/" + local), fixture.localBytes)
+        XCTAssertFalse(git.isRebaseInProgress(at: fixture.storeB))
     }
 
     private func inventoryRecordingGit(trace: String) throws -> GitService {
