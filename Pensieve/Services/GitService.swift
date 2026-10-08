@@ -133,18 +133,20 @@ struct GitService: GitServiceProtocol {
     #endif
     private let gitPath: String
     let fileService: FileServiceProtocol
+    let askpassHelperPath: String
     typealias UpstreamHistoryNetworkRunner = ([String], GitCredential?) throws -> GitOutput
     private let upstreamHistoryNetworkRunner: UpstreamHistoryNetworkRunner?
 
-    /// `fileService` writes the askpass helper (08.2) through the single FS chokepoint; defaulted so
-    /// existing `GitService()` call sites and tests still compile.
+    /// The caller can place the secret-free helper beside its own application state.
     init(
         fileService: FileServiceProtocol = FileService(),
+        askpassHelperPath: String = PathConstants.gitAskpassHelperPath,
         upstreamHistoryNetworkRunner: UpstreamHistoryNetworkRunner? = nil,
         executablePath: String = "/usr/bin/git"
     ) {
         self.gitPath = executablePath
         self.fileService = fileService
+        self.askpassHelperPath = askpassHelperPath
         self.upstreamHistoryNetworkRunner = upstreamHistoryNetworkRunner
     }
 
@@ -230,7 +232,7 @@ struct GitService: GitServiceProtocol {
     /// broader permissions can never be reused; the write is idempotent and cheap next to the network
     /// op it precedes.
     private func ensureAskpassHelper() throws -> String {
-        let path = PathConstants.gitAskpassHelperPath
+        let path = askpassHelperPath
         let body = """
         #!/bin/sh
         case "$1" in

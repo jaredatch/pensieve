@@ -132,13 +132,13 @@ struct SkillInstallService: SkillInstallServiceProtocol {
     let now: () -> Date
     let validateRemote: InstallRemotePolicy.Validator
 
-    init(gitService: SkillInstallGitServing = GitService(),
-         credentialStore: CredentialStoreProtocol = KeychainCredentialStore(),
+    init(gitService: SkillInstallGitServing,
+         credentialStore: CredentialStoreProtocol,
          fileService: FileServiceProtocol = FileService(),
-         scratchRoot: String = Self.defaultScratchRoot,
-         storeRoot: String = Constants.pensieveBaseDir,
+         scratchRoot: String,
+         storeRoot: String,
          manifestService: ManifestReadWriting? = nil,
-         lockPath: String = PathConstants.pensieveAppSupportDir + "/sync.lock",
+         lockPath: String,
          now: @escaping () -> Date = Date.init,
          remoteValidator: @escaping InstallRemotePolicy.Validator =
              InstallRemotePolicy.validateGitHubRepository) {

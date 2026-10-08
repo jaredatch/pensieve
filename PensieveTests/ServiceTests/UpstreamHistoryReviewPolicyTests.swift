@@ -51,10 +51,12 @@ extension UpstreamHistoryServiceTests {
         )))
         let reader = service(git: git, contentHasher: FixedContentHasher(value: "same"))
         let installer = SkillInstallService(
+            gitService: GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass"),
             credentialStore: InMemoryCredentialStore(),
             fileService: fileService,
             scratchRoot: tempDir + "/install-scratch",
             storeRoot: tempDir + "/store",
+            lockPath: tempDir + "/sync.lock",
             remoteValidator: fixtureValidator
         )
 

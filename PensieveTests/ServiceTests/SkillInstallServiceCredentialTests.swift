@@ -29,7 +29,9 @@ extension SkillInstallServiceTests {
             gitService: rejectingGit,
             credentialStore: InMemoryCredentialStore(),
             fileService: fileService,
-            scratchRoot: tempDir + "/remote-policy-scratch"
+            scratchRoot: tempDir + "/remote-policy-scratch",
+            storeRoot: tempDir + "/store",
+            lockPath: tempDir + "/sync.lock"
         )
 
         for remote in [
@@ -61,7 +63,9 @@ extension SkillInstallServiceTests {
             gitService: rejectingGit,
             credentialStore: credentials,
             fileService: fileService,
-            scratchRoot: tempDir + "/credential-scratch"
+            scratchRoot: tempDir + "/credential-scratch",
+            storeRoot: tempDir + "/store",
+            lockPath: tempDir + "/sync.lock"
         )
 
         XCTAssertThrowsError(
@@ -98,7 +102,9 @@ extension SkillInstallServiceTests {
             gitService: authGit,
             credentialStore: InMemoryCredentialStore(),
             fileService: fileService,
-            scratchRoot: tempDir + "/auth-scratch"
+            scratchRoot: tempDir + "/auth-scratch",
+            storeRoot: tempDir + "/store",
+            lockPath: tempDir + "/sync.lock"
         )
 
         XCTAssertThrowsError(
@@ -152,7 +158,9 @@ extension SkillInstallServiceTests {
             gitService: localPermissionGit,
             credentialStore: InMemoryCredentialStore(),
             fileService: fileService,
-            scratchRoot: tempDir + "/local-permission-scratch"
+            scratchRoot: tempDir + "/local-permission-scratch",
+            storeRoot: tempDir + "/store",
+            lockPath: tempDir + "/sync.lock"
         )
 
         XCTAssertThrowsError(

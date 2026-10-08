@@ -222,6 +222,7 @@ final class UpdateCheckServiceTests: XCTestCase {
             gitService: git,
             credentialStore: InMemoryCredentialStore(),
             fileService: fileService,
+            contentHasher: makeContentHasher(),
             scratchRoot: tempDir + "/scratch",
             storeRoot: tempDir + "/store",
             now: { self.checkedAt }
@@ -262,7 +263,7 @@ final class UpdateCheckServiceTests: XCTestCase {
     }
 
     func testRemoteHeadUsesCredentialIsolationArguments() throws {
-        let productionGit = GitService(fileService: fileService)
+        let productionGit = GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass")
         XCTAssertThrowsError(
             try productionGit.remoteHead(
                 remote: "file:///definitely-missing-pensieve-update-repository",
@@ -325,10 +326,22 @@ extension UpdateCheckServiceTests {
             gitService: git,
             credentialStore: credentials,
             fileService: fileService,
+            contentHasher: makeContentHasher(),
             scratchRoot: tempDir + "/scratch",
             storeRoot: tempDir + "/store",
             now: { self.checkedAt },
             remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) }
+        )
+    }
+
+    func makeContentHasher() -> SkillInstallService {
+        SkillInstallService(
+            gitService: GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass"),
+            credentialStore: InMemoryCredentialStore(),
+            fileService: fileService,
+            scratchRoot: tempDir + "/install-scratch",
+            storeRoot: tempDir + "/store",
+            lockPath: tempDir + "/sync.lock"
         )
     }
 

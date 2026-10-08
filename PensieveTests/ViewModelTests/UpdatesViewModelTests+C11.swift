@@ -7,9 +7,14 @@ extension UpdatesViewModelTests {
         let fixture = try prepareRealPinnedUpdate()
         let (_, library) = makeRealReviewOperations(fixture: fixture)
         let hashes = UpdateReviewRecorder<Bool>()
-        let checker = UpdateCheckService(credentialStore: InMemoryCredentialStore(), fileService: fileService,
-            contentHasher: PreviewHashFailure(calls: hashes), scratchRoot: tempDir + "/unused-drift",
-            storeRoot: fixture.storeRoot)
+        let checker = UpdateCheckService(
+            gitService: GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass"),
+            credentialStore: InMemoryCredentialStore(),
+            fileService: fileService,
+            contentHasher: PreviewHashFailure(calls: hashes),
+            scratchRoot: tempDir + "/unused-drift",
+            storeRoot: fixture.storeRoot
+        )
         let defaults = UpdatesViewModel.DefaultOperations(updateCheckService: checker, skillInstallService: fixture.service)
         let window = ViewChangesViewModel(library: library, operations: UpdateReviewOperations(
             diffOperation: defaults.diffOperation,

@@ -171,11 +171,11 @@ struct UpstreamHistoryService {
     let requestedBaselineByteLimit: Int
 
     init(
-        gitService: UpstreamHistoryGitServing = GitService(),
-        credentialStore: CredentialStoreProtocol = KeychainCredentialStore(),
+        gitService: UpstreamHistoryGitServing,
+        credentialStore: CredentialStoreProtocol,
         fileService: FileServiceProtocol = FileService(),
         contentHasher: SkillContentHashing,
-        scratchRoot: String = Self.defaultScratchRoot,
+        scratchRoot: String,
         commitWindow: Int = Self.commitWindow,
         rowWindow: Int = Self.rowWindow,
         textByteLimit: Int = Self.textByteLimit,

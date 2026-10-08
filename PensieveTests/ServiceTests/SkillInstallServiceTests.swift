@@ -13,12 +13,14 @@ final class SkillInstallServiceTests: XCTestCase {
         scratchRoot = tempDir + "/scratch"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
-        gitService = GitService(fileService: fileService)
+        gitService = GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass")
         service = SkillInstallService(
             gitService: gitService,
             credentialStore: InMemoryCredentialStore(),
             fileService: fileService,
             scratchRoot: scratchRoot,
+            storeRoot: tempDir + "/store",
+            lockPath: tempDir + "/sync.lock",
             remoteValidator: fixtureRemoteValidator
         )
     }

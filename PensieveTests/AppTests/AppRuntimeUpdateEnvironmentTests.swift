@@ -12,8 +12,11 @@ final class AppRuntimeUpdateEnvironmentTests: XCTestCase {
         let git = RecordingUpdateGitService()
         let offline = GitError.commandFailed(args: ["ls-remote"], exitCode: 128, stderr: "Could not resolve host: github.com")
         let service = UpdateCheckService(
-            gitService: git, credentialStore: InMemoryCredentialStore(),
-            scratchRoot: fixture.base + "/scratch", storeRoot: fixture.root,
+            gitService: git,
+            credentialStore: InMemoryCredentialStore(),
+            contentHasher: FixedContentHasher(value: "unused"),
+            scratchRoot: fixture.base + "/scratch",
+            storeRoot: fixture.root,
             remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) }
         )
         let ids = try seedSkills(container)
@@ -61,9 +64,14 @@ final class AppRuntimeUpdateEnvironmentTests: XCTestCase {
         defaults.set(123.0, forKey: UpdateCheckSchedule.lastAutoCheckAtKey)
         let git = RecordingUpdateGitService()
         git.usability = .licenseNotAccepted
-        let service = UpdateCheckService(gitService: git, credentialStore: InMemoryCredentialStore(),
-                                         scratchRoot: fixture.base + "/scratch", storeRoot: fixture.root,
-                                         remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) })
+        let service = UpdateCheckService(
+            gitService: git,
+            credentialStore: InMemoryCredentialStore(),
+            contentHasher: FixedContentHasher(value: "unused"),
+            scratchRoot: fixture.base + "/scratch",
+            storeRoot: fixture.root,
+            remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) }
+        )
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         _ = try seedSkills(container)
         let runtime = try makeRuntime(fixture, defaults: defaults, container: container, service: service)
@@ -120,8 +128,11 @@ final class AppRuntimeUpdateEnvironmentTests: XCTestCase {
                 }
             }
             let service = UpdateCheckService(
-                gitService: git, credentialStore: InMemoryCredentialStore(),
-                scratchRoot: fixture.base + "/scratch", storeRoot: fixture.root,
+                gitService: git,
+                credentialStore: InMemoryCredentialStore(),
+                contentHasher: FixedContentHasher(value: "unused"),
+                scratchRoot: fixture.base + "/scratch",
+                storeRoot: fixture.root,
                 remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) }
             )
             let runtime = try makeRuntime(fixture, defaults: isolatedDefaults("empty-\(empty)"),

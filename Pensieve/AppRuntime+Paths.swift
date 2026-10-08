@@ -66,6 +66,8 @@ struct AppRuntimePaths {
 
     var syncLockPath: String { appSupportDir + "/sync.lock" }
 
+    var gitAskpassHelperPath: String { appSupportDir + "/git-askpass.sh" }
+
     var skillsDir: String { storeRoot + "/skills" }
 
     var upstreamHistoryCacheDir: String { appSupportDir + "/upstream-history-cache" }
@@ -222,6 +224,7 @@ extension AppRuntimePaths {
     ) -> UpstreamHistoryService {
         let credentials = makeCredentialStore()
         return UpstreamHistoryService(
+            gitService: makeGitService(fileService: fileService),
             credentialStore: credentials,
             fileService: fileService,
             contentHasher: makeSkillInstallService(
@@ -250,15 +253,18 @@ extension AppRuntimePaths {
         }
     }
 
-    func makeUpdatesViewModelOperations() -> UpdatesViewModel.DefaultOperations {
+    func makeUpdatesViewModelOperations(
+        fileService: FileServiceProtocol = FileService()
+    ) -> UpdatesViewModel.DefaultOperations {
         let credentials = makeCredentialStore()
         let installer = makeSkillInstallService(
             credentialStore: credentials,
-            fileService: FileService()
+            fileService: fileService
         )
         return UpdatesViewModel.DefaultOperations(
             updateCheckService: makeUpdateCheckService(
                 credentialStore: credentials,
+                fileService: fileService,
                 contentHasher: installer
             ),
             skillInstallService: installer
@@ -282,23 +288,27 @@ extension AppRuntimePaths {
         { makeUpdateCheckService() }
     }
 
-    func makeUpdateCheckService() -> UpdateCheckService {
+    func makeUpdateCheckService(fileService: FileServiceProtocol = FileService()) -> UpdateCheckService {
         let credentials = makeCredentialStore()
         return makeUpdateCheckService(
             credentialStore: credentials,
+            fileService: fileService,
             contentHasher: makeSkillInstallService(
                 credentialStore: credentials,
-                fileService: FileService()
+                fileService: fileService
             )
         )
     }
 
     private func makeUpdateCheckService(
         credentialStore: CredentialStoreProtocol,
+        fileService: FileServiceProtocol,
         contentHasher: SkillContentHashing
     ) -> UpdateCheckService {
         return UpdateCheckService(
+            gitService: makeGitService(fileService: fileService),
             credentialStore: credentialStore,
+            fileService: fileService,
             contentHasher: contentHasher,
             scratchRoot: appSupportDir + "/update-check-scratch",
             storeRoot: storeRoot
@@ -310,6 +320,7 @@ extension AppRuntimePaths {
         fileService: FileServiceProtocol
     ) -> SkillInstallService {
         SkillInstallService(
+            gitService: makeGitService(fileService: fileService),
             credentialStore: credentialStore,
             fileService: fileService,
             scratchRoot: appSupportDir + "/skill-install-scratch",
@@ -320,6 +331,10 @@ extension AppRuntimePaths {
 
     private func makeCredentialStore() -> CredentialStoreProtocol {
         isProduction ? KeychainCredentialStore() : InMemoryCredentialStore()
+    }
+
+    private func makeGitService(fileService: FileServiceProtocol) -> GitService {
+        GitService(fileService: fileService, askpassHelperPath: gitAskpassHelperPath)
     }
 
     @MainActor

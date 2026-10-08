@@ -106,24 +106,19 @@ struct UpdateCheckService {
     let now: () -> Date
     let validateRemote: InstallRemotePolicy.Validator
 
-    init(gitService: UpdateCheckGitServing = GitService(),
-         credentialStore: CredentialStoreProtocol = KeychainCredentialStore(),
+    init(gitService: UpdateCheckGitServing,
+         credentialStore: CredentialStoreProtocol,
          fileService: FileServiceProtocol = FileService(),
-         contentHasher: SkillContentHashing? = nil,
-         scratchRoot: String = Self.defaultScratchRoot,
-         storeRoot: String = Constants.pensieveBaseDir,
+         contentHasher: SkillContentHashing,
+         scratchRoot: String,
+         storeRoot: String,
          now: @escaping () -> Date = Date.init,
          remoteValidator: @escaping InstallRemotePolicy.Validator =
              InstallRemotePolicy.validateGitHubRepository) {
         self.gitService = gitService
         self.credentialStore = credentialStore
         self.fileService = fileService
-        self.contentHasher = contentHasher ?? SkillInstallService(
-            credentialStore: credentialStore,
-            fileService: fileService,
-            storeRoot: storeRoot,
-            remoteValidator: remoteValidator
-        )
+        self.contentHasher = contentHasher
         self.scratchRoot = scratchRoot
         self.storeRoot = storeRoot
         self.now = now

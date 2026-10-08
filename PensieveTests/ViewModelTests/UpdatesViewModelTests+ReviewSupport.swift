@@ -20,8 +20,12 @@ extension UpdatesViewModelTests {
         )
         let installer = service ?? fixture.service
         let checker = UpdateCheckService(
-            credentialStore: InMemoryCredentialStore(), fileService: fileService, contentHasher: installer,
-            scratchRoot: tempDir + "/check-scratch", storeRoot: fixture.storeRoot,
+            gitService: GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass"),
+            credentialStore: InMemoryCredentialStore(),
+            fileService: fileService,
+            contentHasher: installer,
+            scratchRoot: tempDir + "/check-scratch",
+            storeRoot: fixture.storeRoot,
             remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) }
         )
         let defaults = UpdatesViewModel.DefaultOperations(updateCheckService: checker, skillInstallService: installer)

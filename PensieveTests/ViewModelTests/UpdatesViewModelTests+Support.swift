@@ -112,6 +112,7 @@ extension UpdatesViewModelTests {
 
     func makeRealModel(fixture: RealFixture) -> UpdatesViewModel {
         let checker = UpdateCheckService(
+            gitService: GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass"),
             credentialStore: InMemoryCredentialStore(),
             fileService: fileService,
             contentHasher: fixture.service,
@@ -171,7 +172,7 @@ extension UpdatesViewModelTests {
         _ = try commit(repository, message: "installed")
         let storeRoot = tempDir + "/store"
         let service = SkillInstallService(
-            gitService: GitService(fileService: fileService),
+            gitService: GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass"),
             credentialStore: InMemoryCredentialStore(),
             fileService: fileService,
             scratchRoot: tempDir + "/install-scratch",

@@ -77,8 +77,14 @@ extension UpdatesViewModelTests {
         let spy = ImportBoundedReadSpy()
         let service = makePreviewService(fixture: fixture, spy: spy)
         let operations = UpdatesViewModel.DefaultOperations(
-            updateCheckService: UpdateCheckService(fileService: fileService, contentHasher: service,
-                                                   scratchRoot: tempDir + "/check-scratch", storeRoot: fixture.storeRoot),
+            updateCheckService: UpdateCheckService(
+                gitService: GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass"),
+                credentialStore: InMemoryCredentialStore(),
+                fileService: fileService,
+                contentHasher: service,
+                scratchRoot: tempDir + "/check-scratch",
+                storeRoot: fixture.storeRoot
+            ),
             skillInstallService: service
         )
         let row = try UpdatesViewModel.makeRow(skill: fixture.skill, driftedLocally: false)
@@ -229,9 +235,14 @@ extension UpdatesViewModelTests {
     }
 
     private func makePreviewService(fixture: RealFixture, spy: ImportBoundedReadSpy) -> SkillInstallService {
-        SkillInstallService(gitService: GitService(fileService: fileService), credentialStore: InMemoryCredentialStore(),
-                            fileService: spy, scratchRoot: tempDir + "/preview-scratch", storeRoot: fixture.storeRoot,
-                            lockPath: tempDir + "/sync.lock",
-                            remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) })
+        SkillInstallService(
+            gitService: GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass"),
+            credentialStore: InMemoryCredentialStore(),
+            fileService: spy,
+            scratchRoot: tempDir + "/preview-scratch",
+            storeRoot: fixture.storeRoot,
+            lockPath: tempDir + "/sync.lock",
+            remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) }
+        )
     }
 }

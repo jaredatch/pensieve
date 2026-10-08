@@ -227,6 +227,7 @@ final class AppRuntimePathsTests: XCTestCase {
     ) throws {
         XCTAssertEqual(service.storeRoot, paths.storeRoot)
         XCTAssertEqual(service.scratchRoot, paths.appSupportDir + "/update-check-scratch")
+        try assertGitService(service.gitService, paths: paths)
         assertCredentialStore(service.credentialStore, usesMemoryCredentials: usesMemoryCredentials)
         let contentHasher = try XCTUnwrap(service.contentHasher as? SkillInstallService)
         assertSkillInstallService(
@@ -244,6 +245,7 @@ final class AppRuntimePathsTests: XCTestCase {
         XCTAssertEqual(service.storeRoot, paths.storeRoot)
         XCTAssertEqual(service.scratchRoot, paths.appSupportDir + "/skill-install-scratch")
         XCTAssertEqual(service.lockPath, paths.syncLockPath)
+        XCTAssertEqual((service.gitService as? GitService)?.askpassHelperPath, paths.gitAskpassHelperPath)
         assertCredentialStore(service.credentialStore, usesMemoryCredentials: usesMemoryCredentials)
     }
 
@@ -254,6 +256,7 @@ final class AppRuntimePathsTests: XCTestCase {
         expectedFileService: FileService
     ) throws {
         XCTAssertEqual(service.scratchRoot, paths.appSupportDir + "/upstream-history-scratch")
+        try assertGitService(service.gitService, paths: paths)
         assertCredentialStore(service.credentialStore, usesMemoryCredentials: usesMemoryCredentials)
         let serviceFileService = try XCTUnwrap(service.fileService as? FileService)
         XCTAssertTrue(serviceFileService === expectedFileService)
@@ -276,5 +279,10 @@ final class AppRuntimePathsTests: XCTestCase {
         } else {
             XCTAssertTrue(store is KeychainCredentialStore)
         }
+    }
+
+    private func assertGitService(_ service: Any, paths: AppRuntimePaths) throws {
+        let git = try XCTUnwrap(service as? GitService)
+        XCTAssertEqual(git.askpassHelperPath, paths.appSupportDir + "/git-askpass.sh")
     }
 }
