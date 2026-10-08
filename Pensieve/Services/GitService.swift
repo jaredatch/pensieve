@@ -89,7 +89,9 @@ protocol GitServiceProtocol {
     func hasRemoteOriginConfigured(at path: String) throws -> Bool
     @discardableResult
     func stageAllAndCommit(at path: String, message: String) throws -> Bool
+    func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> String?
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult
+    func pullRebase(at path: String, credential: GitCredential?, fetchedRevision: String) throws -> PullResult
     func push(at path: String, credential: GitCredential?) throws
     func abortRebase(at path: String) throws
     func conflictedFiles(at path: String) throws -> [String]
@@ -104,6 +106,10 @@ protocol GitServiceProtocol {
 }
 
 extension GitServiceProtocol {
+    func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> String? { nil }
+    func pullRebase(at path: String, credential: GitCredential?, fetchedRevision: String) throws -> PullResult {
+        try pullRebase(at: path, credential: credential)
+    }
     /// Inert default for doubles that do not model the host environment.
     func probeUsability() -> GitUsability { .usable }
     func remoteDefaultBranch(remote: String, credential: GitCredential?) throws -> String? { nil }
@@ -595,13 +601,22 @@ extension GitService {
         return try store.commitStagedChanges(message: message)
     }
 
-    /// `git pull --rebase origin main`. Distinguishes up-to-date / merged / conflicted STRUCTURALLY
+    /// Fetch origin/main, guard protected local files, then pull the pinned commit with rebase.
+    /// Distinguishes up-to-date / merged / conflicted STRUCTURALLY
     /// (no locale-sensitive string matching): conflict = non-zero exit AND `--diff-filter=U` non-empty;
     /// up-to-date vs merged = HEAD unchanged vs changed.
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
+        let revision = try fetchStoreRevision(at: path, credential: credential)
+        return try pullRebase(at: path, credential: credential, fetchedRevision: revision)
+    }
+
+    /// Pull the already fetched and checked commit from this repository. A second remote fetch could
+    /// introduce a colliding path after the app's pre-write guard, so it must not happen here.
+    func pullRebase(at path: String, credential: GitCredential?, fetchedRevision: String) throws -> PullResult {
         let store = try storeOperation(at: path)
+        try store.requireNoExcludedCollision(with: fetchedRevision)
         let before = try headSHA(at: path)
-        let args = ["-C", path, "pull", "--rebase", "origin", "main"]
+        let args = ["-C", path, "pull", "--rebase", ".", fetchedRevision]
         let r = try store.run(Array(args.dropFirst(2)), credential: credential)
         if r.exit == 0 {
             let after = try headSHA(at: path)

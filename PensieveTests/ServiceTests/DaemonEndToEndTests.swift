@@ -273,7 +273,7 @@ final class DaemonEndToEndTests: XCTestCase {
     }
 }
 
-private final class AllowlistedFastForwardGit: FastForwardGitService {
+final class AllowlistedFastForwardGit: FastForwardGitService {
     private let wrapped: GitService
 
     init(wrapping wrapped: GitService) {

@@ -97,6 +97,8 @@ final class GitCompletionReviewTests: XCTestCase {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         try fixture.seedRepository()
+        // The successful fake fetch below leaves a real fetched commit for the guarded rebase.
+        try TestPaths.git.runOrThrow(["-C", fixture.root, "fetch", ".", "HEAD"], in: nil)
         let git = try fixture.executable("""
             simulate_failure() {
                 \(FakeGitScript.skipGlobalOptions)

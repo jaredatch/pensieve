@@ -40,6 +40,12 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
         try wrapped.pullRebase(at: path, credential: credential)
     }
+    func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> String? {
+        try wrapped.preflightStoreUpdate(at: path, credential: credential)
+    }
+    func pullRebase(at path: String, credential: GitCredential?, fetchedRevision: String) throws -> PullResult {
+        try wrapped.pullRebase(at: path, credential: credential, fetchedRevision: fetchedRevision)
+    }
     func push(at path: String, credential: GitCredential?) throws {
         try wrapped.push(at: path, credential: credential)
     }

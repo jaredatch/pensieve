@@ -28,22 +28,8 @@ extension GitService {
         return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// `git -C <path> fetch origin main`. Advances FETCH_HEAD and (opportunistically) the `origin/main`
-    /// remote-tracking ref without touching HEAD or the worktree. Throws `.authenticationFailed` on an
-    /// auth error, `.commandFailed` on any other non-zero exit.
-    func fetch(at path: String, credential: GitCredential?) throws {
-        let args = ["-C", path, "fetch", "origin", "main"]
-        let r = try run(args, in: nil, credential: credential)
-        guard r.exit != 0 else { return }
-        let combined = r.stdout + r.stderr
-        if isAuthFailure(combined) {
-            throw GitError.authenticationFailed(remote: authenticationRemoteLabel(at: path), detail: combined)
-        }
-        throw GitError.commandFailed(args: args, exitCode: r.exit, stderr: r.stderr.isEmpty ? r.stdout : r.stderr,
-            confirmingProbe: r.confirmingProbe)
-    }
-
-    /// Fetch, then `git -C <path> merge --ff-only origin/main`. Never creates a merge commit and never
+    /// Fetch, guard protected local files, then merge the pinned fetched commit with `--ff-only`.
+    /// Never creates a merge commit and never
     /// rebases: on a non-fast-forwardable divergence the merge exits non-zero, leaving HEAD AND the
     /// worktree exactly as before (the preceding fetch still advanced FETCH_HEAD/origin/main — expected,
     /// harmless) → `.diverged`. On a successful merge, classify by HEAD before/after:
@@ -53,7 +39,10 @@ extension GitService {
         let store = try storeOperation(at: path)
         let before = try headSHA(at: path)
         try fetch(at: path, credential: credential)
-        let r = try store.run(["merge", "--ff-only", "origin/main"])
+        let revision = try runOrThrow(["-C", path, "rev-parse", "--verify", "FETCH_HEAD^{commit}"], in: nil)
+            .stdout.trimmingCharacters(in: .newlines)
+        try store.requireNoExcludedCollision(with: revision)
+        let r = try store.run(["merge", "--ff-only", revision])
         guard r.exit == 0 else { return .diverged }
         let after = try headSHA(at: path)
         if let before, let after, before != after {

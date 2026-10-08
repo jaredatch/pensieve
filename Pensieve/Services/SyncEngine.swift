@@ -124,6 +124,7 @@ struct SyncEngine: SyncEngineProtocol {
         }
 
         let headStamp = GitHeadStamp(fileService: fileService)
+        let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
         try prepare?(context)
 
         // 1. SwiftData → manifest files (the portable, mergeable source of truth).
@@ -137,7 +138,7 @@ struct SyncEngine: SyncEngineProtocol {
         // 4. Pull with rebase. A body/overlay conflict is NOT ours to resolve here: abort (restoring the
         //    exact pre-pull tree — nothing half-merged, nothing lost) and surface it. Do NOT rebuild, do
         //    NOT push, so the divergence is preserved for a later, resolvable sync (§D).
-        switch try gitService.pullRebase(at: root, credential: credential) {
+        switch try pullRebase(root: root, credential: credential, incoming: incoming) {
         case .upToDate, .merged:
             break
         case let .conflicted(paths):
@@ -179,12 +180,13 @@ struct SyncEngine: SyncEngineProtocol {
         } catch {
             throw SyncError.storeUnreadable([])
         }
+        let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
         _ = try prepareLocalHead(root: root, credential: credential, context: context)
         // Once prepareLocalHead succeeds, pullRebase may START a rebase; if it (or finishSync) then
         // throws for a non-conflict reason, abort so inspect NEVER leaves a mid-rebase tree at rest
         // (the safe-resting-state invariant). Mirrors resolveConflicts' outer catch.
         do {
-            switch try gitService.pullRebase(at: root, credential: credential) {
+            switch try pullRebase(root: root, credential: credential, incoming: incoming) {
             case .upToDate, .merged:
                 return .cleared(try finishSync(root: root, credential: credential, context: context))
             case let .conflicted(paths):
@@ -216,9 +218,10 @@ struct SyncEngine: SyncEngineProtocol {
         } catch {
             throw SyncError.storeUnreadable([])
         }
+        let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
         _ = try prepareLocalHead(root: root, credential: credential, context: context)
         do {
-            switch try gitService.pullRebase(at: root, credential: credential) {
+            switch try pullRebase(root: root, credential: credential, incoming: incoming) {
             case .upToDate, .merged:
                 return try finishSync(root: root, credential: credential, context: context)
             case let .conflicted(paths):
@@ -252,6 +255,13 @@ struct SyncEngine: SyncEngineProtocol {
     }
 
     private static let resolveMessage = "Pensieve sync (resolve)"
+
+    private func pullRebase(root: String, credential: GitCredential?, incoming: String?) throws -> PullResult {
+        if let incoming {
+            return try gitService.pullRebase(at: root, credential: credential, fetchedRevision: incoming)
+        }
+        return try gitService.pullRebase(at: root, credential: credential)
+    }
 
     /// Sync-time re-validation of the STORED remote against the FULL connect allowlist. A hand-edited
     /// `.git/config` that points `origin` at any connect-rejected form (ext::/fd::, http://, git://,
