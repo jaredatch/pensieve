@@ -83,7 +83,7 @@ extension FileServiceProtocol {
 }
 
 extension FileService {
-    private static let directoryProbes = ProjectDirectoryProbes()
+    private static let directoryProbes = ProjectDirectoryProbes.shared
 
     func directoryExistsFollowingLinks(at path: String) throws -> Bool {
         try Self.directoryProbes.check(at: path, probe: directoryProbe)
@@ -154,9 +154,11 @@ enum SymlinkCreationError: LocalizedError {
     }
 }
 
-/// Concurrent callers share one answer and wait within a two-second bound. The lock protects
+/// Concurrent callers share one answer and wait within the app's default two-second bound. The lock protects
 /// the flight map and answers; timed-out workers stay registered until the raw probe returns.
 final class ProjectDirectoryProbes: @unchecked Sendable {
+    static let shared = ProjectDirectoryProbes()
+
     private final class Flight {
         let ready = DispatchGroup()
         let deadline: DispatchTime
@@ -166,8 +168,15 @@ final class ProjectDirectoryProbes: @unchecked Sendable {
     }
     private let lock = NSLock()
     private var flights: [String: Flight] = [:]
+    private var waitSeconds: TimeInterval = 2
     private let now: () -> DispatchTime
     private let wait: (DispatchGroup, DispatchTime) -> DispatchTimeoutResult
+
+    /// Only the test bundle changes this budget. Existing flights retain their original deadline.
+    var deadlineSeconds: TimeInterval {
+        get { lock.withLock { waitSeconds } }
+        set { lock.withLock { waitSeconds = newValue } }
+    }
 
     /// Tests control clock advancement and observe waits on an isolated registry. Production uses
     /// the monotonic clock and the real broadcast wait; the raw probe always runs on its worker.
@@ -190,7 +199,7 @@ final class ProjectDirectoryProbes: @unchecked Sendable {
             flight = existing
             startsProbe = false
         } else {
-            flight = Flight(deadline: now() + 2)
+            flight = Flight(deadline: now() + waitSeconds)
             flights[key] = flight
             startsProbe = true
         }

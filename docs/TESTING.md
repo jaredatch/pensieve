@@ -55,6 +55,8 @@ A flaky test is a bug, not noise to suppress. The standing rule (enforced by `sc
 
 The XCTest suite still launches Pensieve as its app host, but the split entry point in `PensieveMain` sends that process to `PensieveTestHostApp`. The test host is inert and never bootstraps `AppRuntime`, so it cannot start the scheduler, coordinator, or launch reconciliation. This guard does not sandbox test code: individual tests that use live default paths can still write to `$HOME`. Moving those remaining writes to explicit temporary paths is a separate backlog concern.
 
+The test bundle's load hook sets FileService's shared folder-check deadline to 30 seconds before cases run, allowing for suite load. The app keeps its two-second deadline. Tests of that bound call `ProjectDirectoryProbeDeadline.useAppDeadline(in:)`; XCTest teardown restores the host deadline even after a failure. Cases run serially within each host, and parallel workers have separate registries. Isolated registries keep the app's two-second default.
+
 ## 7. Coverage
 
 Directional, not a vanity gate. The committed `.test-count` floor (PLAN-01) ensures coverage only ratchets up, except a deliberate `--lower` with its reason (§5); a percentage coverage floor is deferred until the count floor proves too coarse (per the Playbook, adopt on evidence).

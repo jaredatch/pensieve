@@ -61,6 +61,7 @@ final class ProjectFolderProbeBoundTests: XCTestCase {
     }
 
     func testConvergenceBoundsBlockedProbeRetainsRowsAndDeploysOtherProjectsForBothOwners() throws {
+        ProjectDirectoryProbeDeadline.useAppDeadline(in: self)
         for categoryOwned in [false, true] {
             let gate = ProjectFolderBlockingProbe()
             let files = FileService(directoryProbe: gate.probe)
@@ -100,6 +101,7 @@ final class ProjectFolderProbeBoundTests: XCTestCase {
     }
 
     func testPreviewAndAddShareBoundAndOutstandingProbe() async throws {
+        ProjectDirectoryProbeDeadline.useAppDeadline(in: self)
         let gate = ProjectFolderBlockingProbe()
         let files = FileService(directoryProbe: gate.probe)
         let h = try ProjectFolderCallerHarness(files: files)
@@ -123,6 +125,32 @@ final class ProjectFolderProbeBoundTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(addStart), 0.5)
         XCTAssertEqual(gate.count(h.otherProject.path), 1)
         XCTAssertFalse(files.fileExists(at: h.otherProject.path + "/.pensieve-project"))
+    }
+    func testSharedDirectoryProbeReturnsAnswerAfterAppDeadline() async throws {
+        let started = expectation(description: "Shared raw lookup starts")
+        let returned = expectation(description: "Shared folder check returns")
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        let lock = NSLock()
+        var result: Result<Bool, Error>?
+        let path = "/fixture/\(UUID().uuidString)"
+        let files = FileService(directoryProbe: { _ in
+            started.fulfill()
+            _ = release.wait(timeout: .now() + TestWait.heldFixtureTimeoutSeconds)
+            return true
+        })
+        DispatchQueue.global(qos: .userInitiated).async {
+            let answer = Result { try files.directoryExistsFollowingLinks(at: path) }
+            lock.withLock { result = answer }
+            returned.fulfill()
+        }
+        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
+        // This real hold must cross the app's two-second deadline to exercise the host's budget.
+        try await Task.sleep(for: .milliseconds(2100))
+        release.signal()
+        await fulfillment(of: [returned], timeout: TestWait.hostedActionTimeoutSeconds)
+        let answer = try XCTUnwrap(lock.withLock { result })
+        XCTAssertTrue(try answer.get(), "The test host must allow a shared probe held past two seconds")
     }
 }
 

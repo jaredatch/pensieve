@@ -4,6 +4,7 @@ import XCTest
 
 @_cdecl("PensieveInstallTimeoutDiagnostics")
 func installTimeoutDiagnostics() {
+    ProjectDirectoryProbeDeadline.install()
     TestTimeoutDiagnostics.install()
 }
 
