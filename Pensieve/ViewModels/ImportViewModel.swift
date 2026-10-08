@@ -172,8 +172,10 @@ final class ImportViewModel {
             do {
                 let resolvedDescription = resolvedDescription(for: discovered)
                 let prepared = preparedContent(for: discovered, description: resolvedDescription)
-                let dirName = try createImportedSkill(discovered, description: resolvedDescription,
+                let result = try createImportedSkill(discovered, description: resolvedDescription,
                                                       content: prepared.content, avoiding: taken)
+                let dirName = result.directoryName
+                importNotices += result.skipped.map { "\(discovered.name): \($0.notice)" }
                 if prepared.keptAsText {
                     importNotices.append("\(discovered.name): frontmatter was kept as text.")
                 }
@@ -192,6 +194,7 @@ final class ImportViewModel {
             } catch {
                 if let slug = occupiedSlug(reportedBy: error) { taken.insert(slug) }
                 self.error = "Failed to import \(discovered.name): \(error.localizedDescription)"
+                importNotices.append("\(discovered.name): \(error.localizedDescription)")
             }
         }
 
@@ -246,12 +249,14 @@ final class ImportViewModel {
 
     private func createImportedSkill(
         _ discovered: DiscoveredSkill, description: String, content: String?, avoiding: Set<String>
-    ) throws -> String {
-        try skillStore.createSkill(
-            name: discovered.name,
-            content: content ?? SkillSerializer.serialize(name: discovered.name, description: description, body: discovered.body),
-            avoiding: avoiding
-        )
+    ) throws -> SkillFolderImportResult {
+        let text = content ?? SkillSerializer.serialize(name: discovered.name, description: description, body: discovered.body)
+        if discovered.sourceContent != nil, discovered.sourcePlatform != "cursor" {
+            return try skillStore.createSkill(name: discovered.name, content: text,
+                copying: (discovered.sourcePath as NSString).deletingLastPathComponent, avoiding: avoiding)
+        }
+        return SkillFolderImportResult(directoryName: try skillStore.createSkill(name: discovered.name,
+            content: text, avoiding: avoiding))
     }
 
     private func preparedContent(

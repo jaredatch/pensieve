@@ -79,6 +79,11 @@ final class ComparisonDirectory {
     /// Stream entries into the shared budget before retaining metadata or opening a child.
     func forEachEntry(excludingGit: Bool, budget: ComparisonInventoryBudget,
                       body: (String, stat) throws -> Void) throws {
+        try forEachEntry(excludingGit: excludingGit, beforeEntry: { _ in try budget.consumeEntry() }, body: body)
+    }
+
+    func forEachEntry(excludingGit: Bool, beforeEntry: (String) throws -> Void,
+                      body: (String, stat) throws -> Void) throws {
         try validate()
         while true {
             try Task.checkCancellation()
@@ -93,7 +98,7 @@ final class ComparisonDirectory {
                 $0.withMemoryRebound(to: CChar.self, capacity: capacity) { String(cString: $0) }
             }
             if name == "." || name == ".." || (excludingGit && name == ".git") { continue }
-            try budget.consumeEntry()
+            try beforeEntry(name)
             var status = stat()
             guard fstatat(descriptor, name, &status, AT_SYMLINK_NOFOLLOW) == 0 else {
                 throw DescriptorFileCopy.error("entry lookup", path: path + "/" + name, code: errno)

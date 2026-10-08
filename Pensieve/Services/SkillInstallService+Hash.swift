@@ -42,15 +42,19 @@ extension SkillInstallService {
         do {
             try fileService.createDirectory(at: temp)
             for entry in entries where entry.isDirectory {
+                try Task.checkCancellation()
                 try fileService.createDirectory(at: temp + "/" + entry.relativePath)
             }
             for entry in entries where !entry.isDirectory {
+                try Task.checkCancellation()
                 try fileService.copyFile(
                     at: sourceDirectory + "/" + entry.relativePath,
                     to: temp + "/" + entry.relativePath
                 )
             }
+            try Task.checkCancellation()
             try beforeReplace()
+            try Task.checkCancellation()
             try fileService.replaceItem(at: destination, with: temp)
         } catch {
             if fileService.directoryExists(at: temp) || fileService.isSymlink(at: temp) {
@@ -106,6 +110,7 @@ extension SkillInstallService {
                                     into entries: inout [VendorEntry]) throws {
         let directory = relativeDirectory.isEmpty ? root : root + "/" + relativeDirectory
         for name in try fileService.listDirectory(at: directory) {
+            try Task.checkCancellation()
             if excludingTopLevelGitMetadata, relativeDirectory.isEmpty, name == ".git" {
                 continue
             }

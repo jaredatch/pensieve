@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 #if !GIT_PROCESS_PROBE
 @testable import Pensieve
@@ -5,21 +6,39 @@ import Foundation
 
 /// Forwards fixture I/O to FileService. Write callbacks observe/interfere with the real build before
 /// and after SKILL.md is written; they do not simulate publication, locking or cleanup. Used by the
-/// import owner and its disposable crash process. Other FileService operations retain their defaults.
+/// import owner and its disposable crash process. Copy callbacks and the descriptor-read syscall
+/// support deterministic inventory races, partial-read errors and mid-copy cancellation.
 final class ImportPublicationFileService: FileServiceProtocol {
     let files = FileService()
     var beforeWrite: (String, String) throws -> Void = { _, _ in }
     var afterWrite: (String, String) throws -> Void = { _, _ in }
     var directoryListings: [String] = []
+    var importCheckpoint: (FileService.ImportCopyCheckpoint) throws -> Void = { _ in }
+    var copyCheckpoint: (String, Int) throws -> Void = { _, _ in }
+    var read: (Int32, UnsafeMutableRawPointer?, Int) -> Int = Darwin.read
     func readFile(at path: String) throws -> String { try files.readFile(at: path) }
     func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws -> RegularFileCopyReceipt {
         try files.copyRegularFiles(fromDirectory: source, toDirectory: destination)
+    }
+    func copyImportedSkillContents(fromDirectory source: String,
+                                   toDirectory destination: String) throws -> [SkillFolderCopySkip] {
+        try files.copyImportedSkillContents(fromDirectory: source, toDirectory: destination,
+                                            checkpoint: importCheckpoint, read: read)
     }
     func writeFile(at path: String, content: String) throws {
         try beforeWrite(path, content)
         try files.writeFile(at: path, content: content)
         try afterWrite(path, content)
     }
+    func copyFile(at source: String, to destination: String) throws {
+        let (descriptor, status) = try FileService.openRegularFile(at: source)
+        defer { close(descriptor) }
+        try DescriptorFileCopy.copy(from: descriptor, status: status, sourcePath: source, to: destination,
+                                    options: .init(read: read), copiedChunk: { try copyCheckpoint(source, $0) })
+    }
+    func readData(at path: String) throws -> Data { try files.readData(at: path) }
+    func isRegularFile(at path: String) -> Bool { files.isRegularFile(at: path) }
+    func isUserExecutableFile(at path: String) -> Bool { files.isUserExecutableFile(at: path) }
     func deleteFile(at path: String) throws { try files.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { files.fileExists(at: path) }
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {

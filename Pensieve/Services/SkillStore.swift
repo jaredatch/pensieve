@@ -26,6 +26,9 @@ protocol SkillStoreProtocol {
     /// avoiding contains the batch's disk snapshot, row-held slugs, each successful publication
     /// and destinations that a failed exclusive publication proved occupied.
     func createSkill(name: String, content: String, avoiding: Set<String>) throws -> String
+    /// Fill the same exclusive-publication temp with a selected local skill folder's safe contents.
+    func createSkill(name: String, content: String, copying sourceDirectory: String,
+                     avoiding: Set<String>) throws -> SkillFolderImportResult
     /// Read the raw SKILL.md content (INCLUDING any frontmatter). Callers that want only the
     /// markdown body must strip via `SkillParser.stripFrontmatter`.
     func readBody(directoryName: String) throws -> String
@@ -47,6 +50,8 @@ protocol SkillStoreProtocol {
 }
 
 extension SkillStoreProtocol {
+    func createSkill(name: String, content: String, copying sourceDirectory: String,
+                     avoiding: Set<String>) throws -> SkillFolderImportResult { throw CocoaError(.featureUnsupported) }
     /// Doubles enumerate their modeled store; never fall through to host filesystem I/O.
     func prepareImport() throws -> Set<String> { Set(try listSkills()) }
 
@@ -98,14 +103,27 @@ final class SkillStore: SkillStoreProtocol {
     }
 
     func createSkill(name: String, content: String, avoiding: Set<String>) throws -> String {
+        try publishSkill(name: name, content: content, sourceDirectory: nil, avoiding: avoiding).directoryName
+    }
+
+    func createSkill(name: String, content: String, copying sourceDirectory: String,
+                     avoiding: Set<String>) throws -> SkillFolderImportResult {
+        try publishSkill(name: name, content: content, sourceDirectory: sourceDirectory, avoiding: avoiding)
+    }
+
+    private func publishSkill(name: String, content: String, sourceDirectory: String?,
+                              avoiding: Set<String>) throws -> SkillFolderImportResult {
         let candidate = Self.availableDirectoryName(for: name, occupied: avoiding)
         let destination = try validatedSkillDirectory(candidate)
         let temporary = VendorTemporaryDirectory.makePath(storeRoot: storeRoot)
         do {
             try fileService.createDirectory(at: temporary)
             try fileService.writeFile(at: temporary + "/SKILL.md", content: content)
+            let skipped = try sourceDirectory.map {
+                try fileService.copyImportedSkillContents(fromDirectory: $0, toDirectory: temporary)
+            } ?? []
             try fileService.publishNewDirectory(at: temporary, to: destination)
-            return candidate
+            return SkillFolderImportResult(directoryName: candidate, skipped: skipped)
         } catch {
             if fileService.directoryExists(at: temporary) || fileService.isSymlink(at: temporary) {
                 try? fileService.deleteDirectory(at: temporary)

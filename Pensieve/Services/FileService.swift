@@ -19,6 +19,8 @@ protocol FileServiceProtocol {
     func writeData(at path: String, data: Data) throws
     func writeExecutableFile(at path: String, content: String) throws
     func copyFile(at sourcePath: String, to destinationPath: String) throws
+    /// Fill an import temp with bounded regular contents, excluding its prepared SKILL.md.
+    func copyImportedSkillContents(fromDirectory source: String, toDirectory destination: String) throws -> [SkillFolderCopySkip]
     /// Copies regular entries from one no-follow directory descriptor; never traverses child links.
     func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws -> RegularFileCopyReceipt
     func deleteFile(at path: String) throws
@@ -78,6 +80,11 @@ struct RegularFileMetadata: Equatable {
 // MARK: - Default implementations
 
 extension FileServiceProtocol {
+    /// Unmodeled folder copies refuse without host I/O.
+    func copyImportedSkillContents(fromDirectory source: String,
+                                   toDirectory destination: String) throws -> [SkillFolderCopySkip] {
+        throw CocoaError(.featureUnsupported)
+    }
     /// Inert default: unmodeled prefix reads never fall back to whole-file reads.
     func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data {
         throw CocoaError(.featureUnsupported)
