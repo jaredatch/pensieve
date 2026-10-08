@@ -36,10 +36,9 @@ extension GitProcessProbe {
             os._exit(23)
             """)
             var failedAfterExit = false
-            let service = git(executable, started: { pid in
-                if afterExit { waitForUnreapedExit(pid) }
-            }, beforeRead: { _, descriptor, stdout, exited in
-                if afterExit, stdout, exited {
+            let service = git(executable, beforeRead: { pid, descriptor, stdout, _ in
+                if afterExit, stdout {
+                    try waitForUnreapedExit(pid)
                     failedAfterExit = true
                     close(descriptor)
                 }
@@ -64,12 +63,15 @@ extension GitProcessProbe {
             ? "OK output, status; holder alive" : "FAIL alive=\(alive), intact=\(intact)"
     }
 
-    private static func waitForUnreapedExit(_ pid: pid_t) {
+    static func waitForUnreapedExit(_ pid: pid_t) throws {
         var info = siginfo_t()
         let deadline = ProcessInfo.processInfo.systemUptime + 5
         while info.si_pid != pid && ProcessInfo.processInfo.systemUptime < deadline {
-            _ = waitid(P_PID, id_t(pid), &info, WEXITED | WNOHANG | WNOWAIT)
-            Thread.sleep(forTimeInterval: 0.01)
+            if waitid(P_PID, id_t(pid), &info, WEXITED | WNOHANG | WNOWAIT) == -1 {
+                guard errno == EINTR else { throw GitProcess.posixError() }
+            }
+            if info.si_pid != pid { usleep(100) }
         }
+        guard info.si_pid == pid else { throw GitProcess.posixError(ETIMEDOUT) }
     }
 }

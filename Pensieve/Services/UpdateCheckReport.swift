@@ -19,16 +19,16 @@ struct ClassifiedUpdateFailure {
     let environment: Bool
     let usability: GitUsability?
 
-    static func classify(_ error: Error, probe: () throws -> GitUsability? = { nil }) -> Self {
-        if case GitError.outputReadFailed = error {
-            return Self(error: error, environment: false, usability: nil)
+    static func classify(_ failure: Error, probe: () throws -> GitUsability? = { nil }) -> Self {
+        if case GitError.outputReadFailed = failure {
+            return Self(error: failure, environment: false, usability: nil)
         }
-        if case let GitError.unusable(value) = error {
-            return Self(error: error, environment: true, usability: value)
+        if case let GitError.unusable(value) = failure {
+            return Self(error: failure, environment: true, usability: value)
         }
         let confirmation: GitUsability?
-        if case let GitError.commandFailed(_, _, _, answer) = error { confirmation = answer } else { confirmation = nil }
-        let mapped = SkillInstallService.mappedRepositoryError(error)
+        if case let GitError.commandFailed(_, _, _, answer) = failure { confirmation = answer } else { confirmation = nil }
+        let mapped = SkillInstallService.mappedRepositoryError(failure)
         if let install = mapped as? SkillInstallError {
             switch install {
             case .networkUnavailable: return Self(error: install, environment: true, usability: confirmation)
@@ -40,7 +40,7 @@ struct ClassifiedUpdateFailure {
         // A carried answer came from the runner. Otherwise the batch diagnostic must establish usability.
         let value: GitUsability?
         do { value = try confirmation ?? probe() } catch {
-            return Self(error: error, environment: false, usability: nil)
+            return Self(error: failure, environment: false, usability: nil)
         }
         if let value, value != .usable {
             return Self(error: GitError.unusable(value), environment: true, usability: value)

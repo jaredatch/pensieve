@@ -35,7 +35,13 @@ extension UpdateCheckServiceTests {
             XCTAssertNil(report.environmentError)
             XCTAssertEqual(report.gitUsability, .usable)
             XCTAssertEqual(git.probeCalls, before + (stage.contains("diagnostic") ? 2 : 1))
-            XCTAssertEqual(try persistedSkill(id: skill.id).checkError, message)
+            let expected: String
+            switch stage {
+            case "diagnostic": expected = "git ls-remote failed (exit 128): failed"
+            case "tree-diagnostic": expected = "git rev-parse failed (exit 128): missing tree"
+            default: expected = message
+            }
+            XCTAssertEqual(try persistedSkill(id: skill.id).checkError, expected)
             XCTAssertTrue(try persistedSkill(id: skill.id).updateAvailable)
         }
     }
@@ -194,6 +200,9 @@ extension UpdateCheckServiceTests {
         XCTAssertEqual(git.treeHashCalls.count, 3)
         XCTAssertEqual(git.probeCalls, 2, "one run preflight plus one diagnostic probe for the batch")
         let before = git.probeCalls
+        git.onTreeHash = { path in
+            throw GitError.commandFailed(args: ["rev-parse"], exitCode: 128, stderr: "failed tree \(path)")
+        }
         git.onProbe = {
             if self.git.probeCalls == before + 1 { return .usable }
             throw GitError.outputReadFailed(detail: "diagnostic EIO")
@@ -203,7 +212,7 @@ extension UpdateCheckServiceTests {
         XCTAssertEqual(local.gitUsability, .usable)
         XCTAssertEqual(git.probeCalls, before + 2, "a failed diagnostic is also cached for the batch")
         for skill in try ModelContext(container).fetch(FetchDescriptor<Skill>()) {
-            XCTAssertEqual(skill.checkError, "Pensieve couldn’t read git’s output: diagnostic EIO")
+            XCTAssertEqual(skill.checkError, "git rev-parse failed (exit 128): failed tree skills/\(skill.directoryName)")
         }
     }
 

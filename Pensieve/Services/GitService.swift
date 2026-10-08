@@ -276,21 +276,18 @@ struct GitService: GitServiceProtocol {
         child.probeHooks = probeHooks
         probeHooks?.started(child.pid)
         #endif
-        let output = try child.readOutput()
-        let outData = output.stdout
-        let errData = output.stderr
+        var output = try child.readOutput()
         // Command output is only a hint: repository-controlled text can resemble a broken shim.
         // Confirm at the shared runner so clone, fetch, conflict and install callers agree.
         // The diagnostic command bypasses this branch, preventing recursive probes.
-        let stderr = String(bytes: errData, encoding: .utf8) ?? ""
-        let detail = stderr.isEmpty ? (String(bytes: outData, encoding: .utf8) ?? "") : stderr
-        var confirmingProbe: GitUsability?
+        let stderr = String(bytes: output.stderr, encoding: .utf8) ?? ""
+        let detail = stderr.isEmpty ? (String(bytes: output.stdout, encoding: .utf8) ?? "") : stderr
         if args != ["--version"], GitUsability.environmentFailure(exit: output.exit, output: detail) != nil {
             let answer = try probeUsability()
             try answer.requireUsable()
-            confirmingProbe = answer
+            output.confirmingProbe = answer
         }
-        return GitDataOutput(stdout: outData, stderr: errData, exit: output.exit, confirmingProbe: confirmingProbe)
+        return output
     }
 
     /// Optional reads retain their fallback for git rejections; host and local output-read failures propagate.

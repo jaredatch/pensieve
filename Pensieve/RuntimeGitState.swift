@@ -53,8 +53,8 @@ final class RuntimeGitState {
                 let remote = (observed ?? cached) == .usable ? read() : nil
                 return (observed, remote)
             } catch {
-                // A local probe read failure is configuration evidence, never host usability evidence.
-                return (nil, .failure(error))
+                // A failed probe supplies no host evidence. Configuration failures require usable git.
+                return (nil, cached == .usable ? .failure(error) : nil)
             }
         }.value
         let change: Change?

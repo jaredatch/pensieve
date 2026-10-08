@@ -2,6 +2,68 @@ import Darwin
 import Foundation
 
 extension GitProcessProbe {
+    static func spawn(_ mode: String, executable: String) -> String {
+        switch mode {
+        case "spawn-signals": return spawnSignals()
+        case "spawn-terminal": return spawnTerminal()
+        default: return spawnFromTerminal(executable)
+        }
+    }
+
+    /// Re-exec the probe in a real foreground terminal session. The fake git observes its own
+    /// session, group and /dev/tty access, without trying a read that could stop the pre-fix child.
+    static func spawnTerminal() -> String {
+        let root = (CommandLine.arguments[3] as NSString).deletingLastPathComponent
+        let files = FileService()
+        let executable = root + "/terminal-git"
+        let report = root + "/terminal-report"
+        do {
+            try files.writeExecutableFile(at: executable, content: """
+            #!/usr/bin/python3
+            import errno, os
+            tty_absent = False
+            try: os.close(os.open('/dev/tty', os.O_RDONLY | os.O_NONBLOCK))
+            except OSError as error: tty_absent = error.errno == errno.ENXIO
+            own_session = os.getsid(0) == os.getpid()
+            own_group = os.getpgrp() == os.getpid()
+            print('session=' + str(own_session) + ' group=' + str(own_group) + ' no-tty=' + str(tty_absent))
+            raise SystemExit(0 if own_session and own_group and tty_absent else 1)
+            """)
+            let driver = Process()
+            driver.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            driver.arguments = ["-c", """
+            import fcntl, os, pty, sys, termios
+            master, slave = pty.openpty()
+            child = os.fork()
+            if child == 0:
+                os.setsid()
+                fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+                os.tcsetpgrp(slave, os.getpgrp())
+                os.execv(sys.argv[1], [sys.argv[1], 'spawn-terminal-inner', sys.argv[2], sys.argv[3]])
+            with open(sys.argv[4] + '/' + str(child), 'w') as f: f.write('terminal probe')
+            _, status = os.waitpid(child, 0)
+            raise SystemExit(os.waitstatus_to_exitcode(status))
+            """, CommandLine.arguments[0], executable, report, root + "/children"]
+            try driver.run()
+            record(driver.processIdentifier)
+            driver.waitUntilExit()
+            return try files.readFile(at: report)
+        } catch { return "FAIL terminal fixture: \(error)" }
+    }
+
+    static func spawnFromTerminal(_ executable: String) -> String {
+        let terminal = open("/dev/tty", O_RDONLY | O_NONBLOCK)
+        guard terminal != -1 else { return "FAIL caller has no controlling terminal" }
+        defer { close(terminal) }
+        guard getsid(0) == getpid(), tcgetpgrp(terminal) == getpgrp() else { return "FAIL caller is not foreground" }
+        do {
+            let output = try git(executable).runData(["--version"], in: nil)
+            let text = String(bytes: output.stdout, encoding: .utf8) ?? ""
+            return output.exit == 0 && text == "session=True group=True no-tty=True\n"
+                ? "OK child session and group; no controlling terminal; foreground caller" : "FAIL terminal child: \(text)"
+        } catch { return "FAIL terminal spawn: \(error)" }
+    }
+
     /// A C main observes the exec contract before a shell or interpreter installs its own handlers.
     static func spawnSignals() -> String {
         let root = (CommandLine.arguments[3] as NSString).deletingLastPathComponent

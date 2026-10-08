@@ -7,6 +7,7 @@ final class GitProcess {
     let pid: pid_t
     let stdout: Int32
     let stderr: Int32
+    private(set) var ownsUnreapedChild = true
     #if GIT_PROCESS_PROBE
     var probeHooks: GitProcessProbeHooks?
     #endif
@@ -61,8 +62,7 @@ final class GitProcess {
         var attributes: posix_spawnattr_t?
         try requireZero(posix_spawnattr_init(&attributes))
         defer { posix_spawnattr_destroy(&attributes) }
-        // A new group is established atomically in the child, before executable code runs.
-        try requireZero(posix_spawnattr_setpgroup(&attributes, 0))
+        // A new session also makes git its group leader, without the app's controlling terminal.
         // Executor threads can block signals, and the app may ignore them. Neither belongs to git.
         var emptyMask = sigset_t()
         var defaultSignals = sigset_t()
@@ -70,7 +70,7 @@ final class GitProcess {
         sigfillset(&defaultSignals)
         try requireZero(posix_spawnattr_setsigmask(&attributes, &emptyMask))
         try requireZero(posix_spawnattr_setsigdefault(&attributes, &defaultSignals))
-        let flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF
+        let flags = POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF
         try requireZero(posix_spawnattr_setflags(&attributes, Int16(flags)))
         try requireZero(posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0))
         try requireZero(posix_spawn_file_actions_adddup2(&actions, stdout, STDOUT_FILENO))
@@ -120,6 +120,11 @@ final class GitProcess {
     }
 
     func reap() throws -> Int32 {
+        // Once a reap is attempted, even a failure cannot authorize signalling this identity again.
+        ownsUnreapedChild = false
+        #if GIT_PROCESS_PROBE
+        try probeHooks?.beforeReap?(pid)
+        #endif
         var status: Int32 = 0
         while waitpid(pid, &status, 0) == -1 {
             guard errno == EINTR else { throw Self.posixError() }

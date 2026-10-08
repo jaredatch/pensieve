@@ -38,10 +38,12 @@ extension GitProcess {
                 try events.wait()
             }
         } catch {
-            // This child remains unreaped even if exit was already observed. Its group cannot belong
-            // to a recycled pid. SIGKILL bounds cleanup when a helper ignores SIGTERM or holds a pipe.
-            kill(-pid, SIGKILL)
-            _ = try reap()
+            // Only the unreaped identity authorizes group cleanup. A failed reap may have consumed
+            // the child already. Cleanup's own reap failure must not replace the local runner error.
+            if ownsUnreapedChild {
+                kill(-pid, SIGKILL)
+                _ = try? reap()
+            }
             throw GitError.outputReadFailed(detail: error.localizedDescription)
         }
     }
@@ -101,7 +103,7 @@ private final class GitOutputEvents {
             try change(ident: UInt(child.stderr), filter: Int16(EVFILT_READ), flags: UInt16(EV_ADD))
             do {
                 #if GIT_PROCESS_PROBE
-                try child.probeHooks?.beforeExitWatch?(child.pid)
+                try probeHooks?.beforeExitWatch?(child.pid)
                 #endif
                 try change(ident: UInt(child.pid), filter: Int16(EVFILT_PROC),
                            flags: UInt16(EV_ADD | EV_ONESHOT), notes: UInt32(NOTE_EXIT))
@@ -111,7 +113,7 @@ private final class GitOutputEvents {
                 guard (error as NSError).code == Int(ESRCH) else { throw error }
                 let exited = try child.hasExited()
                 #if GIT_PROCESS_PROBE
-                try child.probeHooks?.exitWatchFailed?(child.pid, error, exited)
+                try probeHooks?.exitWatchFailed?(child.pid, error, exited)
                 #endif
                 if !exited { try child.waitForExit() }
                 exitNotified = true
@@ -137,17 +139,25 @@ private final class GitOutputEvents {
     }
 
     func wait() throws {
-        let count = kevent(queue, nil, 0, &ready, Int32(ready.count), nil)
+        let count = kernelWait()
+        let failureCode = errno
         #if GIT_PROCESS_PROBE
         probeHooks?.waitReturned?(count)
         #endif
         if count == -1 {
-            guard errno == EINTR else { throw GitProcess.posixError() }
+            guard failureCode == EINTR else { throw GitProcess.posixError(failureCode) }
             return
         }
         for event in ready.prefix(Int(count)) {
             if event.flags & UInt16(EV_ERROR) != 0 { throw GitProcess.posixError(Int32(event.data)) }
             if event.filter == Int16(EVFILT_PROC), event.fflags & UInt32(NOTE_EXIT) != 0 { exitNotified = true }
         }
+    }
+
+    private func kernelWait() -> Int32 {
+        #if GIT_PROCESS_PROBE
+        if let code = probeHooks?.waitFailure?() { errno = code; return -1 }
+        #endif
+        return kevent(queue, nil, 0, &ready, Int32(ready.count), nil)
     }
 }

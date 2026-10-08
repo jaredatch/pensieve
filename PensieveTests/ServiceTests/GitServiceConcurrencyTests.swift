@@ -13,18 +13,26 @@ final class GitServiceConcurrencyTests: XCTestCase {
                 XCTAssertEqual(result.report, "OK output, status; holder alive")
             }
         }
-        for mode in ["exit-wake", "holder-stdout-sleeping-partial", "holder-stderr-sleeping-partial"] {
+        for mode in ["holder-stdout-sleeping-partial", "holder-stderr-sleeping-partial"] {
             let result = try GitProcessProbeRunner.run(mode, timeout: TestWait.hostedActionTimeoutSeconds, noteTimeout: false)
             XCTAssertFalse(result.timedOut, mode)
             XCTAssertEqual(result.status, 0, "\(mode): \(result.report)")
-            XCTAssertEqual(result.report, mode == "exit-wake" ? "OK exit wake; waits=1, timeout wakes=0; empty output, status"
-                           : "OK output, status; holder alive")
+            XCTAssertEqual(result.report, "OK output, status; holder alive")
         }
         let exiting = try GitProcessProbeRunner.run("exit-watch-esrch",
                                                    timeout: TestWait.hostedActionTimeoutSeconds, noteTimeout: false)
         XCTAssertFalse(exiting.timedOut, "An exiting child must finish without an exit watch")
         XCTAssertEqual(exiting.status, 0, exiting.report)
         XCTAssertEqual(exiting.report, "OK exiting child; output, status; holder alive; git reaped")
+    }
+
+    func testGitExitWakesReaderAfterEOFIncludingAnAlreadyQueuedExit() throws {
+        for mode in ["exit-wake", "exit-wake-queued", "exit-wake-eintr"] {
+            let result = try GitProcessProbeRunner.run(mode, timeout: TestWait.hostedActionTimeoutSeconds, noteTimeout: false)
+            XCTAssertFalse(result.timedOut, mode)
+            XCTAssertEqual(result.status, 0, "\(mode): \(result.report)")
+            XCTAssertEqual(result.report, "OK exit wake; waits=1; empty output, status")
+        }
     }
 
     func testBlockedCallsBeyondCoreCountAllowAnotherSamePriorityGitCall() throws {
@@ -91,6 +99,13 @@ final class GitServiceConcurrencyTests: XCTestCase {
             XCTAssertEqual(result.status, 0, "\(mode): \(result.report)")
             XCTAssertEqual(result.report, "OK probe read error; child reaped")
         }
+        for mode in ["reap-exit-failure", "reap-cleanup-failure"] {
+            let result = try GitProcessProbeRunner.run(mode, timeout: TestWait.hostedActionTimeoutSeconds, noteTimeout: false)
+            XCTAssertFalse(result.timedOut, mode)
+            XCTAssertEqual(result.status, 0, "\(mode): \(result.report)")
+            XCTAssertEqual(result.report, mode == "reap-exit-failure" ? "OK reap error; group helper alive"
+                           : "OK cleanup reap error stays local")
+        }
     }
 
     func testReadFailureAfterGitExitReturnsWhileDetachedStderrHolderLives() throws {
@@ -109,6 +124,10 @@ final class GitServiceConcurrencyTests: XCTestCase {
         XCTAssertFalse(signals.timedOut)
         XCTAssertEqual(signals.status, 0, signals.report)
         XCTAssertEqual(signals.report, "OK child signals; blocked caller")
+        let terminal = try GitProcessProbeRunner.run("spawn-terminal", timeout: TestWait.hostedActionTimeoutSeconds)
+        XCTAssertFalse(terminal.timedOut)
+        XCTAssertEqual(terminal.status, 0, terminal.report)
+        XCTAssertEqual(terminal.report, "OK child session and group; no controlling terminal; foreground caller")
     }
 
     func testTimedOutProbeDoesNotPoisonNextProbe() throws {

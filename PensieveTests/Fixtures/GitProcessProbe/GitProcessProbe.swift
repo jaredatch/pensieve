@@ -44,33 +44,38 @@ enum GitProcessProbe {
     static func git(_ executable: String = "/usr/bin/git", started: ((pid_t) -> Void)? = nil,
                     beforeExitWatch: ((pid_t) throws -> Void)? = nil,
                     exitWatchFailed: GitProcessProbeHooks.ExitWatchFailed? = nil,
+                    hooks: ((inout GitProcessProbeHooks) -> Void)? = nil,
                     beforeRead: GitProcessProbeHooks.BeforeRead? = nil) -> GitService {
         var service = GitService(executablePath: executable)
-        service.probeHooks = GitProcessProbeHooks(started: { pid in record(pid); started?(pid) },
-                                                 beforeRead: beforeRead ?? { _, _, _, _ in },
-                                                 beforeExitWatch: beforeExitWatch,
-                                                 exitWatchFailed: exitWatchFailed)
+        var configured = GitProcessProbeHooks(started: { pid in record(pid); started?(pid) },
+                                              beforeRead: beforeRead ?? { _, _, _, _ in },
+                                              beforeExitWatch: beforeExitWatch,
+                                              exitWatchFailed: exitWatchFailed)
+        hooks?(&configured)
+        service.probeHooks = configured
         return service
     }
 
     static func run(_ mode: String, executable: String) -> String {
-        if mode == "spawn-signals" { return spawnSignals() }
-        if mode == "exit-wake" { return exitWake() }
+        if mode.hasPrefix("spawn-") { return spawn(mode, executable: executable) }
+        if mode.hasPrefix("exit-wake") { return exitWake(mode) }
+        if mode.hasPrefix("reap-") { return reapFailure(mode) }
         if mode == "exit-watch-esrch" { return exitingChildWithoutWatch() }
         if mode == "usability-read" || mode == "confirmation-read" { return usabilityRead(mode) }
         if mode.hasPrefix("holder-") { return holder(mode) }
         if mode.hasPrefix("group-") { return groupFailure(mode) }
         if mode == "blocking" { return blocking(executable: executable) }
         if mode == "concurrency" { return concurrency() }
-        if mode == "pipes" {
-            do {
-                let output = try git(executable).runData(["--version"], in: nil)
-                let intact = output.stdout == Data(repeating: 79, count: 262_144)
-                    && output.stderr == Data(repeating: 69, count: 262_144) && output.exit == 23
-                return intact ? "OK both pipes" : "FAIL pipe payload or status"
-            } catch { return "FAIL \(error)" }
-        }
-        return fault(mode, executable: executable)
+        return mode == "pipes" ? pipes(executable: executable) : fault(mode, executable: executable)
+    }
+
+    static func pipes(executable: String) -> String {
+        do {
+            let output = try git(executable).runData(["--version"], in: nil)
+            let intact = output.stdout == Data(repeating: 79, count: 262_144)
+                && output.stderr == Data(repeating: 69, count: 262_144) && output.exit == 23
+            return intact ? "OK both pipes" : "FAIL pipe payload or status"
+        } catch { return "FAIL \(error)" }
     }
 
     static func concurrency() -> String {

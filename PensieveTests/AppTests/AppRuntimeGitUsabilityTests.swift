@@ -21,6 +21,7 @@ final class AppRuntimeGitUsabilityTests: XCTestCase {
             } else {
                 XCTAssertNil(runtime.gitUsability?.message)
             }
+            if state != .usable { await assertFailedProbeKeepsUnusableConfiguration(state) }
         }
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
@@ -38,5 +39,23 @@ final class AppRuntimeGitUsabilityTests: XCTestCase {
         await runtime.refreshGitUsability()
         XCTAssertEqual(runtime.gitUsability, .usable)
         XCTAssertNil(runtime.syncModel.configurationError)
+    }
+
+    private func assertFailedProbeKeepsUnusableConfiguration(_ unusable: GitUsability) async {
+        let git = IngestRecordingGit()
+        var reads = 0
+        git.remoteRead = { reads += 1; return nil }
+        let model = SyncModel(git: git, root: "/unused-test-root")
+        let state = RuntimeGitState(probe: { throw GitError.outputReadFailed(detail: "probe EIO") })
+        model.observeGitState(state)
+        model.applyConfiguration(.success(nil), order: model.beginConfiguration())
+        _ = state.accept(unusable, order: state.beginEvidence(), model: model)
+        _ = await state.refresh(probingGit: true, model: model)
+        XCTAssertEqual(state.usability, unusable)
+        XCTAssertEqual(reads, 0, "Unusable git gates configuration reads")
+        // Fresh git evidence exposes the cached configuration answer before another remote read.
+        _ = state.accept(.usable, order: state.beginEvidence(), model: model)
+        XCTAssertNil(model.configurationError, "The failed probe must not replace the known absent answer")
+        XCTAssertTrue(model.canConnect)
     }
 }
