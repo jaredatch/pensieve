@@ -55,8 +55,8 @@ pathlib.Path(os.environ['TEST_LIFECYCLE_READY']).write_text(json.dumps({
     'pid': os.getpid(), 'directory': str(bundle.parent), 'fixture_root': root, 'fixture_root_exists': exists,
     'git_ceiling': os.environ.get('TEST_RUNNER_GIT_CEILING_DIRECTORIES'),
     'strict_pool': os.environ.get('TEST_RUNNER_LIBDISPATCH_COOPERATIVE_POOL_STRICT'),
-    'workers': sys.argv[sys.argv.index('-parallel-testing-worker-count') + 1]
-        if '-parallel-testing-worker-count' in sys.argv else None}))
+    'workers': [arg for arg in sys.argv
+        if arg in ('-parallel-testing-worker-count', '-maximum-parallel-testing-workers')]}))
 if os.environ.get('TEST_LIFECYCLE_MODE') == 'cascade':
     directory = pathlib.Path(os.environ['TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR'])
     directory.mkdir(parents=True, exist_ok=True)
@@ -173,7 +173,7 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
             self.assertIn("PENSIEVE_TEST_COUNT=1", output)
             observed = json.loads(ready.read_text())
             self.assertEqual(observed['strict_pool'], '1', 'normal suite hosts must use the strict cooperative pool')
-            self.assertEqual(observed['workers'], '3', 'history guards must run with three parallel workers')
+            self.assertEqual(observed['workers'], [], 'the wrapper must leave the test host count to Xcode')
             self.assertTrue(observed["fixture_root_exists"], "builder did not receive an existing fixture root")
             root = Path(observed["fixture_root"])
             self.assertEqual(observed["git_ceiling"], str(root), "Git discovery can escape into the checkout")

@@ -140,7 +140,6 @@ set +e
   -destination "$DESTINATION" \
   -derivedDataPath "$DERIVED_DATA" \
   -parallel-testing-enabled YES \
-  -parallel-testing-worker-count 3 \
   -test-timeouts-enabled YES \
   -default-test-execution-time-allowance 180 \
   -maximum-test-execution-time-allowance 180 \
