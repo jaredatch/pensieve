@@ -5,7 +5,6 @@ import SwiftData
 private typealias PensieveCategory = Pensieve.Category
 /// Stand-in for a SwiftData fetch failure inside `ThrowingSnapshotManifest.snapshot`.
 private struct SnapshotFetchBoom: Error {}
-
 /// PLAN-08 / 08.4 — SyncEngine orchestration + union-merge over stubs and real `file://` clones.
 final class SyncEngineTests: XCTestCase {
     var tempDir: String!; var lockPath: String { tempDir + "-sync.lock" }
@@ -45,6 +44,10 @@ final class SyncEngineTests: XCTestCase {
             return true
         }
 
+        func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+        func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+            try pullRebase(at: path, credential: nil)
+        }
         func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
             calls.append("pull")
             if let pullError { throw pullError }

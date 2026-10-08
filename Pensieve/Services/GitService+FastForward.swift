@@ -38,11 +38,9 @@ extension GitService {
     func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
         let store = try storeOperation(at: path)
         let before = try headSHA(at: path)
-        try fetch(at: path, credential: credential)
-        let revision = try runOrThrow(["-C", path, "rev-parse", "--verify", "FETCH_HEAD^{commit}"], in: nil)
-            .stdout.trimmingCharacters(in: .newlines)
-        try store.requireNoExcludedCollision(with: revision)
-        let r = try store.run(["merge", "--ff-only", revision])
+        let revision = try fetchStoreRevision(at: path, credential: credential)
+        try store.requireNoExcludedCollision(with: revision.commit)
+        let r = try store.run(["merge", "--ff-only", revision.commit])
         guard r.exit == 0 else { return .diverged }
         let after = try headSHA(at: path)
         if let before, let after, before != after {

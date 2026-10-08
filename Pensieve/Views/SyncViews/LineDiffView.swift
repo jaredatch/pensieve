@@ -7,13 +7,15 @@ struct DiffRow: Equatable {
 }
 
 struct LineDiffView: View {
+    static let defaultMaxRows = 400
+
     let thisText: String
     let otherText: String
     let maxRows: Int
     let thisLabel: String
     let otherLabel: String
 
-    init(this thisText: String, other otherText: String, maxRows: Int = 400,
+    init(this thisText: String, other otherText: String, maxRows: Int = LineDiffView.defaultMaxRows,
          thisLabel: String = "This Mac", otherLabel: String = "Other Mac") {
         self.thisText = thisText
         self.otherText = otherText

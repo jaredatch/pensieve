@@ -26,6 +26,10 @@ final class IngestRecordingGit: GitServiceProtocol {
         calls.append("commit")
         return false
     }
+    func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+    func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+        try pullRebase(at: path, credential: nil)
+    }
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
         calls.append("pull")
         return .upToDate

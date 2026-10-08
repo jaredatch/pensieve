@@ -47,6 +47,8 @@ extension SyncBytePreservationTests {
             XCTAssertFalse(native.isRebaseInProgress(at: root))
         }
         try assertLegacyDependencyUpdatesRemainAdmitted(root: root, store: store, native: native)
+        XCTAssertEqual(try files.readData(at: trace + "-cached"), Data("node_modules/legacy.js\0".utf8),
+                       "The index inventory must exclude ordinary tracked skill files")
     }
 
     private func assertLegacyDependencyUpdatesRemainAdmitted(root: String, store: StoreGitOperation,
@@ -55,6 +57,10 @@ extension SyncBytePreservationTests {
         try files.writeFile(at: legacy, content: "already tracked dependency\n")
         try native.runOrThrow(["-C", root, "add", "--force", "node_modules/legacy.js"], in: nil)
         try native.runOrThrow(["-C", root, "commit", "-m", "legacy dependency"], in: nil)
+        let subtree = "node_modules/untracked-package"
+        try files.writeFile(at: root + "/" + subtree + "/deep/file.js", content: "local subtree\n")
+        XCTAssertTrue(try store.excludedUntrackedPaths().contains(Data((subtree + "/").utf8)),
+                      "An untracked subtree in a partly tracked excluded folder must be one receipt")
         let incoming = try native.commitSHA(at: root)
         XCTAssertNoThrow(try store.requireNoExcludedCollision(with: incoming),
                          "A folder receipt must not suppress its already tracked files")
@@ -126,6 +132,17 @@ extension SyncBytePreservationTests {
                 [ "$1" = ls-files ] || return 1
                 case "$*" in *--ignored*) return 0 ;; *) return 1 ;; esac
             }
+            is_cached() {
+                \(FakeGitScript.skipGlobalOptions)
+                [ "$1" = ls-files ] || return 1
+                case "$*" in *--cached*) return 0 ;; *) return 1 ;; esac
+            }
+            if is_cached "$@"; then
+                /usr/bin/git "$@" > '\(trace)-cached'
+                result=$?
+                cat '\(trace)-cached'
+                exit "$result"
+            fi
             if is_inventory "$@"; then
                 /usr/bin/git "$@" > '\(trace)'
                 result=$?
@@ -166,6 +183,24 @@ extension SyncBytePreservationTests {
             XCTAssertEqual(error.localizedDescription, fixture.message)
         }
         try fixture.assertUntouched()
+        let pending = "skills/x/pending.txt"
+        try fixture.files.writeFile(at: fixture.storeB + "/" + pending, content: "uncommitted ordinary work\n")
+        let beforeIndex = try fixture.files.readData(at: fixture.storeB + "/.git/index")
+        XCTAssertThrowsError(try engine.inspectConflicts(root: fixture.storeB, credential: nil,
+                                                        context: fixture.context)) { error in
+            XCTAssertEqual(error.localizedDescription, fixture.message)
+        }
+        try fixture.assertUntouched()
+        XCTAssertThrowsError(try engine.resolveConflicts(root: fixture.storeB,
+            picks: [path: ResolutionPick(side: .thisMachine, expectedThis: fixture.localBytes,
+                                         expectedOther: fixture.remoteBytes)],
+            credential: nil, context: fixture.context)) { error in
+            XCTAssertEqual(error.localizedDescription, fixture.message)
+        }
+        try fixture.assertUntouched()
+        XCTAssertEqual(try fixture.files.readData(at: fixture.storeB + "/.git/index"), beforeIndex,
+                       "Neither inspection nor resolution may stage the pending ordinary file")
+        XCTAssertEqual(try fixture.files.readFile(at: fixture.storeB + "/" + pending), "uncommitted ordinary work\n")
         try fixture.moveLocalFile()
         guard case .synced = try engine.sync(root: fixture.storeB, message: "resume", credential: nil,
             context: fixture.context) else { return XCTFail("Moving the obstacle must allow sync") }

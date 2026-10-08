@@ -1,13 +1,10 @@
 import XCTest
 import SwiftData
 @testable import Pensieve
-
 private typealias PensieveCategory = Pensieve.Category
-
 /// PLAN-09 / 09.2 — reproduce-on-demand conflict inspection/resolution over real file:// clones.
 final class SyncConflictResolutionTests: XCTestCase {
     private var tempDir: String!; private var lockPath: String { tempDir + "-sync.lock" }
-
     override func setUpWithError() throws {
         tempDir = TestTemporaryDirectory.path + "PensieveSyncConflictTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
@@ -292,6 +289,10 @@ extension SyncConflictResolutionTests {
         func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool { true }
         @discardableResult
         func stageAllAndCommit(at path: String, message: String) throws -> Bool { true }
+        func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+        func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+            try pullRebase(at: path, credential: nil)
+        }
         func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
             pullAttempted = true
             if let pullError { throw pullError }

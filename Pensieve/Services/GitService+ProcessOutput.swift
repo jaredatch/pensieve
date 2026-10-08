@@ -163,6 +163,11 @@ private final class GitOutputEvents {
 }
 
 extension GitService {
+    func commandError(_ output: GitOutput, args: [String]) -> GitError {
+        GitError.commandFailed(args: args, exitCode: output.exit,
+            stderr: output.stderr.isEmpty ? output.stdout : output.stderr, confirmingProbe: output.confirmingProbe)
+    }
+
     func dataCommandError(_ output: GitDataOutput, args: [String]) -> GitError {
         GitError.commandFailed(
             args: args,

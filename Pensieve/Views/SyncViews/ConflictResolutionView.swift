@@ -205,40 +205,61 @@ struct ConflictResolutionView: View {
 
 /// The sheet's file comparison, separate from grouping and resolution controls.
 struct ConflictFileComparison: View {
-    let item: ConflictItem
+    private enum Side {
+        case deleted
+        case text(String, preview: String, hiddenLines: Int)
+        case nonText(bytes: Int)
+
+        init(_ bytes: Data?) {
+            guard let bytes else { self = .deleted; return }
+            guard !bytes.contains(0), let text = UpstreamHistoryFileContent.utf8PreservingBOM(bytes) else {
+                self = .nonText(bytes: bytes.count)
+                return
+            }
+            let lines = text.components(separatedBy: "\n")
+            let visible = lines.prefix(LineDiffView.defaultMaxRows)
+            self = .text(text, preview: visible.joined(separator: "\n"), hiddenLines: lines.count - visible.count)
+        }
+    }
+
+    private let this: Side
+    private let other: Side
+
+    init(item: ConflictItem) {
+        this = Side(item.thisMachine)
+        other = Side(item.otherMachine)
+    }
 
     var body: some View {
-        if let this = text(item.thisMachine), let other = text(item.otherMachine) {
+        if case let .text(this, _, _) = this, case let .text(other, _, _) = other,
+           !this.isEmpty, !other.isEmpty {
             LineDiffView(this: this, other: other)
         } else {
             HStack(alignment: .top, spacing: Spacing.md) {
-                side("This Mac", bytes: item.thisMachine)
-                side("Other Mac", bytes: item.otherMachine)
+                side("This Mac", content: this)
+                side("Other Mac", content: other)
             }
         }
     }
 
-    @ViewBuilder private func side(_ title: String, bytes: Data?) -> some View {
+    private func side(_ title: String, content: Side) -> some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(title).font(.caption).foregroundStyle(.secondary)
-            if let bytes {
-                if let text = text(bytes) {
-                    Text(text.isEmpty ? "Empty file" : text)
-                        .font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                } else {
-                    Text("This file can’t be shown as text.").foregroundStyle(.secondary)
-                    Text("\(bytes.count) \(bytes.count == 1 ? "byte" : "bytes")").font(.caption)
-                }
-            } else {
+            switch content {
+            case .deleted:
                 Text("Deleted").foregroundStyle(.secondary)
+            case let .text(text, preview, hiddenLines):
+                Text(text.isEmpty ? "Empty file" : preview)
+                    .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                if hiddenLines > 0 {
+                    Text(verbatim: "... preview truncated - \(hiddenLines) more lines")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            case let .nonText(bytes):
+                Text("This file can’t be shown as text.").foregroundStyle(.secondary)
+                Text("\(bytes) \(bytes == 1 ? "byte" : "bytes")").font(.caption)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func text(_ bytes: Data?) -> String? {
-        guard let bytes else { return "" }
-        guard !bytes.contains(0) else { return nil }
-        return String(bytes: bytes, encoding: .utf8)
     }
 }

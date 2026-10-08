@@ -91,7 +91,7 @@ protocol GitServiceProtocol {
     func stageAllAndCommit(at path: String, message: String) throws -> Bool
     func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision?
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult
-    func pullRebase(at path: String, credential: GitCredential?, fetchedRevision: FetchedStoreRevision) throws -> PullResult
+    func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult
     func push(at path: String, credential: GitCredential?) throws
     func abortRebase(at path: String) throws
     func conflictedFiles(at path: String) throws -> [String]
@@ -106,10 +106,6 @@ protocol GitServiceProtocol {
 }
 
 extension GitServiceProtocol {
-    func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision? { nil }
-    func pullRebase(at path: String, credential: GitCredential?, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
-        try pullRebase(at: path, credential: credential)
-    }
     /// Inert default for doubles that do not model the host environment.
     func probeUsability() -> GitUsability { .usable }
     func remoteDefaultBranch(remote: String, credential: GitCredential?) throws -> String? { nil }
@@ -314,8 +310,7 @@ struct GitService: GitServiceProtocol {
         -> GitOutput {
         let r = try run(args, in: workingDir, credential: credential, storeRules: storeRules)
         guard r.exit == 0 else {
-            throw GitError.commandFailed(args: args, exitCode: r.exit, stderr: r.stderr.isEmpty ? r.stdout : r.stderr,
-                confirmingProbe: r.confirmingProbe)
+            throw commandError(r, args: args)
         }
         return r
     }
@@ -607,17 +602,17 @@ extension GitService {
     /// up-to-date vs merged = HEAD unchanged vs changed.
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
         let revision = try fetchStoreRevision(at: path, credential: credential)
-        return try pullRebase(at: path, credential: credential, fetchedRevision: revision)
+        return try pullRebase(at: path, fetchedRevision: revision)
     }
 
     /// Pull the already fetched and checked commit from this repository. A second remote fetch could
     /// introduce a colliding path after the app's pre-write guard, so it must not happen here.
-    func pullRebase(at path: String, credential: GitCredential?, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+    func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
         let store = try storeOperation(at: path)
         try store.requireNoExcludedCollision(with: fetchedRevision.commit)
         let before = try headSHA(at: path)
         let args = ["-C", path] + (try store.pullArguments(for: fetchedRevision))
-        let r = try store.run(Array(args.dropFirst(2)), credential: credential)
+        let r = try store.run(Array(args.dropFirst(2)))
         if r.exit == 0 {
             let after = try headSHA(at: path)
             return before == after ? .upToDate : .merged
@@ -626,12 +621,7 @@ extension GitService {
         if !conflicts.isEmpty {
             return .conflicted(conflicts)
         }
-        let combined = r.stdout + r.stderr
-        if isAuthFailure(combined) {
-            throw GitError.authenticationFailed(remote: authenticationRemoteLabel(at: path), detail: combined)
-        }
-        throw GitError.commandFailed(args: args, exitCode: r.exit, stderr: r.stderr.isEmpty ? r.stdout : r.stderr,
-            confirmingProbe: r.confirmingProbe)
+        throw commandError(r, args: args)
     }
 
     func push(at path: String, credential: GitCredential?) throws {

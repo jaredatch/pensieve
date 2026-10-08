@@ -258,7 +258,7 @@ struct SyncEngine: SyncEngineProtocol {
 
     private func pullRebase(root: String, credential: GitCredential?, incoming: FetchedStoreRevision?) throws -> PullResult {
         if let incoming {
-            return try gitService.pullRebase(at: root, credential: credential, fetchedRevision: incoming)
+            return try gitService.pullRebase(at: root, fetchedRevision: incoming)
         }
         return try gitService.pullRebase(at: root, credential: credential)
     }

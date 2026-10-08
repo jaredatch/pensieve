@@ -8,14 +8,22 @@ import Foundation
 extension GitService {
 
     /// `git show :<stage>:<path>` — exact bytes, or nil when that stage is absent. Empty data is
-    /// a present empty file. Optional-read fallbacks preserve host and local output-read failures.
+    /// a present empty file. Read failures propagate; only an absent index stage is a deletion.
     func blob(atStage stage: Int, path: String, in workingDir: String) throws -> Data? {
-        guard let r = try GitError.preservingUnusability({
-            try runData(["-C", workingDir, "show", ":\(stage):\(path)"], in: nil)
-        }), r.exit == 0 else {
-            return nil
+        let args = ["-C", workingDir, "show", ":\(stage):\(path)"]
+        let result = try runData(args, in: nil)
+        if result.exit == 0 { return result.stdout }
+        // Only the index can establish deletion. A rejected show of an existing stage is an error.
+        let indexArgs = ["--literal-pathspecs", "-C", workingDir, "ls-files", "--stage", "-z", "--", path]
+        let index = try runData(indexArgs, in: nil)
+        guard index.exit == 0 else { throw dataCommandError(index, args: indexArgs) }
+        let present = index.stdout.split(separator: 0).contains { record in
+            let fields = record.split(separator: 9, maxSplits: 1)
+            return fields.count == 2 && fields[1].elementsEqual(path.utf8)
+                && fields[0].split(separator: 32).last?.elementsEqual(String(stage).utf8) == true
         }
-        return r.stdout
+        guard !present else { throw dataCommandError(result, args: args) }
+        return nil
     }
 
     /// True iff a rebase is mid-flight. Git owns `.git`; this structural probe stays inside GitService.

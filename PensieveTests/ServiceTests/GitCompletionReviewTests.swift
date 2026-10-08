@@ -81,11 +81,11 @@ final class GitCompletionReviewTests: XCTestCase {
         XCTAssertEqual(GitUsability.failed(GitFailureDetail(raw)), .failed(GitFailureDetail("failed repo")))
     }
 
-    func testOrdinaryConflictReadFailuresKeepTheirFallbacks() throws {
+    func testConflictBlobReadFailureThrowsWhileBestEffortReadsKeepFallbacks() throws {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         let git = try fixture.executable("echo 'ordinary missing revision' >&2; exit 128")
-        XCTAssertNil(try git.blob(atStage: 2, path: "missing", in: fixture.root))
+        XCTAssertThrowsError(try git.blob(atStage: 2, path: "missing", in: fixture.root))
         XCTAssertTrue(try git.conflictedFiles(at: fixture.root).isEmpty)
         XCTAssertFalse(try git.hasCommitsToPush(at: fixture.root))
         XCTAssertNil(try git.headSHA(at: fixture.root))

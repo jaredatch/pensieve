@@ -74,9 +74,9 @@ struct ExcludedFileCollisionFixture {
     }
 
     var message: String {
-        if let folder = ["skills/x/node_modules", "skills/x/.env", "skills/x/.venv"].first(where: {
-            path.hasPrefix($0 + "/")
-        }) {
+        let components = path.split(separator: "/")
+        if let index = components.dropLast().firstIndex(where: { ["node_modules", ".env", ".venv"].contains(String($0)) }) {
+            let folder = components.prefix(through: index).joined(separator: "/")
             return "Sync paused so it won't overwrite \(folder) on this Mac. Another Mac already synced files there. "
                 + "Move or rename this folder, then sync again."
         }

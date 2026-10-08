@@ -149,8 +149,7 @@ struct StoreGitOperation {
         let staged = try run(args)
         if staged.exit == 0 { return false }
         guard staged.exit == 1 else {
-            throw GitError.commandFailed(args: ["-C", root] + args, exitCode: staged.exit,
-                stderr: staged.stderr.isEmpty ? staged.stdout : staged.stderr, confirmingProbe: staged.confirmingProbe)
+            throw git.commandError(staged, args: ["-C", root] + args)
         }
         try runOrThrow(["commit", "-m", message])
         return true
@@ -163,8 +162,9 @@ struct StoreGitOperation {
         let args = ["rev-parse", "--verify", upstream + "^{commit}"]
         let head = try runOrThrow(args).stdout.trimmingCharacters(in: .newlines)
         guard head == revision.commit else {
-            throw GitError.commandFailed(args: ["-C", root] + args, exitCode: 1,
-                stderr: "The fetched branch no longer matches the checked commit. Sync again.")
+            let refusal = GitService.GitOutput(stdout: "", stderr:
+                "The fetched branch no longer matches the checked commit. Sync again.", exit: 1)
+            throw git.commandError(refusal, args: ["-C", root] + args)
         }
         return ["rebase", "--fork-point", "--onto", revision.commit, upstream]
     }
@@ -204,8 +204,8 @@ struct StoreGitOperation {
         return files
     }
 
-    /// Native --directory receipts collapse only wholly untracked subtrees. Partly tracked folders
-    /// retain individual new paths; never widen them to the excluded ancestor.
+    /// Native receipts collapse wholly untracked subtrees, including those within partly tracked
+    /// excluded folders. Indexed-file replacements retain their exact individual new paths.
     func excludedUntrackedPaths() throws -> [Data] {
         let fileArgs = ["ls-files", "--others", "-z"] + StoreExclusions.directoryArguments
         let files = try runData(fileArgs)
@@ -219,27 +219,43 @@ struct StoreGitOperation {
             + StoreExclusions.directoryArguments + ["--"] + StoreExclusions.directoryPathspecs
         let directories = try runData(args)
         guard directories.exit == 0 else { throw git.dataCommandError(directories, args: ["-C", root] + args) }
-        let cachedArgs = ["ls-files", "--cached", "-z"]
+        let cachedArgs = ["ls-files", "--cached", "-z", "--"] + StoreExclusions.directoryPathspecs
         let cached = try runData(cachedArgs)
         guard cached.exit == 0 else { throw git.dataCommandError(cached, args: ["-C", root] + cachedArgs) }
-        let partial = Set(cached.stdout.split(separator: 0).compactMap { StoreExclusions.folderContainingFile($0) })
-        paths += directories.stdout.split(separator: 0).filter { path in
-            !partial.contains { path.starts(with: $0 + Data([0x2F])) }
-        }.map { Data($0) }
-        paths += try excludedFiles(in: partial)
+        paths += directories.stdout.split(separator: 0).map { Data($0) }
+        paths += try excludedFiles(beneath: cached.stdout.split(separator: 0).map { Data($0) })
         return paths
     }
 
-    private func excludedFiles(in folders: Set<Data>) throws -> [Data] {
-        guard !folders.isEmpty else { return [] }
-        let names = try folders.map { folder -> String in
-            guard let name = String(bytes: folder, encoding: .utf8) else {
+    private func excludedFiles(beneath tracked: [Data]) throws -> [Data] {
+        // --directory already collapsed every wholly untracked subtree. Its one omission is an
+        // indexed file replaced by a directory: inspect only indexed paths inside excluded folders.
+        let names = try Set(tracked.map { path -> String in
+            if let name = String(bytes: path, encoding: .utf8) { return name }
+            guard let folder = StoreExclusions.folderContainingFile(path),
+                  let name = String(bytes: folder, encoding: .utf8) else {
                 throw GitError.repositoryUnreadable(path: root, detail: "An excluded folder name isn't valid UTF-8.")
             }
             return name
+        })
+        var paths: [Data] = []
+        var batch: [String] = []
+        var bytes = 0
+        for name in names {
+            if bytes + name.utf8.count > 65_536 {
+                paths += try excludedFiles(at: batch)
+                batch = []
+                bytes = 0
+            }
+            batch.append(name)
+            bytes += name.utf8.count + 1
         }
-        // Limit the detailed walk to partly indexed folders. It also sees children below a tracked
-        // file replaced by a directory, which --directory omits. Untracked folder trees stay pruned.
+        paths += try excludedFiles(at: batch)
+        return paths
+    }
+
+    private func excludedFiles(at names: [String]) throws -> [Data] {
+        guard !names.isEmpty else { return [] }
         let args = ["--literal-pathspecs", "ls-files", "--others", "--ignored", "-z"]
             + StoreExclusions.directoryArguments + ["--"] + names
         let result = try runData(args)

@@ -310,13 +310,51 @@ extension GitServiceTests {
         try git.runOrThrow(["-C", a, "add", "--force", ".env"], in: nil)
         try git.runOrThrow(["-C", a, "commit", "-m", "later unchecked tree"], in: nil)
         try git.push(at: a, credential: nil)
-        XCTAssertEqual(try git.pullRebase(at: pinned, credential: nil, fetchedRevision: checked), .merged)
+        XCTAssertEqual(try git.pullRebase(at: pinned, fetchedRevision: checked), .merged)
         XCTAssertFalse(files.fileExists(at: pinned + "/purged.txt"))
         XCTAssertEqual(try files.readFile(at: pinned + "/pinned.txt"), "local sync commit\n")
         XCTAssertEqual(try files.readFile(at: pinned + "/.env"), "local excluded fixture\n")
         XCTAssertEqual(try git.runOrThrow(["-C", pinned, "rev-parse", "origin/main"], in: nil).stdout, checkedHead,
                        "The guarded update must not fetch the later remote tree")
         XCTAssertFalse(git.isRebaseInProgress(at: pinned))
+    }
+
+    func testPinnedPullRefusesMovedTrackingRefWithoutChangingTheStore() throws {
+        let remote = try seededRemote()
+        let a = try clone(remote, "pin-a")
+        let b = try clone(remote, "pin-b")
+        try write("local.txt", "local work\n", in: b)
+        XCTAssertTrue(try git.stageAllAndCommit(at: b, message: "local"))
+        try write("incoming.txt", "checked upstream\n", in: a)
+        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "checked"))
+        try git.push(at: a, credential: nil)
+        try FileService().writeFile(at: b + "/.env", content: "protected local fixture\n")
+        let checked = try XCTUnwrap(git.preflightStoreUpdate(at: b, credential: nil))
+        try write("later.txt", "unchecked upstream\n", in: a)
+        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "later"))
+        try git.push(at: a, credential: nil)
+        try git.fetch(at: b, credential: nil)
+        let files = FileService()
+        let beforeHead = try git.headSHA(at: b)
+        let beforeIndex = try files.readData(at: b + "/.git/index")
+        let beforeStatus = try git.runOrThrow(["-C", b, "status", "--porcelain"], in: nil).stdout
+        XCTAssertThrowsError(try git.pullRebase(at: b, fetchedRevision: checked)) { error in
+            guard case let GitError.commandFailed(_, _, detail, _) = error else {
+                return XCTFail("A moved tracking ref must refuse the checked rebase: \(error)")
+            }
+            XCTAssertEqual(detail, "The fetched branch no longer matches the checked commit. Sync again.")
+        }
+        XCTAssertEqual(try git.headSHA(at: b), beforeHead)
+        XCTAssertEqual(try files.readData(at: b + "/.git/index"), beforeIndex)
+        XCTAssertEqual(try git.runOrThrow(["-C", b, "status", "--porcelain"], in: nil).stdout, beforeStatus)
+        XCTAssertEqual(try files.readFile(at: b + "/local.txt"), "local work\n")
+        XCTAssertEqual(try files.readFile(at: b + "/.env"), "protected local fixture\n")
+        XCTAssertFalse(files.fileExists(at: b + "/incoming.txt"))
+        XCTAssertFalse(files.fileExists(at: b + "/later.txt"))
+        XCTAssertFalse(git.isRebaseInProgress(at: b))
+        let current = try XCTUnwrap(git.preflightStoreUpdate(at: b, credential: nil))
+        XCTAssertEqual(try git.pullRebase(at: b, fetchedRevision: current), .merged)
+        XCTAssertEqual(try files.readFile(at: b + "/later.txt"), "unchecked upstream\n")
     }
 
     private func configureNativeRebaseDefaults(at root: String) throws {

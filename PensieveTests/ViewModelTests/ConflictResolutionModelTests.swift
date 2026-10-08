@@ -50,6 +50,10 @@ final class ConflictResolutionModelTests: XCTestCase {
         func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool { false }
         @discardableResult
         func stageAllAndCommit(at path: String, message: String) throws -> Bool { false }
+        func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+        func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+            try pullRebase(at: path, credential: nil)
+        }
         func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult { .upToDate }
         func push(at path: String, credential: GitCredential?) throws {}
         func abortRebase(at path: String) throws {}
