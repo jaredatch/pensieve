@@ -35,7 +35,7 @@ final class GitCompletionReviewTests: XCTestCase {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         let git = try fixture.executable("""
-            while [ "$1" = '-c' ]; do shift 2; done
+            \(FakeGitScript.skipGlobalOptions)
             if [ "$1" = '--version' ]; then echo 'git version fixture'; exit 0; fi
             echo 'checkout failed for xcrun: error: invalid active developer path' >&2
             exit 128
@@ -99,8 +99,7 @@ final class GitCompletionReviewTests: XCTestCase {
         try fixture.seedRepository()
         let git = try fixture.executable("""
             simulate_failure() {
-                while [ "$1" = '-c' ]; do shift 2; done
-                if [ "$1" = '-C' ]; then shift 2; fi
+                \(FakeGitScript.skipGlobalOptions)
                 if [ "$1" = show ]; then touch '\(fixture.failureSwitch)'; fi
                 if [ -f '\(fixture.failureSwitch)' ]; then
                   echo 'Xcode license not accepted' >&2; exit 69

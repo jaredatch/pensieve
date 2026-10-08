@@ -32,7 +32,7 @@ final class SyncBytePreservationTests: XCTestCase {
     }
 
     func testSkillIdentFilterAndEncodingRulesPreserveBytes() throws {
-        try roundTrip(skillRules: true, installed: false, transformations: true)
+        try roundTrip(skillRules: true, installed: false, transformations: true, nestedRepositories: true)
     }
 
     func testExistingStoreStatusAndFastForwardPreserveSkillBytes() throws {
@@ -40,7 +40,7 @@ final class SyncBytePreservationTests: XCTestCase {
     }
 
     private func roundTrip(skillRules: Bool, installed: Bool, transformations: Bool = false,
-                           fastForward: Bool = false) throws {
+                           fastForward: Bool = false, nestedRepositories: Bool = false) throws {
         let remote = base + "/remote.git"
         let gitA = try userGit("A", remote: remote, skillRules: skillRules)
         let gitB = try userGit("B", remote: remote, skillRules: skillRules)
@@ -61,7 +61,7 @@ final class SyncBytePreservationTests: XCTestCase {
             contextA.insert(Skill(name: "Authored", skillDescription: "Authored fixture", directoryName: "authored"))
             try contextA.save()
         }
-        let expected = try inventory(at: storeA + "/skills")
+        let expected = try prepareInventory(store: storeA, git: gitA, nestedRepositories: nestedRepositories)
         try files.writeFile(at: storeA + "/.DS_Store", content: "Finder metadata")
         try files.writeFile(at: storeA + "/skills/bytes/.DS_Store", content: "Finder metadata")
         let installer = installService(git: gitA, store: storeA)
@@ -70,6 +70,7 @@ final class SyncBytePreservationTests: XCTestCase {
             context: contextA), .synced(pushed: true, warnings: []))
         XCTAssertEqual(try installer.stableContentHash(at: storeA + "/skills/bytes"), beforeHash)
         try assertRemoteBytes(expected, git: gitA, remote: remote)
+        if nestedRepositories { try assertNestedRepositoriesStayLocal(store: storeA, git: gitA, remote: remote) }
         XCTAssertEqual(try gitA.runData(["--git-dir", remote, "show", "main:manifest/manifest.yaml"], in: nil)
             .stdout, try files.readData(at: storeA + "/manifest/manifest.yaml"),
             "Global excludes must not hide the manifest")
@@ -227,6 +228,9 @@ final class SyncBytePreservationTests: XCTestCase {
         try files.writeExecutableFile(at: directory + "/scripts/run.sh", content: "#!/bin/sh\necho original\n")
     }
 
+}
+
+extension SyncBytePreservationTests {
     private func installService(git: GitService, store: String) -> SkillInstallService {
         SkillInstallService(gitService: git, credentialStore: InMemoryCredentialStore(),
             scratchRoot: base + "/install-scratch", storeRoot: store, lockPath: base + "/sync.lock")
@@ -265,5 +269,38 @@ final class SyncBytePreservationTests: XCTestCase {
             }
         }
         return result
+    }
+}
+
+extension SyncBytePreservationTests {
+    private var nestedRoots: [String] { ["bytes/assets/vendor", "authored/vendor"] }
+
+    private func prepareInventory(store: String, git: GitService, nestedRepositories: Bool) throws -> [String: Data] {
+        if nestedRepositories {
+            for relative in nestedRoots {
+                let nested = store + "/skills/" + relative
+                try files.createDirectory(at: nested)
+                try git.initRepository(at: nested)
+                try files.writeFile(at: nested + "/nested.txt", content: "separate repository\n")
+                try git.stageAllAndCommit(at: nested, message: "nested repo")
+            }
+        }
+        return try inventory(at: store + "/skills").filter { path, _ in
+            !nestedRepositories || !nestedRoots.contains { path.hasPrefix($0 + "/") }
+        }
+    }
+
+    private func assertNestedRepositoriesStayLocal(store: String, git: GitService, remote: String) throws {
+        let tree = try git.runOrThrow(["--git-dir", remote, "ls-tree", "-r", "main"], in: nil)
+        XCTAssertFalse(tree.stdout.contains("160000"), "Sync must never publish a gitlink")
+        for relative in nestedRoots {
+            XCTAssertTrue(files.directoryExists(at: store + "/skills/" + relative + "/.git"))
+            XCTAssertFalse(tree.stdout.contains("skills/" + relative), "Nested repositories stay local")
+            try git.stagePath("skills/" + relative, at: store)
+            XCTAssertEqual(try git.runOrThrow(["-C", store, "ls-files", "--stage", "--", "skills/" + relative],
+                in: nil).stdout, "", "Resolving a path must not stage a gitlink")
+        }
+        XCTAssertFalse(try git.stageAllAndCommit(at: store, message: "nested repos remain local"),
+            "A subsequent sync must not attempt an empty commit for omitted repositories")
     }
 }

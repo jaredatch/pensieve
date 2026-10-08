@@ -19,15 +19,9 @@ extension GitService {
     /// `status` (e.g. the path is not a repo) is treated as NOT clean — the conservative default that
     /// keeps a downstream puller from fast-forwarding over a worktree it could not inspect.
     func isWorktreeClean(at path: String) -> Bool {
-        // Upgrade an existing store before status can run a skill's clean filter. A branchless
-        // repository is still observed without installing metadata; sync refuses it before pulling.
-        do {
-            if try hasLocalBranches(at: path) { try ensureStoreAttributes(at: path) }
-        } catch { return false }
-        guard let r = try? run(["-C", path, "status", "--porcelain"], in: nil, storeRules: true), r.exit == 0,
-              let unstaged = try? unstagedSkillPaths(at: path), unstaged.isEmpty else {
-            return false
-        }
+        guard let store = try? storeOperation(at: path),
+              let r = try? store.run(["status", "--porcelain"]), r.exit == 0,
+              let unstaged = try? store.unstagedSkillPaths(), unstaged.isEmpty else { return false }
         return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -53,10 +47,10 @@ extension GitService {
     /// `.fastForwarded(from:to:)` when it moved, `.upToDate` when it did not. Auth failures propagate
     /// from `fetch` as `.authenticationFailed`. The local `merge` takes no credential (no network).
     func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
-        try ensureStoreAttributes(at: path)
+        let store = try storeOperation(at: path)
         let before = try headSHA(at: path)
         try fetch(at: path, credential: credential)
-        let r = try run(["-C", path, "merge", "--ff-only", "origin/main"], in: nil, storeRules: true)
+        let r = try store.run(["merge", "--ff-only", "origin/main"])
         guard r.exit == 0 else { return .diverged }
         let after = try headSHA(at: path)
         if let before, let after, before != after {

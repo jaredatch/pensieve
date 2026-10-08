@@ -37,8 +37,7 @@ final class GitUsabilityTests: XCTestCase {
             defer { try? fixture.remove() }
             if sample.hasGitEntry { try fixture.files.createDirectory(at: fixture.root + "/.git") }
             let standIn = try fixture.executable("""
-                while [ "$1" = '-c' ]; do shift 2; done
-                if [ "$1" = '-C' ]; then shift 2; fi
+                \(FakeGitScript.skipGlobalOptions)
                 if [ "$1" = '--version' ] && [ '\(sample.versionFails)' != true ]; then
                     echo 'git version fixture'; exit 0
                 fi

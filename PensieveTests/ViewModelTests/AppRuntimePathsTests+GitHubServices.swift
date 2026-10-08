@@ -11,8 +11,11 @@ extension AppRuntimePathsTests {
         )
         defer { try? files.deleteDirectory(at: sandbox) }
         let otherPaths = AppRuntimePaths(storeRoot: sandbox + "/other-store", appSupportDir: sandbox + "/other-support")
+        let cloneTemp = sandbox + "/.pensieve-clone-" + UUID().uuidString
+        let cloneSentinel = sandbox + "/.pensieve-clone-backup/keep"
         let vendorTemp = paths.storeRoot + ".vendor-" + UUID().uuidString + ".tmp"
         let sentinels = [
+            cloneSentinel,
             otherPaths.skillInstallScratchRoot + "/leftover",
             otherPaths.updateCheckScratchRoot + "/leftover",
             otherPaths.upstreamHistoryScratchRoot + "/leftover",
@@ -23,14 +26,17 @@ extension AppRuntimePathsTests {
         for path in sentinels { try files.writeFile(at: path, content: "keep") }
         for scratch in scratchRoots { try files.writeFile(at: scratch + "/leftover", content: "abandoned") }
         try files.writeFile(at: vendorTemp + "/leftover", content: "abandoned")
+        try files.writeFile(at: cloneTemp + "/partial", content: "abandoned")
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: paths.syncLockPath))
         defer { lock.release() }
         paths.cleanupGitHubSkillTemps(fileService: files)
         for scratch in scratchRoots { XCTAssertFalse(files.directoryExists(at: scratch), scratch) }
         XCTAssertTrue(files.directoryExists(at: vendorTemp), "The runtime's held lock must protect vendor temps")
+        XCTAssertTrue(files.directoryExists(at: cloneTemp), "A held sync lock must protect an active clone")
         lock.release()
         paths.cleanupGitHubSkillTemps(fileService: files)
         XCTAssertFalse(files.directoryExists(at: vendorTemp))
+        XCTAssertFalse(files.directoryExists(at: cloneTemp))
         for path in sentinels { XCTAssertEqual(try files.readFile(at: path), "keep", path) }
     }
 

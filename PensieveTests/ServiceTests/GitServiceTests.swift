@@ -144,10 +144,13 @@ final class GitServiceTests: XCTestCase {
         let b = try clone(remote, "b")
         XCTAssertTrue(FileManager.default.fileExists(atPath: b + "/README.md"))
         let originalHead = try git.commitSHA(at: b)
-        XCTAssertThrowsError(try git.clone(remote: remote, into: b, credential: nil))
+        try assertCloneRefusesOccupiedStore(remote: remote, destination: b)
         XCTAssertEqual(try git.commitSHA(at: b), originalHead, "Publication must preserve an occupied store")
         XCTAssertEqual(try FileService().readFile(at: b + "/README.md"), "seed\n")
-        for failure in ["metadata-write", "metadata-path", "head-probe", "head-read", "checkout", "terminated-checkout"] {
+        try assertClonePublicationRace(remote: remote)
+        let failures = ["clone", "metadata-write", "metadata-path", "head-probe", "head-read",
+                        "checkout", "terminated-checkout"]
+        for failure in failures {
             try assertFailedCloneCanRetry(remote: remote, failure: failure)
         }
     }
@@ -351,6 +354,7 @@ extension GitServiceTests {
         XCTAssertEqual(body, "B version\n")   // B's edit survives the abort
         let before = try git.commitSHA(at: b)
         for failure in ["metadata-write", "metadata-path"] {
+            if FileService().fileExists(at: b + "-fault") { try FileService().deleteFile(at: b + "-fault") }
             XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .conflicted(["README.md"]))
             try FileService().deleteFile(at: b + "/.git/info/attributes")
             let failing = try failingMetadataGit(failure, root: b)
@@ -361,7 +365,6 @@ extension GitServiceTests {
             XCTAssertEqual(try git.commitSHA(at: b), before)
             XCTAssertEqual(try FileService().readFile(at: b + "/README.md"), "B version\n")
             XCTAssertEqual(try rawGit(["-C", b, "status", "--porcelain"]).out, "")
-            if git.isRebaseInProgress(at: b) { try git.abortRebase(at: b) }
         }
     }
 
@@ -603,12 +606,15 @@ extension GitServiceTests {
 private struct AskpassWriteObservingFileService: FileServiceProtocol {
     let beforeWrite: (String) throws -> Void
     let afterWrite: () throws -> Void
+    let beforeDelete: (String) -> Void
     private let wrapped = FileService()
 
     init(beforeWrite: @escaping (String) throws -> Void = { _ in },
+         beforeDelete: @escaping (String) -> Void = { _ in },
          afterWrite: @escaping () throws -> Void = {}) {
         self.beforeWrite = beforeWrite
         self.afterWrite = afterWrite
+        self.beforeDelete = beforeDelete
     }
 
     func writeFile(at path: String, content: String) throws {
@@ -622,7 +628,13 @@ private struct AskpassWriteObservingFileService: FileServiceProtocol {
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
-    func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
+    func deleteDirectory(at path: String) throws {
+        beforeDelete(path)
+        try wrapped.deleteDirectory(at: path)
+    }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try wrapped.entryTypeWithoutFollowingLinks(at: path)
+    }
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
         try wrapped.createSymlink(at: linkPath, pointingTo: targetPath)
     }
@@ -664,6 +676,8 @@ extension GitServiceTests {
                 try files.writeFile(at: root + "-fault", content: "metadata write refused")
                 throw AskpassWriteBoom()
             }
+        }, beforeDelete: { path in
+            XCTAssertTrue(files.directoryExists(at: path), "Cleanup must not delete an absent clone folder")
         })
         return GitService(fileService: observing, askpassHelperPath: tempDir + "/askpass", executablePath: executable)
     }
@@ -672,10 +686,12 @@ extension GitServiceTests {
         """
             #!/bin/sh
             fail_command() {
-                while [ "$1" = '-c' ]; do shift 2; done
                 repository=''
-                if [ "$1" = '-C' ]; then repository="$2"; shift 2; fi
+                \(FakeGitScript.skipGlobalOptions)
                 failure='\(failure)'
+                if [ "$1" = clone ] && [ "$failure" = clone ]; then
+                    touch '\(root)-fault'; echo 'clone failed' >&2; exit 128
+                fi
                 if [ "$1 $2" = 'rev-parse --path-format=absolute' ] && [ "$failure" = metadata-path ]; then
                     touch '\(root)-fault'; echo 'metadata lookup failed' >&2; exit 128
                 fi
@@ -701,5 +717,40 @@ extension GitServiceTests {
             fail_command "$@"
             exec /usr/bin/git "$@"
             """ + "\n"
+    }
+}
+
+extension GitServiceTests {
+    private func assertCloneRefusesOccupiedStore(remote: String, destination: String) throws {
+        let files = FileService()
+        let trace = tempDir + "/occupied-trace"
+        let executable = tempDir + "/occupied-git"
+        try files.writeExecutableFile(at: executable, content: """
+            #!/bin/sh
+            touch '\(trace)'
+            exec /usr/bin/git "$@"
+            """ + "\n")
+        let recording = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+        XCTAssertThrowsError(try recording.clone(remote: remote, into: destination, credential: nil)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("already exists and is not an empty directory"))
+        }
+        XCTAssertFalse(files.fileExists(at: trace), "An occupied store must refuse before downloading")
+    }
+
+    private func assertClonePublicationRace(remote: String) throws {
+        let files = FileService()
+        let destination = tempDir + "/publication-race"
+        try files.createDirectory(at: destination)
+        let observing = AskpassWriteObservingFileService(beforeWrite: { path in
+            if path.hasSuffix("/info/attributes") {
+                try files.writeFile(at: destination + "/keep", content: "arrived during download")
+            }
+        })
+        let cloning = GitService(fileService: observing, askpassHelperPath: tempDir + "/askpass")
+        XCTAssertThrowsError(try cloning.clone(remote: remote, into: destination, credential: nil)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("already exists and is not an empty directory"))
+        }
+        XCTAssertEqual(try files.readFile(at: destination + "/keep"), "arrived during download")
+        XCTAssertFalse(files.directoryExists(at: destination + "/.git"))
     }
 }

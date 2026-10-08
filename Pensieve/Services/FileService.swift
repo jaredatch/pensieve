@@ -209,12 +209,18 @@ extension FileServiceProtocol {
     /// Unlike a swap, it cannot discard destination contents that appeared while the source was built.
     func publishDirectory(at sourcePath: String, to destinationPath: String) throws {
         guard try entryTypeWithoutFollowingLinks(at: sourcePath) == .directory else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(ENOTDIR),
-                          userInfo: [NSFilePathErrorKey: sourcePath])
+            throw DescriptorFileCopy.error("publish directory", path: sourcePath, code: ENOTDIR)
         }
         guard Darwin.rename(sourcePath, destinationPath) == 0 else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno),
-                          userInfo: [NSFilePathErrorKey: destinationPath])
+            let code = errno
+            if code == ENOTEMPTY || code == EEXIST || code == ENOTDIR {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [
+                    NSFilePathErrorKey: destinationPath,
+                    NSLocalizedDescriptionKey:
+                        "The store destination '\(destinationPath)' already exists and is not an empty directory."
+                ])
+            }
+            throw DescriptorFileCopy.error("publish directory", path: destinationPath, code: code)
         }
     }
 

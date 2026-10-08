@@ -161,3 +161,15 @@ private final class GitOutputEvents {
         return kevent(queue, nil, 0, &ready, Int32(ready.count), nil)
     }
 }
+
+extension GitService {
+    func dataCommandError(_ output: GitDataOutput, args: [String]) -> GitError {
+        GitError.commandFailed(
+            args: args,
+            exitCode: output.exit,
+            stderr: String(
+                bytes: output.stderr.isEmpty ? output.stdout : output.stderr,
+                encoding: .utf8
+            ) ?? "", confirmingProbe: output.confirmingProbe)
+    }
+}

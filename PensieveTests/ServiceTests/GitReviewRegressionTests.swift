@@ -193,8 +193,7 @@ final class GitReviewRegressionTests: XCTestCase {
         try fixture.seedRepository()
         let git = try fixture.executable("""
             simulate_failure() {
-                while [ "$1" = '-c' ]; do shift 2; done
-                if [ "$1" = '-C' ]; then shift 2; fi
+                \(FakeGitScript.skipGlobalOptions)
                 case "$1" in
                   --version) echo 'git version fixture'; exit 0 ;;
                   fetch|pull|push) echo 'Authentication failed' >&2; exit 128 ;;

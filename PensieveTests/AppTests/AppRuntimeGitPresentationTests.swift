@@ -152,10 +152,10 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         // A non-scaffold empty store selects clone after the successful preflight.
-        try fixture.files.writeFile(at: fixture.root + "/keep.txt", content: "fixture")
+        try fixture.files.createDirectory(at: fixture.root)
         let git = try fixture.executable("""
         simulate_failure() {
-            while [ "$1" = '-c' ]; do shift 2; done
+            \(FakeGitScript.skipGlobalOptions)
             if [ "$1" = clone ]; then touch '\(fixture.failureSwitch)'; fi
         }
         simulate_failure "$@"

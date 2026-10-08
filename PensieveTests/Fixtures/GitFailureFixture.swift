@@ -44,9 +44,8 @@ struct GitFailureFixture {
             marker=missing
             if [ "$PENSIEVE_GIT_PASSWORD" = '\(expectedToken)' ]; then marker=received; fi
             printf '%s\\t%s\\n' "$marker" "$*" >> '\(credentialTrace)'
-            while [ "$1" = '-c' ]; do shift 2; done
             repository='\(root)'
-            if [ "$1" = '-C' ]; then repository="$2"; shift 2; fi
+            \(FakeGitScript.skipGlobalOptions)
             case "$1 $2" in
               clone*) for destination in "$@"; do :; done; mkdir -p "$destination/.git" ;;
               'ls-remote --symref') printf 'ref: refs/heads/main\\tHEAD\\n' ;;

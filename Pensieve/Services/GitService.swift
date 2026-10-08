@@ -360,7 +360,7 @@ struct GitService: GitServiceProtocol {
         try runOrThrow(["-C", path, "init"], in: nil, storeRules: true)
         try runOrThrow(["-C", path, "symbolic-ref", "HEAD", "refs/heads/main"], in: nil)
         try ensureCommitIdentity(at: path)
-        try ensureStoreAttributes(at: path)
+        _ = try storeOperation(at: path)
     }
 
     func setRemote(_ url: String, at path: String) throws {
@@ -399,16 +399,19 @@ struct GitService: GitServiceProtocol {
         // OPTION and executes it (git-option injection — distinct from shell injection). See type doc.
         // Keep an incomplete repository away from the live store, including across process death.
         // Publish only after attributes and checkout succeed; retry can use another sibling.
+        try requireEmptyCloneDestination(at: path)
         let parent = (path as NSString).deletingLastPathComponent
         let staging = parent + "/.pensieve-clone-" + UUID().uuidString
-        defer { try? fileService.deleteDirectory(at: staging) }
+        defer {
+            if fileService.directoryExists(at: staging) { try? fileService.deleteDirectory(at: staging) }
+        }
         let args = ["clone", "--quiet", "--no-checkout", "--", remote, staging]
         let r = try run(args, in: nil, credential: credential, storeRules: true)
         if r.exit == 0 {
-            try ensureStoreAttributes(at: staging)
+            let store = try storeOperation(at: staging)
             // A throwing branch observation distinguishes an empty remote from a failed HEAD read.
             if try hasLocalBranches(at: staging) {
-                try runOrThrow(["-C", staging, "checkout", "--force"], in: nil, storeRules: true)
+                try store.runOrThrow(["checkout", "--force"])
             }
             try fileService.publishDirectory(at: staging, to: path)
             return
@@ -514,8 +517,7 @@ extension GitService {
     }
 
     func checkoutUnbornBranch(_ branch: String, at path: String) throws {
-        try ensureStoreAttributes(at: path)
-        try runOrThrow(["-C", path, "checkout", "-B", branch], in: nil, storeRules: true)
+        try storeOperation(at: path).runOrThrow(["checkout", "-B", branch])
     }
 
     func fetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {
@@ -523,11 +525,8 @@ extension GitService {
     }
 
     func materializeFromFetchHead(at path: String) throws {
-        try ensureStoreAttributes(at: path)
-        try runOrThrow(
-            ["-C", path, "restore", "--source=FETCH_HEAD", "--staged", "--worktree", "--", ":/"],
-            in: nil, storeRules: true
-        )
+        try storeOperation(at: path).runOrThrow(
+            ["restore", "--source=FETCH_HEAD", "--staged", "--worktree", "--", ":/"])
     }
 
     func bornBranch(_ branch: String, at path: String) throws {
@@ -591,23 +590,19 @@ extension GitService {
     @discardableResult
     func stageAllAndCommit(at path: String, message: String) throws -> Bool {
         try ensureCommitIdentity(at: path)
-        try stageStore(at: path)
-        let status = try runOrThrow(["-C", path, "status", "--porcelain"], in: nil, storeRules: true)
-        if status.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return false   // nothing to commit
-        }
-        try runOrThrow(["-C", path, "commit", "-m", message], in: nil, storeRules: true)
-        return true
+        let store = try storeOperation(at: path)
+        try store.stage()
+        return try store.commitStagedChanges(message: message)
     }
 
     /// `git pull --rebase origin main`. Distinguishes up-to-date / merged / conflicted STRUCTURALLY
     /// (no locale-sensitive string matching): conflict = non-zero exit AND `--diff-filter=U` non-empty;
     /// up-to-date vs merged = HEAD unchanged vs changed.
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
-        try ensureStoreAttributes(at: path)
+        let store = try storeOperation(at: path)
         let before = try headSHA(at: path)
         let args = ["-C", path, "pull", "--rebase", "origin", "main"]
-        let r = try run(args, in: nil, credential: credential, storeRules: true)
+        let r = try store.run(Array(args.dropFirst(2)), credential: credential)
         if r.exit == 0 {
             let after = try headSHA(at: path)
             return before == after ? .upToDate : .merged
@@ -637,13 +632,9 @@ extension GitService {
     }
 
     func abortRebase(at path: String) throws {
-        let repairFailure: Error?
-        do {
-            try ensureStoreAttributes(at: path)
-            repairFailure = nil
-        } catch { repairFailure = error }
-        try runOrThrow(["-C", path, "rebase", "--abort"], in: nil, storeRules: true)
-        if let repairFailure { throw repairFailure }
+        let store = try StoreGitOperation(git: self, root: path, aborting: true)
+        try store.runOrThrow(["rebase", "--abort"])
+        if let repairFailure = store.repairFailure { throw repairFailure }
     }
 
     func conflictedFiles(at path: String) throws -> [String] {

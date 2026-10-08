@@ -95,6 +95,7 @@ struct LaunchReconciler {
         }
         // App init makes the first best-effort sweep. Retry immediately before rebuild because a
         // daemon may have held sync.lock during init.
+        GitService.cleanupCloneTemps(fileService: fileService, storeRoot: root, lockPath: lockPath)
         SkillInstallService.cleanupVendorTemps(
             fileService: fileService,
             storeRoot: root,

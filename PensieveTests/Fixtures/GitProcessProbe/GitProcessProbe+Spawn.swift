@@ -127,7 +127,7 @@ extension GitProcessProbe {
         do {
             try FileService().writeExecutableFile(at: executable, content: """
             #!/bin/sh
-            while [ "$1" = '-c' ]; do shift 2; done
+            \(FakeGitScript.skipGlobalOptions)
             if [ "$1" = --version ]; then exec /bin/sleep 60; fi
             echo 'xcrun: error: invalid active developer path' >&2
             exit 1

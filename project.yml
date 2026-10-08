@@ -98,8 +98,10 @@ targets:
     type: tool
     platform: macOS
     sources:
+      - path: PensieveTests/Fixtures/FakeGitScript.swift
       - path: PensieveTests/Fixtures/GitProcessProbe
       - path: Pensieve/Utilities/BlockingWork.swift
+      - path: Pensieve/Services/SyncLock.swift
       - path: Pensieve/Services/GitService.swift
       - path: Pensieve/Services/GitService+StoreRules.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift

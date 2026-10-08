@@ -247,6 +247,11 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         try beforeFileWrite?(physical)
         try wrapped.writeFile(at: physical, content: content)
     }
+    func writeData(at path: String, data: Data) throws {
+        let physical = resolved(path)
+        try beforeFileWrite?(physical)
+        try wrapped.writeData(at: physical, data: data)
+    }
     func writeExecutableFile(at path: String, content: String) throws {
         try wrapped.writeExecutableFile(at: resolved(path), content: content)
     }

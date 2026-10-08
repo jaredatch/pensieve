@@ -235,6 +235,7 @@ extension AppRuntimePaths {
     /// Launch sweeps the same paths the services use, before the runtime starts its work.
     func cleanupGitHubSkillTemps(fileService: FileServiceProtocol = FileService()) {
         SkillInstallService.cleanupScratchRoot(fileService: fileService, scratchRoot: skillInstallScratchRoot)
+        GitService.cleanupCloneTemps(fileService: fileService, storeRoot: storeRoot, lockPath: syncLockPath)
         SkillInstallService.cleanupVendorTemps(fileService: fileService, storeRoot: storeRoot, lockPath: syncLockPath)
         UpdateCheckService.cleanupScratchRoot(fileService: fileService, scratchRoot: updateCheckScratchRoot)
         UpstreamHistoryService.cleanupScratchRoot(fileService: fileService, scratchRoot: upstreamHistoryScratchRoot)
