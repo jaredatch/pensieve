@@ -43,7 +43,7 @@ final class ManifestScenarioCarryTests: XCTestCase {
         XCTAssertEqual(try files.readData(at: root + "/manifest/scenarios/legacy.yaml"), bytes)
     }
 
-    func testMalformedYAMLAndNonYAMLEntriesAreCarriedWithoutReadingLinks() throws {
+    func testMalformedYAMLAndNonYAMLEntriesAreCarriedWithoutReadingLinks() async throws {
         let outside = root + "/outside"
         try files.writeFile(at: outside, content: "secret")
         try files.writeFile(at: root + "/manifest/scenarios/broken.yaml", content: ":\n  - [\n")
@@ -61,6 +61,22 @@ final class ManifestScenarioCarryTests: XCTestCase {
         XCTAssertEqual(try files.readData(at: root + "/manifest/scenarios/opaque.bin"), Data([255, 0]))
         XCTAssertFalse(guarded.touchedForbiddenPath)
         XCTAssertEqual(try files.readFile(at: outside), "secret")
+        var changed = empty
+        changed.categories = [CategoryRecord(name: "Cancelled writer", projectKeys: [], skillSlugs: [])]
+        let snapshot = changed
+        let root = try XCTUnwrap(root)
+        let writer = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            let cancelled = Task.isCancelled
+            try service.write(snapshot, toRoot: root)
+            return cancelled
+        }
+        let cancelled = try await writer.value
+        XCTAssertTrue(cancelled, "The manifest write ran inside an already-cancelled task")
+        XCTAssertEqual(try service.read(fromRoot: root).categories, changed.categories)
+        XCTAssertEqual(try files.readData(at: root + "/manifest/scenarios/opaque.bin"), Data([255, 0]))
+        XCTAssertEqual(try files.readFile(at: root + "/manifest/scenarios/broken.yaml"), ":\n  - [\n")
+        XCTAssertFalse(guarded.touchedForbiddenPath)
     }
 
     func testSymlinkedScenarioDirectoryBecomesEmptyRealDirectory() throws {

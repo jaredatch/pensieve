@@ -36,7 +36,7 @@ struct ImportDoneView: View {
                 .frame(maxHeight: 100)
             }
 
-            if let error = importVM.error {
+            if let error = importVM.doneError {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(.red)

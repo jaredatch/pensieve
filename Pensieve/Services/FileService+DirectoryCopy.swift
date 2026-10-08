@@ -72,7 +72,7 @@ extension FileService {
                 throw DescriptorFileCopy.error("source changed", path: path, code: ESTALE)
             }
             try DescriptorFileCopy.copy(from: child, status: status, sourcePath: path, to: destination + "/" + name,
-                                        copiedChunk: { count in
+                                        options: .init(), copiedChunk: { count in
                 try checkpoint(.copiedChunk(name, count))
             })
             guard try DirectoryCopySource.descriptorStamp(child, path: path) == opened.entries[name] else {
@@ -193,8 +193,12 @@ private final class DirectoryCopySource {
 enum DescriptorFileCopy {
     struct Options {
         var maximumBytes = Int.max
+        var checkingCancellation = false
         var renameFile: (String, String) -> Int32 = { Darwin.rename($0, $1) }
         var read: (Int32, UnsafeMutableRawPointer?, Int) -> Int = Darwin.read
+        func checkCancellation() throws {
+            if checkingCancellation { try Task.checkCancellation() }
+        }
     }
 
     static func error(_ operation: String, path: String, code: Int32) -> NSError {
@@ -205,19 +209,10 @@ enum DescriptorFileCopy {
     }
 
     /// The source descriptor and metadata must come from FileService.openRegularFile.
-    static func copy(from descriptor: Int32, status: stat, sourcePath: String, to destination: String,
-                     renameFile: (String, String) -> Int32 = { Darwin.rename($0, $1) },
-                     copiedChunk: (Int) throws -> Void = { _ in }) throws {
-        try withoutActuallyEscaping(renameFile) { renameFile in
-            try copy(from: descriptor, status: status, sourcePath: sourcePath, to: destination,
-                     options: .init(renameFile: renameFile), copiedChunk: copiedChunk)
-        }
-    }
-
     @discardableResult
     static func copy(from descriptor: Int32, status: stat, sourcePath: String, to destination: String,
                      options: Options, copiedChunk: (Int) throws -> Void = { _ in }) throws -> Int {
-        try Task.checkCancellation()
+        try options.checkCancellation()
         guard options.maximumBytes >= 0, status.st_size >= 0, status.st_size <= options.maximumBytes else {
             throw CocoaError(.fileReadTooLarge)
         }
@@ -233,7 +228,7 @@ enum DescriptorFileCopy {
         var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
         var total = 0
         while true {
-            try Task.checkCancellation()
+            try options.checkCancellation()
             let remaining = options.maximumBytes - total
             let requested = remaining < buffer.count ? remaining + 1 : buffer.count
             let count = buffer.withUnsafeMutableBytes { options.read(descriptor, $0.baseAddress, requested) }
@@ -247,7 +242,7 @@ enum DescriptorFileCopy {
             total += count
             try copiedChunk(count)
         }
-        try Task.checkCancellation()
+        try options.checkCancellation()
         guard options.renameFile(temporary, destination) == 0 else { throw error("rename", path: destination, code: errno) }
         renamed = true
         return total

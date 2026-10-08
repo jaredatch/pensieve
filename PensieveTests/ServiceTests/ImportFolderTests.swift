@@ -42,7 +42,7 @@ final class ImportFolderTests: XCTestCase {
         XCTAssertFalse(try files.listDirectory(at: root).contains { $0.hasPrefix("store.vendor-") }, file: file, line: line)
     }
 
-    func assertRendered(_ notices: [String], model: ImportViewModel) async throws {
+    func assertRendered(_ notices: [String], model: ImportViewModel, uniqueFailure: String? = nil) async throws {
         let host = NSHostingView(rootView: AnyView(ImportDoneView(importVM: model, onDone: {}).frame(width: 600)))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 500),
                               styleMask: [.borderless], backing: .buffered, defer: false)
@@ -53,6 +53,11 @@ final class ImportFolderTests: XCTestCase {
             let strings = RenderedViewTestSupport.values(in: host).compactMap { $0 as? Text }
                 .flatMap { RenderedViewTestSupport.strings(in: $0) }
             return notices.allSatisfy(strings.contains)
+        }
+        if let uniqueFailure {
+            let rows = RenderedViewTestSupport.values(in: host).compactMap { $0 as? Text }
+                .filter { RenderedViewTestSupport.strings(in: $0).contains { $0.contains(uniqueFailure) } }
+            XCTAssertEqual(rows.count, 1, "A skill failure must appear only once in the rendered done step")
         }
     }
 
@@ -81,6 +86,7 @@ final class ImportFolderTests: XCTestCase {
         XCTAssertFalse(files.isUserExecutableFile(at: imported + "/assets/payload.bin"))
         try assertFreshCheckout(expected: expected, slug: "folder", context: context)
         try assertNoTemps()
+        try assertCaseCollisionsFailWithoutReplacingFiles()
     }
 
     func assertFreshCheckout(expected: [String: Data], slug: String, context: ModelContext) throws {
@@ -141,7 +147,9 @@ final class ImportFolderTests: XCTestCase {
             for (path, data) in expected {
                 XCTAssertEqual(try files.readData(at: store + "/skills/hidden/" + path), data, path)
             }
-            let notices = skipped.map { "Hidden: Skipped \($0.key): \($0.value)." }
+            let groups = Dictionary(grouping: skipped.keys, by: { skipped[$0]! })
+            let notices = groups.map { "Hidden: \($0.key): \($0.value.sorted().joined(separator: ", "))" }
+            XCTAssertEqual(model.importNotices.count, 2, "Hidden and sync exclusions each get one line")
             XCTAssertEqual(Set(model.importNotices), Set(notices))
             try await assertRendered(notices, model: model)
             try assertFreshCheckout(expected: expected, slug: "hidden", context: context)
@@ -178,25 +186,25 @@ final class ImportFolderTests: XCTestCase {
         var skipped: [String: String] = [:]
         for path in [".gitignore", ".gitattributes", "references/.git"] {
             try files.writeFile(at: source + "/" + path, content: path == ".gitignore" ? "assets/\n" : "excluded")
-            skipped[path] = "dot-entry"
+            skipped[path] = "Hidden items left out"
         }
         for path in [".git", "references/.private"] {
             try files.writeFile(at: source + "/" + path + "/ignored", content: "excluded subtree")
-            skipped[path] = "dot-entry"
+            skipped[path] = "Hidden items left out"
         }
         for prefix in ["", "references/"] {
             let env = prefix + ".env"
             try files.writeFile(at: source + "/" + env + (envDirectory ? "/ignored" : ""), content: "excluded")
-            skipped[env] = "excluded from sync"
+            skipped[env] = "Left out because Pensieve doesn't sync them"
             for name in [".env.local", ".env.example.local", ".DS_Store"] {
                 let path = prefix + name
                 try files.writeFile(at: source + "/" + path, content: "excluded")
-                skipped[path] = "excluded from sync"
+                skipped[path] = name == ".DS_Store" ? "Hidden items left out" : "Left out because Pensieve doesn't sync them"
             }
             for name in [".venv", "node_modules"] {
                 let path = prefix + name
                 try files.writeFile(at: source + "/" + path + "/ignored", content: "excluded subtree")
-                skipped[path] = "excluded from sync"
+                skipped[path] = "Left out because Pensieve doesn't sync them"
             }
         }
         return skipped

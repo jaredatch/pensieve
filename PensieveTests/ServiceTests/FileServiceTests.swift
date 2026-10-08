@@ -30,7 +30,7 @@ final class FileServiceTests: XCTestCase {
         var chunks = 0
         // Inject failure in the descriptor helper that the public copyFile entry uses.
         XCTAssertThrowsError(try DescriptorFileCopy.copy(from: descriptor, status: status,
-                                                        sourcePath: source, to: destination) { _ in
+                                                        sourcePath: source, to: destination, options: .init()) { _ in
             chunks += 1
             throw CocoaError(.fileWriteUnknown)
         })
@@ -50,7 +50,7 @@ final class FileServiceTests: XCTestCase {
         var reused: String?
         var identity: FileIdentity?
         try DescriptorFileCopy.copy(from: descriptor, status: status, sourcePath: source, to: destination,
-                                    renameFile: { temporary, target in
+                                    options: .init(renameFile: { temporary, target in
             let result = Darwin.rename(temporary, target)
             guard result == 0 else { return result }
             reused = temporary
@@ -59,7 +59,7 @@ final class FileServiceTests: XCTestCase {
             }
             identity = self.fileService.fileIdentity(at: temporary, followingLinks: false)
             return result
-        })
+        }))
         let temporary = try XCTUnwrap(reused, "The successful rename must run")
         XCTAssertEqual(try fileService.readFile(at: destination), "copied bytes")
         XCTAssertTrue(fileService.fileExists(at: temporary), "Success must not unlink a name reused after rename")

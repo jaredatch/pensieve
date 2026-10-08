@@ -31,10 +31,14 @@ final class ImportPublicationFileService: FileServiceProtocol {
         try afterWrite(path, content)
     }
     func copyFile(at source: String, to destination: String) throws {
+        try copyFile(at: source, to: destination, checkingCancellation: false)
+    }
+    func copyFile(at source: String, to destination: String, checkingCancellation: Bool) throws {
         let (descriptor, status) = try FileService.openRegularFile(at: source)
         defer { close(descriptor) }
         try DescriptorFileCopy.copy(from: descriptor, status: status, sourcePath: source, to: destination,
-                                    options: .init(read: read), copiedChunk: { try copyCheckpoint(source, $0) })
+                                    options: .init(checkingCancellation: checkingCancellation, read: read),
+                                    copiedChunk: { try copyCheckpoint(source, $0) })
     }
     func readData(at path: String) throws -> Data { try files.readData(at: path) }
     func isRegularFile(at path: String) -> Bool { files.isRegularFile(at: path) }

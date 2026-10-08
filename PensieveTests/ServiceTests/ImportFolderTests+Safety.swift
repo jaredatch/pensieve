@@ -40,8 +40,7 @@ extension ImportFolderTests {
         XCTAssertEqual(try files.readFile(at: store + "/skills/folder/scripts/regular"), "regular bytes")
         XCTAssertFalse(readPaths.isEmpty, "A real regular-file copy must have run")
         XCTAssertTrue(readPaths.allSatisfy { $0 == files.realPath(at: target + "/scripts/regular") })
-        let notices = ["Folder: Skipped file-link: a link.", "Folder: Skipped folder-link: a link.",
-                       "Folder: Skipped pipe: a special file.", "Folder: Skipped socket: a special file."]
+        let notices = ["Folder: Links left out: file-link, folder-link", "Folder: Special files left out: pipe, socket"]
         XCTAssertEqual(Set(model.importNotices), Set(notices))
         for entry in ["file-link", "folder-link", "pipe", "socket"] {
             XCTAssertNil(try files.entryTypeWithoutFollowingLinks(at: store + "/skills/folder/" + entry))
@@ -51,7 +50,7 @@ extension ImportFolderTests {
         try assertNoTemps()
     }
 
-    func testLeafSubstitutedAfterInventoryIsSkippedWithoutReadingOrBlocking() throws {
+    func testLeafSubstitutedAfterInventoryIsSkippedWithoutReadingOrBlocking() async throws {
         for kind in ["symlink", "fifo"] {
             let source = try source(kind)
             try files.writeFile(at: source + "/changing", content: "original")
@@ -91,9 +90,10 @@ extension ImportFolderTests {
             XCTAssertEqual(bytesRead, Data("included".utf8).count)
             XCTAssertNil(try files.entryTypeWithoutFollowingLinks(at: store + "/skills/" + kind + "/changing"))
             XCTAssertEqual(try files.readFile(at: store + "/skills/" + kind + "/retained"), "included")
-            XCTAssertEqual(model.importNotices, ["\(kind): Skipped changing: changed during the copy."])
+            XCTAssertEqual(model.importNotices, ["\(kind): Changed during import, so left out: changing"])
             try assertNoTemps()
         }
+        try await assertChangedRegularCopiesAreSkipped()
     }
 
     private func makeSocket(at path: String) throws -> Int32 {

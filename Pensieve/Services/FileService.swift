@@ -19,6 +19,7 @@ protocol FileServiceProtocol {
     func writeData(at path: String, data: Data) throws
     func writeExecutableFile(at path: String, content: String) throws
     func copyFile(at sourcePath: String, to destinationPath: String) throws
+    func copyFile(at sourcePath: String, to destinationPath: String, checkingCancellation: Bool) throws
     /// Fill an import temp with bounded regular contents, excluding its prepared SKILL.md.
     func copyImportedSkillContents(fromDirectory source: String, toDirectory destination: String) throws -> [SkillFolderCopySkip]
     /// Copies regular entries from one no-follow directory descriptor; never traverses child links.
@@ -160,7 +161,14 @@ extension FileServiceProtocol {
     func copyFile(at sourcePath: String, to destinationPath: String) throws {
         let (fd, status) = try FileService.openRegularFile(at: sourcePath)
         defer { close(fd) }
-        try DescriptorFileCopy.copy(from: fd, status: status, sourcePath: sourcePath, to: destinationPath)
+        try DescriptorFileCopy.copy(from: fd, status: status, sourcePath: sourcePath, to: destinationPath, options: .init())
+    }
+
+    /// Forward modeled copies without introducing host I/O. Concrete FileService opts in between chunks.
+    func copyFile(at sourcePath: String, to destinationPath: String, checkingCancellation: Bool) throws {
+        if checkingCancellation { try Task.checkCancellation() }
+        try copyFile(at: sourcePath, to: destinationPath)
+        if checkingCancellation { try Task.checkCancellation() }
     }
 
     /// True iff the owner/user executable bit is set on a regular file. Group/world execute bits do
@@ -233,6 +241,13 @@ final class FileService: FileServiceProtocol {
 
     init(directoryProbe: @escaping (String) throws -> Bool = FileService.probeDirectory) {
         self.directoryProbe = directoryProbe
+    }
+
+    func copyFile(at sourcePath: String, to destinationPath: String, checkingCancellation: Bool) throws {
+        let (descriptor, status) = try Self.openRegularFile(at: sourcePath)
+        defer { close(descriptor) }
+        try DescriptorFileCopy.copy(from: descriptor, status: status, sourcePath: sourcePath, to: destinationPath,
+                                    options: .init(checkingCancellation: checkingCancellation))
     }
 
     func readFile(at path: String) throws -> String {

@@ -18,7 +18,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
-- Local import now brings scripts, references, assets and nested folders along with each skill, preserving executable bits. It keeps `.env.example`, `.env.sample` and `.env.template` files, and skips secret environment files, virtualenvs, `node_modules`, other dot-entries, links and special files with notices. Contents of skipped folders do not count toward the 1,000-entry or 64 MiB limits; other oversized selections are refused while the rest continue.
+- Local import now brings scripts, references, assets and nested folders along with each skill, preserving executable bits. It keeps `.env.example`, `.env.sample` and `.env.template` files, and skips secret environment files, virtualenvs, `node_modules`, other dot-entries, links and special files with notices grouped by reason. Files changed during import are left out; names that differ only by case fail that skill. Contents of skipped folders do not count toward the 1,000-entry or 64 MiB limits; skills over 64 folder levels deep also fail, while other selections continue.
 
 - The Updates sheet is simpler: one row per skill, with its old and new commit and a View Changes button. A skill you've edited locally gets a "Replace my local edits" checkbox, and Update leaves it alone until you check it.
 - If a project folder is missing or unreadable when you delete a skill or remove the project, Pensieve remembers the cleanup on this Mac. Once the folder is reachable, a later launch or sync that brings changes removes its links and rules unless a current project still requests them.

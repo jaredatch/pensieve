@@ -22,6 +22,8 @@ final class ImportViewModel {
     var importProgress: Double = 0
     var error: String?
     var importNotices: [String] = []
+    private var noticedError: String?
+    var doneError: String? { error == noticedError ? nil : error }
     var scanSkips: [ImportScanSkip] = []
     private var latestFolderReport = ImportScanReport()
     private(set) var importedSkillCount = 0
@@ -151,6 +153,7 @@ final class ImportViewModel {
         saveContext: (ModelContext) throws -> Void = { try $0.save() }
     ) -> ImportOutcome {
         importNotices = []
+        noticedError = nil
         importedSkillCount = 0
         error = nil
         let toImport = discoveredSkills.filter { selectedSkills.contains($0.sourcePath) }
@@ -175,7 +178,7 @@ final class ImportViewModel {
                 let result = try createImportedSkill(discovered, description: resolvedDescription,
                                                       content: prepared.content, avoiding: taken)
                 let dirName = result.directoryName
-                importNotices += result.skipped.map { "\(discovered.name): \($0.notice)" }
+                importNotices += SkillFolderCopySkip.notices(for: result.skipped).map { "\(discovered.name): \($0)" }
                 if prepared.keptAsText {
                     importNotices.append("\(discovered.name): frontmatter was kept as text.")
                 }
@@ -195,6 +198,7 @@ final class ImportViewModel {
                 if let slug = occupiedSlug(reportedBy: error) { taken.insert(slug) }
                 self.error = "Failed to import \(discovered.name): \(error.localizedDescription)"
                 importNotices.append("\(discovered.name): \(error.localizedDescription)")
+                noticedError = self.error
             }
         }
 

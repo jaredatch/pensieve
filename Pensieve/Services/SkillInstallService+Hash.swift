@@ -49,7 +49,8 @@ extension SkillInstallService {
                 try Task.checkCancellation()
                 try fileService.copyFile(
                     at: sourceDirectory + "/" + entry.relativePath,
-                    to: temp + "/" + entry.relativePath
+                    to: temp + "/" + entry.relativePath,
+                    checkingCancellation: true
                 )
             }
             try Task.checkCancellation()

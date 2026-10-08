@@ -7,21 +7,36 @@ struct SkillFolderImportResult {
 }
 
 struct SkillFolderCopySkip: Equatable {
-    enum Reason: String {
-        case dotEntry = "dot-entry", link = "a link", special = "a special file", changed = "changed during the copy"
-        case syncExcluded = "excluded from sync"
+    enum Reason: CaseIterable {
+        case dotEntry, syncExcluded, link, special, changed
+        var heading: String {
+            switch self {
+            case .dotEntry: "Hidden items left out"
+            case .syncExcluded: "Left out because Pensieve doesn't sync them"
+            case .link: "Links left out"
+            case .special: "Special files left out"
+            case .changed: "Changed during import, so left out"
+            }
+        }
     }
     let path: String
     let reason: Reason
-    var notice: String { "Skipped \(path): \(reason.rawValue)." }
+    static func notices(for skipped: [Self]) -> [String] {
+        Reason.allCases.compactMap { reason in
+            let paths = skipped.filter { $0.reason == reason }.map(\.path).sorted()
+            return paths.isEmpty ? nil : reason.heading + ": " + paths.joined(separator: ", ")
+        }
+    }
 }
 
 enum SkillFolderCopyError: LocalizedError {
-    case tooManyEntries, tooManyBytes
+    case tooManyEntries, tooManyBytes, tooDeep, caseCollision(String, String)
     var errorDescription: String? {
         switch self {
         case .tooManyEntries: "The skill folder is too large (more than 1,000 entries)."
         case .tooManyBytes: "The skill folder is too large (more than 64 MiB of file data)."
+        case .tooDeep: "The skill folder is too large (more than 64 folders deep)."
+        case .caseCollision(let first, let second): "The skill folder has names that differ only by case: \(first), \(second)."
         }
     }
 }
@@ -48,7 +63,17 @@ extension FileService {
     ) throws -> [SkillFolderCopySkip] {
         let root = try ComparisonDirectory(path: resolveRealPath(at: source), name: "", parent: nil)
         let inventory = ImportCopyInventory()
-        try inventory.collect(root, relative: "", checkpoint: checkpoint)
+        let limits = FileTreeComparisonLimits(maximumFileBytes: Self.maximumImportBytes,
+            maximumFiles: Self.maximumImportEntries, maximumTotalBytes: Self.maximumImportBytes,
+            maximumEntries: Self.maximumImportEntries)
+        let budget = ComparisonInventoryBudget(limits: limits) { limit in
+            switch limit {
+            case .entries: SkillFolderCopyError.tooManyEntries
+            case .depth: SkillFolderCopyError.tooDeep
+            }
+        }
+        try walkComparisonEntries(root, excludingGit: false, budget: budget,
+                                  beforeEntry: { try checkpoint(.entry($0)) }, entry: inventory.admit)
         try checkpoint(.inventoried)
         for path in inventory.directories { try createDirectory(at: destination + "/" + path) }
         // SKILL.md was already read by discovery and is replaced by prepared text, not copied again.
@@ -63,12 +88,21 @@ extension FileService {
                 inventory.skipped.append(SkillFolderCopySkip(path: path, reason: .changed))
                 continue
             }
+            try validateImportSize(opened, maximumBytes: remaining)
+            if try importSourceChanged(opened) {
+                inventory.skipped.append(SkillFolderCopySkip(path: path, reason: .changed))
+                continue
+            }
             do {
                 let count = try copyFile(from: opened, to: destination + "/" + path,
-                    options: .init(maximumBytes: remaining, read: read), copiedChunk: {
+                    options: .init(maximumBytes: remaining, checkingCancellation: true, read: read), copiedChunk: {
                         try checkpoint(.copiedChunk(path, $0))
-                    })
+                })
                 remaining -= count
+                if try importSourceChanged(opened) {
+                    try deleteFile(at: destination + "/" + path)
+                    inventory.skipped.append(SkillFolderCopySkip(path: path, reason: .changed))
+                }
             } catch {
                 if (error as NSError).domain == NSCocoaErrorDomain,
                    (error as NSError).code == CocoaError.fileReadTooLarge.rawValue { throw SkillFolderCopyError.tooManyBytes }
@@ -77,6 +111,21 @@ extension FileService {
         }
         try root.validate()
         return inventory.skipped.sorted { $0.path < $1.path }
+    }
+
+    private func validateImportSize(_ source: ComparisonOpenedFile, maximumBytes: Int) throws {
+        guard source.initial.st_size >= 0, source.initial.st_size <= maximumBytes else {
+            throw SkillFolderCopyError.tooManyBytes
+        }
+    }
+
+    private func importSourceChanged(_ source: ComparisonOpenedFile) throws -> Bool {
+        do { return try source.changed() } catch {
+            let failure = error as NSError
+            guard failure.domain == NSPOSIXErrorDomain,
+                  [ELOOP, EFTYPE, EISDIR, ENOENT, EOPNOTSUPP].contains(Int32(failure.code)) else { throw error }
+            return true
+        }
     }
 
     /// Uses the same descriptor copy as install, retaining its atomic leaf write and read errors.
@@ -88,53 +137,52 @@ extension FileService {
 }
 
 private final class ImportCopyInventory {
-    var entries = 0
     var bytes = 0
     var skillBytes = 0
     var directories: [String] = []
     var files: [(String, ComparisonFile)] = []
     var skipped: [SkillFolderCopySkip] = []
+    private var casePaths = ["skill.md": "SKILL.md"]
 
-    func collect(_ directory: ComparisonDirectory, relative: String,
-                 checkpoint: (FileService.ImportCopyCheckpoint) throws -> Void) throws {
-        try directory.forEachEntry(excludingGit: false, beforeEntry: { name in
-            let path = relative.isEmpty ? name : relative + "/" + name
-            try checkpoint(.entry(path))
-            entries += 1
-            guard entries <= FileService.maximumImportEntries else { throw SkillFolderCopyError.tooManyEntries }
-        }, body: { name, status in
-            let path = relative.isEmpty ? name : relative + "/" + name
-            let kind = status.st_mode & S_IFMT
-            let nameBytes = Data(name.utf8)
-            let excluded = kind == S_IFDIR
-                ? StoreExclusions.isExcludedDirectory(nameBytes[...])
-                : StoreExclusions.isExcludedFile(Data(path.utf8)[...])
-            if excluded {
-                skipped.append(SkillFolderCopySkip(path: path, reason: .syncExcluded))
-                return
+    func admit(_ directory: ComparisonDirectory, name: String, path: String, status: stat) throws -> Bool {
+        let kind = status.st_mode & S_IFMT
+        let nameBytes = Data(name.utf8)
+        let excluded = kind == S_IFDIR
+            ? StoreExclusions.isExcludedDirectory(nameBytes[...])
+            : StoreExclusions.isExcludedFile(Data(path.utf8)[...])
+        if excluded {
+            let reason: SkillFolderCopySkip.Reason = name == ".DS_Store" ? .dotEntry : .syncExcluded
+            skipped.append(SkillFolderCopySkip(path: path, reason: reason))
+            return false
+        }
+        if name.utf8.first == 0x2E, kind != S_IFREG || !StoreExclusions.isTemplateFile(nameBytes[...]) {
+            skipped.append(SkillFolderCopySkip(path: path, reason: .dotEntry))
+            return false
+        }
+        if kind == S_IFDIR || kind == S_IFREG {
+            if let first = casePaths[path.lowercased()], first != path {
+                let paths = [first, path].sorted()
+                throw SkillFolderCopyError.caseCollision(paths[0], paths[1])
             }
-            if name.utf8.first == 0x2E, kind != S_IFREG || !StoreExclusions.isTemplateFile(nameBytes[...]) {
-                skipped.append(SkillFolderCopySkip(path: path, reason: .dotEntry))
-                return
+            casePaths[path.lowercased()] = path
+        }
+        switch kind {
+        case S_IFDIR:
+            directories.append(path)
+            return true
+        case S_IFREG:
+            guard status.st_size >= 0, status.st_size <= FileService.maximumImportBytes - bytes else {
+                throw SkillFolderCopyError.tooManyBytes
             }
-            switch kind {
-            case S_IFDIR:
-                directories.append(path)
-                let child = try ComparisonDirectory(path: directory.path + "/" + name, name: name, parent: directory)
-                try collect(child, relative: path, checkpoint: checkpoint)
-            case S_IFREG:
-                guard status.st_size >= 0, status.st_size <= FileService.maximumImportBytes - bytes else {
-                    throw SkillFolderCopyError.tooManyBytes
-                }
-                bytes += Int(status.st_size)
-                if relative.isEmpty, name.caseInsensitiveCompare("SKILL.md") == .orderedSame {
-                    skillBytes = Int(status.st_size)
-                } else {
-                    files.append((path, ComparisonFile(directory: directory.reference, name: name, status: status)))
-                }
-            case S_IFLNK: skipped.append(SkillFolderCopySkip(path: path, reason: .link))
-            default: skipped.append(SkillFolderCopySkip(path: path, reason: .special))
+            bytes += Int(status.st_size)
+            if path == "SKILL.md" {
+                skillBytes = Int(status.st_size)
+            } else {
+                files.append((path, ComparisonFile(directory: directory.reference, name: name, status: status)))
             }
-        })
+        case S_IFLNK: skipped.append(SkillFolderCopySkip(path: path, reason: .link))
+        default: skipped.append(SkillFolderCopySkip(path: path, reason: .special))
+        }
+        return false
     }
 }
