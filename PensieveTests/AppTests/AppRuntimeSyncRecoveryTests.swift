@@ -249,7 +249,7 @@ private extension AppRuntimeSyncRecoveryTests {
             switch block {
             case "conflict": h.runtime.syncModel.apply(.conflicted(["skills/example/SKILL.md"]))
             case "branchless": try h.fixture.files.deleteFile(at: h.fixture.root + "/.git/refs/heads/main")
-            default: try GitService().removeRemote(at: h.fixture.root)
+            default: try TestPaths.git.removeRemote(at: h.fixture.root)
             }
             h.probe.set { .usable }
             await h.runtime.refreshGitUsability()
@@ -259,7 +259,7 @@ private extension AppRuntimeSyncRecoveryTests {
             case "conflict":
                 try h.runtime.beginConflictResolution()(.synced(pushed: true, warnings: [], completedAt: Date()))
             case "branchless": try h.fixture.files.writeFile(at: h.fixture.root + "/.git/refs/heads/main", content: branch)
-            default: try GitService().setRemote("https://fixture.test/store.git", at: h.fixture.root)
+            default: try TestPaths.git.setRemote("https://fixture.test/store.git", at: h.fixture.root)
             }
             await h.runtime.refreshGitConfiguration(probingGit: false)
             await h.waitForFollowUpOrIdle()

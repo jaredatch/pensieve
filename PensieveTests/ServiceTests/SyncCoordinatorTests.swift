@@ -87,7 +87,7 @@ final class SyncCoordinatorTests: XCTestCase {
     func testLockBusyTickSkips() async throws {
         let container = try inMemoryContainer()
         let lockPath = tempDir + "/sync.lock"
-        let engine = SyncEngine(lockPath: lockPath)
+        let engine = SyncEngine(gitService: TestPaths.git, lockPath: lockPath)
         let coordinator = await configuredCoordinator(container: container, engine: engine, root: tempDir)
         let startupCompleted = expectation(description: "startup cycle")
         let tickCompleted = expectation(description: "locked tick cycle")
@@ -237,7 +237,7 @@ extension SyncCoordinatorTests {
     func configuredCoordinator(
         container: ModelContainer,
         engine: SyncEngineProtocol,
-        git: GitServiceProtocol = GitService(),
+        git: GitServiceProtocol = TestPaths.git,
         root: String
     ) async -> SyncCoordinator {
         let coordinator = await Task.detached { SyncCoordinator(modelContainer: container) }.value
@@ -247,8 +247,7 @@ extension SyncCoordinatorTests {
             credentials: EmptyCredentialStore(),
             root: root,
             audit: NullAudit(),
-            machineIdentity: InertMachineIdentity(),
-            machineStateService: InertMachineStateService()
+            machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService())
         )
         return coordinator
     }
@@ -259,7 +258,7 @@ extension SyncCoordinatorTests {
         let remote = "file://" + remotePath
         let seed = tempDir + "/seed"
         try FileManager.default.createDirectory(atPath: seed, withIntermediateDirectories: true)
-        let git = GitService()
+        let git = TestPaths.git
         try git.initRepository(at: seed)
         try git.setRemote(remote, at: seed)
         try ManifestService().write(

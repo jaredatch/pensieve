@@ -83,12 +83,13 @@ extension UpdatesViewModelTests {
         try fileService.writeFile(at: fixture.repository + "/skills/vendor/SKILL.md",
             content: "---\nname: Next\ndescription: Next update\n---\nnext body\n")
         fixture.skill.upstreamCommit = try commit(fixture.repository, message: "next pinned update")
-        fixture.skill.upstreamTree = try GitService().treeHash(at: fixture.repository, path: "skills/vendor")
+        fixture.skill.upstreamTree = try TestPaths.git.treeHash(at: fixture.repository, path: "skills/vendor")
         fixture.skill.updateAvailable = true
         fixture.skill.upstreamCommitDate = Date(timeIntervalSince1970: 1_870_000_000)
         try context.save()
         let service = SkillInstallService(
-            gitService: GitService(fileService: fileService), credentialStore: InMemoryCredentialStore(),
+            gitService: GitService(fileService: fileService, askpassHelperPath: TestPaths.gitAskpassHelperPath),
+                credentialStore: InMemoryCredentialStore(),
             fileService: fileService, scratchRoot: tempDir + "/post-write", storeRoot: fixture.storeRoot,
             manifestService: CrashManifest(wrapped: ManifestService(fileService: fileService), failurePoint: .beforeUpsert),
             lockPath: tempDir + "/sync.lock", remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) }

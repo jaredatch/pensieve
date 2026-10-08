@@ -89,9 +89,12 @@ final class WaitingRemovalDeletionSafetyTests: XCTestCase {
             let failing = RecordingDeletionSkillStore()
             failing.entries.insert(h.base.skill.directoryName)
             failing.deleteFailures.insert(h.base.skill.directoryName)
-            let library = phase == "row" ? h.library : SkillLibraryViewModel(skillStore: failing,
-                fileService: h.mapped, manifestService: ManifestService(fileService: h.base.files),
-                manifestRoot: h.base.root + "/store", notifier: {})
+            let library = phase == "row" ? h.library : SkillLibraryViewModel(
+                skillStore: failing,
+                fileService: h.mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+                manifestService: ManifestService(fileService: h.base.files), manifestRoot: h.base.root + "/store",
+                notifier: {}
+            )
             h.base.mapped.beforeDeployStateWrite = { _ in throw CocoaError(.fileWriteNoPermission) }
             var saves = 0
             XCTAssertFalse(SkillDeletionFlow.delete(skill: h.base.skill, library: library, platformVM: h.vm,

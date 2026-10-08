@@ -68,7 +68,7 @@ extension SyncNudgeTests {
         let store = InstallEchoSkillStore()
         let watcher = InstallEchoWatcher()
         let library = SkillLibraryViewModel(
-            skillStore: store, fileWatchService: watcher,
+            skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot,
             notifier: {
                 nudgeCount += 1
                 installNudge.fulfill()
@@ -332,7 +332,8 @@ extension SyncNudgeTests {
         let store = InstallEchoSkillStore()
         let watcher = InstallEchoWatcher()
         let library = SkillLibraryViewModel(
-            skillStore: store, fileWatchService: watcher, notifier: notifier
+            skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot,
+            notifier: notifier
         )
         return InstallEchoFixture(store: store, watcher: watcher, library: library)
     }

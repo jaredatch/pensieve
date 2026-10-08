@@ -7,6 +7,7 @@ final class PlatformViewModel {
     let linkService: LinkServiceProtocol
     private let cursorCompiler: CursorCompilerProtocol
     private let fileService: FileServiceProtocol
+    let skillsDirectory: String
     let projectReconcilePolicy: ProjectReconcilePolicy
     let deployStateStore: DeployStateStore
     let removalService: DeployRemovalServicing
@@ -27,10 +28,11 @@ final class PlatformViewModel {
 
     init(
         fileService: FileServiceProtocol? = nil,
-        linkService: LinkServiceProtocol? = nil,
-        cursorCompiler: CursorCompilerProtocol? = nil,
-        agentDetection: AgentDetectionServiceProtocol? = nil,
-        deployStateStore: DeployStateStore? = nil,
+        linkService: LinkServiceProtocol,
+        cursorCompiler: CursorCompilerProtocol,
+        agentDetection: AgentDetectionServiceProtocol,
+        deployStateStore: DeployStateStore,
+        skillsDirectory: String,
         waitingRemovalStore: WaitingRemovalStoring? = nil,
         now: @escaping () -> Date = Date.init,
         persist: @escaping (ModelContext) throws -> Void = { try $0.save() }
@@ -38,19 +40,17 @@ final class PlatformViewModel {
         let fs = fileService ?? FileService()
         self.fileService = fs
         self.projectReconcilePolicy = ProjectReconcilePolicy(fileService: fs)
-        self.linkService = linkService ?? LinkService(fileService: fs)
-        self.cursorCompiler = cursorCompiler ?? CursorCompiler(
-            fileService: fs,
-            skillStore: SkillStore(fileService: fs)
-        )
-        let stateStore = deployStateStore ?? DeployStateStore(fileService: fs)
+        self.linkService = linkService
+        self.skillsDirectory = skillsDirectory
+        self.cursorCompiler = cursorCompiler
+        let stateStore = deployStateStore
         self.deployStateStore = stateStore
         self.removalService = DeployRemovalService(stateStore: stateStore)
         self.waitingRemovalStore = waitingRemovalStore ?? WaitingRemovalStore(fileService: stateStore.fileService,
             appSupportDir: stateStore.appSupportDir)
         self.now = now
         self.persist = persist
-        self.installed = (agentDetection ?? AgentDetectionService()).installedPlatforms()
+        self.installed = agentDetection.installedPlatforms()
         refreshDeployIndex()
     }
 
@@ -111,14 +111,14 @@ final class PlatformViewModel {
         // the TOP so LinkService / CursorCompiler are never reached for an unsafe dir. Single shared
         // C7 resolver (PLAN-11) - levels this site up to component validation.
         guard SkillStore.safeSkillDirectory(
-                slug: skill.directoryName, base: Constants.pensieveSkillsDir, fileService: fileService) != nil else {
+                slug: skill.directoryName, base: skillsDirectory, fileService: fileService) != nil else {
             throw SkillStoreError.invalidDirectory(skill.directoryName)
         }
         // Leaf guard: a symlink-platform deploy never reaches CursorCompiler's
         // readBody, and the contentsHash below reads the leaf directly — so deploy refuses a
         // non-regular SKILL.md leaf here, before any link/compile/hash.
         guard let safeSkillPath = SkillStore.safeSkillFile(
-                slug: skill.directoryName, base: Constants.pensieveSkillsDir, fileService: fileService) else {
+                slug: skill.directoryName, base: skillsDirectory, fileService: fileService) else {
             throw SkillStoreError.unsafeLeaf(skill.directoryName)
         }
 

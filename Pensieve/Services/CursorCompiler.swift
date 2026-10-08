@@ -36,11 +36,13 @@ extension CursorCompilerProtocol {
 
 final class CursorCompiler: CursorCompilerProtocol {
     private let fileService: FileServiceProtocol
+    private let userRulesDirectory: String
     private let skillStore: SkillStoreProtocol
     private let ownership: DeployArtifactOwnershipChecking
 
-    init(fileService: FileServiceProtocol, skillStore: SkillStoreProtocol) {
+    init(fileService: FileServiceProtocol, skillStore: SkillStoreProtocol, userRulesDirectory: String) {
         self.fileService = fileService
+        self.userRulesDirectory = userRulesDirectory
         self.skillStore = skillStore
         self.ownership = DeployArtifactOwnership(fileService: fileService)
     }
@@ -107,7 +109,8 @@ final class CursorCompiler: CursorCompilerProtocol {
     }
 
     func outputPath(skill: Skill, projectPath: String?) -> String {
-        DeployPaths.cursorPath(directoryName: skill.directoryName, projectPath: projectPath)
+        DeployPaths(skillsDirectory: "", userSkillsDirectories: [:], cursorUserRulesDirectory: userRulesDirectory)
+            .cursorPath(directoryName: skill.directoryName, projectPath: projectPath)
     }
 
     // MARK: - MDC Generation

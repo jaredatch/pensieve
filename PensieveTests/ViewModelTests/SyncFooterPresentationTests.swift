@@ -81,7 +81,8 @@ final class SyncFooterPresentationTests: XCTestCase {
         _ state: SyncModel.SyncState,
         hovering: Bool = false
     ) -> SyncFooterPresentation? {
-        SyncFooterPresentation.make(state: state, canResolve: SyncModel(initialState: state).canResolve,
+        SyncFooterPresentation.make(state: state, canResolve: SyncModel(git: TestPaths.git, root: TestPaths.storeRoot,
+            initialState: state).canResolve,
                                     hovering: hovering, now: now)
     }
 }

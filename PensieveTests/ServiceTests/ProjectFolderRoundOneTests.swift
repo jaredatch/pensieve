@@ -12,8 +12,13 @@ final class ProjectFolderRoundOneTests: XCTestCase {
         let category = try h.addCategory()
         category.projectKeys.append(h.otherProject.identityKey!)
         let links = SiblingFailureLinkService(files: h.mapped)
-        let vm = PlatformViewModel(fileService: h.mapped, linkService: links,
-            agentDetection: DeployStubDetection(installed: [.codex]), deployStateStore: h.deployState)
+        let vm = PlatformViewModel(
+            fileService: h.mapped,
+            linkService: links,
+            cursorCompiler: TestPaths.cursorCompiler(fileService: h.mapped),
+            agentDetection: DeployStubDetection(installed: [.codex]),
+            deployStateStore: h.deployState, skillsDirectory: TestPaths.skillsDir
+        )
         let reconciler = CategoryReconciler(platformVM: vm)
         XCTAssertEqual(reconciler.reconcile(context: h.context).successes.count, 2)
         // The other project already has a pending category unlink; removal must log its failure.
@@ -103,8 +108,12 @@ final class ProjectFolderRoundOneTests: XCTestCase {
         try h.files.createDirectory(at: h.project.path)
         try h.addIntent(platform: .cursor)
         XCTAssertEqual(h.intent.reconcile(context: h.context).successes.count, 1)
-        let compiler = CursorCompiler(fileService: h.mapped, skillStore: SkillStore(fileService: h.files,
-            baseDir: h.root + "/store/skills"))
+        let compiler = CursorCompiler(
+            fileService: h.mapped,
+            skillStore: SkillStore(fileService: h.files,
+            baseDir: h.root + "/store/skills"),
+            userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
+        )
         let path = compiler.outputPath(skill: h.skill, projectPath: h.project.path)
         try h.files.writeFile(at: path, content: "Edited Cursor rule")
         XCTAssertFalse(try h.platformVM.removalOperation(
@@ -125,7 +134,7 @@ private final class SiblingFailureLinkService: LinkServiceProtocol {
             return try operation.delete()
         })
     }
-    init(files: FileServiceProtocol) { wrapped = LinkService(fileService: files) }
+    init(files: FileServiceProtocol) { wrapped = TestPaths.linkService(fileService: files) }
     func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
         try wrapped.link(skill: skill, platform: platform, projectPath: projectPath)
     }

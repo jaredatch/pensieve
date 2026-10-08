@@ -125,13 +125,14 @@ final class SkillStoreTests: XCTestCase {
     func testEstimatedTokensZeroForSymlinkedDir() {
         let skill = Skill(name: "S", skillDescription: "d", directoryName: "victim")
         let body = String(repeating: "x", count: 1000)
-        XCTAssertEqual(skill.estimatedTokens(using: FakeFS(symlink: true, body: body)), 0)
+        XCTAssertEqual(skill.estimatedTokens(using: FakeFS(symlink: true, body: body), skillsDirectory: TestPaths.skillsDir), 0)
     }
 
     func testEstimatedTokensNonZeroForRealDir() {
         let skill = Skill(name: "S", skillDescription: "d", directoryName: "ok")
         let body = String(repeating: "x", count: 1000)
-        XCTAssertGreaterThan(skill.estimatedTokens(using: FakeFS(symlink: false, body: body)), 0)
+        XCTAssertGreaterThan(skill.estimatedTokens(using: FakeFS(symlink: false, body: body),
+            skillsDirectory: TestPaths.skillsDir), 0)
     }
 
     func testEstimatedTokensReturnsZeroForInvalidDirectoryName() {
@@ -140,7 +141,7 @@ final class SkillStoreTests: XCTestCase {
         // non-symlink FakeFS would return a 1000-char body.
         let skill = Skill(name: "S", skillDescription: "d", directoryName: "../evil")
         let body = String(repeating: "x", count: 1000)
-        XCTAssertEqual(skill.estimatedTokens(using: FakeFS(symlink: false, body: body)), 0)
+        XCTAssertEqual(skill.estimatedTokens(using: FakeFS(symlink: false, body: body), skillsDirectory: TestPaths.skillsDir), 0)
     }
 
     func testCreateSkillAvoidsGivenSlugs() throws {

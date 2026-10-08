@@ -15,11 +15,14 @@ final class GitServiceTests: XCTestCase {
     override func setUpWithError() throws {
         tempDir = TestTemporaryDirectory.path + "PensieveGitServiceTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
-        git = GitService(fileService: LinkServiceCanonicalDirectoryFileService(
+        git = GitService(
+            fileService: LinkServiceCanonicalDirectoryFileService(
             wrapped: FileService(),
-            pathMappings: [(PathConstants.gitAskpassHelperPath, tempDir + "/askpass")],
+            pathMappings: [((TestPaths.gitAskpassHelperPath), tempDir + "/askpass")],
             physicalSandbox: tempDir
-        ))
+        ),
+            askpassHelperPath: TestPaths.gitAskpassHelperPath
+        )
     }
 
     override func tearDownWithError() throws {
@@ -566,7 +569,8 @@ extension GitServiceTests {
     }
 
     func testAskpassHelperWriteFailurePropagates() throws {
-        let failingGit = GitService(fileService: AskpassWriteFailingFileService())
+        let failingGit = GitService(fileService: AskpassWriteFailingFileService(),
+            askpassHelperPath: TestPaths.gitAskpassHelperPath)
         XCTAssertThrowsError(
             try failingGit.childEnvironment(credential: .httpsToken(username: "u", token: "ghp_x"))
         )

@@ -87,10 +87,10 @@ struct MachineStateService: MachineStateServicing {
 
     init(
         fileService: FileServiceProtocol = FileService(),
-        agentDetection: AgentDetectionServiceProtocol = AgentDetectionService(),
+        agentDetection: AgentDetectionServiceProtocol,
         defaults: UserDefaults = .standard,
-        deployState: (() throws -> DeployState)? = nil,
-        homeDirectory: String = PathConstants.homeDirectory,
+        deployState: @escaping () throws -> DeployState,
+        homeDirectory: String,
         hostName: @escaping () -> String? = MachineDisplayName.currentHostName,
         appVersion: @escaping () -> String = {
             Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
@@ -100,7 +100,7 @@ struct MachineStateService: MachineStateServicing {
         self.fileService = fileService
         self.agentDetection = agentDetection
         self.defaults = defaults
-        self.deployState = deployState ?? { try DeployStateStore(fileService: fileService).read() }
+        self.deployState = deployState
         self.homeDirectory = homeDirectory
         self.hostName = hostName
         self.appVersion = appVersion

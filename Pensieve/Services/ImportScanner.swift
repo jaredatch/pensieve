@@ -51,11 +51,11 @@ final class ImportScanner: ImportScannerProtocol {
 
     init(
         fileService: FileServiceProtocol,
-        claudeSkillsDir: String = Constants.claudeCodeUserSkillsDir,
-        grokSkillsDir: String = Constants.grokUserSkillsDir,
-        cursorRulesDir: String = Constants.cursorUserRulesDir,
-        codexSkillsDir: String = Constants.codexUserSkillsDir,
-        storeRoot: String = Constants.pensieveBaseDir
+        claudeSkillsDir: String,
+        grokSkillsDir: String,
+        cursorRulesDir: String,
+        codexSkillsDir: String,
+        storeRoot: String
     ) {
         self.fileService = fileService
         self.claudeSkillsDir = claudeSkillsDir

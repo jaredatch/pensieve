@@ -61,8 +61,8 @@ final class SyncModel {
         return slugs
     }
 
-    init(git: GitServiceProtocol = GitService(),
-         root: String = Constants.pensieveBaseDir,
+    init(git: GitServiceProtocol,
+         root: String,
          initialState: SyncState = .idle) {
         self.git = git
         self.root = root

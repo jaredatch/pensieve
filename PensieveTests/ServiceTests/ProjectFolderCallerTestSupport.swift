@@ -27,7 +27,7 @@ struct ProjectFolderCallerHarness {
         let slug = try store.createSkill(name: "Caller Skill", description: "Caller", body: "# Body")
         mapped = LinkServiceCanonicalDirectoryFileService(
             wrapped: files,
-            pathMappings: [(logical: Constants.pensieveSkillsDir, physical: root + "/store/skills")],
+            pathMappings: [(logical: TestPaths.skillsDir, physical: root + "/store/skills")],
             physicalSandbox: root
         )
         context = ModelContext(try AppRuntime.makeContainer(
@@ -37,8 +37,10 @@ struct ProjectFolderCallerHarness {
         deployState = DeployStateStore(fileService: mapped, appSupportDir: root + "/support")
         platformVM = PlatformViewModel(
             fileService: mapped,
+            linkService: TestPaths.linkService(fileService: mapped),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: mapped),
             agentDetection: DeployStubDetection(installed: installed),
-            deployStateStore: deployState
+            deployStateStore: deployState, skillsDirectory: TestPaths.skillsDir
         )
         intent = IntentReconciler(
             platformVM: platformVM,
@@ -92,7 +94,12 @@ struct ProjectFolderCallerHarness {
         let manifest = ManifestService(fileService: files)
         return DeployIntentModel(platformVM: platformVM, dependencies: DeployIntentDependencies(
             identity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID),
-            stateService: MachineStateService(fileService: mapped), root: root + "/store",
+            stateService: MachineStateService(
+                fileService: mapped,
+                agentDetection: AgentDetectionService(homeDirectory: TestPaths.homeDirectory),
+                deployState: { DeployState(schemaVersion: DeployStateStore.currentSchemaVersion, records: []) },
+                homeDirectory: TestPaths.homeDirectory
+            ), root: root + "/store",
             writeManifest: { context in
                 try manifest.write(try manifest.snapshot(from: context), toRoot: root + "/store")
             }, notifier: {}, reconcile: { intent.reconcile(context: $0) },
@@ -109,6 +116,7 @@ struct ProjectFolderCallerHarness {
     }
 
     func artifact(_ platform: PlatformTarget, project: Project? = nil) -> String {
-        DeployPaths.linkPath(directoryName: skill.directoryName, platform: platform, projectPath: (project ?? self.project).path)
+        TestPaths.deployPaths.linkPath(directoryName: skill.directoryName, platform: platform,
+            projectPath: (project ?? self.project).path)
     }
 }

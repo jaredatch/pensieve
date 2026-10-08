@@ -44,7 +44,7 @@ extension CursorOwnershipTests {
     }
 
     private func verifyCombiningMarkTraversalLinks(removing: Bool) throws {
-        let links = LinkService(fileService: mapped)
+        let links = TestPaths.linkService(fileService: mapped)
         let occupants: [Occupant] = [.parentThenCombiningLink, .interiorCombiningLink, .leadingCombiningTraversalLink]
         var cases = 0
         defer { XCTAssertEqual(cases, 27, "All link agents, supported scopes and target shapes must run") }
@@ -90,18 +90,18 @@ extension CursorOwnershipTests {
     }
 
     private func traversalLinks(at path: String, physical: String, occupant: Occupant, suffix: String) throws -> LinkService {
-        let logicalTarget = try linkTarget(occupant, store: Constants.pensieveSkillsDir, suffix: suffix)
+        let logicalTarget = try linkTarget(occupant, store: TestPaths.skillsDir, suffix: suffix)
         let physicalTarget = try files.symlinkTarget(at: physical)
         // Exact target mappings keep the fixture's grapheme-prefix residual out of ownership's input.
         let boundary = LinkServiceCanonicalDirectoryFileService(wrapped: files, pathMappings: [
-            (logicalTarget, physicalTarget), (path, physical), (Constants.pensieveSkillsDir, root + "/store/skills")
+            (logicalTarget, physicalTarget), (path, physical), (TestPaths.skillsDir, root + "/store/skills")
         ], physicalSandbox: root)
         XCTAssertEqual(Data(try boundary.symlinkTarget(at: path).utf8), Data(logicalTarget.utf8))
-        return LinkService(fileService: boundary)
+        return TestPaths.linkService(fileService: boundary)
     }
 
     private func runOccupantCase(platform: PlatformTarget, project: String?, occupant: Occupant, removing: Bool) throws {
-        let links = LinkService(fileService: mapped)
+        let links = TestPaths.linkService(fileService: mapped)
         let path = platform.usesSymlinks
             ? links.linkPath(skill: skill, platform: platform, projectPath: project)
             : compiler.outputPath(skill: skill, projectPath: project)

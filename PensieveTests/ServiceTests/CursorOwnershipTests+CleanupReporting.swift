@@ -27,8 +27,13 @@ extension CursorOwnershipTests {
         let targeted = CleanupRemovalCompiler(wrapped: compiler) {
             try self.mapped.writeFile(at: path, content: replacement)
         }
-        let vm = PlatformViewModel(fileService: mapped, cursorCompiler: targeted,
-            agentDetection: DeployStubDetection(installed: [.cursor]), deployStateStore: harness.state)
+        let vm = PlatformViewModel(
+            fileService: mapped,
+            linkService: TestPaths.linkService(fileService: mapped),
+            cursorCompiler: targeted,
+            agentDetection: DeployStubDetection(installed: [.cursor]),
+            deployStateStore: harness.state, skillsDirectory: TestPaths.skillsDir
+        )
         let before = vm.refreshCounter
         let result = removeAllDeploysWithLocalEvidence(vm, skill: skill, projects: [],
             context: harness.context)
@@ -63,8 +68,11 @@ extension CursorOwnershipTests {
         for deployed in [false, true] {
             let harness = try contextAndVM()
             if deployed { try compiler.compile(skill: skill, projectPath: nil) }
-            let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
-                manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+            let library = SkillLibraryViewModel(
+                skillStore: store,
+                fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+                manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
+            )
             XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
                 projects: [], context: harness.context, persist: { _ in throw DeletionTestError() }))
             XCTAssertEqual(library.deletionNotice?.message.contains("already removed"), deployed)

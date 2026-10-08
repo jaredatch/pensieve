@@ -46,7 +46,8 @@ enum GitProcessProbe {
                     exitWatchFailed: GitProcessProbeHooks.ExitWatchFailed? = nil,
                     hooks: ((inout GitProcessProbeHooks) -> Void)? = nil,
                     beforeRead: GitProcessProbeHooks.BeforeRead? = nil) -> GitService {
-        var service = GitService(executablePath: executable)
+        var service = GitService(askpassHelperPath: (executable as NSString).deletingLastPathComponent + "/git-askpass.sh",
+                                 executablePath: executable)
         var configured = GitProcessProbeHooks(started: { pid in record(pid); started?(pid) },
                                               beforeRead: beforeRead ?? { _, _, _, _ in },
                                               beforeExitWatch: beforeExitWatch,

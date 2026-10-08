@@ -39,7 +39,7 @@ private final class ProjectSnapshotLinkService: LinkServiceProtocol {
     }
 
     func targetPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
-        Constants.pensieveSkillsDir + "/" + skill.directoryName
+        TestPaths.skillsDir + "/" + skill.directoryName
     }
 
     func validateAll(skills: [Skill]) -> [BrokenLink] { [] }
@@ -103,7 +103,7 @@ final class ProjectSkillsSnapshotTests: XCTestCase {
             linkService: linkService,
             cursorCompiler: cursorCompiler,
             agentDetection: ProjectSnapshotDetection(installed: installed),
-            deployStateStore: .memoryBacked
+            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
         )
     }
 

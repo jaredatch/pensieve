@@ -46,12 +46,13 @@ extension AppRuntimePathsTests {
 
     /// The containment double fences FileService calls. Subprocess destinations and the raw-POSIX
     /// lock are checked before use, and credentials must be in-memory before a service runs.
-    func testAuthenticatedGitHubServicesUseOnlyTemporaryRuntimePaths() throws {
+    func testAuthenticatedGitHubServicesUseOnlyTemporaryRuntimePaths() async throws {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         let paths = fixture.paths
         let files = LinkServiceCanonicalDirectoryFileService(
-            wrapped: fixture.files, pathMappings: [], physicalSandbox: fixture.base
+            wrapped: fixture.files, pathMappings: [], physicalSandbox: fixture.base,
+            nonSymlinkAncestors: fixtureAncestorMetadata(fixture.base)
         )
         let operations = paths.makeUpdatesViewModelOperations(fileService: files)
         let installer = operations.skillInstallService
@@ -74,7 +75,7 @@ extension AppRuntimePathsTests {
         // One token must reach every runtime factory, including history and provenance.
         try credentials.store(token: "fixture-install-token", username: "fixture", forHost: CredentialHost.githubInstall)
         guard try assertSharedCredentials(paths: paths, historyStore: historyCredentials) else { return }
-        try withLocalGitHubRemote(fixture: fixture, files: files) { remote in
+        try await withLocalGitHubRemote(fixture: fixture, files: files) { remote in
             let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
             let context = ModelContext(container)
             let fetch = try installer.fetch(repo: remote.url, ref: remote.ref, credential: nil)
@@ -86,6 +87,7 @@ extension AppRuntimePathsTests {
             XCTAssertEqual(skill.installedOrigin?.installedCommit, remote.first)
             try assertTemporaryAskpass(paths: paths, files: files)
             try files.deleteFile(at: paths.gitAskpassHelperPath)
+            try await assertSyncScanAndRebuild(paths: paths, files: files, fixture: fixture, context: context)
             try checkUpdatedRemote(operations: operations, history: history, paths: paths,
                                    remote: remote, context: context, skill: skill)
             for scratch in [installer.scratchRoot, checker.scratchRoot, history.scratchRoot] {
@@ -138,8 +140,8 @@ extension AppRuntimePathsTests {
     }
 
     private func withLocalGitHubRemote(
-        fixture: GitFailureFixture, files: FileServiceProtocol, operation: (LocalRemote) throws -> Void
-    ) throws {
+        fixture: GitFailureFixture, files: FileServiceProtocol, operation: (LocalRemote) async throws -> Void
+    ) async throws {
         let repository = fixture.base + "/upstream"
         let git = GitService(fileService: files, askpassHelperPath: fixture.support + "/setup-askpass")
         try files.createDirectory(at: repository)
@@ -160,7 +162,7 @@ extension AppRuntimePathsTests {
         defer {
             if let oldConfiguration { setenv("XDG_CONFIG_HOME", oldConfiguration, 1) } else { unsetenv("XDG_CONFIG_HOME") }
         }
-        try operation(LocalRemote(git: git, files: files, repository: repository, url: url,
+        try await operation(LocalRemote(git: git, files: files, repository: repository, url: url,
                                   original: original, first: first, ref: ref))
     }
 
@@ -171,7 +173,17 @@ extension AppRuntimePathsTests {
         XCTAssertFalse(body.contains("fixture-install-token"))
     }
 
-    private func requireContainedGit(_ services: [Any], files: LinkServiceCanonicalDirectoryFileService) throws {
+    private func fixtureAncestorMetadata(_ sandbox: String) -> Set<String> {
+        var path = (sandbox as NSString).deletingLastPathComponent
+        var ancestors = Set<String>()
+        while path != "/" {
+            ancestors.insert(path)
+            path = (path as NSString).deletingLastPathComponent
+        }
+        return ancestors
+    }
+
+    func requireContainedGit(_ services: [Any], files: LinkServiceCanonicalDirectoryFileService) throws {
         for service in services {
             let git = try XCTUnwrap(service as? GitService)
             let contained = try XCTUnwrap(git.fileService as? LinkServiceCanonicalDirectoryFileService)

@@ -9,7 +9,7 @@ final class GitServiceRebaseTests: XCTestCase {
     override func setUpWithError() throws {
         tempDir = TestTemporaryDirectory.path + "PensieveGitServiceRebaseTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
-        git = GitService()
+        git = TestPaths.git
     }
 
     override func tearDownWithError() throws {

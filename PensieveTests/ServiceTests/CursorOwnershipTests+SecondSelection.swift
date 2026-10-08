@@ -10,7 +10,12 @@ extension CursorOwnershipTests {
         let manifest = ManifestService(fileService: files)
         return DeployIntentModel(platformVM: harness.vm, dependencies: DeployIntentDependencies(
             identity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID),
-            stateService: MachineStateService(fileService: mapped), root: root + "/store",
+            stateService: MachineStateService(
+                fileService: mapped,
+                agentDetection: AgentDetectionService(homeDirectory: TestPaths.homeDirectory),
+                deployState: { DeployState(schemaVersion: DeployStateStore.currentSchemaVersion, records: []) },
+                homeDirectory: TestPaths.homeDirectory
+            ), root: root + "/store",
             writeManifest: { try manifest.write(try manifest.snapshot(from: $0), toRoot: self.root + "/store") },
             notifier: {}, reconcile: { intent.reconcile(context: $0) }, lockPath: root + "/support/intent.lock"))
     }

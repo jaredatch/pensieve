@@ -49,7 +49,7 @@ extension IngestPreflightTests {
             rebuildService: StoreRebuildService(),
             root: appClone,
             audit: IngestNullAudit(),
-            machineIdentity: InertMachineIdentity(), machineStateService: InertMachineStateService()
+            machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService())
         )
         await coordinator.seedLastIngestedHeadStamp(initialStamp)
         guard case .synced = await coordinator.runCycle() else {
@@ -130,7 +130,7 @@ extension IngestPreflightTests {
         let remote = "file://" + remotePath
         let seed = tempDir + "/\(name)-seed"
         try FileManager.default.createDirectory(atPath: seed, withIntermediateDirectories: true)
-        let git = GitService()
+        let git = TestPaths.git
         let manifest = ManifestService()
         try git.initRepository(at: seed)
         try git.setRemote(remote, at: seed)

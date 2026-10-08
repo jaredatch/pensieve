@@ -135,8 +135,9 @@ final class CategoryReconcileWiringTests: XCTestCase {
         CategoryReconciler(platformVM: PlatformViewModel(
             fileService: StubFileService(linkService: linkService),
             linkService: linkService,
+            cursorCompiler: TestPaths.cursorCompiler(fileService: StubFileService(linkService: linkService)),
             agentDetection: StubDetection(installed: installed),
-            deployStateStore: .memoryBacked
+            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
         ))
     }
 
@@ -202,31 +203,27 @@ final class CategoryReconcileWiringTests: XCTestCase {
         try context.save()
         let linkService = RecordingLinkService()
         let reconciler = makeReconciler(linkService: linkService)
-
-        let assignResult = CategoryStore().setSkill(
+        let assignResult = CategoryStore(manifestRoot: TestPaths.storeRoot).setSkill(
             skill,
             inCategory: category,
             assigned: true,
             reconciler: reconciler,
             context: context
         )
-
         XCTAssertFalse(assignResult.hasFailures)
         XCTAssertEqual(assignResult.successes.count, 2)
         XCTAssertEqual(Set(linkService.linkCalls), Set([
             RecordedLink(directoryName: skill.directoryName, platform: .claudeCode, projectPath: project.path),
             RecordedLink(directoryName: skill.directoryName, platform: .codex, projectPath: project.path)
         ]))
-
         linkService.unlinkCalls.removeAll()
-        let unassignResult = CategoryStore().setSkill(
+        let unassignResult = CategoryStore(manifestRoot: TestPaths.storeRoot).setSkill(
             skill,
             inCategory: category,
             assigned: false,
             reconciler: reconciler,
             context: context
         )
-
         XCTAssertFalse(unassignResult.hasFailures)
         XCTAssertEqual(unassignResult.successes.count, 2)
         XCTAssertEqual(Set(linkService.unlinkCalls), Set([
@@ -243,14 +240,13 @@ final class CategoryReconcileWiringTests: XCTestCase {
         let reconciler = makeReconciler(linkService: linkService)
         _ = reconciler.reconcile(context: context)
         linkService.unlinkCalls.removeAll()
-
         let result = removeRegisteredProject(
             seed.project,
-            reconciler: reconciler,
-            platformVM: reconciler.platformVM, localMachineID: ProjectIntentHarness.localID,
+            reconciler: reconciler, manifestRoot: TestPaths.storeRoot,
+            platformVM: reconciler.platformVM,
+            localMachineID: ProjectIntentHarness.localID,
             context: context
         )
-
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(Set(linkService.unlinkCalls), Set([
             RecordedLink(directoryName: seed.skill.directoryName, platform: .claudeCode, projectPath: seed.project.path),
@@ -271,8 +267,9 @@ final class CategoryReconcileWiringTests: XCTestCase {
 
         let result = removeRegisteredProject(
             seed.project,
-            reconciler: reconciler,
-            platformVM: reconciler.platformVM, localMachineID: ProjectIntentHarness.localID,
+            reconciler: reconciler, manifestRoot: TestPaths.storeRoot,
+            platformVM: reconciler.platformVM,
+            localMachineID: ProjectIntentHarness.localID,
             context: context
         )
 
@@ -293,7 +290,10 @@ final class CategoryReconcileWiringTests: XCTestCase {
         _ = reconciler.reconcile(context: context)
         linkService.unlinkCalls.removeAll()
         let skillStore = RecordingSkillStore()
-        let library = SkillLibraryViewModel(skillStore: skillStore)
+        let library = SkillLibraryViewModel(
+            skillStore: skillStore, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
+        )
 
         SkillDeletionFlow.delete(
             skill: seed.skill, library: library, platformVM: reconciler.platformVM,
@@ -321,7 +321,10 @@ final class CategoryReconcileWiringTests: XCTestCase {
         linkService.throwOnUnlink = [.codex]
         let skill = try context.fetch(FetchDescriptor<Skill>()).first!
         let skillStore = RecordingSkillStore()
-        let library = SkillLibraryViewModel(skillStore: skillStore)
+        let library = SkillLibraryViewModel(
+            skillStore: skillStore, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
+        )
 
         SkillDeletionFlow.delete(
             skill: skill, library: library, platformVM: reconciler.platformVM,
@@ -349,7 +352,10 @@ final class CategoryReconcileWiringTests: XCTestCase {
         let skill = try context.fetch(FetchDescriptor<Skill>()).first!
 
         let skillStore = RecordingSkillStore()
-        let library = SkillLibraryViewModel(skillStore: skillStore)
+        let library = SkillLibraryViewModel(
+            skillStore: skillStore, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
+        )
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "edited")           // an unsaved draft for this skill
 
@@ -378,7 +384,7 @@ final class CategoryReconcileWiringTests: XCTestCase {
         _ = reconciler.reconcile(context: context)
         linkService.unlinkCalls.removeAll()
 
-        let result = CategoryStore().setSkill(
+        let result = CategoryStore(manifestRoot: TestPaths.storeRoot).setSkill(
             skill,
             inCategory: firstCategory,
             assigned: false,

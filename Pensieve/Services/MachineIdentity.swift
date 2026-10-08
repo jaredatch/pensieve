@@ -12,7 +12,7 @@ struct MachineIdentity: MachineIdentityProviding {
 
     init(
         fileService: FileServiceProtocol = FileService(),
-        appSupportDir: String = PathConstants.pensieveAppSupportDir,
+        appSupportDir: String,
         makeUUID: @escaping () -> UUID = UUID.init,
         warn: @escaping (String) -> Void = { NSLog("Pensieve machine identity: \($0)") }
     ) {

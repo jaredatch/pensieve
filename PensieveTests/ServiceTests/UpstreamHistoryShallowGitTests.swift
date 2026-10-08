@@ -104,10 +104,11 @@ extension UpstreamHistoryServiceTests {
         let repository = try repositoryWithVersions(4)
         let installed = try revision("HEAD~3", in: repository)
         let remote = URL(fileURLWithPath: repository).absoluteString
-        let executor = GitService(fileService: fileService)
+        let executor = GitService(fileService: fileService, askpassHelperPath: TestPaths.gitAskpassHelperPath)
         var invocations: [([String], GitCredential?)] = []
         let git = GitService(
             fileService: fileService,
+            askpassHelperPath: TestPaths.gitAskpassHelperPath,
             upstreamHistoryNetworkRunner: { args, credential in
                 invocations.append((args, credential))
                 return try executor.run(args, in: nil, credential: credential)
@@ -141,10 +142,11 @@ extension UpstreamHistoryServiceTests {
         let repository = try repositoryWithVersions(4)
         let installed = try revision("HEAD~3", in: repository)
         let remote = URL(fileURLWithPath: repository).absoluteString
-        let executor = GitService(fileService: fileService)
+        let executor = GitService(fileService: fileService, askpassHelperPath: TestPaths.gitAskpassHelperPath)
         var networkCall = 0
         let git = GitService(
             fileService: fileService,
+            askpassHelperPath: TestPaths.gitAskpassHelperPath,
             upstreamHistoryNetworkRunner: { args, credential in
                 networkCall += 1
                 if networkCall == 2 {

@@ -105,7 +105,14 @@ final class UntrustedSkillRewriteTests: XCTestCase {
                 let skill = Skill(name: "New", skillDescription: "New description", directoryName: slug)
                 context.insert(skill)
                 try files.writeFile(at: path, content: source)
-                let scanner = ImportScanner(fileService: files, storeRoot: root + "/store")
+                let scanner = ImportScanner(
+                    fileService: files,
+                    claudeSkillsDir: TestPaths.root + "/claude",
+                    grokSkillsDir: TestPaths.root + "/grok",
+                    cursorRulesDir: TestPaths.root + "/cursor",
+                    codexSkillsDir: TestPaths.root + "/codex",
+                    storeRoot: root + "/store"
+                )
                 let model = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: root + "/store")
                 model.discoveredSkills = [DiscoveredSkill(name: "New", body: SkillParser.stripFrontmatter(source),
                     sourcePlatform: "Claude Code", sourcePath: path, skillDescription: "New description", sourceContent: source)]
@@ -132,7 +139,10 @@ final class UntrustedSkillRewriteTests: XCTestCase {
 
     @MainActor
     func testGeneratedBodySavesKeepFrontmatterAndExactEditedBytes() throws {
-        let model = SkillLibraryViewModel(skillStore: store, fileService: files, manifestRoot: root + "/store")
+        let model = SkillLibraryViewModel(
+            skillStore: store,
+            fileService: files, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: root + "/store"
+        )
         let edited = "First\nSecond\r\nThird\rFourth\u{85}Fifth\u{2028}Sixth\u{2029}Last"
         for (index, fixture) in FrontmatterRewriteFixture.sweep.enumerated() {
             let slug = "case-\(index)"

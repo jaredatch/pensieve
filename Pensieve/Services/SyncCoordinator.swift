@@ -46,27 +46,26 @@ actor SyncCoordinator {
     private let modelContainer: ModelContainer
 
     init(modelContainer: ModelContainer) { self.modelContainer = modelContainer }
-    private var engine: SyncEngineProtocol = SyncEngine()
-    private var git: GitServiceProtocol = GitService()
-    private var credentials: CredentialStoreProtocol = KeychainCredentialStore()
+    private var engine: SyncEngineProtocol?
+    private var git: GitServiceProtocol?
+    private var credentials: CredentialStoreProtocol?
     private var rebuildService: StoreRebuildServiceProtocol = StoreRebuildService()
-    private var root = Constants.pensieveBaseDir
-    private var audit: SyncAuditWriting = SyncAudit()
-    private var machineIdentity: MachineIdentityProviding = MachineIdentity()
-    private var machineStateService: MachineStateServicing = MachineStateService()
+    private var root = ""
+    private var audit: SyncAuditWriting?
+    private var machineIdentity: MachineIdentityProviding?
+    private var machineStateService: MachineStateServicing?
     private var now: () -> Date = Date.init
-    private var headStamp: () -> String? = { GitHeadStamp().read(root: Constants.pensieveBaseDir) }
+    private var headStamp: () -> String? = { nil }
     private var lastIngestedHeadStamp: String?
 
     func configure(
-        engine: SyncEngineProtocol = SyncEngine(),
-        git: GitServiceProtocol = GitService(),
-        credentials: CredentialStoreProtocol = KeychainCredentialStore(),
+        engine: SyncEngineProtocol,
+        git: GitServiceProtocol,
+        credentials: CredentialStoreProtocol,
         rebuildService: StoreRebuildServiceProtocol = StoreRebuildService(),
-        root: String = Constants.pensieveBaseDir,
-        audit: SyncAuditWriting = SyncAudit(),
-        machineIdentity: MachineIdentityProviding = MachineIdentity(),
-        machineStateService: MachineStateServicing = MachineStateService(),
+        root: String,
+        audit: SyncAuditWriting,
+        machine: (identity: MachineIdentityProviding, stateService: MachineStateServicing),
         now: @escaping () -> Date = Date.init,
         headStamp: (() -> String?)? = nil
     ) {
@@ -76,8 +75,8 @@ actor SyncCoordinator {
         self.rebuildService = rebuildService
         self.root = root
         self.audit = audit
-        self.machineIdentity = machineIdentity
-        self.machineStateService = machineStateService
+        self.machineIdentity = machine.identity
+        self.machineStateService = machine.stateService
         self.now = now
         self.headStamp = headStamp ?? { GitHeadStamp().read(root: root) }
     }
@@ -87,6 +86,9 @@ actor SyncCoordinator {
     }
 
     func runCycle() -> SyncCycleResult {
+        guard let engine, let machineIdentity, let machineStateService, let audit else {
+            return .failed("Sync coordinator has not been configured.")
+        }
         let result: SyncCycleResult
         do {
             // A fresh context prevents an earlier cycle's registered objects from hiding a newer UI save.
@@ -111,11 +113,11 @@ actor SyncCoordinator {
                     // Machine state is observability: a publication failure must never block the pull
                     // that follows, or a persistent local fault would wedge sync on this machine for good.
                     do {
-                        let machineID = try self.machineIdentity.identifier()
+                        let machineID = try machineIdentity.identifier()
                         // Republish only on content change (ignoring the timestamp): an unchanged parsed
                         // on-disk state is the ONLY skip; absent/corrupt/unreadable all route to the write
                         // arm (self-heal). Skipping here is what keeps an idle cycle commit-free.
-                        try self.machineStateService.publishIfChanged(
+                        try machineStateService.publishIfChanged(
                             machineID: machineID,
                             context: context,
                             publishedAt: self.now(),
@@ -190,6 +192,7 @@ actor SyncCoordinator {
     }
 
     private func resolveCredential() throws -> GitCredential? {
+        guard let git, let credentials else { return nil }
         try git.probeUsability().requireUsable()
         guard let remote = try git.remoteURL(at: root),
               let spec = RemoteURLPolicy.parse(remote) else { return nil }

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(AppRuntime.self) private var runtime
     var body: some View {
         TabView {
             GeneralSettingsView()
@@ -18,7 +19,7 @@ struct SettingsView: View {
                     Label("Platforms", systemImage: "square.stack.3d.up")
                 }
 
-            GitHubSettingsView()
+            GitHubSettingsView(credentialStore: runtime.paths.makeCredentialStore())
                 .tabItem {
                     Label("GitHub", systemImage: "lock.shield")
                 }

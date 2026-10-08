@@ -17,7 +17,8 @@ final class SkillDetailTabResetTests: XCTestCase {
         let git = SkillDetailTabResetGit(thirdCommit: thirdCommit)
         let base = TestTemporaryDirectory.path + "SkillDetailTabResetTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: base)
+            skillStore: SkillStore(fileService: FileService(), baseDir: base),
+            fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
         )
         let history = UpstreamHistoryViewModel(
             readOperation: { _, _, _ in historyResult() },
@@ -64,8 +65,11 @@ final class SkillDetailTabResetTests: XCTestCase {
         let fileService = DeployRecordingFileService()
         let platformVM = PlatformViewModel(
             fileService: fileService,
+            linkService: TestPaths.linkService(fileService: fileService),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: fileService),
             agentDetection: EmptyMachineDetection(),
-            deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: base)
+            deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: base),
+            skillsDirectory: TestPaths.skillsDir
         )
         let dependencies = DeployIntentDependencies(
             identity: InertMachineIdentity(),
@@ -136,6 +140,7 @@ private struct SkillHistoryTabResetHarness: View {
             onOpenUpdates: {},
             onUpdateCheck: { _ in },
             git: git,
+            store: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
             workingDir: workingDir,
             hostedPresentation: presentation
         )
@@ -197,6 +202,7 @@ private struct SkillDeploymentsTabResetHarness: View {
             localMachineID: InertMachineIdentity.value,
             hostedIntentModel: intentModel,
             hostedPresentation: presentation,
+            homeDirectory: TestPaths.homeDirectory,
             onAddProject: {}
         )
     }

@@ -6,6 +6,7 @@ import SwiftUI
 /// mode are this view's own state and persist across skills; a retained draft brings the source view back
 /// (PLAN-33's rule for the Edit toggle, carried over).
 struct DetailView: View {
+    @Environment(AppRuntime.self) private var runtime
     let skill: Skill
     let syncModel: SyncModel
     let tagsInUse: [String]
@@ -151,13 +152,15 @@ struct DetailView: View {
         switch tab {
         case .overview:
             SkillOverviewTab(skill: skill, snapshot: snapshot, provenance: skillProvenance,
-                             installedCount: platformVM.deployablePlatforms(forProject: false).count, now: Date())
+                             installedCount: platformVM.deployablePlatforms(forProject: false).count, now: Date(),
+                             homeDirectory: runtime.paths.homeDirectory, skillsDirectory: runtime.paths.skillsDir)
         case .deployments:
             SkillDeploymentsTab(skill: skill, snapshot: snapshot, statusIsCurrent: statusIsCurrent, projects: projects,
                                 platformVM: platformVM, addsFenced: library.addsFenced,
                                 intentDependencies: intentDependencies,
                                 machineStates: machineStates,
                                 localMachineID: localMachineID,
+                                homeDirectory: runtime.paths.homeDirectory,
                                 onAddProject: onAddProject)
         case .content:
             SkillContentTab(skill: skill, snapshot: snapshot, library: library, presentation: presentation,
@@ -176,7 +179,8 @@ struct DetailView: View {
                 onOpenUpdates: onOpenUpdates,
                 onUpdateCheck: { skillID in
                     provenance.checkForUpdates(skillID: skillID, context: context)
-                }
+                },
+                git: runtime.paths.makeGitService(), store: library.skillStore, workingDir: runtime.paths.storeRoot
             )
                 .environment(\.skillHistorySyncSignal, SkillHistorySyncSignal(syncModel.state))
         }
@@ -275,13 +279,16 @@ private extension DetailView {
             SkillMoreMenu(
                 state: SkillMoreMenuState(skill: skill, provenance: skillProvenance,
                                           isChecking: provenance.isChecking(skillID: skill.id)),
-                onReveal: { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: skill.canonicalDir)]) },
+                onReveal: {
+                    let directory = skill.canonicalDir(skillsDirectory: runtime.paths.skillsDir)
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: directory)])
+                },
                 onViewOnGitHub: {
                     if let url = skillProvenance?.skillURL ?? skillProvenance?.repositoryURL { NSWorkspace.shared.open(url) }
                 },
                 onCopyPath: {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(skill.canonicalDir, forType: .string)
+                    NSPasteboard.general.setString(skill.canonicalDir(skillsDirectory: runtime.paths.skillsDir), forType: .string)
                 },
                 onCheckForUpdates: checkForUpdates,
                 onConnect: onConnectToRepository,

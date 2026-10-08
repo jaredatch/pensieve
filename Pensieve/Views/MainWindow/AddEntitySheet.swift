@@ -14,6 +14,7 @@ enum AddSheet: String, Identifiable {
 /// the detail toolbar's + control can open them from any column. Each creates through the same store
 /// call its list view used.
 struct AddEntitySheet: View {
+    @Environment(AppRuntime.self) private var runtime
     let kind: AddSheet
     let notifier: SyncStateNotifying
     let intentReconciler: @MainActor (ModelContext) -> BatchResult
@@ -24,13 +25,15 @@ struct AddEntitySheet: View {
         switch kind {
         case .project:
             AddProjectSheet(
+                manifestRoot: runtime.paths.storeRoot,
                 notifier: notifier,
                 intentReconciler: intentReconciler,
                 onCreated: { onCreated(.project($0.id)) }
             )
         case .category:
             EntityNameSheet(title: "Add Category", fieldLabel: "Category Name", actionTitle: "Add") { name in
-                let created = CategoryStore(manifestService: ManifestService(), notifier: notifier)
+                let created = CategoryStore(manifestService: ManifestService(), manifestRoot: runtime.paths.storeRoot,
+                    notifier: notifier)
                     .create(name: name, context: context)
                 if let created { onCreated(.category(created.id)) }
             }

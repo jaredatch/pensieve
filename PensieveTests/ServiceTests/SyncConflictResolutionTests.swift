@@ -200,7 +200,7 @@ extension SyncConflictResolutionTests {
 
     private func makeBodyConflict(thisBody: String = "This machine body",
                                   otherBody: String = "Other machine body") throws -> BodyConflictFixture {
-        let git = GitService()
+        let git = TestPaths.git
         let manifest = ManifestService()
         let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: git), manifestService: manifest,
                                 storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)

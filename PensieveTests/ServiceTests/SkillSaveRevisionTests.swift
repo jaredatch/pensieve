@@ -21,7 +21,9 @@ final class SkillSaveRevisionTests: XCTestCase {
         context.insert(skill)
         try context.save()
         XCTAssertFalse(context.hasChanges)
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         XCTAssertEqual(library.updateBody(skill, body: "Body"), .unchanged)
         XCTAssertFalse(context.hasChanges, "An equal model description must not be assigned again")
     }
@@ -36,7 +38,7 @@ final class SkillSaveRevisionTests: XCTestCase {
                             content: "---\r\nname: Test\r\ndescription: D\r\n---\r\n\r\nOld\r\n")
         let presenter = RecordingPresenter()
         let watcher = RecordingWatcher()
-        let library = SkillLibraryViewModel(skillStore: store, fileWatchService: watcher)
+        let library = SkillLibraryViewModel(skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot)
         library.unsavedChangesPresenter = presenter.present
         let skill = Skill(name: "Test", directoryName: slug)
         _ = library.editorBody(for: skill)
@@ -69,7 +71,11 @@ final class SkillSaveRevisionTests: XCTestCase {
         let skill = Skill(name: "Test", skillDescription: "D", directoryName: slug)
         let timestamp = skill.updatedAt
         var nudges = 0
-        let library = SkillLibraryViewModel(skillStore: store, notifier: { nudges += 1 })
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot,
+            notifier: { nudges += 1 }
+        )
         let writes = files.writes.count
         XCTAssertTrue(library.updateBody(skill, body: "Body\n").succeeded)
         XCTAssertEqual(files.writes.count, writes, "Byte-identical saves must not write the file")
@@ -83,7 +89,9 @@ final class SkillSaveRevisionTests: XCTestCase {
         let store = CountingSkillStore(body: "Old")
         store.rewriteOverride = "Stored\r\nSecond"
         let skill = Skill(name: "Test", directoryName: "test")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         XCTAssertTrue(library.updateBody(skill, body: "Requested\nSecond").succeeded)
         XCTAssertEqual(store.writeCount, 1)
         XCTAssertTrue(library.wasLastWrittenByApp(directoryName: "test", currentBody: "Stored\r\nSecond"),
@@ -100,7 +108,11 @@ final class SkillSaveRevisionTests: XCTestCase {
         let path = root + "/" + slug + "/SKILL.md"
         let skill = Skill(name: "Test", skillDescription: "D", directoryName: slug)
         var nudges = 0
-        let library = SkillLibraryViewModel(skillStore: store, notifier: { nudges += 1 })
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot,
+            notifier: { nudges += 1 }
+        )
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "Edited")
         try files.files.writeFile(at: path, content: SkillSerializer.serialize(name: "Test", description: "D", body: "Edited"))
@@ -126,7 +138,11 @@ final class SkillSaveRevisionTests: XCTestCase {
                 let slug = try store.createSkill(name: "Fallback", description: "D", body: "Old")
                 let skill = Skill(name: "Fallback", skillDescription: description, directoryName: slug)
                 var nudges = 0
-                let library = SkillLibraryViewModel(skillStore: store, notifier: { nudges += 1 })
+                let library = SkillLibraryViewModel(
+                    skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+                    manifestRoot: TestPaths.storeRoot,
+                    notifier: { nudges += 1 }
+                )
                 let path = root + "/" + slug + "/SKILL.md"
                 if fromDraft {
                     _ = library.editorBody(for: skill)
@@ -197,7 +213,11 @@ final class SkillSaveRevisionTests: XCTestCase {
         let skill = Skill(name: "Test", skillDescription: "D", directoryName: slug)
         var publishedDirty: [Bool] = []
         var library: SkillLibraryViewModel!
-        library = SkillLibraryViewModel(skillStore: store, notifier: { publishedDirty.append(library.hasUnsavedChanges) })
+        library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot,
+            notifier: { publishedDirty.append(library.hasUnsavedChanges) }
+        )
         XCTAssertEqual(library.updateBody(skill, body: "Body"), .unchanged)
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "Edited")

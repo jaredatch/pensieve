@@ -2,7 +2,7 @@ import SwiftUI
 
 struct GeneralSettingsView: View {
     @Environment(AppRuntime.self) private var runtime
-    @AppStorage("pensieveSkillsDir") private var skillsDir = Constants.pensieveSkillsDir
+    @AppStorage("pensieveSkillsDir") private var skillsDir = ""
     @AppStorage(UpdateChannelPolicy.betaUpdatesEnabledKey) private var betaUpdatesEnabled = false
     @AppStorage(UpdateCheckSchedule.frequencyKey) private var updateCheckFrequency =
         UpdateCheckFrequency.weekly.rawValue
@@ -15,14 +15,14 @@ struct GeneralSettingsView: View {
             Section("Storage") {
                 LabeledContent("Skills Directory") {
                     HStack {
-                        Text(skillsDir)
+                        Text(skillsDir.isEmpty ? runtime.paths.skillsDir : skillsDir)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
 
                         Button("Reset") {
-                            skillsDir = Constants.pensieveSkillsDir
+                            skillsDir = runtime.paths.skillsDir
                         }
                         .controlSize(.small)
                     }

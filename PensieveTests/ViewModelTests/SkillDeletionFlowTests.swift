@@ -45,9 +45,12 @@ final class SkillDeletionFlowTests: XCTestCase {
             notifier: counter.notify)
         library.startWatching()
         let platform = PlatformViewModel(
-            fileService: stateFS, linkService: links, cursorCompiler: cursor,
+            fileService: stateFS,
+            linkService: links,
+            cursorCompiler: cursor,
             agentDetection: DeletionTestDetection(installed: [.claudeCode, .cursor]),
-            deployStateStore: state)
+            deployStateStore: state, skillsDirectory: TestPaths.skillsDir
+        )
         return Fixture(context: context, skill: skill, store: store, manifest: manifest,
                        links: links, cursor: cursor, state: state, library: library,
                        platform: platform, watcher: watcher, counter: counter, project: project)

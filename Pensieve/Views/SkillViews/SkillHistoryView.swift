@@ -22,10 +22,10 @@ struct SkillHistoryView: View {
     @State private var errorMessage: String?
 
     init(skill: Skill,
-         git: GitServiceProtocol = GitService(),
+         git: GitServiceProtocol,
          fileService: FileServiceProtocol = FileService(),
-         store: SkillStoreProtocol = SkillStore(fileService: FileService()),
-         workingDir: String = Constants.pensieveBaseDir,
+         store: SkillStoreProtocol,
+         workingDir: String,
          library: SkillLibraryViewModel? = nil,
          notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
          onDismiss: @escaping () -> Void) {

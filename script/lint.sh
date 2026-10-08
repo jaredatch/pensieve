@@ -4,6 +4,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 cd "$REPO"
+python3 script/check-live-defaults.py
 # The helper owns both the per-run root and documented system-temp exceptions; Foundation APIs bypass it.
 python3 - <<'PY'
 from pathlib import Path

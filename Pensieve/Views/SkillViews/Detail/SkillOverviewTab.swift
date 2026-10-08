@@ -8,6 +8,8 @@ struct SkillOverviewTab: View {
     let provenance: SkillProvenance?
     let installedCount: Int
     let now: Date
+    let homeDirectory: String
+    let skillsDirectory: String
     @State private var showsAllFiles = false
 
     var body: some View {
@@ -15,7 +17,7 @@ struct SkillOverviewTab: View {
                                                     budgets: PlatformTokenBudgetSetting.values())
         let source = SkillOverviewPresentation.sourceRows(
             skill: skill, provenance: provenance, origin: skill.installedOrigin,
-            homeDirectory: Constants.homeDirectory, now: now)
+            homeDirectory: homeDirectory, skillsDirectory: skillsDirectory, now: now)
         let contents = SkillOverviewPresentation.contentsRows(inventory: snapshot.inventory)
         let shown = showsAllFiles ? contents : Array(contents.prefix(SkillOverviewPresentation.contentsRowsShown))
 

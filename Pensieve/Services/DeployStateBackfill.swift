@@ -8,14 +8,8 @@ protocol DeployStateBackfilling {
 struct DeployStateBackfillPaths {
     var pensieveSkillsDir: String
     var cursorUserRulesDir: String
-    var userSkillsRoot: (PlatformTarget) -> String? = DeployPaths.userSkillsRoot(for:)
+    var userSkillsRoot: (PlatformTarget) -> String?
 
-    static var defaults: DeployStateBackfillPaths {
-        DeployStateBackfillPaths(
-            pensieveSkillsDir: Constants.pensieveSkillsDir,
-            cursorUserRulesDir: Constants.cursorUserRulesDir
-        )
-    }
 }
 
 struct DeployStateBackfill: DeployStateBackfilling {
@@ -30,16 +24,22 @@ struct DeployStateBackfill: DeployStateBackfilling {
     private let fileService: FileServiceProtocol
     private let store: DeployStateStore
     private let paths: DeployStateBackfillPaths
+    private var deployPaths: DeployPaths {
+        DeployPaths(skillsDirectory: paths.pensieveSkillsDir,
+            userSkillsDirectories: Dictionary(uniqueKeysWithValues: PlatformTarget.allCases.compactMap { platform in
+                paths.userSkillsRoot(platform).map { (platform, $0) }
+            }), cursorUserRulesDirectory: paths.cursorUserRulesDir)
+    }
     private let now: () -> Date
 
     init(
         fileService: FileServiceProtocol = FileService(),
-        store: DeployStateStore? = nil,
-        paths: DeployStateBackfillPaths = .defaults,
+        store: DeployStateStore,
+        paths: DeployStateBackfillPaths,
         now: @escaping () -> Date = Date.init
     ) {
         self.fileService = fileService
-        self.store = store ?? DeployStateStore(fileService: fileService)
+        self.store = store
         self.paths = paths
         self.now = now
     }
@@ -142,7 +142,7 @@ struct DeployStateBackfill: DeployStateBackfilling {
         var candidates: [Candidate] = []
         for record in deployRecords where record.platform == .cursor && record.projectID == nil {
             guard seen.insert(record.targetPath).inserted,
-                  let slug = DeployPaths.slug(artifactPath: record.targetPath, platform: .cursor, projectPath: nil,
+                  let slug = deployPaths.slug(artifactPath: record.targetPath, platform: .cursor, projectPath: nil,
                                               cursorUserRulesDirectory: paths.cursorUserRulesDir),
                   fileService.fileExists(at: record.targetPath) else { continue }
             candidates.append(Candidate(
@@ -170,12 +170,12 @@ struct DeployStateBackfill: DeployStateBackfilling {
                   ProjectDirectory.canAccess(project.path) else { continue }
 
             if record.platform.usesSymlinks {
-                let expectedLink = DeployPaths.linkPath(
+                let expectedLink = deployPaths.linkPath(
                     directoryName: skill.directoryName,
                     platform: record.platform,
                     projectPath: project.path
                 )
-                let expectedTarget = DeployPaths.targetPath(
+                let expectedTarget = deployPaths.targetPath(
                     directoryName: skill.directoryName,
                     platform: record.platform,
                     projectPath: project.path
@@ -184,7 +184,7 @@ struct DeployStateBackfill: DeployStateBackfilling {
                       fileService.isSymlink(at: record.targetPath),
                       (try? fileService.symlinkTarget(at: record.targetPath)) == expectedTarget else { continue }
             } else {
-                let expectedPath = DeployPaths.cursorPath(directoryName: skill.directoryName, projectPath: project.path)
+                let expectedPath = deployPaths.cursorPath(directoryName: skill.directoryName, projectPath: project.path)
                 guard record.targetPath == expectedPath,
                       fileService.fileExists(at: record.targetPath) else { continue }
             }

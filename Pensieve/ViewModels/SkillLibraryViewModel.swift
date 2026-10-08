@@ -53,7 +53,8 @@ final class SkillLibraryViewModel {
     @MainActor private(set) var appWriteRevision: Int = 0
     let fileWatchService: FileWatchServiceProtocol
     private let manifestService: ManifestSnapshotting?
-    private let manifestRoot: String
+    let manifestRoot: String
+    var skillsDirectory: String { manifestRoot + "/skills" }
     private var lastManifestError: String?
     let notifier: SyncStateNotifying
     var isWatching = false
@@ -91,17 +92,17 @@ final class SkillLibraryViewModel {
     private(set) var storeUnreadable = false
     var deletionNotice: DeletionNotice?
     init(
-        skillStore: SkillStoreProtocol? = nil,
+        skillStore: SkillStoreProtocol,
         fileService: FileServiceProtocol? = nil,
-        fileWatchService: FileWatchServiceProtocol? = nil,
+        fileWatchService: FileWatchServiceProtocol,
         manifestService: ManifestSnapshotting? = nil,
-        manifestRoot: String = Constants.pensieveBaseDir,
+        manifestRoot: String,
         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed
     ) {
         let fs = fileService ?? FileService()
         self.fileService = fs
-        self.skillStore = skillStore ?? SkillStore(fileService: fs)
-        self.fileWatchService = fileWatchService ?? FileWatchService()
+        self.skillStore = skillStore
+        self.fileWatchService = fileWatchService
         self.manifestService = manifestService
         self.manifestRoot = manifestRoot
         self.notifier = notifier

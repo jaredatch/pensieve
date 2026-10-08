@@ -42,8 +42,7 @@ final class ImportWholeFileTests: XCTestCase {
         ImportViewModel(
             scanner: scanner(),
             skillStore: SkillStore(fileService: files, baseDir: root + "/store/skills"),
-            manifestService: ManifestService(fileService: files),
-            manifestRoot: root + "/store"
+            manifestService: ManifestService(fileService: files), manifestRoot: root + "/store"
         )
     }
 

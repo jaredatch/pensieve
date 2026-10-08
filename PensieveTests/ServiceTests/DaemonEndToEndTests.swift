@@ -18,7 +18,7 @@ final class DaemonEndToEndTests: XCTestCase {
     private var cursorRulesDir: String!
 
     private let fileService = FileService()
-    private let git = GitService()
+    private let git = TestPaths.git
     private let manifest = ManifestService()
     private let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
 
@@ -114,7 +114,8 @@ final class DaemonEndToEndTests: XCTestCase {
             fileService: fileService,
             manifestService: manifest,
             root: cloneB,
-            lockPath: appSupport + "/sync.lock"
+            lockPath: appSupport + "/sync.lock",
+            git: TestPaths.git
         )
 
         let outcome = launch.reconcileOnLaunch(context: context, alreadyMigrated: false)

@@ -240,7 +240,7 @@ extension SyncEngineTests {
     // MARK: (e) two-clone category union: both skill slugs survive, deduped, both converge
 
     func testTwoCloneCategoryUnionMergeYieldsBothSlugs() throws {
-        let git = GitService()
+        let git = TestPaths.git
         let manifest = ManifestService()
         let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: git), manifestService: manifest,
                                 storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)
@@ -275,7 +275,7 @@ extension SyncEngineTests {
     // MARK: (f) two-clone project union: same identity_key, different names → deterministic winner
 
     func testTwoCloneProjectUnionConvergesToDeterministicWinner() throws {
-        let git = GitService()
+        let git = TestPaths.git
         let manifest = ManifestService()
         let remote = try seedRemote(git: git) { seed in
             try manifest.write(ManifestSnapshot(schemaVersion: 1, categories: [], projects: [], skills: []),
@@ -317,7 +317,7 @@ extension SyncEngineTests {
 
     /// BETTER-1 payoff: real GitService/SyncEngine/StoreRebuildService over a bare `file://` remote.
     func testTwoMachineRoundTripSkillBodyAndCategoryPropagate() throws {
-        let git = GitService()
+        let git = TestPaths.git
         let manifest = ManifestService()
         let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: git), manifestService: manifest,
                                 storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)

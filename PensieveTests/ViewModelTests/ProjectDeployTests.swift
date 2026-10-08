@@ -95,7 +95,8 @@ final class ProjectDeployTests: XCTestCase {
             fileService: StubFileService(),
             linkService: linkService,
             cursorCompiler: StubCursorCompiler(),
-            agentDetection: StubDetection(installed: []), deployStateStore: .memoryBacked
+            agentDetection: StubDetection(installed: []),
+            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
         )
     }
 
@@ -166,7 +167,12 @@ final class ProjectDeployTests: XCTestCase {
 
     func testDeployablePlatformsFiltersProjectUnsupportedAgents() {
         let installed: [PlatformTarget] = [.claudeCode, .codex, .cursor, .openClaw, .hermes]
-        let vm = PlatformViewModel(agentDetection: StubDetection(installed: installed), deployStateStore: .memoryBacked)
+        let vm = PlatformViewModel(
+            linkService: TestPaths.linkService(fileService: FileService()),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: FileService()),
+            agentDetection: StubDetection(installed: installed),
+            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
+        )
 
         XCTAssertEqual(vm.deployablePlatforms(forProject: true), [.claudeCode, .codex, .cursor])
         XCTAssertEqual(vm.deployablePlatforms(forProject: false), installed)

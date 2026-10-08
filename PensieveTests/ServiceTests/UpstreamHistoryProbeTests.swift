@@ -77,7 +77,8 @@ extension UpstreamHistoryServiceTests {
         let credential = GitCredential.httpsToken(username: "installer", token: "secret")
         var capturedArgs: [String] = []
         var capturedCredential: GitCredential?
-        let git = GitService(fileService: fileService) { args, suppliedCredential in
+        let git = GitService(fileService: fileService,
+                             askpassHelperPath: TestPaths.gitAskpassHelperPath) { args, suppliedCredential in
             capturedArgs = args
             capturedCredential = suppliedCredential
             return GitService.GitOutput(

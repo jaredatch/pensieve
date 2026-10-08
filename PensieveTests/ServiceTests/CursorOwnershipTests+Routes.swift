@@ -11,8 +11,13 @@ extension CursorOwnershipTests {
         context.insert(skill)
         try context.save()
         let state = DeployStateStore(fileService: mapped, appSupportDir: root + "/support")
-        let vm = PlatformViewModel(fileService: mapped, cursorCompiler: compiler,
-            agentDetection: DeployStubDetection(installed: PlatformTarget.allCases), deployStateStore: state)
+        let vm = PlatformViewModel(
+            fileService: mapped,
+            linkService: TestPaths.linkService(fileService: mapped),
+            cursorCompiler: compiler,
+            agentDetection: DeployStubDetection(installed: PlatformTarget.allCases),
+            deployStateStore: state, skillsDirectory: TestPaths.skillsDir
+        )
         return OwnershipRouteHarness(context: context, vm: vm, state: state)
     }
 
@@ -76,8 +81,11 @@ extension CursorOwnershipTests {
                 .reconcile(context: context).hasFailures)
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
         default:
-            let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
-                manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+            let library = SkillLibraryViewModel(
+                skillStore: store,
+                fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+                manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
+            )
             XCTAssertTrue(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: vm,
                                                   projects: [project], context: context))
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<Skill>()), 0)
@@ -171,7 +179,7 @@ extension CursorOwnershipTests {
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<DeployRecord>()), 1)
             try plant(owned: true, legacy: false, platform: platform, path: path, project: nil)
             XCTAssertEqual(reconciler.reconcile(context: context).successes.count, 1)
-            XCTAssertEqual(try mapped.symlinkTarget(at: path), Constants.pensieveSkillsDir + "/" + skill.directoryName)
+            XCTAssertEqual(try mapped.symlinkTarget(at: path), TestPaths.skillsDir + "/" + skill.directoryName)
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<IntentAssignment>()), 1)
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<DeployRecord>()), 2)
             XCTAssertTrue(reconciler.reconcile(context: context).outcomes.isEmpty)
@@ -202,7 +210,7 @@ extension CursorOwnershipTests {
 
     func artifactPath(_ platform: PlatformTarget, project: String?) -> String {
         platform.usesSymlinks
-            ? DeployPaths.linkPath(directoryName: skill.directoryName, platform: platform, projectPath: project)
+            ? TestPaths.deployPaths.linkPath(directoryName: skill.directoryName, platform: platform, projectPath: project)
             : compiler.outputPath(skill: skill, projectPath: project)
     }
 
@@ -210,7 +218,7 @@ extension CursorOwnershipTests {
         if try mapped.entryExistsWithoutFollowingLinks(at: path) { try mapped.deleteFile(at: path) }
         if platform.usesSymlinks {
             let target = owned
-                ? Constants.pensieveSkillsDir + "/other" + (platform == .codex && project != nil ? "/SKILL.md" : "")
+                ? TestPaths.skillsDir + "/other" + (platform == .codex && project != nil ? "/SKILL.md" : "")
                 : root + "/foreign"
             try mapped.createSymlink(at: path, pointingTo: target)
         } else {

@@ -28,9 +28,13 @@ extension CursorOwnershipTests {
         XCTAssertTrue(probes.isEmpty, "Invalid slugs must not reach artifact metadata: \(probes)")
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<Skill>()), 1)
         // Validation must surface even when an injected compiler owns no other artifacts.
-        let vm = PlatformViewModel(fileService: mapped,
+        let vm = PlatformViewModel(
+            fileService: mapped,
+            linkService: TestPaths.linkService(fileService: mapped),
             cursorCompiler: AbsentCleanupCompiler(path: artifactPath(.cursor, project: project.path)),
-            agentDetection: DeployStubDetection(installed: [.cursor]), deployStateStore: harness.state)
+            agentDetection: DeployStubDetection(installed: [.cursor]),
+            deployStateStore: harness.state, skillsDirectory: TestPaths.skillsDir
+        )
         let injectedLibrary = deletionLibrary()
         XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: injectedLibrary, platformVM: vm,
             projects: [project], context: harness.context))
@@ -48,8 +52,13 @@ extension CursorOwnershipTests {
         let path = artifactPath(.cursor, project: project.path)
         let bytes = "---\n# pensieve: managed\n---\nOutside the injected compiler"
         try mapped.writeFile(at: path, content: bytes)
-        let vm = PlatformViewModel(fileService: mapped, cursorCompiler: AbsentCleanupCompiler(path: path),
-            agentDetection: DeployStubDetection(installed: [.cursor]), deployStateStore: harness.state)
+        let vm = PlatformViewModel(
+            fileService: mapped,
+            linkService: TestPaths.linkService(fileService: mapped),
+            cursorCompiler: AbsentCleanupCompiler(path: path),
+            agentDetection: DeployStubDetection(installed: [.cursor]),
+            deployStateStore: harness.state, skillsDirectory: TestPaths.skillsDir
+        )
         var evidence: SkillProjectDeployEvidence?
         let result = vm.removeAllDeploys(skill: skill, projects: [project], localProjectEvidence: {
             var local = try vm.localSkillProjectDeployEvidence(skill: skill, projects: [project], context: harness.context)
@@ -150,8 +159,11 @@ extension CursorOwnershipTests {
     }
 
     private func deletionLibrary() -> SkillLibraryViewModel {
-        SkillLibraryViewModel(skillStore: store, fileService: mapped,
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+        SkillLibraryViewModel(
+            skillStore: store,
+            fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
+        )
     }
 }
 

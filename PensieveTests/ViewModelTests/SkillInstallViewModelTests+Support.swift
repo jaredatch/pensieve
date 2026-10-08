@@ -136,7 +136,7 @@ extension SkillInstallViewModelTests {
 
     func makeRealService() -> SkillInstallService {
         SkillInstallService(
-            gitService: GitService(fileService: fileService),
+            gitService: GitService(fileService: fileService, askpassHelperPath: TestPaths.gitAskpassHelperPath),
             credentialStore: InMemoryCredentialStore(),
             fileService: fileService,
             scratchRoot: tempDir + "/scratch",

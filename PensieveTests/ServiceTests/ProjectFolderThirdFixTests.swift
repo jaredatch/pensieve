@@ -11,13 +11,17 @@ final class ProjectFolderThirdFixTests: XCTestCase {
     func testRelativePathBuildersReturnRecordedPaths() {
         let files = SecondFixPathFiles()
         let skill = Skill(name: "Skill", directoryName: "skill")
-        let links = LinkService(fileService: files)
-        let cursor = CursorCompiler(fileService: files, skillStore: skillStore())
+        let links = TestPaths.linkService(fileService: files)
+        let cursor = CursorCompiler(
+            fileService: files,
+            skillStore: skillStore(),
+            userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
+        )
         for path in relativePaths {
             for platform in platforms {
                 let expected = artifact(project: path, slug: skill.directoryName, platform: platform)
                 if platform.usesSymlinks {
-                    XCTAssertEqual(DeployPaths.linkPath(directoryName: skill.directoryName,
+                    XCTAssertEqual(TestPaths.deployPaths.linkPath(directoryName: skill.directoryName,
                         platform: platform, projectPath: path), expected)
                     XCTAssertEqual(links.linkPath(skill: skill, platform: platform, projectPath: path), expected)
                 } else {
@@ -31,8 +35,12 @@ final class ProjectFolderThirdFixTests: XCTestCase {
     func testRelativeDeploysFailMissingBeforeDiskAccessForFourAgents() {
         let files = SecondFixPathFiles()
         let skill = Skill(name: "Skill", directoryName: "skill")
-        let links = LinkService(fileService: files)
-        let cursor = CursorCompiler(fileService: files, skillStore: skillStore())
+        let links = TestPaths.linkService(fileService: files)
+        let cursor = CursorCompiler(
+            fileService: files,
+            skillStore: skillStore(),
+            userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
+        )
         for path in relativePaths {
             for platform in platforms {
                 XCTAssertThrowsError(try platform.usesSymlinks
@@ -52,8 +60,13 @@ final class ProjectFolderThirdFixTests: XCTestCase {
         let h = try ProjectFolderCallerHarness()
         defer { h.cleanup() }
         let files = SecondFixPathFiles()
-        let vm = PlatformViewModel(fileService: files,
-                                   agentDetection: DeployStubDetection(installed: []), deployStateStore: h.deployState)
+        let vm = PlatformViewModel(
+            fileService: files,
+            linkService: TestPaths.linkService(fileService: files),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: files),
+            agentDetection: DeployStubDetection(installed: []),
+            deployStateStore: h.deployState, skillsDirectory: TestPaths.skillsDir
+        )
         for path in relativePaths {
             h.project.path = path
             for platform in platforms {
@@ -68,8 +81,13 @@ final class ProjectFolderThirdFixTests: XCTestCase {
         let h = try ProjectFolderCallerHarness()
         defer { h.cleanup() }
         let files = SecondFixPathFiles()
-        let vm = PlatformViewModel(fileService: files,
-                                   agentDetection: DeployStubDetection(installed: []), deployStateStore: h.deployState)
+        let vm = PlatformViewModel(
+            fileService: files,
+            linkService: TestPaths.linkService(fileService: files),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: files),
+            agentDetection: DeployStubDetection(installed: []),
+            deployStateStore: h.deployState, skillsDirectory: TestPaths.skillsDir
+        )
         for path in relativePaths {
             h.project.path = path
             try h.deployState.replaceAll(platforms.map { record(h, platform: $0) })
@@ -86,8 +104,13 @@ final class ProjectFolderThirdFixTests: XCTestCase {
         let h = try ProjectFolderCallerHarness()
         defer { h.cleanup() }
         let files = SecondFixPathFiles()
-        let vm = PlatformViewModel(fileService: files, agentDetection: DeployStubDetection(installed: platforms),
-                                  deployStateStore: h.deployState)
+        let vm = PlatformViewModel(
+            fileService: files,
+            linkService: TestPaths.linkService(fileService: files),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: files),
+            agentDetection: DeployStubDetection(installed: platforms),
+            deployStateStore: h.deployState, skillsDirectory: TestPaths.skillsDir
+        )
         for path in relativePaths {
             h.project.path = path
             try h.deployState.replaceAll(platforms.filter(\.usesSymlinks).map { record(h, platform: $0) })
@@ -110,7 +133,7 @@ final class ProjectFolderThirdFixTests: XCTestCase {
             h.project.path = path
             for platform in platforms {
                 let output = artifact(project: path, slug: h.skill.directoryName, platform: platform)
-                files.symlinkTargets[output] = DeployPaths.targetPath(
+                files.symlinkTargets[output] = TestPaths.deployPaths.targetPath(
                     directoryName: h.skill.directoryName, platform: platform, projectPath: path)
                 h.context.insert(DeployRecord(skillID: h.skill.id, platform: platform,
                     targetPath: output, contentHash: "legacy", projectID: h.project.id))
@@ -147,10 +170,14 @@ final class ProjectFolderThirdFixTests: XCTestCase {
             let outcome = BatchPairOutcome(skillID: h.skill.id, skillName: h.skill.name, platform: .codex,
                 target: .project(h.project.id), error: message)
             var logs: [String] = []
-            let result = removeRegisteredProject(h.otherProject,
-                reconciler: ThirdFixReconciler(result: BatchResult(outcomes: [outcome])),
-                platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
-            context: h.context, logFailure: { logs.append($0) })
+            let result = removeRegisteredProject(
+                h.otherProject,
+                reconciler: ThirdFixReconciler(result: BatchResult(outcomes: [outcome])), manifestRoot: TestPaths.storeRoot,
+                platformVM: h.platformVM,
+                localMachineID: ProjectIntentHarness.localID,
+                context: h.context,
+                logFailure: { logs.append($0) }
+            )
             XCTAssertFalse(result.hasFailures)
             XCTAssertEqual(logs, [h.project.id.uuidString + ": " + message])
         }

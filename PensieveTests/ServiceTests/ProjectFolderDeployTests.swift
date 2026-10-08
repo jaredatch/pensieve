@@ -16,18 +16,20 @@ final class ProjectFolderDeployTests: XCTestCase {
         let store = SkillStore(fileService: files, baseDir: root + "/store")
         let slug = try store.createSkill(name: "test-skill", description: "Test", body: "# Body")
         skill = Skill(name: "Test", directoryName: slug)
-        var mappings = [(logical: Constants.pensieveSkillsDir, physical: root + "/store")]
+        var mappings = [(logical: TestPaths.skillsDir, physical: root + "/store")]
         for platform in PlatformTarget.allCases where platform.usesSymlinks {
-            if let logical = DeployPaths.userSkillsRoot(for: platform) {
-                let source = platform == .hermes ? Constants.hermesUserSkillsDir : logical
+            if let logical = TestPaths.deployPaths.userSkillsRoot(for: platform) {
+                let source = platform == .hermes
+                    ? (logical as NSString).deletingLastPathComponent : logical
                 mappings.append((logical: source, physical: root + "/user/" + platform.rawValue))
             }
         }
-        mappings.append((logical: Constants.cursorUserRulesDir, physical: root + "/user/cursor"))
+        mappings.append((logical: TestPaths.deployPaths.cursorUserRulesDirectory, physical: root + "/user/cursor"))
         mapped = LinkServiceCanonicalDirectoryFileService(
             wrapped: files, pathMappings: mappings, physicalSandbox: root)
-        links = LinkService(fileService: mapped)
-        compiler = CursorCompiler(fileService: mapped, skillStore: store)
+        links = TestPaths.linkService(fileService: mapped)
+        compiler = CursorCompiler(fileService: mapped, skillStore: store,
+            userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory)
     }
 
     override func tearDownWithError() throws {

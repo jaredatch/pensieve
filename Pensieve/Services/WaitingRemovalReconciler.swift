@@ -149,7 +149,7 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
     private func occupant(_ entry: WaitingRemoval) throws -> DeployArtifactOccupant {
         let ownership = DeployArtifactOwnership(fileService: fileService)
         if entry.platform.usesSymlinks {
-            return try ownership.link(at: entry.artifactPath, skillsDirectory: Constants.pensieveSkillsDir,
+            return try ownership.link(at: entry.artifactPath, skillsDirectory: platformVM.skillsDirectory,
                 linksFile: entry.platform == .codex)
         }
         let occupant = try ownership.cursor(at: entry.artifactPath, legacyContent: nil)

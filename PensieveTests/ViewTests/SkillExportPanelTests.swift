@@ -126,7 +126,7 @@ final class SkillExportPanelTests: XCTestCase {
     private func makeModel() -> SkillExportModel {
         let library = SkillLibraryViewModel(
             skillStore: SkillStore(fileService: fileService, baseDir: root + "/skills"),
-            fileService: fileService, manifestRoot: root
+            fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: root
         )
         return SkillExportModel(skill: Skill(name: "Export", directoryName: "export-skill"), library: library)
     }

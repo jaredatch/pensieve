@@ -79,7 +79,7 @@ private final class SnapshotLinkService: LinkServiceProtocol {
     }
 
     func targetPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
-        Constants.pensieveSkillsDir + "/" + skill.directoryName
+        TestPaths.skillsDir + "/" + skill.directoryName
     }
 
     func validateAll(skills: [Skill]) -> [BrokenLink] { [] }
@@ -134,7 +134,8 @@ final class DetailContentSnapshotTests: XCTestCase {
             fileService: fileService,
             linkService: linkService,
             cursorCompiler: SnapshotCursorCompiler(upToDate: cursorUpToDate),
-            agentDetection: SnapshotDetection(installed: installed), deployStateStore: .memoryBacked
+            agentDetection: SnapshotDetection(installed: installed),
+            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
         )
         return (platformVM, linkService)
     }
@@ -144,15 +145,16 @@ final class DetailContentSnapshotTests: XCTestCase {
         let fileService = SnapshotFileService(document: document)
         let skill = Skill(name: "Snapshot Skill", directoryName: "snapshot-skill")
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService),
-            fileService: fileService
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir),
+            fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
         )
         let (platformVM, _) = makePlatformVM(fileService: fileService, linked: [], installed: [])
 
         let snapshot = DetailContentSnapshot.load(skill: skill, projects: [], library: library, platformVM: platformVM)
 
         XCTAssertEqual(snapshot.body, "# Body\n\nSnapshot text.")
-        XCTAssertEqual(snapshot.tokenCount, skill.estimatedTokens(using: fileService))
+        XCTAssertEqual(snapshot.tokenCount, skill.estimatedTokens(using: fileService, skillsDirectory: TestPaths.skillsDir))
 
         let revisionBefore = library.appWriteRevision
         library.noteAppAuthoredBody(skill, body: snapshot.body)
@@ -165,7 +167,11 @@ final class DetailContentSnapshotTests: XCTestCase {
     func testMacStatusCoversEveryInstalledPlatform() {
         let fileService = SnapshotFileService(document: document)
         let skill = Skill(name: "Snapshot Skill", directoryName: "snapshot-skill")
-        let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: fileService), fileService: fileService)
+        let library = SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir),
+            fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
+        )
         let (platformVM, linkService) = makePlatformVM(fileService: fileService, linked: [.claudeCode],
                                                        installed: [.claudeCode, .cursor])
 
@@ -180,7 +186,11 @@ final class DetailContentSnapshotTests: XCTestCase {
     func testTheCompilersAnswerReachesTheMacStatus() {
         let fileService = SnapshotFileService(document: document)
         let skill = Skill(name: "Snapshot Skill", directoryName: "snapshot-skill")
-        let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: fileService), fileService: fileService)
+        let library = SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir),
+            fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
+        )
         let (platformVM, _) = makePlatformVM(fileService: fileService, linked: [],
                                              installed: [.claudeCode, .cursor], cursorUpToDate: true)
 
@@ -195,7 +205,11 @@ final class DetailContentSnapshotTests: XCTestCase {
         let skill = Skill(name: "Snapshot Skill", directoryName: "snapshot-skill")
         let alpha = Project(name: "Alpha", path: "/tmp/alpha")
         let beta = Project(name: "Beta", path: "/tmp/beta")
-        let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: fileService), fileService: fileService)
+        let library = SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir),
+            fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
+        )
         let (platformVM, linkService) = makePlatformVM(fileService: fileService, linked: [],
                                                        installed: [.claudeCode, .codex, .openClaw, .hermes])
         linkService.linkedByProjectPath = ["/tmp/alpha": [.claudeCode]]
@@ -214,7 +228,11 @@ final class DetailContentSnapshotTests: XCTestCase {
         let fileService = SnapshotFileService(document: document)
         let skill = Skill(name: "Snapshot Skill", directoryName: "snapshot-skill")
         let project = Project(name: "Alpha", path: "/tmp/alpha")
-        let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: fileService), fileService: fileService)
+        let library = SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir),
+            fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
+        )
         let (platformVM, _) = makePlatformVM(fileService: fileService, linked: [.claudeCode], installed: [])
 
         let snapshot = DetailContentSnapshot.load(skill: skill, projects: [project], library: library, platformVM: platformVM)
@@ -227,7 +245,11 @@ final class DetailContentSnapshotTests: XCTestCase {
     func testInventoryRidesTheSnapshot() {
         let fileService = InventoryFileService(document: document, entries: ["SKILL.md", "notes.md"])
         let skill = Skill(name: "Snapshot Skill", directoryName: "snapshot-skill")
-        let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: fileService), fileService: fileService)
+        let library = SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir),
+            fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
+        )
         let (platformVM, _) = makePlatformVM(fileService: fileService, linked: [], installed: [])
 
         let snapshot = DetailContentSnapshot.load(skill: skill, projects: [], library: library, platformVM: platformVM)
@@ -250,8 +272,9 @@ final class DetailContentSnapshotTests: XCTestCase {
     func testAppWriteRevisionCoalescesQueuedPublishes() {
         let fileService = SnapshotFileService(document: document)
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService),
-            fileService: fileService
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir),
+            fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
         )
         let before = library.appWriteRevision
 

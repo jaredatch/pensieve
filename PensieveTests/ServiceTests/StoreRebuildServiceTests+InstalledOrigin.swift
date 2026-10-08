@@ -42,9 +42,8 @@ extension StoreRebuildServiceTests {
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
         let viewModel = SkillLibraryViewModel(
             skillStore: store,
-            fileService: fileService,
-            manifestService: manifest,
-            manifestRoot: tempDir
+            fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: manifest, manifestRoot: tempDir
         )
         viewModel.updateMetadata(skill, tags: ["documents", "edited"], scope: .project, context: context)
 

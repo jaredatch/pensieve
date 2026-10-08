@@ -173,6 +173,7 @@ targets:
       - path: Pensieve/Models/SkillScope.swift
       - path: Pensieve/Models/AdapterConfig.swift
       - path: Pensieve/Utilities/PathConstants.swift
+      - path: Pensieve/Utilities/RuntimePaths.swift
       - path: Pensieve/Utilities/DisplayTextSanitizer.swift
     settings:
       base:

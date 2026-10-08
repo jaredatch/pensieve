@@ -14,7 +14,11 @@ final class CursorCompilerTests: XCTestCase {
 
         fileService = FileService()
         skillStore = SkillStore(fileService: fileService, baseDir: skillsDir)
-        compiler = CursorCompiler(fileService: fileService, skillStore: skillStore)
+        compiler = CursorCompiler(
+            fileService: fileService,
+            skillStore: skillStore,
+            userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
+        )
     }
 
     override func tearDownWithError() throws {

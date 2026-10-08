@@ -10,7 +10,7 @@ final class GitHubCredentialSettingsModel {
 
     private let credentialStore: CredentialStoreProtocol
 
-    init(credentialStore: CredentialStoreProtocol = KeychainCredentialStore()) {
+    init(credentialStore: CredentialStoreProtocol) {
         self.credentialStore = credentialStore
         refresh()
     }

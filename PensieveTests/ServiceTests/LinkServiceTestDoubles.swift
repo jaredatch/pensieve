@@ -128,6 +128,7 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     private let wrapped: FileServiceProtocol
     private let pathMappings: [(logical: String, physical: String)]
     private let physicalSandbox: String?
+    private let nonSymlinkAncestors: Set<String>
     /// Checkpoints act on translated sandbox paths immediately before their real FileService operation.
     var beforeDirectoryCreation: ((String) throws -> Void)?
     var beforeArtifactCreation: ((String) throws -> Void)?
@@ -144,7 +145,8 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     var translatesSymlinkTargets = true
 
     func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? {
-        wrapped.fileIdentity(at: resolved(path), followingLinks: followingLinks)
+        if nonSymlinkAncestors.contains(path) { return nil }
+        return wrapped.fileIdentity(at: resolved(path), followingLinks: followingLinks)
     }
 
     init(
@@ -155,16 +157,19 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         self.wrapped = wrapped
         pathMappings = [(canonicalDirectory, substituteDirectory)]
         physicalSandbox = nil
+        nonSymlinkAncestors = []
     }
 
     init(
         wrapped: FileServiceProtocol,
         pathMappings: [(logical: String, physical: String)],
-        physicalSandbox: String? = nil
+        physicalSandbox: String? = nil,
+        nonSymlinkAncestors: Set<String> = []
     ) {
         self.wrapped = wrapped
         self.pathMappings = pathMappings.sorted { $0.logical.count > $1.logical.count }
         self.physicalSandbox = physicalSandbox
+        self.nonSymlinkAncestors = nonSymlinkAncestors
     }
 
     private func physicalPath(for logicalPath: String) -> String {
@@ -313,7 +318,9 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         return translatesSymlinkTargets ? logicalPath(for: target) : target
     }
     func isSymlink(at path: String) -> Bool {
-        wrapped.isSymlink(at: resolved(path))
+        // ImportScanner walks ancestry. Supply fixture metadata without forwarding outside the sandbox.
+        if nonSymlinkAncestors.contains(path) { return false }
+        return wrapped.isSymlink(at: resolved(path))
     }
     func isRegularFile(at path: String) -> Bool {
         wrapped.isRegularFile(at: resolved(path))

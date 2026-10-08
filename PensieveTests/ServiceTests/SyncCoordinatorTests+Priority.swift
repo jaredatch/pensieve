@@ -20,9 +20,14 @@ extension SyncCoordinatorTests {
                                      launchBackfill: { _ in }, postSyncConvergence: PriorityConvergence(),
                                      paths: fixture.paths, gitUsabilityProbe: { .usable },
                                      coordinatorConfigure: { coordinator in
-            await coordinator.configure(engine: engine, credentials: InMemoryCredentialStore(), root: fixture.root,
-                                        audit: SyncAudit(appSupport: fixture.support), machineIdentity: InertMachineIdentity(),
-                                        machineStateService: InertMachineStateService())
+            await coordinator.configure(
+                engine: engine,
+                git: TestPaths.git,
+                credentials: InMemoryCredentialStore(),
+                root: fixture.root,
+                audit: SyncAudit(appSupport: fixture.support),
+                machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService())
+            )
         })
         registerPriorityCleanup(fixture: fixture, runtime: runtime, release: release)
         cleanupRegistered = true
@@ -131,10 +136,14 @@ extension SyncCoordinatorTests {
                 launchBackfill: { _ in backfills += 1 }, hasRemoteConfigured: { true },
                 postSyncConvergence: PriorityConvergence(), paths: fixture.paths, gitUsabilityProbe: { .usable },
                 coordinatorConfigure: { coordinator in
-                    await coordinator.configure(engine: engine, credentials: InMemoryCredentialStore(), root: fixture.root,
-                                                audit: SyncAudit(appSupport: fixture.support),
-                                                machineIdentity: InertMachineIdentity(),
-                                                machineStateService: InertMachineStateService())
+                    await coordinator.configure(
+                        engine: engine,
+                        git: TestPaths.git,
+                        credentials: InMemoryCredentialStore(),
+                        root: fixture.root,
+                        audit: SyncAudit(appSupport: fixture.support),
+                        machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService())
+                    )
                 })
             registerPriorityCleanup(fixture: fixture, runtime: runtime, release: release)
             cleanupRegistered = true

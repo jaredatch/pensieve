@@ -19,15 +19,15 @@ final class PlatformSettingsPresentationTests: XCTestCase {
 
     func testGrokPathRowFollowsClaudeCodeAndShowsItsUserSkillsFolder() {
         XCTAssertEqual(
-            PlatformPathSetting.rows.map(\.platform),
+            PlatformPathSetting.rows(paths: TestPaths.deployPaths).map(\.platform),
             [.claudeCode, .grok, .cursor]
         )
 
-        guard let grok = PlatformPathSetting.rows.first(where: { $0.platform == .grok }) else {
+        guard let grok = PlatformPathSetting.rows(paths: TestPaths.deployPaths).first(where: { $0.platform == .grok }) else {
             return XCTFail("Grok is missing from Platform Paths")
         }
         XCTAssertEqual(grok.label, "Grok Skills")
-        XCTAssertEqual(grok.path, Constants.grokUserSkillsDir)
+        XCTAssertEqual(grok.path, TestPaths.deployPaths.userSkillsRoot(for: .grok)!)
     }
 
     func testGrokDefaultBudgetIs2500Tokens() {

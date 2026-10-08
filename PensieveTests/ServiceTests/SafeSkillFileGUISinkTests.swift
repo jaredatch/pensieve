@@ -67,7 +67,7 @@ final class SafeSkillFileGUISinkTests: XCTestCase {
         let fs = LeafRejectingFileService()
         let skill = Skill(name: "Victim", skillDescription: "victim", directoryName: "victim")
 
-        XCTAssertEqual(skill.estimatedTokens(using: fs), 0)
+        XCTAssertEqual(skill.estimatedTokens(using: fs, skillsDirectory: TestPaths.skillsDir), 0)
         XCTAssertTrue(fs.readPaths.isEmpty)
     }
 
@@ -88,7 +88,11 @@ final class SafeSkillFileGUISinkTests: XCTestCase {
         let foreign = foreignSkill(name: "Foreign", description: "pwned")
         try plantSymlinkedLeaf(slug: "victim", foreign: foreign)
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
-        let compiler = CursorCompiler(fileService: fileService, skillStore: store)
+        let compiler = CursorCompiler(
+            fileService: fileService,
+            skillStore: store,
+            userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
+        )
         let skill = Skill(name: "Victim", skillDescription: "victim", directoryName: "victim")
         let projectPath = tempDir + "/project"
         let outputPath = compiler.outputPath(skill: skill, projectPath: projectPath)
@@ -113,7 +117,8 @@ final class SafeSkillFileGUISinkTests: XCTestCase {
             linkService: link,
             cursorCompiler: NoopCursorCompiler(),
             agentDetection: StubDetection(),
-            deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: tempDir + "/app-support")
+            deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: tempDir + "/app-support"),
+            skillsDirectory: TestPaths.skillsDir
         )
 
         vm.deploy(skill: skill, platform: .claudeCode, target: .userWide, context: context)

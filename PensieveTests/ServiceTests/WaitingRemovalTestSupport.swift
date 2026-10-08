@@ -13,18 +13,27 @@ struct WaitingRemovalHarness {
     init(platforms: [PlatformTarget] = [.codex], persistent: Bool = false) throws {
         let base = try ProjectFolderCallerHarness(installed: platforms, persistent: persistent)
         self.base = base
-        let mappings = [(Constants.pensieveSkillsDir, base.root + "/store/skills"),
-                        (Constants.cursorUserRulesDir, base.root + "/user/rules")]
+        let mappings = [(TestPaths.skillsDir, base.root + "/store/skills"),
+                        (TestPaths.deployPaths.cursorUserRulesDirectory, base.root + "/user/rules")]
             + PlatformTarget.allCases.compactMap { platform in
-                DeployPaths.userSkillsRoot(for: platform).map { ($0, base.root + "/user/" + platform.rawValue) }
+                TestPaths.deployPaths.userSkillsRoot(for: platform).map { ($0, base.root + "/user/" + platform.rawValue) }
             }
         mapped = LinkServiceCanonicalDirectoryFileService(wrapped: base.files,
             pathMappings: mappings, physicalSandbox: base.root)
-        vm = PlatformViewModel(fileService: mapped, agentDetection: DeployStubDetection(installed: platforms),
-            deployStateStore: base.deployState,
-            waitingRemovalStore: WaitingRemovalStore(fileService: mapped, appSupportDir: base.root + "/support"))
-        library = SkillLibraryViewModel(skillStore: SkillStore(fileService: mapped), fileService: mapped,
-            manifestService: ManifestService(fileService: base.files), manifestRoot: base.root + "/store", notifier: {})
+        vm = PlatformViewModel(
+            fileService: mapped,
+            linkService: TestPaths.linkService(fileService: mapped),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: mapped),
+            agentDetection: DeployStubDetection(installed: platforms),
+            deployStateStore: base.deployState, skillsDirectory: TestPaths.skillsDir,
+            waitingRemovalStore: WaitingRemovalStore(fileService: mapped, appSupportDir: base.root + "/support")
+        )
+        library = SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: mapped, baseDir: TestPaths.skillsDir),
+            fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: ManifestService(fileService: base.files), manifestRoot: base.root + "/store",
+            notifier: {}
+        )
         try base.files.writeFile(at: base.root + "/support/machine-id", content: ProjectIntentHarness.localID + "\n")
     }
 

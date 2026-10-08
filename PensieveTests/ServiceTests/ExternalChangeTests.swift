@@ -39,7 +39,7 @@ final class ExternalChangeTests: XCTestCase {
 
     private func makeViewModel(watcher: StubWatcher) -> SkillLibraryViewModel {
         let store = SkillStore(fileService: FileService(), baseDir: tempRoot)
-        return SkillLibraryViewModel(skillStore: store, fileWatchService: watcher)
+        return SkillLibraryViewModel(skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot)
     }
 
     /// A real external edit (on-disk body differs from the last app-written/loaded fingerprint)
@@ -72,7 +72,8 @@ final class ExternalChangeTests: XCTestCase {
         let store = SkillStore(fileService: FileService(), baseDir: tempRoot)
         var nudges = 0
         let viewModel = SkillLibraryViewModel(
-            skillStore: store, fileWatchService: watcher, notifier: { nudges += 1 }
+            skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot,
+            notifier: { nudges += 1 }
         )
         let skill = Skill(name: "Deleted Skill", directoryName: directoryName)
         XCTAssertEqual(viewModel.editorBody(for: skill), "Original body")
@@ -120,7 +121,8 @@ final class ExternalChangeTests: XCTestCase {
         let directoryName = "bare-skill"
         try writeSkill(directoryName, body: "A")
         let store = SkillStore(fileService: FileService(), baseDir: tempRoot)
-        let viewModel = SkillLibraryViewModel(skillStore: store, fileWatchService: StubWatcher())
+        let viewModel = SkillLibraryViewModel(skillStore: store, fileWatchService: StubWatcher(),
+            manifestRoot: TestPaths.storeRoot)
         let skill = Skill(name: "Bare Skill", directoryName: directoryName)
         try store.writeBody(directoryName: directoryName, body: "A\n")
 
@@ -323,7 +325,8 @@ extension ExternalChangeTests {
         let watcher = StubWatcher()
         let store = SkillStore(fileService: FileService(), baseDir: tempRoot)
         var nudges = 0
-        let viewModel = SkillLibraryViewModel(skillStore: store, fileWatchService: watcher, notifier: { nudges += 1 })
+        let viewModel = SkillLibraryViewModel(skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot,
+            notifier: { nudges += 1 })
         let skill = Skill(name: "Bundle Skill", directoryName: directoryName)
         XCTAssertEqual(viewModel.editorBody(for: skill), "Original body")
         viewModel.startWatching()

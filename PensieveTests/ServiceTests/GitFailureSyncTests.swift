@@ -20,8 +20,14 @@ final class GitFailureSyncTests: XCTestCase {
             )) { XCTAssertEqual($0 as? GitError, .unusable(state)) }
             XCTAssertFalse(prepared)
             let coordinator = SyncCoordinator(modelContainer: container)
-            await coordinator.configure(engine: engine, git: git, root: fixture.root,
-                                        audit: SyncAudit(appSupport: fixture.support))
+            await coordinator.configure(
+                engine: engine,
+                git: git,
+                credentials: InMemoryCredentialStore(),
+                root: fixture.root,
+                audit: SyncAudit(appSupport: fixture.support),
+                machine: (identity: MachineIdentity(appSupportDir: TestPaths.appSupportDir), stateService: TestPaths.stateService)
+            )
             let result = await coordinator.runCycle()
             XCTAssertEqual(result, .failed(state.message ?? ""))
             XCTAssertEqual(try fixture.snapshot(), before)
@@ -53,12 +59,13 @@ final class GitFailureSyncTests: XCTestCase {
         try fixture.seedRepository(remote: nil)
         let before = try fixture.snapshot()
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
-        let engine = SyncEngine(lockPath: fixture.support + "/sync.lock")
+        let engine = SyncEngine(gitService: TestPaths.git, lockPath: fixture.support + "/sync.lock")
         var prepared = false
         XCTAssertEqual(try engine.sync(root: fixture.root, message: "test", credential: nil,
                                       context: container.mainContext, prepare: { _ in prepared = true }), .noRemote)
         XCTAssertFalse(prepared)
-        XCTAssertEqual(runDaemon(fixture, git: GitService()).exitCode, 0)
+        XCTAssertEqual(runDaemon(fixture,
+            git: TestPaths.git).exitCode, 0)
         XCTAssertEqual(try fixture.snapshot(), before)
     }
 
@@ -68,20 +75,26 @@ final class GitFailureSyncTests: XCTestCase {
         try fixture.seedRepository()
         try fixture.files.deleteFile(at: fixture.root + "/.git/HEAD")
         let before = try fixture.snapshot()
-        let git = GitService()
+        let git = TestPaths.git
         XCTAssertEqual(try git.probeUsability(), .usable)
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
-        let engine = SyncEngine(lockPath: fixture.support + "/sync.lock")
+        let engine = SyncEngine(gitService: TestPaths.git, lockPath: fixture.support + "/sync.lock")
         XCTAssertThrowsError(try engine.sync(root: fixture.root, message: "test", credential: nil,
                                              context: container.mainContext)) { assertRepositoryFailure($0, fixture: fixture) }
         let spy = GitFailureEngineSpy()
         let coordinator = SyncCoordinator(modelContainer: container)
-        await coordinator.configure(engine: spy, git: git, root: fixture.root,
-                                    audit: SyncAudit(appSupport: fixture.support))
+        await coordinator.configure(
+            engine: spy,
+            git: git,
+            credentials: InMemoryCredentialStore(),
+            root: fixture.root,
+            audit: SyncAudit(appSupport: fixture.support),
+            machine: (identity: MachineIdentity(appSupportDir: TestPaths.appSupportDir), stateService: TestPaths.stateService)
+        )
         guard case let .failed(message) = await coordinator.runCycle() else { return XCTFail("must fail") }
         XCTAssertTrue(message.contains("repository"))
         XCTAssertTrue(message.contains(fixture.root))
-        let model = ConflictResolutionModel(engine: spy, git: git, root: fixture.root)
+        let model = ConflictResolutionModel(engine: spy, git: git, credentials: InMemoryCredentialStore(), root: fixture.root)
         await model.loadAndReport(context: container.mainContext)
         guard case let .error(detail) = model.phase else { return XCTFail("must fail before inspection") }
         XCTAssertTrue(detail.contains("repository"))
@@ -95,7 +108,7 @@ final class GitFailureSyncTests: XCTestCase {
         try fixture.seedRepository()
         try fixture.files.deleteFile(at: fixture.root + "/.git/HEAD")
         let before = try fixture.snapshot()
-        let result = runDaemon(fixture, git: GitService())
+        let result = runDaemon(fixture, git: TestPaths.git)
         XCTAssertEqual(result.exitCode, 1)
         XCTAssertTrue(result.stdout.contains("repository"))
         let status = try JSONDecoder().decode(
@@ -104,8 +117,13 @@ final class GitFailureSyncTests: XCTestCase {
         XCTAssertEqual(status.result, "failed")
         XCTAssertTrue(status.detail.contains("repository"))
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
-        let model = SyncSetupModel(context: container.mainContext, root: fixture.root,
-                                   lockPath: fixture.support + "/sync.lock")
+        let model = SyncSetupModel(
+            context: container.mainContext,
+            git: TestPaths.git,
+            credentials: InMemoryCredentialStore(),
+            root: fixture.root,
+            lockPath: fixture.support + "/sync.lock"
+        )
         let spec = try XCTUnwrap(SyncSetupModel.parseRemote("git@example.com:other.git"))
         XCTAssertThrowsError(try model.perform(spec: spec, credential: .sshAgent)) {
             assertRepositoryFailure($0, fixture: fixture)
@@ -145,7 +163,8 @@ final class GitFailureSyncTests: XCTestCase {
         try fixture.seedRepository(remote: "git@example.com:store.git")
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         let spy = GitFailureEngineSpy()
-        let model = ConflictResolutionModel(engine: spy, root: fixture.root)
+        let model = ConflictResolutionModel(engine: spy, git: TestPaths.git, credentials: InMemoryCredentialStore(),
+            root: fixture.root)
         await model.loadAndReport(context: container.mainContext)
         guard case let .ready(groups) = model.phase, let group = groups.first else { return XCTFail("missing conflict") }
         model.choose(group.id, .thisMachine)
@@ -163,9 +182,10 @@ final class GitFailureSyncTests: XCTestCase {
         defer { try? fixture.remove() }
         try fixture.seedRepository(remote: nil)
         let remote = fixture.base + "/remote.git"
-        try GitService().runOrThrow(["init", "--bare", "--initial-branch=main", remote], in: nil)
-        try GitService().setRemote(remote, at: fixture.root)
-        try GitService().push(at: fixture.root, credential: nil)
+        try TestPaths.git.runOrThrow(["init", "--bare",
+            "--initial-branch=main", remote], in: nil)
+        try TestPaths.git.setRemote(remote, at: fixture.root)
+        try TestPaths.git.push(at: fixture.root, credential: nil)
         let git = try fixture.executable("""
             if [ -f '\(fixture.failureSwitch)' ]; then
                 echo 'Xcode license: sudo xcodebuild -license' >&2
@@ -188,7 +208,7 @@ final class GitFailureSyncTests: XCTestCase {
         let recovered = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: git), lockPath: fixture.support + "/sync.lock")
         guard case .synced = try recovered.sync(root: fixture.root, message: "recovered", credential: nil,
                                                 context: container.mainContext) else { return XCTFail("must sync") }
-        let remoteHead = try GitService().runOrThrow(["--git-dir", remote, "rev-parse", "HEAD"], in: nil).stdout
+        let remoteHead = try TestPaths.git.runOrThrow(["--git-dir", remote, "rev-parse", "HEAD"], in: nil).stdout
         XCTAssertEqual(remoteHead.trimmingCharacters(in: .whitespacesAndNewlines), try git.commitSHA(at: fixture.root))
     }
 

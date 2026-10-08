@@ -131,12 +131,12 @@ final class GitReviewRegressionTests: XCTestCase {
         XCTAssertFalse(fixture.files.fileExists(at: fixture.trace))
         try fixture.files.deleteDirectory(at: target)
         try fixture.files.writeFile(at: target, content: "not a directory")
-        XCTAssertThrowsError(try GitService().remoteURL(at: fixture.root)) { error in
+        XCTAssertThrowsError(try TestPaths.git.remoteURL(at: fixture.root)) { error in
             guard case GitError.repositoryUnreadable = error else { return XCTFail("\(error)") }
         }
         try fixture.files.deleteFile(at: fixture.root)
         try fixture.files.writeFile(at: fixture.root, content: "not a directory")
-        XCTAssertThrowsError(try GitService().remoteURL(at: fixture.root)) { error in
+        XCTAssertThrowsError(try TestPaths.git.remoteURL(at: fixture.root)) { error in
             guard case GitError.repositoryUnreadable = error else { return XCTFail("\(error)") }
         }
     }
@@ -149,7 +149,7 @@ final class GitReviewRegressionTests: XCTestCase {
         try FileManager.default.moveItem(atPath: fixture.root + "/metadata", toPath: fixture.root + "/.GIT")
         XCTAssertTrue(try fixture.files.listDirectory(at: fixture.root).contains(".GIT"))
         let expected = fixture.files.directoryExists(at: fixture.root + "/.git") ? "https://fixture.test/store.git" : nil
-        XCTAssertEqual(try GitService().remoteURL(at: fixture.root), expected)
+        XCTAssertEqual(try TestPaths.git.remoteURL(at: fixture.root), expected)
     }
 
     func testDeniedRootLookupRemainsUnknown() throws {
@@ -157,7 +157,7 @@ final class GitReviewRegressionTests: XCTestCase {
         defer { try? fixture.remove() }
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: fixture.root)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fixture.root) }
-        XCTAssertThrowsError(try GitService().remoteURL(at: fixture.root)) { error in
+        XCTAssertThrowsError(try TestPaths.git.remoteURL(at: fixture.root)) { error in
             guard case let GitError.repositoryUnreadable(path, _) = error else { return XCTFail("\(error)") }
             XCTAssertEqual(path, fixture.root)
         }

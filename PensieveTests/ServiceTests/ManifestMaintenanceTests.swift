@@ -81,7 +81,10 @@ final class ManifestMaintenanceTests: XCTestCase {
     func testCreatingSkillWritesOverlay() throws {
         let context = try makeContext()
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
-        let vm = SkillLibraryViewModel(skillStore: store, manifestService: manifest, manifestRoot: tempDir)
+        let vm = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: manifest, manifestRoot: tempDir
+        )
         vm.createSkill(name: "My Skill", description: "d", body: "# b", tags: ["x"], context: context)
         XCTAssertTrue(overlayExists(slug: "my-skill"))
         let read = try manifest.read(fromRoot: tempDir)
@@ -92,7 +95,10 @@ final class ManifestMaintenanceTests: XCTestCase {
     func testCreatingSkillUsesUserScopeInRecordAndOverlay() throws {
         let context = try makeContext()
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
-        let vm = SkillLibraryViewModel(skillStore: store, manifestService: manifest, manifestRoot: tempDir)
+        let vm = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: manifest, manifestRoot: tempDir
+        )
 
         vm.createSkill(name: "Scoped", description: "d", body: "# b", tags: [], context: context)
 
@@ -112,7 +118,7 @@ final class ManifestMaintenanceTests: XCTestCase {
         let context = try makeContext()
         try seedProjectIntent(context)
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
-        let vm = ImportViewModel(skillStore: store, manifestService: manifest, manifestRoot: tempDir)
+        let vm = ImportViewModel(scanner: TestPaths.scanner, skillStore: store, manifestService: manifest, manifestRoot: tempDir)
         let discovered = DiscoveredSkill(
             name: "Imported Skill",
             body: "# imported body",
@@ -141,7 +147,10 @@ final class ManifestMaintenanceTests: XCTestCase {
         let context = try makeContext()
         try seedProjectIntent(context)
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
-        let vm = SkillLibraryViewModel(skillStore: store, manifestService: manifest, manifestRoot: tempDir)
+        let vm = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: manifest, manifestRoot: tempDir
+        )
         vm.createSkill(name: "Editable", description: "d", body: "# b", tags: [], context: context)
         let skill = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
         vm.updateMetadata(skill, tags: ["edited"], scope: .project, context: context)
@@ -155,7 +164,10 @@ final class ManifestMaintenanceTests: XCTestCase {
     func testDeletingSkillPrunesOverlay() throws {
         let context = try makeContext()
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
-        let vm = SkillLibraryViewModel(skillStore: store, manifestService: manifest, manifestRoot: tempDir)
+        let vm = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: manifest, manifestRoot: tempDir
+        )
         vm.createSkill(name: "Doomed", description: "d", body: "# b", tags: [], context: context)
         XCTAssertTrue(overlayExists(slug: "doomed"))
         let legacyPath = tempDir + "/manifest/scenarios/legacy.yaml"
@@ -164,8 +176,12 @@ final class ManifestMaintenanceTests: XCTestCase {
         let skill = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
         XCTAssertTrue(SkillDeletionFlow.delete(
             skill: skill, library: vm,
-            platformVM: PlatformViewModel(agentDetection: DeployStubDetection(installed: []),
-                                          deployStateStore: .memoryBacked),
+            platformVM: PlatformViewModel(
+                linkService: TestPaths.linkService(fileService: FileService()),
+                cursorCompiler: TestPaths.cursorCompiler(fileService: FileService()),
+                agentDetection: DeployStubDetection(installed: []),
+                deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
+            ),
             projects: [], context: context
         ))
         XCTAssertFalse(overlayExists(slug: "doomed"))
@@ -177,7 +193,10 @@ final class ManifestMaintenanceTests: XCTestCase {
         let context = try makeContext()
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
         let failing = ManifestService(fileService: ThrowingWriteFileService())
-        let vm = SkillLibraryViewModel(skillStore: store, manifestService: failing, manifestRoot: tempDir)
+        let vm = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: failing, manifestRoot: tempDir
+        )
         vm.createSkill(name: "Resilient", description: "d", body: "# b", tags: [], context: context)
         XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).count, 1)
         XCTAssertNotNil(vm.error)
@@ -222,10 +241,14 @@ final class ManifestMaintenanceTests: XCTestCase {
         _ = removeRegisteredProject(
             project,
             reconciler: NoopReconciler(),
-            manifestService: manifest,
-            manifestRoot: tempDir,
-            platformVM: PlatformViewModel(fileService: fileService,
-                agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked),
+            manifestService: manifest, manifestRoot: tempDir,
+            platformVM: PlatformViewModel(
+                fileService: fileService,
+                linkService: TestPaths.linkService(fileService: fileService),
+                cursorCompiler: TestPaths.cursorCompiler(fileService: fileService),
+                agentDetection: DeployStubDetection(installed: []),
+                deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
+            ),
             localMachineID: ProjectIntentHarness.localID,
             context: context
         )

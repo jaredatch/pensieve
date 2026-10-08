@@ -3,7 +3,7 @@ import XCTest
 
 extension UpstreamHistoryServiceTests {
     func testShallowProbeFailureThrowsInsteadOfReportingCompleteHistory() {
-        let git = GitService(fileService: fileService)
+        let git = GitService(fileService: fileService, askpassHelperPath: TestPaths.gitAskpassHelperPath)
 
         XCTAssertThrowsError(try git.isShallowRepository(at: tempDir + "/missing-repository"))
     }

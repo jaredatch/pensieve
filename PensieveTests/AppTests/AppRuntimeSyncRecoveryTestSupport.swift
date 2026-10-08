@@ -36,8 +36,15 @@ extension XCTestCase {
                 if let failure { throw failure }
                 return result
             }, coordinatorConfigure: { coordinator in
-                await coordinator.configure(engine: engine, git: IngestRecordingGit(),
-                    credentials: InMemoryCredentialStore(), root: fixture.root, audit: IngestNullAudit())
+                await coordinator.configure(
+                    engine: engine,
+                    git: IngestRecordingGit(),
+                    credentials: InMemoryCredentialStore(),
+                    root: fixture.root,
+                    audit: IngestNullAudit(),
+                    machine: (identity: MachineIdentity(appSupportDir: TestPaths.appSupportDir),
+                        stateService: TestPaths.stateService)
+                )
             })
         await runtime.bootstrapTask.value
         let h = RecoveryHarness(fixture: fixture, runtime: runtime, engine: engine,

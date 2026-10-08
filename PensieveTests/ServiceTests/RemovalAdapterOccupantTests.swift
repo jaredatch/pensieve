@@ -10,8 +10,13 @@ final class RemovalAdapterOccupantTests: XCTestCase {
             defer { h.base.cleanup() }
             h.vm.deploy(skill: h.base.skill, platform: platform, context: h.base.context)
             let adapter = ReplacementRemovalAdapter(files: h.mapped)
-            let vm = PlatformViewModel(fileService: h.mapped, linkService: adapter, cursorCompiler: adapter,
-                agentDetection: DeployStubDetection(installed: [platform]), deployStateStore: h.base.deployState)
+            let vm = PlatformViewModel(
+                fileService: h.mapped,
+                linkService: adapter,
+                cursorCompiler: adapter,
+                agentDetection: DeployStubDetection(installed: [platform]),
+                deployStateStore: h.base.deployState, skillsDirectory: TestPaths.skillsDir
+            )
             let pair = DeployRemovalPair(skill: h.base.skill, platform: platform)
             let result = vm.removeOwnedBatch(pairs: [pair, pair], target: .userWide)
             XCTAssertFalse(result.hasFailures)
@@ -32,8 +37,12 @@ private final class ReplacementRemovalAdapter: LinkServiceProtocol, CursorCompil
 
     init(files: FileServiceProtocol) {
         self.files = files
-        links = LinkService(fileService: files)
-        cursor = CursorCompiler(fileService: files, skillStore: SkillStore(fileService: files))
+        links = TestPaths.linkService(fileService: files)
+        cursor = CursorCompiler(
+            fileService: files,
+            skillStore: SkillStore(fileService: files, baseDir: TestPaths.skillsDir),
+            userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
+        )
     }
 
     func removalOperation(skill: Skill, platform: PlatformTarget, projectPath: String?) -> DeployRemovalOperation {

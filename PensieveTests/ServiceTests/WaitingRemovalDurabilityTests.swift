@@ -36,7 +36,7 @@ final class WaitingRemovalDurabilityTests: XCTestCase {
             XCTAssertEqual(category.skillSlugs, [h.base.skill.directoryName])
             XCTAssertEqual(category.projectKeys, [h.base.project.identityKey!])
             XCTAssertTrue(h.mapped.isSymlink(at: userPath))
-            XCTAssertTrue(h.mapped.fileExists(at: h.base.skill.canonicalPath))
+            XCTAssertTrue(h.mapped.fileExists(at: h.base.skill.canonicalPath(skillsDirectory: TestPaths.skillsDir)))
             XCTAssertFalse(h.base.files.fileExists(at: h.storePath))
         }
     }

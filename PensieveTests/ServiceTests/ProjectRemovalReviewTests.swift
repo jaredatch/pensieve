@@ -41,13 +41,19 @@ final class ProjectRemovalReviewTests: XCTestCase {
         let checkpoint = RemovalCheckpointReconciler(reconciler: h.category) {
             do {
                 try h.files.deleteFile(at: path)
-                try LinkService(fileService: h.mapped).link(skill: h.skill, platform: .claudeCode, projectPath: h.project.path)
+                try TestPaths.linkService(fileService: h.mapped).link(skill: h.skill, platform: .claudeCode,
+                    projectPath: h.project.path)
                 return BatchResult()
             } catch { return BatchResult.readFailure("checkpoint", error: error) }
         }
-        let result = removeRegisteredProject(h.project, reconciler: checkpoint,
-            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
-            confirmedPreview: confirmed.preview, context: h.context)
+        let result = removeRegisteredProject(
+            h.project,
+            reconciler: checkpoint, manifestRoot: TestPaths.storeRoot,
+            platformVM: h.platformVM,
+            localMachineID: ProjectIntentHarness.localID,
+            confirmedPreview: confirmed.preview,
+            context: h.context
+        )
         XCTAssertFalse(result.hasFailures)
         XCTAssertTrue(h.files.isSymlink(at: path), "An artifact outside the confirmed owned set survives")
         XCTAssertTrue(try h.deployState.read().records.isEmpty)

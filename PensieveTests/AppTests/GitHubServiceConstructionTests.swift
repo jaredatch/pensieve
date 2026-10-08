@@ -24,20 +24,84 @@ final class GitHubServiceConstructionTests: XCTestCase {
     ]
 
     func testGitHubServicesRequireTheirCallersDependencies() throws {
-        let directory = TestTemporaryDirectory.url.appendingPathComponent("GitHubConstruction-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let prelude = """
+        try assertRequiredArguments(requiredArguments)
+    }
+
+    func testRuntimeServicesRequireExplicitPaths() throws {
+        try assertRequiredArguments([
+            ("GitService", [("askpassHelperPath", "root")]),
+            ("SkillStore", [("fileService", "files"), ("baseDir", "root")]),
+            ("SyncEngine", [("gitService", "git"), ("lockPath", "root")]),
+            ("SyncModel", [("git", "git"), ("root", "root")]),
+            ("SyncAudit", [("appSupport", "root")]),
+            ("MachineIdentity", [("appSupportDir", "root")]),
+            ("DeployStateStore", [("fileService", "files"), ("appSupportDir", "root")]),
+            ("FileWatchService", [("rootDir", "root")]),
+            ("ImportScanner", [("fileService", "files"), ("claudeSkillsDir", "root"), ("grokSkillsDir", "root"),
+                               ("cursorRulesDir", "root"), ("codexSkillsDir", "root"), ("storeRoot", "root")]),
+            ("StoreMigrationService", [("skillStore", "store")]),
+            ("CategoryStore", [("manifestRoot", "root")]),
+            ("LaunchReconciler", [("migrationService", "StoreMigrationService(skillStore: store)"),
+                                  ("root", "root"), ("lockPath", "root"), ("git", "git")]),
+            ("SyncSetupModel", [("context", "context"), ("git", "git"), ("credentials", "credentials"),
+                                ("root", "root"), ("lockPath", "root")]),
+            ("ConflictResolutionModel", [("engine", "engine"), ("git", "git"), ("credentials", "credentials"),
+                                         ("root", "root")]),
+            ("GitHubCredentialSettingsModel", [("credentialStore", "credentials")]),
+            ("MachineStateService", [("agentDetection", "detection"),
+                                     ("deployState", "{ try state.read() }"), ("homeDirectory", "root")]),
+            ("PlatformViewModel", [("linkService", "link"), ("cursorCompiler", "cursor"),
+                                   ("agentDetection", "detection"), ("deployStateStore", "state"), ("skillsDirectory", "root")]),
+            ("SkillLibraryViewModel", [("skillStore", "store"), ("fileWatchService", "watcher"), ("manifestRoot", "root")]),
+            ("ImportViewModel", [("scanner", "scanner"), ("skillStore", "store"), ("manifestRoot", "root")]),
+            ("DeployReconciler", [("fileService", "files"), ("deployState", "state"), ("pensieveSkillsDir", "root"),
+                                   ("agentSkillDirs", "[]"), ("cursorRulesDir", "root")]),
+            ("DeployStateBackfill", [("store", "state"),
+                                     ("paths",
+                                         "DeployStateBackfillPaths(pensieveSkillsDir: root, cursorUserRulesDir: root, " +
+                                         "userSkillsRoot: { _ in nil })")]),
+            ("await coordinator.configure", [("engine", "engine"), ("git", "git"), ("credentials", "credentials"),
+                                              ("root", "root"), ("audit", "SyncAudit(appSupport: root)"),
+                                              ("machine",
+                                                  "(identity: MachineIdentity(appSupportDir: root), " +
+                                                  "stateService: paths.makeMachineStateService(defaults: .standard))")]),
+            ("SyncLock.tryAcquire", [("at", "root")])
+        ])
+    }
+
+    private let prelude = """
             import Foundation
+            import SwiftData
             @testable import Pensieve
+            @MainActor func constructionClients() async {
             let root = "/unused-typecheck-only"
             let git = GitService(askpassHelperPath: root)
             let credentials = InMemoryCredentialStore()
+            let files = FileService()
+            let store = SkillStore(fileService: files, baseDir: root)
+            let paths = AppRuntimePaths(storeRoot: root, appSupportDir: root)
+            let engine = paths.makeSyncEngine()
+            let detection = AgentDetectionService(homeDirectory: root)
+            let link = LinkService(fileService: files, paths: paths.deployPaths)
+            let cursor = CursorCompiler(fileService: files, skillStore: store, userRulesDirectory: root)
+            let state = DeployStateStore(fileService: files, appSupportDir: root)
+            let watcher = FileWatchService(rootDir: root)
+            let scanner = paths.makeImportScanner()
+            let container = try! AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+            let context = ModelContext(container)
+            let coordinator = SyncCoordinator(modelContainer: context.container)
             let hasher = SkillInstallService(gitService: git, credentialStore: credentials,
                                             scratchRoot: root, storeRoot: root, lockPath: root)
             """ + "\n"
+
+    private func assertRequiredArguments(
+        _ requiredArguments: [(type: String, arguments: [(label: String, value: String)])]
+    ) throws {
+        let directory = TestTemporaryDirectory.url.appendingPathComponent("GitHubConstruction-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
         let valid = requiredArguments.map { client(type: $0.type, arguments: $0.arguments) }.joined(separator: "\n")
-        let control = try typecheck(prelude + valid, fileName: "control.swift", directory: directory)
+        let control = try typecheck(prelude + valid + "\n}", fileName: "control.swift", directory: directory)
         XCTAssertEqual(control.exit, 0, control.diagnostics)
         guard control.exit == 0 else { return }
         var clients: [String] = []
@@ -47,10 +111,11 @@ final class GitHubServiceConstructionTests: XCTestCase {
             for omitted in requirement.arguments {
                 let source = client(type: requirement.type, arguments: requirement.arguments.filter { $0.label != omitted.label })
                 expected.append(Omission(line: firstLine + clients.count, type: requirement.type, label: omitted.label))
-                clients.append("func omitted_\(clients.count)() { \(source) }")
+                clients.append("@MainActor func omitted_\(clients.count)() async { \(source) }")
             }
         }
-        let result = try typecheck(prelude + clients.joined(separator: "\n"), fileName: "omitted.swift", directory: directory)
+        let result = try typecheck(prelude + clients.joined(separator: "\n") + "\n}", fileName: "omitted.swift",
+            directory: directory)
         XCTAssertNotEqual(result.exit, 0)
         let errors = result.diagnostics.components(separatedBy: "\n").filter { $0.contains(": error:") }
         XCTAssertEqual(errors.count, expected.count, result.diagnostics)

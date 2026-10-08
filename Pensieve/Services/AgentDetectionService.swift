@@ -49,30 +49,32 @@ protocol AgentDetectionServiceProtocol {
 /// installed if ANY signal is present: its config dir, its app bundle, or its CLI on PATH.
 struct AgentDetectionService: AgentDetectionServiceProtocol {
     private let probe: EnvironmentProbe
+    private let home: String
 
-    init(probe: EnvironmentProbe = SystemEnvironmentProbe()) {
+    init(probe: EnvironmentProbe = SystemEnvironmentProbe(), homeDirectory: String) {
         self.probe = probe
+        self.home = homeDirectory
     }
 
     func isInstalled(_ platform: PlatformTarget) -> Bool {
         switch platform {
         case .claudeCode:
-            return probe.directoryExists(at: Self.home + "/.claude")
+            return probe.directoryExists(at: home + "/.claude")
                 || probe.executableExists(named: "claude")
         case .grok:
-            return probe.directoryExists(at: Self.home + "/.grok")
+            return probe.directoryExists(at: home + "/.grok")
                 || probe.executableExists(named: "grok")
         case .codex:
-            return probe.directoryExists(at: Self.home + "/.codex")
+            return probe.directoryExists(at: home + "/.codex")
                 || probe.executableExists(named: "codex")
         case .openClaw:
-            return probe.directoryExists(at: Self.home + "/.openclaw")
+            return probe.directoryExists(at: home + "/.openclaw")
                 || probe.executableExists(named: "openclaw")
         case .hermes:
-            return probe.directoryExists(at: Self.home + "/.hermes")
+            return probe.directoryExists(at: home + "/.hermes")
                 || probe.executableExists(named: "hermes")
         case .cursor:
-            return probe.directoryExists(at: Self.home + "/.cursor")
+            return probe.directoryExists(at: home + "/.cursor")
                 || probe.directoryExists(at: "/Applications/Cursor.app")
                 || probe.executableExists(named: "cursor")
         }
@@ -82,7 +84,4 @@ struct AgentDetectionService: AgentDetectionServiceProtocol {
         PlatformTarget.allCases.filter(isInstalled)
     }
 
-    /// Home path as a string (no filesystem read; existence checks go through `probe`).
-    /// `NSHomeDirectory()` keeps this off raw filesystem APIs so the §2-boundary grep stays clean.
-    private static let home = NSHomeDirectory()
 }

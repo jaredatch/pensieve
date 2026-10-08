@@ -22,7 +22,7 @@ final class GitBlockingFixture {
     }
 
     func run() throws {
-        let git = GitService(executablePath: root + "/git")
+        let git = GitService(askpassHelperPath: TestPaths.gitAskpassHelperPath, executablePath: root + "/git")
         _ = try git.runData(["--version"], in: nil)
     }
 

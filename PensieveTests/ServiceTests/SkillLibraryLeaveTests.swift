@@ -10,7 +10,10 @@ final class SkillLibraryLeaveTests: XCTestCase {
     private func makeSkill() -> Skill { Skill(name: "Test Skill", directoryName: "test-skill") }
 
     func testConfirmLeavingProceedsAtOnceWhenClean() {
-        let library = SkillLibraryViewModel(skillStore: CountingSkillStore(body: "A"))
+        let library = SkillLibraryViewModel(
+            skillStore: CountingSkillStore(body: "A"), fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
+        )
         let presenter = RecordingPresenter()
         library.unsavedChangesPresenter = presenter.present
         let skill = makeSkill()
@@ -25,7 +28,9 @@ final class SkillLibraryLeaveTests: XCTestCase {
 
     func testConfirmLeavingSaveWritesThenProceeds() {
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let presenter = RecordingPresenter()
         presenter.answer = .save
         library.unsavedChangesPresenter = presenter.present
@@ -48,7 +53,9 @@ final class SkillLibraryLeaveTests: XCTestCase {
 
     func testConfirmLeavingDontSaveDiscardsThenProceeds() {
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let presenter = RecordingPresenter()
         presenter.answer = .discard
         library.unsavedChangesPresenter = presenter.present
@@ -67,7 +74,9 @@ final class SkillLibraryLeaveTests: XCTestCase {
 
     func testConfirmLeavingCancelKeepsTheDraftAndRefuses() {
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let presenter = RecordingPresenter()
         presenter.answer = .cancel
         library.unsavedChangesPresenter = presenter.present
@@ -85,7 +94,10 @@ final class SkillLibraryLeaveTests: XCTestCase {
     }
 
     func testConfirmLeavingSaveFailureRefuses() {
-        let library = SkillLibraryViewModel(skillStore: ThrowingSkillStore())
+        let library = SkillLibraryViewModel(
+            skillStore: ThrowingSkillStore(), fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
+        )
         let presenter = RecordingPresenter()
         presenter.answer = .save
         library.unsavedChangesPresenter = presenter.present
@@ -102,7 +114,10 @@ final class SkillLibraryLeaveTests: XCTestCase {
     }
 
     func testASecondQuestionWhileOneIsOpenIsRefused() {
-        let library = SkillLibraryViewModel(skillStore: CountingSkillStore(body: "A"))
+        let library = SkillLibraryViewModel(
+            skillStore: CountingSkillStore(body: "A"), fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
+        )
         let presenter = RecordingPresenter()   // answer nil: the first question stays open
         library.unsavedChangesPresenter = presenter.present
         let skill = makeSkill()
@@ -129,7 +144,9 @@ final class SkillLibraryLeaveTests: XCTestCase {
         // A sync pull or a terminal removed the skill's files while it was being edited (Context, route 12): the
         // row goes with the next rebuild, but the draft is the user's — Save must not re-create the file.
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let skill = makeSkill()
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "B")
@@ -145,7 +162,9 @@ final class SkillLibraryLeaveTests: XCTestCase {
         // The files vanish while the sheet is up: Save is refused (nothing re-created), the draft stays, and
         // the leaving continuation reads "did not proceed", as after any refused save.
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let presenter = RecordingPresenter()   // holds the question open
         library.unsavedChangesPresenter = presenter.present
         let skill = makeSkill()
@@ -164,7 +183,10 @@ final class SkillLibraryLeaveTests: XCTestCase {
     }
 
     func testTheDefaultPresenterAnswersCancel() {
-        let library = SkillLibraryViewModel(skillStore: CountingSkillStore(body: "A"))
+        let library = SkillLibraryViewModel(
+            skillStore: CountingSkillStore(body: "A"), fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
+        )
         let skill = makeSkill()
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "B")

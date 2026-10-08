@@ -22,7 +22,7 @@ final class FileWatchService: FileWatchServiceProtocol {
     private let queue = DispatchQueue(label: "com.jaredatch.pensieve.filewatch")
 
     init(
-        rootDir: String = Constants.pensieveSkillsDir,
+        rootDir: String,
         onChange: @escaping (String) -> Void = FileWatchService.osLogSink
     ) {
         self.rootDir = URL(fileURLWithPath: rootDir).resolvingSymlinksInPath().path

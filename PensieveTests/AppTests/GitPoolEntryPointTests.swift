@@ -46,12 +46,14 @@ final class GitPoolEntryPointTests: XCTestCase {
         switch entry {
         case .cycle, .worktree: return try await startCycle(entry, block: block, fixture: fixture)
         case .configurationProbe, .configurationRemote:
-            try GitService().initRepository(at: fixture.root)
+            try TestPaths.git.initRepository(at: fixture.root)
             let state = RuntimeGitState(probe: {
                 if entry == .configurationProbe { try? block.run() }
                 return .usable
             })
-            let git = entry == .configurationRemote ? GitService(executablePath: block.root + "/git") : GitService()
+            let git = entry == .configurationRemote
+                ? GitService(askpassHelperPath: TestPaths.gitAskpassHelperPath, executablePath: block.root + "/git")
+                : TestPaths.git
             let model = SyncModel(git: git, root: fixture.root)
             return Task { _ = await state.refresh(probingGit: true, model: model) }
         case .updateCheck, .failureClassification:
@@ -109,11 +111,17 @@ final class GitPoolEntryPointTests: XCTestCase {
                             fixture: UpdateReviewFixture) async throws -> Task<Void, Never> {
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         let coordinator = SyncCoordinator(modelContainer: container)
-        await coordinator.configure(engine: entry == .cycle ? PoolSyncEngine(block: block) : NoRemotePoolEngine(),
-            git: GitService(), credentials: InMemoryCredentialStore(), root: fixture.root)
+        await coordinator.configure(
+            engine: entry == .cycle ? PoolSyncEngine(block: block) : NoRemotePoolEngine(),
+            git: TestPaths.git,
+            credentials: InMemoryCredentialStore(),
+            root: fixture.root,
+            audit: SyncAudit(appSupport: TestPaths.appSupportDir),
+            machine: (identity: MachineIdentity(appSupportDir: TestPaths.appSupportDir), stateService: TestPaths.stateService)
+        )
         let paths = AppRuntimePaths(storeRoot: fixture.root, appSupportDir: fixture.root + "/support")
         if entry == .worktree {
-            let git = GitService()
+            let git = TestPaths.git
             try git.initRepository(at: fixture.root)
             _ = try git.runOrThrow(["config", "core.fsmonitor", block.root + "/git"], in: fixture.root)
         }

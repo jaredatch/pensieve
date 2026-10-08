@@ -132,7 +132,7 @@ extension SkillInstallServiceTests {
     }
 
     private func assertShallowCloneDisablesConfiguredCredentialHelpers() {
-        let productionGit = GitService()
+        let productionGit = TestPaths.git
         XCTAssertThrowsError(
             try productionGit.cloneShallow(
                 remote: "file:///definitely-missing-pensieve-install-repository",

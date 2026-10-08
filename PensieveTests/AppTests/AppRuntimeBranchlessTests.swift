@@ -7,7 +7,7 @@ final class AppRuntimeBranchlessTests: XCTestCase {
     func testBranchlessCycleReplacesHealthyTimeWithoutOfferingConnectAndDaemonAgrees() async throws {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
-        let git = GitService()
+        let git = TestPaths.git
         try git.initRepository(at: fixture.root)
         _ = try git.runOrThrow(["-C", fixture.root, "commit", "--allow-empty", "-m", "fixture"], in: nil)
         try git.setRemote("https://fixture.test/store.git", at: fixture.root)
@@ -83,20 +83,11 @@ final class AppRuntimeBranchlessTests: XCTestCase {
         for trigger in ["tick", "wake", "manual", "read failure"] {
             let fixture = try GitFailureFixture()
             defer { try? fixture.remove() }
-            let git = GitService()
+            let git = TestPaths.git
             try git.initRepository(at: fixture.root)
             try git.setRemote("https://fixture.test/store.git", at: fixture.root)
             let cycles = RuleProbe()
-            let runtime = try AppRuntime(
-                scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { true }),
-                defaults: isolatedDefaults(), paths: fixture.paths, gitUsabilityProbe: { .usable },
-                coordinatorConfigure: { coordinator in
-                    await coordinator.configure(engine: StatusOrderEngine {
-                        _ = cycles.run()
-                        return try git.hasLocalBranches(at: fixture.root) ? .synced(pushed: false, warnings: []) : .branchless
-                    }, git: git, credentials: InMemoryCredentialStore(), root: fixture.root,
-                    audit: SyncAudit(appSupport: fixture.support))
-                })
+            let runtime = try branchCheckRuntime(fixture: fixture, git: git, cycles: cycles)
             await runtime.bootstrapTask.value
             runtime.scheduler.launchIngestCompleted()
             await TestWait.until(failureMessage: "branch-checking cycle did not finish") {
@@ -128,4 +119,24 @@ final class AppRuntimeBranchlessTests: XCTestCase {
             }
         }
     }
+    private func branchCheckRuntime(fixture: GitFailureFixture, git: GitService, cycles: RuleProbe) throws -> AppRuntime {
+        return try AppRuntime(
+                scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { true }),
+                defaults: isolatedDefaults(), paths: fixture.paths, gitUsabilityProbe: { .usable },
+                coordinatorConfigure: { coordinator in
+                    await coordinator.configure(
+                        engine: StatusOrderEngine {
+                        _ = cycles.run()
+                        return try git.hasLocalBranches(at: fixture.root) ? .synced(pushed: false, warnings: []) : .branchless
+                    },
+                        git: git,
+                        credentials: InMemoryCredentialStore(),
+                        root: fixture.root,
+                        audit: SyncAudit(appSupport: fixture.support),
+                        machine: (identity: MachineIdentity(appSupportDir: TestPaths.appSupportDir),
+                            stateService: TestPaths.stateService)
+                    )
+                })
+    }
+
 }

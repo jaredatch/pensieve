@@ -18,7 +18,7 @@ final class WaitingRemovalRequestSafetyTests: XCTestCase {
         try h.hideFolder()
         XCTAssertTrue(h.deleteSkill())
         XCTAssertEqual(try h.vm.waitingRemovalStore.read().count, 1)
-        let slug = try SkillStore(fileService: h.mapped).createSkill(
+        let slug = try SkillStore(fileService: h.mapped, baseDir: TestPaths.skillsDir).createSkill(
             name: "Caller Skill", description: "Replacement", body: "# Replacement")
         let replacement = Skill(name: "Caller Skill", directoryName: slug)
         h.base.context.insert(replacement)
@@ -70,7 +70,8 @@ final class WaitingRemovalRequestSafetyTests: XCTestCase {
         XCTAssertTrue(try h.base.deployState.read().records.isEmpty)
         XCTAssertEqual(try h.base.context.fetchCount(FetchDescriptor<DeployRecord>()), 1)
         // An older artifact can return after un-assignment; history still exists but no request does.
-        try LinkService(fileService: h.mapped).link(skill: h.base.skill, platform: .codex, projectPath: h.base.project.path)
+        try TestPaths.linkService(fileService: h.mapped).link(skill: h.base.skill, platform: .codex,
+            projectPath: h.base.project.path)
         XCTAssertFalse(h.vm.reconcileWaitingRemovals(context: h.base.context).hasFailures)
         XCTAssertFalse(h.base.files.isSymlink(at: h.base.artifact(.codex)))
         XCTAssertTrue(try h.vm.waitingRemovalStore.read().isEmpty)

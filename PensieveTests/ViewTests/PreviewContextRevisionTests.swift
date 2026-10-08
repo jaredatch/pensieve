@@ -37,7 +37,7 @@ final class PreviewContextRevisionTests: XCTestCase {
         let slug = try store.createSkill(name: "Skill", description: "D", body: "Body")
         let other = try store.createSkill(name: "Other", description: "D", body: "Other body")
         let watcher = RecordingWatcher()
-        let library = SkillLibraryViewModel(skillStore: store, fileWatchService: watcher)
+        let library = SkillLibraryViewModel(skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot)
         let skill = Skill(name: "Skill", directoryName: slug)
         _ = library.editorBody(for: skill)
         library.startWatching()

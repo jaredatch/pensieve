@@ -178,7 +178,10 @@ final class ImportBoundedReadTests: XCTestCase {
         try makeSparseFile(rules + "/huge.mdc", bytes: cap + 1)
         try spy.files.writeFile(at: root + "/claude/README.md", content: "Ordinary collection file")
         try spy.files.createDirectory(at: root + "/claude/empty-folder")
-        let model = ImportViewModel(scanner: makeScanner())
+        let model = ImportViewModel(
+            scanner: makeScanner(),
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         model.scan()
 
         XCTAssertEqual(model.discoveredSkills.map(\.name), ["good"])
@@ -196,11 +199,17 @@ final class ImportBoundedReadTests: XCTestCase {
         XCTAssertEqual(model.scanSkips, retainedSkips, "Library refusal must retain the matching report")
     }
 
+}
+
+extension ImportBoundedReadTests {
     func testAllSkippedFolderKeepsNothingFoundAndDoesNotWidenDanglingLeaf() throws {
         let collection = root + "/folder"
         try spy.files.writeFile(at: collection + "/child/SKILL.md", content: "Child")
         try spy.files.createSymlink(at: collection + "/SKILL.md", pointingTo: root + "/absent")
-        let model = ImportViewModel(scanner: makeScanner())
+        let model = ImportViewModel(
+            scanner: makeScanner(),
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
 
         XCTAssertEqual(model.scanFolder(collection), .nothingFound)
         XCTAssertTrue(model.discoveredSkills.isEmpty)
@@ -219,7 +228,11 @@ final class ImportBoundedReadTests: XCTestCase {
                 fileService: files, claudeSkillsDir: root + "/claude", grokSkillsDir: root + "/grok",
                 cursorRulesDir: root + "/cursor", codexSkillsDir: root + "/codex", storeRoot: alias
             )
-            let model = ImportViewModel(scanner: scanner)
+            let model = ImportViewModel(
+                scanner: scanner,
+                skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
+                manifestRoot: TestPaths.storeRoot
+            )
             XCTAssertEqual(model.scanFolder(library), .insideLibrary)
             XCTAssertTrue(model.discoveredSkills.isEmpty)
             XCTAssertTrue(model.scanSkips.isEmpty)

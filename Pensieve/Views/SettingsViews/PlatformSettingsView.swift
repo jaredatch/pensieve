@@ -51,14 +51,15 @@ struct PlatformPathSetting: Identifiable, Equatable {
     var id: PlatformTarget { platform }
     var label: String { "\(platform.displayName) \(kind)" }
 
-    static let rows: [Self] = [
-        Self(platform: .claudeCode, kind: "Skills", path: Constants.claudeCodeUserSkillsDir),
-        Self(platform: .grok, kind: "Skills", path: Constants.grokUserSkillsDir),
-        Self(platform: .cursor, kind: "Rules", path: Constants.cursorUserRulesDir)
-    ]
+    static func rows(paths: DeployPaths) -> [Self] { [
+        Self(platform: .claudeCode, kind: "Skills", path: paths.userSkillsRoot(for: .claudeCode) ?? ""),
+        Self(platform: .grok, kind: "Skills", path: paths.userSkillsRoot(for: .grok) ?? ""),
+        Self(platform: .cursor, kind: "Rules", path: paths.cursorUserRulesDirectory)
+    ] }
 }
 
 struct PlatformSettingsView: View {
+    @Environment(AppRuntime.self) private var runtime
     var body: some View {
         Form {
             Section("Token Budgets") {
@@ -83,7 +84,7 @@ struct PlatformSettingsView: View {
             }
 
             Section("Platform Paths") {
-                ForEach(PlatformPathSetting.rows) { setting in
+                ForEach(PlatformPathSetting.rows(paths: runtime.paths.deployPaths)) { setting in
                     LabeledContent(setting.label) {
                         Text(setting.path)
                             .font(.caption)

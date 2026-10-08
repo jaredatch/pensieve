@@ -129,7 +129,7 @@ extension AppRuntimePathsTests {
         let paths = fixture.paths
         // Observe a born branch, then remove it before the retry-driven cycle. The real engine must
         // report branchless before preparation or network I/O, without changing the store or .git.
-        let git = GitService()
+        let git = TestPaths.git
         try git.initRepository(at: paths.storeRoot)
         _ = try git.runOrThrow(["-C", paths.storeRoot, "commit", "--allow-empty", "-m", "fixture"], in: nil)
         try git.setRemote("https://fixture.test/store.git", at: paths.storeRoot)
@@ -140,7 +140,12 @@ extension AppRuntimePathsTests {
         var returnedInitialOutcome = false
         let runtime = try AppRuntime(
             container: container,
-            platformVM: PlatformViewModel(agentDetection: StubDetection(), deployStateStore: .memoryBacked),
+            platformVM: PlatformViewModel(
+                linkService: TestPaths.linkService(fileService: FileService()),
+                cursorCompiler: TestPaths.cursorCompiler(fileService: FileService()),
+                agentDetection: StubDetection(),
+                deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
+            ),
             library: paths.makeLibrary(fileWatchService: StubWatcher(), notifier: {}),
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { true }),
             defaults: defaults,
@@ -176,7 +181,7 @@ extension AppRuntimePathsTests {
     func testPathSnapshotWaitIncludesModelCycleAfterScheduledFollowUpQueues() async throws {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
-        let git = GitService()
+        let git = TestPaths.git
         try git.initRepository(at: fixture.root)
         _ = try git.runOrThrow(["-C", fixture.root, "commit", "--allow-empty", "-m", "fixture"], in: nil)
         try git.setRemote("https://fixture.test/store.git", at: fixture.root)

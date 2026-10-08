@@ -59,7 +59,7 @@ final class SkillStore: SkillStoreProtocol {
     private let fileService: FileServiceProtocol
     private let baseDir: String
 
-    init(fileService: FileServiceProtocol, baseDir: String = PathConstants.pensieveSkillsDir) {
+    init(fileService: FileServiceProtocol, baseDir: String) {
         self.fileService = fileService
         self.baseDir = baseDir
     }

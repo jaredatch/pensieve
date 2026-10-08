@@ -16,8 +16,13 @@ final class ProjectRemovalExecutionTests: XCTestCase {
             h.otherProject.name = "Unrelated saved edit"
             throw CocoaError(.fileWriteNoPermission)
         }
-        let result = removeRegisteredProject(h.project, reconciler: h.category,
-            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, context: h.context)
+        let result = removeRegisteredProject(
+            h.project,
+            reconciler: h.category, manifestRoot: TestPaths.storeRoot,
+            platformVM: h.platformVM,
+            localMachineID: ProjectIntentHarness.localID,
+            context: h.context
+        )
         XCTAssertTrue(result.hasFailures)
         XCTAssertFalse(result.didRetireProjectEvidence, "Saving another project's edit did not retire this project's evidence")
         XCTAssertFalse(h.context.hasChanges, "The unrelated pending edit reached the final save")
@@ -37,8 +42,13 @@ final class ProjectRemovalExecutionTests: XCTestCase {
         h.mapped.beforeArtifactDeletion = { path in
             if path == h.artifact(.codex) { throw CocoaError(.fileWriteNoPermission) }
         }
-        let result = removeRegisteredProject(h.project, reconciler: h.category,
-            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, context: h.context)
+        let result = removeRegisteredProject(
+            h.project,
+            reconciler: h.category, manifestRoot: TestPaths.storeRoot,
+            platformVM: h.platformVM,
+            localMachineID: ProjectIntentHarness.localID,
+            context: h.context
+        )
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(result.didRetireProjectEvidence, "A saved project ledger retirement is evidence even without state rows")
         let remaining = try h.context.fetch(FetchDescriptor<IntentAssignment>())
@@ -64,8 +74,13 @@ final class ProjectRemovalExecutionTests: XCTestCase {
             throw NSError(domain: NSPOSIXErrorDomain, code: 5,
                 userInfo: [NSLocalizedDescriptionKey: "State retirement failed"])
         }
-        let result = removeRegisteredProject(h.project, reconciler: h.category,
-            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, context: h.context)
+        let result = removeRegisteredProject(
+            h.project,
+            reconciler: h.category, manifestRoot: TestPaths.storeRoot,
+            platformVM: h.platformVM,
+            localMachineID: ProjectIntentHarness.localID,
+            context: h.context
+        )
         XCTAssertEqual(result.failureCount, 2)
         let message = ProjectRemovalModel.removalFailureMessage(projectName: h.project.name, result: result)
         let artifact = try XCTUnwrap(message.range(of: "Artifact delete failed"))
@@ -94,8 +109,13 @@ final class ProjectRemovalExecutionTests: XCTestCase {
             }
             return BatchResult()
         }
-        let result = removeRegisteredProject(h.project, reconciler: reconciler,
-            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, context: h.context)
+        let result = removeRegisteredProject(
+            h.project,
+            reconciler: reconciler, manifestRoot: TestPaths.storeRoot,
+            platformVM: h.platformVM,
+            localMachineID: ProjectIntentHarness.localID,
+            context: h.context
+        )
         XCTAssertEqual(result.failureCount, 1)
         XCTAssertTrue(result.failures.first?.error?.contains("Could not check ownership") == true)
         XCTAssertTrue(result.failures.first?.error?.contains(path) == true)
@@ -116,9 +136,14 @@ final class ProjectRemovalExecutionTests: XCTestCase {
         model.request(h.project, platformVM: h.platformVM, context: h.context)
         try h.files.replaceItem(at: h.root + "/offline", with: h.project.path)
         let result = model.confirm { project, plan in
-            removeRegisteredProject(project, reconciler: h.category,
-                platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
-                confirmedPreview: plan, context: h.context)
+            removeRegisteredProject(
+                project,
+                reconciler: h.category, manifestRoot: TestPaths.storeRoot,
+                platformVM: h.platformVM,
+                localMachineID: ProjectIntentHarness.localID,
+                confirmedPreview: plan,
+                context: h.context
+            )
         }
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(model.error?.contains("changed") == true)
@@ -138,9 +163,14 @@ final class ProjectRemovalExecutionTests: XCTestCase {
         h.mapped.beforeProjectProbe = { path in
             if path == h.project.path { throw NSError(domain: NSPOSIXErrorDomain, code: 13) }
         }
-        let result = removeRegisteredProject(h.project, reconciler: h.category,
-            platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
-            confirmedPreview: model.preview, context: h.context)
+        let result = removeRegisteredProject(
+            h.project,
+            reconciler: h.category, manifestRoot: TestPaths.storeRoot,
+            platformVM: h.platformVM,
+            localMachineID: ProjectIntentHarness.localID,
+            confirmedPreview: model.preview,
+            context: h.context
+        )
         let message = ProjectRemovalModel.removalFailureMessage(projectName: h.project.name, result: result)
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(message.contains("folder"))
@@ -149,6 +179,9 @@ final class ProjectRemovalExecutionTests: XCTestCase {
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 2)
     }
 
+}
+
+extension ProjectRemovalExecutionTests {
     func testFolderDisappearingDuringExecutionKeepsEvidenceAndWithdrawalForRetry() throws {
         let h = try ProjectFolderCallerHarness(installed: [.codex])
         defer { h.cleanup() }
@@ -205,9 +238,14 @@ final class ProjectRemovalExecutionTests: XCTestCase {
         let model = ProjectRemovalModel()
         model.request(h.project, platformVM: h.platformVM, context: h.context)
         model.confirm { project, plan in
-            removeRegisteredProject(project, reconciler: h.category,
-                platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, confirmedPreview: plan,
-                context: h.context)
+            removeRegisteredProject(
+                project,
+                reconciler: h.category, manifestRoot: TestPaths.storeRoot,
+                platformVM: h.platformVM,
+                localMachineID: ProjectIntentHarness.localID,
+                confirmedPreview: plan,
+                context: h.context
+            )
         }
         XCTAssertNil(model.error)
         XCTAssertEqual(targetReads, 9, "Confirmation, current execution classification and the protective leaf check")

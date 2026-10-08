@@ -12,7 +12,7 @@ final class WaitingRemovalRequestTests: XCTestCase {
         let slug = h.base.skill.directoryName
         try h.hideFolder()
         XCTAssertTrue(h.deleteSkill())
-        let newSlug = try SkillStore(fileService: h.mapped).createSkill(
+        let newSlug = try SkillStore(fileService: h.mapped, baseDir: TestPaths.skillsDir).createSkill(
             name: "Caller Skill", description: "New skill", body: "# Replacement")
         XCTAssertEqual(newSlug, slug)
         let replacement = Skill(name: "Caller Skill", directoryName: newSlug)

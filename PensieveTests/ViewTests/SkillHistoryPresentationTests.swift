@@ -43,7 +43,9 @@ final class SkillHistoryPresentationTests: XCTestCase {
         let skill = Skill(name: "Example", directoryName: "example")
         let store = RecordingHistorySkillStore()
         try store.writeBody(directoryName: skill.directoryName, body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "B")
         store.writeBodyFails = true

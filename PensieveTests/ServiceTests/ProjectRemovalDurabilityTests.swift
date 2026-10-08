@@ -145,9 +145,13 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
                 throw NSError(domain: NSPOSIXErrorDomain, code: 5)
             }
         }
-        let result = removeRegisteredProject(h.project,
-            reconciler: h.category, platformVM: h.platformVM,
-            localMachineID: ProjectIntentHarness.localID, context: h.context)
+        let result = removeRegisteredProject(
+            h.project,
+            reconciler: h.category, manifestRoot: TestPaths.storeRoot,
+            platformVM: h.platformVM,
+            localMachineID: ProjectIntentHarness.localID,
+            context: h.context
+        )
         XCTAssertFalse(result.hasFailures, "A category CRUD publication dependency must not control project removal")
         XCTAssertEqual(writes, 0, "The caller provided no manifest service")
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.otherProject.id])

@@ -21,7 +21,7 @@ extension UpdateCheckServiceTests {
         try runGit(["-C", root, "tag", "-a", "annotated", first, "-m", "annotated"])
         try runGit(["-C", root, "tag", "lightweight", second])
 
-        let service = GitService()
+        let service = TestPaths.git
         XCTAssertEqual(try service.remoteHead(remote: root, ref: "same", credential: nil), second)
         XCTAssertEqual(try service.remoteHead(remote: root, ref: "annotated", credential: nil), first)
         XCTAssertEqual(try service.remoteHead(remote: root, ref: "lightweight", credential: nil), second)

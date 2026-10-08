@@ -230,10 +230,14 @@ final class ProjectRemovalTests: XCTestCase {
 
     private func plant(_ h: ProjectFolderCallerHarness, platform: PlatformTarget) throws -> String {
         if platform == .cursor {
-            try CursorCompiler(fileService: h.mapped, skillStore: SkillStore(fileService: h.files,
-                baseDir: h.root + "/store/skills")).compile(skill: h.skill, projectPath: h.project.path)
+            try CursorCompiler(
+                fileService: h.mapped,
+                skillStore: SkillStore(fileService: h.files,
+                baseDir: h.root + "/store/skills"),
+                userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
+            ).compile(skill: h.skill, projectPath: h.project.path)
         } else {
-            try LinkService(fileService: h.mapped).link(skill: h.skill, platform: platform, projectPath: h.project.path)
+            try TestPaths.linkService(fileService: h.mapped).link(skill: h.skill, platform: platform, projectPath: h.project.path)
         }
         return h.platformVM.artifactPath(skill: h.skill, platform: platform, target: .project(h.project))
     }

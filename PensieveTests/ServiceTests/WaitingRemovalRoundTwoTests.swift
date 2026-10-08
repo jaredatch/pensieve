@@ -10,7 +10,8 @@ final class WaitingRemovalRoundTwoTests: XCTestCase {
         let h = try WaitingRemovalHarness(persistent: true)
         defer { h.base.cleanup() }
         try h.base.files.createDirectory(at: h.base.project.path)
-        try LinkService(fileService: h.mapped).link(skill: h.base.skill, platform: .codex, projectPath: h.base.project.path)
+        try TestPaths.linkService(fileService: h.mapped).link(skill: h.base.skill, platform: .codex,
+            projectPath: h.base.project.path)
         try h.base.deployState.upsert(DeployStateRecord(slug: h.base.skill.directoryName, platform: "codex",
             scope: "project", projectIdentityKey: h.base.project.identityKey,
             artifactPath: h.base.artifact(.codex), recordedAt: "original"))
@@ -44,7 +45,8 @@ final class WaitingRemovalRoundTwoTests: XCTestCase {
         let h = try WaitingRemovalHarness(persistent: true)
         defer { h.base.cleanup() }
         try h.base.files.createDirectory(at: h.base.project.path)
-        try LinkService(fileService: h.mapped).link(skill: h.base.skill, platform: .codex, projectPath: h.base.project.path)
+        try TestPaths.linkService(fileService: h.mapped).link(skill: h.base.skill, platform: .codex,
+            projectPath: h.base.project.path)
         try h.base.deployState.upsert(DeployStateRecord(slug: h.base.skill.directoryName, platform: "codex",
             scope: "project", projectIdentityKey: h.base.project.identityKey,
             artifactPath: h.base.artifact(.codex), recordedAt: "original"))
@@ -86,8 +88,14 @@ final class WaitingRemovalRoundTwoTests: XCTestCase {
                 _ = try h.base.deployState.remove(artifactPaths: [row.artifactPath])
             }
             let records = try h.base.deployState.read().records
-            let result = removeRegisteredProject(h.base.project, reconciler: h.base.category, platformVM: h.vm,
-                localMachineID: ProjectIntentHarness.localID, confirmedPreview: preview, context: h.base.context)
+            let result = removeRegisteredProject(
+                h.base.project,
+                reconciler: h.base.category, manifestRoot: TestPaths.storeRoot,
+                platformVM: h.vm,
+                localMachineID: ProjectIntentHarness.localID,
+                confirmedPreview: preview,
+                context: h.base.context
+            )
             XCTAssertEqual(result.operationFailures,
                 ["The project changed while confirmation was open. Please review removal again."],
                 "A changed waiting-cleanup promise must require a fresh confirmation")

@@ -57,7 +57,7 @@ struct SyncSettingsView: View {
             onDismiss: {
                 refresh()
             },
-            content: { SyncSetupView(model: SyncSetupModel(context: modelContext)) }
+            content: { SyncSetupView(model: runtime.paths.makeSyncSetupModel(context: modelContext)) }
         )
         .confirmationDialog(
             "Disconnect from \(remoteURL ?? "this repository")?",
@@ -101,7 +101,7 @@ struct SyncSettingsView: View {
             return
         }
         do {
-            try SyncSetupModel(context: modelContext).performDisconnect()
+            try runtime.paths.makeSyncSetupModel(context: modelContext).performDisconnect()
         } catch {
             disconnectError = error.localizedDescription
         }

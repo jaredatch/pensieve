@@ -15,10 +15,14 @@ final class WaitingRemovalProjectTests: XCTestCase {
                     try h.base.files.createDirectory(at: h.base.project.path)
                     let path = h.vm.artifactPath(skill: h.base.skill, platform: platform, target: .project(h.base.project))
                     if platform.usesSymlinks {
-                        try LinkService(fileService: h.mapped).link(skill: h.base.skill, platform: platform,
+                        try TestPaths.linkService(fileService: h.mapped).link(skill: h.base.skill, platform: platform,
                             projectPath: h.base.project.path)
                     } else {
-                        try CursorCompiler(fileService: h.mapped, skillStore: SkillStore(fileService: h.mapped))
+                        try CursorCompiler(
+                            fileService: h.mapped,
+                            skillStore: SkillStore(fileService: h.mapped, baseDir: TestPaths.skillsDir),
+                            userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
+                        )
                             .compile(skill: h.base.skill, projectPath: h.base.project.path)
                     }
                     try seed(source, platform: platform, path: path, harness: h)
@@ -83,16 +87,26 @@ final class WaitingRemovalProjectTests: XCTestCase {
         try h.base.context.save()
         // Map the historical relative spelling into the sandbox, including preparation's resolver.
         let mapped = LinkServiceCanonicalDirectoryFileService(wrapped: h.base.files,
-            pathMappings: [(Constants.pensieveSkillsDir, h.base.root + "/store/skills"),
+            pathMappings: [(TestPaths.skillsDir, h.base.root + "/store/skills"),
                            (h.base.project.path, h.base.root + "/legacy-relative")], physicalSandbox: h.base.root)
-        let vm = PlatformViewModel(fileService: mapped, agentDetection: DeployStubDetection(installed: [.codex]),
-            deployStateStore: h.base.deployState)
+        let vm = PlatformViewModel(
+            fileService: mapped,
+            linkService: TestPaths.linkService(fileService: mapped),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: mapped),
+            agentDetection: DeployStubDetection(installed: [.codex]),
+            deployStateStore: h.base.deployState, skillsDirectory: TestPaths.skillsDir
+        )
         let model = ProjectRemovalModel()
         model.request(h.base.project, platformVM: vm, context: h.base.context)
         XCTAssertEqual(model.preview?.artifactCount, 0)
         XCTAssertFalse(model.preview?.message.contains("when the folder is back") == true)
-        let result = removeRegisteredProject(h.base.project, reconciler: h.base.category,
-            platformVM: vm, localMachineID: ProjectIntentHarness.localID, context: h.base.context)
+        let result = removeRegisteredProject(
+            h.base.project,
+            reconciler: h.base.category, manifestRoot: TestPaths.storeRoot,
+            platformVM: vm,
+            localMachineID: ProjectIntentHarness.localID,
+            context: h.base.context
+        )
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(try h.base.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.base.otherProject.id])
         XCTAssertTrue(try vm.waitingRemovalStore.read().isEmpty)

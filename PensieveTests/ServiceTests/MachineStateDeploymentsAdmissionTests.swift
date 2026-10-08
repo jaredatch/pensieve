@@ -15,7 +15,12 @@ final class MachineStateDeploymentsAdmissionTests: XCTestCase {
 
         let root = makeRoot()
         defer { try? fileService.deleteDirectory(at: root) }
-        let service = MachineStateService(fileService: fileService)
+        let service = MachineStateService(
+            fileService: fileService,
+            agentDetection: AgentDetectionService(homeDirectory: TestPaths.homeDirectory),
+            deployState: { DeployState(schemaVersion: DeployStateStore.currentSchemaVersion, records: []) },
+            homeDirectory: TestPaths.homeDirectory
+        )
         try service.write(state(id: validID, name: "Valid"), toRoot: root)
         try service.write(state(id: localID, name: "Forged Local"), toRoot: root)
         let content = DeploymentsPresentation.remoteContent(
@@ -35,7 +40,12 @@ final class MachineStateDeploymentsAdmissionTests: XCTestCase {
             try? fileService.deleteDirectory(at: root)
             try? fileService.deleteDirectory(at: sourceRoot)
         }
-        let service = MachineStateService(fileService: fileService)
+        let service = MachineStateService(
+            fileService: fileService,
+            agentDetection: AgentDetectionService(homeDirectory: TestPaths.homeDirectory),
+            deployState: { DeployState(schemaVersion: DeployStateStore.currentSchemaVersion, records: []) },
+            homeDirectory: TestPaths.homeDirectory
+        )
         try service.write(state(id: validID, name: "Valid"), toRoot: root)
         try service.write(state(id: stateID, name: "Hostile"), toRoot: sourceRoot)
         let hostile = try fileService.readFile(at: sourceRoot + "/machines/" + stateID + ".yaml")

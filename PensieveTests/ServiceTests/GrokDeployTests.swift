@@ -112,7 +112,7 @@ final class GrokDeployTests: XCTestCase {
     }
 
     func testInvalidPathComponentRejected() {
-        let service = LinkService(fileService: fileService)
+        let service = TestPaths.linkService(fileService: fileService)
         for component in ["..", "nested/skill"] {
             let skill = makeSkill(directoryName: component)
             XCTAssertThrowsError(try service.link(
@@ -131,23 +131,26 @@ final class GrokDeployTests: XCTestCase {
     }
 
     private func makeProjectService(skill: Skill) throws -> LinkService {
-        let logicalTarget = Constants.pensieveSkillsDir + "/" + skill.directoryName
+        let logicalTarget = TestPaths.skillsDir + "/" + skill.directoryName
         let physicalTarget = tempDir + "/pensieve/skills/" + skill.directoryName
         try fileService.createDirectory(at: physicalTarget)
-        return LinkService(fileService: LinkServiceCanonicalDirectoryFileService(
+        return LinkService(
+            fileService: LinkServiceCanonicalDirectoryFileService(
             wrapped: fileService,
             canonicalDirectory: logicalTarget,
-            substituteDirectory: physicalTarget))
+            substituteDirectory: physicalTarget),
+            paths: TestPaths.deployPaths
+        )
     }
 
     private func makeUserWideContext() throws -> UserWideContext {
         let skill = makeSkill()
-        let logicalTarget = Constants.pensieveSkillsDir + "/" + skill.directoryName
+        let logicalTarget = TestPaths.skillsDir + "/" + skill.directoryName
         let physicalTarget = tempDir + "/pensieve/skills/" + skill.directoryName
         let physicalGrokRoot = tempDir + "/home/.grok/skills"
         try fileService.createDirectory(at: physicalTarget)
 
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let home = TestPaths.homeDirectory
         let literalUserRoots: [PlatformTarget: String] = [
             .claudeCode: home + "/.claude/skills",
             .grok: home + "/.grok/skills",
@@ -170,7 +173,7 @@ final class GrokDeployTests: XCTestCase {
         let translated = LinkServiceCanonicalDirectoryFileService(
             wrapped: fileService, pathMappings: mappings, physicalSandbox: tempDir)
         return UserWideContext(
-            service: LinkService(fileService: translated),
+            service: TestPaths.linkService(fileService: translated),
             skill: skill,
             physicalLink: physicalGrokRoot + "/" + skill.directoryName,
             physicalTarget: physicalTarget)

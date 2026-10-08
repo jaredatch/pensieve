@@ -72,7 +72,7 @@ struct CategoryStore: CategoryStoreProtocol {
     private let manifestRoot: String
     let notifier: SyncStateNotifying
 
-    init(manifestService: ManifestSnapshotting? = nil, manifestRoot: String = Constants.pensieveBaseDir,
+    init(manifestService: ManifestSnapshotting? = nil, manifestRoot: String,
          notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed) {
         self.manifestService = manifestService
         self.manifestRoot = manifestRoot

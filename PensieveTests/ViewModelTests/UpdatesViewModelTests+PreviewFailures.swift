@@ -74,7 +74,7 @@ extension UpdatesViewModelTests {
 /// Uses real clones; only the selected failing Git boundary throws a path-bearing production error.
 private struct PreviewFailingGit: SkillInstallGitServing {
     let step: String
-    let git = GitService()
+    let git = TestPaths.git
     func cloneShallow(remote: String, branch: String?, into path: String, credential: GitCredential?) throws {
         if step == "unusable-clone" { throw GitError.unusable(.developerToolsMissing) }
         if step == "clone" { throw GitError.repositoryUnreadable(path: path, detail: "remote: untrusted clone text " + path) }

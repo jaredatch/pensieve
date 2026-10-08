@@ -17,9 +17,14 @@ extension SyncEngineTests {
         }
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         let coordinator = SyncCoordinator(modelContainer: container)
-        await coordinator.configure(engine: engine, git: git, credentials: InMemoryCredentialStore(), root: tempDir,
-                                    audit: SyncAudit(appSupport: tempDir + "/support"),
-                                    machineIdentity: InertMachineIdentity(), machineStateService: InertMachineStateService())
+        await coordinator.configure(
+            engine: engine,
+            git: git,
+            credentials: InMemoryCredentialStore(),
+            root: tempDir,
+            audit: SyncAudit(appSupport: tempDir + "/support"),
+            machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService())
+        )
         let outcome = await coordinator.runCycle()
         XCTAssertEqual(outcome, .failed(message))
         XCTAssertFalse(git.calls.contains("push"))

@@ -18,7 +18,7 @@ struct AddProjectSheet: View {
     init(
         model: AddProjectModel = AddProjectModel(),
         manifestService: ManifestSnapshotting = ManifestService(),
-        manifestRoot: String = Constants.pensieveBaseDir,
+        manifestRoot: String,
         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
         intentReconciler: @escaping @MainActor (ModelContext) -> BatchResult = { _ in BatchResult() },
         onCreated: @escaping (Project) -> Void = { _ in }

@@ -20,7 +20,7 @@ struct SyncAudit: SyncAuditWriting {
     private let now: () -> Date
 
     init(
-        appSupport: String = PathConstants.pensieveAppSupportDir,
+        appSupport: String,
         fileService: FileServiceProtocol = FileService(),
         now: @escaping () -> Date = Date.init
     ) {

@@ -114,8 +114,14 @@ final class LaunchReconcilerTests: XCTestCase {
         rebuildService = StoreRebuildService(fileService: fileService, manifestService: manifest)
         migrationService = StoreMigrationService(fileService: fileService, manifestService: manifest,
                                                  skillStore: skillStore)
-        reconciler = LaunchReconciler(rebuildService: rebuildService, migrationService: migrationService,
-                                      manifestService: manifest, root: tempDir, lockPath: tempDir + "/sync.lock")
+        reconciler = LaunchReconciler(
+            rebuildService: rebuildService,
+            migrationService: migrationService,
+            manifestService: manifest,
+            root: tempDir,
+            lockPath: tempDir + "/sync.lock",
+            git: TestPaths.git
+        )
     }
 
     override func tearDownWithError() throws {
@@ -480,9 +486,15 @@ extension LaunchReconcilerTests {
         let rebuild = StoreRebuildService(fileService: faulty, manifestService: ManifestService(fileService: faulty))
         let migration = StoreMigrationService(fileService: faulty, manifestService: ManifestService(fileService: faulty),
                                               skillStore: SkillStore(fileService: faulty, baseDir: tempDir + "/skills"))
-        let rec = LaunchReconciler(rebuildService: rebuild, migrationService: migration, fileService: faulty,
-                                   manifestService: ManifestService(fileService: faulty), root: tempDir,
-                                   lockPath: tempDir + "/sync.lock")
+        let rec = LaunchReconciler(
+            rebuildService: rebuild,
+            migrationService: migration,
+            fileService: faulty,
+            manifestService: ManifestService(fileService: faulty),
+            root: tempDir,
+            lockPath: tempDir + "/sync.lock",
+            git: TestPaths.git
+        )
 
         let outcome = rec.reconcileOnLaunch(context: ctx, alreadyMigrated: true)
 

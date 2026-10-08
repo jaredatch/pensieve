@@ -12,7 +12,7 @@ final class GitServiceFastForwardTests: XCTestCase {
     override func setUpWithError() throws {
         tempDir = TestTemporaryDirectory.path + "PensieveGitServiceFastForwardTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
-        git = GitService()
+        git = TestPaths.git
     }
 
     override func tearDownWithError() throws {

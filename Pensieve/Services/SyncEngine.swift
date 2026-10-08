@@ -89,11 +89,11 @@ struct SyncEngine: SyncEngineProtocol {
     private let lockPath: String
     private let lockProvider: (String) -> SyncLock?
 
-    init(gitService: GitServiceProtocol = GitService(),
+    init(gitService: GitServiceProtocol,
          manifestService: ManifestSnapshotting = ManifestService(),
          storeRebuildService: StoreRebuildServiceProtocol = StoreRebuildService(),
          fileService: FileServiceProtocol = FileService(),
-         lockPath: String = PathConstants.pensieveAppSupportDir + "/sync.lock",
+         lockPath: String,
          lockProvider: @escaping (String) -> SyncLock? = { SyncLock.tryAcquire(at: $0) }) {
         self.gitService = gitService
         self.manifestService = manifestService

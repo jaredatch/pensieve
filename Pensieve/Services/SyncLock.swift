@@ -26,7 +26,7 @@ final class SyncLock {
     /// Non-blocking acquire. Returns a held lock, or `nil` if another holder has it. Fail-safe: also `nil`
     /// if the lock file cannot be opened — never proceed with git under an unestablished lock.
     static func tryAcquire(
-        at path: String = PathConstants.pensieveAppSupportDir + "/sync.lock"
+        at path: String
     ) -> SyncLock? {
         // Ensure the containing dir exists (fresh install): a missing parent would fail `open`. The askpass
         // helper also lives here but is written lazily by a later git op, so the lock must not rely on it.

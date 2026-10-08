@@ -27,7 +27,9 @@ class TestLifecycleTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         scripts = self.root / "script"
         scripts.mkdir()
-        for name in ("test.sh", "test_diagnostics.py", "test_runs.py", "test_temp_cleanup.py"):
+        (self.root / "Pensieve").mkdir()
+        (self.root / "PensieveDaemon").mkdir()
+        for name in ("test.sh", "test_diagnostics.py", "test_runs.py", "test_temp_cleanup.py", "check-live-defaults.py"):
             source = SCRIPTS / name
             if source.exists():
                 shutil.copy2(source, scripts / name)

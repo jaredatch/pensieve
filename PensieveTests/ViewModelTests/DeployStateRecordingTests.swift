@@ -162,7 +162,7 @@ final class DeployStateRecordingTests: XCTestCase {
             linkService: RecordingLinkService(root: tempDir),
             cursorCompiler: RecordingCursorCompiler(root: tempDir),
             agentDetection: StubDetection(),
-            deployStateStore: store,
+            deployStateStore: store, skillsDirectory: TestPaths.skillsDir,
             now: { Date(timeIntervalSince1970: 1_784_332_800) }
         )
     }

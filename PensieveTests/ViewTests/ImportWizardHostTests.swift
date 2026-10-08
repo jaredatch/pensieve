@@ -8,7 +8,10 @@ import XCTest
 final class ImportWizardHostTests: XCTestCase {
     func testResultsAndDoneSummaryCountsReasonsAndReplacesLaterScan() {
         let scanner = ReportScanner()
-        let model = ImportViewModel(scanner: scanner)
+        let model = ImportViewModel(
+            scanner: scanner,
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         model.scan()
         let expected = "Skipped 5 entries: 2 symlinks or special files; 1 file larger than 4 MiB; "
             + "1 unreadable file or folder; 1 file that isn't UTF-8 text."
@@ -40,7 +43,10 @@ final class ImportWizardHostTests: XCTestCase {
             fileService: files, claudeSkillsDir: root + "/none-claude", grokSkillsDir: root + "/none-grok",
             cursorRulesDir: root + "/none-cursor", codexSkillsDir: root + "/none-codex", storeRoot: root + "/store"
         )
-        let model = ImportViewModel(scanner: scanner, skillStore: SkillStore(fileService: files, baseDir: root + "/store/skills"))
+        let model = ImportViewModel(
+            scanner: scanner,
+            skillStore: SkillStore(fileService: files, baseDir: root + "/store/skills"), manifestRoot: TestPaths.storeRoot
+        )
         XCTAssertEqual(model.scanFolder(root + "/source"), .found(30))
         XCTAssertEqual(model.scanSummary, "Skipped 1 entry: 1 file that isn't UTF-8 text.")
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))

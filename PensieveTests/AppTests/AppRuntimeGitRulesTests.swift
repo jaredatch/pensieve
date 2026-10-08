@@ -35,9 +35,15 @@ final class AppRuntimeGitRulesTests: XCTestCase {
             scheduler: SyncScheduler(startAutomatically: false), defaults: isolatedDefaults(),
             paths: fixture.paths, gitUsabilityProbe: probe.run,
             coordinatorConfigure: { coordinator in
-                await coordinator.configure(engine: RecoveredPresentationEngine(), git: GitService(),
-                                            credentials: InMemoryCredentialStore(), root: fixture.root,
-                                            audit: SyncAudit(appSupport: fixture.support))
+                await coordinator.configure(
+                    engine: RecoveredPresentationEngine(),
+                    git: TestPaths.git,
+                    credentials: InMemoryCredentialStore(),
+                    root: fixture.root,
+                    audit: SyncAudit(appSupport: fixture.support),
+                    machine: (identity: MachineIdentity(appSupportDir: TestPaths.appSupportDir),
+                        stateService: TestPaths.stateService)
+                )
             }
         )
         await runtime.bootstrapTask.value
@@ -58,9 +64,15 @@ final class AppRuntimeGitRulesTests: XCTestCase {
                 scheduler: SyncScheduler(startAutomatically: false), defaults: isolatedDefaults("preflight-\(index)"),
                 paths: fixture.paths, gitUsabilityProbe: probe.run,
                 coordinatorConfigure: { coordinator in
-                    await coordinator.configure(engine: StoppedRuleEngine(failure: failure), git: GitService(),
-                                                credentials: InMemoryCredentialStore(), root: fixture.root,
-                                                audit: SyncAudit(appSupport: fixture.support))
+                    await coordinator.configure(
+                        engine: StoppedRuleEngine(failure: failure),
+                        git: TestPaths.git,
+                        credentials: InMemoryCredentialStore(),
+                        root: fixture.root,
+                        audit: SyncAudit(appSupport: fixture.support),
+                        machine: (identity: MachineIdentity(appSupportDir: TestPaths.appSupportDir),
+                            stateService: TestPaths.stateService)
+                    )
                 }
             )
             await runtime.bootstrapTask.value
@@ -124,7 +136,7 @@ final class AppRuntimeGitRulesTests: XCTestCase {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         try fixture.seedRepository()
-        let remote = try GitService().remoteURL(at: fixture.root)
+        let remote = try TestPaths.git.remoteURL(at: fixture.root)
         XCTAssertNotNil(remote)
         let runtime = try AppRuntime(
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }), defaults: isolatedDefaults(),

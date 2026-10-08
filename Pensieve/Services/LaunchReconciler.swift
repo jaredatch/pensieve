@@ -59,12 +59,12 @@ struct LaunchReconciler {
     private let git: GitServiceProtocol
 
     init(rebuildService: StoreRebuildServiceProtocol = StoreRebuildService(),
-         migrationService: StoreMigrationServiceProtocol = StoreMigrationService(),
+         migrationService: StoreMigrationServiceProtocol,
          fileService: FileServiceProtocol = FileService(),
          manifestService: ManifestReadWriting = ManifestService(),
-         root: String = Constants.pensieveBaseDir,
-         lockPath: String = PathConstants.pensieveAppSupportDir + "/sync.lock",
-         git: GitServiceProtocol = GitService(),
+         root: String,
+         lockPath: String,
+         git: GitServiceProtocol,
          headStampOverride: (() -> String?)? = nil) {
         self.rebuildService = rebuildService
         self.migrationService = migrationService

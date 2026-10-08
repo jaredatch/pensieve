@@ -80,7 +80,7 @@ extension SyncCoordinatorTests {
         let firstStarted = expectation(description: "scheduled cycle started")
         let followupFinished = expectation(description: "queued follow-up finished")
         let release = AsyncGate()
-        let model = SyncModel()
+        let model = SyncModel(git: TestPaths.git, root: TestPaths.storeRoot)
         let scheduler = makeCoalescingScheduler { await model.syncAndReport($0) }
         var cycles = 0
         var activeCycles = 0
@@ -119,7 +119,7 @@ extension SyncCoordinatorTests {
         let firstStarted = expectation(description: "first manual cycle started")
         let followupFinished = expectation(description: "manual follow-up finished")
         let release = AsyncGate()
-        let model = SyncModel()
+        let model = SyncModel(git: TestPaths.git, root: TestPaths.storeRoot)
         let scheduler = SyncScheduler(
             debounceSeconds: 0,
             startAutomatically: false,

@@ -85,8 +85,16 @@ final class MachineIdentityTests: XCTestCase {
     private func service(
         fileService: FileServiceProtocol? = nil, warn: @escaping (String) -> Void = { _ in }
     ) -> MachineStateService {
-        MachineStateService(fileService: fileService ?? self.fileService, agentDetection: EmptyMachineDetection(),
-                            defaults: UserDefaults(), hostName: { "Test Mac" }, appVersion: { "test" }, warn: warn)
+        MachineStateService(
+            fileService: fileService ?? self.fileService,
+            agentDetection: EmptyMachineDetection(),
+            defaults: UserDefaults(),
+            deployState: { DeployState(schemaVersion: DeployStateStore.currentSchemaVersion, records: []) },
+            homeDirectory: TestPaths.homeDirectory,
+            hostName: { "Test Mac" },
+            appVersion: { "test" },
+            warn: warn
+        )
     }
 
     private func writeStateFile(named name: String, machineID: String) throws {

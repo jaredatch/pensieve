@@ -27,7 +27,9 @@ final class SkillPreservingWriteTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = ModelContext(container)
-        let vm = SkillLibraryViewModel(skillStore: store)
+        let vm = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let original = """
         ---
         # upstream comment

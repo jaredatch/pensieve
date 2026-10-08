@@ -60,12 +60,12 @@ final class Skill {
 
     // MARK: - Computed
 
-    var canonicalPath: String {
-        Constants.pensieveSkillsDir + "/" + directoryName + "/SKILL.md"
+    func canonicalPath(skillsDirectory: String) -> String {
+        skillsDirectory + "/" + directoryName + "/SKILL.md"
     }
 
-    var canonicalDir: String {
-        Constants.pensieveSkillsDir + "/" + directoryName
+    func canonicalDir(skillsDirectory: String) -> String {
+        skillsDirectory + "/" + directoryName
     }
 
     var cursorConfig: CursorAdapterConfig? {
@@ -107,9 +107,9 @@ final class Skill {
         checkError = nil
     }
 
-    func estimatedTokens(using fileService: FileServiceProtocol) -> Int {
+    func estimatedTokens(using fileService: FileServiceProtocol, skillsDirectory: String) -> Int {
         guard let path = SkillStore.safeSkillFile(
-                slug: directoryName, base: Constants.pensieveSkillsDir, fileService: fileService),
+                slug: directoryName, base: skillsDirectory, fileService: fileService),
               let body = try? fileService.readFile(at: path) else { return 0 }
         return body.count / Constants.charsPerToken
     }

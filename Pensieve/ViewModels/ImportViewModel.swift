@@ -46,16 +46,15 @@ final class ImportViewModel {
 
     init(
         fileService: FileServiceProtocol? = nil,
-        scanner: ImportScannerProtocol? = nil,
-        skillStore: SkillStoreProtocol? = nil,
+        scanner: ImportScannerProtocol,
+        skillStore: SkillStoreProtocol,
         manifestService: ManifestSnapshotting? = nil,
-        manifestRoot: String = Constants.pensieveBaseDir,
+        manifestRoot: String,
         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
         echoRegistrar: @escaping SyncWriteEchoRegistering = SyncWriteEchoRegistrar.suppressed
     ) {
-        let fs = fileService ?? FileService()
-        self.scanner = scanner ?? ImportScanner(fileService: fs)
-        self.skillStore = skillStore ?? SkillStore(fileService: fs)
+        self.scanner = scanner
+        self.skillStore = skillStore
         self.manifestService = manifestService
         self.manifestRoot = manifestRoot
         self.notifier = notifier

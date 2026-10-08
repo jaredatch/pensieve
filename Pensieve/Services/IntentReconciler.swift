@@ -35,7 +35,7 @@ struct IntentReconciler: IntentReconcilerProtocol {
 
     init(
         platformVM: PlatformViewModel,
-        machineIdentity: MachineIdentityProviding = MachineIdentity(),
+        machineIdentity: MachineIdentityProviding,
         stateFetcher: ReconcilerStateFetching = ReconcilerStateFetcher()
     ) {
         self.platformVM = platformVM

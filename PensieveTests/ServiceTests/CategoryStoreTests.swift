@@ -22,7 +22,7 @@ final class CategoryStoreTests: XCTestCase {
     @MainActor
     func testCreateInsertsTrimmedCategoryAndRejectsBlankName() throws {
         let context = try makeContext()
-        let store = CategoryStore()
+        let store = CategoryStore(manifestRoot: TestPaths.storeRoot)
 
         XCTAssertEqual(try categoryCount(in: context), 0)
 
@@ -37,7 +37,7 @@ final class CategoryStoreTests: XCTestCase {
     @MainActor
     func testRenameChangesName() throws {
         let context = try makeContext()
-        let store = CategoryStore()
+        let store = CategoryStore(manifestRoot: TestPaths.storeRoot)
         let category = try XCTUnwrap(store.create(name: "Backend", context: context))
 
         store.rename(category, to: "Frontend", context: context)
@@ -48,7 +48,7 @@ final class CategoryStoreTests: XCTestCase {
     @MainActor
     func testSetProjectUsesIdentityKeyAndIsIdempotent() throws {
         let context = try makeContext()
-        let store = CategoryStore()
+        let store = CategoryStore(manifestRoot: TestPaths.storeRoot)
         let category = try XCTUnwrap(store.create(name: "Backend", context: context))
         let project = Project(name: "P1", path: "/tmp/p1")
         project.identityKey = "git:github.com/me/p1"
@@ -68,7 +68,7 @@ final class CategoryStoreTests: XCTestCase {
     @MainActor
     func testSetProjectWithPendingIdentityIsNoOp() throws {
         let context = try makeContext()
-        let store = CategoryStore()
+        let store = CategoryStore(manifestRoot: TestPaths.storeRoot)
         let category = try XCTUnwrap(store.create(name: "Backend", context: context))
         let project = Project(name: "Pending", path: "/tmp/pending")
         context.insert(project)
@@ -81,7 +81,7 @@ final class CategoryStoreTests: XCTestCase {
     @MainActor
     func testSetSkillUsesDirectoryNameAndIsIdempotent() throws {
         let context = try makeContext()
-        let store = CategoryStore()
+        let store = CategoryStore(manifestRoot: TestPaths.storeRoot)
         let category = try XCTUnwrap(store.create(name: "Backend", context: context))
         let skill = Skill(name: "Review", directoryName: "review")
         context.insert(skill)
@@ -99,7 +99,7 @@ final class CategoryStoreTests: XCTestCase {
     @MainActor
     func testCategoriesContainingProjectKeyFiltersCategories() throws {
         let context = try makeContext()
-        let store = CategoryStore()
+        let store = CategoryStore(manifestRoot: TestPaths.storeRoot)
         let backend = try XCTUnwrap(store.create(name: "Backend", context: context))
         let frontend = try XCTUnwrap(store.create(name: "Frontend", context: context))
         let project = Project(name: "P1", path: "/tmp/p1")
@@ -117,7 +117,7 @@ final class CategoryStoreTests: XCTestCase {
     @MainActor
     func testCategoriesContainingSkillSlugFiltersCategories() throws {
         let context = try makeContext()
-        let store = CategoryStore()
+        let store = CategoryStore(manifestRoot: TestPaths.storeRoot)
         let backend = try XCTUnwrap(store.create(name: "Backend", context: context))
         let frontend = try XCTUnwrap(store.create(name: "Frontend", context: context))
         let skill = Skill(name: "Review", directoryName: "review")

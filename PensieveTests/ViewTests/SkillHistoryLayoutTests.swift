@@ -23,7 +23,10 @@ final class SkillHistoryLayoutTests: XCTestCase {
         let tab = SkillHistoryTab(
             skill: Skill(name: "Example", directoryName: "example"),
             currentBody: "# Current",
-            library: SkillLibraryViewModel(skillStore: store),
+            library: SkillLibraryViewModel(
+                skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+                manifestRoot: TestPaths.storeRoot
+            ),
             upstreamHistory: historyOwner(read: { _, _, _ in historyResult() }),
             localRevision: .initial,
             onOpenUpdates: {},

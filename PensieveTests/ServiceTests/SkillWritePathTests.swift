@@ -58,7 +58,9 @@ final class SkillWritePathTests: XCTestCase {
     @MainActor
     func testCreateWritesFrontmatterPlusBody() throws {
         let context = try makeContext()
-        let vm = SkillLibraryViewModel(skillStore: store)
+        let vm = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         vm.createSkill(name: "My Skill", description: "Does a thing", body: "# Hello",
                        tags: [], context: context)
 
@@ -72,7 +74,9 @@ final class SkillWritePathTests: XCTestCase {
     @MainActor
     func testCreateWithNoDescriptionFallsBackToName() throws {
         let context = try makeContext()
-        let vm = SkillLibraryViewModel(skillStore: store)
+        let vm = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         vm.createSkill(name: "Lonely", description: "", body: "# Body",
                        tags: [], context: context)
 
@@ -86,7 +90,9 @@ final class SkillWritePathTests: XCTestCase {
     @MainActor
     func testCreateReturnsTheSkillItInserted() throws {
         let context = try makeContext()
-        let vm = SkillLibraryViewModel(skillStore: store)
+        let vm = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let created = vm.createSkill(name: "Fresh", description: "", body: "# b",
                                      tags: [], context: context)
         let inserted = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
@@ -100,7 +106,9 @@ final class SkillWritePathTests: XCTestCase {
     @MainActor
     func testCreateFingerprintsTheBodyAsTheWatcherReadsIt() throws {
         let context = try makeContext()
-        let vm = SkillLibraryViewModel(skillStore: store)
+        let vm = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         vm.createSkill(name: "Echo", description: "", body: "# Echo\n\nText.\n",
                        tags: [], context: context)
         let onDisk = vm.currentOnDiskBody(directoryName: "echo")
@@ -112,7 +120,9 @@ final class SkillWritePathTests: XCTestCase {
     @MainActor
     func testEditPreservesFrontmatter() throws {
         let context = try makeContext()
-        let vm = SkillLibraryViewModel(skillStore: store)
+        let vm = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         vm.createSkill(name: "Editable", description: "Original desc", body: "# v1",
                        tags: [], context: context)
         let skill = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
@@ -142,9 +152,10 @@ final class SkillWritePathTests: XCTestCase {
             claudeSkillsDir: claudeDir,
             grokSkillsDir: tempDir + "/none-grok",
             cursorRulesDir: tempDir + "/none",
-            codexSkillsDir: tempDir + "/none-codex"
+            codexSkillsDir: tempDir + "/none-codex",
+            storeRoot: TestPaths.storeRoot
         )
-        let vm = ImportViewModel(scanner: scanner, skillStore: store)
+        let vm = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: TestPaths.storeRoot)
         let context = try makeContext()
         vm.scan()
         vm.importSelected(context: context)
@@ -173,9 +184,10 @@ final class SkillWritePathTests: XCTestCase {
             claudeSkillsDir: tempDir + "/none",
             grokSkillsDir: tempDir + "/none-grok",
             cursorRulesDir: cursorDir,
-            codexSkillsDir: tempDir + "/none-codex"
+            codexSkillsDir: tempDir + "/none-codex",
+            storeRoot: TestPaths.storeRoot
         )
-        let vm = ImportViewModel(scanner: scanner, skillStore: store)
+        let vm = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: TestPaths.storeRoot)
         let context = try makeContext()
         vm.scan()
         vm.importSelected(context: context)
@@ -199,9 +211,10 @@ final class SkillWritePathTests: XCTestCase {
             claudeSkillsDir: claudeDir,
             grokSkillsDir: tempDir + "/none-grok",
             cursorRulesDir: tempDir + "/none",
-            codexSkillsDir: tempDir + "/none-codex"
+            codexSkillsDir: tempDir + "/none-codex",
+            storeRoot: TestPaths.storeRoot
         )
-        let vm = ImportViewModel(scanner: scanner, skillStore: store)
+        let vm = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: TestPaths.storeRoot)
         let context = try makeContext()
         vm.scan()
         vm.importSelected(context: context)
@@ -223,7 +236,9 @@ final class SkillWritePathTests: XCTestCase {
         // body-only SKILL.md. Editing it must NOT write a rebuild-inadmissible empty description —
         // the save path falls back to the name, matching create/import, and backfills the row too.
         let context = try makeContext()
-        let vm = SkillLibraryViewModel(skillStore: store)
+        let vm = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         try fileService.createDirectory(at: tempDir + "/legacy")
         try fileService.writeFile(at: tempDir + "/legacy/SKILL.md", content: "# old body")
         let skill = Skill(name: "Legacy", directoryName: "legacy")   // skillDescription defaults to ""
@@ -249,7 +264,8 @@ final class SkillWritePathTests: XCTestCase {
             DiscoveredSkill(name: "Foo", body: "two", sourcePlatform: "test", sourcePath: "/two")
         ]
         let recordingStore = RecordingDeletionSkillStore()
-        let vm = ImportViewModel(scanner: WritePathScanner(skills: discovered), skillStore: recordingStore)
+        let vm = ImportViewModel(scanner: WritePathScanner(skills: discovered), skillStore: recordingStore,
+            manifestRoot: TestPaths.storeRoot)
         vm.scan()
 
         vm.importSelected(context: context)
@@ -268,7 +284,8 @@ final class SkillWritePathTests: XCTestCase {
             DiscoveredSkill(name: "Two", body: "two", sourcePlatform: "test", sourcePath: "/two")
         ]
         let recordingStore = RecordingDeletionSkillStore()
-        let vm = ImportViewModel(scanner: WritePathScanner(skills: discovered), skillStore: recordingStore)
+        let vm = ImportViewModel(scanner: WritePathScanner(skills: discovered), skillStore: recordingStore,
+            manifestRoot: TestPaths.storeRoot)
         vm.scan()
         vm.importProgress = 0.5
 
@@ -298,8 +315,7 @@ extension SkillWritePathTests {
         let vm = ImportViewModel(
             scanner: scanner,
             skillStore: store,
-            manifestService: manifest,
-            manifestRoot: tempDir
+            manifestService: manifest, manifestRoot: tempDir
         )
         vm.scan()
 
@@ -325,7 +341,7 @@ extension SkillWritePathTests {
         )
         let scanner = WritePathScanner(skills: [])
         scanner.folderSkills = [discovered]
-        let vm = ImportViewModel(scanner: scanner, skillStore: store)
+        let vm = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: TestPaths.storeRoot)
 
         XCTAssertEqual(vm.scanFolder("/folder"), .found(1))
         vm.importSelected(context: context)
@@ -344,7 +360,7 @@ extension SkillWritePathTests {
         )
         let scanner = WritePathScanner(skills: [])
         scanner.folderSkills = [discovered]
-        let vm = ImportViewModel(scanner: scanner, skillStore: store)
+        let vm = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: TestPaths.storeRoot)
 
         XCTAssertEqual(vm.scanFolder("/folder"), .found(1))
         let originalResults = vm.discoveredSkills

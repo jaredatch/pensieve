@@ -303,7 +303,8 @@ extension CategoryReconcilerTests {
             fileService: files,
             linkService: linkService,
             cursorCompiler: cursorCompiler,
-            agentDetection: StubDetection(installed: installed), deployStateStore: .memoryBacked
+            agentDetection: StubDetection(installed: installed),
+            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
         )
         return CategoryReconciler(platformVM: vm)
     }

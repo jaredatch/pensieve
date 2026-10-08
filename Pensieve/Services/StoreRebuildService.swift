@@ -55,7 +55,7 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
     }
 
     @discardableResult
-    func rebuild(fromRoot root: String = Constants.pensieveBaseDir, context: ModelContext) -> RebuildResult {
+    func rebuild(fromRoot root: String, context: ModelContext) -> RebuildResult {
         var result = RebuildResult()
 
         // Read the manifest ONCE. `read` throws when the manifest is unreadable — a newer/unsupported

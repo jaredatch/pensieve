@@ -113,15 +113,22 @@ extension AppRuntimeStatusOrderTests {
     }
 
     func completionRuntime(_ fixture: GitFailureFixture, git: IngestRecordingGit, probe: RuleProbe,
-                           label: String, coordinatorGit: GitServiceProtocol = GitService(),
+                           label: String,
+                           coordinatorGit: GitServiceProtocol = TestPaths.git,
                            operation: @escaping () throws -> SyncOutcome) async throws -> AppRuntime {
         let runtime = try AppRuntime(syncModel: SyncModel(git: git, root: fixture.root),
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { true }),
             defaults: isolatedDefaults(label), paths: fixture.paths, gitUsabilityProbe: probe.run,
             coordinatorConfigure: { coordinator in
-                await coordinator.configure(engine: StatusOrderEngine(operation: operation),
-                    git: coordinatorGit, credentials: InMemoryCredentialStore(), root: fixture.root,
-                    audit: SyncAudit(appSupport: fixture.support))
+                await coordinator.configure(
+                    engine: StatusOrderEngine(operation: operation),
+                    git: coordinatorGit,
+                    credentials: InMemoryCredentialStore(),
+                    root: fixture.root,
+                    audit: SyncAudit(appSupport: fixture.support),
+                    machine: (identity: MachineIdentity(appSupportDir: TestPaths.appSupportDir),
+                        stateService: TestPaths.stateService)
+                )
             })
         await runtime.bootstrapTask.value
         return runtime

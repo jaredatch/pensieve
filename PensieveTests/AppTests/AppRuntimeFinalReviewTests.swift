@@ -12,8 +12,8 @@ final class AppRuntimeFinalReviewTests: XCTestCase {
     func testBranchlessCycleCannotAdvertiseAnAbsentRemote() async throws {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
-        try GitService().initRepository(at: fixture.root)
-        try GitService().setRemote("https://fixture.test/store.git", at: fixture.root)
+        try TestPaths.git.initRepository(at: fixture.root)
+        try TestPaths.git.setRemote("https://fixture.test/store.git", at: fixture.root)
         let runtime = try AppRuntime(
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }),
             defaults: isolatedDefaults(), paths: fixture.paths, gitUsabilityProbe: { .usable }
@@ -28,7 +28,7 @@ final class AppRuntimeFinalReviewTests: XCTestCase {
             XCTAssertNotEqual(model.state, .unconfigured)
             await runtime.refreshGitConfiguration(probingGit: false)
         }
-        try GitService().removeRemote(at: fixture.root)
+        try TestPaths.git.removeRemote(at: fixture.root)
         model.apply(.noRemote)
         XCTAssertFalse(model.canConnect, "only the completed read can establish absence")
         await runtime.refreshGitConfiguration(probingGit: false)

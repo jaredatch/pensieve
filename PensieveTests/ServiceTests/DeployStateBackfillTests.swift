@@ -7,6 +7,10 @@ final class DeployStateBackfillTests: XCTestCase {
     private var fileService: FileService!
     private var store: DeployStateStore!
     private var paths: DeployStateBackfillPaths!
+    private var deployPaths: DeployPaths {
+        DeployPaths(skillsDirectory: paths.pensieveSkillsDir, userSkillsDirectories: [:],
+            cursorUserRulesDirectory: paths.cursorUserRulesDir)
+    }
 
     override func setUpWithError() throws {
         tempDir = TestTemporaryDirectory.path + "PensieveDeployStateBackfillTests-\(UUID().uuidString)"
@@ -89,12 +93,12 @@ final class DeployStateBackfillTests: XCTestCase {
             try makeCanonicalSkill(slug)
         }
 
-        let validLink = DeployPaths.linkPath(
+        let validLink = deployPaths.linkPath(
             directoryName: validLinkSkill.directoryName,
             platform: .claudeCode,
             projectPath: project.path
         )
-        let validTarget = DeployPaths.targetPath(
+        let validTarget = deployPaths.targetPath(
             directoryName: validLinkSkill.directoryName,
             platform: .claudeCode,
             projectPath: project.path
@@ -118,7 +122,8 @@ final class DeployStateBackfillTests: XCTestCase {
         makeBackfill().backfill(context: context)
 
         let records = try store.read().records
-        let keylessLink = DeployPaths.linkPath(directoryName: "nil-skill", platform: .claudeCode, projectPath: nilProject.path)
+        let keylessLink = deployPaths.linkPath(directoryName: "nil-skill", platform: .claudeCode,
+            projectPath: nilProject.path)
         XCTAssertEqual(Set(records.map(\.artifactPath)), [validLink, validCursor, keylessLink])
         XCTAssertEqual(Set(records.map(\.projectIdentityKey)), ["project-key", nil])
         XCTAssertEqual(records.first { $0.artifactPath == keylessLink }?.scope, "project")
@@ -218,7 +223,7 @@ final class DeployStateBackfillTests: XCTestCase {
 
     @MainActor
     private func insertForeignProjectSymlink(skill: Skill, project: Project, context: ModelContext) throws {
-        let link = DeployPaths.linkPath(directoryName: skill.directoryName, platform: .claudeCode,
+        let link = deployPaths.linkPath(directoryName: skill.directoryName, platform: .claudeCode,
                                         projectPath: project.path)
         try fileService.createSymlink(at: link, pointingTo: tempDir + "/outside/foreign")
         insertRecord(skill: skill, platform: .claudeCode, targetPath: link, project: project, context: context)
@@ -231,8 +236,8 @@ final class DeployStateBackfillTests: XCTestCase {
         project: Project,
         context: ModelContext
     ) throws {
-        let link = DeployPaths.linkPath(directoryName: skill.directoryName, platform: .codex, projectPath: project.path)
-        let wrongTarget = DeployPaths.targetPath(directoryName: wrongTargetSkill.directoryName, platform: .codex,
+        let link = deployPaths.linkPath(directoryName: skill.directoryName, platform: .codex, projectPath: project.path)
+        let wrongTarget = deployPaths.targetPath(directoryName: wrongTargetSkill.directoryName, platform: .codex,
                                                  projectPath: project.path)
         try fileService.createSymlink(at: link, pointingTo: wrongTarget)
         insertRecord(skill: skill, platform: .codex, targetPath: link, project: project, context: context)
@@ -241,7 +246,7 @@ final class DeployStateBackfillTests: XCTestCase {
     @MainActor
     private func insertWrongShapeProjectSymlink(skill: Skill, project: Project, context: ModelContext) throws {
         let link = project.path + "/.claude/skills/wrong-shape-extra"
-        let target = DeployPaths.targetPath(directoryName: skill.directoryName, platform: .claudeCode,
+        let target = deployPaths.targetPath(directoryName: skill.directoryName, platform: .claudeCode,
                                             projectPath: project.path)
         try fileService.createSymlink(at: link, pointingTo: target)
         insertRecord(skill: skill, platform: .claudeCode, targetPath: link, project: project, context: context)
@@ -249,9 +254,9 @@ final class DeployStateBackfillTests: XCTestCase {
 
     @MainActor
     private func insertNilIdentityProjectSymlink(skill: Skill, project: Project, context: ModelContext) throws {
-        let link = DeployPaths.linkPath(directoryName: skill.directoryName, platform: .claudeCode,
+        let link = deployPaths.linkPath(directoryName: skill.directoryName, platform: .claudeCode,
                                         projectPath: project.path)
-        let target = DeployPaths.targetPath(directoryName: skill.directoryName, platform: .claudeCode,
+        let target = deployPaths.targetPath(directoryName: skill.directoryName, platform: .claudeCode,
                                             projectPath: project.path)
         try fileService.createSymlink(at: link, pointingTo: target)
         insertRecord(skill: skill, platform: .claudeCode, targetPath: link, project: project, context: context)

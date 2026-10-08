@@ -95,9 +95,14 @@ final class CategoryDetailModelTests: XCTestCase {
         let platformVM = PlatformViewModel(
             fileService: StubFileService(),
             linkService: linkService,
-            agentDetection: StubDetection(installed: [.claudeCode, .codex]), deployStateStore: .memoryBacked
+            cursorCompiler: TestPaths.cursorCompiler(fileService: StubFileService()),
+            agentDetection: StubDetection(installed: [.claudeCode, .codex]),
+            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
         )
-        return CategoryDetailModel(reconciler: CategoryReconciler(platformVM: platformVM))
+        return CategoryDetailModel(
+            store: CategoryStore(manifestRoot: TestPaths.storeRoot),
+            reconciler: CategoryReconciler(platformVM: platformVM)
+        )
     }
 
     @MainActor

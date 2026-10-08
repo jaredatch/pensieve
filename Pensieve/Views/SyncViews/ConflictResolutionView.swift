@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct ConflictResolutionView: View {
+    @Environment(AppRuntime.self) private var runtime
     @Environment(\.modelContext) private var modelContext
     @State private var model: ConflictResolutionModel
     @State private var historySkill: Skill?
@@ -42,6 +43,8 @@ struct ConflictResolutionView: View {
             if let historySkill {
                 SkillHistoryView(
                     skill: historySkill,
+                    git: runtime.paths.makeGitService(),
+                    store: runtime.library.skillStore, workingDir: runtime.paths.storeRoot,
                     library: library,
                     notifier: notifier,
                     onDismiss: { self.historySkill = nil }

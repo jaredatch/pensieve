@@ -140,7 +140,7 @@ struct GitService: GitServiceProtocol {
     /// The caller can place the secret-free helper beside its own application state.
     init(
         fileService: FileServiceProtocol = FileService(),
-        askpassHelperPath: String = PathConstants.gitAskpassHelperPath,
+        askpassHelperPath: String,
         upstreamHistoryNetworkRunner: UpstreamHistoryNetworkRunner? = nil,
         executablePath: String = "/usr/bin/git"
     ) {

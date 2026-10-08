@@ -37,14 +37,14 @@ struct StoreMigrationService: StoreMigrationServiceProtocol {
 
     init(fileService: FileServiceProtocol = FileService(),
          manifestService: ManifestSnapshotting = ManifestService(),
-         skillStore: SkillStoreProtocol = SkillStore(fileService: FileService())) {
+         skillStore: SkillStoreProtocol) {
         self.fileService = fileService
         self.manifestService = manifestService
         self.skillStore = skillStore
     }
 
     @discardableResult
-    func migrateIfNeeded(fromRoot root: String = Constants.pensieveBaseDir,
+    func migrateIfNeeded(fromRoot root: String,
                          context: ModelContext) -> MigrationResult {
         var result = MigrationResult()
         // Bail on a store read failure — do NOT let a transient fetch error masquerade as "zero skills"

@@ -10,11 +10,16 @@ final class ProjectFolderSecondFixTests: XCTestCase {
         let h = try ProjectFolderCallerHarness(installed: [.codex])
         defer { h.cleanup() }
         let mapped = LinkServiceCanonicalDirectoryFileService(wrapped: h.files, pathMappings: [
-            (logical: Constants.pensieveSkillsDir, physical: h.root + "/store/skills"),
-            (logical: Constants.codexUserSkillsDir, physical: h.root + "/user")
+            (logical: TestPaths.skillsDir, physical: h.root + "/store/skills"),
+            (logical: TestPaths.deployPaths.userSkillsRoot(for: .codex)!, physical: h.root + "/user")
         ], physicalSandbox: h.root)
-        let vm = PlatformViewModel(fileService: mapped,
-            agentDetection: DeployStubDetection(installed: [.codex]), deployStateStore: h.deployState)
+        let vm = PlatformViewModel(
+            fileService: mapped,
+            linkService: TestPaths.linkService(fileService: mapped),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: mapped),
+            agentDetection: DeployStubDetection(installed: [.codex]),
+            deployStateStore: h.deployState, skillsDirectory: TestPaths.skillsDir
+        )
         let intent = IntentReconciler(platformVM: vm,
             machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID))
         h.context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.localID,
@@ -77,7 +82,7 @@ final class ProjectFolderSecondFixTests: XCTestCase {
             let files = SecondFixPathFiles()
             files.probeError = NSError(domain: NSPOSIXErrorDomain, code: Int(ETIMEDOUT))
             let skill = Skill(name: "Skill", directoryName: "skill")
-            XCTAssertThrowsError(try LinkService(fileService: files).link(
+            XCTAssertThrowsError(try TestPaths.linkService(fileService: files).link(
                 skill: skill, platform: platform, projectPath: "/unresponsive/project")) { error in
                 guard case ProjectFolderError.couldNotCheck = error else { return XCTFail("Got \(error)") }
             }
@@ -88,8 +93,12 @@ final class ProjectFolderSecondFixTests: XCTestCase {
     func testRelativeRemovalAndStatusDoNotAccessDisk() throws {
         let files = SecondFixPathFiles()
         let skill = Skill(name: "Skill", directoryName: "skill")
-        let links = LinkService(fileService: files)
-        let cursor = CursorCompiler(fileService: files, skillStore: SkillStore(fileService: files, baseDir: "/fixture"))
+        let links = TestPaths.linkService(fileService: files)
+        let cursor = CursorCompiler(
+            fileService: files,
+            skillStore: SkillStore(fileService: files, baseDir: "/fixture"),
+            userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
+        )
         for path in ["code/app", "~/code/app", "", "~fixture/code"] {
             for (platform, suffix) in [(PlatformTarget.claudeCode, "/.claude/skills/skill"),
                                       (.grok, "/.grok/skills/skill"), (.codex, "/agents/skill.md")] {

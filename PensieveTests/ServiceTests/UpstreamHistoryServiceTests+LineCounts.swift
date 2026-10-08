@@ -200,7 +200,8 @@ extension UpstreamHistoryServiceTests {
         try bytes.write(to: url)
         let result = try rawGit(["-C", repository, "hash-object", "--no-filters", "-w", "--", url.path])
         XCTAssertEqual(result.exit, 0, result.stderr)
-        return try GitService(fileService: fileService).historicalContent(
+        return try GitService(fileService: fileService,
+            askpassHelperPath: TestPaths.gitAskpassHelperPath).historicalContent(
             object: result.stdout.trimmingCharacters(in: .whitespacesAndNewlines),
             size: bytes.count, repositoryPath: repository, textByteLimit: UpstreamHistoryService.textByteLimit
         )

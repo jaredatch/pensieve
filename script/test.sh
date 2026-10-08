@@ -52,6 +52,8 @@ fi
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 DESTINATION="platform=macOS,arch=arm64"
 DERIVED_DATA="$REPO/DerivedData"
+# Reject live-state defaults before any test can construct an unsafe collaborator.
+python3 "$REPO/script/check-live-defaults.py" || exit 1
 export HOME="$DERIVED_DATA/Home"
 export CLANG_MODULE_CACHE_PATH="$DERIVED_DATA/ModuleCache.noindex"
 export SWIFT_MODULE_CACHE_PATH="$DERIVED_DATA/ModuleCache.noindex"

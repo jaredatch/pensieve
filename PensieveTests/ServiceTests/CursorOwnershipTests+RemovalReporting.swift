@@ -25,8 +25,11 @@ extension CursorOwnershipTests {
                     userInfo: [NSLocalizedDescriptionKey: "Artifact delete failed"]) }
             }
             if deletion {
-                let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
-                    manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+                let library = SkillLibraryViewModel(
+                    skillStore: store,
+                    fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+                    manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
+                )
                 XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
                     projects: [project], context: harness.context))
                 let message = try XCTUnwrap(library.deletionNotice?.message)

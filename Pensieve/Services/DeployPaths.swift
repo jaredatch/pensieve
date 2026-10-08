@@ -3,14 +3,19 @@ import Foundation
 /// Pure, SwiftData-free symlink path resolution (PLAN-12 / 12.1). Extracted from
 /// `LinkService.linkPath`/`targetPath` so the GUI deploy path and the daemon's reconcile share one
 /// implementation. Takes a plain `directoryName` instead of a `@Model` `Skill`.
-enum DeployPaths {
+struct DeployPaths {
+    let skillsDirectory: String
+    let userSkillsDirectories: [PlatformTarget: String]
+    let cursorUserRulesDirectory: String
+
     /// Invert only the exact builder layout, without resolving or normalizing recorded paths.
-    static func slug(artifactPath: String, platform: PlatformTarget, projectPath: String?,
-                     cursorUserRulesDirectory: String = PathConstants.cursorUserRulesDir) -> String? {
+    func slug(artifactPath: String, platform: PlatformTarget, projectPath: String?,
+              cursorUserRulesDirectory: String? = nil) -> String? {
         guard projectPath == nil || platform.supportsProjectScope else { return nil }
         let sentinel = "pensieve-artifact-slug"
         let template = platform == .cursor
-            ? cursorPath(directoryName: sentinel, projectPath: projectPath, userRulesDirectory: cursorUserRulesDirectory)
+            ? cursorPath(directoryName: sentinel, projectPath: projectPath,
+                userRulesDirectory: cursorUserRulesDirectory ?? self.cursorUserRulesDirectory)
             : linkPath(directoryName: sentinel, platform: platform, projectPath: projectPath)
         guard let slot = template.range(of: sentinel, options: .backwards) else { return nil }
         let prefix = Array(template[..<slot.lowerBound].utf8)
@@ -23,73 +28,60 @@ enum DeployPaths {
         return String(bytes: leaf, encoding: .utf8)
     }
 
-    static func cursorPath(directoryName: String, projectPath: String?,
-                           userRulesDirectory: String = PathConstants.cursorUserRulesDir) -> String {
-        let root = projectPath.map { $0 + "/.cursor/rules" } ?? userRulesDirectory
+    func cursorPath(directoryName: String, projectPath: String?,
+                    userRulesDirectory: String? = nil) -> String {
+        let root = projectPath.map { $0 + "/.cursor/rules" } ?? userRulesDirectory ?? cursorUserRulesDirectory
         return root + "/" + directoryName + ".mdc"
     }
 
-    static func userSkillsRoot(for platform: PlatformTarget) -> String? {
-        switch platform {
-        case .claudeCode:
-            return PathConstants.claudeCodeUserSkillsDir
-        case .grok:
-            return PathConstants.grokUserSkillsDir
-        case .cursor:
-            return nil
-        case .codex:
-            return PathConstants.codexUserSkillsDir
-        case .openClaw:
-            return PathConstants.openClawUserSkillsDir
-        case .hermes:
-            return PathConstants.hermesUserSkillsDir + "/" + PathConstants.hermesDefaultCategory
-        }
+    func userSkillsRoot(for platform: PlatformTarget) -> String? {
+        userSkillsDirectories[platform]
     }
 
-    static func linkPath(directoryName: String, platform: PlatformTarget, projectPath: String?) -> String {
+    func linkPath(directoryName: String, platform: PlatformTarget, projectPath: String?) -> String {
         switch platform {
         case .claudeCode:
             if let projectPath {
                 return projectPath + "/" + PathConstants.claudeCodeProjectSkillsRel + "/" + directoryName
             } else {
-                return PathConstants.claudeCodeUserSkillsDir + "/" + directoryName
+                return (userSkillsDirectories[.claudeCode] ?? "") + "/" + directoryName
             }
         case .grok:
             if let projectPath {
                 return projectPath + "/" + PathConstants.grokProjectSkillsRel + "/" + directoryName
             } else {
-                return PathConstants.grokUserSkillsDir + "/" + directoryName
+                return (userSkillsDirectories[.grok] ?? "") + "/" + directoryName
             }
         case .codex:
             guard let projectPath else {
-                return PathConstants.codexUserSkillsDir + "/" + directoryName
+                return (userSkillsDirectories[.codex] ?? "") + "/" + directoryName
             }
             return projectPath + "/" + PathConstants.codexAgentsRel + "/" + directoryName + ".md"
         case .openClaw:
-            return PathConstants.openClawUserSkillsDir + "/" + directoryName
+            return (userSkillsDirectories[.openClaw] ?? "") + "/" + directoryName
         case .hermes:
-            return PathConstants.hermesUserSkillsDir + "/" + PathConstants.hermesDefaultCategory + "/" + directoryName
+            return (userSkillsDirectories[.hermes] ?? "") + "/" + directoryName
         case .cursor:
             return ""
         }
     }
 
-    static func targetPath(directoryName: String, platform: PlatformTarget, projectPath: String?) -> String {
+    func targetPath(directoryName: String, platform: PlatformTarget, projectPath: String?) -> String {
         switch platform {
         case .claudeCode:
-            return PathConstants.pensieveSkillsDir + "/" + directoryName
+            return skillsDirectory + "/" + directoryName
         case .grok:
-            return PathConstants.pensieveSkillsDir + "/" + directoryName
+            return skillsDirectory + "/" + directoryName
         case .codex:
             if projectPath == nil {
-                return PathConstants.pensieveSkillsDir + "/" + directoryName
+                return skillsDirectory + "/" + directoryName
             } else {
-                return PathConstants.pensieveSkillsDir + "/" + directoryName + "/SKILL.md"
+                return skillsDirectory + "/" + directoryName + "/SKILL.md"
             }
         case .openClaw:
-            return PathConstants.pensieveSkillsDir + "/" + directoryName
+            return skillsDirectory + "/" + directoryName
         case .hermes:
-            return PathConstants.pensieveSkillsDir + "/" + directoryName
+            return skillsDirectory + "/" + directoryName
         case .cursor:
             return ""
         }

@@ -36,10 +36,10 @@ final class ConflictResolutionModel {
     private let now: () -> Date
     private let onResolutionStarted: () throws -> (SyncCycleResult) -> Void
 
-    init(engine: SyncEngineProtocol = SyncEngine(),
-         git: GitServiceProtocol = GitService(),
-         credentials: CredentialStoreProtocol = KeychainCredentialStore(),
-         root: String = Constants.pensieveBaseDir,
+    init(engine: SyncEngineProtocol,
+         git: GitServiceProtocol,
+         credentials: CredentialStoreProtocol,
+         root: String,
          headStamp: (() -> String?)? = nil,
          now: @escaping () -> Date = Date.init,
          onResolutionStarted: @escaping () throws -> (SyncCycleResult) -> Void = { { _ in } }) {

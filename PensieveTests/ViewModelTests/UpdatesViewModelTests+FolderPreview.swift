@@ -14,7 +14,7 @@ extension UpdatesViewModelTests {
         try fileService.writeFile(at: upstream + "/added.txt", content: "new file\n")
         for side in [local, upstream] { try fileService.writeFile(at: side + "/same.txt", content: "same\n") }
         fixture.skill.upstreamCommit = try commit(fixture.repository, message: "whole folder update")
-        fixture.skill.upstreamTree = try GitService().treeHash(at: fixture.repository, path: "skills/vendor")
+        fixture.skill.upstreamTree = try TestPaths.git.treeHash(at: fixture.repository, path: "skills/vendor")
         try context.save()
         let before = try fileService.readData(at: local + "/SKILL.md")
         let update = try PinnedSkillUpdate(skill: fixture.skill)
@@ -46,7 +46,7 @@ extension UpdatesViewModelTests {
             }
         }
         fixture.skill.upstreamCommit = try commit(fixture.repository, message: "whole-preview budget")
-        fixture.skill.upstreamTree = try GitService().treeHash(at: fixture.repository, path: "skills/vendor")
+        fixture.skill.upstreamTree = try TestPaths.git.treeHash(at: fixture.repository, path: "skills/vendor")
         let spy = ImportBoundedReadSpy()
         let preview = try makePreviewService(fixture: fixture, spy: spy).previewUpdate(PinnedSkillUpdate(skill: fixture.skill))
         let actual = spy.prefixReadBytes + spy.comparisonReadBytes
@@ -62,7 +62,7 @@ extension UpdatesViewModelTests {
         let huge = "---\nname: Huge\ndescription: Huge skill\n---\n" + String(repeating: "a", count: 2 * 1_024 * 1_024)
         try fileService.writeFile(at: fixture.repository + "/skills/vendor/SKILL.md", content: huge)
         fixture.skill.upstreamCommit = try commit(fixture.repository, message: "oversized SKILL.md")
-        fixture.skill.upstreamTree = try GitService().treeHash(at: fixture.repository, path: "skills/vendor")
+        fixture.skill.upstreamTree = try TestPaths.git.treeHash(at: fixture.repository, path: "skills/vendor")
         let spy = ImportBoundedReadSpy()
         let service = makePreviewService(fixture: fixture, spy: spy)
         let preview = try service.previewUpdate(PinnedSkillUpdate(skill: fixture.skill))
@@ -107,7 +107,7 @@ extension UpdatesViewModelTests {
                      "---\nname: Vendor\ndescription: ''\n---\n" + String(repeating: "a", count: 2 * 1_024 * 1_024)] {
             try fileService.writeFile(at: fixture.repository + "/skills/vendor/SKILL.md", content: body)
             fixture.skill.upstreamCommit = try commit(fixture.repository, message: "invalid frontmatter")
-            fixture.skill.upstreamTree = try GitService().treeHash(at: fixture.repository, path: "skills/vendor")
+            fixture.skill.upstreamTree = try TestPaths.git.treeHash(at: fixture.repository, path: "skills/vendor")
             XCTAssertThrowsError(try fixture.service.previewUpdate(PinnedSkillUpdate(skill: fixture.skill))) { error in
                 guard case SkillInstallError.unavailableCandidate = error else {
                     return XCTFail("Expected the same admission refusal as apply: \(error)")
@@ -177,7 +177,7 @@ extension UpdatesViewModelTests {
         try fileService.writeFile(at: fixture.repository + "/skills/vendor/SKILL.md",
                                   content: "---\nname: Broken\ndescription: ''\n---\nbody\n")
         fixture.skill.upstreamCommit = try commit(fixture.repository, message: "invalid before comparison")
-        fixture.skill.upstreamTree = try GitService().treeHash(at: fixture.repository, path: "skills/vendor")
+        fixture.skill.upstreamTree = try TestPaths.git.treeHash(at: fixture.repository, path: "skills/vendor")
         let spy = ImportBoundedReadSpy()
         XCTAssertThrowsError(try makePreviewService(fixture: fixture, spy: spy)
             .previewUpdate(PinnedSkillUpdate(skill: fixture.skill)))
@@ -194,7 +194,7 @@ extension UpdatesViewModelTests {
             try fileService.writeFile(at: fixture.repository + "/skills/vendor/SKILL.md",
                                       content: header + String(repeating: "a", count: size - header.utf8.count))
             fixture.skill.upstreamCommit = try commit(fixture.repository, message: "bounded admission \(size)")
-            fixture.skill.upstreamTree = try GitService().treeHash(at: fixture.repository, path: "skills/vendor")
+            fixture.skill.upstreamTree = try TestPaths.git.treeHash(at: fixture.repository, path: "skills/vendor")
             let spy = ImportBoundedReadSpy()
             _ = try makePreviewService(fixture: fixture, spy: spy).previewUpdate(PinnedSkillUpdate(skill: fixture.skill))
             XCTAssertEqual(spy.readAttempts.count, 1, "One bounded admission read, including oversized bodies")
@@ -223,7 +223,7 @@ extension UpdatesViewModelTests {
             let directory = upstreamSide ? fixture.repository + "/skills/vendor" : fixture.storeRoot + "/skills/vendor"
             try fileService.createSymlink(at: directory + "/unsafe", pointingTo: "/etc")
             fixture.skill.upstreamCommit = try commit(fixture.repository, message: "link before frontmatter \(upstreamSide)")
-            fixture.skill.upstreamTree = try GitService().treeHash(at: fixture.repository, path: "skills/vendor")
+            fixture.skill.upstreamTree = try TestPaths.git.treeHash(at: fixture.repository, path: "skills/vendor")
             let spy = ImportBoundedReadSpy()
             XCTAssertThrowsError(try makePreviewService(fixture: fixture, spy: spy)
                 .previewUpdate(PinnedSkillUpdate(skill: fixture.skill))) { error in

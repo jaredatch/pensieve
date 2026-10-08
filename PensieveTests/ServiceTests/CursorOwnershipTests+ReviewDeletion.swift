@@ -83,11 +83,11 @@ extension CursorOwnershipTests {
 
     func testForeignLinkRefusalUsesOneTypedClassification() throws {
         for state in [LinkServiceScriptedPathState.retargetedDirectorySymlink, .realFile] {
-            let path = DeployPaths.linkPath(directoryName: skill.directoryName, platform: .claudeCode, projectPath: nil)
+            let path = TestPaths.deployPaths.linkPath(directoryName: skill.directoryName, platform: .claudeCode, projectPath: nil)
             let scripted = LinkServiceScriptedFileService(linkPath: path,
-                canonicalDirectory: Constants.pensieveSkillsDir + "/" + skill.directoryName, state: state)
+                canonicalDirectory: TestPaths.skillsDir + "/" + skill.directoryName, state: state)
             scripted.failRepeatedEntryProbe = true
-            XCTAssertThrowsError(try LinkService(fileService: scripted).link(skill: skill, platform: .claudeCode,
+            XCTAssertThrowsError(try TestPaths.linkService(fileService: scripted).link(skill: skill, platform: .claudeCode,
                                                                             projectPath: nil)) { error in
                 if state.isSymlink {
                     guard case ArtifactOwnershipError.occupiedPath(let occupied) = error else {
@@ -108,8 +108,11 @@ extension CursorOwnershipTests {
 
     @MainActor
     private func reviewDelete(_ harness: OwnershipRouteHarness, project: Project) -> Bool {
-        let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+        let library = SkillLibraryViewModel(
+            skillStore: store,
+            fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
+        )
         return SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
                                         projects: [project], context: harness.context)
     }

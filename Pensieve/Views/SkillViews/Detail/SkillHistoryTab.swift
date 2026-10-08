@@ -85,9 +85,9 @@ struct SkillHistoryTab: View {
          localRevision: UpstreamHistoryLocalRevision,
          onOpenUpdates: @escaping () -> Void,
          onUpdateCheck: @escaping UpstreamHistoryViewModel.UpdateCheckRequest,
-         git: GitServiceProtocol = GitService(),
-         store: SkillStoreProtocol = SkillStore(fileService: FileService()),
-         workingDir: String = Constants.pensieveBaseDir,
+         git: GitServiceProtocol,
+         store: SkillStoreProtocol,
+         workingDir: String,
          hostedPresentation: SkillHistoryTabPresentation? = nil) {
         self.skill = skill
         self.currentBody = currentBody

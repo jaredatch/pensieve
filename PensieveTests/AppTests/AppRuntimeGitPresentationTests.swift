@@ -32,7 +32,7 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
             XCTAssertEqual(runtime.syncModel.remoteURL, "https://fixture.test/store.git")
             XCTAssertEqual(runtime.syncModel.state, .synced(at: syncedAt))
         }
-        try GitService().removeRemote(at: fixture.root)
+        try TestPaths.git.removeRemote(at: fixture.root)
         await runtime.refreshGitUsability()
         XCTAssertNil(runtime.syncModel.remoteURL)
         XCTAssertNil(runtime.syncModel.configurationError)
@@ -124,8 +124,9 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
         XCTAssertTrue(runtime.syncModel.configurationError?.contains("store folder can't be found") == true)
         XCTAssertFalse(runtime.syncModel.configurationError?.contains("couldn’t be opened") == true)
         XCTAssertNotEqual(runtime.syncModel.state, .unconfigured)
-        let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: GitService(),
-                                hasLocalBranches: GitService().hasLocalBranches,
+        let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support,
+            git: TestPaths.git,
+                                hasLocalBranches: TestPaths.git.hasLocalBranches,
                                 credentials: InMemoryCredentialStore(), reconciler: NoPresentationReconciler(), now: Date.init)
         XCTAssertTrue(daemon.runOnce().detail.contains("store folder can't be found"))
     }
@@ -180,9 +181,15 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }),
             defaults: isolatedDefaults(), paths: fixture.paths, gitUsabilityProbe: probe.run,
             coordinatorConfigure: { coordinator in
-                await coordinator.configure(engine: RecoveredPresentationEngine(), git: GitService(),
-                                            credentials: InMemoryCredentialStore(), root: fixture.root,
-                                            audit: SyncAudit(appSupport: fixture.support))
+                await coordinator.configure(
+                    engine: RecoveredPresentationEngine(),
+                    git: TestPaths.git,
+                    credentials: InMemoryCredentialStore(),
+                    root: fixture.root,
+                    audit: SyncAudit(appSupport: fixture.support),
+                    machine: (identity: MachineIdentity(appSupportDir: TestPaths.appSupportDir),
+                        stateService: TestPaths.stateService)
+                )
             }
         )
         await runtime.bootstrapTask.value

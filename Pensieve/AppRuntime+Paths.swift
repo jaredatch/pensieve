@@ -56,18 +56,19 @@ struct AppRuntimePaths {
         }
     }
 
-    let storeRoot: String
-    let appSupportDir: String
-    private let temporaryCredentials = InMemoryCredentialStore()
+    let runtimePaths: RuntimePaths
+    var storeRoot: String { runtimePaths.storeRoot }
+    var appSupportDir: String { runtimePaths.appSupportDir }
+    var homeDirectory: String { runtimePaths.homeDirectory }
+    var deployPaths: DeployPaths { runtimePaths.deployPaths }
 
     init(storeRoot: String, appSupportDir: String) {
-        self.storeRoot = storeRoot
-        self.appSupportDir = appSupportDir
+        runtimePaths = RuntimePaths(storeRoot: storeRoot, appSupportDir: appSupportDir)
     }
 
     static let production = AppRuntimePaths(
-        storeRoot: Constants.pensieveBaseDir,
-        appSupportDir: PathConstants.pensieveAppSupportDir
+        storeRoot: RuntimePaths.production.storeRoot,
+        appSupportDir: RuntimePaths.production.appSupportDir
     )
 
     var syncLockPath: String { appSupportDir + "/sync.lock" }
@@ -87,11 +88,11 @@ struct AppRuntimePaths {
     /// The agent directories (`~/.claude/skills`, Cursor's rules, …) sit outside both roots, so only the
     /// production pair may reach them; any other pair gets none, and a Cursor rules directory of its own.
     private var isProduction: Bool {
-        storeRoot == Constants.pensieveBaseDir && appSupportDir == PathConstants.pensieveAppSupportDir
+        runtimePaths.isProduction
     }
 
     private var cursorRulesDir: String {
-        isProduction ? PathConstants.cursorUserRulesDir : appSupportDir + "/cursor-rules"
+        deployPaths.cursorUserRulesDirectory
     }
 
     struct HermeticDefaultsUnavailable: Error {}
@@ -120,14 +121,15 @@ struct AppRuntimePaths {
         })
     }
 
-    func hasRemoteConfigured(git: GitServiceProtocol = GitService()) -> Bool {
+    func hasRemoteConfigured(git suppliedGit: GitServiceProtocol? = nil) -> Bool {
+        let git = suppliedGit ?? makeGitService()
         do { return try git.remoteURL(at: storeRoot) != nil } catch {
             return true // Unknown must defer backfill just like a configured remote.
         }
     }
 
     func isWorktreeClean() -> Bool {
-        GitService().isWorktreeClean(at: storeRoot)
+        makeGitService().isWorktreeClean(at: storeRoot)
     }
 
     @MainActor
@@ -139,26 +141,37 @@ struct AppRuntimePaths {
     }
 
     func makePlatformViewModel() -> PlatformViewModel {
-        guard !isProduction else { return PlatformViewModel() }
+        if isProduction {
+            let files = FileService()
+            return PlatformViewModel(fileService: files, linkService: LinkService(fileService: files, paths: deployPaths),
+                cursorCompiler: CursorCompiler(fileService: files, skillStore: SkillStore(fileService: files, baseDir: skillsDir),
+                    userRulesDirectory: cursorRulesDir), agentDetection: makeAgentDetection(),
+                deployStateStore: DeployStateStore(fileService: files, appSupportDir: appSupportDir), skillsDirectory: skillsDir)
+        }
         let fileService = FileService()
         return PlatformViewModel(
             fileService: fileService,
             linkService: NoDeploymentLinkService(outputRoot: appSupportDir + "/agent-links"),
             cursorCompiler: NoDeploymentCursorCompiler(outputRoot: cursorRulesDir),
             agentDetection: NoAgentDetection(),
-            deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: appSupportDir)
+            deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: appSupportDir),
+            skillsDirectory: skillsDir
         )
     }
 
     /// A `@ModelActor` takes only its container; its collaborators arrive through `configure`. Every
     /// path-bearing one is set here, before any injected `coordinatorConfigure` runs.
-    func configureCoordinator(_ coordinator: SyncCoordinator) async {
+    func configureCoordinator(_ coordinator: SyncCoordinator, machineStateService: MachineStateServicing,
+                              fileService: FileServiceProtocol = FileService()) async {
         await coordinator.configure(
-            engine: SyncEngine(lockPath: syncLockPath),
+            engine: makeSyncEngine(fileService: fileService),
+            git: makeGitService(fileService: fileService),
             credentials: makeCredentialStore(),
+            rebuildService: makeStoreRebuildService(fileService: fileService),
             root: storeRoot,
-            audit: SyncAudit(appSupport: appSupportDir),
-            machineIdentity: MachineIdentity(appSupportDir: appSupportDir)
+            audit: SyncAudit(appSupport: appSupportDir, fileService: fileService),
+            machine: (identity: MachineIdentity(fileService: fileService, appSupportDir: appSupportDir),
+                stateService: machineStateService)
         )
     }
 
@@ -176,7 +189,8 @@ struct AppRuntimePaths {
                 migrationService: migrationService,
                 fileService: fileService,
                 root: storeRoot,
-                lockPath: syncLockPath
+                lockPath: syncLockPath,
+                git: makeGitService()
             ).reconcileOnLaunch(
                 context: context,
                 alreadyMigrated: alreadyMigrated,
@@ -190,7 +204,8 @@ struct AppRuntimePaths {
     func makeLaunchBackfill() -> AppRuntime.LaunchBackfill {
         { context in
             let fileService = FileService()
-            var backfillPaths = DeployStateBackfillPaths(pensieveSkillsDir: skillsDir, cursorUserRulesDir: cursorRulesDir)
+            var backfillPaths = DeployStateBackfillPaths(pensieveSkillsDir: skillsDir, cursorUserRulesDir: cursorRulesDir,
+                userSkillsRoot: deployPaths.userSkillsRoot)
             if !isProduction { backfillPaths.userSkillsRoot = { _ in nil } }
             DeployStateBackfill(
                 fileService: fileService,
@@ -349,39 +364,8 @@ extension AppRuntimePaths {
         )
     }
 
-    private func makeCredentialStore() -> CredentialStoreProtocol {
-        isProduction ? KeychainCredentialStore() : temporaryCredentials
+    func makeCredentialStore() -> CredentialStoreProtocol {
+        runtimePaths.credentialStore
     }
 
-    private func makeGitService(fileService: FileServiceProtocol) -> GitService {
-        GitService(fileService: fileService, askpassHelperPath: gitAskpassHelperPath)
-    }
-
-    @MainActor
-    func makeConvergence(
-        container: ModelContainer,
-        platformVM: PlatformViewModel,
-        intentReconciler: IntentReconciler
-    ) -> PostSyncConvergence {
-        PostSyncConvergence(
-            root: storeRoot,
-            deployReconciler: makeDeployReconciler(),
-            contextFactory: { ModelContext(container) },
-            categoryReconciler: CategoryReconciler(platformVM: platformVM),
-            intentReconciler: intentReconciler,
-            auditLog: { SyncAudit(appSupport: appSupportDir).append(category: $0, detail: $1) },
-            didConverge: { platformVM.noteDeployStateChanged() }
-        )
-    }
-
-    private func makeDeployReconciler() -> DeployReconciler {
-        let fileService = FileService()
-        return DeployReconciler(
-            fileService: fileService,
-            deployState: DeployStateStore(fileService: fileService, appSupportDir: appSupportDir),
-            pensieveSkillsDir: skillsDir,
-            agentSkillDirs: isProduction ? DeployReconciler.defaultAgentSkillDirs : [],
-            cursorRulesDir: cursorRulesDir
-        )
-    }
 }
