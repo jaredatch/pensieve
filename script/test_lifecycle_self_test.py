@@ -193,6 +193,9 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
                     self.assertEqual((bundles[0] / 'marker').read_text(), 'preserved evidence')
 
     def test_sweep_removes_only_old_matching_temp_artifacts(self):
+        # Freeze the copied helper's clock so wrapper-driven assertions tolerate scheduling stalls.
+        sweep_script = self.root / "script/test_temp_cleanup.py"
+        sweep_script.write_text("import time\ntime.monotonic = lambda: 0.0\n" + sweep_script.read_text())
         old_empty, nonempty, young = [self.system_temp / str(uuid.UUID(int=index)).upper() for index in (10, 11, 12)]
         unrelated = self.system_temp / "ordinary-folder"
         lowercase = self.system_temp / "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
@@ -389,7 +392,8 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
                 (path / "arrived").write_text("keep racing data")
             rmdir(name, dir_fd=dir_fd)
 
-        with patch.object(cleanup.os, "rmdir", side_effect=add_entry_before_rmdir):
+        with patch.object(cleanup.os, "rmdir", side_effect=add_entry_before_rmdir), \
+             patch.object(cleanup.time, "monotonic", return_value=0.0):
             cleanup.sweep(str(race_root))
         self.assertEqual(set(race_root.iterdir()), raced)
         for path in raced:
@@ -407,6 +411,23 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
         self.env["TEST_LIFECYCLE_SYSTEM_TEMP"] = str(linked_temp)
         self.failed_run(label="linked-debug-temp")
         self.assertTrue(linked_old.is_dir(), "sweep followed the debug folder symlink")
+
+    def test_sweep_keeps_matching_old_folders_when_its_budget_expires(self):
+        import test_temp_cleanup as cleanup
+        for location, elapsed, kept in (("root", 0.249, False), ("root", 0.25, True),
+                                        ("debug", 0.124, False), ("debug", 0.125, True)):
+            with self.subTest(location=location, elapsed=elapsed):
+                root = self.root / f"budget-{location}-{elapsed}"
+                parent = root if location == "root" else root / "com.jaredatch.Pensieve.debug"
+                parent.mkdir(parents=True)
+                folder = parent / "ABCDEFAB-1234-5678-9ABC-DEF012345678-12345-aBc09F"
+                folder.mkdir()
+                os.utime(folder, (1, 1))
+                clock = iter((0.0,))
+                with patch.object(cleanup.time, "monotonic", side_effect=lambda: next(clock, elapsed)):
+                    cleanup.sweep(str(root))
+                self.assertEqual(folder.is_dir(), kept,
+                                 f"{location} sweep must {'keep' if kept else 'remove'} the folder at {elapsed}s")
 
     def abandoned_runs(self):
         self.runs.mkdir(parents=True, exist_ok=True)
