@@ -107,7 +107,7 @@ final class AppRuntimeSyncRecoveryTests: XCTestCase {
             XCTAssertEqual(h.engine.count, manual ? 2 : 1, "one retry spends the manual request, even if it fails")
         }
         try await assertRetryExpiresWithUsableEvidence()
-        try await assertBlockedRecoveryRetainsManualRetry()
+        try await assertRecoveryWhileIneligible()
         try await assertSpentRetryCannotRearmAfterDirectSync()
     }
 
@@ -138,23 +138,31 @@ final class AppRuntimeSyncRecoveryTests: XCTestCase {
         }
         try await assertPrivilegedRequestsSurviveGitOutage()
         try await assertRefusedRetryPreservesAbsorbedStanding()
+        try await assertRefusedRecoveryDoesNotCancelNudge()
     }
 
 }
 
 private extension AppRuntimeSyncRecoveryTests {
     func assertPrivilegedRequestsSurviveGitOutage() async throws {
-        for scenario in ["queued manual", "idle manual", "preflight"] {
+        for scenario in ["queued manual", "idle manual", "preflight", "first manual", "first preflight"] {
             let outcomes: [Result<SyncOutcome, Error>] = scenario == "queued manual"
                 ? [.failure(GitError.unusable(.developerToolsMissing))] : []
-            let h = try await makeHarness(outcomes: outcomes)
+            let probe = RuleProbe()
+            let firstAnswer = scenario.hasPrefix("first")
+            let h = try await makeHarness(outcomes: outcomes, probe: probe,
+                initialProbeError: firstAnswer ? GitError.outputReadFailed(detail: "bootstrap EIO") : nil)
             h.preference.enabled = scenario == "queued manual"
             h.runtime.scheduler.launchIngestCompleted()
             if scenario == "queued manual" { await h.waitForCycle(1) }
             h.preference.enabled = false
-            h.probe.set { .developerToolsMissing }
-            await h.runtime.refreshGitUsability()
-            if scenario == "preflight" {
+            if firstAnswer {
+                XCTAssertNil(h.runtime.gitUsability)
+            } else {
+                h.probe.set { .developerToolsMissing }
+                await h.runtime.refreshGitUsability()
+            }
+            if scenario.hasSuffix("preflight") {
                 h.runtime.scheduler.enqueueLaunchPreflight()
             } else if scenario == "queued manual" {
                 await h.runtime.syncModel.syncNowAndReport()
@@ -170,7 +178,7 @@ private extension AppRuntimeSyncRecoveryTests {
             XCTAssertEqual(h.engine.count, before + 1, scenario + " must retain its background-off bypass")
             if h.engine.count == before + 1 {
                 XCTAssertEqual(h.engine.priorities.last,
-                               scenario == "preflight" ? QOS_CLASS_DEFAULT : QOS_CLASS_USER_INITIATED)
+                               scenario.hasSuffix("preflight") ? QOS_CLASS_DEFAULT : QOS_CLASS_USER_INITIATED)
                 h.probe.set { .usable }
                 h.release.open()
             }
@@ -196,7 +204,7 @@ private extension AppRuntimeSyncRecoveryTests {
         XCTAssertEqual(h.engine.count, 1)
     }
 
-    func assertBlockedRecoveryRetainsManualRetry() async throws {
+    func assertRecoveryWhileIneligible() async throws {
         for block in ["conflict", "branchless", "absent"] {
             let h = try await makeHarness(outcomes: [.failure(GitError.unusable(.developerToolsMissing))])
             h.preference.enabled = false
@@ -218,16 +226,20 @@ private extension AppRuntimeSyncRecoveryTests {
             await h.waitForIdle()
             XCTAssertEqual(h.engine.count, 1, block + " must refuse the recovery cycle")
             switch block {
-            case "conflict": h.runtime.syncModel.clearConflict()
+            case "conflict":
+                try h.runtime.beginConflictResolution()(.synced(pushed: true, warnings: [], completedAt: Date()))
             case "branchless": try h.fixture.files.writeFile(at: h.fixture.root + "/.git/refs/heads/main", content: branch)
             default: try GitService().setRemote("https://fixture.test/store.git", at: h.fixture.root)
             }
             await h.runtime.refreshGitConfiguration(probingGit: false)
             await h.waitForFollowUpOrIdle()
-            XCTAssertEqual(h.engine.count, 2, block + " must not spend a retry that could not run")
+            let expected = block == "conflict" ? 1 : 2
+            XCTAssertEqual(h.engine.count, expected,
+                           block == "conflict" ? "production resolution's usable evidence retires the retry"
+                           : block + " permits the retry after a configuration-only refresh")
             if h.engine.count == 2 { h.release.open() }
             await h.finish()
-            XCTAssertEqual(h.engine.count, 2)
+            XCTAssertEqual(h.engine.count, expected)
         }
     }
 }
@@ -281,6 +293,27 @@ private extension AppRuntimeSyncRecoveryTests {
             await h.finish()
             XCTAssertEqual(h.engine.count, 2, trigger + " must run once")
         }
+    }
+
+    func assertRefusedRecoveryDoesNotCancelNudge() async throws {
+        let h = try await makeHarness()
+        h.runtime.scheduler.launchIngestCompleted()
+        await h.waitForCycle(1)
+        h.release.open()
+        await h.waitForIdle()
+        XCTAssertFalse(h.runtime.scheduler.hasPendingTrigger)
+        // A stale recovery packet can reach the scheduler after usable evidence retired its retry.
+        // Queue a real watcher nudge first. The refused packet cannot cover that mutation.
+        h.runtime.scheduler.nudge()
+        h.runtime.scheduler.enqueue(.manualRecovery)
+        await h.waitForFollowUpOrIdle()
+        XCTAssertEqual(h.engine.count, 2, "refusing a stale retry must leave the nudge able to start its own cycle")
+        if h.engine.count == 2 {
+            XCTAssertEqual(h.engine.priorities.last, QOS_CLASS_DEFAULT)
+            h.release.open()
+        }
+        await h.finish()
+        XCTAssertEqual(h.engine.count, 2, "the surviving nudge must run once")
     }
 
     func assertSpentRetryCannotRearmAfterDirectSync() async throws {

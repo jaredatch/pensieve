@@ -3,6 +3,8 @@ import Foundation
 /// What the sidebar's sync line shows for a `SyncModel.SyncState`, at rest and under the pointer.
 /// Pure so the mapping is tested apart from the view; `SyncStatusView` renders it.
 struct SyncFooterPresentation: Equatable {
+    static let branchlessMessage = "Can't sync yet: the store has no branch"
+
     enum Action: Equatable {
         case none
         case sync
@@ -26,8 +28,8 @@ struct SyncFooterPresentation: Equatable {
             return nil
         case .branchless:
             return SyncFooterPresentation(symbol: "exclamationmark.triangle", showsSpinner: false,
-                                          label: "Can't sync yet: the store has no branch", emphasized: true,
-                                          action: .sync, help: "Can't sync yet: the store has no branch")
+                                          label: branchlessMessage, emphasized: true,
+                                          action: .sync, help: branchlessMessage)
         case .syncing:
             return SyncFooterPresentation(symbol: "arrow.triangle.2.circlepath", showsSpinner: true,
                                           label: "Syncing…", emphasized: hovering, action: .none, help: nil)

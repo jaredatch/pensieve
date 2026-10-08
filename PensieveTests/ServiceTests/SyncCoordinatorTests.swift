@@ -117,7 +117,7 @@ final class SyncCoordinatorTests: XCTestCase {
             startAutomatically: false,
             backgroundSyncEnabled: { true }
         )
-        scheduler.installDrain(hasRemote: { false }, action: { _ in cycles += 1 })
+        scheduler.installDrain(isConfigured: { false }, action: { _ in cycles += 1 })
         scheduler.coordinatorBecameReady()
         scheduler.launchIngestCompleted()
         scheduler.tick()

@@ -77,6 +77,7 @@ final class AppRuntime {
                 self.coordinator = coordinator
                 self.syncModel.installSyncRequest { [weak self] in
                     guard let self else { return }
+                    self.scheduler.cycleDidStart()
                     self.library.beginCoordinatorChanges()
                     let evidence = self.gitState.beginEvidence()
                     let result = await Self.runCoordinatorCycle(coordinator, library: self.library, paths: paths)
@@ -177,12 +178,11 @@ final class AppRuntime {
     func refreshGitUsability() async { await refreshGitConfiguration(probingGit: true) }
 
     var syncLockPath: String { paths.syncLockPath }
-
     var backgroundSyncEnabled: Bool {
         get { defaults.object(forKey: Self.backgroundSyncEnabledKey) as? Bool ?? true }
         set {
             defaults.set(newValue, forKey: Self.backgroundSyncEnabledKey)
-            scheduler.backgroundPreferenceChanged()
+            scheduler.drainPendingRequests()
         }
     }
 
@@ -351,12 +351,14 @@ extension AppRuntime {
     }
 
     private func handleGitChange(_ change: RuntimeGitState.Change?) {
-        guard let change, change.recovered else { return }
-        let retry = automaticUpdateRetryDeferred
-        automaticUpdateRetryDeferred = false
-        if retry { checkForSkillUpdatesIfDue() }
-        syncModel.resumeAfterGitRecovery()
-        scheduler.resumePendingTriggers()
+        guard let change, change.usability == .usable else { return }
+        if change.recovered {
+            let retry = automaticUpdateRetryDeferred
+            automaticUpdateRetryDeferred = false
+            if retry { checkForSkillUpdatesIfDue() }
+            syncModel.resumeAfterGitRecovery()
+        }
+        scheduler.drainPendingRequests()
     }
 
     private func startUpdateCheck(at checkedAt: Date? = nil, showsFailureAlert: Bool, automatic: Bool = false) {

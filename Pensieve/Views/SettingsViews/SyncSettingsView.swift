@@ -50,7 +50,7 @@ struct SyncSettingsView: View {
         .padding()
         .task { await runtime.refreshGitUsability() }
         .onChange(of: backgroundSyncEnabled) { _, _ in
-            runtime.scheduler.backgroundPreferenceChanged()
+            runtime.scheduler.drainPendingRequests()
         }
         .sheet(
             isPresented: $showSetup,

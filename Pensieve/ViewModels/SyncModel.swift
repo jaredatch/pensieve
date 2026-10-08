@@ -194,7 +194,7 @@ final class SyncModel {
     }
 
     func syncAndReport(_ request: SyncRequest) async {
-        guard !refuseRecoveryIfNecessary(request) else { return }
+        guard !redispatchIfRecoveryIsRefused(request) else { return }
         guard !isCycleInFlight else {
             queuedRequest = queuedRequest.map { $0.absorbing(request) } ?? request
             return
@@ -224,7 +224,7 @@ final class SyncModel {
         let followUp = queuedRequest
         queuedRequest = nil
         if let followUp, canSyncNow {
-            if followUp.contains(.manualRecovery), manualRetry == .ready { manualRetry = .queued }
+            if followUp.contains(.manualRecovery) { manualRetry = .queued }
             pendingSyncRequest?(followUp)
         }
     }
@@ -279,7 +279,7 @@ final class SyncModel {
 }
 
 private extension SyncModel {
-    func refuseRecoveryIfNecessary(_ request: SyncRequest) -> Bool {
+    func redispatchIfRecoveryIsRefused(_ request: SyncRequest) -> Bool {
         guard request.contains(.manualRecovery) else { return false }
         let retryAvailable = manualRetry == .ready || manualRetry == .queued
         guard retryAvailable && canScheduleSync else {
@@ -289,7 +289,6 @@ private extension SyncModel {
             if !remaining.isEmpty { pendingSyncRequest?(remaining) }
             return true
         }
-        manualRetry = .ready
         return false
     }
 

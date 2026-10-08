@@ -4,7 +4,8 @@ import XCTest
 @testable import Pensieve
 
 extension AppRuntimeSyncRecoveryTests {
-    func makeHarness(outcomes: [Result<SyncOutcome, Error>] = []) async throws -> RecoveryHarness {
+    func makeHarness(outcomes: [Result<SyncOutcome, Error>] = [],
+                     probe: RuleProbe = RuleProbe(), initialProbeError: Error? = nil) async throws -> RecoveryHarness {
         let fixture = try GitFailureFixture()
         var ready = false
         defer { if !ready { try? fixture.remove() } }
@@ -12,7 +13,6 @@ extension AppRuntimeSyncRecoveryTests {
         let release = TestWait.Gate(owner: self)
         let engine = RecoveryEngine(release: release, outcomes: outcomes)
         let preference = RecoveryPreference()
-        let probe = RuleProbe()
         let scheduler = SyncScheduler(debounceSeconds: 0, startAutomatically: false,
                                       backgroundSyncEnabled: { preference.enabled })
         let library = SkillLibraryViewModel(
@@ -21,7 +21,11 @@ extension AppRuntimeSyncRecoveryTests {
             notifier: SyncStateNotifier.suppressed)
         let runtime = try AppRuntime(library: library, scheduler: scheduler, defaults: isolatedDefaults(),
             launchBackfill: { _ in }, postSyncConvergence: RecoveryConvergence(), paths: fixture.paths,
-            gitUsabilityProbe: probe.run, coordinatorConfigure: { coordinator in
+            gitUsabilityProbe: {
+                let result = probe.run()
+                if let initialProbeError, probe.count == 1 { throw initialProbeError }
+                return result
+            }, coordinatorConfigure: { coordinator in
                 await coordinator.configure(engine: engine, git: IngestRecordingGit(),
                     credentials: InMemoryCredentialStore(), root: fixture.root, audit: IngestNullAudit())
             })

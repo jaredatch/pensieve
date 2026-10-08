@@ -114,7 +114,7 @@ final class GitReviewRegressionTests: XCTestCase {
         XCTAssertEqual(backfills, 0)
         XCTAssertEqual(convergence.launches, 0)
         let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: git,
-                                hasLocalBranches: { try git.hasLocalBranches(at: fixture.root) },
+                                hasLocalBranches: git.hasLocalBranches,
                                 credentials: InMemoryCredentialStore(), reconciler: ReviewReconciler(), now: Date.init)
         XCTAssertEqual(daemon.runOnce().category, "failed")
     }
@@ -170,7 +170,7 @@ final class GitReviewRegressionTests: XCTestCase {
         try fixture.seedRepository()
         let git = try fixture.broken(.failed(GitFailureDetail("first line\nsecond line\r\nthird line\u{2028}last line")))
         let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: git,
-                                hasLocalBranches: { try git.hasLocalBranches(at: fixture.root) },
+                                hasLocalBranches: git.hasLocalBranches,
                                 credentials: InMemoryCredentialStore(), reconciler: ReviewReconciler(), now: Date.init)
         let output = DaemonCLI.execute(["run"], appSupport: fixture.support,
                                        readFile: { try? fixture.files.readData(at: $0) },

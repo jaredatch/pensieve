@@ -9,7 +9,7 @@ extension SyncCoordinatorTests {
             var isConflicted = conflicted
             var cycles = 0
             let scheduler = SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false })
-            scheduler.installDrain(hasRemote: { hasRemote }, isConflicted: { isConflicted }, action: { _ in cycles += 1 })
+            scheduler.installDrain(isConfigured: { hasRemote }, isConflicted: { isConflicted }, action: { _ in cycles += 1 })
             scheduler.coordinatorBecameReady()
             scheduler.launchIngestCompleted()
             scheduler.enqueueLaunchPreflight()
@@ -35,7 +35,10 @@ extension SyncCoordinatorTests {
         let followupFinished = expectation(description: "one follow-up")
         let release = AsyncGate()
         var cycles = 0
-        let scheduler = makeCoalescingScheduler(debounceSeconds: 0.2) { _ in
+        let model = SyncModel()
+        let scheduler = makeCoalescingScheduler(debounceSeconds: 0.2) { await model.syncAndReport($0) }
+        model.installSyncRequest {
+            scheduler.cycleDidStart()
             cycles += 1
             if cycles == 1 {
                 firstStarted.fulfill()

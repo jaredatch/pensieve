@@ -150,7 +150,7 @@ private struct PensieveMenuBarView: View {
         }
         Toggle("Background sync", isOn: $backgroundSyncEnabled)
             .onChange(of: backgroundSyncEnabled) { _, _ in
-                runtime.scheduler.backgroundPreferenceChanged()
+                runtime.scheduler.drainPendingRequests()
             }
         Divider()
         Button("Open Pensieve") {
@@ -180,7 +180,7 @@ private struct PensieveMenuBarView: View {
         case .conflicted: return "Conflict needs attention"
         case .error: return "Sync failed"
         case .unconfigured: return "Sync not configured"
-        case .branchless: return "Can't sync yet: the store has no branch"
+        case .branchless: return SyncFooterPresentation.branchlessMessage
         }
     }
 

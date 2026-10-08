@@ -59,7 +59,7 @@ final class DaemonEndToEndTests: XCTestCase {
             root: cloneB,
             appSupport: appSupport,
             git: AllowlistedFastForwardGit(wrapping: git),
-            hasLocalBranches: { try self.git.hasLocalBranches(at: self.cloneB) },
+            hasLocalBranches: self.git.hasLocalBranches,
             credentials: NilCredentialStore(),
             reconciler: DeployReconciler(
                 fileService: fileService,

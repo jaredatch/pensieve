@@ -17,7 +17,7 @@ let outcome = DaemonCLI.execute(
             root: PathConstants.pensieveBaseDir,
             appSupport: PathConstants.pensieveAppSupportDir,
             git: git,
-            hasLocalBranches: { try git.hasLocalBranches(at: PathConstants.pensieveBaseDir) },
+            hasLocalBranches: git.hasLocalBranches,
             credentials: KeychainCredentialStore(),
             reconciler: DeployReconciler(
                 fileService: fileService,

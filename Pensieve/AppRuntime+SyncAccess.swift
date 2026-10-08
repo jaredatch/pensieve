@@ -54,7 +54,7 @@ extension AppRuntime {
             scheduler?.enqueue(request)
         }
         scheduler.installDrain(
-            hasRemote: { [weak self] in
+            isConfigured: { [weak self] in
                 guard let self else { return false }
                 return syncModel.isConfigured
             },

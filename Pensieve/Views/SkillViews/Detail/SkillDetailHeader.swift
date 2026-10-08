@@ -108,7 +108,7 @@ struct SkillDetailHeader: View {
                 .foregroundStyle(.orange)
         }
         if syncModel.state == .branchless {
-            Label("Can't sync yet: the store has no branch", systemImage: "exclamationmark.triangle")
+            Label(SyncFooterPresentation.branchlessMessage, systemImage: "exclamationmark.triangle")
                 .font(.caption)
                 .foregroundStyle(.orange)
         }

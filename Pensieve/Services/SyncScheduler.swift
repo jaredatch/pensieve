@@ -72,7 +72,7 @@ final class SyncScheduler {
     private let debounceNanoseconds: UInt64
     private let backgroundSyncOverride: (() -> Bool)?
     private var syncAction: ((SyncRequest) async -> Void)?
-    private var hasRemote: () -> Bool = { true }
+    private var isConfigured: () -> Bool = { true }
     private var isGitUsable: () -> Bool = { true }
     private var isConflicted: () -> Bool = { false }
 
@@ -99,12 +99,12 @@ final class SyncScheduler {
     }
 
     func installDrain(
-        hasRemote: @escaping () -> Bool = { true },
+        isConfigured: @escaping () -> Bool = { true },
         isGitUsable: @escaping () -> Bool = { true },
         isConflicted: @escaping () -> Bool = { false },
         action: @escaping (SyncRequest) async -> Void
     ) {
-        self.hasRemote = hasRemote
+        self.isConfigured = isConfigured
         self.isGitUsable = isGitUsable
         self.isConflicted = isConflicted
         syncAction = action
@@ -141,11 +141,13 @@ final class SyncScheduler {
         }
     }
 
-    func backgroundPreferenceChanged() {
-        drainIfPossible()
-    }
+    func drainPendingRequests() { drainIfPossible() }
 
-    func resumePendingTriggers() { drainIfPossible() }
+    /// Only an admitted model cycle covers a nudge; a scheduler hand-off may be refused.
+    func cycleDidStart() {
+        debounceTask?.cancel()
+        debounceTask = nil
+    }
 
     func enqueueTrigger() { enqueue(.scheduled) }
     func enqueueManualTrigger() { enqueue(.manual) }
@@ -181,7 +183,7 @@ final class SyncScheduler {
               !isSyncing,
               let syncAction else { return }
         guard backgroundSyncEnabled || pendingRequest.isPrivileged else { return }
-        guard hasRemote(), !isConflicted() else {
+        guard isConfigured(), !isConflicted() else {
             hasPendingTrigger = false
             pendingRequest = .scheduled
             return
@@ -192,11 +194,6 @@ final class SyncScheduler {
             return
         }
 
-        // A cycle that starts after a nudge was received already covers that mutation. This matters when
-        // a tick/wake queued the follow-up while the 30-second debounce was still sleeping: without the
-        // cancellation, the delayed nudge would launch a redundant third cycle.
-        debounceTask?.cancel()
-        debounceTask = nil
         // Main-actor callbacks inherit UI priority. Background cycles retain the previous default QoS;
         // a queued Sync Now keeps its manual priority even when background triggers coalesce with it.
         let request = pendingRequest

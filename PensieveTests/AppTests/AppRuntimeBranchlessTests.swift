@@ -42,20 +42,41 @@ final class AppRuntimeBranchlessTests: XCTestCase {
         await model.syncNowAndReport()
         XCTAssertEqual(model.state, .branchless, "another cycle must still report branchlessness without writes")
         XCTAssertEqual(try fixture.snapshot(), before, "the cycle cannot prepare or write a branchless store")
-        let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: git,
-                                hasLocalBranches: { try git.hasLocalBranches(at: fixture.root) },
-                                credentials: InMemoryCredentialStore(), reconciler: IngestNoopDeploy(), now: Date.init)
-        XCTAssertEqual(daemon.runOnce().detail, "branchless")
-        let status = try JSONDecoder().decode(DaemonStatus.self,
-                                              from: fixture.files.readData(at: fixture.support + "/daemon-status.json"))
-        XCTAssertEqual(status.result, "skipped")
-        XCTAssertEqual(status.detail, "branchless")
+        try assertDaemonUsesInjectedRootAndReportsBranchless(fixture, git: git)
         XCTAssertEqual(model.state, .branchless)
         try git.stageAllAndCommit(at: fixture.root, message: "first branch")
         await runtime.refreshGitConfiguration(probingGit: false)
         XCTAssertTrue(model.canSyncNow, "a later read of a born branch restores sync eligibility")
         XCTAssertFalse(model.canConnect)
         try await assertBranchAppearingIsNoticed()
+    }
+
+    private func assertDaemonUsesInjectedRootAndReportsBranchless(_ fixture: GitFailureFixture, git: GitService) throws {
+        let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: git,
+                                hasLocalBranches: { root in
+                                    XCTAssertEqual(root, fixture.root, "branch probe must receive the cycle's injected root")
+                                    return try git.hasLocalBranches(at: root)
+                                },
+                                credentials: InMemoryCredentialStore(), reconciler: IngestNoopDeploy(), now: Date.init)
+        // The executable's composition must not resolve the default store a second time inside
+        // its branch probe. That would disagree with a daemon constructed with another root.
+        let checkout = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let entry = try fixture.files.readFile(at: checkout.appendingPathComponent("PensieveDaemon/main.swift").path)
+        let defaultRootPattern = #"root:\s*([A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*)"#
+        let probePattern = #"hasLocalBranches:\s*([^,]+),"#
+        func capture(_ pattern: String) throws -> String {
+            let expression = try NSRegularExpression(pattern: pattern)
+            let match = try XCTUnwrap(expression.firstMatch(in: entry, range: NSRange(entry.startIndex..., in: entry)))
+            return String(entry[try XCTUnwrap(Range(match.range(at: 1), in: entry))])
+        }
+        XCTAssertFalse(try capture(probePattern).contains(capture(defaultRootPattern)),
+                       "the branch probe must use the daemon's root, not resolve another default store")
+        XCTAssertEqual(daemon.runOnce().detail, "branchless")
+        let status = try JSONDecoder().decode(DaemonStatus.self,
+                                              from: fixture.files.readData(at: fixture.support + "/daemon-status.json"))
+        XCTAssertEqual(status.result, "skipped")
+        XCTAssertEqual(status.detail, "branchless")
     }
 
     private func assertBranchAppearingIsNoticed() async throws {
