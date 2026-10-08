@@ -65,7 +65,9 @@ final class UntrustedSkillRewriteTests: XCTestCase {
                 fileService: files, claudeSkillsDir: root + "/claude", grokSkillsDir: root + "/grok",
                 cursorRulesDir: root + "/cursor", codexSkillsDir: root + "/codex", storeRoot: root + "/store"
             )
-            let model = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: root + "/store")
+            let model = ImportViewModel(scanner: scanner, skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: root + "/store")
             let context = try context()
             let folder = root + "/source-\(index)"
             try files.writeFile(at: folder + "/SKILL.md", content: fixture.source)
@@ -113,7 +115,9 @@ final class UntrustedSkillRewriteTests: XCTestCase {
                     codexSkillsDir: TestPaths.root + "/codex",
                     storeRoot: root + "/store"
                 )
-                let model = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: root + "/store")
+                let model = ImportViewModel(scanner: scanner, skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: root + "/store")
                 model.discoveredSkills = [DiscoveredSkill(name: "New", body: SkillParser.stripFrontmatter(source),
                     sourcePlatform: "Claude Code", sourcePath: path, skillDescription: "New description", sourceContent: source)]
                 model.selectedSkills = [path]

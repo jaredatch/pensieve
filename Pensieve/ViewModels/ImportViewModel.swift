@@ -7,7 +7,9 @@ final class ImportViewModel {
     enum FolderScanOutcome: Equatable { case found(Int), nothingFound, insideLibrary }
 
     private let scanner: ImportScannerProtocol
+    private let fileService: FileServiceProtocol
     private let skillStore: SkillStoreProtocol
+    private let lockPath: String
     private let manifestService: ManifestSnapshotting?
     private let manifestRoot: String
     private let notifier: SyncStateNotifying
@@ -48,13 +50,16 @@ final class ImportViewModel {
         fileService: FileServiceProtocol? = nil,
         scanner: ImportScannerProtocol,
         skillStore: SkillStoreProtocol,
+        lockPath: String,
         manifestService: ManifestSnapshotting? = nil,
         manifestRoot: String,
         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
         echoRegistrar: @escaping SyncWriteEchoRegistering = SyncWriteEchoRegistrar.suppressed
     ) {
         self.scanner = scanner
+        self.fileService = fileService ?? FileService()
         self.skillStore = skillStore
+        self.lockPath = lockPath
         self.manifestService = manifestService
         self.manifestRoot = manifestRoot
         self.notifier = notifier
@@ -151,6 +156,11 @@ final class ImportViewModel {
         error = nil
         let toImport = discoveredSkills.filter { selectedSkills.contains($0.sourcePath) }
         guard !toImport.isEmpty else { return }
+        guard let lock = SyncLock.tryAcquire(at: lockPath) else {
+            error = "Sync is running. Try importing again when it finishes."
+            return
+        }
+        defer { lock.release() }
 
         var taken: Set<String>
         do {
@@ -189,6 +199,11 @@ final class ImportViewModel {
             }
         }
 
+        finishImport(context: context, writtenSlugs: writtenSlugs, saveContext: saveContext)
+    }
+
+    private func finishImport(context: ModelContext, writtenSlugs: [String],
+                              saveContext: (ModelContext) throws -> Void) {
         do {
             try saveContext(context)
             importedSkillCount = writtenSlugs.count
@@ -209,11 +224,10 @@ final class ImportViewModel {
     private func createImportedSkill(
         _ discovered: DiscoveredSkill, description: String, content: String?, avoiding: Set<String>
     ) throws -> String {
-        if let content {
-            return try skillStore.createSkill(name: discovered.name, content: content, avoiding: avoiding)
-        }
-        return try skillStore.createSkill(
-            name: discovered.name, description: description, body: discovered.body, avoiding: avoiding
+        try skillStore.createImportedSkill(
+            name: discovered.name,
+            content: content ?? SkillSerializer.serialize(name: discovered.name, description: description, body: discovered.body),
+            avoiding: avoiding, storeRoot: manifestRoot, fileService: fileService
         )
     }
 

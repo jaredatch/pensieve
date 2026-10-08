@@ -64,7 +64,8 @@ extension AppRuntimePaths {
                              echoRegistrar: @escaping SyncWriteEchoRegistering) -> ImportViewModel {
         let files = FileService()
         return ImportViewModel(fileService: files, scanner: makeImportScanner(fileService: files),
-            skillStore: SkillStore(fileService: files, baseDir: skillsDir), manifestService: ManifestService(),
+            skillStore: SkillStore(fileService: files, baseDir: skillsDir), lockPath: syncLockPath,
+            manifestService: ManifestService(),
             manifestRoot: storeRoot, notifier: notifier, echoRegistrar: echoRegistrar)
     }
 

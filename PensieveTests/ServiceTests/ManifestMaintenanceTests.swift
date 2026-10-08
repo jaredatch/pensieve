@@ -118,7 +118,9 @@ final class ManifestMaintenanceTests: XCTestCase {
         let context = try makeContext()
         try seedProjectIntent(context)
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
-        let vm = ImportViewModel(scanner: TestPaths.scanner, skillStore: store, manifestService: manifest, manifestRoot: tempDir)
+        let vm = ImportViewModel(scanner: TestPaths.scanner, skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestService: manifest, manifestRoot: tempDir)
         let discovered = DiscoveredSkill(
             name: "Imported Skill",
             body: "# imported body",

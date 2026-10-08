@@ -180,7 +180,9 @@ final class ImportBoundedReadTests: XCTestCase {
         try spy.files.createDirectory(at: root + "/claude/empty-folder")
         let model = ImportViewModel(
             scanner: makeScanner(),
-            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot
         )
         model.scan()
 
@@ -208,7 +210,9 @@ extension ImportBoundedReadTests {
         try spy.files.createSymlink(at: collection + "/SKILL.md", pointingTo: root + "/absent")
         let model = ImportViewModel(
             scanner: makeScanner(),
-            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot
         )
 
         XCTAssertEqual(model.scanFolder(collection), .nothingFound)
@@ -231,7 +235,8 @@ extension ImportBoundedReadTests {
             let model = ImportViewModel(
                 scanner: scanner,
                 skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
-                manifestRoot: TestPaths.storeRoot
+                lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot
             )
             XCTAssertEqual(model.scanFolder(library), .insideLibrary)
             XCTAssertTrue(model.discoveredSkills.isEmpty)

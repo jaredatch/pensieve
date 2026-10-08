@@ -42,6 +42,7 @@ final class ImportWholeFileTests: XCTestCase {
         ImportViewModel(
             scanner: scanner(),
             skillStore: SkillStore(fileService: files, baseDir: root + "/store/skills"),
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestService: ManifestService(fileService: files), manifestRoot: root + "/store"
         )
     }

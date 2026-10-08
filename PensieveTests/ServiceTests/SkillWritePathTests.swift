@@ -155,7 +155,9 @@ final class SkillWritePathTests: XCTestCase {
             codexSkillsDir: tempDir + "/none-codex",
             storeRoot: TestPaths.storeRoot
         )
-        let vm = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: TestPaths.storeRoot)
+        let vm = ImportViewModel(scanner: scanner, skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot)
         let context = try makeContext()
         vm.scan()
         vm.importSelected(context: context)
@@ -187,7 +189,9 @@ final class SkillWritePathTests: XCTestCase {
             codexSkillsDir: tempDir + "/none-codex",
             storeRoot: TestPaths.storeRoot
         )
-        let vm = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: TestPaths.storeRoot)
+        let vm = ImportViewModel(scanner: scanner, skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot)
         let context = try makeContext()
         vm.scan()
         vm.importSelected(context: context)
@@ -214,7 +218,9 @@ final class SkillWritePathTests: XCTestCase {
             codexSkillsDir: tempDir + "/none-codex",
             storeRoot: TestPaths.storeRoot
         )
-        let vm = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: TestPaths.storeRoot)
+        let vm = ImportViewModel(scanner: scanner, skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot)
         let context = try makeContext()
         vm.scan()
         vm.importSelected(context: context)
@@ -263,15 +269,17 @@ final class SkillWritePathTests: XCTestCase {
             DiscoveredSkill(name: "Foo", body: "one", sourcePlatform: "test", sourcePath: "/one"),
             DiscoveredSkill(name: "Foo", body: "two", sourcePlatform: "test", sourcePath: "/two")
         ]
-        let recordingStore = RecordingDeletionSkillStore()
-        let vm = ImportViewModel(scanner: WritePathScanner(skills: discovered), skillStore: recordingStore,
+
+        let vm = ImportViewModel(scanner: WritePathScanner(skills: discovered), skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestRoot: TestPaths.storeRoot)
         vm.scan()
 
         vm.importSelected(context: context)
 
-        XCTAssertTrue(recordingStore.createAvoiding[0].contains("Foo"))
-        XCTAssertTrue(recordingStore.createAvoiding[1].contains("foo-2"))
+        XCTAssertEqual(try fileService.listDirectory(at: tempDir).sorted(), ["foo-2", "foo-3"])
+        XCTAssertEqual(SkillParser.stripFrontmatter(try rawFile("foo-2")), "one")
+        XCTAssertEqual(SkillParser.stripFrontmatter(try rawFile("foo-3")), "two")
         let slugs = try context.fetch(FetchDescriptor<Skill>()).map(\.directoryName)
         XCTAssertEqual(Set(slugs), ["Foo", "foo-2", "foo-3"])
     }
@@ -283,15 +291,16 @@ final class SkillWritePathTests: XCTestCase {
             DiscoveredSkill(name: "One", body: "one", sourcePlatform: "test", sourcePath: "/one"),
             DiscoveredSkill(name: "Two", body: "two", sourcePlatform: "test", sourcePath: "/two")
         ]
-        let recordingStore = RecordingDeletionSkillStore()
-        let vm = ImportViewModel(scanner: WritePathScanner(skills: discovered), skillStore: recordingStore,
+        let before = try fileService.listDirectory(at: tempDir)
+        let vm = ImportViewModel(scanner: WritePathScanner(skills: discovered), skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestRoot: TestPaths.storeRoot)
         vm.scan()
         vm.importProgress = 0.5
 
         vm.importSelected(context: context, takenSlugs: { _ in throw DeletionTestError() })
 
-        XCTAssertTrue(recordingStore.createAvoiding.isEmpty)
+        XCTAssertEqual(try fileService.listDirectory(at: tempDir), before)
         XCTAssertTrue(try context.fetch(FetchDescriptor<Skill>()).isEmpty)
         XCTAssertTrue(vm.error?.contains("couldn't read the library") == true)
         XCTAssertEqual(vm.importProgress, 0.5)
@@ -315,6 +324,7 @@ extension SkillWritePathTests {
         let vm = ImportViewModel(
             scanner: scanner,
             skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestService: manifest, manifestRoot: tempDir
         )
         vm.scan()
@@ -341,7 +351,9 @@ extension SkillWritePathTests {
         )
         let scanner = WritePathScanner(skills: [])
         scanner.folderSkills = [discovered]
-        let vm = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: TestPaths.storeRoot)
+        let vm = ImportViewModel(scanner: scanner, skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot)
 
         XCTAssertEqual(vm.scanFolder("/folder"), .found(1))
         vm.importSelected(context: context)
@@ -360,7 +372,9 @@ extension SkillWritePathTests {
         )
         let scanner = WritePathScanner(skills: [])
         scanner.folderSkills = [discovered]
-        let vm = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: TestPaths.storeRoot)
+        let vm = ImportViewModel(scanner: scanner, skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot)
 
         XCTAssertEqual(vm.scanFolder("/folder"), .found(1))
         let originalResults = vm.discoveredSkills

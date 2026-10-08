@@ -14,6 +14,7 @@ enum GitProcessProbe {
         let executable = CommandLine.arguments[2]
         let report = CommandLine.arguments[3]
         registry = (report as NSString).deletingLastPathComponent + "/children"
+        if mode.hasPrefix("import-") { holdImport(mode, root: executable, report: report) }
         if mode == "hold" {
             let child = Process()
             child.executableURL = URL(fileURLWithPath: "/bin/sleep")

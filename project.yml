@@ -99,7 +99,16 @@ targets:
     platform: macOS
     sources:
       - path: PensieveTests/Fixtures/FakeGitScript.swift
+      - path: PensieveTests/Fixtures/ImportPublicationFileService.swift
       - path: PensieveTests/Fixtures/GitProcessProbe
+      - path: Pensieve/Services/SkillStore+Import.swift
+      - path: Pensieve/Services/SkillStore.swift
+      - path: Pensieve/Services/SkillParser.swift
+      - path: Pensieve/Services/SkillParser+Preservation.swift
+      - path: Pensieve/Services/SkillSerializer.swift
+      - path: Pensieve/Services/CheckedYAMLLoader.swift
+      - path: Pensieve/Models/AdapterConfig.swift
+      - path: Pensieve/Models/SkillScope.swift
       - path: Pensieve/Utilities/BlockingWork.swift
       - path: Pensieve/Services/SyncLock.swift
       - path: Pensieve/Services/GitService.swift
@@ -109,6 +118,7 @@ targets:
       - path: Pensieve/Services/GitService+Usability.swift
       - path: Pensieve/Services/GitServiceConflict.swift
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+Publication.swift
       - path: Pensieve/Services/FileService+ProjectFolder.swift
       - path: Pensieve/Services/ProjectFolderError.swift
       - path: Pensieve/Services/FileService+BoundedRead.swift
@@ -129,12 +139,16 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGNING_REQUIRED: NO
 
+    dependencies:
+      - package: Yams
+
   PensieveDaemon:
     type: tool
     platform: macOS
     sources:
       - path: PensieveDaemon
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+Publication.swift
       - path: Pensieve/Services/FileService+ProjectFolder.swift
       - path: Pensieve/Services/ProjectFolderError.swift
       - path: Pensieve/Services/FileService+BoundedRead.swift
@@ -160,6 +174,7 @@ targets:
       - path: Pensieve/Services/SkillParser+Preservation.swift
       - path: Pensieve/Services/SkillSerializer.swift
       - path: Pensieve/Services/SkillStore.swift
+      - path: Pensieve/Services/SkillStore+Import.swift
       - path: Pensieve/Services/ManifestTypes.swift
       - path: Pensieve/Services/ManifestService.swift
       - path: Pensieve/Services/ManifestService+DeployIntents.swift

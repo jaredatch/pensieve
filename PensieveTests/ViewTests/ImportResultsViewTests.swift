@@ -7,7 +7,8 @@ final class ImportResultsViewTests: XCTestCase {
             importVM: ImportViewModel(
                 scanner: EmptyImportScanner(),
                 skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir),
-                manifestRoot: TestPaths.storeRoot
+                lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot
             ),
             onImport: {}
         )

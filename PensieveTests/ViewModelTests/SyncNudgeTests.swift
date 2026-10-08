@@ -116,7 +116,9 @@ final class SyncNudgeTests: XCTestCase {
         )
         let model = ImportViewModel(
             scanner: FixedImportScanner(skills: [discovered]),
-            skillStore: fixture.store, manifestRoot: TestPaths.storeRoot,
+            skillStore: fixture.store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot,
             notifier: fixture.counter.notify,
             echoRegistrar: { fixture.library.noteAppAuthoredBodies(directoryNames: $0) }
         )
