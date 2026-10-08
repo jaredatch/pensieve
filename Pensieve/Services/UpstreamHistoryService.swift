@@ -148,7 +148,7 @@ protocol UpstreamHistoryGitServing {
 
 extension GitService: UpstreamHistoryGitServing {}
 
-struct UpstreamHistoryService {
+struct UpstreamHistoryService: ScratchRootCleaning {
     static let commitWindow = 200
     static let rowWindow = 20
     static let textByteLimit = 256 * 1_024
@@ -264,17 +264,6 @@ struct UpstreamHistoryService {
             return head
         } catch {
             throw SkillInstallService.mappedRepositoryError(error)
-        }
-    }
-
-    static func cleanupScratchRoot(
-        fileService: FileServiceProtocol = FileService(),
-        scratchRoot: String
-    ) {
-        if fileService.directoryExists(at: scratchRoot) || fileService.isSymlink(at: scratchRoot) {
-            try? fileService.deleteDirectory(at: scratchRoot)
-        } else if fileService.fileExists(at: scratchRoot) {
-            try? fileService.deleteFile(at: scratchRoot)
         }
     }
 }

@@ -488,6 +488,7 @@
 		8F556CA304EE023722B92D7D /* CategoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF1ACAB7706B313E016D0E23 /* CategoryStore.swift */; };
 		8F7A571FE8265BB1FEAE2CFD /* ManifestService+DeployIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54BFE973DF07F620C36F86B3 /* ManifestService+DeployIntents.swift */; };
 		8F8BB1B9345C9457A0BC35E5 /* SyncEngineTests+ReadFailure.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D8967A9ADDC501B33E8C3D /* SyncEngineTests+ReadFailure.swift */; };
+		8FD520EDC36D6D909FDC2F5C /* ScratchRootCleaning.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63D9CDA3F387218B9E0ED517 /* ScratchRootCleaning.swift */; };
 		8FED7C552287DBD2B3D52060 /* ManifestServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B8D3D41E84FB980F7699909 /* ManifestServiceTests.swift */; };
 		8FEDDB5E7307E6C7F2D25E88 /* ProjectIdentityServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 656E6B947C6F0CB8F84C5AE3 /* ProjectIdentityServiceTests.swift */; };
 		9013111702359DB3CE9B70C0 /* DisplayTextSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84A2492D4B447B089CA9BDFB /* DisplayTextSanitizer.swift */; };
@@ -1255,6 +1256,7 @@
 		62BABE699B265B187CCBA8A2 /* ManifestScenarioCarryTests+RoundOne.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ManifestScenarioCarryTests+RoundOne.swift"; sourceTree = "<group>"; };
 		63527BB409B9E3A6A844A91C /* GitProcess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitProcess.swift; sourceTree = "<group>"; };
 		63C896474379103CDB682B09 /* StoreRebuildServiceTests+SymlinkGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StoreRebuildServiceTests+SymlinkGuard.swift"; sourceTree = "<group>"; };
+		63D9CDA3F387218B9E0ED517 /* ScratchRootCleaning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScratchRootCleaning.swift; sourceTree = "<group>"; };
 		649B98DFA176E1B015DAA9F7 /* SkillOverviewContentsLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillOverviewContentsLayoutTests.swift; sourceTree = "<group>"; };
 		64C29DE54B3ED2AD1D3A46F4 /* DeployPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeployPaths.swift; sourceTree = "<group>"; };
 		64D6587BCACB53D50A16599E /* ManifestScenarioTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManifestScenarioTests.swift; sourceTree = "<group>"; };
@@ -2148,6 +2150,7 @@
 				9CEEBB641A09831B2E6BAC4E /* ProjectRemovalWithdrawal.swift */,
 				D27ECC698439DD6D83522492 /* ReconcilerStateFetcher.swift */,
 				0AFBC4D16E14809FD65E3013 /* RemoteURLPolicy.swift */,
+				63D9CDA3F387218B9E0ED517 /* ScratchRootCleaning.swift */,
 				23774EC1561D91F6CCA1B316 /* SkillInstallService.swift */,
 				F5F76BEEA7E57063A1F6D066 /* SkillInstallService+Checkout.swift */,
 				08FD0E863648E65FCE41186D /* SkillInstallService+Credential.swift */,
@@ -3754,6 +3757,7 @@
 				34771FAECC1D498DDB03F1FF /* RuntimeGitState.swift in Sources */,
 				C9EE063A6CF9960B22F01DE3 /* Scenario.swift in Sources */,
 				37A5450C393B1B8EA847BA29 /* ScenarioAssignment.swift in Sources */,
+				8FD520EDC36D6D909FDC2F5C /* ScratchRootCleaning.swift in Sources */,
 				0A0C94FF13A98C00E164DC0B /* SettingsView.swift in Sources */,
 				63D87646880D08DAA9EE176D /* SidebarOutline.swift in Sources */,
 				F9A55360D6B9EAA88665A36F /* SidebarView.swift in Sources */,

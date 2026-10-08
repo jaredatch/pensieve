@@ -81,8 +81,7 @@ enum UpdateCheckError: LocalizedError, Equatable {
     }
 }
 
-struct UpdateCheckService {
-
+struct UpdateCheckService: ScratchRootCleaning {
     struct Snapshot {
         let id: UUID
         let directoryName: String
@@ -163,15 +162,6 @@ struct UpdateCheckService {
     static func driftedLocally(currentContentHash: String,
                                installedContentHash: String) -> Bool {
         currentContentHash != installedContentHash
-    }
-
-    static func cleanupScratchRoot(fileService: FileServiceProtocol = FileService(),
-                                   scratchRoot: String) {
-        if fileService.directoryExists(at: scratchRoot) || fileService.isSymlink(at: scratchRoot) {
-            try? fileService.deleteDirectory(at: scratchRoot)
-        } else if fileService.fileExists(at: scratchRoot) {
-            try? fileService.deleteFile(at: scratchRoot)
-        }
     }
 }
 

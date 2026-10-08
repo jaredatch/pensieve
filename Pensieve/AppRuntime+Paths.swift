@@ -58,6 +58,12 @@ struct AppRuntimePaths {
 
     let storeRoot: String
     let appSupportDir: String
+    private let temporaryCredentials = InMemoryCredentialStore()
+
+    init(storeRoot: String, appSupportDir: String) {
+        self.storeRoot = storeRoot
+        self.appSupportDir = appSupportDir
+    }
 
     static let production = AppRuntimePaths(
         storeRoot: Constants.pensieveBaseDir,
@@ -344,7 +350,7 @@ extension AppRuntimePaths {
     }
 
     private func makeCredentialStore() -> CredentialStoreProtocol {
-        isProduction ? KeychainCredentialStore() : InMemoryCredentialStore()
+        isProduction ? KeychainCredentialStore() : temporaryCredentials
     }
 
     private func makeGitService(fileService: FileServiceProtocol) -> GitService {

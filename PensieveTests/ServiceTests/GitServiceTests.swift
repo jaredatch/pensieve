@@ -393,6 +393,50 @@ extension GitServiceTests {
         let helperBody = try git.fileService.readFile(at: helper)
         XCTAssertFalse(helperBody.contains(secret))   // the helper reads env; it holds NO secret at rest
         XCTAssertTrue(helperBody.contains("PENSIEVE_GIT_PASSWORD"))
+        try assertHelperRemainsExecutableDuringRewrite(body: helperBody, environment: env, secret: secret)
+    }
+
+    private func assertHelperRemainsExecutableDuringRewrite(
+        body: String, environment: [String: String], secret: String
+    ) throws {
+        let helper = tempDir + "/askpass"
+        try FileService().deleteFile(at: helper)
+        var observations = 0
+        var executions = 0
+        // A second caller executes the shared helper while the first caller's write is paused.
+        let files = AskpassWriteObservingFileService {
+            observations += 1
+            // Before first publication, an absent helper is valid; a visible one must be executable.
+            guard FileService().fileExists(at: helper) else { return }
+            executions += 1
+            let mode = try FileManager.default.attributesOfItem(atPath: helper)[.posixPermissions] as? NSNumber
+            XCTAssertEqual(mode?.intValue, 0o700, "A published helper must already be owner-only and executable")
+            XCTAssertEqual(try FileService().readFile(at: helper), body)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: helper)
+            process.arguments = ["Password"]
+            process.environment = environment
+            let output = Pipe()
+            process.standardOutput = output
+            do { try process.run() } catch {
+                XCTFail("The shared helper could not execute during replacement: \(error)")
+                return
+            }
+            let bytes = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+            XCTAssertEqual(String(bytes: bytes, encoding: .utf8), secret)
+        }
+        let writer = GitService(fileService: files, askpassHelperPath: helper)
+        for _ in 0..<2 {
+            _ = try writer.childEnvironment(credential: .httpsToken(username: "other", token: "other-fixture-token"))
+        }
+        XCTAssertGreaterThan(observations, 0, "The replacement must be observed")
+        XCTAssertGreaterThan(executions, 0, "A second caller must execute the shared helper")
+        let mode = try FileManager.default.attributesOfItem(atPath: helper)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(mode?.intValue, 0o700)
+        XCTAssertEqual(try FileService().readFile(at: helper), body)
+        XCTAssertEqual(try FileService().listDirectory(at: tempDir), ["askpass"])
     }
 
     private struct NetworkCredentialOperation {
@@ -527,4 +571,30 @@ extension GitServiceTests {
             try failingGit.childEnvironment(credential: .httpsToken(username: "u", token: "ghp_x"))
         )
     }
+}
+
+/// Uses the real filesystem and observes completed writes through the existing FileService boundary.
+/// Executable writes inherit the production default, so the observation falls before its next step.
+private struct AskpassWriteObservingFileService: FileServiceProtocol {
+    let afterWrite: () throws -> Void
+    private let wrapped = FileService()
+
+    func writeFile(at path: String, content: String) throws {
+        try wrapped.writeFile(at: path, content: content)
+        try afterWrite()
+    }
+    func readFile(at path: String) throws -> String { try wrapped.readFile(at: path) }
+    func deleteFile(at path: String) throws { try wrapped.deleteFile(at: path) }
+    func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
+    func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
+    func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
+    func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
+    func deleteDirectory(at path: String) throws { try wrapped.deleteDirectory(at: path) }
+    func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
+        try wrapped.createSymlink(at: linkPath, pointingTo: targetPath)
+    }
+    func symlinkTarget(at path: String) throws -> String { try wrapped.symlinkTarget(at: path) }
+    func isSymlink(at path: String) -> Bool { wrapped.isSymlink(at: path) }
+    func listDirectory(at path: String) throws -> [String] { try wrapped.listDirectory(at: path) }
+    func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
 }

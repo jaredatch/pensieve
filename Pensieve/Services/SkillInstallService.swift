@@ -115,8 +115,7 @@ protocol SkillInstallServiceProtocol {
                 context: ModelContext) throws
 }
 
-struct SkillInstallService: SkillInstallServiceProtocol {
-
+struct SkillInstallService: SkillInstallServiceProtocol, ScratchRootCleaning {
     static let invalidFrontmatterReason =
         "SKILL.md needs parseable frontmatter with non-empty name and description"
     private static let symlinkReason = "skill contains a symbolic link"
@@ -191,15 +190,6 @@ struct SkillInstallService: SkillInstallServiceProtocol {
 }
 
 extension SkillInstallService {
-    static func cleanupScratchRoot(fileService: FileServiceProtocol = FileService(),
-                                   scratchRoot: String) {
-        if fileService.directoryExists(at: scratchRoot) || fileService.isSymlink(at: scratchRoot) {
-            try? fileService.deleteDirectory(at: scratchRoot)
-        } else if fileService.fileExists(at: scratchRoot) {
-            try? fileService.deleteFile(at: scratchRoot)
-        }
-    }
-
     private func fetch(repo: String, ref: String?, targetPath: String?,
                        credential: GitCredential?) throws -> SkillFetchResult {
         guard let validatedRemote = validateRemote(repo) else {

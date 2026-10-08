@@ -9,6 +9,7 @@ extension AppRuntimePathsTests {
         let files = LinkServiceCanonicalDirectoryFileService(
             wrapped: FileService(), pathMappings: [], physicalSandbox: sandbox
         )
+        defer { try? files.deleteDirectory(at: sandbox) }
         let otherPaths = AppRuntimePaths(storeRoot: sandbox + "/other-store", appSupportDir: sandbox + "/other-support")
         let vendorTemp = paths.storeRoot + ".vendor-" + UUID().uuidString + ".tmp"
         let sentinels = [
@@ -16,7 +17,7 @@ extension AppRuntimePathsTests {
             otherPaths.updateCheckScratchRoot + "/leftover",
             otherPaths.upstreamHistoryScratchRoot + "/leftover",
             otherPaths.storeRoot + ".vendor-" + UUID().uuidString + ".tmp/leftover",
-            paths.skillsDir + "/keep/SKILL.md", paths.gitAskpassHelperPath,
+            paths.skillsDir + "/keep/SKILL.md", paths.appSupportDir + "/cleanup-sentinel",
             paths.upstreamHistoryCacheDir + "/cached"
         ]
         for path in sentinels { try files.writeFile(at: path, content: "keep") }
@@ -70,9 +71,9 @@ extension AppRuntimePathsTests {
         let credentials = try XCTUnwrap(installer.credentialStore as? InMemoryCredentialStore)
         XCTAssertTrue(checker.credentialStore as AnyObject === credentials)
         let historyCredentials = try XCTUnwrap(history.credentialStore as? InMemoryCredentialStore)
-        // Tokens force the concrete GitService's helper write even for local file transport.
+        // One token must reach every runtime factory, including history and provenance.
         try credentials.store(token: "fixture-install-token", username: "fixture", forHost: CredentialHost.githubInstall)
-        try historyCredentials.store(token: "fixture-history-token", username: "fixture", forHost: CredentialHost.githubInstall)
+        guard try assertSharedCredentials(paths: paths, historyStore: historyCredentials) else { return }
         try withLocalGitHubRemote(fixture: fixture, files: files) { remote in
             let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
             let context = ModelContext(container)
@@ -94,6 +95,17 @@ extension AppRuntimePathsTests {
             XCTAssertEqual(try files.readFile(at: paths.skillsDir + "/example/SKILL.md"), remote.original)
             XCTAssertEqual(try files.listDirectory(at: fixture.base).filter { $0.contains(".vendor-") }, [])
         }
+    }
+
+    private func assertSharedCredentials(paths: AppRuntimePaths, historyStore: InMemoryCredentialStore) throws -> Bool {
+        let provenance = try XCTUnwrap(paths.makeSkillProvenanceServiceFactory()().credentialStore as? InMemoryCredentialStore)
+        let expected = GitCredential.httpsToken(username: "fixture", token: "fixture-install-token")
+        let stores = [historyStore, provenance]
+        for store in stores { XCTAssertEqual(store.credential(forHost: CredentialHost.githubInstall), expected) }
+        let separateRuntime = AppRuntimePaths(storeRoot: paths.storeRoot, appSupportDir: paths.appSupportDir)
+        let separateStore = try XCTUnwrap(separateRuntime.makeUpdateCheckService().credentialStore as? InMemoryCredentialStore)
+        XCTAssertNil(separateStore.credential(forHost: CredentialHost.githubInstall))
+        return stores.allSatisfy { $0.credential(forHost: CredentialHost.githubInstall) == expected }
     }
 
     private func checkUpdatedRemote(
@@ -157,7 +169,6 @@ extension AppRuntimePathsTests {
         let body = try files.readFile(at: paths.gitAskpassHelperPath)
         XCTAssertTrue(body.contains("$PENSIEVE_GIT_PASSWORD"))
         XCTAssertFalse(body.contains("fixture-install-token"))
-        XCTAssertFalse(body.contains("fixture-history-token"))
     }
 
     private func requireContainedGit(_ services: [Any], files: LinkServiceCanonicalDirectoryFileService) throws {

@@ -165,14 +165,21 @@ extension FileServiceProtocol {
         return permissions.uint16Value & 0o100 != 0
     }
 
-    /// Write `content`, then set the file mode to 0700 (owner rwx only). Provided as a default so every
-    /// conformer (the concrete `FileService`, any test stub) inherits it unchanged. The `setAttributes`
-    /// call lives INSIDE the FileService layer — the one layer permitted to touch `FileManager` — so it
-    /// is within the single-chokepoint boundary, not a bypass. Used for the git askpass helper.
-    /// (PLAN-08 / 08.2)
+    /// Stage complete bytes and owner-only executable permissions before publishing the file.
+    /// Concurrent askpass writers can replace the shared path without exposing a non-executable file.
     func writeExecutableFile(at path: String, content: String) throws {
-        try writeFile(at: path, content: content)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path)
+        let temporary = path + ".executable-" + UUID().uuidString + ".tmp"
+        do {
+            try writeFile(at: temporary, content: content)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: temporary)
+            guard Darwin.rename(temporary, path) == 0 else {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno),
+                              userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))])
+            }
+        } catch {
+            try? deleteFile(at: temporary)
+            throw error
+        }
     }
 
     /// Atomically replace the item at `path` with the freshly-built one at `sourcePath` (which is
