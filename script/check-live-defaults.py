@@ -12,11 +12,14 @@ from pathlib import Path
 import re
 import sys
 
-NON_LOCATION_MEMBERS = {
-    "hermesDefaultCategory", "claudeCodeProjectSkillsRel", "grokProjectSkillsRel", "codexAgentsRel",
-    "defaultClaudeCodeTokenBudget", "defaultGrokTokenBudget", "defaultCursorTokenBudget",
-    "defaultCodexTokenBudget", "charsPerToken",
+# PathConstants documents this inventory beside its definitions. Adding or renaming
+# a live location also updates this set; unrelated config members need no guard edit.
+LOCATION_MEMBERS = {
+    "homeDirectory", "pensieveBaseDir", "pensieveSkillsDir", "pensieveAppSupportDir", "gitAskpassHelperPath",
+    "claudeCodeUserSkillsDir", "grokUserSkillsDir", "codexUserSkillsDir", "openClawUserSkillsDir",
+    "hermesUserSkillsDir", "cursorUserRulesDir",
 }
+PATH_TYPES = {"RuntimePaths", "AppRuntimePaths"}
 RESOLVERS = {
     "Pensieve/Utilities/PathConstants.swift",  # Defines the real paths without performing I/O.
     "Pensieve/Utilities/Constants.swift",  # App re-exports the same definitions.
@@ -74,6 +77,10 @@ def tokens(source):
         elif (match := re.match(r'[A-Za-z_][A-Za-z_0-9]*', source[pos:])):
             yield match[0], pos
             pos += len(match[0])
+        elif (match := re.match(r'[!%&*+\-/<=>?^|~]+', source[pos:])):
+            # Swift operators are whole tokens: == and != are not assignments.
+            yield match[0], pos
+            pos += len(match[0])
         elif source[pos].isspace():
             pos += 1
         else:
@@ -89,13 +96,13 @@ def violations(source, relative):
     for index, (token, offset) in enumerate(lexed):
         tail = [item[0] for item in lexed[index:index + 3]]
         reason = None
-        if len(tail) == 3 and token in {"Constants", "PathConstants"} and tail[1] == "." and tail[2] not in NON_LOCATION_MEMBERS:
+        if len(tail) == 3 and token in {"Constants", "PathConstants"} and tail[1] == "." and tail[2] in LOCATION_MEMBERS:
             reason = "live location must come from the runtime's paths value"
         elif token == "KeychainCredentialStore" and (tail[1:2] == ["("] or tail[1:] == [".", "init"]):
             reason = "real Keychain store must come from runtime resolution"
-        elif token in {"RuntimePaths", "AppRuntimePaths"} and tail[1:] == [".", "production"] and relative not in PRODUCTION_CALLERS:
+        elif token in PATH_TYPES and tail[1:] == [".", "production"] and relative not in PRODUCTION_CALLERS:
             reason = "production paths must be selected by the process runtime"
-        elif tail[:2] == ["=", "."] and tail[2:] == ["production"] and relative not in PRODUCTION_CALLERS:
+        elif tail == ["=", ".", "production"] and index > 0 and lexed[index - 1][0] in PATH_TYPES and relative not in PRODUCTION_CALLERS:
             reason = "a production paths default must be selected by the process runtime"
         elif token in {"NSHomeDirectory", "homeDirectoryForCurrentUser"}:
             reason = "home resolution belongs to the runtime's path definitions"

@@ -58,6 +58,8 @@ enum HomePath {
 /// re-exports every member below so existing app call sites keep the `Constants.` spelling; the
 /// daemon-compiled shared files reference `PathConstants` directly (they are excluded from the app
 /// target's SwiftUI-importing `Constants`).
+/// Adding or renaming a live location also updates LOCATION_MEMBERS in
+/// script/check-live-defaults.py. Relative paths and non-location config stay outside that inventory.
 enum PathConstants {
     // MARK: - Pensieve Storage
 

@@ -21,7 +21,8 @@ final class RuntimePathGuardTests: XCTestCase {
             withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let members = ["pensieveBaseDir", "pensieveSkillsDir", "pensieveAppSupportDir", "gitAskpassHelperPath",
-                       "claudeCodeUserSkillsDir", "grokUserSkillsDir", "cursorUserRulesDir", "homeDirectory"]
+                       "claudeCodeUserSkillsDir", "grokUserSkillsDir", "codexUserSkillsDir", "openClawUserSkillsDir",
+                       "hermesUserSkillsDir", "cursorUserRulesDir", "homeDirectory"]
         var cases = members.flatMap { member in
             ["init(root: String = Constants.\(member)) {}", "let root = PathConstants.\(member)"]
         }
@@ -40,6 +41,7 @@ final class RuntimePathGuardTests: XCTestCase {
                 XCTAssertEqual(result.status, 1, source)
                 XCTAssertTrue(result.output.contains(folder + "/NewCollaborator.swift:2:"), result.output)
             }
+            try assertPermittedSources(in: directory, at: path)
             try FileManager.default.removeItem(at: path)
         }
         let harmless = """
@@ -58,6 +60,21 @@ final class RuntimePathGuardTests: XCTestCase {
             to: resolution, atomically: true, encoding: .utf8)
         let accepted = try runGuard(root: directory)
         XCTAssertEqual(accepted.status, 0, accepted.output)
+    }
+
+    private func assertPermittedSources(in directory: URL, at path: URL) throws {
+        let permitted = [
+            "func isLive(_ e: Env) -> Bool { e == .production }",
+            "func isLive(_ e: Env) -> Bool { e != .production }",
+            "let environment: Env = .production",
+            "let n = Constants.maxBodyBytes",
+            "let n = PathConstants.maxBodyBytes"
+        ]
+        for source in permitted {
+            try ("struct NewCollaborator {\n" + source + "\n}\n").write(to: path, atomically: true, encoding: .utf8)
+            let result = try runGuard(root: directory)
+            XCTAssertEqual(result.status, 0, source + "\n" + result.output)
+        }
     }
 
     private func runGuard(root: URL) throws -> (status: Int32, output: String) {
