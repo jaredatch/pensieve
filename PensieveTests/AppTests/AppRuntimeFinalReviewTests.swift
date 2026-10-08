@@ -325,6 +325,7 @@ extension AppRuntimeFinalReviewTests {
         let probe = RuleProbe()
         probe.set { .licenseNotAccepted }
         let git = try fixture.executable("""
+            while [ "$1" = '-c' ]; do shift 2; done
             if [ "$1" = '--version' ]; then echo 'git version fixture'; exit 0; fi
             printf '%s' 'checkout failed for xcrun: error: invalid active developer path' >&2
             exit 128

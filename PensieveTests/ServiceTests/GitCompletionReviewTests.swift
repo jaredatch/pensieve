@@ -35,6 +35,7 @@ final class GitCompletionReviewTests: XCTestCase {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         let git = try fixture.executable("""
+            while [ "$1" = '-c' ]; do shift 2; done
             if [ "$1" = '--version' ]; then echo 'git version fixture'; exit 0; fi
             echo 'checkout failed for xcrun: error: invalid active developer path' >&2
             exit 128
@@ -97,16 +98,21 @@ final class GitCompletionReviewTests: XCTestCase {
         defer { try? fixture.remove() }
         try fixture.seedRepository()
         let git = try fixture.executable("""
-            if [ "$3" = show ]; then touch '\(fixture.failureSwitch)'; fi
-            if [ -f '\(fixture.failureSwitch)' ]; then
-              echo 'Xcode license not accepted' >&2; exit 69
-            fi
-            if [ "$1" = '--version' ]; then echo 'git version fixture'; exit 0; fi
-            case "$3" in
-              fetch) exit 0 ;;
-              pull) exit 1 ;;
-              diff) if [ "$4" = '--name-only' ]; then printf 'skills/example/SKILL.md\\0'; exit 0; fi ;;
-            esac
+            simulate_failure() {
+                while [ "$1" = '-c' ]; do shift 2; done
+                if [ "$1" = '-C' ]; then shift 2; fi
+                if [ "$1" = show ]; then touch '\(fixture.failureSwitch)'; fi
+                if [ -f '\(fixture.failureSwitch)' ]; then
+                  echo 'Xcode license not accepted' >&2; exit 69
+                fi
+                case "$1" in
+                  --version) echo 'git version fixture'; exit 0 ;;
+                  fetch) exit 0 ;;
+                  pull) exit 1 ;;
+                  diff) if [ "$2" = '--name-only' ]; then printf 'skills/example/SKILL.md\\0'; exit 0; fi ;;
+                esac
+            }
+            simulate_failure "$@"
             exec /usr/bin/git "$@"
             """)
         let engine = SyncEngine(gitService: git, lockPath: fixture.support + "/sync.lock")

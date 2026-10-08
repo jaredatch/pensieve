@@ -247,9 +247,10 @@ struct GitService: GitServiceProtocol {
     // MARK: Process runner (§B — verbatim)
 
     @discardableResult
-    func run(_ args: [String], in workingDir: String?, credential: GitCredential? = nil) throws
+    func run(_ args: [String], in workingDir: String?, credential: GitCredential? = nil,
+             storeRules: Bool = false) throws
         -> GitOutput {
-        let result = try runData(args, in: workingDir, credential: credential)
+        let result = try runData(args, in: workingDir, credential: credential, storeRules: storeRules)
         return GitOutput(
             stdout: String(bytes: result.stdout, encoding: .utf8) ?? "",
             stderr: String(bytes: result.stderr, encoding: .utf8) ?? "",
@@ -269,11 +270,14 @@ struct GitService: GitServiceProtocol {
 
     @discardableResult
     func runData(
-        _ args: [String], in workingDir: String?, credential: GitCredential? = nil
+        _ args: [String], in workingDir: String?, credential: GitCredential? = nil, storeRules: Bool = false
     ) throws
         -> GitDataOutput {
-        let child = try GitProcess(executable: gitPath, arguments: args, workingDirectory: workingDir,
-                                   environment: childEnvironment(credential: credential))
+        var environment = try childEnvironment(credential: credential)
+        if storeRules { environment["GIT_ATTR_NOSYSTEM"] = "1" }
+        let arguments = storeRules ? Self.storeConfigurationArgs + args : args
+        let child = try GitProcess(executable: gitPath, arguments: arguments, workingDirectory: workingDir,
+                                   environment: environment)
         #if GIT_PROCESS_PROBE
         child.probeHooks = probeHooks
         probeHooks?.started(child.pid)
@@ -299,9 +303,10 @@ struct GitService: GitServiceProtocol {
 
     /// Run and throw `.commandFailed` on a non-zero exit. For fixture-style ops with no auth surface.
     @discardableResult
-    func runOrThrow(_ args: [String], in workingDir: String?, credential: GitCredential? = nil) throws
+    func runOrThrow(_ args: [String], in workingDir: String?, credential: GitCredential? = nil,
+                    storeRules: Bool = false) throws
         -> GitOutput {
-        let r = try run(args, in: workingDir, credential: credential)
+        let r = try run(args, in: workingDir, credential: credential, storeRules: storeRules)
         guard r.exit == 0 else {
             throw GitError.commandFailed(args: args, exitCode: r.exit, stderr: r.stderr.isEmpty ? r.stdout : r.stderr,
                 confirmingProbe: r.confirmingProbe)
@@ -352,9 +357,10 @@ struct GitService: GitServiceProtocol {
     /// `git init` + force the default branch to `main` deterministically (regardless of the host's
     /// `init.defaultBranch`), + a local identity fallback. `path` must already exist.
     func initRepository(at path: String) throws {
-        try runOrThrow(["-C", path, "init"], in: nil)
+        try runOrThrow(["-C", path, "init"], in: nil, storeRules: true)
         try runOrThrow(["-C", path, "symbolic-ref", "HEAD", "refs/heads/main"], in: nil)
         try ensureCommitIdentity(at: path)
+        try ensureStoreAttributes(at: path)
     }
 
     func setRemote(_ url: String, at path: String) throws {
@@ -391,9 +397,16 @@ struct GitService: GitServiceProtocol {
     func clone(remote: String, into path: String, credential: GitCredential?) throws {
         // `--` terminates options: without it git parses a `--upload-pack=<cmd>`-style remote as an
         // OPTION and executes it (git-option injection — distinct from shell injection). See type doc.
-        let args = ["clone", "--quiet", "--", remote, path]
-        let r = try run(args, in: nil, credential: credential)
-        guard r.exit != 0 else { return }
+        // Install our higher-priority attributes BEFORE the first checkout reads skill rules.
+        let args = ["clone", "--quiet", "--no-checkout", "--", remote, path]
+        let r = try run(args, in: nil, credential: credential, storeRules: true)
+        if r.exit == 0 {
+            try ensureStoreAttributes(at: path)
+            if try headSHA(at: path) != nil {
+                try runOrThrow(["-C", path, "checkout", "--force"], in: nil, storeRules: true)
+            }
+            return
+        }
         let combined = r.stdout + r.stderr
         if isAuthFailure(combined) {
             throw GitError.authenticationFailed(remote: remote, detail: combined)
@@ -495,7 +508,8 @@ extension GitService {
     }
 
     func checkoutUnbornBranch(_ branch: String, at path: String) throws {
-        try runOrThrow(["-C", path, "checkout", "-B", branch], in: nil)
+        try ensureStoreAttributes(at: path)
+        try runOrThrow(["-C", path, "checkout", "-B", branch], in: nil, storeRules: true)
     }
 
     func fetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {
@@ -503,9 +517,10 @@ extension GitService {
     }
 
     func materializeFromFetchHead(at path: String) throws {
+        try ensureStoreAttributes(at: path)
         try runOrThrow(
             ["-C", path, "restore", "--source=FETCH_HEAD", "--staged", "--worktree", "--", ":/"],
-            in: nil
+            in: nil, storeRules: true
         )
     }
 
@@ -570,12 +585,12 @@ extension GitService {
     @discardableResult
     func stageAllAndCommit(at path: String, message: String) throws -> Bool {
         try ensureCommitIdentity(at: path)
-        try runOrThrow(["-C", path, "add", "-A"], in: nil)
-        let status = try runOrThrow(["-C", path, "status", "--porcelain"], in: nil)
+        try stageStore(at: path)
+        let status = try runOrThrow(["-C", path, "status", "--porcelain"], in: nil, storeRules: true)
         if status.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return false   // nothing to commit
         }
-        try runOrThrow(["-C", path, "commit", "-m", message], in: nil)
+        try runOrThrow(["-C", path, "commit", "-m", message], in: nil, storeRules: true)
         return true
     }
 
@@ -583,9 +598,10 @@ extension GitService {
     /// (no locale-sensitive string matching): conflict = non-zero exit AND `--diff-filter=U` non-empty;
     /// up-to-date vs merged = HEAD unchanged vs changed.
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
+        try ensureStoreAttributes(at: path)
         let before = try headSHA(at: path)
         let args = ["-C", path, "pull", "--rebase", "origin", "main"]
-        let r = try run(args, in: nil, credential: credential)
+        let r = try run(args, in: nil, credential: credential, storeRules: true)
         if r.exit == 0 {
             let after = try headSHA(at: path)
             return before == after ? .upToDate : .merged
@@ -615,7 +631,8 @@ extension GitService {
     }
 
     func abortRebase(at path: String) throws {
-        try runOrThrow(["-C", path, "rebase", "--abort"], in: nil)
+        try ensureStoreAttributes(at: path)
+        try runOrThrow(["-C", path, "rebase", "--abort"], in: nil, storeRules: true)
     }
 
     func conflictedFiles(at path: String) throws -> [String] {

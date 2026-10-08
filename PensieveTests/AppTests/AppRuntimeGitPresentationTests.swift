@@ -154,7 +154,11 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
         // A non-scaffold empty store selects clone after the successful preflight.
         try fixture.files.writeFile(at: fixture.root + "/keep.txt", content: "fixture")
         let git = try fixture.executable("""
-        if [ "$1" = clone ]; then touch '\(fixture.failureSwitch)'; fi
+        simulate_failure() {
+            while [ "$1" = '-c' ]; do shift 2; done
+            if [ "$1" = clone ]; then touch '\(fixture.failureSwitch)'; fi
+        }
+        simulate_failure "$@"
         if [ -f '\(fixture.failureSwitch)' ]; then
           echo 'You have not agreed to the Xcode license.' >&2
           exit 69
@@ -166,7 +170,11 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
             credentials: InMemoryCredentialStore(), root: fixture.root, lockPath: fixture.support + "/sync.lock")
         await model.connectAndReport(url: "git@example.com:skills.git", username: "", token: "")
         XCTAssertEqual(model.state, .failed(GitUsability.licenseNotAccepted.message ?? ""))
-        let calls = try fixture.files.readFile(at: fixture.trace).split(separator: "\n")
+        let calls = try fixture.files.readFile(at: fixture.trace).split(separator: "\n").map { line in
+            var arguments = line.split(separator: " ")
+            while arguments.first == "-c", arguments.count >= 2 { arguments.removeFirst(2) }
+            return arguments.joined(separator: " ")
+        }
         XCTAssertEqual(calls.filter { $0 == "--version" }.count, 2, "one preflight and one confirming probe")
         XCTAssertTrue(calls.contains { $0.hasPrefix("clone ") })
     }

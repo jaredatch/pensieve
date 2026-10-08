@@ -137,10 +137,15 @@ final class GitFailureSyncTests: XCTestCase {
         try fixture.seedRepository()
         let before = try fixture.snapshot()
         let git = try fixture.executable("""
-            if [ "$3" = 'remote' ] && [ "$4" = 'get-url' ]; then
-                echo 'could not read repository config' >&2
-                exit 128
-            fi
+            simulate_failure() {
+                while [ "$1" = '-c' ]; do shift 2; done
+                if [ "$1" = '-C' ]; then shift 2; fi
+                if [ "$1" = 'remote' ] && [ "$2" = 'get-url' ]; then
+                    echo 'could not read repository config' >&2
+                    exit 128
+                fi
+            }
+            simulate_failure "$@"
             exec /usr/bin/git "$@"
             """)
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
@@ -217,10 +222,15 @@ final class GitFailureSyncTests: XCTestCase {
         defer { try? fixture.remove() }
         try fixture.seedRepository()
         let git = try fixture.executable("""
-            if [ "$3" = 'add' ]; then
-                echo "checkout failed for 'xcrun: error: invalid active developer path'" >&2
-                exit 128
-            fi
+            simulate_failure() {
+                while [ "$1" = '-c' ]; do shift 2; done
+                if [ "$1" = '-C' ]; then shift 2; fi
+                if [ "$1" = 'add' ]; then
+                    echo "checkout failed for 'xcrun: error: invalid active developer path'" >&2
+                    exit 128
+                fi
+            }
+            simulate_failure "$@"
             exec /usr/bin/git "$@"
             """)
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))

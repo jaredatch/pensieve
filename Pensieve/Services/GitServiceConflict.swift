@@ -25,13 +25,18 @@ extension GitService {
 
     /// Continue a rebase, skipping only when the replay is structurally proven empty.
     func continueRebase(at path: String) throws -> PullResult {
+        try ensureStoreAttributes(at: path)
         let args = ["-C", path, "rebase", "--continue"]
-        let r = try run(args, in: nil)
+        let r = try run(args, in: nil, storeRules: true)
         if r.exit == 0 { return .merged }
         let conflicts = try conflictedFiles(at: path)
         if !conflicts.isEmpty { return .conflicted(conflicts) }
-        let cachedClean = (try runBestEffort(["-C", path, "diff", "--cached", "--quiet"], in: nil))?.exit == 0
-        let worktreeClean = (try runBestEffort(["-C", path, "diff", "--quiet"], in: nil))?.exit == 0
+        let cachedClean = try GitError.preservingUnusability {
+            try run(["-C", path, "diff", "--cached", "--quiet"], in: nil, storeRules: true)
+        }?.exit == 0
+        let worktreeClean = try GitError.preservingUnusability {
+            try run(["-C", path, "diff", "--quiet"], in: nil, storeRules: true)
+        }?.exit == 0
         if isRebaseInProgress(at: path) && cachedClean && worktreeClean {
             _ = try skipRebase(at: path)
             return .merged
@@ -42,9 +47,10 @@ extension GitService {
 
     /// `git rebase --skip`. Exit 0 => .merged (or .upToDate if HEAD is unchanged); else throw.
     func skipRebase(at path: String) throws -> PullResult {
+        try ensureStoreAttributes(at: path)
         let before = try headSHA(at: path)
         let args = ["-C", path, "rebase", "--skip"]
-        let r = try run(args, in: nil)
+        let r = try run(args, in: nil, storeRules: true)
         guard r.exit == 0 else {
             throw GitError.commandFailed(args: args, exitCode: r.exit, stderr: r.stderr.isEmpty ? r.stdout : r.stderr,
                 confirmingProbe: r.confirmingProbe)
@@ -54,7 +60,8 @@ extension GitService {
 
     /// `git add -- <path>` — stage a resolved path. The `--` guards a leading-dash path.
     func stagePath(_ path: String, at root: String) throws {
-        try runOrThrow(["-C", root, "add", "--", path], in: nil)
+        try ensureStoreAttributes(at: root)
+        try runOrThrow(["--literal-pathspecs", "-C", root, "add", "--force", "--", path], in: nil, storeRules: true)
     }
 
     /// Collapse unpushed divergence to one commit so the following rebase replays exactly one commit.
@@ -68,7 +75,7 @@ extension GitService {
             }
             return try stageAllAndCommit(at: root, message: message)
         }
-        try runOrThrow(["-C", root, "add", "-A"], in: nil)
+        try stageStore(at: root)
         guard let baseR = try runBestEffort(["-C", root, "merge-base", "HEAD", "origin/main"], in: nil),
               baseR.exit == 0 else {
             return try stageAllAndCommit(at: root, message: message)
@@ -76,8 +83,8 @@ extension GitService {
         let base = baseR.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !base.isEmpty else { return try stageAllAndCommit(at: root, message: message) }
         try runOrThrow(["-C", root, "reset", "--soft", base], in: nil)
-        if (try run(["-C", root, "diff", "--cached", "--quiet"], in: nil)).exit != 0 {
-            try runOrThrow(["-C", root, "commit", "-m", message], in: nil)
+        if (try run(["-C", root, "diff", "--cached", "--quiet"], in: nil, storeRules: true)).exit != 0 {
+            try runOrThrow(["-C", root, "commit", "-m", message], in: nil, storeRules: true)
             return true
         }
         return false

@@ -101,6 +101,7 @@ targets:
       - path: PensieveTests/Fixtures/GitProcessProbe
       - path: Pensieve/Utilities/BlockingWork.swift
       - path: Pensieve/Services/GitService.swift
+      - path: Pensieve/Services/GitService+StoreRules.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
       - path: Pensieve/Services/GitProcess.swift
       - path: Pensieve/Services/GitService+Usability.swift
@@ -144,6 +145,7 @@ targets:
       - path: Pensieve/Services/FileService+TreeWalk.swift
       - path: Pensieve/Services/FileService+TreeComparison.swift
       - path: Pensieve/Services/GitService.swift
+      - path: Pensieve/Services/GitService+StoreRules.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
       - path: Pensieve/Services/GitProcess.swift
       - path: Pensieve/Services/GitService+Usability.swift

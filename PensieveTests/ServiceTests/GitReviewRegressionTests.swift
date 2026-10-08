@@ -192,11 +192,16 @@ final class GitReviewRegressionTests: XCTestCase {
         defer { try? fixture.remove() }
         try fixture.seedRepository()
         let git = try fixture.executable("""
-            if [ "$1" = '--version' ]; then echo 'git version fixture'; exit 0; fi
-            case "$3" in
-              fetch|pull|push) echo 'Authentication failed' >&2; exit 128 ;;
-              remote) echo 'repository config unreadable' >&2; exit 128 ;;
-            esac
+            simulate_failure() {
+                while [ "$1" = '-c' ]; do shift 2; done
+                if [ "$1" = '-C' ]; then shift 2; fi
+                case "$1" in
+                  --version) echo 'git version fixture'; exit 0 ;;
+                  fetch|pull|push) echo 'Authentication failed' >&2; exit 128 ;;
+                  remote) echo 'repository config unreadable' >&2; exit 128 ;;
+                esac
+            }
+            simulate_failure "$@"
             exec /usr/bin/git "$@"
             """)
         let operations: [() throws -> Void] = [
