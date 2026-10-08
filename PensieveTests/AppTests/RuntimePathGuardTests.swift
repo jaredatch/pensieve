@@ -20,19 +20,8 @@ final class RuntimePathGuardTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("PensieveDaemon"),
             withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let members = ["pensieveBaseDir", "pensieveSkillsDir", "pensieveAppSupportDir", "gitAskpassHelperPath",
-                       "claudeCodeUserSkillsDir", "grokUserSkillsDir", "codexUserSkillsDir", "openClawUserSkillsDir",
-                       "hermesUserSkillsDir", "cursorUserRulesDir", "homeDirectory"]
-        var cases = members.flatMap { member in
-            ["init(root: String = Constants.\(member)) {}", "let root = PathConstants.\(member)"]
-        }
-        cases += ["init(credentials: CredentialStoreProtocol = KeychainCredentialStore()) {}",
-                  "let credentials = KeychainCredentialStore()",
-                  "let credentials = KeychainCredentialStore.init()",
-                  "init(lock: String = PathConstants /* nested /* text */ comment */ .\n" +
-                      "pensieveAppSupportDir + \"/sync.lock\") {}",
-                  "let root = \"\\(Constants.pensieveBaseDir)\"",
-                  "let paths: RuntimePaths = .production"]
+        let inventory = try fixtureInventory(in: directory)
+        let cases = rejectedSources(members: try XCTUnwrap(inventory["location"]))
         for folder in ["Pensieve", "PensieveDaemon"] {
             let path = directory.appendingPathComponent(folder + "/NewCollaborator.swift")
             for source in cases {
@@ -44,6 +33,61 @@ final class RuntimePathGuardTests: XCTestCase {
             try assertPermittedSources(in: directory, at: path)
             try FileManager.default.removeItem(at: path)
         }
+        try assertUnclassifiedDefinitions(in: directory)
+        try assertHarmlessSources(in: directory)
+    }
+
+    private func rejectedSources(members: [String]) -> [String] {
+        members.flatMap { member in
+            ["init(root: String = Constants.\(member)) {}", "let root = PathConstants.\(member)"]
+        } + ["init(credentials: CredentialStoreProtocol = KeychainCredentialStore()) {}",
+             "let credentials = KeychainCredentialStore()", "let credentials = KeychainCredentialStore.init()",
+             "init(lock: String = PathConstants /* nested /* text */ comment */ .\n" +
+                 "pensieveAppSupportDir + \"/sync.lock\") {}",
+             "let root = \"\\(Constants.pensieveBaseDir)\"", "let paths: RuntimePaths = .production",
+             "init(p: RuntimePaths! = .production) {}", "init(p: RuntimePaths? = .production) {}",
+             "init(p: Box<RuntimePaths> = .production) {}", "init(p: (RuntimePaths) = .production) {}",
+             "var paths: RuntimePaths; init() { self.paths = .production }",
+             "let p: RuntimePaths = (.production)", "let environment: Env = .production",
+             "let p = RuntimePaths.production", "let p = AppRuntimePaths.production",
+             "let x = a+/* \" */ Constants.homeDirectory // \"",
+             "init(root: String = Constants.geminiUserSkillsDir) {}",
+             "let c = Constants.self; let root = c.pensieveBaseDir",
+             "let c = PathConstants.self; let root = c.pensieveBaseDir",
+             "func make() -> RuntimePaths { .production }",
+             "let p: RuntimePaths = .`production`",
+             "let x = root == RuntimePaths.production.storeRoot",
+             "let x = root == .production.storeRoot"]
+    }
+
+    private func fixtureInventory(in directory: URL) throws -> [String: [String]] {
+        let source = repository.appendingPathComponent("script/runtime-path-members.json")
+        var inventory = try JSONDecoder().decode([String: [String]].self, from: Data(contentsOf: source))
+        inventory["nonLocation", default: []].append("maxBodyBytes")
+        let destination = directory.appendingPathComponent("script/runtime-path-members.json")
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(inventory).write(to: destination)
+        return inventory
+    }
+
+    private func assertUnclassifiedDefinitions(in directory: URL) throws {
+        for type in ["PathConstants", "Constants"] {
+            let relative = "Pensieve/Utilities/" + type + ".swift"
+            let path = directory.appendingPathComponent(relative)
+            try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+            for member in ["geminiUserSkillsDir", "newSafeLimit"] {
+                try ("enum " + type + " {\nstatic let " + member + " = 8\n}\n").write(
+                    to: path, atomically: true, encoding: .utf8)
+                let result = try runGuard(root: directory)
+                XCTAssertEqual(result.status, 1, result.output)
+                XCTAssertTrue(result.output.contains(relative + ":2:"), result.output)
+                XCTAssertTrue(result.output.contains(member), result.output)
+            }
+            try FileManager.default.removeItem(at: path)
+        }
+    }
+
+    private func assertHarmlessSources(in directory: URL) throws {
         let harmless = """
             struct Neutral {
                 // let root = Constants.pensieveBaseDir
@@ -66,7 +110,13 @@ final class RuntimePathGuardTests: XCTestCase {
         let permitted = [
             "func isLive(_ e: Env) -> Bool { e == .production }",
             "func isLive(_ e: Env) -> Bool { e != .production }",
-            "let environment: Env = .production",
+            "func isLive(_ e: Env) -> Bool { .production == e }",
+            "func isLive(_ e: Env) -> Bool { (.production) != e }",
+            "func isLive(_ e: Env) -> Bool { e == (.production) }",
+            "func isLive(_ e: Env) -> Bool { switch e { case .production: return true; default: return false } }",
+            "func isLive(_ e: Env) -> Bool { if case .production = e { return true }; return false }",
+            "let z = a+// Constants.homeDirectory\n",
+            "let z = a+/* \" Constants.homeDirectory */b",
             "let n = Constants.maxBodyBytes",
             "let n = PathConstants.maxBodyBytes"
         ]
