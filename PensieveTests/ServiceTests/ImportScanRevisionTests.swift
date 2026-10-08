@@ -228,7 +228,7 @@ extension ImportScanRevisionTests {
                 throw CocoaError(.fileWriteNoPermission)
             }
         }
-        let model = ImportViewModel(fileService: files, scanner: scanner, skillStore: store,
+        let model = ImportViewModel(scanner: scanner, skillStore: store,
             lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestRoot: root)
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
@@ -258,7 +258,7 @@ extension ImportScanRevisionTests {
         var notifications = 0
         var echoes: [[String]] = []
         let model = ImportViewModel(
-            fileService: files, scanner: scanner,
+            scanner: scanner,
             skillStore: store,
             lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestRoot: root,
@@ -294,7 +294,7 @@ extension ImportScanRevisionTests {
         let root = TestTemporaryDirectory.path + "ImportCount-" + UUID().uuidString
         let files = FileService()
         defer { try? files.deleteDirectory(at: root) }
-        let model = ImportViewModel(fileService: files, scanner: scanner,
+        let model = ImportViewModel(scanner: scanner,
             skillStore: SkillStore(fileService: files, baseDir: root + "/skills"),
             lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
             manifestRoot: root)

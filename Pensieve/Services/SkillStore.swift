@@ -58,7 +58,7 @@ extension SkillStoreProtocol {
 // MARK: - Implementation
 
 final class SkillStore: SkillStoreProtocol {
-    private let fileService: FileServiceProtocol
+    let fileService: FileServiceProtocol
     let baseDir: String
 
     init(fileService: FileServiceProtocol, baseDir: String) {
@@ -71,19 +71,12 @@ final class SkillStore: SkillStoreProtocol {
     }
 
     func createSkill(name: String, description: String, body: String, avoiding: Set<String>) throws -> String {
-        try createSkill(
-            name: name,
-            content: SkillSerializer.serialize(name: name, description: description, body: body),
-            avoiding: avoiding
-        )
-    }
-
-    func createSkill(name: String, content: String, avoiding: Set<String>) throws -> String {
         let slug = Self.slugify(name)
         let dirName = try uniqueDirectoryName(for: slug, avoiding: avoiding)
         try fileService.createDirectory(at: baseDir + "/" + dirName)
         let path = try validatedSkillDirectory(dirName) + "/SKILL.md"
-        try fileService.writeFile(at: path, content: content)
+        try fileService.writeFile(at: path,
+            content: SkillSerializer.serialize(name: name, description: description, body: body))
         return dirName
     }
 

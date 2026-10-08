@@ -25,14 +25,16 @@ final class ImportPublicationTests: XCTestCase {
         return ModelContext(container)
     }
 
-    private func model(using service: FileServiceProtocol? = nil, names: [String] = ["One"]) throws -> ImportViewModel {
+    private func model(using service: FileServiceProtocol? = nil, names: [String] = ["One"],
+                       manifestRoot: String? = nil) throws -> ImportViewModel {
         for name in names { try files.writeFile(at: root + "/sources/\(name)/SKILL.md", content: content(name)) }
         let service = service ?? files
         let scanner = ImportScanner(fileService: files, claudeSkillsDir: root + "/sources",
             grokSkillsDir: root + "/grok", cursorRulesDir: root + "/cursor", codexSkillsDir: root + "/codex",
             storeRoot: storeRoot)
-        let model = ImportViewModel(fileService: service, scanner: scanner,
-            skillStore: SkillStore(fileService: service, baseDir: skills), lockPath: lockPath, manifestRoot: storeRoot)
+        let model = ImportViewModel(scanner: scanner,
+            skillStore: SkillStore(fileService: service, baseDir: skills), lockPath: lockPath,
+            manifestRoot: manifestRoot ?? storeRoot)
         model.scan()
         return model
     }
@@ -66,7 +68,7 @@ final class ImportPublicationTests: XCTestCase {
             SkillInstallService.cleanupVendorTemps(fileService: self.files, storeRoot: self.storeRoot, lockPath: self.lockPath)
             XCTAssertTrue(self.files.fileExists(at: path))
         }
-        let model = try model(using: service, names: ["One", "Two"])
+        let model = try model(using: service, names: ["One", "Two"], manifestRoot: root + "/unrelated-manifest")
         let context = try context()
         model.importSelected(context: context)
 

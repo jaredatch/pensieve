@@ -2,10 +2,67 @@ import AppKit
 import SwiftData
 import SwiftUI
 import XCTest
+import Vision
 @testable import Pensieve
 
 @MainActor
 final class ImportWizardHostTests: XCTestCase {
+    func testRefusedImportKeepsSelectionAndAllowsRetry() async throws {
+        let root = TestTemporaryDirectory.path + "ImportWizardRetry-" + UUID().uuidString
+        let files = FileService()
+        defer { try? files.deleteDirectory(at: root) }
+        for name in ["Chosen", "Unselected"] {
+            try files.writeFile(at: root + "/source/\(name)/SKILL.md",
+                                content: "---\nname: \(name)\ndescription: Description\n---\n\nBody")
+        }
+        let lockPath = root + "/support/sync.lock"
+        let model = retryModel(root: root, files: files, lockPath: lockPath)
+        let selection = model.selectedSkills
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        let fixture = hostWizard(model: model, context: container.mainContext)
+        defer { fixture.window.close() }
+
+        // An existing directory at the lock path makes the real open fail even for a privileged test host.
+        try files.createDirectory(at: lockPath)
+        let unopenablePressed = await pressImport(in: fixture.host)
+        XCTAssertTrue(unopenablePressed)
+        guard unopenablePressed else { return }
+        await TestWait.until(failureMessage: "An unopenable lock must report its error") { model.error != nil }
+        XCTAssertFalse(model.error?.localizedCaseInsensitiveContains("sync is running") == true)
+        XCTAssertTrue(model.error?.localizedCaseInsensitiveContains("lock file") == true)
+        XCTAssertEqual(model.selectedSkills, selection)
+        XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<Skill>()).isEmpty)
+        XCTAssertFalse(files.directoryExists(at: root + "/store"))
+        XCTAssertTrue(try renderedText(in: fixture.host).map(\.text).joined(separator: " ").contains("lock"))
+
+        try files.deleteDirectory(at: lockPath)
+        let held = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
+        defer { held.release() }
+        let busyPressed = await pressImport(in: fixture.host)
+        XCTAssertTrue(busyPressed)
+        guard busyPressed else { return }
+        await TestWait.until(failureMessage: "The busy lock must report its refusal") {
+            model.error?.localizedCaseInsensitiveContains("sync is running") == true
+        }
+        XCTAssertEqual(model.selectedSkills, selection)
+        XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<Skill>()).isEmpty)
+        XCTAssertFalse(files.directoryExists(at: root + "/store"))
+        let busyText = try renderedText(in: fixture.host).map(\.text).joined(separator: " ")
+        XCTAssertTrue(busyText.localizedCaseInsensitiveContains("sync"))
+
+        held.release()
+        let retryPressed = await pressImport(in: fixture.host)
+        XCTAssertTrue(retryPressed)
+        await TestWait.until(failureMessage: "Retry must import the preserved selection") { model.importedSkillCount == 1 }
+        XCTAssertNil(model.error)
+        XCTAssertEqual(model.selectedSkills, selection)
+        XCTAssertEqual(try container.mainContext.fetch(FetchDescriptor<Skill>()).map(\.directoryName), ["chosen"])
+        XCTAssertEqual(try files.listDirectory(at: root + "/store/skills"), ["chosen"])
+        await TestWait.until(failureMessage: "Successful retry must reach Done") {
+            (try? self.renderedText(in: fixture.host).contains { $0.text == "Done" }) == true
+        }
+    }
+
     func testResultsAndDoneSummaryCountsReasonsAndReplacesLaterScan() {
         let scanner = ReportScanner()
         let model = ImportViewModel(
@@ -83,6 +140,28 @@ final class ImportWizardHostTests: XCTestCase {
         XCTAssertEqual(fixture.host.fittingSize, fittingSize)
     }
 
+    private func hostWizard(model: ImportViewModel, context: ModelContext)
+        -> (host: NSHostingView<AnyView>, window: NSWindow) {
+        let fixture = host(AnyView(ImportWizardView(importVM: model, writesAllowed: true, startsAtResults: true)
+            .environment(\.modelContext, context).background(Color(nsColor: .windowBackgroundColor))))
+        fixture.window.styleMask = [.titled, .closable]
+        fixture.host.frame = NSRect(x: 0, y: 0, width: 600, height: 500)
+        NSApp.activate(ignoringOtherApps: true)
+        fixture.window.makeKeyAndOrderFront(nil)
+        return fixture
+    }
+
+    private func retryModel(root: String, files: FileService, lockPath: String) -> ImportViewModel {
+        let model = ImportViewModel(scanner: ImportScanner(fileService: files,
+            claudeSkillsDir: root + "/source", grokSkillsDir: root + "/grok", cursorRulesDir: root + "/cursor",
+            codexSkillsDir: root + "/codex", storeRoot: root + "/store"),
+            skillStore: SkillStore(fileService: files, baseDir: root + "/store/skills"),
+            lockPath: lockPath, manifestRoot: root + "/store")
+        model.scan()
+        model.selectedSkills = Set(model.discoveredSkills.filter { $0.name == "Chosen" }.map(\.sourcePath))
+        return model
+    }
+
     private func host(_ view: AnyView) -> (host: NSHostingView<AnyView>, window: NSWindow) {
         // Constrain width only: a fixed 500-point root height would hide overflowing sheet content.
         let host = NSHostingView(rootView: AnyView(view.frame(width: 600)))
@@ -100,9 +179,52 @@ final class ImportWizardHostTests: XCTestCase {
     private func scrollViews(in root: NSView) -> [NSScrollView] {
         [root].compactMap { $0 as? NSScrollView } + root.subviews.flatMap(scrollViews(in:))
     }
+
+    private func pressImport(in root: NSView) async -> Bool {
+        var target: CGRect?
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                             failureMessage: "The selection must retain its Import Selected button", diagnostics: {
+            ((try? self.renderedText(in: root)) ?? []).map(\.text).joined(separator: " | ")
+        }, {
+            target = try? self.renderedText(in: root).first { $0.text.contains("Import Selected") }?.bounds
+            return target != nil
+        })
+        guard let target, let window = root.window else { return false }
+        let y = root.isFlipped ? 1 - target.midY : target.midY
+        let point = root.convert(NSPoint(x: target.midX * root.bounds.width, y: y * root.bounds.height), to: nil)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            guard let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else { return false }
+            window.sendEvent(event)
+        }
+        return true
+    }
+
+    // SwiftUI omits virtual accessibility controls in this host. Read the real 2x render,
+    // as AddProjectSheetHostTests does, and click the recognized footer caption.
+    private func renderedText(in root: NSView) throws -> [(text: String, bounds: CGRect)] {
+        root.layoutSubtreeIfNeeded()
+        let bounds = root.bounds
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil,
+            pixelsWide: Int(bounds.width * 2), pixelsHigh: Int(bounds.height * 2), bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0))
+        bitmap.size = bounds.size
+        root.cacheDisplay(in: bounds, to: bitmap)
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["en-US"]
+        try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([request])
+        return (request.results ?? []).compactMap {
+            guard let candidate = $0.topCandidates(1).first else { return nil }
+            return (candidate.string, $0.boundingBox)
+        }
+    }
 }
 
 private final class ReportScanner: ImportScannerProtocol {
+
     var skipped: [ImportScanSkip] = [
         .init(path: "/fixture/one", reason: .notRegular),
         .init(path: "/fixture/two", reason: .notRegular),

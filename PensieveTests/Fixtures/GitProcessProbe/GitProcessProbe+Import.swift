@@ -12,9 +12,9 @@ extension GitProcessProbe {
                     try files.files.writeFile(at: report, content: path)
                     holdWhileParentLives()
                 }
-                _ = try SkillStore(fileService: files, baseDir: root + "/store/skills").createImportedSkill(
+                _ = try SkillStore(fileService: files, baseDir: root + "/store/skills").createSkill(
                     name: "Crash", content: "---\nname: Crash\ndescription: Crash\n---\n\nComplete",
-                    avoiding: [], storeRoot: root + "/store", fileService: files)
+                    avoiding: [])
             } else {
                 try files.files.writeFile(at: report, content: "READY")
                 holdWhileParentLives()

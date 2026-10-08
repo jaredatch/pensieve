@@ -28,18 +28,26 @@ final class SyncLock {
     static func tryAcquire(
         at path: String
     ) -> SyncLock? {
+        try? tryAcquireReportingErrors(at: path)
+    }
+
+    /// Returns nil only for contention; callers that offer a retry can distinguish an inaccessible lock.
+    /// The original nonthrowing API retains its fail-safe nil for either refusal.
+    static func tryAcquireReportingErrors(at path: String) throws -> SyncLock? {
         // Ensure the containing dir exists (fresh install): a missing parent would fail `open`. The askpass
         // helper also lives here but is written lazily by a later git op, so the lock must not rely on it.
         let dir = (path as NSString).deletingLastPathComponent
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
 
         // O_CLOEXEC: git child processes we spawn must NOT inherit (and thus co-hold) this lock fd.
         let fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { return nil }                 // can't establish the lock → fail safe (busy)
+        guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
 
         if flock(fd, LOCK_EX | LOCK_NB) != 0 {
-            close(fd)                                     // held by someone else (EWOULDBLOCK) → not ours
-            return nil
+            let code = errno
+            close(fd)
+            if code == EWOULDBLOCK { return nil }
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
         }
         return SyncLock(fd: fd)
     }

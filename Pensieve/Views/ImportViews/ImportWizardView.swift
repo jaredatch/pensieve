@@ -36,8 +36,7 @@ struct ImportWizardView: View {
                         importVM.error = "Failed to import: couldn't read the library"
                         return
                     }
-                    importVM.importSelected(context: context)
-                    step = .done
+                    if importVM.importSelected(context: context) == .finished { step = .done }
                 }
             case .done:
                 doneView

@@ -109,24 +109,34 @@ final class SyncNudgeTests: XCTestCase {
     }
 
     func testImportCompletionNudges() throws {
-        let fixture = try libraryFixture()
-        let discovered = DiscoveredSkill(
-            name: "Imported", body: "Body", sourcePlatform: "codex",
-            sourcePath: "/fixture/imported/SKILL.md", skillDescription: "Description"
-        )
-        let model = ImportViewModel(
-            scanner: FixedImportScanner(skills: [discovered]),
-            skillStore: fixture.store,
-            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
-            manifestRoot: TestPaths.storeRoot,
-            notifier: fixture.counter.notify,
-            echoRegistrar: { fixture.library.noteAppAuthoredBodies(directoryNames: $0) }
-        )
-        fixture.library.startWatching()
-        model.scan()
-        model.importSelected(context: fixture.context)
-        fixture.watcher.emit("imported")
-        XCTAssertEqual(fixture.counter.value, 1)
+        let files = FileService()
+        let before = files.directoryExists(at: TestPaths.skillsDir) ? try files.listDirectory(at: TestPaths.skillsDir) : nil
+        for _ in 0..<2 {
+            let fixture = try libraryFixture()
+            let discovered = DiscoveredSkill(
+                name: "Imported", body: "Body", sourcePlatform: "codex",
+                sourcePath: "/fixture/imported/SKILL.md", skillDescription: "Description"
+            )
+            let model = ImportViewModel(
+                scanner: FixedImportScanner(skills: [discovered]),
+                skillStore: fixture.store,
+                lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+                manifestRoot: TestPaths.storeRoot,
+                notifier: fixture.counter.notify,
+                echoRegistrar: { fixture.library.noteAppAuthoredBodies(directoryNames: $0) }
+            )
+            fixture.library.startWatching()
+            model.scan()
+            model.importSelected(context: fixture.context)
+            fixture.watcher.emit("imported")
+            XCTAssertEqual(fixture.counter.value, 1)
+            XCTAssertEqual(Set(fixture.store.bodies.keys), ["imported"])
+            XCTAssertTrue(fixture.store.bodies["imported"]?.contains("Body") == true)
+            XCTAssertEqual(try fixture.context.fetch(FetchDescriptor<Skill>()).map(\.directoryName), ["imported"])
+            XCTAssertFalse(fixture.library.externallyModified.contains("imported"))
+        }
+        let after = files.directoryExists(at: TestPaths.skillsDir) ? try files.listDirectory(at: TestPaths.skillsDir) : nil
+        XCTAssertEqual(after, before, "Memory-store imports must not write to their neutral disk path")
     }
 
     func testUpdateApplyNudges() async throws {

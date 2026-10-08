@@ -58,6 +58,9 @@ final class ImportReadSpy: FileServiceProtocol {
     func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {
         try files.entryExistsWithoutFollowingLinks(at: path)
     }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try files.entryTypeWithoutFollowingLinks(at: path)
+    }
     func realPath(at path: String) -> String { files.realPath(at: path) }
     func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? {
         files.fileIdentity(at: path, followingLinks: followingLinks)

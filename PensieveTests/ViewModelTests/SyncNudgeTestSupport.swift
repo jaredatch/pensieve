@@ -26,6 +26,19 @@ final class MemorySkillStore: SkillStoreProtocol {
         return slug
     }
 
+    func createSkill(name: String, content: String, avoiding: Set<String>) throws -> String {
+        let slug = SkillStore.slugify(name)
+        let taken = Set(bodies.keys.map { $0.lowercased() }).union(avoiding.map { $0.lowercased() })
+        var candidate = slug
+        var suffix = 2
+        while taken.contains(candidate) {
+            candidate = slug + "-\(suffix)"
+            suffix += 1
+        }
+        bodies[candidate] = content
+        return candidate
+    }
+
     func readBody(directoryName: String) throws -> String { bodies[directoryName] ?? "" }
 
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,

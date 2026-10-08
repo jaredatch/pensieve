@@ -5,9 +5,9 @@ import SwiftUI
 @Observable
 final class ImportViewModel {
     enum FolderScanOutcome: Equatable { case found(Int), nothingFound, insideLibrary }
+    enum ImportOutcome { case refused, finished }
 
     private let scanner: ImportScannerProtocol
-    private let fileService: FileServiceProtocol
     private let skillStore: SkillStoreProtocol
     private let lockPath: String
     private let manifestService: ManifestSnapshotting?
@@ -47,7 +47,6 @@ final class ImportViewModel {
     }
 
     init(
-        fileService: FileServiceProtocol? = nil,
         scanner: ImportScannerProtocol,
         skillStore: SkillStoreProtocol,
         lockPath: String,
@@ -57,7 +56,6 @@ final class ImportViewModel {
         echoRegistrar: @escaping SyncWriteEchoRegistering = SyncWriteEchoRegistrar.suppressed
     ) {
         self.scanner = scanner
-        self.fileService = fileService ?? FileService()
         self.skillStore = skillStore
         self.lockPath = lockPath
         self.manifestService = manifestService
@@ -146,20 +144,17 @@ final class ImportViewModel {
         }
     }
 
+    @discardableResult
     func importSelected(
         context: ModelContext,
         takenSlugs: (ModelContext) throws -> Set<String> = { Set(try $0.fetch(FetchDescriptor<Skill>()).map(\.directoryName)) },
         saveContext: (ModelContext) throws -> Void = { try $0.save() }
-    ) {
+    ) -> ImportOutcome {
         importNotices = []
         importedSkillCount = 0
         error = nil
         let toImport = discoveredSkills.filter { selectedSkills.contains($0.sourcePath) }
-        guard !toImport.isEmpty else { return }
-        guard let lock = SyncLock.tryAcquire(at: lockPath) else {
-            error = "Sync is running. Try importing again when it finishes."
-            return
-        }
+        guard !toImport.isEmpty, let lock = acquireImportLock() else { return .refused }
         defer { lock.release() }
 
         var taken: Set<String>
@@ -167,7 +162,7 @@ final class ImportViewModel {
             taken = try takenSlugs(context)
         } catch {
             self.error = "Failed to import: couldn't read the library (\(error.localizedDescription))"
-            return
+            return .refused
         }
 
         importProgress = 0
@@ -200,6 +195,22 @@ final class ImportViewModel {
         }
 
         finishImport(context: context, writtenSlugs: writtenSlugs, saveContext: saveContext)
+        return .finished
+    }
+
+    private func acquireImportLock() -> SyncLock? {
+        do {
+            guard let lock = try SyncLock.tryAcquireReportingErrors(at: lockPath) else {
+                error = "Pensieve's library is busy: sync is running or another operation is in progress. " +
+                    "Try importing again."
+                return nil
+            }
+            return lock
+        } catch {
+            self.error = "Couldn't access Pensieve's lock file. " +
+                "Check the App Support folder's permissions, then try again."
+            return nil
+        }
     }
 
     private func finishImport(context: ModelContext, writtenSlugs: [String],
@@ -224,10 +235,10 @@ final class ImportViewModel {
     private func createImportedSkill(
         _ discovered: DiscoveredSkill, description: String, content: String?, avoiding: Set<String>
     ) throws -> String {
-        try skillStore.createImportedSkill(
+        try skillStore.createSkill(
             name: discovered.name,
             content: content ?? SkillSerializer.serialize(name: discovered.name, description: description, body: discovered.body),
-            avoiding: avoiding, storeRoot: manifestRoot, fileService: fileService
+            avoiding: avoiding
         )
     }
 
