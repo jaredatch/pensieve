@@ -194,14 +194,10 @@ final class SyncModel {
     }
 
     func syncAndReport(_ request: SyncRequest) async {
+        guard !refuseRecoveryIfNecessary(request) else { return }
         guard !isCycleInFlight else {
             queuedRequest = queuedRequest.map { $0.absorbing(request) } ?? request
             return
-        }
-        if request == .manualRecovery {
-            guard manualRetry == .ready || manualRetry == .queued else { return }
-            manualRetry = .ready
-            guard canScheduleSync else { return }
         }
         guard canSyncNow else { return }
         guard let syncRequest else { pendingSyncRequest?(request); return }
@@ -215,7 +211,7 @@ final class SyncModel {
     }
 
     private func finishCycle(_ request: SyncRequest) {
-        if request == .manual && cycleFailed {
+        if request.contains(.manual) && cycleFailed {
             manualRetry = recoveredDuringCycle ? .ready
                 : gitState?.usability?.message != nil ? .inOutage : .awaitingOutage
         }
@@ -228,7 +224,7 @@ final class SyncModel {
         let followUp = queuedRequest
         queuedRequest = nil
         if let followUp, canSyncNow {
-            if followUp == .manualRecovery { manualRetry = .queued }
+            if followUp.contains(.manualRecovery), manualRetry == .ready { manualRetry = .queued }
             pendingSyncRequest?(followUp)
         }
     }
@@ -283,6 +279,20 @@ final class SyncModel {
 }
 
 private extension SyncModel {
+    func refuseRecoveryIfNecessary(_ request: SyncRequest) -> Bool {
+        guard request.contains(.manualRecovery) else { return false }
+        let retryAvailable = manualRetry == .ready || manualRetry == .queued
+        guard retryAvailable && canScheduleSync else {
+            if retryAvailable { manualRetry = .ready }
+            let remaining = request.subtracting(.manualRecovery)
+            // Redispatch applies the surviving request's own preference and priority rules.
+            if !remaining.isEmpty { pendingSyncRequest?(remaining) }
+            return true
+        }
+        manualRetry = .ready
+        return false
+    }
+
     func enqueueManualRetryIfPossible() {
         guard manualRetry == .ready, !isCycleInFlight, canScheduleSync,
               gitState?.usability == .usable, let pendingSyncRequest else { return }

@@ -108,6 +108,7 @@ final class AppRuntimeSyncRecoveryTests: XCTestCase {
         }
         try await assertRetryExpiresWithUsableEvidence()
         try await assertBlockedRecoveryRetainsManualRetry()
+        try await assertSpentRetryCannotRearmAfterDirectSync()
     }
 
     func testQueuedPrivilegedRequestKeepsStandingWhenItMeetsDirectCycle() async throws {
@@ -136,6 +137,7 @@ final class AppRuntimeSyncRecoveryTests: XCTestCase {
             XCTAssertFalse(h.runtime.scheduler.isSyncing, "the bypass must be spent")
         }
         try await assertPrivilegedRequestsSurviveGitOutage()
+        try await assertRefusedRetryPreservesAbsorbedStanding()
     }
 
 }
@@ -227,5 +229,73 @@ private extension AppRuntimeSyncRecoveryTests {
             await h.finish()
             XCTAssertEqual(h.engine.count, 2)
         }
+    }
+}
+
+private extension AppRuntimeSyncRecoveryTests {
+    func heldRecoveryBeforeIngest() async throws -> RecoveryHarness {
+        let h = try await makeHarness(outcomes: [.failure(GitError.unusable(.developerToolsMissing))])
+        h.preference.enabled = false
+        XCTAssertFalse(h.runtime.scheduler.isLaunchIngestReady)
+        let manual = Task { await h.runtime.syncModel.syncNowAndReport() }
+        await h.waitForCycle(1)
+        h.probe.set { .developerToolsMissing }
+        h.release.open()
+        await manual.value
+        await h.waitForIdle()
+        h.probe.set { .usable }
+        await h.runtime.refreshGitUsability()
+        XCTAssertTrue(h.runtime.scheduler.hasPendingTrigger, "ingest must hold the recovery request")
+        XCTAssertFalse(h.runtime.scheduler.isSyncing)
+        return h
+    }
+
+    func assertRefusedRetryPreservesAbsorbedStanding() async throws {
+        for trigger in ["preflight", "tick", "branchless tick"] {
+            let h = try await heldRecoveryBeforeIngest()
+            if trigger == "branchless tick" {
+                let branchPath = h.fixture.root + "/.git/refs/heads/main"
+                let branch = try h.fixture.files.readFile(at: branchPath)
+                try h.fixture.files.deleteFile(at: branchPath)
+                await h.runtime.refreshGitConfiguration(probingGit: false)
+                XCTAssertFalse(h.runtime.syncModel.canScheduleSync)
+                // An external branch appears after the observation, before the queued tick re-checks it.
+                try h.fixture.files.writeFile(at: branchPath, content: branch)
+            } else {
+                await h.runtime.refreshGitUsability() // A later usable probe invalidates the held retry.
+            }
+            h.preference.enabled = trigger != "preflight"
+            if trigger == "preflight" {
+                h.runtime.scheduler.enqueueLaunchPreflight()
+            } else {
+                h.runtime.scheduler.tick()
+            }
+            h.runtime.scheduler.launchIngestCompleted()
+            await h.waitForFollowUpOrIdle()
+            XCTAssertEqual(h.engine.count, 2, trigger + " must survive refusal of the retry it joined")
+            if h.engine.count == 2 {
+                XCTAssertEqual(h.engine.priorities.last, QOS_CLASS_DEFAULT,
+                               "refused manual recovery cannot lend its priority to ordinary work")
+                h.release.open()
+            }
+            await h.finish()
+            XCTAssertEqual(h.engine.count, 2, trigger + " must run once")
+        }
+    }
+
+    func assertSpentRetryCannotRearmAfterDirectSync() async throws {
+        let h = try await heldRecoveryBeforeIngest()
+        let direct = Task { await h.runtime.syncModel.syncNowAndReport() }
+        await h.waitForCycle(2)
+        h.runtime.scheduler.launchIngestCompleted()
+        await TestWait.until(failureMessage: "held recovery request did not return from the busy model") {
+            !h.runtime.scheduler.isSyncing
+        }
+        h.release.open()
+        await direct.value
+        await h.waitForFollowUpOrIdle(after: 2)
+        XCTAssertEqual(h.engine.count, 2, "direct Sync Now spent the retry before the busy-model hand-off")
+        await h.finish()
+        XCTAssertEqual(h.engine.count, 2, "a spent recovery request cannot re-arm itself")
     }
 }

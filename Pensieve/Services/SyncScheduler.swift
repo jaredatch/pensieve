@@ -37,13 +37,18 @@ struct SyncedStateMutationError: LocalizedError {
     }
 }
 
-/// Request standing survives coalescing and a hand-off through a busy SyncModel. A recovery retry
-/// bypasses background-off like Sync Now, but cannot re-arm the user's spent retry.
-enum SyncRequest: Int {
-    case scheduled, launchPreflight, manualRecovery, manual
+/// Coalescing retains each request kind so refusing a recovery retry cannot discard ordinary work.
+/// A recovery retry bypasses background-off like Sync Now, but cannot re-arm the user's spent retry.
+struct SyncRequest: OptionSet {
+    let rawValue: Int
+    static let scheduled = SyncRequest(rawValue: 1 << 0)
+    static let launchPreflight = SyncRequest(rawValue: 1 << 1)
+    static let manualRecovery = SyncRequest(rawValue: 1 << 2)
+    static let manual = SyncRequest(rawValue: 1 << 3)
 
-    var isManual: Bool { self == .manual || self == .manualRecovery }
-    func absorbing(_ other: SyncRequest) -> SyncRequest { rawValue >= other.rawValue ? self : other }
+    var isManual: Bool { contains(.manual) || contains(.manualRecovery) }
+    var isPrivileged: Bool { isManual || contains(.launchPreflight) }
+    func absorbing(_ other: SyncRequest) -> SyncRequest { union(other) }
 }
 
 /// Main-actor trigger coordinator. Triggers coalesce into one follow-up cycle; the pending request
@@ -147,8 +152,8 @@ final class SyncScheduler {
     func enqueueLaunchPreflight() { enqueue(.launchPreflight) }
 
     func enqueue(_ request: SyncRequest) {
+        pendingRequest = hasPendingTrigger ? pendingRequest.absorbing(request) : request
         hasPendingTrigger = true
-        pendingRequest = pendingRequest.absorbing(request)
         drainIfPossible()
     }
 
@@ -175,7 +180,7 @@ final class SyncScheduler {
               isLaunchIngestReady,
               !isSyncing,
               let syncAction else { return }
-        guard backgroundSyncEnabled || pendingRequest != .scheduled else { return }
+        guard backgroundSyncEnabled || pendingRequest.isPrivileged else { return }
         guard hasRemote(), !isConflicted() else {
             hasPendingTrigger = false
             pendingRequest = .scheduled
@@ -183,7 +188,7 @@ final class SyncScheduler {
         }
         // Host unavailability holds privileged requests; scheduled-only work is still dropped.
         guard isGitUsable() else {
-            if pendingRequest == .scheduled { hasPendingTrigger = false }
+            if !pendingRequest.isPrivileged { hasPendingTrigger = false }
             return
         }
 
