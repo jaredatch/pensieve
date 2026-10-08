@@ -397,14 +397,20 @@ struct GitService: GitServiceProtocol {
     func clone(remote: String, into path: String, credential: GitCredential?) throws {
         // `--` terminates options: without it git parses a `--upload-pack=<cmd>`-style remote as an
         // OPTION and executes it (git-option injection — distinct from shell injection). See type doc.
-        // Install our higher-priority attributes BEFORE the first checkout reads skill rules.
-        let args = ["clone", "--quiet", "--no-checkout", "--", remote, path]
+        // Keep an incomplete repository away from the live store, including across process death.
+        // Publish only after attributes and checkout succeed; retry can use another sibling.
+        let parent = (path as NSString).deletingLastPathComponent
+        let staging = parent + "/.pensieve-clone-" + UUID().uuidString
+        defer { try? fileService.deleteDirectory(at: staging) }
+        let args = ["clone", "--quiet", "--no-checkout", "--", remote, staging]
         let r = try run(args, in: nil, credential: credential, storeRules: true)
         if r.exit == 0 {
-            try ensureStoreAttributes(at: path)
-            if try headSHA(at: path) != nil {
-                try runOrThrow(["-C", path, "checkout", "--force"], in: nil, storeRules: true)
+            try ensureStoreAttributes(at: staging)
+            // A throwing branch observation distinguishes an empty remote from a failed HEAD read.
+            if try hasLocalBranches(at: staging) {
+                try runOrThrow(["-C", staging, "checkout", "--force"], in: nil, storeRules: true)
             }
+            try fileService.publishDirectory(at: staging, to: path)
             return
         }
         let combined = r.stdout + r.stderr
@@ -631,8 +637,13 @@ extension GitService {
     }
 
     func abortRebase(at path: String) throws {
-        try ensureStoreAttributes(at: path)
+        let repairFailure: Error?
+        do {
+            try ensureStoreAttributes(at: path)
+            repairFailure = nil
+        } catch { repairFailure = error }
         try runOrThrow(["-C", path, "rebase", "--abort"], in: nil, storeRules: true)
+        if let repairFailure { throw repairFailure }
     }
 
     func conflictedFiles(at path: String) throws -> [String] {

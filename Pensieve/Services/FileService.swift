@@ -39,6 +39,8 @@ protocol FileServiceProtocol {
     /// Replaces only links. A non-link occupant throws SymlinkCreationError.occupiedPath.
     func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws
     func deleteDirectory(at path: String) throws
+    /// Atomically publish a sibling directory over an absent or empty directory only.
+    func publishDirectory(at sourcePath: String, to destinationPath: String) throws
     /// Replaces only links. A non-link occupant throws SymlinkCreationError.occupiedPath.
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws
     func symlinkTarget(at path: String) throws -> String
@@ -200,6 +202,19 @@ extension FileServiceProtocol {
             try? FileManager.default.removeItem(atPath: sourcePath)   // now holds the displaced old item
         } else {
             try FileManager.default.moveItem(atPath: sourcePath, toPath: path)   // atomic create
+        }
+    }
+
+    /// A directory rename is atomic and refuses a nonempty directory or any non-directory occupant.
+    /// Unlike a swap, it cannot discard destination contents that appeared while the source was built.
+    func publishDirectory(at sourcePath: String, to destinationPath: String) throws {
+        guard try entryTypeWithoutFollowingLinks(at: sourcePath) == .directory else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(ENOTDIR),
+                          userInfo: [NSFilePathErrorKey: sourcePath])
+        }
+        guard Darwin.rename(sourcePath, destinationPath) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno),
+                          userInfo: [NSFilePathErrorKey: destinationPath])
         }
     }
 

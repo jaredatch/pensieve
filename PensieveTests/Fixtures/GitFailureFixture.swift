@@ -45,12 +45,14 @@ struct GitFailureFixture {
             if [ "$PENSIEVE_GIT_PASSWORD" = '\(expectedToken)' ]; then marker=received; fi
             printf '%s\\t%s\\n' "$marker" "$*" >> '\(credentialTrace)'
             while [ "$1" = '-c' ]; do shift 2; done
-            if [ "$1" = '-C' ]; then shift 2; fi
+            repository='\(root)'
+            if [ "$1" = '-C' ]; then repository="$2"; shift 2; fi
             case "$1 $2" in
+              clone*) for destination in "$@"; do :; done; mkdir -p "$destination/.git" ;;
               'ls-remote --symref') printf 'ref: refs/heads/main\\tHEAD\\n' ;;
               ls-remote*) printf '%s\\trefs/heads/main\\n' '\(String(repeating: "a", count: 40))' ;;
               'rev-parse --is-shallow-repository') printf 'true\\n' ;;
-              'rev-parse --path-format=absolute') printf '%s/.git/%s\\n' '\(root)' "$4" ;;
+              'rev-parse --path-format=absolute') printf '%s/.git/%s\\n' "$repository" "$4" ;;
               rev-parse*|rev-list*) printf '%s\\n' '\(String(repeating: "a", count: 40))' ;;
               'cat-file -e') exit 1 ;;
               fetch*)

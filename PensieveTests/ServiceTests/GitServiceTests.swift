@@ -143,6 +143,13 @@ final class GitServiceTests: XCTestCase {
         let remote = try seededRemote()
         let b = try clone(remote, "b")
         XCTAssertTrue(FileManager.default.fileExists(atPath: b + "/README.md"))
+        let originalHead = try git.commitSHA(at: b)
+        XCTAssertThrowsError(try git.clone(remote: remote, into: b, credential: nil))
+        XCTAssertEqual(try git.commitSHA(at: b), originalHead, "Publication must preserve an occupied store")
+        XCTAssertEqual(try FileService().readFile(at: b + "/README.md"), "seed\n")
+        for failure in ["metadata-write", "metadata-path", "head-probe", "head-read", "checkout", "terminated-checkout"] {
+            try assertFailedCloneCanRetry(remote: remote, failure: failure)
+        }
     }
 
     func testRemoteURLRoundTrip() throws {
@@ -342,6 +349,20 @@ extension GitServiceTests {
         XCTAssertTrue(try git.conflictedFiles(at: b).isEmpty)
         let body = try String(contentsOfFile: b + "/README.md", encoding: .utf8)
         XCTAssertEqual(body, "B version\n")   // B's edit survives the abort
+        let before = try git.commitSHA(at: b)
+        for failure in ["metadata-write", "metadata-path"] {
+            XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .conflicted(["README.md"]))
+            try FileService().deleteFile(at: b + "/.git/info/attributes")
+            let failing = try failingMetadataGit(failure, root: b)
+            XCTAssertThrowsError(try failing.abortRebase(at: b), "Repair failure may be reported")
+            XCTAssertTrue(FileService().fileExists(at: b + "-fault"))
+            XCTAssertFalse(git.isRebaseInProgress(at: b), "Repair failure must never skip abort")
+            XCTAssertTrue(try git.conflictedFiles(at: b).isEmpty)
+            XCTAssertEqual(try git.commitSHA(at: b), before)
+            XCTAssertEqual(try FileService().readFile(at: b + "/README.md"), "B version\n")
+            XCTAssertEqual(try rawGit(["-C", b, "status", "--porcelain"]).out, "")
+            if git.isRebaseInProgress(at: b) { try git.abortRebase(at: b) }
+        }
     }
 
     // MARK: 10.5 — conflicted-path NUL enumeration (C8): an embedded-newline path must not fragment
@@ -580,10 +601,18 @@ extension GitServiceTests {
 /// Uses the real filesystem and observes completed writes through the existing FileService boundary.
 /// Executable writes inherit the production default, so the observation falls before its next step.
 private struct AskpassWriteObservingFileService: FileServiceProtocol {
+    let beforeWrite: (String) throws -> Void
     let afterWrite: () throws -> Void
     private let wrapped = FileService()
 
+    init(beforeWrite: @escaping (String) throws -> Void = { _ in },
+         afterWrite: @escaping () throws -> Void = {}) {
+        self.beforeWrite = beforeWrite
+        self.afterWrite = afterWrite
+    }
+
     func writeFile(at path: String, content: String) throws {
+        try beforeWrite(path)
         try wrapped.writeFile(at: path, content: content)
         try afterWrite()
     }
@@ -601,4 +630,76 @@ private struct AskpassWriteObservingFileService: FileServiceProtocol {
     func isSymlink(at path: String) -> Bool { wrapped.isSymlink(at: path) }
     func listDirectory(at path: String) throws -> [String] { try wrapped.listDirectory(at: path) }
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
+}
+
+extension GitServiceTests {
+    private func assertFailedCloneCanRetry(remote: String, failure: String) throws {
+        let files = FileService()
+        let destination = tempDir + "/clone-" + failure
+        try files.createDirectory(at: destination)
+        let failed = try failingMetadataGit(failure, root: destination)
+        XCTAssertThrowsError(try failed.clone(remote: remote, into: destination, credential: nil), failure) { error in
+            if failure == "head-probe" { XCTAssertEqual(error as? GitError, .unusable(.licenseNotAccepted)) }
+        }
+        XCTAssertTrue(files.fileExists(at: destination + "-fault"), "The injected failure must be reached")
+        XCTAssertFalse(files.directoryExists(at: destination + "/.git"), "Failed connect must not leave a syncable repo")
+        XCTAssertEqual(try files.listDirectory(at: destination), [], "Failed connect must preserve the empty store")
+        XCTAssertFalse(files.fileExists(at: destination + "-published"), "Checkout must finish before publication")
+        do { try git.clone(remote: remote, into: destination, credential: nil) } catch {
+            XCTFail("Retry failed for \(failure): \(error)")
+            return
+        }
+        XCTAssertEqual(try files.readFile(at: destination + "/README.md"), "seed\n", "Retry must deliver the remote")
+        XCTAssertTrue(git.isWorktreeClean(at: destination))
+    }
+
+    /// Real git delegates keep their argv. Only metadata/checkout failures are simulated; receipts
+    /// prove the fault fired and observe whether the canonical store was exposed during checkout.
+    private func failingMetadataGit(_ failure: String, root: String) throws -> GitService {
+        let files = FileService()
+        let executable = root + "-git"
+        try files.writeExecutableFile(at: executable, content: metadataFailureScript(failure, root: root))
+        let observing = AskpassWriteObservingFileService(beforeWrite: { path in
+            if failure == "metadata-write", path.hasSuffix("/info/attributes") {
+                try files.writeFile(at: root + "-fault", content: "metadata write refused")
+                throw AskpassWriteBoom()
+            }
+        })
+        return GitService(fileService: observing, askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+    }
+
+    private func metadataFailureScript(_ failure: String, root: String) -> String {
+        """
+            #!/bin/sh
+            fail_command() {
+                while [ "$1" = '-c' ]; do shift 2; done
+                repository=''
+                if [ "$1" = '-C' ]; then repository="$2"; shift 2; fi
+                failure='\(failure)'
+                if [ "$1 $2" = 'rev-parse --path-format=absolute' ] && [ "$failure" = metadata-path ]; then
+                    touch '\(root)-fault'; echo 'metadata lookup failed' >&2; exit 128
+                fi
+                if [ "$1 $2" = 'rev-parse HEAD' ] || [ "$1" = for-each-ref ]; then
+                    case "$failure" in
+                      head-probe) touch '\(root)-fault'; echo 'Xcode license not accepted' >&2; exit 69 ;;
+                      head-read) touch '\(root)-fault'; echo 'head observation failed' >&2; exit 128 ;;
+                    esac
+                fi
+                if [ "$1" = --version ] && [ "$failure" = head-probe ] && [ -f '\(root)-fault' ]; then
+                    echo 'Xcode license not accepted' >&2; exit 69
+                fi
+                if [ "$1" = checkout ]; then
+                    if [ -d '\(root)/.git' ]; then touch '\(root)-published'; fi
+                    case "$failure" in
+                      checkout|terminated-checkout)
+                        touch '\(root)-fault'; echo 'partial checkout' > "$repository/README.md"
+                        if [ "$failure" = terminated-checkout ]; then kill -TERM "$$"; fi
+                        echo 'checkout failed' >&2; exit 128 ;;
+                    esac
+                fi
+            }
+            fail_command "$@"
+            exec /usr/bin/git "$@"
+            """ + "\n"
+    }
 }
