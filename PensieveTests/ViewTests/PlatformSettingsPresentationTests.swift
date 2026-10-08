@@ -108,13 +108,6 @@ final class PlatformSettingsPresentationTests: XCTestCase {
         }
     }
 
-    private func isolatedDefaults() throws -> UserDefaults {
-        let suite = "PlatformSettingsPresentationTests.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
-        return defaults
-    }
-
     private func assertStoredBudget(_ value: Any, expected: Int,
                                     file: StaticString = #filePath, line: UInt = #line) throws {
         let defaults = try isolatedDefaults()
