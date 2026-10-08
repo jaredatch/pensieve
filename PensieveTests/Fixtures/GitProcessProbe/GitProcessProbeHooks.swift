@@ -9,4 +9,6 @@ struct GitProcessProbeHooks {
     let beforeRead: BeforeRead
     var beforeExitWatch: ((pid_t) throws -> Void)?
     var exitWatchFailed: ExitWatchFailed?
+    var beforeWait: ((pid_t, Bool) throws -> Void)?
+    var waitReturned: ((Int32) -> Void)?
 }

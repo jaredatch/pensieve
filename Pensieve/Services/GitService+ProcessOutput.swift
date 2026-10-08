@@ -32,6 +32,9 @@ extension GitProcess {
                     if !errOpen { try events.removePipe(stderr) }
                 }
                 // Pipe readiness and child exit both wake this caller, including exit after both EOFs.
+                #if GIT_PROCESS_PROBE
+                try probeHooks?.beforeWait?(pid, !outOpen && !errOpen)
+                #endif
                 try events.wait()
             }
         } catch {
@@ -79,11 +82,17 @@ extension GitProcess {
 
 /// Kernel notifications do not reap the child. Its identity remains owned until all reads succeed.
 private final class GitOutputEvents {
+    #if GIT_PROCESS_PROBE
+    private let probeHooks: GitProcessProbeHooks?
+    #endif
     private var queue: Int32
     private var ready = Array(repeating: kevent(), count: 3)
     private(set) var exitNotified = false
 
     init(child: GitProcess) throws {
+        #if GIT_PROCESS_PROBE
+        probeHooks = child.probeHooks
+        #endif
         queue = kqueue()
         guard queue != -1 else { throw GitProcess.posixError() }
         do {
@@ -129,6 +138,9 @@ private final class GitOutputEvents {
 
     func wait() throws {
         let count = kevent(queue, nil, 0, &ready, Int32(ready.count), nil)
+        #if GIT_PROCESS_PROBE
+        probeHooks?.waitReturned?(count)
+        #endif
         if count == -1 {
             guard errno == EINTR else { throw GitProcess.posixError() }
             return

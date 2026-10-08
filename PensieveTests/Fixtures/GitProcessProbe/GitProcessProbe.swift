@@ -55,7 +55,7 @@ enum GitProcessProbe {
 
     static func run(_ mode: String, executable: String) -> String {
         if mode == "spawn-signals" { return spawnSignals() }
-        if mode == "exit-latency" { return exitLatency() }
+        if mode == "exit-wake" { return exitWake() }
         if mode == "exit-watch-esrch" { return exitingChildWithoutWatch() }
         if mode == "usability-read" || mode == "confirmation-read" { return usabilityRead(mode) }
         if mode.hasPrefix("holder-") { return holder(mode) }

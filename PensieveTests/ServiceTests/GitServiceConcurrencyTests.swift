@@ -13,11 +13,11 @@ final class GitServiceConcurrencyTests: XCTestCase {
                 XCTAssertEqual(result.report, "OK output, status; holder alive")
             }
         }
-        for mode in ["exit-latency", "holder-stdout-sleeping-partial", "holder-stderr-sleeping-partial"] {
+        for mode in ["exit-wake", "holder-stdout-sleeping-partial", "holder-stderr-sleeping-partial"] {
             let result = try GitProcessProbeRunner.run(mode, timeout: TestWait.hostedActionTimeoutSeconds, noteTimeout: false)
             XCTAssertFalse(result.timedOut, mode)
             XCTAssertEqual(result.status, 0, "\(mode): \(result.report)")
-            XCTAssertEqual(result.report, mode == "exit-latency" ? "OK exit wake; empty output, status"
+            XCTAssertEqual(result.report, mode == "exit-wake" ? "OK exit wake; waits=1, timeout wakes=0; empty output, status"
                            : "OK output, status; holder alive")
         }
         let exiting = try GitProcessProbeRunner.run("exit-watch-esrch",
