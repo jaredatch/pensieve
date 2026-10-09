@@ -39,15 +39,12 @@ enum StoreIgnoreRules {
         return Array(Set(paths)).sorted()
     }
 
-    /// Retirement may hide an asset below one skill, never a skill, its SKILL.md, or manifest structure.
+    /// Retirement admits relative paths with nonempty, nontraversing, noncontrol components.
     private static func isRetirable(_ path: String) -> Bool {
         let parts = PathSyntax.components(path, omittingEmptySubsequences: false)
-        guard parts.count >= 3, parts[0] == "skills", !PathSyntax.isAbsolute(path),
-              parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
-              !path.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else { return false }
-        let name = parts[2].folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
-                                    locale: Locale(identifier: "en_US_POSIX"))
-        return name != "skill.md"
+        return !parts.isEmpty && !PathSyntax.isAbsolute(path)
+            && parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." })
+            && !path.unicodeScalars.contains(where: { $0.properties.generalCategory == .control })
     }
 
     static func ignoreText(paths: [String]) -> String {

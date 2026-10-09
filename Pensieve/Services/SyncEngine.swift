@@ -301,8 +301,7 @@ struct SyncEngine: SyncEngineProtocol {
     private func resolveConflictedPaths(_ paths: [String], picks: [String: ResolutionPick],
                                         root: String) throws {
         guard Set(paths) == Set(picks.keys) else { throw SyncError.conflictsChanged }
-        var replacements: [String] = []
-        for path in paths.sorted() {
+        for path in paths {
             let this = try ConflictVersion { try gitService.conflictEntry(atStage: 3, path: path, in: root) }
             let other = try ConflictVersion { try gitService.conflictEntry(atStage: 2, path: path, in: root) }
             guard let pick = picks[path],
@@ -316,12 +315,6 @@ struct SyncEngine: SyncEngineProtocol {
                 throw SyncError.conflictsChanged
             }
             let chosen = pick.side == .thisMachine ? this : other
-            if replacements.contains(where: { PathSyntax.hasPrefix(path, $0 + "/") }) {
-                guard chosen.mode == nil else { throw SyncError.conflictsChanged }
-                try gitService.removeConflictEntryFromIndex(path, at: root)
-                continue
-            }
-            if chosen.entry != nil { replacements.append(path) }
             let hasGitlink = this.unavailable?.mode == "160000" || other.unavailable?.mode == "160000"
             if chosen.unavailable?.mode == "160000" || (hasGitlink && chosen.mode == nil) {
                 try gitService.retireConflictPath(path, at: root)
@@ -335,7 +328,8 @@ struct SyncEngine: SyncEngineProtocol {
     private func applyConflictVersion(_ chosen: ConflictVersion, stage: Int, path: String,
                                       full: String, root: String) throws {
         guard chosen.unavailable == nil else { throw SyncError.conflictSideUnavailable(path: path) }
-        if chosen.entry == nil, try fileService.entryTypeWithoutFollowingLinks(at: full) == .directory {
+        if try fileService.entryTypeWithoutFollowingLinks(at: full) == .directory {
+            guard chosen.entry == nil else { throw SyncError.conflictFolderMustMove(path: path) }
             // The folder side removed the old file. Resolve that index entry without staging or
             // deleting its children; their own conflict picks retain their native stages.
             try gitService.removeConflictEntryFromIndex(path, at: root)
@@ -348,15 +342,9 @@ struct SyncEngine: SyncEngineProtocol {
                     throw SyncError.conflictsChanged
                 }
             }
-            do {
-                try gitService.restoreConflictEntry(entry, stage: stage, path: path, at: root)
-            } catch is ConflictFolderMustMove {
-                throw SyncError.conflictFolderMustMove(path: path)
-            }
-        } else {
-            if try fileService.entryExistsWithoutFollowingLinks(at: full) { try fileService.deleteFile(at: full) }
-            try gitService.removeConflictEntryFromIndex(path, at: root)
-            return
+            try gitService.restoreConflictEntry(entry, stage: stage, path: path, at: root)
+        } else if try fileService.entryExistsWithoutFollowingLinks(at: full) {
+            try fileService.deleteFile(at: full)
         }
         try gitService.stagePath(path, at: root)
     }

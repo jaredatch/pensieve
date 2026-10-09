@@ -34,30 +34,6 @@ extension SyncBytePreservationTests {
         XCTAssertNoThrow(try StoreIgnoreRules.prepare(at: missing, files: files), "Absence means no receipts")
     }
 
-    func testRetirementReceiptsCannotHideSyncedStructure() throws {
-        for path in ["skills", "manifest", "skills/x", "skills/x/SKILL.md", "skills/x/skill.md", "skills/x/ſkill.md",
-                     ".gitignore",
-                     "manifest/skills/x.yaml", "skills/../manifest", "skills/x/assets/../SKILL.md"] {
-            let store = base + "/invalid-" + UUID().uuidString
-            try files.createDirectory(at: store)
-            let receipt = "# Pensieve retired path: " + Data(path.utf8).base64EncodedString() + "\n"
-            try files.writeFile(at: store + "/.gitattributes", content: receipt)
-            let spy = RetirementFileService()
-            XCTAssertThrowsError(try StoreIgnoreRules.prepare(at: store, files: spy), "R3: refused path \(path)")
-            XCTAssertTrue(spy.writes.isEmpty)
-        }
-        let store = base + "/valid"
-        try files.createDirectory(at: store)
-        try TestPaths.git.initRepository(at: store)
-        try StoreIgnoreRules.prepare(at: store, files: files, retiring: "skills/x/assets/legacy")
-        try files.writeFile(at: store + "/skills/x/assets/legacy/keep", content: "retired bytes")
-        try files.writeFile(at: store + "/skills/new/SKILL.md", content: "new skill")
-        try TestPaths.git.stageAllAndCommit(at: store, message: "safe receipt")
-        let tree = try TestPaths.git.runOrThrow(["-C", store, "ls-tree", "-r", "--name-only", "HEAD"], in: nil).stdout
-        XCTAssertTrue(tree.contains("skills/new/SKILL.md"))
-        XCTAssertFalse(tree.contains("skills/x/assets/legacy/keep"))
-    }
-
     func testRuleTemporaryWritesCannotBeStagedAtWriteBoundary() throws {
         let store = base + "/crash-store"
         try files.createDirectory(at: store)

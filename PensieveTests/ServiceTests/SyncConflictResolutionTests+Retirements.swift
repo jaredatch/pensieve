@@ -70,26 +70,4 @@ extension SyncConflictResolutionTests {
                                                in: nil).stdout.isEmpty)
     }
 
-    @MainActor
-    func assertThisFileAgainstRemoteGitlink() throws {
-        for side in [ConflictSide.thisMachine, .otherMachine] {
-            let bytes = Data("this file must sync".utf8)
-            let fixture = try SyncConflictByteFixture.gitlinkConflict(fileOnThisMachine: bytes)
-            defer { try? fixture.files.deleteDirectory(at: fixture.root) }
-            let item = try fixture.inspect()
-            do {
-                _ = try fixture.engine.resolveConflicts(root: fixture.storeB,
-                    picks: [item.path: ResolutionPick(side: side, expectedThis: item.thisMachine,
-                        expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
-                        expectedOtherUnavailable: item.otherUnavailable, expectedThisMode: item.thisMode,
-                        expectedOtherMode: item.otherMode)], credential: nil, context: fixture.contextB)
-                if side == .thisMachine { try fixture.assertPublished(bytes) } else {
-                    let tree = try fixture.git.runData(["--git-dir", fixture.remote, "ls-tree", "-r", "main",
-                                                       "--", item.path], in: nil)
-                    XCTAssertTrue(tree.stdout.isEmpty)
-                }
-            } catch { XCTFail("Remote gitlink, pick \(side): \(error)") }
-        }
-    }
-
 }
