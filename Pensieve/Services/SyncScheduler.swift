@@ -187,6 +187,13 @@ final class SyncScheduler {
         }
     }
 
+    private enum RequestEligibility { case eligible, backgroundDisabled, unavailableStore }
+
+    private func eligibility(for request: SyncRequest) -> RequestEligibility {
+        guard backgroundSyncEnabled || request.isPrivileged else { return .backgroundDisabled }
+        return isConfigured() && !isConflicted() ? .eligible : .unavailableStore
+    }
+
     private func drainIfPossible() {
         guard hasPendingTrigger,
               isCoordinatorReady,
@@ -194,13 +201,15 @@ final class SyncScheduler {
               !isRecheckingGit || !isGitUnknown(),
               !isSyncing,
               let syncAction else { return }
-        guard backgroundSyncEnabled || pendingRequest.isPrivileged else { return }
-        guard isConfigured(), !isConflicted() else {
+        switch eligibility(for: pendingRequest) {
+        case .backgroundDisabled: return
+        case .unavailableStore:
             let discarded = pendingRequest
             hasPendingTrigger = false
             pendingRequest = .scheduled
             requestDiscarded(discarded)
             return
+        case .eligible: break
         }
         // Host unavailability holds privileged requests; scheduled-only work is still dropped.
         guard isGitUsable() else {
@@ -230,7 +239,8 @@ final class SyncScheduler {
 
     private func enqueueAfterGitRecheck() {
         guard isGitUnknown(), let recheckGit else { enqueueTrigger(); return }
-        guard backgroundSyncEnabled, isConfigured(), !isConflicted() else { enqueueTrigger(); return }
+        let request = hasPendingTrigger ? pendingRequest.absorbing(.scheduled) : .scheduled
+        guard eligibility(for: request) == .eligible else { enqueueTrigger(); return }
         guard !isRecheckingGit else { return }
         isRecheckingGit = true
         // Overlapping scheduled events join one pending request. Newer known evidence may drain it

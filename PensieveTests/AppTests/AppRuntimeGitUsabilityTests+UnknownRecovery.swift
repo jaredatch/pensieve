@@ -6,31 +6,49 @@ extension AppRuntimeGitUsabilityTests {
         try await assertIneligibleEventsDoNotRecheck()
         for (event, launchReady) in [("tick", true), ("wake", true), ("nudge", true),
                                      ("tick", false), ("wake", false)] {
-            let h = try await makeSyncRecoveryHarness(initialProbeError: GitError.outputReadFailed(detail: "launch EIO"))
-            XCTAssertNil(h.runtime.gitUsability)
-            if launchReady {
-                h.runtime.scheduler.launchIngestCompleted()
-                XCTAssertFalse(h.runtime.scheduler.hasPendingTrigger, "unknown git drops the launch trigger")
-            }
-            h.probe.set {
-                XCTAssertFalse(Thread.isMainThread, "scheduled rechecks must not freeze the window")
-                return .usable
-            }
-            fireScheduledEvent(event, on: h.runtime.scheduler)
-            if !launchReady {
-                await TestWait.until(failureMessage: "recheck must run before launch ingestion is ready") {
-                    h.runtime.gitUsability == .usable
-                }
-                XCTAssertEqual(h.engine.count, 0, "ingestion still gates cycles")
-                h.runtime.scheduler.launchIngestCompleted()
-            }
-            await h.waitForCycle(1)
-            XCTAssertEqual(h.probe.count, 2, "one scheduled event earns one recheck")
-            XCTAssertEqual(h.runtime.gitUsability, .usable)
-            h.release.open()
-            await h.finish()
-            XCTAssertEqual(h.engine.count, 1, "the trigger and recovery must coalesce")
+            try await assertScheduledEventRechecks(event, launchReady: launchReady)
         }
+        for event in ["tick", "wake", "nudge"] {
+            for request in [SyncRequest.launchPreflight, .manual] {
+                try await assertScheduledEventRechecks(event, request: request)
+            }
+        }
+    }
+
+    private func assertScheduledEventRechecks(_ event: String, launchReady: Bool = true,
+                                              request: SyncRequest? = nil) async throws {
+        let h = try await makeSyncRecoveryHarness(initialProbeError: GitError.outputReadFailed(detail: "launch EIO"))
+        XCTAssertNil(h.runtime.gitUsability)
+        if let request {
+            h.preference.enabled = false
+            h.runtime.scheduler.enqueue(request)
+        }
+        if launchReady {
+            h.runtime.scheduler.launchIngestCompleted()
+            XCTAssertEqual(h.runtime.scheduler.hasPendingTrigger, request != nil,
+                           "unknown git holds privileged requests and drops scheduled-only work")
+        }
+        h.probe.set {
+            XCTAssertFalse(Thread.isMainThread, "scheduled rechecks must not freeze the window")
+            return .usable
+        }
+        fireScheduledEvent(event, on: h.runtime.scheduler)
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "\(event), \(String(describing: request)): eligible request must recheck git") {
+            h.runtime.gitUsability == .usable
+        }
+        let usability = try XCTUnwrap(h.runtime.gitUsability)
+        XCTAssertEqual(usability, .usable)
+        if !launchReady {
+            XCTAssertEqual(h.engine.count, 0, "ingestion still gates cycles")
+            h.runtime.scheduler.launchIngestCompleted()
+        }
+        await h.waitForCycle(1)
+        XCTAssertEqual(h.probe.count, 2, "one scheduled event earns one recheck")
+        XCTAssertEqual(h.runtime.gitUsability, .usable)
+        h.release.open()
+        await h.finish()
+        XCTAssertEqual(h.engine.count, 1, "the trigger and recovery must coalesce")
     }
 
     func testUnknownRecoveryFromSettingsUpdatesAndSyncCatchesUpOnce() async throws {
@@ -87,7 +105,6 @@ extension AppRuntimeGitUsabilityTests {
             h.probe.set { XCTAssertFalse(Thread.isMainThread); return answer }
             // A configuration-only read joins neither the held probe nor its evidence clock.
             await h.runtime.mainWindowAppeared()
-            XCTAssertEqual(h.probe.count, 2, "overlapping ticks and wakes share the in-flight probe")
             XCTAssertNil(h.runtime.gitUsability)
             XCTAssertEqual(h.engine.count, 0, "no cycle may start before the probe answers")
             // Release unexpected probes too so a coalescing failure cannot strand their workers.
@@ -97,7 +114,9 @@ extension AppRuntimeGitUsabilityTests {
                 await h.waitForCycle(1)
                 h.release.open()
             }
-            await h.waitForIdle()
+            await h.waitForDrain()
+            // Judge the overlap batch after its asynchronous work drains, before any known-state event.
+            XCTAssertEqual(h.probe.count, 2, "overlapping ticks and wakes share the in-flight probe")
             await assertKnownAnswerStopsRechecks(h, answer: answer)
             await h.finish()
             XCTAssertEqual(h.probe.count, 2, "known usable and known unusable answers stop scheduled rechecks")
@@ -141,15 +160,14 @@ extension AppRuntimeGitUsabilityTests {
             }
             h.runtime.scheduler.launchIngestCompleted()
             let before = h.runtime.syncModel.configurationDescription
-            let unexpected = expectation(description: "\(refusal): ineligible event probed git")
-            unexpected.isInverted = true
             h.probe.set {
                 XCTAssertFalse(Thread.isMainThread)
-                unexpected.fulfill()
+                XCTFail("\(refusal): ineligible event probed git")
                 return .developerToolsMissing
             }
             for event in ["tick", "wake", "nudge"] { fireScheduledEvent(event, on: h.runtime.scheduler) }
-            await fulfillment(of: [unexpected], timeout: TestWait.hostedActionTimeoutSeconds)
+            // Tick and wake decide refusal inline; give the zero-delay nudge its actor turn.
+            await Task.yield()
             XCTAssertEqual(h.probe.count, 1, refusal)
             XCTAssertNil(h.runtime.gitUsability, refusal)
             XCTAssertEqual(h.runtime.syncModel.configurationDescription, before, refusal)
