@@ -71,6 +71,7 @@ final class SyncScheduler {
     private let interval: TimeInterval
     private let debounceNanoseconds: UInt64
     private let backgroundSyncOverride: (() -> Bool)?
+    private var requestDiscarded: (SyncRequest) -> Void = { _ in }
     private var syncAction: ((SyncRequest) async -> Void)?
     private var isConfigured: () -> Bool = { true }
     private var isGitUsable: () -> Bool = { true }
@@ -102,11 +103,13 @@ final class SyncScheduler {
         isConfigured: @escaping () -> Bool = { true },
         isGitUsable: @escaping () -> Bool = { true },
         isConflicted: @escaping () -> Bool = { false },
+        requestDiscarded: @escaping (SyncRequest) -> Void = { _ in },
         action: @escaping (SyncRequest) async -> Void
     ) {
         self.isConfigured = isConfigured
         self.isGitUsable = isGitUsable
         self.isConflicted = isConflicted
+        self.requestDiscarded = requestDiscarded
         syncAction = action
         drainIfPossible()
     }
@@ -184,8 +187,10 @@ final class SyncScheduler {
               let syncAction else { return }
         guard backgroundSyncEnabled || pendingRequest.isPrivileged else { return }
         guard isConfigured(), !isConflicted() else {
+            let discarded = pendingRequest
             hasPendingTrigger = false
             pendingRequest = .scheduled
+            requestDiscarded(discarded)
             return
         }
         // Host unavailability holds privileged requests; scheduled-only work is still dropped.

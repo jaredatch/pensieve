@@ -65,19 +65,14 @@ extension GitService {
 
     /// A legacy gitlink is removed only from the index. Its anchored root ignore travels to other
     /// Macs so later syncs cannot add ordinary local files beneath the retired path.
-    func retireConflictPath(_ path: String, at root: String) throws {
+    func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
         try storeOperation(at: root).runOrThrow(["--literal-pathspecs", "update-index", "--force-remove", "--", path])
-        let escaped = path.unicodeScalars.map { scalar -> String in
-            let text = String(scalar)
-            return "\\*?[]!# ".unicodeScalars.contains(scalar) ? "\\" + text : text
-        }.joined()
-        let ignore = root + "/.gitignore"
-        var rules = try fileService.readFile(at: ignore)
-        let rule = "/" + escaped
-        if !rules.split(separator: "\n").contains(where: { $0 == Substring(rule) }) {
-            if !rules.hasSuffix("\n") { rules += "\n" }
-            try fileService.writeFile(at: ignore, content: rules + rule + "\n")
-        }
+    }
+
+    func retireConflictPath(_ path: String, at root: String) throws {
+        try removeConflictEntryFromIndex(path, at: root)
+        try StoreIgnoreRules.prepare(at: root, files: fileService, retiring: path)
+        try stagePath(".gitattributes", at: root)
         try stagePath(".gitignore", at: root)
     }
 

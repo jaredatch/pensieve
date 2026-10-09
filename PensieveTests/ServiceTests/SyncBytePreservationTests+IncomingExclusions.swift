@@ -207,7 +207,11 @@ extension SyncBytePreservationTests {
 
     private func assertFilesystemEquivalentIncomingNames() throws {
         for (local, incoming) in [("skills/x/.env", "skills/x/.ENV"),
-                                  ("skills/x/caf\u{00E9}/.env", "skills/x/cafe\u{0301}/.env")] {
+                                  ("skills/x/caf\u{00E9}/.env", "skills/x/cafe\u{0301}/.env"),
+                                  ("skills/x/.env.ss", "skills/x/.env.ß"),
+                                  ("skills/x/.env.σ", "skills/x/.env.ς"),
+                                  ("skills/x/.env.secret", "skills/x/.env.ſecret"),
+                                  ("skills/x/.env.fi", "skills/x/.env.ﬁ")] {
             let fixture = try ExcludedFileCollisionFixture(path: local, hidden: true, localCommit: true,
                                                            incomingPath: incoming)
             defer { try? fixture.files.deleteDirectory(at: fixture.root) }

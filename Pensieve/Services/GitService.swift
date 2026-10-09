@@ -99,6 +99,7 @@ protocol GitServiceProtocol {
     func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry?
     func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws
     func retireConflictPath(_ path: String, at root: String) throws
+    func removeConflictEntryFromIndex(_ path: String, at root: String) throws
     func continueRebase(at path: String) throws -> PullResult
     func skipRebase(at path: String) throws -> PullResult
     func stagePath(_ path: String, at root: String) throws
@@ -119,6 +120,10 @@ extension GitServiceProtocol {
 
     func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
         throw GitError.repositoryUnreadable(path: root, detail: "Conflict entry restoration is unavailable.")
+    }
+
+    func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
+        throw CocoaError(.featureUnsupported)
     }
 
     func retireConflictPath(_ path: String, at root: String) throws {

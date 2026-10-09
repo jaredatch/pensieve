@@ -60,6 +60,7 @@ extension AppRuntime {
             },
             isGitUsable: { [weak self] in self?.gitUsability == .usable },
             isConflicted: { [weak syncModel] in syncModel?.isConflicted ?? false },
+            requestDiscarded: { [weak syncModel] request in syncModel?.syncRequestWasDiscarded(request) },
             action: { [weak syncModel, weak scheduler] request in
                 await syncModel?.syncAndReport(request, onCycleStart: { scheduler?.cycleDidStart() })
             }

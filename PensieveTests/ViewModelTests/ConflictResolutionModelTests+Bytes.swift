@@ -5,6 +5,7 @@ import XCTest
 
 extension ConflictResolutionModelTests {
     func testBinaryAndUTF16ConflictsRenderUnavailableTextAndKeepSelections() async throws {
+        try await assertMissingObjectSelectionAndCopy()
         for payload in SyncConflictByteFixture.payloads {
             let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
             defer { try? fixture.files.deleteDirectory(at: fixture.root) }
@@ -35,6 +36,34 @@ extension ConflictResolutionModelTests {
             XCTAssertFalse(model.canApply)
             model.choose(group.id, .otherMachine)
             XCTAssertTrue(model.canApply, "An unavailable text preview must not block choosing exact bytes")
+        }
+    }
+
+    private func assertMissingObjectSelectionAndCopy() async throws {
+        for stage in [2, 3] {
+            let payload = SyncConflictByteFixture.payloads[0]
+            let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
+            defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+            let engine = try fixture.missingObjectEngine(stage: stage)
+            let model = ConflictResolutionModel(engine: engine, git: fixture.git,
+                credentials: InMemoryCredentialStore(), root: fixture.storeB)
+            await model.loadAndReport(context: fixture.contextB)
+            guard case let .ready(groups) = model.phase else { return XCTFail("A missing blob must load as unavailable") }
+            let group = try XCTUnwrap(groups.first)
+            let item = try XCTUnwrap(group.items.first)
+            let strings = await renderedComparison(item)
+            XCTAssertTrue(strings.contains("This version can’t be shown or kept as a file. You can keep the other version."))
+            XCTAssertFalse(strings.contains("Deleted"))
+            XCTAssertFalse(strings.contains("Empty file"))
+            model.choose(group.id, stage == 3 ? .thisMachine : .otherMachine)
+            XCTAssertEqual(model.selectionError, SyncError.conflictSideUnavailable(path: item.path).errorDescription)
+            XCTAssertFalse(model.canApply)
+            model.choose(group.id, stage == 3 ? .otherMachine : .thisMachine)
+            XCTAssertNil(model.selectionError)
+            XCTAssertTrue(model.canApply)
+            await model.applyAndReport(context: fixture.contextB)
+            XCTAssertEqual(model.phase, .done)
+            try fixture.assertPublished(stage == 3 ? payload.other : payload.this)
         }
     }
 
@@ -78,6 +107,7 @@ extension ConflictResolutionModelTests {
     }
 
     func testLegacyGitlinkConflictReachesTheSheetAndKeepsTheOtherSideAvailable() async throws {
+        try await assertFilePickRefusesFolderAndOtherPickResolves()
         for both in [false, true] {
             for side in [ConflictSide.thisMachine, .otherMachine] {
                 let fixture = try SyncConflictByteFixture.gitlinkConflict(both: both)
@@ -91,7 +121,8 @@ extension ConflictResolutionModelTests {
                 let strings = await renderedComparison(item)
                 XCTAssertTrue(strings.contains("Nested repository"))
                 XCTAssertTrue(strings.contains(
-                    "Either choice stops syncing this path and keeps its folder on this Mac and other Macs."))
+                    "Choosing a file or link keeps it in sync. Choosing Nested repository or Deleted "
+                    + "stops syncing this path and keeps its folder."))
                 XCTAssertEqual(strings.filter { $0 == "Deleted" }.count, both ? 0 : 1)
                 model.choose(group.id, side)
                 XCTAssertNil(model.selectionError)
@@ -103,6 +134,31 @@ extension ConflictResolutionModelTests {
                 XCTAssertTrue(tree.stdout.isEmpty)
             }
         }
+    }
+
+    private func assertFilePickRefusesFolderAndOtherPickResolves() async throws {
+        let fixture = try SyncConflictByteFixture.gitlinkConflict(otherEntry: .file(Data("kept file".utf8)))
+        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+        let full = fixture.storeB + "/" + fixture.path
+        let model = ConflictResolutionModel(engine: fixture.engine, git: fixture.git,
+            credentials: InMemoryCredentialStore(), root: fixture.storeB)
+        await model.loadAndReport(context: fixture.contextB)
+        guard case let .ready(groups) = model.phase else { return XCTFail("A mixed-type conflict must load") }
+        let group = try XCTUnwrap(groups.first)
+        let strings = await renderedComparison(try XCTUnwrap(group.items.first))
+        XCTAssertTrue(strings.contains("Choosing a file or link keeps it in sync. Choosing Nested repository or Deleted "
+            + "stops syncing this path and keeps its folder."))
+        try fixture.files.writeFile(at: fixture.root + "/resolution-marker", content: "local folder work")
+        model.choose(group.id, .otherMachine)
+        await model.applyAndReport(context: fixture.contextB)
+        guard case .ready = model.phase else { return XCTFail("A refused folder replacement must keep choices available") }
+        XCTAssertEqual(model.selectionError,
+            "Move the folder at \(fixture.path), then choose this version again. You can also choose the other version.")
+        XCTAssertEqual(try fixture.files.readFile(at: full + "/keep"), "local folder work")
+        model.choose(group.id, .thisMachine)
+        await model.applyAndReport(context: fixture.contextB)
+        XCTAssertEqual(model.phase, .done)
+        XCTAssertEqual(try fixture.files.readFile(at: full + "/keep"), "local folder work")
     }
 
     private func renderedComparison(_ item: ConflictItem) async -> [String] {

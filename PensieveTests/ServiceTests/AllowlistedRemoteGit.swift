@@ -61,6 +61,9 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
         try wrapped.restoreConflictEntry(entry, stage: stage, path: path, at: root)
     }
     func retireConflictPath(_ path: String, at root: String) throws { try wrapped.retireConflictPath(path, at: root) }
+    func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
+        try wrapped.removeConflictEntryFromIndex(path, at: root)
+    }
     func continueRebase(at path: String) throws -> PullResult { try wrapped.continueRebase(at: path) }
     func skipRebase(at path: String) throws -> PullResult { try wrapped.skipRebase(at: path) }
     func stagePath(_ path: String, at root: String) throws { try wrapped.stagePath(path, at: root) }

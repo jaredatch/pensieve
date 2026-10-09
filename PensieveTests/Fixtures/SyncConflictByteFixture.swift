@@ -10,6 +10,7 @@ struct SyncConflictByteFixture {
         case executable(Data)
         case symlink(String)
         case gitlink(String)
+        case folder
         case deleted
     }
 
@@ -29,6 +30,7 @@ struct SyncConflictByteFixture {
 
     let root: String
     let path: String
+    let expectedPaths: [String]
     let remote: String
     let storeA: String
     let storeB: String
@@ -43,18 +45,23 @@ struct SyncConflictByteFixture {
                       this: this.map(Entry.file) ?? .deleted, other: other.map(Entry.file) ?? .deleted)
     }
 
-    init(name: String, initial: Entry, this: Entry, other: Entry) throws {
+    init(name: String, initial: Entry, this: Entry, other: Entry, indexMerge: Bool = false) throws {
         root = TestTemporaryDirectory.path + "ConflictBytes-" + UUID().uuidString
         remote = root + "/remote.git"
         storeA = root + "/A"
         storeB = root + "/B"
         path = "skills/conflict/assets/" + name
-        git = TestPaths.git
+        if case .folder = other { expectedPaths = [path, path + "/keep"] } else { expectedPaths = [path] }
+        git = indexMerge ? GitService(askpassHelperPath: root + "/askpass", executablePath: root + "/index-merge-git")
+            : TestPaths.git
         engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: git), lockPath: root + "/sync.lock")
         contextA = try Self.context()
         contextB = try Self.context()
         do {
             try files.createDirectory(at: root)
+            if indexMerge {
+                try installIndexMergeGit()
+            }
             try git.runOrThrow(["init", "--bare", "--initial-branch=main", remote], in: nil)
             let seed = root + "/seed"
             try files.createDirectory(at: seed)
@@ -77,7 +84,7 @@ struct SyncConflictByteFixture {
                 context: contextA), .synced(pushed: true, warnings: []))
             try change(this, at: storeB)
             XCTAssertEqual(try engine.sync(root: storeB, message: "this changes", credential: nil,
-                context: contextB), .conflicted([path]))
+                context: contextB), .conflicted(expectedPaths))
             XCTAssertFalse(git.isRebaseInProgress(at: storeB))
         } catch {
             try? files.deleteDirectory(at: root)
@@ -85,13 +92,42 @@ struct SyncConflictByteFixture {
         }
     }
 
-    func inspect() throws -> ConflictItem {
+    private func installIndexMergeGit() throws {
+        // read-tree supplies native unmerged stages for a file/gitlink type conflict without
+        // merge-recursive's auxiliary filename. No mocked conflict list or side receipt.
+        try files.writeExecutableFile(at: root + "/index-merge-git", content: """
+            #!/bin/sh
+            /usr/bin/git "$@"
+            result=$?
+            merge_index() {
+                \(FakeGitScript.skipGlobalOptions)
+                if [ "$1" = rebase ] && [ "$2" != --abort ] && [ "$2" != --continue ] && \
+                   /usr/bin/git -C '\(storeB)' rev-parse --verify REBASE_HEAD >/dev/null 2>&1; then
+                    base=$(/usr/bin/git -C '\(storeB)' merge-base HEAD REBASE_HEAD) || exit 1
+                    /usr/bin/git -C '\(storeB)' read-tree --empty || exit 1
+                    /usr/bin/git -C '\(storeB)' read-tree -m "$base" HEAD REBASE_HEAD || exit 1
+                    rm -f '\(storeB)/\(path)'~*
+                    # Place the preservation witness after native rebase, at resolution's
+                    # boundary. Git's earlier ordinary-gitlink-folder loss is filed separately.
+                    if [ -f '\(root)/resolution-marker' ] && [ -d '\(storeB)/\(path)' ]; then
+                        cp '\(root)/resolution-marker' '\(storeB)/\(path)/keep' || exit 1
+                    fi
+                fi
+            }
+            merge_index "$@"
+            exit "$result"
+            """ + "\n")
+    }
+
+    func inspect() throws -> ConflictItem { try XCTUnwrap(inspectAll().first) }
+
+    func inspectAll() throws -> [ConflictItem] {
         let inspection = try engine.inspectConflicts(root: storeB, credential: nil, context: contextB)
         guard case let .conflicts(set) = inspection else {
             throw NSError(domain: "ConflictBytesFixture", code: 1)
         }
-        XCTAssertEqual(set.items.map(\.path), [path])
-        return try XCTUnwrap(set.items.first)
+        XCTAssertEqual(set.items.map(\.path), expectedPaths)
+        return set.items
     }
 
     func change(_ bytes: Data?, at store: String) throws {
@@ -102,21 +138,36 @@ struct SyncConflictByteFixture {
         let full = store + "/" + path
         switch entry {
         case let .file(bytes):
+            try removeFolder(at: full)
             try files.writeData(at: full, data: bytes)
         case let .executable(bytes):
             try files.writeExecutableFile(at: full, content: XCTUnwrap(String(bytes: bytes, encoding: .utf8)))
         case let .symlink(target):
-            if try files.entryExistsWithoutFollowingLinks(at: full) { try files.deleteFile(at: full) }
+            try removeEntry(at: full)
             try files.createSymlink(at: full, pointingTo: target)
         case let .gitlink(object):
+            if try files.entryTypeWithoutFollowingLinks(at: full) == .regular { try files.deleteFile(at: full) }
             try files.createDirectory(at: full)
             try git.runOrThrow(["-C", store, "update-index", "--add", "--cacheinfo", "160000," + object + "," + path], in: nil)
+        case .folder:
+            if try files.entryExistsWithoutFollowingLinks(at: full) { try files.deleteFile(at: full) }
+            try files.writeFile(at: full + "/keep", content: "chosen folder bytes")
         case .deleted:
             if files.directoryExists(at: full) { try files.deleteDirectory(at: full) } else { try files.deleteFile(at: full) }
         }
     }
 
-    static func gitlinkConflict(both: Bool = false) throws -> Self {
+    private func removeFolder(at path: String) throws {
+        if try files.entryTypeWithoutFollowingLinks(at: path) == .directory { try files.deleteDirectory(at: path) }
+    }
+
+    private func removeEntry(at path: String) throws {
+        if try files.entryTypeWithoutFollowingLinks(at: path) == .directory {
+            try files.deleteDirectory(at: path)
+        } else if try files.entryExistsWithoutFollowingLinks(at: path) { try files.deleteFile(at: path) }
+    }
+
+    static func gitlinkConflict(both: Bool = false, otherEntry: Entry? = nil) throws -> Self {
         let root = TestTemporaryDirectory.path + "GitlinkSource-" + UUID().uuidString
         let files = FileService()
         let git = TestPaths.git
@@ -133,7 +184,60 @@ struct SyncConflictByteFixture {
         try git.stageAllAndCommit(at: root, message: "third nested commit")
         let third = try git.commitSHA(at: root)
         return try Self(name: "legacy-link", initial: .gitlink(first), this: .gitlink(second),
-                        other: both ? .gitlink(third) : .deleted)
+                        other: otherEntry ?? (both ? .gitlink(third) : .deleted), indexMerge: otherEntry != nil)
+    }
+
+    func ignoreFaultEngine(_ kind: String) throws -> SyncEngine {
+        let executable = root + "/ignore-fault-git"
+        let ignore = storeB + "/.gitignore"
+        try files.writeFile(at: root + "/outside-key", content: "outside sentinel")
+        let change: String
+        switch kind {
+        case "binary": change = "printf '\\377\\376' > '\(ignore)'"
+        case "link": change = "ln -s '\(root)/outside-key' '\(ignore)'"
+        case "folder": change = "mkdir '\(ignore)'"
+        case "fifo": change = "mkfifo '\(ignore)'"
+        case "unreadable": change = "printf '*\\n' > '\(ignore)'; chmod 000 '\(ignore)'"
+        default: change = ":"
+        }
+        try files.writeExecutableFile(at: executable, content: """
+            #!/bin/sh
+            /usr/bin/git "$@"
+            result=$?
+            replace_ignore() {
+                \(FakeGitScript.skipGlobalOptions)
+                if [ "$1" = rebase ] && [ "$2" != --abort ] && [ "$2" != --continue ] && \
+                   /usr/bin/git -C '\(storeB)' rev-parse --verify REBASE_HEAD >/dev/null 2>&1; then
+                    rm -f '\(ignore)'
+                    \(change)
+                fi
+            }
+            replace_ignore "$@"
+            exit "$result"
+            """ + "\n")
+        let fault = GitService(askpassHelperPath: root + "/askpass", executablePath: executable)
+        return SyncEngine(gitService: AllowlistedRemoteGit(wrapping: fault), lockPath: root + "/sync.lock")
+    }
+
+    /// Native rebase supplies the conflict; only its selected index object's identity is replaced
+    /// with an absent blob. Both inspection and resolution still use GitService's real object reads.
+    func missingObjectEngine(stage: Int) throws -> SyncEngine {
+        let executable = root + "/missing-object-git"
+        try files.writeExecutableFile(at: executable, content: """
+            #!/bin/sh
+            alter() {
+                \(FakeGitScript.skipGlobalOptions)
+                if [ "$1" = ls-files ] && [ "$2" = --stage ] && \
+                   /usr/bin/git -C '\(storeB)' rev-parse --verify REBASE_HEAD >/dev/null 2>&1; then
+                    printf '100644 1111111111111111111111111111111111111111 \(stage)\t\(path)\n' | \
+                      /usr/bin/git -C '\(storeB)' update-index --index-info || exit 1
+                fi
+            }
+            alter "$@"
+            exec /usr/bin/git "$@"
+            """ + "\n")
+        let fault = GitService(askpassHelperPath: root + "/askpass", executablePath: executable)
+        return SyncEngine(gitService: AllowlistedRemoteGit(wrapping: fault), lockPath: root + "/sync.lock")
     }
 
     func assertPublished(_ expected: Data?, line: UInt = #line) throws {

@@ -128,6 +128,10 @@ struct StoreGitOperation {
         }
         infoDirectory = resolved
         repairFailure = failure
+        if !aborting {
+            let rules = StoreIgnoreRules.ignoreText(paths: StoreIgnoreRules.retiredPaths(at: root, files: git.fileService))
+            try git.fileService.writeFile(at: resolved + "/pensieve-ignore", content: rules)
+        }
     }
 
     @discardableResult
@@ -175,7 +179,7 @@ struct StoreGitOperation {
 
     private func untrackedPaths(_ path: String) throws -> Data {
         var args = ["--literal-pathspecs", "ls-files", "--others", "-z"]
-        for path in [root + "/.gitignore", infoDirectory + "/exclude"]
+        for path in [infoDirectory + "/pensieve-ignore", infoDirectory + "/exclude"]
             where git.fileService.fileExists(at: path) {
             args.append("--exclude-from=" + path)
         }
@@ -184,7 +188,7 @@ struct StoreGitOperation {
     }
 
     func ordinaryUntrackedPaths() throws -> Data {
-        try untrackedFiles(["ls-files", "--others", "--exclude-standard", "-z"])
+        try untrackedPaths(".")
     }
 
     /// Git reports an untracked nested repository as a slash-terminated entry rather than its files.
@@ -275,8 +279,8 @@ struct StoreGitOperation {
         let args = ["ls-tree", "-r", "--name-only", "-z", revision]
         let incoming = try runData(args)
         guard incoming.exit == 0 else { throw git.dataCommandError(incoming, args: ["-C", root] + args) }
-        // Fold only to find candidates. FileService's identities decide whether another spelling
-        // actually names the same entry on this volume, retaining case-sensitive destinations.
+        // Identity is the candidate key itself. This admits every filesystem alias without a
+        // guessed Unicode folding and never opens or follows the protected leaf.
         var containingPaths: [Data: [(prefix: Data, path: Data)]] = [:]
         for path in local {
             for prefix in pathPrefixes(path) {
@@ -301,8 +305,9 @@ struct StoreGitOperation {
     }
 
     private func collisionKey(_ path: Data) -> Data {
-        guard let text = String(data: path, encoding: .utf8) else { return path }
-        return Data(text.precomposedStringWithCanonicalMapping.lowercased().utf8)
+        guard let text = String(data: path, encoding: .utf8),
+              let identity = git.fileService.fileIdentity(at: root + "/" + text, followingLinks: false) else { return path }
+        return Data([0]) + Data("\(identity.device):\(identity.inode)".utf8)
     }
 
     private func sameDestination(_ first: Data, _ second: Data) -> Bool {

@@ -182,6 +182,10 @@ final class SyncModel {
 
     func syncScheduledAndReport() async { await syncAndReport(.scheduled) }
 
+    func syncRequestWasDiscarded(_ request: SyncRequest) {
+        if request.contains(.manualRecovery), manualRetry == .queued { manualRetry = .ready }
+    }
+
     func resumeAfterGitRecovery() {
         if isCycleInFlight {
             recoveredDuringCycle = true

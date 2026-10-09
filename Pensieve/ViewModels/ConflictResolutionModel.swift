@@ -93,7 +93,8 @@ final class ConflictResolutionModel {
         guard case var .ready(groups) = phase,
               let index = groups.firstIndex(where: { $0.id == groupID }) else { return }
         if let unavailable = groups[index].items.first(where: {
-            !$0.retiresGitlink && (side == .thisMachine ? $0.thisUnavailable : $0.otherUnavailable) != nil
+            let receipt = side == .thisMachine ? $0.thisUnavailable : $0.otherUnavailable
+            return receipt != nil && receipt?.mode != "160000"
         }) {
             selectionError = SyncError.conflictSideUnavailable(path: unavailable.path).errorDescription
             return
@@ -149,6 +150,9 @@ final class ConflictResolutionModel {
             await loadAndReport(context: context)
         } catch SyncError.conflictSideUnavailable(let path) {
             selectionError = SyncError.conflictSideUnavailable(path: path).errorDescription
+            phase = .ready(groups)
+        } catch SyncError.conflictFolderMustMove(let path) {
+            selectionError = SyncError.conflictFolderMustMove(path: path).errorDescription
             phase = .ready(groups)
         } catch let error as LocalizedError {
             phase = .error(error.errorDescription ?? "Couldn't resolve conflicts.")

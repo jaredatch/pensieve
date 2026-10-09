@@ -205,12 +205,12 @@ struct ConflictResolutionView: View {
 struct ConflictFileComparison: View {
     private enum Side {
         case deleted
-        case unavailable
+        case unavailable(mode: String)
         case text(String, preview: String, hiddenLines: Int)
         case nonText(bytes: Int)
 
         init(_ bytes: Data?, unavailable: UnavailableConflictSide?) {
-            guard unavailable == nil else { self = .unavailable; return }
+            if let unavailable { self = .unavailable(mode: unavailable.mode); return }
             guard let bytes else { self = .deleted; return }
             guard !bytes.contains(0), let text = UpstreamHistoryFileContent.utf8PreservingBOM(bytes) else {
                 self = .nonText(bytes: bytes.count)
@@ -240,7 +240,8 @@ struct ConflictFileComparison: View {
         } else {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 if retiresGitlink {
-                    Text("Either choice stops syncing this path and keeps its folder on this Mac and other Macs.")
+                    Text("Choosing a file or link keeps it in sync. Choosing Nested repository or Deleted "
+                         + "stops syncing this path and keeps its folder.")
                         .foregroundStyle(.secondary)
                 }
                 HStack(alignment: .top, spacing: Spacing.md) {
@@ -257,8 +258,8 @@ struct ConflictFileComparison: View {
             switch content {
             case .deleted:
                 Text("Deleted").foregroundStyle(.secondary)
-            case .unavailable:
-                Text(retiresGitlink ? "Nested repository"
+            case let .unavailable(mode):
+                Text(mode == "160000" ? "Nested repository"
                      : "This version can’t be shown or kept as a file. You can keep the other version.")
                     .foregroundStyle(.secondary)
             case let .text(text, preview, hiddenLines):

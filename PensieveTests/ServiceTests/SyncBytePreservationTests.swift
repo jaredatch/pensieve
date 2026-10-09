@@ -1,3 +1,4 @@
+import Darwin
 import SwiftData
 import XCTest
 @testable import Pensieve
@@ -20,7 +21,13 @@ final class SyncBytePreservationTests: XCTestCase {
     }
 
     func testGlobalIgnoreAndLineEndingRulesPreserveImportedAndAuthoredBytes() throws {
-        try roundTrip(skillRules: false, installed: false)
+        for kind in ["rules", "link", "missing", "binary", "folder", "fifo", "dangling", "unreadable"] {
+            do {
+                try roundTrip(skillRules: false, installed: false, rootIgnore: kind)
+            } catch { XCTFail("Root ignore \(kind): \(error)") }
+            try files.deleteDirectory(at: base)
+            try files.createDirectory(at: base)
+        }
     }
 
     func testInstalledSkillRulesAndControlFilesPreserveBytesAndHash() throws {
@@ -39,14 +46,34 @@ final class SyncBytePreservationTests: XCTestCase {
         try roundTrip(skillRules: true, installed: false, transformations: true, fastForward: true)
     }
 
+    private func substituteRootIgnore(_ kind: String, at store: String) throws {
+        let path = store + "/.gitignore"
+        if try files.entryExistsWithoutFollowingLinks(at: path) { try files.deleteFile(at: path) }
+        switch kind {
+        case "rules": try files.writeFile(at: path, content: "*\n/skills\n.DS_Store\n")
+        case "link":
+            try files.writeFile(at: base + "/outside-key", content: "outside sentinel")
+            try files.createSymlink(at: path, pointingTo: "../outside-key")
+        case "dangling": try files.createSymlink(at: path, pointingTo: "../absent-key")
+        case "binary": try files.writeData(at: path, data: Data([255, 254]))
+        case "folder": try files.createDirectory(at: path)
+        case "fifo": XCTAssertEqual(mkfifo(path, 0o600), 0)
+        case "unreadable":
+            try files.writeFile(at: path, content: "*\n")
+            XCTAssertEqual(chmod(path, 0), 0)
+        default: break
+        }
+    }
+
     private func roundTrip(skillRules: Bool, installed: Bool, transformations: Bool = false,
-                           fastForward: Bool = false, nestedRepositories: Bool = false) throws {
+                           fastForward: Bool = false, nestedRepositories: Bool = false, rootIgnore: String? = nil) throws {
         let remote = base + "/remote.git"
         let gitA = try userGit("A", remote: remote, skillRules: skillRules)
         let gitB = try userGit("B", remote: remote, skillRules: skillRules)
         try seedRemote(git: gitA, remote: remote)
         let storeA = base + "/storeA"
         try gitA.clone(remote: remoteURL, into: storeA, credential: nil)
+        if let rootIgnore { try substituteRootIgnore(rootIgnore, at: storeA) }
         let contextA = try makeContext()
         if installed {
             try installSkill(git: gitA, store: storeA, remote: remote, context: contextA)
@@ -70,6 +97,7 @@ final class SyncBytePreservationTests: XCTestCase {
             context: contextA), .synced(pushed: true, warnings: []))
         XCTAssertEqual(try installer.stableContentHash(at: storeA + "/skills/bytes"), beforeHash)
         try assertRemoteBytes(expected, git: gitA, remote: remote)
+        try assertRootIgnoreDidNotReadLink(rootIgnore, git: gitA, remote: remote, store: storeA)
         if nestedRepositories { try assertNestedRepositoriesStayLocal(store: storeA, git: gitA, remote: remote) }
         XCTAssertEqual(try gitA.runData(["--git-dir", remote, "show", "main:manifest/manifest.yaml"], in: nil)
             .stdout, try files.readData(at: storeA + "/manifest/manifest.yaml"),
@@ -91,6 +119,18 @@ final class SyncBytePreservationTests: XCTestCase {
         }
         if fastForward { try assertExistingStorePull(gitA: gitA, gitB: gitB, context: contextA) }
         try assertRewrittenTransport()
+    }
+
+    private func assertRootIgnoreDidNotReadLink(_ rootIgnore: String?, git: GitService,
+                                                remote: String, store: String) throws {
+        if let rootIgnore {
+            let ignore = try git.runData(["--git-dir", remote, "show", "main:.gitignore"], in: nil)
+            XCTAssertFalse(ignore.stdout.contains(Data("outside sentinel".utf8)), "Link targets must never enter a commit")
+            if rootIgnore == "link" {
+                XCTAssertEqual(try files.readFile(at: base + "/outside-key"), "outside sentinel")
+                XCTAssertFalse(files.isSymlink(at: store + "/.gitignore"))
+            }
+        }
     }
 
     private func assertRewrittenTransport() throws {

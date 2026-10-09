@@ -112,6 +112,7 @@ targets:
       - path: Pensieve/Services/SyncLock.swift
       - path: Pensieve/Services/GitService.swift
       - path: Pensieve/Services/GitService+StoreRules.swift
+      - path: Pensieve/Services/StoreIgnoreRules.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
       - path: Pensieve/Services/GitProcess.swift
       - path: Pensieve/Services/GitService+Usability.swift
@@ -166,6 +167,7 @@ targets:
       - path: Pensieve/Services/FileService+TreeComparison.swift
       - path: Pensieve/Services/GitService.swift
       - path: Pensieve/Services/GitService+StoreRules.swift
+      - path: Pensieve/Services/StoreIgnoreRules.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
       - path: Pensieve/Services/GitProcess.swift
       - path: Pensieve/Services/GitService+Usability.swift

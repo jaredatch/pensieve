@@ -33,6 +33,7 @@ enum SyncError: LocalizedError, Equatable {
     case storeUnreadable([String])
     case conflictsChanged
     case conflictSideUnavailable(path: String)
+    case conflictFolderMustMove(path: String)
     case rejectedRemote(String)
     case syncInProgress
 
@@ -45,6 +46,8 @@ enum SyncError: LocalizedError, Equatable {
             return "The conflict changed while you were resolving it — reopen to see the latest."
         case let .conflictSideUnavailable(path):
             return "Pensieve can’t keep this version of \(path) as a file. Choose the other version."
+        case let .conflictFolderMustMove(path):
+            return "Move the folder at \(path), then choose this version again. You can also choose the other version."
         case .rejectedRemote:
             return "This store's git remote uses an unsupported form. Reconnect with an https:// URL "
                 + "or an ssh remote (git@host:path)."
@@ -251,18 +254,7 @@ struct SyncEngine: SyncEngineProtocol {
     /// scalar-dominant, so a concurrent same-skill edit is a genuine conflict the safe `.conflicted`
     /// interim handles — unioning it would produce a duplicate-key YAML file Yams refuses to parse.
     private func ensureSyncAttributes(root: String) throws {
-        let attributes = """
-        manifest/categories/*.yaml merge=union
-        manifest/scenarios/*.yaml merge=union
-        manifest/projects.yaml merge=union
-        """
-        try fileService.writeFile(at: root + "/.gitattributes", content: attributes + "\n")
-        let ignore = root + "/.gitignore"
-        let rules = (try? fileService.readFile(at: ignore)) ?? ""
-        if !rules.split(separator: "\n").contains(".DS_Store") {
-            try fileService.writeFile(at: ignore, content: rules + (rules.isEmpty || rules.hasSuffix("\n") ? "" : "\n")
-                                      + ".DS_Store\n")
-        }
+        try StoreIgnoreRules.prepare(at: root, files: fileService)
     }
 
     private static let resolveMessage = "Pensieve sync (resolve)"
@@ -322,11 +314,13 @@ struct SyncEngine: SyncEngineProtocol {
             guard let full = validatedWorktreePath(path, root: root) else {
                 throw SyncError.conflictsChanged
             }
-            if this.unavailable?.mode == "160000" || other.unavailable?.mode == "160000" {
+            let chosen = pick.side == .thisMachine ? this : other
+            let hasGitlink = this.unavailable?.mode == "160000" || other.unavailable?.mode == "160000"
+            if chosen.unavailable?.mode == "160000" || (hasGitlink && chosen.mode == nil) {
                 try gitService.retireConflictPath(path, at: root)
                 continue
             }
-            try applyConflictVersion(pick.side == .thisMachine ? this : other,
+            try applyConflictVersion(chosen,
                                      stage: pick.side == .thisMachine ? 3 : 2, path: path, full: full, root: root)
         }
     }
@@ -334,8 +328,12 @@ struct SyncEngine: SyncEngineProtocol {
     private func applyConflictVersion(_ chosen: ConflictVersion, stage: Int, path: String,
                                       full: String, root: String) throws {
         guard chosen.unavailable == nil else { throw SyncError.conflictSideUnavailable(path: path) }
-        guard try fileService.entryTypeWithoutFollowingLinks(at: full) != .directory else {
-            throw SyncError.conflictsChanged
+        if try fileService.entryTypeWithoutFollowingLinks(at: full) == .directory {
+            guard chosen.entry == nil else { throw SyncError.conflictFolderMustMove(path: path) }
+            // The folder side removed the old file. Resolve that index entry without staging or
+            // deleting its children; their own conflict picks retain their native stages.
+            try gitService.removeConflictEntryFromIndex(path, at: root)
+            return
         }
         if let entry = chosen.entry {
             if entry.mode == "120000" {

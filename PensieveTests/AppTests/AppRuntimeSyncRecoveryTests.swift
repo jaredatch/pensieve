@@ -106,6 +106,7 @@ final class AppRuntimeSyncRecoveryTests: XCTestCase {
             await h.finish()
             XCTAssertEqual(h.engine.count, manual ? 2 : 1, "one retry spends the manual request, even if it fails")
         }
+        try await assertDroppedQueuedRecoveryAllowsLaterRecovery()
         try await assertHeldRecoverySurvivesUsableProbe()
         try await assertRetryExpiresWithUsableEvidence()
         try await assertRecoveryWhileIneligible()
@@ -144,35 +145,7 @@ final class AppRuntimeSyncRecoveryTests: XCTestCase {
     }
 
 }
-
 private extension AppRuntimeSyncRecoveryTests {
-    func assertConcurrentProbeCannotSuppressStartupFailure() async throws {
-        let started = expectation(description: "startup probe entered")
-        let release = TestWait.Gate(owner: self)
-        let probe = RuleProbe()
-        probe.set {
-            if probe.count == 1 {
-                started.fulfill()
-                try? release.wait()
-            }
-            return .usable
-        }
-        let startup = Task {
-            try await makeSyncRecoveryHarness(probe: probe,
-                initialProbeError: GitError.outputReadFailed(detail: "bootstrap EIO"))
-        }
-        await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
-        await TestWait.until(failureMessage: "startup probe did not block") { release.waiterCount == 1 }
-        let concurrent = await BlockingWork.run(priority: .utility) { probe.run() }
-        XCTAssertEqual(concurrent, .usable)
-        XCTAssertEqual(probe.count, 2, "the other call must finish before startup resumes")
-        release.open()
-        let h = try await startup.value
-        XCTAssertNil(h.runtime.gitUsability, "startup keeps its own failure despite the later shared count")
-        XCTAssertEqual(h.runtime.syncModel.configurationError, "Pensieve couldn’t read git’s output: bootstrap EIO")
-        await h.finish()
-    }
-
     func assertPrivilegedRequestsSurviveGitOutage() async throws {
         for scenario in ["queued manual", "idle manual", "preflight", "first manual", "first preflight"] {
             let outcomes: [Result<SyncOutcome, Error>] = scenario == "queued manual"
@@ -274,7 +247,6 @@ private extension AppRuntimeSyncRecoveryTests {
         }
     }
 }
-
 private extension AppRuntimeSyncRecoveryTests {
     func heldRecoveryBeforeIngest() async throws -> RecoveryHarness {
         let h = try await makeSyncRecoveryHarness(outcomes: [.failure(GitError.unusable(.developerToolsMissing))])
@@ -291,6 +263,33 @@ private extension AppRuntimeSyncRecoveryTests {
         XCTAssertTrue(h.runtime.scheduler.hasPendingTrigger, "ingest must hold the recovery request")
         XCTAssertFalse(h.runtime.scheduler.isSyncing)
         return h
+    }
+
+    func assertDroppedQueuedRecoveryAllowsLaterRecovery() async throws {
+        for block in ["conflict", "absent"] {
+            let h = try await heldRecoveryBeforeIngest()
+            if block == "conflict" {
+                h.runtime.syncModel.apply(.conflicted(["skills/example/SKILL.md"]))
+            } else {
+                try TestPaths.git.removeRemote(at: h.fixture.root)
+                await h.runtime.refreshGitConfiguration(probingGit: false)
+            }
+            h.runtime.scheduler.launchIngestCompleted()
+            await h.waitForIdle()
+            XCTAssertFalse(h.runtime.scheduler.hasPendingTrigger, "Repository refusal must drop the queued packet")
+            if block == "conflict" {
+                h.runtime.syncModel.clearConflict()
+            } else {
+                try TestPaths.git.setRemote("https://fixture.test/store.git", at: h.fixture.root)
+                await h.runtime.refreshGitConfiguration(probingGit: false)
+            }
+            await h.recover()
+            await h.waitForFollowUpOrIdle()
+            XCTAssertEqual(h.engine.count, 2, block + " must not strand the next recovery")
+            if h.engine.count == 2 { h.release.open() }
+            await h.finish()
+            XCTAssertEqual(h.engine.count, 2, "Only one catch-up may run")
+        }
     }
 
     func assertHeldRecoverySurvivesUsableProbe() async throws {
