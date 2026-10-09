@@ -73,7 +73,7 @@ struct PreviewImageLoader: PreviewImageLoading {
     }
 
     private func localPath(_ url: URL, skillDirectory: String?) throws -> String {
-        guard let skillDirectory, skillDirectory.hasPrefix("/"),
+        guard let skillDirectory, PathSyntax.isAbsolute(skillDirectory),
               url.scheme == nil || url.scheme?.lowercased() == "file",
               url.host == nil || url.host == "" || url.host == "localhost" else {
             throw PreviewImageError.blocked
@@ -86,7 +86,7 @@ struct PreviewImageLoader: PreviewImageLoading {
         let root = URL(fileURLWithPath: safeDirectory, isDirectory: true).standardizedFileURL
         guard let resolved = Self.resolvedURL(url, skillDirectory: root.path) else { throw PreviewImageError.blocked }
         let path = resolved.standardizedFileURL.path
-        guard !path.contains("\0"), path.hasPrefix(root.path + "/") else { throw PreviewImageError.blocked }
+        guard !path.contains("\0"), PathSyntax.hasPrefix(path, root.path + "/") else { throw PreviewImageError.blocked }
         return path
     }
 

@@ -42,7 +42,7 @@ extension ManifestService {
         for machineEntry in try fileService.listDirectory(at: deploysDir).sorted() {
             let machineFile = "deploys/" + machineEntry
             guard machineEntry == (machineEntry as NSString).lastPathComponent,
-                  !machineEntry.contains("/"), !machineEntry.contains("\\"),
+                  !PathSyntax.hasSeparator(machineEntry), !machineEntry.contains("\\"),
                   let uuid = UUID(uuidString: machineEntry),
                   machineEntry == uuid.uuidString,
                   !fileService.isSymlink(at: deploysDir + "/" + machineEntry),
@@ -76,7 +76,7 @@ extension ManifestService {
         for entry in try fileService.listDirectory(at: directory).sorted() {
             let relativePath = "deploys/" + machineID + "/" + entry
             guard entry == (entry as NSString).lastPathComponent,
-                  !entry.contains("/"), !entry.contains("\\"), entry.hasSuffix(".yaml") else {
+                  !PathSyntax.hasSeparator(entry), !entry.contains("\\"), entry.hasSuffix(".yaml") else {
                 throw ManifestError.corruptManifestFile(relativePath)
             }
             let stem = String(entry.dropLast(5))

@@ -148,6 +148,7 @@ final class SyncConflictResolutionTests: XCTestCase {
         try FileManager.default.createSymbolicLink(atPath: root + "/skills/victim", withDestinationPath: inRootDecoy)
         try assertUnsafePath("skills/victim/SKILL.md", root: root, escapedPath: inRootDecoy + "/SKILL.md")
         try assertUnsafePath("skills/\u{85}/SKILL.md", root: root, escapedPath: nil)
+        try assertUnsafeJoiningScalarPaths(root: root)
         // Lexical guards (absolute / .. / . / empty component) — each must reject before any write.
         try assertUnsafePath("../outside/direct.txt", root: root, escapedPath: outside + "/direct.txt")
         try assertUnsafePath("/absolute.txt", root: root, escapedPath: nil)
@@ -178,7 +179,6 @@ final class SyncConflictResolutionTests: XCTestCase {
     }
 }
 // MARK: - Conflict fixtures
-
 extension SyncConflictResolutionTests {
     private static let slug = "conflict"
     private static let skillPath = "skills/conflict/SKILL.md"
@@ -313,8 +313,8 @@ extension SyncConflictResolutionTests {
         func hasCommitsToPush(at path: String) -> Bool { false }
     }
 
-    private func assertUnsafePath(_ path: String, root: String, escapedPath: String?,
-                                  line: UInt = #line) throws {
+    func assertUnsafePath(_ path: String, root: String, escapedPath: String?,
+                          line: UInt = #line) throws {
         let git = StubGit(conflictPath: path)
         let engine = SyncEngine(gitService: git, manifestService: ManifestService(),
                                 storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)

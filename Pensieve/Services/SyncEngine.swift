@@ -327,9 +327,9 @@ struct SyncEngine: SyncEngineProtocol {
     }
 
     static func kind(for path: String) -> ConflictKind {
-        if path.hasPrefix("skills/") && path.hasSuffix("/SKILL.md") { return .body }
-        if path.hasPrefix("manifest/skills/") { return .overlay }
-        if path.hasPrefix("manifest/categories/") { return .category }
+        if PathSyntax.hasPrefix(path, "skills/") && PathSyntax.hasSuffix(path, "/SKILL.md") { return .body }
+        if PathSyntax.hasPrefix(path, "manifest/skills/") { return .overlay }
+        if PathSyntax.hasPrefix(path, "manifest/categories/") { return .category }
         if path == "manifest/projects.yaml" { return .project }
         return .body
     }
@@ -338,8 +338,8 @@ struct SyncEngine: SyncEngineProtocol {
     /// any `.`/`..`/empty/control-scalar component; any symlink at a directory/non-leaf component; and
     /// a symlinked leaf whose target resolves outside `root`. Containment is boundary-aware.
     private func validatedWorktreePath(_ path: String, root: String) -> String? {
-        guard !path.isEmpty, !path.hasPrefix("/") else { return nil }
-        let components = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard !path.isEmpty, !PathSyntax.isAbsolute(path) else { return nil }
+        let components = PathSyntax.components(path, omittingEmptySubsequences: false)
         for component in components {
             if component.isEmpty || component == "." || component == ".." { return nil }
             if component.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) {
@@ -358,11 +358,11 @@ struct SyncEngine: SyncEngineProtocol {
             // escape-only check below).
             if index != components.count - 1 { return nil }
             guard let target = try? fileService.symlinkTarget(at: current) else { return nil }
-            let base = target.hasPrefix("/")
+            let base = PathSyntax.isAbsolute(target)
                 ? target
                 : (current as NSString).deletingLastPathComponent + "/" + target
             let resolved = URL(fileURLWithPath: base).resolvingSymlinksInPath().path
-            if resolved != realRoot && !resolved.hasPrefix(realRoot + "/") { return nil }
+            if resolved != realRoot && !PathSyntax.hasPrefix(resolved, realRoot + "/") { return nil }
         }
         return root + "/" + path
     }

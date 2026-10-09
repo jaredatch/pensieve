@@ -43,7 +43,7 @@ final class AddProjectModel {
     /// editing either field cancels it. Submission revalidates the directory, including after a failed Add.
     var canSubmit: Bool {
         !didSubmit && !isCheckingIdentity && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && submissionPath.hasPrefix("/")
+            && PathSyntax.isAbsolute(submissionPath)
     }
 
     func refreshIdentityStatus() {
@@ -59,7 +59,7 @@ final class AddProjectModel {
             identityMessage = nil
             return
         }
-        guard expanded.hasPrefix("/") else {
+        guard PathSyntax.isAbsolute(expanded) else {
             isCheckingIdentity = false
             hasIdentityError = true
             identityMessage = "Enter a full path, starting with / or ~/"

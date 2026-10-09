@@ -28,7 +28,7 @@ struct WaitingRemoval: Codable, Equatable {
     let legacyFingerprint: CursorRemovalFingerprint?
 
     var isValid: Bool {
-        guard projectPath.hasPrefix("/"), platform.supportsProjectScope,
+        guard PathSyntax.isAbsolute(projectPath), platform.supportsProjectScope,
               (try? LinkService.validatePathComponent(slug)) != nil, !source.isEmpty else { return false }
         guard let expected = DeployPaths.projectArtifactPath(directoryName: slug, platform: platform,
                                                               projectPath: projectPath) else { return false }

@@ -221,27 +221,24 @@ final class ConflictResolutionModel {
     }
 
     private func skillBodySlug(from path: String) -> String? {
-        guard path.hasPrefix("skills/"), path.hasSuffix("/SKILL.md") else { return nil }
-        let start = path.index(path.startIndex, offsetBy: "skills/".count)
-        let end = path.index(path.endIndex, offsetBy: -"/SKILL.md".count)
-        guard start < end else { return nil }
-        return String(path[start..<end])
+        guard PathSyntax.hasPrefix(path, "skills/"), PathSyntax.hasSuffix(path, "/SKILL.md") else { return nil }
+        guard let relative = PathSyntax.relativePath(path, under: "skills"),
+              relative.count > "/SKILL.md".count else { return nil }
+        return String(relative.dropLast("/SKILL.md".count))
     }
 
     private func skillOverlaySlug(from path: String) -> String? {
-        guard path.hasPrefix("manifest/skills/"), path.hasSuffix(".yaml") else { return nil }
-        let start = path.index(path.startIndex, offsetBy: "manifest/skills/".count)
-        let end = path.index(path.endIndex, offsetBy: -".yaml".count)
-        guard start < end else { return nil }
-        return String(path[start..<end])
+        guard PathSyntax.hasPrefix(path, "manifest/skills/"), path.hasSuffix(".yaml") else { return nil }
+        guard let relative = PathSyntax.relativePath(path, under: "manifest/skills"),
+              relative.count > ".yaml".count else { return nil }
+        return String(relative.dropLast(".yaml".count))
     }
 
     private func categoryName(from path: String) -> String {
-        guard path.hasPrefix("manifest/categories/"), path.hasSuffix(".yaml") else { return path }
-        let start = path.index(path.startIndex, offsetBy: "manifest/categories/".count)
-        let end = path.index(path.endIndex, offsetBy: -".yaml".count)
-        guard start < end else { return path }
-        return String(path[start..<end])
+        guard PathSyntax.hasPrefix(path, "manifest/categories/"), path.hasSuffix(".yaml") else { return path }
+        guard let relative = PathSyntax.relativePath(path, under: "manifest/categories"),
+              relative.count > ".yaml".count else { return path }
+        return String(relative.dropLast(".yaml".count))
     }
 
     private func resolveCredential() throws -> GitCredential? {

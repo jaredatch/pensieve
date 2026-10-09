@@ -8,14 +8,15 @@ enum HomePath {
             return nil
         }
         if normalizedPath == normalizedHome { return "~" }
-        return "~" + normalizedPath.dropFirst(normalizedHome.count)
+        guard let relative = PathSyntax.relativePath(normalizedPath, under: normalizedHome) else { return nil }
+        return "~/" + relative
     }
 
     static func displayAbbreviation(_ path: String, homeDirectory: String) -> String? {
         guard admittedPair(path, homeDirectory: homeDirectory) != nil else { return nil }
         if path == homeDirectory { return "~" }
-        guard path.hasPrefix(homeDirectory + "/") else { return nil }
-        return "~" + path.dropFirst(homeDirectory.count)
+        guard let relative = PathSyntax.relativePath(path, under: homeDirectory) else { return nil }
+        return "~/" + relative
     }
 
     private static func admittedPair(_ path: String, homeDirectory: String) -> (String, String)? {
@@ -23,8 +24,8 @@ enum HomePath {
         let normalizedPath = lexicallyNormalized(path)
         let normalizedHome = lexicallyNormalized(homeDirectory)
         let isDescendant = normalizedHome == "/"
-            ? normalizedPath.hasPrefix("/")
-            : normalizedPath.hasPrefix(normalizedHome + "/")
+            ? PathSyntax.isAbsolute(normalizedPath)
+            : PathSyntax.hasPrefix(normalizedPath, normalizedHome + "/")
         guard normalizedPath == normalizedHome || isDescendant else {
             return nil
         }
@@ -32,9 +33,9 @@ enum HomePath {
     }
 
     private static func lexicallyNormalized(_ path: String) -> String {
-        let isAbsolute = path.hasPrefix("/")
-        var components: [Substring] = []
-        for component in path.split(separator: "/", omittingEmptySubsequences: false) {
+        let isAbsolute = PathSyntax.isAbsolute(path)
+        var components: [String] = []
+        for component in PathSyntax.components(path, omittingEmptySubsequences: false) {
             switch component {
             case "", ".":
                 continue

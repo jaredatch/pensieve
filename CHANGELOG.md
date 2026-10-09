@@ -35,6 +35,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Path checks now recognize filesystem separators beside combining marks, joiners, emoji modifiers and tag characters. Sync refuses escaping links while existing accented skill names and decomposed link targets keep working.
 - A connected store with no branch now says why it can't sync, instead of showing an old sync time. When git starts working again, sync catches up promptly; with background sync off, it retries your failed Sync Now once.
 - Slow git operations no longer tie up the threads the app needs to stay responsive. Sync, update checks and upstream history can make progress independently.
 - Short rendered skills now line up with the file row in Content and stay aligned to the left in History.

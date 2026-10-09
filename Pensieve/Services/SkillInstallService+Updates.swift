@@ -133,21 +133,21 @@ extension SkillInstallService {
                 || error is FileTreeComparisonError { return error }
             return SkillUpdateFlowError.previewReadFailed("Couldn't compare the skill's files.")
         }
-        let isUpstream = path == upstream || path.hasPrefix(upstream + "/")
+        let isUpstream = PathSyntax.isWithin(path, root: upstream)
         let root = isUpstream ? upstream : local
-        guard path == root || path.hasPrefix(root + "/") else {
+        guard PathSyntax.isWithin(path, root: root) else {
             return SkillUpdateFlowError.previewReadFailed("Couldn't compare the skill's files.")
         }
-        var relative = path == root ? "." : String(path.dropFirst(root.count + 1))
+        var relative = PathSyntax.relativePath(path, under: root).flatMap { $0.isEmpty ? nil : $0 } ?? "."
         if isUpstream, let skillPath {
             // Scratch/session/repository are implementation paths, not part of the skill.
-            let components = relative.split(separator: "/")
+            let components = PathSyntax.components(relative)
             relative = components.count > 2 ? components.dropFirst(2).joined(separator: "/") : "."
             if !skillPath.isEmpty {
-                if relative == skillPath || skillPath.hasPrefix(relative + "/") {
+                if PathSyntax.isWithin(skillPath, root: relative) {
                     relative = "."
-                } else if relative.hasPrefix(skillPath + "/") {
-                    relative = String(relative.dropFirst(skillPath.count + 1))
+                } else if PathSyntax.isWithin(relative, root: skillPath, includingRoot: false) {
+                    relative = PathSyntax.relativePath(relative, under: skillPath) ?? "."
                 }
             }
         }

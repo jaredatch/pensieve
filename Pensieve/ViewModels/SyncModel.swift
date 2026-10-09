@@ -52,10 +52,14 @@ final class SyncModel {
         guard case let .conflicted(paths) = state else { return [] }
         var slugs = Set<String>()
         for path in paths {
-            if path.hasPrefix("skills/"), path.hasSuffix("/SKILL.md") {
-                slugs.insert(String(path.dropFirst("skills/".count).dropLast("/SKILL.md".count)))
-            } else if path.hasPrefix("manifest/skills/"), path.hasSuffix(".yaml") {
-                slugs.insert(String(path.dropFirst("manifest/skills/".count).dropLast(".yaml".count)))
+            if PathSyntax.hasPrefix(path, "skills/"), PathSyntax.hasSuffix(path, "/SKILL.md") {
+                if let relative = PathSyntax.relativePath(path, under: "skills") {
+                    slugs.insert(String(relative.dropLast("/SKILL.md".count)))
+                }
+            } else if PathSyntax.hasPrefix(path, "manifest/skills/"), path.hasSuffix(".yaml") {
+                if let relative = PathSyntax.relativePath(path, under: "manifest/skills") {
+                    slugs.insert(String(relative.dropLast(".yaml".count)))
+                }
             }
         }
         return slugs

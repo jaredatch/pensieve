@@ -103,15 +103,8 @@ final class FileWatchService: FileWatchServiceProtocol {
 
         for path in changedPaths {
             let normalizedPath = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-            guard normalizedPath == rootDir || normalizedPath.hasPrefix(rootDir + "/") else {
-                continue
-            }
-
-            let relativePath = String(normalizedPath.dropFirst(rootDir.count))
-                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            guard let directoryName = relativePath.split(separator: "/").first.map(String.init) else {
-                continue
-            }
+            guard let relativePath = PathSyntax.relativePath(normalizedPath, under: rootDir),
+                  let directoryName = PathSyntax.components(relativePath).first else { continue }
 
             directoryNames.insert(directoryName)
         }

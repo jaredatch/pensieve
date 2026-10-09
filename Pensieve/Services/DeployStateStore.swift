@@ -14,8 +14,10 @@ struct DeployStateRecord: Codable, Equatable {
         guard let platform = PlatformTarget(rawValue: platform), platform.supportsProjectScope else { return artifactPath }
         guard let suffix = DeployPaths.projectArtifactPath(directoryName: slug, platform: platform,
                                                             projectPath: "") else { return artifactPath }
-        guard artifactPath.hasSuffix(suffix) else { return artifactPath }
-        let path = String(artifactPath.dropLast(suffix.count))
+        guard PathSyntax.hasSuffix(artifactPath, suffix) else { return artifactPath }
+        let suffixComponents = PathSyntax.components(suffix).count
+        let path = PathSyntax.components(artifactPath, omittingEmptySubsequences: false)
+            .dropLast(suffixComponents).joined(separator: "/")
         return path.isEmpty ? "/" : path
     }
 }

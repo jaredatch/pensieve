@@ -32,6 +32,25 @@ final class ImportScannerStoreRefusalTests: XCTestCase {
         )
     }
 
+    func testJoiningNamesStayWithinStoreAndExternalFolderLinksRemainImportable() throws {
+        let store = tempDir + "/.pensieve"
+        let scanner = makeScanner(grokSkillsDir: tempDir + "/grok")
+        for (index, scalar) in PathJoiningScalars.values.enumerated() {
+            let name = scalar + "skill"
+            let own = store + "/" + name
+            let other = tempDir + "/external/" + name
+            let text = "---\nname: Skill\ndescription: Fixture\n---\nbody"
+            try fileService.writeFile(at: own + "/SKILL.md", content: text)
+            try fileService.writeFile(at: other + "/SKILL.md", content: text)
+            let alias = tempDir + "/alias-\(index)"
+            try fileService.createSymlink(at: alias, pointingTo: other)
+            XCTAssertTrue(scanner.isInsideStore(own + "/SKILL.md"))
+            XCTAssertFalse(scanner.isInsideStore(other + "/SKILL.md"))
+            XCTAssertTrue(scanner.scanFolder(own).isEmpty)
+            XCTAssertEqual(scanner.scanFolder(alias).map(\.sourcePath), [alias + "/SKILL.md"])
+        }
+    }
+
     /// PLAN-30 / 30.2 Layer-2: a skill that reaches the store through a symlink — on a child entry
     /// (through an alias, so the target's name never says `.pensieve`) or on the `SKILL.md` itself —
     /// is refused the same as the library itself.

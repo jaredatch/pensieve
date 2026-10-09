@@ -9,7 +9,7 @@ struct ProjectDirectory {
 
     /// User-wide operations are admitted; saved project paths must be absolute before disk access.
     static func canAccess(_ projectPath: String?) -> Bool {
-        projectPath?.hasPrefix("/") ?? true
+        projectPath.map(PathSyntax.isAbsolute) ?? true
     }
 }
 
@@ -58,9 +58,10 @@ extension FileServiceProtocol {
     /// The supplied writer stays private; callers pass content or a target to the bounded methods.
     private func writeInProject(at artifactPath: String, project: ProjectDirectory, write: () throws -> Void) throws {
         let projectPath = project.path
-        let prefix = projectPath.hasSuffix("/") ? projectPath : projectPath + "/"
-        guard artifactPath.hasPrefix(prefix) else { throw CocoaError(.fileWriteInvalidFileName) }
-        let components = artifactPath.dropFirst(prefix.count).split(separator: "/")
+        guard let relative = PathSyntax.relativePath(artifactPath, under: projectPath), !relative.isEmpty else {
+            throw CocoaError(.fileWriteInvalidFileName)
+        }
+        let components = PathSyntax.components(relative)
         guard !components.isEmpty, components.allSatisfy({ $0 != "." && $0 != ".." }) else {
             throw CocoaError(.fileWriteInvalidFileName)
         }
@@ -178,7 +179,7 @@ final class ProjectDirectoryProbes: @unchecked Sendable {
     }
 
     func check(at path: String, probe: @escaping (String) throws -> Bool) throws -> Bool {
-        let key = path.split(separator: "/").joined(separator: "/")
+        let key = PathSyntax.components(path).joined(separator: "/")
         lock.lock()
         let flight: Flight
         let startsProbe: Bool

@@ -27,7 +27,7 @@ extension SkillLibraryViewModel {
     static func bundleFileText(slug: String, relativePath: String, base: String,
                                fileService: FileServiceProtocol) -> String? {
         guard let dir = SkillStore.safeSkillDirectory(slug: slug, base: base, fileService: fileService) else { return nil }
-        let components = relativePath.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        let components = PathSyntax.components(relativePath, omittingEmptySubsequences: false)
         guard !components.isEmpty, components.allSatisfy(SkillStore.isPathSafeSlug) else { return nil }
         var path = dir
         for component in components {

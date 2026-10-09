@@ -22,8 +22,8 @@ extension MachineStateService {
     }
 
     static func admittedPublishedPath(_ value: Any?) -> String? {
-        guard let path = value as? String, path == "~" || path.hasPrefix("~/") else { return nil }
-        guard !path.split(separator: "/", omittingEmptySubsequences: false).contains("..") else { return nil }
+        guard let path = value as? String, path == "~" || PathSyntax.hasPrefix(path, "~/") else { return nil }
+        guard !PathSyntax.components(path, omittingEmptySubsequences: false).contains("..") else { return nil }
         return path
     }
 

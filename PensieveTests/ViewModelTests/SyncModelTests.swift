@@ -118,6 +118,15 @@ final class SyncModelTests: XCTestCase {
             ])
         )
         XCTAssertEqual(model.conflictedSlugs, ["a", "b"])
+        for scalar in PathJoiningScalars.values {
+            let name = scalar + "skill"
+            let joined = SyncModel(git: StubGit(), root: "/unused", initialState: .conflicted([
+                "skills/" + name + "/SKILL.md", "manifest/skills/" + name + ".yaml"
+            ]))
+            XCTAssertEqual(joined.conflictedSlugs, [name])
+            XCTAssertEqual(SyncEngine.kind(for: "manifest/skills/" + name + ".yaml"), .overlay)
+            XCTAssertEqual(SyncEngine.kind(for: "manifest/categories/" + name + ".yaml"), .category)
+        }
 
         let idleModel = SyncModel(
             git: StubGit(),

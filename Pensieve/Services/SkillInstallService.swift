@@ -354,7 +354,7 @@ extension SkillInstallService {
 
     private func hasSymlinkedComponent(at repositoryPath: String, relativePath: String) -> Bool {
         var path = repositoryPath
-        for component in relativePath.split(separator: "/", omittingEmptySubsequences: false) {
+        for component in PathSyntax.components(relativePath, omittingEmptySubsequences: false) {
             path += "/" + component
             if fileService.isSymlink(at: path) { return true }
         }

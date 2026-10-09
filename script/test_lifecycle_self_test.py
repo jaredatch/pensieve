@@ -30,7 +30,7 @@ class TestLifecycleTests(unittest.TestCase):
         (self.root / "Pensieve").mkdir()
         (self.root / "PensieveDaemon").mkdir()
         for name in ("test.sh", "test_diagnostics.py", "test_runs.py", "test_temp_cleanup.py", "check-live-defaults.py",
-                     "runtime-path-members.json"):
+                     "runtime-path-members.json", "check-path-syntax.py"):
             source = SCRIPTS / name
             if source.exists():
                 shutil.copy2(source, scripts / name)

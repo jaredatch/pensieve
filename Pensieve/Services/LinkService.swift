@@ -155,8 +155,8 @@ final class LinkService: LinkServiceProtocol {
         guard !component.isEmpty,
               component != ".",
               component != "..",
-              !component.contains("/"),
-              !component.hasPrefix("~") else {
+              !PathSyntax.hasSeparator(component),
+              !PathSyntax.startsWithTilde(component) else {
             throw LinkError.invalidPathComponent(component)
         }
     }

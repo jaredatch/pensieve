@@ -131,6 +131,7 @@ targets:
       - path: Pensieve/Services/FileService+TreeComparison.swift
       - path: Pensieve/Services/RemoteURLPolicy.swift
       - path: Pensieve/Utilities/PathConstants.swift
+      - path: Pensieve/Utilities/PathSyntax.swift
       - path: Pensieve/Utilities/DisplayTextSanitizer.swift
     settings:
       base:
@@ -194,6 +195,7 @@ targets:
       - path: Pensieve/Models/SkillScope.swift
       - path: Pensieve/Models/AdapterConfig.swift
       - path: Pensieve/Utilities/PathConstants.swift
+      - path: Pensieve/Utilities/PathSyntax.swift
       - path: Pensieve/Utilities/RuntimePaths.swift
       - path: Pensieve/Utilities/DisplayTextSanitizer.swift
     settings:

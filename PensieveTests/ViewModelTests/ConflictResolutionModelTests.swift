@@ -109,6 +109,25 @@ final class ConflictResolutionModelTests: XCTestCase {
         XCTAssertFalse(model.canApply)
     }
 
+    func testJoiningBodyAndOverlayNamesGroupWithoutLosingTheirFirstScalar() async throws {
+        for scalar in PathJoiningScalars.values {
+            let context = try makeContext()
+            let name = scalar + "skill"
+            context.insert(Skill(name: "Joined Skill", directoryName: name))
+            try context.save()
+            let engine = StubResolutionEngine()
+            engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: name), overlayItem(slug: name)]))]
+            let model = makeModel(engine: engine)
+            await model.loadAndReport(context: context)
+            let group = try XCTUnwrap(readyGroups(from: model.phase).first)
+            XCTAssertEqual(group.id, name)
+            XCTAssertEqual(group.title, "Joined Skill")
+            XCTAssertEqual(group.items.count, 2)
+            model.choose(name, .thisMachine)
+            XCTAssertTrue(model.canApply)
+        }
+    }
+
     func testChooseEnablesApply() async throws {
         let context = try makeContext()
         let engine = StubResolutionEngine()

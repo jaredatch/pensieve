@@ -27,7 +27,7 @@ extension SkillInstallService {
         return try withCheckout(source: source, credential: credential, preview: true) { checkoutPath in
             var directory = checkoutPath
             var relative = ""
-            for component in candidate.path.split(separator: "/") {
+            for component in PathSyntax.components(candidate.path) {
                 directory += "/" + component
                 relative += (relative.isEmpty ? "" : "/") + component
                 guard try fileService.entryTypeWithoutFollowingLinks(at: directory) == .directory else {

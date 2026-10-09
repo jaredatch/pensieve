@@ -43,12 +43,9 @@ struct DeployArtifactOwnership: DeployArtifactOwnershipChecking {
     }
 
     static func ownsLinkTarget(_ target: String, skillsDirectory: String, linksFile: Bool) -> Bool {
-        let prefix = skillsDirectory + "/"
-        guard skillsDirectory.hasPrefix("/"), target.hasPrefix(prefix) else { return false }
-        // A slash followed by a combining mark can share one Character; path separators are scalars.
-        let components = target.dropFirst(prefix.count).unicodeScalars
-            .split(separator: "/", omittingEmptySubsequences: false)
-            .map { String(String.UnicodeScalarView($0)) }
+        guard PathSyntax.isAbsolute(skillsDirectory),
+              let relative = PathSyntax.relativePath(target, under: skillsDirectory), !relative.isEmpty else { return false }
+        let components = PathSyntax.components(relative, omittingEmptySubsequences: false)
         guard components.count == (linksFile ? 2 : 1),
               let name = components.first, !name.isEmpty, name != ".", name != ".." else { return false }
         return !linksFile || components.last == "SKILL.md"

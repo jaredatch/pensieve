@@ -204,7 +204,7 @@ final class SkillStore: SkillStoreProtocol {
     /// is always the slugified form — not as a gate on already-existing on-disk skill names.
     static func isCanonicalSlug(_ slug: String) -> Bool {
         !slug.isEmpty
-            && !slug.contains("/")
+            && !PathSyntax.hasSeparator(slug)
             && slug != "."
             && slug != ".."
             && slugify(slug) == slug
@@ -219,7 +219,7 @@ final class SkillStore: SkillStoreProtocol {
     /// scalar) are still rejected. (PLAN-19 security review.)
     static func isPathSafeSlug(_ slug: String) -> Bool {
         !slug.isEmpty
-            && !slug.contains("/")
+            && !PathSyntax.hasSeparator(slug)
             && !slug.contains("\\")
             && slug != "."
             && slug != ".."
@@ -229,7 +229,7 @@ final class SkillStore: SkillStoreProtocol {
 
     /// Pure path construction for render-time context. Filesystem admission still uses C7.
     static func skillDirectoryPath(slug: String, base: String) -> String? {
-        guard !slug.isEmpty, !slug.contains("/"), slug != ".", slug != ".." else { return nil }
+        guard !slug.isEmpty, !PathSyntax.hasSeparator(slug), slug != ".", slug != ".." else { return nil }
         return base + "/" + slug
     }
 

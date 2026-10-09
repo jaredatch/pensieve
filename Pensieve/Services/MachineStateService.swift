@@ -216,7 +216,7 @@ private extension MachineStateService {
 
     func admittedFilename(_ entry: String) -> String? {
         guard entry == (entry as NSString).lastPathComponent,
-              !entry.contains("/"), !entry.contains("\\"), entry.hasSuffix(".yaml") else {
+              !PathSyntax.hasSeparator(entry), !entry.contains("\\"), entry.hasSuffix(".yaml") else {
             warn("skipped traversal-shaped machine state filename \(entry)")
             return nil
         }
