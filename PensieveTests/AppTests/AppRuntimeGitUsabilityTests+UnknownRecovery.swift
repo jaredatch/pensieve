@@ -57,16 +57,14 @@ extension AppRuntimeGitUsabilityTests {
         for answer in [GitUsability.usable, .developerToolsMissing] {
             let h = try await makeSyncRecoveryHarness(initialProbeError: GitError.outputReadFailed(detail: "launch EIO"))
             h.runtime.scheduler.launchIngestCompleted()
-            let started = expectation(description: "scheduled probe started")
             let release = TestWait.Gate(owner: self)
             h.probe.set {
                 XCTAssertFalse(Thread.isMainThread)
-                started.fulfill()
                 try? release.wait()
                 return answer
             }
             h.runtime.scheduler.tick()
-            await fulfillment(of: [started], timeout: TestWait.hostedActionTimeoutSeconds)
+            await TestWait.until(failureMessage: "scheduled probe did not start") { release.waiterCount > 0 }
             for _ in 0..<5 { h.runtime.scheduler.tick(); h.runtime.scheduler.wake() }
             var settingsEntered = false
             let settings = Task {
@@ -79,7 +77,8 @@ extension AppRuntimeGitUsabilityTests {
             XCTAssertEqual(h.probe.count, 2, "tick, wake and Settings share the in-flight probe")
             XCTAssertNil(h.runtime.gitUsability)
             XCTAssertEqual(h.engine.count, 0, "no cycle may start before the probe answers")
-            release.open()
+            // Release unexpected probes too so a coalescing failure cannot strand their workers.
+            for _ in 0..<12 { release.open() }
             await settings.value
             await TestWait.until(failureMessage: "git answer was not accepted") { h.runtime.gitUsability == answer }
             if answer == .usable {
@@ -87,17 +86,30 @@ extension AppRuntimeGitUsabilityTests {
                 h.release.open()
             }
             await h.waitForIdle()
-            for (index, trigger) in [h.runtime.scheduler.tick, h.runtime.scheduler.wake].enumerated() {
-                trigger()
-                if answer == .usable {
-                    await h.waitForCycle(index + 2)
-                    h.release.open()
-                    await h.waitForIdle()
-                }
-            }
+            await assertKnownAnswerStopsRechecks(h, answer: answer)
             await h.finish()
             XCTAssertEqual(h.probe.count, 2, "known usable and known unusable answers stop scheduled rechecks")
             XCTAssertEqual(h.engine.count, answer == .usable ? 3 : 0)
+        }
+    }
+
+    private func assertKnownAnswerStopsRechecks(_ h: RecoveryHarness, answer: GitUsability) async {
+        // An erroneous recheck must return so the probe-count assertion catches it, without a gate timeout.
+        h.probe.set { answer }
+        await TestWait.until(failureMessage: "initial recheck did not drain") {
+            !h.runtime.scheduler.hasPendingTrigger && !h.runtime.scheduler.isSyncing
+        }
+        for (index, trigger) in [h.runtime.scheduler.tick, h.runtime.scheduler.wake].enumerated() {
+            trigger()
+            if answer == .usable {
+                await h.waitForCycle(index + 2)
+                h.release.open()
+            }
+            // A recheck keeps the scheduled request pending even when no sync cycle is in flight.
+            await TestWait.until(failureMessage: "known-state scheduled request did not drain") {
+                !h.runtime.scheduler.hasPendingTrigger && !h.runtime.scheduler.isSyncing
+            }
+            XCTAssertEqual(h.probe.count, 2, "known \(answer): event \(index) must not probe git again")
         }
     }
 }
