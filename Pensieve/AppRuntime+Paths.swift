@@ -221,13 +221,17 @@ struct AppRuntimePaths {
         notifier: @escaping SyncStateNotifying
     ) -> SkillLibraryViewModel {
         let fileService = FileService()
+        let saves = ManifestSaveModel(manifest: ManifestService(fileService: fileService),
+            root: storeRoot, lockPath: syncLockPath)
+        saves.didSave = notifier
         return SkillLibraryViewModel(
             skillStore: SkillStore(fileService: fileService, baseDir: skillsDir, storeRoot: storeRoot),
             fileService: fileService,
             fileWatchService: fileWatchService ?? FileWatchService(rootDir: skillsDir),
             manifestService: ManifestService(),
             manifestRoot: storeRoot,
-            notifier: notifier
+            notifier: notifier,
+            manifestSaves: saves
         )
     }
 }

@@ -74,6 +74,13 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
             return result
         }
 
+        return rebuild(snapshot: snapshot, fromRoot: root, context: context)
+    }
+
+    /// A lock-owning GUI writer already read and updated the manifest. Reuse its plain result,
+    /// including pending local edits, rather than sampling disk again during presentation merge.
+    func rebuild(snapshot: ManifestSnapshot, fromRoot root: String, context: ModelContext) -> RebuildResult {
+        var result = RebuildResult()
         let manifestIsAuthoritative = manifestHasContent(root: root)
         let filePresentSlugs = rebuildSkills(
             root: root,

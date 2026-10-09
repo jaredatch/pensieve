@@ -1,0 +1,90 @@
+import Foundation
+import SwiftData
+@testable import Pensieve
+
+@MainActor
+final class ManifestSaveFixture {
+    final class Messages { var lines: [String] = [] }
+    let root: String
+    let lockPath: String
+    let files = FileService()
+    let manifest = ManifestService()
+    let context: ModelContext
+    let saves: ManifestSaveModel
+    let recording: RecordingSaveManifest
+    let messages = Messages()
+    let library: SkillLibraryViewModel
+    let categories: CategoryStore
+    let local = Pensieve.Category(name: "Local")
+    let doomed = Pensieve.Category(name: "ZDelete")
+    let alpha = Skill(name: "Alpha", directoryName: "alpha")
+    let beta = Skill(name: "Beta", directoryName: "beta")
+    let project: Project
+
+    init(unopenableLock: Bool = false) throws {
+        root = TestTemporaryDirectory.path + "manifest-save-" + UUID().uuidString
+        lockPath = root + "/support/sync.lock"
+        context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
+        recording = RecordingSaveManifest()
+        let messages = messages
+        saves = ManifestSaveModel(manifest: recording, root: root, lockPath: lockPath, log: { messages.lines.append($0) })
+        library = SkillLibraryViewModel(skillStore: SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root),
+            fileWatchService: FileWatchService(rootDir: root + "/skills"), manifestService: manifest,
+            manifestRoot: root, manifestSaves: saves)
+        categories = CategoryStore(manifestService: manifest, manifestRoot: root, manifestSaves: saves)
+        project = Project(name: "Local", path: root + "/project")
+        project.identityKey = "local-key"
+        for skill in [alpha, beta] {
+            skill.createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+            context.insert(skill)
+            try files.writeFile(at: skill.canonicalPath(skillsDirectory: root + "/skills"),
+                content: SkillSerializer.serialize(name: skill.name, description: "description", body: "body"))
+        }
+        context.insert(local)
+        context.insert(doomed)
+        context.insert(project)
+        try context.save()
+        try manifest.write(try manifest.snapshot(from: context), toRoot: root)
+        if unopenableLock { try files.createDirectory(at: lockPath) }
+    }
+
+    func manifestBytes() throws -> [String: Data] {
+        try Self.manifestBytes(root: root, files: files)
+    }
+
+    static func manifestBytes(root: String, files: FileServiceProtocol) throws -> [String: Data] {
+        var result: [String: Data] = [:]
+        func walk(_ relative: String) throws {
+            for name in try files.listDirectory(at: root + "/manifest" + relative) {
+                let path = relative + "/" + name
+                if files.directoryExists(at: root + "/manifest" + path) { try walk(path) } else {
+                    result[path] = try files.readData(at: root + "/manifest" + path)
+                }
+            }
+        }
+        try walk("")
+        return result
+    }
+
+    func cleanup() { try? files.deleteDirectory(at: root) }
+}
+
+/// Records the real full-snapshot writes, preserving their thread order; it does not implement merging.
+final class RecordingSaveManifest: ManifestSnapshotting {
+    private let base = ManifestService()
+    private let lock = NSLock()
+    private var snapshots: [ManifestSnapshot] = []
+    var writes: [ManifestSnapshot] {
+        lock.lock()
+        defer { lock.unlock() }
+        return snapshots
+    }
+    func snapshot(from context: ModelContext) throws -> ManifestSnapshot { try base.snapshot(from: context) }
+    func read(fromRoot root: String) throws -> ManifestSnapshot { try base.read(fromRoot: root) }
+    func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
+        try base.write(snapshot, toRoot: root)
+        lock.lock()
+        snapshots.append(snapshot)
+        lock.unlock()
+    }
+}

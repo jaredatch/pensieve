@@ -10,7 +10,7 @@ extension StoreRebuildServiceTests {
     }
 
     @MainActor
-    func testInstalledOriginSurvivesRebuildAndSnapshot() throws {
+    func testInstalledOriginSurvivesRebuildAndSnapshot() async throws {
         let context = try makeContext()
         let installedDate = try XCTUnwrap(ManifestService.parseDate("2026-07-30T16:00:00Z"))
         let installed = InstalledOrigin(
@@ -46,6 +46,7 @@ extension StoreRebuildServiceTests {
             manifestService: manifest, manifestRoot: tempDir
         )
         viewModel.updateMetadata(skill, tags: ["documents", "edited"], scope: .project, context: context)
+        await viewModel.manifestSaves?.waitUntilIdle()
 
         XCTAssertNil(viewModel.error)
         XCTAssertEqual(try installedOriginBlock(slug: "pdf"), originalOriginBlock)

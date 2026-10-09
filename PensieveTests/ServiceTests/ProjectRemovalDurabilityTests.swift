@@ -25,6 +25,30 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         try relaunchAndRetry(h, projectID: projectID)
     }
 
+    func testBusySyncRefusesBeforeWithdrawalOrArtifactCleanup() throws {
+        let h = try fixture()
+        defer { h.cleanup() }
+        let saved = try manifest(h).read(fromRoot: h.root + "/sync")
+        let state = try h.deployState.read()
+        let requests = try h.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.key)
+        var artifactEffects: [String] = []
+        h.mapped.beforeArtifactDeletion = { artifactEffects.append($0) }
+        h.mapped.beforeArtifactCreation = { artifactEffects.append($0) }
+        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.root + "/sync/sync.lock"))
+        defer { lock.release() }
+        let result = remove(h, project: h.project, context: h.context)
+        XCTAssertEqual(result.operationFailures, ["Sync is running. Try again when it finishes."])
+        XCTAssertTrue(artifactEffects.isEmpty)
+        XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync"), saved)
+        XCTAssertEqual(try h.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.key), requests)
+        XCTAssertEqual(try h.deployState.read(), state)
+        XCTAssertTrue(try h.context.fetch(FetchDescriptor<Project>()).contains { $0.id == h.project.id })
+        for platform in [PlatformTarget.codex, .cursor] {
+            XCTAssertTrue(try h.platformVM.removalOperation(skill: h.skill, platform: platform,
+                target: .project(h.project)).classify().isOwned)
+        }
+    }
+
     func testFailedManifestWriteKeepsRegistrationAndRelaunchRetryWithdrawsIntent() throws {
         let h = try fixture()
         defer { h.cleanup() }
@@ -32,6 +56,9 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         try manifest(h).write(try manifest(h).snapshot(from: h.context), toRoot: h.root + "/sync")
         let keys = category.projectKeys
         var faulted = false
+        var artifactEffects: [String] = []
+        h.mapped.beforeArtifactDeletion = { artifactEffects.append($0) }
+        h.mapped.beforeArtifactCreation = { artifactEffects.append($0) }
         h.mapped.beforeFileWrite = { path in
             if path.contains(".manifest-build-") && path.hasSuffix("/manifest.yaml") {
                 faulted = true
@@ -41,6 +68,7 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         let projectID = h.project.id
         let result = remove(h, project: h.project, context: h.context)
         XCTAssertTrue(faulted, "The real manifest writer must reach the fault")
+        XCTAssertTrue(artifactEffects.isEmpty, "A refused publication must attempt no artifact write or deletion")
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(ProjectRemovalModel.removalFailureMessage(projectName: h.project.name, result: result)
             .contains("stays registered"))
@@ -53,6 +81,10 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         XCTAssertEqual(category.projectKeys, keys, "Withdrawal leaves shared category membership unchanged")
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 2)
         XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").categories.first?.projectKeys, keys)
+        for platform in [PlatformTarget.codex, .cursor] {
+            XCTAssertTrue(try h.platformVM.removalOperation(skill: h.skill, platform: platform,
+                target: .project(h.project)).classify().isOwned, "Publish refusal must preserve the deployed artifact")
+        }
         h.mapped.beforeFileWrite = nil
         try relaunchAndRetry(h, projectID: projectID)
         XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").categories.first?.projectKeys, keys)

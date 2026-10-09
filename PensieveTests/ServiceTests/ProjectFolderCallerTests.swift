@@ -47,17 +47,19 @@ final class ProjectFolderCallerTests: XCTestCase {
         XCTAssertEqual(durable.filter { $0.projectKey == harness.project.identityKey }.count, 4)
     }
 
-    func testCategoryFailureListNamesMissingProjectAndOtherPairsDeploy() throws {
+    func testCategoryFailureListNamesMissingProjectAndOtherPairsDeploy() async throws {
         let harness = try ProjectFolderCallerHarness()
         defer { harness.cleanup() }
         let rule = try harness.addCategory()
         rule.skillSlugs = []
         rule.projectKeys.append(harness.otherProject.identityKey!)
         try harness.context.save()
-        let store = CategoryStore(manifestService: ManifestService(fileService: harness.files),
-                                  manifestRoot: harness.root + "/store")
+        let saves = ManifestSaveModel(manifest: ManifestService(fileService: harness.files),
+            root: harness.root + "/store", lockPath: harness.root + "/sync.lock")
+        let store = CategoryStore(manifestRoot: harness.root + "/store", manifestSaves: saves)
         let model = CategoryDetailModel(store: store, reconciler: harness.category)
         model.setSkill(harness.skill, inCategory: rule, assigned: true, context: harness.context)
+        await saves.waitUntilIdle()
         let result = try XCTUnwrap(model.lastResult)
         XCTAssertEqual(result.failureCount, 4)
         XCTAssertEqual(result.successes.count, 4)
@@ -72,12 +74,12 @@ final class ProjectFolderCallerTests: XCTestCase {
         XCTAssertFalse(try harness.files.entryExistsWithoutFollowingLinks(at: harness.root + "/absent"))
     }
 
-    func testCategorySkillRemovalFromMissingProjectSucceedsWithoutShownError() throws {
-        try assertCategoryRemovalFromMissingProject(removingSkill: true)
+    func testCategorySkillRemovalFromMissingProjectSucceedsWithoutShownError() async throws {
+        try await assertCategoryRemovalFromMissingProject(removingSkill: true)
     }
 
-    func testCategoryMemberRemovalFromMissingProjectSucceedsWithoutShownError() throws {
-        try assertCategoryRemovalFromMissingProject(removingSkill: false)
+    func testCategoryMemberRemovalFromMissingProjectSucceedsWithoutShownError() async throws {
+        try await assertCategoryRemovalFromMissingProject(removingSkill: false)
     }
 
     func testRemovingIntentDeployAndRegisteredMissingProjectCreatesNothing() throws {
@@ -122,7 +124,7 @@ final class ProjectFolderCallerTests: XCTestCase {
         XCTAssertFalse(try harness.files.entryExistsWithoutFollowingLinks(at: harness.root + "/absent"))
     }
 
-    private func assertCategoryRemovalFromMissingProject(removingSkill: Bool) throws {
+    private func assertCategoryRemovalFromMissingProject(removingSkill: Bool) async throws {
         let harness = try ProjectFolderCallerHarness()
         defer { harness.cleanup() }
         let rule = try harness.addCategory()
@@ -130,15 +132,16 @@ final class ProjectFolderCallerTests: XCTestCase {
         XCTAssertEqual(harness.category.reconcile(context: harness.context).successes.count, 4)
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 4)
         try harness.files.deleteDirectory(at: harness.root + "/absent")
-        let model = CategoryDetailModel(
-            store: CategoryStore(manifestService: ManifestService(fileService: harness.files),
-                                 manifestRoot: harness.root + "/store"), reconciler: harness.category
-        )
+        let saves = ManifestSaveModel(manifest: ManifestService(fileService: harness.files),
+            root: harness.root + "/store", lockPath: harness.root + "/sync.lock")
+        let model = CategoryDetailModel(store: CategoryStore(manifestRoot: harness.root + "/store", manifestSaves: saves),
+                                       reconciler: harness.category)
         if removingSkill {
             model.setSkill(harness.skill, inCategory: rule, assigned: false, context: harness.context)
         } else {
             model.setProject(harness.project, inCategory: rule, member: false, context: harness.context)
         }
+        await saves.waitUntilIdle()
         let result = try XCTUnwrap(model.lastResult)
         XCTAssertEqual(model.lastActionVerb, "removed")
         XCTAssertFalse(result.hasFailures, "A missing folder must not make removal present an error")

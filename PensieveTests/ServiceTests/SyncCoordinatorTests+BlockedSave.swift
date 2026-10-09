@@ -20,7 +20,6 @@ extension SyncCoordinatorTests {
             body: "before", tags: [], context: context))
         skill.updatedAt = Date(timeIntervalSince1970: 1)
         try context.save()
-        library.regenerateManifest(context: context)
         let coordinator = await configuredCoordinator(container: harness.container,
             engine: SyncEngine(gitService: git, lockPath: paths.syncLockPath), git: git, root: paths.storeRoot)
         let first = await coordinator.runCycle()

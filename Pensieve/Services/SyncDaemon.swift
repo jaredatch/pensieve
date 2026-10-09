@@ -139,7 +139,7 @@ struct SyncDaemon {
 
         // 6. Reconcile on BOTH success branches (self-heals even when already up-to-date). Reconcile is
         //    fail-safe internally (Stage 12.9); a reconcile error never fails the pull that already landed.
-        //    Runs inside the held lock, so the reconcile's manifest read never overlaps a GUI write-swap.
+        //    GUI manifest saves wait for this whole cycle, then apply their edits to the pulled tree.
         _ = try? reconciler.reconcile(root: root)
         return finish(.synced(changed: changed))
     }

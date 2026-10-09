@@ -51,13 +51,14 @@ final class UpdateMetadataTests: XCTestCase {
     }
 
     @MainActor
-    func testUpdateMetadataWritesTagsToOverlayAndNotSkillFile() throws {
+    func testUpdateMetadataWritesTagsToOverlayAndNotSkillFile() async throws {
         let fixture = try makeLibrary()
         let skillPath = tempDir + "/skills/\(fixture.skill.directoryName)/SKILL.md"
         let bytesBefore = try fileService.readData(at: skillPath)
         let updatedAtBefore = fixture.skill.updatedAt
 
         fixture.library.updateMetadata(fixture.skill, tags: ["a", "b"], scope: .user, context: fixture.context)
+        await fixture.library.manifestSaves?.waitUntilIdle()
 
         let overlay = try XCTUnwrap(
             try manifest.read(fromRoot: tempDir).skills.first { $0.slug == fixture.skill.directoryName }

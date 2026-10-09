@@ -87,7 +87,7 @@ final class WaitingRemovalSkillFailureTests: XCTestCase {
         }
     }
 
-    func testFinalRecordRetirementWarningPreservesWaitingAndManifestNotice() throws {
+    func testFinalRecordRetirementWarningPreservesWaitingAndManifestNotice() async throws {
         for clearNotice in [false, true] {
             let h = try WaitingRemovalHarness()
             defer { h.base.cleanup() }
@@ -107,13 +107,14 @@ final class WaitingRemovalSkillFailureTests: XCTestCase {
             }
             XCTAssertTrue(SkillDeletionFlow.delete(skill: h.base.skill, library: library, platformVM: h.vm,
                 projects: [h.base.project, h.base.otherProject], context: h.base.context))
+            await library.manifestSaves?.waitUntilIdle()
+            XCTAssertTrue(library.error?.contains("manifest") == true)
             let message = try XCTUnwrap(library.deletionNotice?.message)
             XCTAssertTrue(message.hasPrefix("Deleted “\(h.base.skill.name)”."), "clearNotice=\(clearNotice)")
             if !clearNotice {
                 XCTAssertTrue(message.contains(h.base.project.name))
                 XCTAssertTrue(message.contains(h.base.project.path))
                 XCTAssertTrue(message.contains("will be removed when the folder is back"))
-                XCTAssertTrue(message.contains("sync manifest couldn't be updated"))
             }
             XCTAssertTrue(message.contains("records couldn't be retired"))
             XCTAssertEqual(try h.vm.waitingRemovalStore.read().count, 1)

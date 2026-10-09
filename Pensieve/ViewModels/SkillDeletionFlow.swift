@@ -46,6 +46,7 @@ enum SkillDeletionFlow {
             try retire(skill: skill, context: context)
             try persist(context)
             retirementSaved = true
+            library.regenerateManifest(.retireSkill(skill.directoryName), context: context)
         } catch {
             context.rollback()
             library.deletionNotice = .failed(
@@ -56,20 +57,15 @@ enum SkillDeletionFlow {
 
         let outcome = library.deleteSkillEntry(skill, context: context, persist: persist)
         deletionOutcome = outcome
-        let manifestNote = updateManifest(library: library, context: context, waitingProjects: cleanupResult.waitingProjects)
+        let manifestNote = waitingCleanupNote(library: library, waitingProjects: cleanupResult.waitingProjects)
         return present(outcome, skill: skill, manifestNote: manifestNote, library: library)
     }
 
-    private static func updateManifest(
-        library: SkillLibraryViewModel, context: ModelContext, waitingProjects: [String]
+    private static func waitingCleanupNote(
+        library: SkillLibraryViewModel, waitingProjects: [String]
     ) -> String {
         var manifestNote = ""
-        do {
-            try library.writeManifest(context: context)
-            library.notifier()
-        } catch {
-            manifestNote = " The sync manifest couldn't be updated and will regenerate on the next change."
-        }
+        library.notifier()
 
         if !waitingProjects.isEmpty {
             manifestNote += " Links and rules in \(waitingProjects.joined(separator: ", ")) "

@@ -78,7 +78,7 @@ final class ManifestMaintenanceTests: XCTestCase {
     // MARK: - Skills
 
     @MainActor
-    func testCreatingSkillWritesOverlay() throws {
+    func testCreatingSkillWritesOverlay() async throws {
         let context = try makeContext()
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let vm = SkillLibraryViewModel(
@@ -86,13 +86,14 @@ final class ManifestMaintenanceTests: XCTestCase {
             manifestService: manifest, manifestRoot: tempDir
         )
         vm.createSkill(name: "My Skill", description: "d", body: "# b", tags: ["x"], context: context)
+        await vm.manifestSaves?.waitUntilIdle()
         XCTAssertTrue(overlayExists(slug: "my-skill"))
         let read = try manifest.read(fromRoot: tempDir)
         XCTAssertEqual(read.skills.first { $0.slug == "my-skill" }?.tags, ["x"])
     }
 
     @MainActor
-    func testCreatingSkillUsesUserScopeInRecordAndOverlay() throws {
+    func testCreatingSkillUsesUserScopeInRecordAndOverlay() async throws {
         let context = try makeContext()
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let vm = SkillLibraryViewModel(
@@ -101,6 +102,7 @@ final class ManifestMaintenanceTests: XCTestCase {
         )
 
         vm.createSkill(name: "Scoped", description: "d", body: "# b", tags: [], context: context)
+        await vm.manifestSaves?.waitUntilIdle()
 
         let record = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
         XCTAssertEqual(record.scope, .user)
@@ -145,7 +147,7 @@ final class ManifestMaintenanceTests: XCTestCase {
     }
 
     @MainActor
-    func testUpdatingMetadataReflectsInOverlay() throws {
+    func testUpdatingMetadataReflectsInOverlay() async throws {
         let context = try makeContext()
         try seedProjectIntent(context)
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
@@ -156,6 +158,7 @@ final class ManifestMaintenanceTests: XCTestCase {
         vm.createSkill(name: "Editable", description: "d", body: "# b", tags: [], context: context)
         let skill = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
         vm.updateMetadata(skill, tags: ["edited"], scope: .project, context: context)
+        await vm.manifestSaves?.waitUntilIdle()
         let overlay = try XCTUnwrap(try manifest.read(fromRoot: tempDir).skills.first { $0.slug == "editable" })
         XCTAssertEqual(overlay.tags, ["edited"])
         XCTAssertEqual(overlay.scope, .project)
@@ -163,7 +166,7 @@ final class ManifestMaintenanceTests: XCTestCase {
     }
 
     @MainActor
-    func testDeletingSkillPrunesOverlay() throws {
+    func testDeletingSkillPrunesOverlay() async throws {
         let context = try makeContext()
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let vm = SkillLibraryViewModel(
@@ -171,6 +174,7 @@ final class ManifestMaintenanceTests: XCTestCase {
             manifestService: manifest, manifestRoot: tempDir
         )
         vm.createSkill(name: "Doomed", description: "d", body: "# b", tags: [], context: context)
+        await vm.manifestSaves?.waitUntilIdle()
         XCTAssertTrue(overlayExists(slug: "doomed"))
         let legacyPath = tempDir + "/manifest/scenarios/legacy.yaml"
         let legacyBytes = Data([255, 0, 10]) + Data("name: Old\nskill_slugs: [doomed]\n".utf8)
@@ -186,12 +190,13 @@ final class ManifestMaintenanceTests: XCTestCase {
             ),
             projects: [], context: context
         ))
+        await vm.manifestSaves?.waitUntilIdle()
         XCTAssertFalse(overlayExists(slug: "doomed"))
         XCTAssertFalse(fileService.directoryExists(at: tempDir + "/manifest/scenarios"))
     }
 
     @MainActor
-    func testManifestFailureIsSurfacedButMutationSucceeds() throws {
+    func testManifestFailureIsSurfacedButMutationSucceeds() async throws {
         let context = try makeContext()
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let failing = ManifestService(fileService: ThrowingWriteFileService())
@@ -200,6 +205,7 @@ final class ManifestMaintenanceTests: XCTestCase {
             manifestService: failing, manifestRoot: tempDir
         )
         vm.createSkill(name: "Resilient", description: "d", body: "# b", tags: [], context: context)
+        await vm.manifestSaves?.waitUntilIdle()
         XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).count, 1)
         XCTAssertNotNil(vm.error)
     }
@@ -207,20 +213,24 @@ final class ManifestMaintenanceTests: XCTestCase {
     // MARK: - Categories
 
     @MainActor
-    func testCategoryCreateEditDeleteMaintainsManifest() throws {
+    func testCategoryCreateEditDeleteMaintainsManifest() async throws {
         let context = try makeContext()
         try seedProjectIntent(context)
-        let store = CategoryStore(manifestService: manifest, manifestRoot: tempDir)
+        let saves = ManifestSaveModel(manifest: manifest, root: tempDir, lockPath: tempDir + "/sync.lock")
+        let store = CategoryStore(manifestService: manifest, manifestRoot: tempDir, manifestSaves: saves)
         let category = try XCTUnwrap(store.create(name: "Swift", context: context))
+        await saves.waitUntilIdle()
         let file = tempDir + "/manifest/categories/" + ManifestService.categoryFileName("Swift")
         XCTAssertTrue(fileService.fileExists(at: file))
 
         let skill = Skill(name: "S", directoryName: "swift-style")
         context.insert(skill)
         store.setSkill(skill, inCategory: category, assigned: true, context: context)
+        await saves.waitUntilIdle()
         XCTAssertTrue(try fileService.readFile(at: file).contains("swift-style"))
 
         store.delete(category, context: context)
+        await saves.waitUntilIdle()
         XCTAssertFalse(fileService.fileExists(at: file))
         try assertProjectIntentSurvives()
     }
@@ -235,7 +245,20 @@ final class ManifestMaintenanceTests: XCTestCase {
         project.identityKey = "git:github.com/me/app"
         project.identityKind = "remote"
 
+        var disk = try manifest.snapshot(from: context)
+        disk.categories.append(CategoryRecord(name: "Remote", projectKeys: [], skillSlugs: []))
+        try manifest.write(disk, toRoot: tempDir)
+        let before = try manifest.read(fromRoot: tempDir)
+        let beforeBytes = try ManifestSaveFixture.manifestBytes(root: tempDir, files: fileService)
+        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: tempDir + "/sync.lock"))
+        defer { lock.release() }
+        let projectFile = try fileService.readData(at: tempDir + "/manifest/projects.yaml")
         registerProject(project, manifestService: manifest, manifestRoot: tempDir, context: context)
+        XCTAssertEqual(try ModelContext(context.container).fetch(FetchDescriptor<Project>()).map(\.id), [project.id])
+        XCTAssertEqual(try manifest.read(fromRoot: tempDir), before)
+        XCTAssertEqual(try ManifestSaveFixture.manifestBytes(root: tempDir, files: fileService), beforeBytes)
+        XCTAssertEqual(try fileService.readData(at: tempDir + "/manifest/projects.yaml"), projectFile)
+        lock.release()
         XCTAssertEqual(try fileService.readFile(at: tempDir + "/manifest/projects.yaml"), "projects:\n")
         let intentPath = tempDir + "/manifest/deploys/AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA/durable-intent.yaml"
         let intentBytesBeforeRemoval = try fileService.readFile(at: intentPath)

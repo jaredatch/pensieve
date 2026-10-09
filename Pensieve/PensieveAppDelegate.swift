@@ -10,6 +10,7 @@ final class PensieveAppDelegate: NSObject, NSApplicationDelegate {
     private(set) static weak var shared: PensieveAppDelegate?
 
     weak var runtime: AppRuntime?
+    private let pendingSaveTermination = PendingSaveTermination()
 
     override init() {
         super.init()
@@ -35,7 +36,8 @@ final class PensieveAppDelegate: NSObject, NSApplicationDelegate {
             hasUnsavedChanges: runtime?.library.hasUnsavedChanges ?? false,
             questionOpen: runtime?.library.pendingUnsavedChanges != nil,
             confirm: { then in self.runtime?.library.confirmLeavingAnyDraft(then: then) },
-            reply: { sender.reply(toApplicationShouldTerminate: $0) }
+            reply: { sender.reply(toApplicationShouldTerminate: $0) },
+            saves: runtime?.library.manifestSaves, saveTermination: pendingSaveTermination
         )
     }
 
@@ -49,11 +51,20 @@ final class PensieveAppDelegate: NSObject, NSApplicationDelegate {
         hasUnsavedChanges: Bool,
         questionOpen: Bool,
         confirm: @escaping (@escaping (Bool) -> Void) -> Void,
-        reply: @escaping (Bool) -> Void
+        reply: @escaping (Bool) -> Void,
+        saves: ManifestSaveModel? = nil,
+        saveTermination: PendingSaveTermination? = nil
     ) -> NSApplication.TerminateReply {
-        guard !questionOpen else { return .terminateCancel }
-        guard hasUnsavedChanges else { return .terminateNow }
-        DispatchQueue.main.async { confirm(reply) }
+        guard !questionOpen, saveTermination?.isWaiting != true else { return .terminateCancel }
+        let hasPendingSave = (saves?.pendingCount ?? 0) > 0
+        guard hasUnsavedChanges || hasPendingSave else { return .terminateNow }
+        let finish: (Bool) -> Void = { allowed in
+            guard allowed, let saves, saves.pendingCount > 0 else { reply(allowed); return }
+            (saveTermination ?? PendingSaveTermination()).wait(for: saves, reply: reply)
+        }
+        DispatchQueue.main.async {
+            if hasUnsavedChanges { confirm(finish) } else { finish(true) }
+        }
         return .terminateLater
     }
 

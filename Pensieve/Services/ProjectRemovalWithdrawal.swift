@@ -31,7 +31,7 @@ struct ProjectRemovalWithdrawal {
             throw failure("save project withdrawal", error)
         }
         do {
-            try publish(context: context)
+            try publish(context: context, project: project, request: request)
         } catch {
             let publicationError = error
             var restoration = "The saved requests were kept."
@@ -75,9 +75,22 @@ struct ProjectRemovalWithdrawal {
         }
     }
 
-    private func publish(context: ModelContext) throws {
+    private func publish(context: ModelContext, project: Project? = nil,
+                         request: ProjectRemovalWithdrawalRequest? = nil) throws {
         guard let manifestService else { return }
-        try manifestService.write(manifestService.snapshot(from: context), toRoot: manifestRoot)
+        let local = try manifestService.snapshot(from: context)
+        var snapshot: ManifestSnapshot
+        do {
+            snapshot = FileService().fileExists(at: manifestRoot + "/manifest/manifest.yaml")
+                ? try manifestService.read(fromRoot: manifestRoot) : local
+        } catch {
+            if case ManifestError.unsupportedSchema = error { throw error }
+            snapshot = local
+        }
+        if let project, let request, !request.keepingSharedKey, let key = project.identityKey {
+            snapshot.deployIntents.removeAll { $0.machineID == request.localMachineID && $0.projectKey == key }
+        }
+        try manifestService.write(snapshot, toRoot: manifestRoot)
     }
 
     private func failure(_ operation: String, _ error: Error, detail: String? = nil,

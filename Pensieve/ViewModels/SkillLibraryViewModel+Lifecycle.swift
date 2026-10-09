@@ -15,7 +15,8 @@ extension SkillLibraryViewModel {
         do {
             try context.save()
             error = nil
-            regenerateManifest(context: context)
+            regenerateManifest(.skillMetadata(skill.directoryName, tags == previousTags ? nil : tags,
+                scope == previousScope ? nil : scope), context: context)
             notifier()
         } catch {
             skill.tags = previousTags

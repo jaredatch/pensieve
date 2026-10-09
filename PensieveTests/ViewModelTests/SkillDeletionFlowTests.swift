@@ -41,7 +41,7 @@ final class SkillDeletionFlowTests: XCTestCase {
         let state = DeployStateStore(fileService: stateFS, appSupportDir: stateRoot)
         let library = SkillLibraryViewModel(
             skillStore: store, fileService: stateFS,
-            fileWatchService: watcher, manifestService: manifest, manifestRoot: "/manifest",
+            fileWatchService: watcher, manifestService: manifest, manifestRoot: stateRoot + "/manifest",
             notifier: counter.notify)
         library.startWatching()
         let platform = PlatformViewModel(
@@ -74,18 +74,20 @@ final class SkillDeletionFlowTests: XCTestCase {
         try f.context.save()
     }
 
-    private func delete(_ f: Fixture, persist: ((ModelContext) throws -> Void)? = nil) -> Bool {
-        SkillDeletionFlow.delete(
+    private func delete(_ f: Fixture, persist: ((ModelContext) throws -> Void)? = nil) async -> Bool {
+        let result = SkillDeletionFlow.delete(
             skill: f.skill, library: f.library, platformVM: f.platform, projects: [f.project],
             context: f.context, persist: persist ?? { try $0.save() })
+        await f.library.manifestSaves?.waitUntilIdle()
+        return result
     }
 
-    func testDeleteRetainsSkillWhenAnyRemovalFails() throws {
+    func testDeleteRetainsSkillWhenAnyRemovalFails() async throws {
         let f = try fixture(); try seedAllState(f)
         let path = f.links.path(f.skill, .claudeCode, nil)
         f.links.linkedPaths.insert(path); f.links.failingUnlinkPaths.insert(path)
         try f.state.upsert(record(f, path: path, platform: .claudeCode))
-        XCTAssertFalse(delete(f)); XCTAssertNotNil(f.library.deletionNotice)
+        let deleted = await delete(f); XCTAssertFalse(deleted); XCTAssertNotNil(f.library.deletionNotice)
         XCTAssertTrue(f.library.deletionNotice?.message.contains("injected failure") == true)
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<Skill>()).count, 1)
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<MachineDeployIntent>()).count, 2)
@@ -93,11 +95,11 @@ final class SkillDeletionFlowTests: XCTestCase {
         XCTAssertTrue(f.manifest.snapshots.isEmpty); XCTAssertEqual(f.counter.value, 0)
     }
 
-    func testDeleteRetiresEveryStateClassThenDeletesSkill() throws {
+    func testDeleteRetiresEveryStateClassThenDeletesSkill() async throws {
         let f = try fixture(); try seedAllState(f)
         f.context.insert(MachineDeployIntent(machineID: UUID().uuidString,
                                              skillSlug: "other", platformRaw: "cursor")); try f.context.save()
-        XCTAssertTrue(delete(f)); XCTAssertEqual(f.counter.value, 1)
+        let deleted = await delete(f); XCTAssertTrue(deleted); XCTAssertEqual(f.counter.value, 1)
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<Skill>()).count, 0)
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.skillSlug), ["other"])
         XCTAssertTrue(try f.context.fetch(FetchDescriptor<Pensieve.Category>()).allSatisfy { $0.skillSlugs.isEmpty })
@@ -106,9 +108,9 @@ final class SkillDeletionFlowTests: XCTestCase {
         XCTAssertFalse(f.manifest.snapshots.last?.deployIntents.contains { $0.skillSlug == "alpha" } == true)
     }
 
-    func testDeleteRollsBackEveryStateClassWhenRetirementSaveFails() throws {
+    func testDeleteRollsBackEveryStateClassWhenRetirementSaveFails() async throws {
         let f = try fixture(); try seedAllState(f)
-        XCTAssertFalse(delete(f, persist: { _ in throw DeletionTestError() }))
+        let deleted = await delete(f, persist: { _ in throw DeletionTestError() }); XCTAssertFalse(deleted)
         XCTAssertFalse(f.context.hasChanges); XCTAssertEqual(f.counter.value, 0)
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<MachineDeployIntent>()).count, 2)
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<IntentAssignment>()).count, 1)
@@ -116,40 +118,41 @@ final class SkillDeletionFlowTests: XCTestCase {
         XCTAssertTrue(f.manifest.snapshots.isEmpty); XCTAssertTrue(f.store.entries.contains("alpha"))
     }
 
-    func testDeleteReportsDirectoryDeleteFailure() throws {
+    func testDeleteReportsDirectoryDeleteFailure() async throws {
         let f = try fixture(); try seedAllState(f); f.store.deleteFailures.insert("alpha")
-        XCTAssertFalse(delete(f)); XCTAssertEqual(f.counter.value, 1)
+        let deleted = await delete(f); XCTAssertFalse(deleted); XCTAssertEqual(f.counter.value, 1)
         XCTAssertNotNil(try f.context.fetch(FetchDescriptor<Skill>()).first)
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<IntentAssignment>()).count, 0)
         XCTAssertEqual(f.manifest.snapshots.count, 1)
     }
 
-    func testDeleteWarnsWhenFinalManifestWriteFails() throws {
+    func testDeleteWarnsWhenFinalManifestWriteFails() async throws {
         let f = try fixture(); f.manifest.failingWrites = [1, 2]
-        XCTAssertTrue(delete(f)); XCTAssertEqual(f.counter.value, 0)
-        guard case .warning(let message) = f.library.deletionNotice else { return XCTFail("warning") }
-        XCTAssertTrue(message.contains("manifest"))
+        let deleted = await delete(f); XCTAssertTrue(deleted); XCTAssertEqual(f.counter.value, 1)
+        XCTAssertTrue(f.library.error?.contains("manifest") == true)
     }
 
-    func testDeleteIsQuietWhenFinalManifestWriteSucceedsAfterEarlierFailure() throws {
+    func testDeleteIsQuietWhenFinalManifestWriteSucceedsAfterEarlierFailure() async throws {
         let f = try fixture(); f.manifest.failingWrites = [1]
-        XCTAssertTrue(delete(f)); XCTAssertNil(f.library.deletionNotice); XCTAssertNil(f.library.error)
+        let deleted = await delete(f)
+        XCTAssertTrue(deleted); XCTAssertNil(f.library.deletionNotice); XCTAssertNil(f.library.error)
         XCTAssertEqual(f.counter.value, 1); XCTAssertEqual(f.manifest.snapshots.count, 1)
     }
 
-    func testDeleteReportsRowRetainedWhenRowSaveFails() throws {
+    func testDeleteReportsRowRetainedWhenRowSaveFails() async throws {
         let f = try fixture(); var calls = 0; let before = f.library.reloadToken
-        XCTAssertFalse(delete(f, persist: { context in
+        let deleted = await delete(f, persist: { context in
             calls += 1; if calls == 2 { throw DeletionTestError() }; try context.save()
-        }))
+        })
+        XCTAssertFalse(deleted)
         XCTAssertFalse(f.context.hasChanges); XCTAssertEqual(f.library.pendingRowCleanup, [f.skill.id])
         XCTAssertEqual(f.library.reloadToken, before + 1); XCTAssertEqual(f.counter.value, 1)
         f.context.rollback(); try f.context.save()
         XCTAssertNotNil(try f.context.fetch(FetchDescriptor<Skill>()).first)
     }
 
-    func testQuarantinedRowRefusesEveryWrite() throws {
-        let f = try quarantinedFixture()
+    func testQuarantinedRowRefusesEveryWrite() async throws {
+        let f = try await quarantinedFixture()
         XCTAssertFalse(f.library.updateBody(f.skill, body: "resurrect").succeeded)
         f.library.noteEditorChanged(f.skill, body: "resurrect"); XCTAssertFalse(f.library.saveDraft(f.skill))
         XCTAssertThrowsError(try restoreSkillHistoryVersion(
@@ -158,16 +161,16 @@ final class SkillDeletionFlowTests: XCTestCase {
         XCTAssertEqual(f.counter.value, 1)
     }
 
-    func testDeleteRetryCompletesForQuarantinedRow() throws {
-        let f = try quarantinedFixture(); f.counter.reset()
-        XCTAssertTrue(delete(f)); XCTAssertEqual(f.counter.value, 1)
+    func testDeleteRetryCompletesForQuarantinedRow() async throws {
+        let f = try await quarantinedFixture(); f.counter.reset()
+        let deleted = await delete(f); XCTAssertTrue(deleted); XCTAssertEqual(f.counter.value, 1)
         XCTAssertTrue(f.library.pendingRowCleanup.isEmpty)
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<Skill>()).count, 0)
     }
 
-    func testDeleteRetryRetainsRowWhoseFilesCameBack() throws {
+    func testDeleteRetryRetainsRowWhoseFilesCameBack() async throws {
         for arm in 0..<7 {
-            let f = try quarantinedFixture(); f.counter.reset()
+            let f = try await quarantinedFixture(); f.counter.reset()
             f.store.deleteFailures.insert("alpha")
             switch arm {
             case 0: f.store.bodies["alpha"] = "restored"; f.store.entries.insert("alpha")
@@ -178,20 +181,20 @@ final class SkillDeletionFlowTests: XCTestCase {
             case 5: f.store.entryAnswers = [false, true]
             default: f.store.readAnswers = [false, true]; f.store.bodies["alpha"] = "restored"
             }
-            XCTAssertFalse(delete(f), "arm \(arm)")
+            let deleted = await delete(f); XCTAssertFalse(deleted, "arm \(arm)")
             XCTAssertNotNil(try f.context.fetch(FetchDescriptor<Skill>()).first)
             XCTAssertEqual(f.counter.value, 1)
             if arm == 0 || arm == 4 || arm == 6 { XCTAssertTrue(f.library.pendingRowCleanup.isEmpty) }
         }
     }
 
-    func testDeleteRetryRetainsRowWhoseEntryStillExists() throws {
+    func testDeleteRetryRetainsRowWhoseEntryStillExists() async throws {
         // Quarantined, but the slug directory is back with an unreadable (unsafe) leaf and the store's
         // delete would succeed: the retry must probe first and retain — the directory is never deleted.
-        let f = try quarantinedFixture(); f.counter.reset()
+        let f = try await quarantinedFixture(); f.counter.reset()
         f.store.bodies["alpha"] = "present"; f.store.entries.insert("alpha"); f.store.unsafeLeaves.insert("alpha")
         let deletesBefore = f.store.deleteCalls.count
-        XCTAssertFalse(delete(f))
+        let deleted = await delete(f); XCTAssertFalse(deleted)
         XCTAssertEqual(f.store.deleteCalls.count, deletesBefore, "the directory must not be deleted")
         XCTAssertNotNil(try f.context.fetch(FetchDescriptor<Skill>()).first)
         XCTAssertTrue(f.library.pendingRowCleanup.contains(f.skill.id))
@@ -203,7 +206,7 @@ final class SkillDeletionFlowTests: XCTestCase {
 
 extension SkillDeletionFlowTests {
 
-    func testCreateAbortsWhenRowsCannotBeFetched() throws {
+    func testCreateAbortsWhenRowsCannotBeFetched() async throws {
         let f = try fixture()
         f.library.createSkill(name: "New", description: "", body: "", tags: [],
                               context: f.context, takenSlugs: { _ in throw DeletionTestError() })
@@ -212,27 +215,28 @@ extension SkillDeletionFlowTests {
         XCTAssertEqual(f.counter.value, 0)
     }
 
-    func testDeleteRefusesWhenLibraryUnavailable() throws {
+    func testDeleteRefusesWhenLibraryUnavailable() async throws {
         let f = try fixture(); try seedAllState(f)
         let path = f.links.path(f.skill, .claudeCode, nil); f.links.linkedPaths.insert(path)
         f.library.refreshQuarantine(context: f.context, fetch: { _ in throw DeletionTestError() })
-        XCTAssertFalse(delete(f)); XCTAssertTrue(f.links.unlinkCalls.isEmpty); XCTAssertEqual(f.counter.value, 0)
+        let deleted = await delete(f)
+        XCTAssertFalse(deleted); XCTAssertTrue(f.links.unlinkCalls.isEmpty); XCTAssertEqual(f.counter.value, 0)
         XCTAssertFalse(f.library.updateBody(f.skill, body: "x").succeeded)
         f.library.createSkill(name: "Blocked", description: "", body: "x", tags: [],
                               context: f.context)
         XCTAssertTrue(f.store.createAvoiding.isEmpty)
         f.library.refreshQuarantine(context: f.context); XCTAssertFalse(f.library.libraryUnavailable)
-        XCTAssertTrue(delete(f)); XCTAssertEqual(f.counter.value, 1)
+        let retried = await delete(f); XCTAssertTrue(retried); XCTAssertEqual(f.counter.value, 1)
     }
 
-    func testDeleteWatcherEchoIsNotASecondNudge() throws {
-        let f = try fixture(); XCTAssertTrue(delete(f)); let token = f.library.reloadToken
+    func testDeleteWatcherEchoIsNotASecondNudge() async throws {
+        let f = try fixture(); let deleted = await delete(f); XCTAssertTrue(deleted); let token = f.library.reloadToken
         f.watcher.emit("alpha")
         XCTAssertEqual(f.counter.value, 1); XCTAssertTrue(f.library.externallyModified.isEmpty)
         XCTAssertEqual(f.library.reloadToken, token)
     }
 
-    func testRefreshQuarantineIsRebuiltFromMissingFiles() throws {
+    func testRefreshQuarantineIsRebuiltFromMissingFiles() async throws {
         let f = try fixture(); let missing = Skill(name: "Missing", directoryName: "missing")
         let unsafe = Skill(name: "Unsafe", directoryName: "unsafe")
         f.context.insert(missing); f.context.insert(unsafe); try f.context.save()
@@ -246,7 +250,7 @@ extension SkillDeletionFlowTests {
         f.library.refreshQuarantine(context: f.context); XCTAssertFalse(f.library.libraryUnavailable)
     }
 
-    func testCreateAvoidsEveryRowSlug() throws {
+    func testCreateAvoidsEveryRowSlug() async throws {
         let f = try fixture(slug: "PDF-Tools")
         f.library.createSkill(name: "PDF Tools", description: "", body: "body", tags: [],
                               context: f.context)
@@ -256,45 +260,45 @@ extension SkillDeletionFlowTests {
         XCTAssertEqual(f.counter.value, 1)
     }
 
-    func testDeleteNeverRedeploysTheDeletedSkill() throws {
-        let f = try fixture(); try seedAllState(f); XCTAssertTrue(delete(f))
+    func testDeleteNeverRedeploysTheDeletedSkill() async throws {
+        let f = try fixture(); try seedAllState(f); let deleted = await delete(f); XCTAssertTrue(deleted)
         XCTAssertTrue(f.links.linkCalls.isEmpty)
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<DeployRecord>()).filter { $0.skillID == f.skill.id }.count, 0)
         XCTAssertEqual(f.counter.value, 1)
     }
 
-    func testDeleteLeavesOtherSkillsStaleLedgerRowsAlone() throws {
+    func testDeleteLeavesOtherSkillsStaleLedgerRowsAlone() async throws {
         let f = try fixture(); let other = Skill(name: "Other", directoryName: "other")
         f.context.insert(other)
         f.context.insert(SkillProjectAssignment(
             skillID: other.id, projectID: f.project.id, platform: .cursor))
         try f.context.save()
-        XCTAssertTrue(delete(f))
+        let deleted = await delete(f); XCTAssertTrue(deleted)
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<SkillProjectAssignment>()).count, 1)
         XCTAssertTrue(f.cursor.removeProjectPaths.isEmpty); XCTAssertTrue(f.links.unlinkCalls.isEmpty)
         XCTAssertEqual(f.counter.value, 1)
     }
 
-    func testDeleteRemovesOwnCursorArtifact() throws {
+    func testDeleteRemovesOwnCursorArtifact() async throws {
         let f = try fixture()
         f.cursor.ownedProjectPaths = [nil]
-        XCTAssertTrue(delete(f)); XCTAssertEqual(f.cursor.removeProjectPaths.count, 1)
+        let deleted = await delete(f); XCTAssertTrue(deleted); XCTAssertEqual(f.cursor.removeProjectPaths.count, 1)
         XCTAssertNil(f.cursor.removeProjectPaths[0])
         XCTAssertEqual(f.counter.value, 1)
     }
 
-    func testDeleteRemovesOwnedSymlinkExactlyOnce() throws {
+    func testDeleteRemovesOwnedSymlinkExactlyOnce() async throws {
         let f = try fixture(); let path = f.links.path(f.skill, .claudeCode, f.project.path)
         f.links.linkedPaths.insert(path); try f.state.upsert(record(f, path: path, platform: .claudeCode))
         f.context.insert(SkillProjectAssignment(skillID: f.skill.id, projectID: f.project.id,
                                                 platform: .claudeCode)); try f.context.save()
-        XCTAssertTrue(delete(f)); XCTAssertEqual(f.links.unlinkCalls.count, 1)
+        let deleted = await delete(f); XCTAssertTrue(deleted); XCTAssertEqual(f.links.unlinkCalls.count, 1)
         XCTAssertEqual(f.links.unlinkCalls.first?.1, f.project.path); XCTAssertEqual(f.counter.value, 1)
     }
 
-    private func quarantinedFixture() throws -> Fixture {
+    private func quarantinedFixture() async throws -> Fixture {
         let f = try fixture(); var calls = 0
-        _ = delete(f, persist: { context in calls += 1; if calls == 2 { throw DeletionTestError() }; try context.save() })
+        _ = await delete(f, persist: { context in calls += 1; if calls == 2 { throw DeletionTestError() }; try context.save() })
         return f
     }
 
@@ -303,7 +307,7 @@ extension SkillDeletionFlowTests {
                           projectIdentityKey: nil, artifactPath: path, recordedAt: "2026-01-01T00:00:00Z")
     }
 
-    func testDeleteRefusedAtTheDirectoryKeepsTheDraft() throws {
+    func testDeleteRefusedAtTheDirectoryKeepsTheDraft() async throws {
         // The sheet was answered before the confirmation, but a retained entry can turn dirty while the
         // confirmation is up (a sync pull moved the file): a delete refused at the directory retains the skill
         // WITH its draft — the discard belongs after the files are provably gone (PLAN-33 batch Layer-2).
@@ -311,7 +315,7 @@ extension SkillDeletionFlowTests {
         XCTAssertEqual(f.library.editorBody(for: f.skill), "body")
         f.library.noteEditorChanged(f.skill, body: "edited")
         f.store.deleteFailures.insert("alpha")
-        XCTAssertFalse(delete(f))
+        let deleted = await delete(f); XCTAssertFalse(deleted)
         XCTAssertNotNil(try f.context.fetch(FetchDescriptor<Skill>()).first)
         XCTAssertTrue(f.library.hasUnsavedChanges(for: f.skill))
         XCTAssertEqual(f.library.drafts[f.skill.directoryName]?.body, "edited")

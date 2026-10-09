@@ -13,9 +13,7 @@ struct SidebarView: View {
 }
 
 // File scope and internal for CategoryReconcileWiringTests; this is the only raw Project delete path.
-/// Insert + persist a freshly-built Project, then regenerate the manifest (best-effort, surfaced via
-/// log). Extracted from AddProjectSheet so the register path is unit-testable and the manifest stays
-/// current after a registration. (PLAN-07 / 07.3)
+/// Registration is local state. Machine-state publication carries identities; manifest/ stays untouched.
 @discardableResult
 @MainActor
 func registerProject(_ project: Project,
@@ -26,22 +24,9 @@ func registerProject(_ project: Project,
                      notifier: SyncStateNotifying = SyncStateNotifier.suppressed) -> Project {
     context.insert(project)
     try? context.save()
-    regenerateProjectManifest(manifestService: manifestService, manifestRoot: manifestRoot, context: context)
     _ = intentReconciler?(context)
     notifier()
     return project
-}
-
-private func regenerateProjectManifest(manifestService: ManifestSnapshotting?,
-                                       manifestRoot: String,
-                                       context: ModelContext) {
-    guard let manifestService else { return }
-    do {
-        try manifestService.write(manifestService.snapshot(from: context), toRoot: manifestRoot)
-    } catch {
-        Logger(subsystem: "com.jaredatch.pensieve", category: "manifest")
-            .warning("Project mutation saved, but manifest regeneration failed: \(error.localizedDescription, privacy: .public)")
-    }
 }
 
 /// Save and publish request withdrawal, remove prepared artifacts while the project is live,
@@ -57,56 +42,83 @@ func removeRegisteredProject(_ project: Project,
                              confirmedPreview: ProjectRemovalPreview? = nil,
                              context: ModelContext,
                              notifier: SyncStateNotifying = SyncStateNotifier.suppressed,
-                             logFailure: @escaping (String) -> Void = logProjectRemovalFailure) -> BatchResult {
+                             logFailure: @escaping (String) -> Void = logProjectRemovalFailure,
+                             lockPath: String? = nil) -> BatchResult {
+    guard let lock = SyncLock.tryAcquire(at: lockPath ?? manifestRoot + "/sync.lock") else {
+        var result = BatchResult()
+        result.operationFailures.append("Sync is running. Try again when it finishes.")
+        return result
+    }
+    defer { lock.release() }
     defer { notifier() }
-    let intentRows: [IntentAssignment], intents: [MachineDeployIntent]
-    let plan: ProjectRemovalPlan
-    let waitingIDs: Set<UUID>
-    do {
-        intentRows = try stateFetcher.intentAssignments(context: context)
-        intents = try stateFetcher.deployIntents(context: context)
-        plan = try ProjectRemovalPlan.prepare(project: project, platformVM: platformVM,
-                                               context: context, stateFetcher: stateFetcher)
-        if let failure = projectRemovalAdmissionFailure(project: project, plan: plan,
-            confirmedPreview: confirmedPreview, intents: intents, localMachineID: localMachineID) {
-            var result = BatchResult()
-            result.operationFailures.append(failure)
-            return result
+    return ProjectRemovalExecution(reconciler: reconciler, manifestService: manifestService,
+        manifestRoot: manifestRoot, stateFetcher: stateFetcher, platformVM: platformVM, localMachineID: localMachineID,
+        confirmedPreview: confirmedPreview, logFailure: logFailure).run(project: project, context: context)
+}
+
+@MainActor
+private struct ProjectRemovalExecution {
+    let reconciler: CategoryReconcilerProtocol
+    let manifestService: ManifestSnapshotting?
+    let manifestRoot: String
+    let stateFetcher: ReconcilerStateFetching
+    let platformVM: PlatformViewModel
+    let localMachineID: String?
+    let confirmedPreview: ProjectRemovalPreview?
+    let logFailure: (String) -> Void
+
+    func run(project: Project, context: ModelContext) -> BatchResult {
+        let intentRows: [IntentAssignment], intents: [MachineDeployIntent]
+        let plan: ProjectRemovalPlan
+        let waitingIDs: Set<UUID>
+        do {
+            intentRows = try stateFetcher.intentAssignments(context: context)
+            intents = try stateFetcher.deployIntents(context: context)
+            plan = try ProjectRemovalPlan.prepare(project: project, platformVM: platformVM,
+                                                   context: context, stateFetcher: stateFetcher)
+            if let failure = projectRemovalAdmissionFailure(project: project, plan: plan,
+                confirmedPreview: confirmedPreview, intents: intents, localMachineID: localMachineID) {
+                var result = BatchResult()
+                result.operationFailures.append(failure)
+                return result
+            }
+            waitingIDs = try plan.saveWaitingRemovals(project: project, platformVM: platformVM)
+        } catch let error as ProjectFolderError {
+            return projectFolderPreparationFailure(error)
+        } catch { return BatchResult.readFailure("project deploy records", error: error) }
+        let publication = ProjectRemovalWithdrawal(manifestService: manifestService,
+            manifestRoot: manifestRoot, logFailure: logFailure)
+        let request = ProjectRemovalWithdrawalRequest(keepingSharedKey: plan.hasIdentitySibling,
+            intents: intents, localMachineID: localMachineID)
+        var result = BatchResult()
+        do {
+            result.didWithdrawProjectRequests = try publication.apply(project: project, request: request, context: context)
+        } catch {
+            result.didWithdrawProjectRequests = (error as? ProjectRemovalWithdrawalFailure)?.didWithdrawRequests ?? false
+            result.operationFailures.append(error.localizedDescription)
+            return settleProjectWaitingCleanup(result, ids: waitingIDs, platformVM: platformVM)
         }
-        waitingIDs = try plan.saveWaitingRemovals(project: project, platformVM: platformVM)
-    } catch let error as ProjectFolderError {
-        return projectFolderPreparationFailure(error)
-    } catch { return BatchResult.readFailure("project deploy records", error: error) }
-    let publication = ProjectRemovalWithdrawal(manifestService: manifestService,
-        manifestRoot: manifestRoot, logFailure: logFailure)
-    let request = ProjectRemovalWithdrawalRequest(keepingSharedKey: plan.hasIdentitySibling,
-        intents: intents, localMachineID: localMachineID)
-    var result = BatchResult()
-    do {
-        result.didWithdrawProjectRequests = try publication.apply(project: project, request: request, context: context)
-    } catch {
-        result.didWithdrawProjectRequests = (error as? ProjectRemovalWithdrawalFailure)?.didWithdrawRequests ?? false
-        result.operationFailures.append(error.localizedDescription)
+        result.append(reconciler.reconcileRemovingProject(project.id, preservingProjects: plan.folderSiblingIDs,
+                                                         context: context))
+        do {
+            if context.hasChanges { try context.save() }
+        } catch {
+            context.rollback()
+            result.operationFailures.append("Couldn't save project reconciliation: " + error.localizedDescription)
+        }
+        logUnrelatedProjectFailures(result, removing: project, logFailure: logFailure)
+        result.outcomes.removeAll { outcome in
+            guard case .project(let id)? = outcome.target else { return false }
+            return id != project.id
+        }
+        guard !result.hasFailures else { return settleProjectWaitingCleanup(result, ids: waitingIDs, platformVM: platformVM) }
+        let cleanup = plan.removeArtifacts(project: project, platformVM: platformVM)
+        result.append(cleanup)
+        result.append(completeProjectRemoval(project, intentRows: intentRows, cleanup: cleanup,
+            priorFailed: result.hasFailures, context: context))
         return settleProjectWaitingCleanup(result, ids: waitingIDs, platformVM: platformVM)
     }
-    result.append(reconciler.reconcileRemovingProject(project.id, preservingProjects: plan.folderSiblingIDs, context: context))
-    do {
-        if context.hasChanges { try context.save() }
-    } catch {
-        context.rollback()
-        result.operationFailures.append("Couldn't save project reconciliation: " + error.localizedDescription)
-    }
-    logUnrelatedProjectFailures(result, removing: project, logFailure: logFailure)
-    result.outcomes.removeAll { outcome in
-        guard case .project(let id)? = outcome.target else { return false }
-        return id != project.id
-    }
-    guard !result.hasFailures else { return settleProjectWaitingCleanup(result, ids: waitingIDs, platformVM: platformVM) }
-    let cleanup = plan.removeArtifacts(project: project, platformVM: platformVM)
-    result.append(cleanup)
-    result.append(completeProjectRemoval(project, intentRows: intentRows, cleanup: cleanup,
-        priorFailed: result.hasFailures, context: context))
-    return settleProjectWaitingCleanup(result, ids: waitingIDs, platformVM: platformVM)
+
 }
 
 private func projectFolderPreparationFailure(_ error: ProjectFolderError) -> BatchResult {

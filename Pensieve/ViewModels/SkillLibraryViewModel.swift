@@ -52,7 +52,7 @@ final class SkillLibraryViewModel {
     /// Monotonic invalidation for successful app-authored SKILL.md rewrites (frontmatter-only ones included).
     @MainActor private(set) var appWriteRevision: Int = 0
     let fileWatchService: FileWatchServiceProtocol
-    private let manifestService: ManifestSnapshotting?
+    let manifestSaves: ManifestSaveModel?
     let manifestRoot: String
     var skillsDirectory: String { skillStore.baseDir }
     private var lastManifestError: String?
@@ -97,13 +97,16 @@ final class SkillLibraryViewModel {
         fileWatchService: FileWatchServiceProtocol,
         manifestService: ManifestSnapshotting? = nil,
         manifestRoot: String,
-        notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed
+        notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
+        manifestSaves: ManifestSaveModel? = nil
     ) {
         let fs = fileService ?? FileService()
         self.fileService = fs
         self.skillStore = skillStore
         self.fileWatchService = fileWatchService
-        self.manifestService = manifestService
+        self.manifestSaves = manifestSaves ?? manifestService.map {
+            ManifestSaveModel(manifest: $0, root: manifestRoot, lockPath: manifestRoot + "/sync.lock", files: fs)
+        }
         self.manifestRoot = manifestRoot
         self.notifier = notifier
     }
@@ -111,24 +114,18 @@ final class SkillLibraryViewModel {
         fileWatchService.stop()
     }
     // MARK: - CRUD
-    /// Best-effort: regenerate the on-disk manifest from current SwiftData state after a mutation to
-    /// synced state. No-op when no manifest service is wired (tests). A failure is SURFACED via `error`,
-    /// never silently swallowed (the mutation itself already succeeded and is not rolled back).
-    func regenerateManifest(context: ModelContext) {
-        do {
-            try writeManifest(context: context)
-        } catch {
-            let message = "Saved, but updating the sync manifest failed: \(error.localizedDescription)"
-            self.error = message
-            lastManifestError = message
+    func regenerateManifest(_ change: ManifestChange, context: ModelContext) {
+        manifestSaves?.submit(change, context: context) { [weak self] failure in
+            guard let self else { return }
+            if let failure {
+                let message = "Saved, but updating the sync manifest failed: \(failure.localizedDescription)"
+                self.error = message
+                self.lastManifestError = message
+            } else {
+                if self.error == self.lastManifestError { self.error = nil }
+                self.lastManifestError = nil
+            }
         }
-    }
-
-    func writeManifest(context: ModelContext) throws {
-        guard let manifestService else { return }
-        try manifestService.write(manifestService.snapshot(from: context), toRoot: manifestRoot)
-        if error == lastManifestError { error = nil }
-        lastManifestError = nil
     }
 
     @discardableResult
@@ -162,7 +159,9 @@ final class SkillLibraryViewModel {
             context.insert(skill)
             try context.save()
             error = nil
-            regenerateManifest(context: context)
+            regenerateManifest(.createSkill(SkillOverlay(slug: dirName, createdAt: skill.createdAt,
+                scope: skill.scope, tags: skill.tags, cursor: skill.cursorConfig, agents: [], origin: .authored)),
+                context: context)
             setLastWrittenBody(SkillParser.canonicalBody(body), directoryName: dirName)
             notifier()
             return skill
@@ -181,7 +180,7 @@ extension SkillLibraryViewModel {
     // Frozen 26.2-a keeps the pre-delete probe and both existing re-probes in this one primitive.
     func deleteSkillEntry(_ skill: Skill, context: ModelContext,
                           persist: (ModelContext) throws -> Void = { try $0.save() }) -> SkillDeletionResult {
-        let quarantined = pendingRowCleanup.contains(skill.id)
+        let quarantined = pendingRowCleanup.contains(skill.id), deletedSlug = skill.directoryName
         if quarantined {
             // Probe BEFORE any destructive step: a retry proceeds only when the leaf is not readable and the
             // no-follow, case-folded listing proves the entry absent. Any entry retains; a readable regular
@@ -239,7 +238,7 @@ extension SkillLibraryViewModel {
         }
         pendingRowCleanup.remove(skill.id)
         self.error = nil
-        regenerateManifest(context: context)
+        regenerateManifest(.deleteSkill(deletedSlug), context: context)
         return self.error == nil ? .deleted : .deletedManifestStale
     }
 }

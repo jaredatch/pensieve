@@ -7,13 +7,17 @@ import SwiftUI
 struct SyncStatusView: View {
     @Environment(\.modelContext) private var modelContext
     let model: SyncModel
+    var saves: ManifestSaveModel?
     let onResolve: () -> Void
     @State private var isHovering = false
 
     var body: some View {
         // Re-evaluated each minute so "12m ago" keeps counting without a state change.
         TimelineView(.periodic(from: .now, by: 60)) { context in
-            if let line = SyncFooterPresentation.make(state: model.state, canResolve: model.canResolve,
+            if let message = saves?.statusMessage {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.sm)
+            } else if let line = SyncFooterPresentation.make(state: model.state, canResolve: model.canResolve,
                 hovering: isHovering, now: context.date) {
                 Button(action: { perform(line.action) }, label: {
                     HStack(spacing: Spacing.xs) {

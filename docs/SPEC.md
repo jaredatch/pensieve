@@ -282,6 +282,8 @@ Add Project requires an existing directory. A path starting with `~/` expands to
 
 Remove asks for confirmation with the project's name and the number of owned links and rules it will delete. Cancel changes nothing. Pensieve checks the count and folder state again before proceeding; a changed preview asks you to review removal again. Your other files and the project folder stay.
 
+Project removal refuses while sync or another library operation holds `sync.lock`, with "Sync is running. Try again when it finishes." The refusal keeps the registration, requests, artifacts and manifest unchanged.
+
 Removing a project affects only this Mac. Category membership stays shared, so other Macs keep their category deploys. After confirmation, Pensieve withdraws this Mac's project deployment requests that no other local registration uses. It saves and publishes that withdrawal before removing any links or rules. Cleanup covers owned category and direct deploys recorded in this Mac's assignments, deploy state or local deploy history. Pensieve does not scan the folder for marked rules. It deletes the registration and remaining assignment records last, after cleanup succeeds. Other Macs' direct deployment requests stay.
 
 Another registration on this Mac with the same project identity keeps the shared direct requests. Another registration resolving to the same folder, including through a link, keeps all links, rules and deploy-state records there. That confirmation counts zero removals and explains why.
@@ -313,6 +315,10 @@ Categories let a user group registered projects and deploy a skill to a whole cl
 ## Resident Background Sync and Machines
 
 Pensieve owns background sync in the main app. Launch at Login is optional. Closing the last window leaves the process running in the menu bar; Open Pensieve restores the main window and Quit ends the process.
+
+Category edits and skill creation, deletion and metadata edits appear in the window immediately. Their manifest saves wait quietly for sync, Connect or another holder of `sync.lock`, then apply in order to the current disk state. Pulled changes survive, and a local edit wins on a field it changes. An edit whose target was removed by a pull is skipped and logged; the window shows the pulled state. Project registration saves immediately without writing the manifest.
+
+After about five seconds, the sync status line says "Your change will save when sync finishes." It clears when the queue finishes. Quit waits for a pending save. After a few seconds it asks "Pensieve is still saving a change. It's waiting for sync to finish. If you quit now, the change won't be saved." Wait cancels quit and leaves the save running. Quit Anyway ends the process without saving that pending manifest change.
 
 Pensieve creates an empty manifest scaffold at launch, before sync is configured. The first Mac with local skills initializes an empty remote and pushes its store. A fresh additional Mac should connect before importing or creating skills: Connect adopts the launch-created store in place — fetching the existing remote, materializing the tree, and rebuilding the local index — when the store is provably safe to adopt. Safe means no local branch, every synced model family empty, and a disk shape that is either the virgin scaffold (stray `.DS_Store` entries and a `.git` left by an interrupted attempt are tolerated) or a partial tree fetched by Pensieve's own interrupted adoption, recognized by the matching origin plus the remote-tracking ref that fetch created — never local-only content of the user's. A branch-less repository that fits neither shape gets an explicit error with nothing on disk or in the index mutated. Everything else keeps its ordinary connect path: stores with a local branch re-point their remote, first Macs with local skills initialize and push, and a plain target with no repository and no skills still clones.
 
