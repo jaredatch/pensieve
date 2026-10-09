@@ -226,7 +226,7 @@ final class ImportViewModel {
         } catch {
             NSLog("Pensieve import lock access failed at %@: %@", lockPath, String(describing: error))
             self.error = "Pensieve couldn't open its lock file, so nothing was imported. " +
-                "Check that you can write to Pensieve's Application Support folder, then try again."
+                "Make sure sync.lock in Pensieve's Application Support folder is a file you can write to, then try again."
             return nil
         }
     }

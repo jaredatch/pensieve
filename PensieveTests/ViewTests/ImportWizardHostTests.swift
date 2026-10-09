@@ -178,7 +178,7 @@ final class ImportWizardHostTests: XCTestCase {
 
     private func assertLockAccessAdvice(_ error: String?) {
         XCTAssertEqual(error, "Pensieve couldn't open its lock file, so nothing was imported. "
-            + "Check that you can write to Pensieve's Application Support folder, then try again.")
+            + "Make sure sync.lock in Pensieve's Application Support folder is a file you can write to, then try again.")
         XCTAssertFalse(error?.contains(POSIXError(.EISDIR).localizedDescription) == true,
                        "The advice uses plain sentences; the native cause belongs in the log")
     }

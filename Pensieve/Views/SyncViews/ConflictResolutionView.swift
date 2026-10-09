@@ -261,7 +261,8 @@ struct ConflictFileComparison: View {
                         Text("Choosing a file or link keeps it in sync.").foregroundStyle(.secondary)
                     }
                     if this.canRetire || other.canRetire {
-                        Text("Choosing Nested repository or Deleted stops syncing this path. Its folder stays on this Mac.")
+                        Text("Choosing a nested repository or a deletion stops syncing this path. "
+                            + "Whatever is at this path on this Mac stays where it is.")
                             .foregroundStyle(.secondary)
                         if removesOtherFile {
                             Text("The other Mac removes its copy the next time it syncs.").foregroundStyle(.secondary)

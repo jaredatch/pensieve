@@ -67,8 +67,8 @@ extension ConflictResolutionModelTests {
         let unavailableStrings = await renderedComparison(try XCTUnwrap(set.items.first))
         XCTAssertTrue(unavailableStrings.contains("Can’t be read"))
         XCTAssertFalse(unavailableStrings.contains("Choosing a file or link keeps it in sync."))
-        XCTAssertTrue(unavailableStrings.contains("Choosing Nested repository or Deleted stops syncing this path. "
-            + "Its folder stays on this Mac."))
+        XCTAssertTrue(unavailableStrings.contains("Choosing a nested repository or a deletion stops syncing this path. "
+            + "Whatever is at this path on this Mac stays where it is."))
     }
 
     private func assertMissingObjectSelectionAndCopy() async throws {
@@ -154,8 +154,8 @@ extension ConflictResolutionModelTests {
                 let strings = await renderedComparison(item)
                 XCTAssertTrue(strings.contains("Nested repository"))
                 XCTAssertFalse(strings.contains("Choosing a file or link keeps it in sync."))
-                XCTAssertTrue(strings.contains("Choosing Nested repository or Deleted stops syncing this path. "
-                    + "Its folder stays on this Mac."))
+                XCTAssertTrue(strings.contains("Choosing a nested repository or a deletion stops syncing this path. "
+                    + "Whatever is at this path on this Mac stays where it is."))
                 XCTAssertFalse(strings.contains("The other Mac removes its copy the next time it syncs."))
                 XCTAssertEqual(strings.filter { $0 == "Deleted" }.count, both ? 0 : 1)
                 model.choose(group.id, side)
@@ -181,8 +181,8 @@ extension ConflictResolutionModelTests {
         let group = try XCTUnwrap(groups.first)
         let strings = await renderedComparison(try XCTUnwrap(group.items.first))
         XCTAssertTrue(strings.contains("Choosing a file or link keeps it in sync."))
-        XCTAssertTrue(strings.contains("Choosing Nested repository or Deleted stops syncing this path. "
-            + "Its folder stays on this Mac."))
+        XCTAssertTrue(strings.contains("Choosing a nested repository or a deletion stops syncing this path. "
+            + "Whatever is at this path on this Mac stays where it is."))
         XCTAssertTrue(strings.contains("The other Mac removes its copy the next time it syncs."))
         try fixture.files.writeFile(at: fixture.root + "/resolution-marker", content: "local folder work")
         model.choose(group.id, .otherMachine)

@@ -2,16 +2,12 @@ import Foundation
 
 enum StoreReceiptError: LocalizedError {
     case unreadable(String)
-    case invalidPath(String, source: String = StoreIgnoreRules.receiptFile)
+    case invalidPath(String)
 
     var errorDescription: String? {
         switch self {
-        case let .unreadable(source):
-            return "Pensieve can't read its list of retired paths (\(source)), so sync stopped. "
-                + "Restore that file from another Mac, then sync again."
-        case let .invalidPath(path, source):
-            return "Pensieve's list of retired paths (\(source)) names a path it can't use: \(path). "
-                + "Remove that line, then sync again."
+        case let .unreadable(path): return "Sync stopped because retirement receipts at \(path) cannot be read exactly."
+        case let .invalidPath(path): return "Sync stopped because a retirement receipt names an unsafe store path: \(path)."
         }
     }
 }
@@ -29,18 +25,14 @@ enum StoreIgnoreRules {
         // Read the unpublished predecessor's comments exactly too, then migrate them on preparation.
         for source in [".gitattributes", receiptFile] {
             let full = root + "/" + source
-            let data: Data
-            do {
-                guard try files.entryTypeWithoutFollowingLinks(at: full) != nil else { continue }
-                data = try files.readRegularFileData(at: full, maximumBytes: 1_048_576, containedIn: root)
-            } catch { throw StoreReceiptError.unreadable(source) }
-            guard let text = String(data: data, encoding: .utf8) else { throw StoreReceiptError.unreadable(source) }
+            guard try files.entryTypeWithoutFollowingLinks(at: full) != nil else { continue }
+            let data = try files.readRegularFileData(at: full, maximumBytes: 1_048_576, containedIn: root)
+            guard let text = String(data: data, encoding: .utf8) else { throw StoreReceiptError.unreadable(full) }
             for line in text.split(separator: "\n") where line.hasPrefix(marker) {
                 guard let data = Data(base64Encoded: String(line.dropFirst(marker.count))),
-                      let path = String(data: data, encoding: .utf8) else {
-                    throw StoreReceiptError.invalidPath(String(line), source: source)
+                      let path = String(data: data, encoding: .utf8), isRetirable(path) else {
+                    throw StoreReceiptError.invalidPath(String(line))
                 }
-                guard isRetirable(path) else { throw StoreReceiptError.invalidPath(path, source: source) }
                 paths.append(path)
             }
         }
@@ -71,11 +63,11 @@ enum StoreIgnoreRules {
             paths.append(path)
         }
         paths = Array(Set(paths)).sorted()
-        try files.writeFile(at: root + "/.gitattributes", content: attributes)
         if !paths.isEmpty {
             let receipts = paths.map { marker + Data($0.utf8).base64EncodedString() + "\n" }.joined()
             try files.writeFile(at: root + "/" + receiptFile, content: receipts)
         }
+        try files.writeFile(at: root + "/.gitattributes", content: attributes)
         // A folder is user data. Keep it in place; staging uses generated rules in metadata.
         let ignore = root + "/.gitignore"
         let type = try? files.entryTypeWithoutFollowingLinks(at: ignore)
