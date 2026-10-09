@@ -55,6 +55,8 @@
 #   the app is not a Debug build (bundle id must end in .debug, or already be .dogfood)
 #   the fake home resolves to the real home, contains it, or lives under /tmp or /var
 #   --reset on a directory without the marker this script writes
+#   another copy registered as the dogfood id is installed or running outside the
+#     staged app, or LaunchServices or lsappinfo cannot be read to check
 #   the fence self-test fails in either direction
 #
 # Launch through this script only: `open`, Finder, and Xcode Run go through
@@ -63,7 +65,7 @@
 # dogfood identity is auto-denied from a headless shell.
 #
 # Written for bash 3.2 (stock macOS).
-# Keychain guard tests: python3 -B script/dogfood_self_test.py
+# Guard tests (keychain, other copies): python3 -B script/dogfood_self_test.py
 
 set -euo pipefail
 
@@ -172,6 +174,78 @@ if [ "$bundle_id" = "$DOGFOOD_ID" ]; then
   STAGED="$APP"
 else
   STAGED="$SANDBOX_ROOT/Pensieve.app"
+fi
+
+# --- no other copy LaunchServices could start as the dogfood id -------------
+# A reopen or `open -b` sent to the dogfood id lets LaunchServices start ANY bundle registered
+# under it, outside the fence, against real data. So the staged copy must be the only one.
+# Read LaunchServices' own database and lsappinfo, not Spotlight (it skips excluded folders).
+# Each lookup is captured with its exit status checked on its own, and an empty listing counts
+# as a failure too (lsappinfo exits 0 even on a bad command), so a failed read refuses.
+# lsregister is looked up on PATH first only so the self-test can stub it.
+LSREGISTER="$(command -v lsregister 2>/dev/null || true)"
+: "${LSREGISTER:=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister}"
+# STAGED may not exist yet (first run): canonicalize its folder instead.
+staged_canon="$(canon "$STAGED")" || staged_canon="$(canon "$(dirname "$STAGED")")/$(basename "$STAGED")"
+same_as_staged() { [ "$1" = "$STAGED" ] || [ "$(canon "$1" || printf '%s' "$1")" = "$staged_canon" ]; }
+
+# The dump runs to tens of MB, so it goes to a file rather than a variable, and runs once.
+ls_dump="$(mktemp -t pensieve-dogfood-ls)" || die "could not create a temp file for the LaunchServices dump"
+if ! "$LSREGISTER" -dump > "$ls_dump" 2>/dev/null; then
+  rm -f "$ls_dump"
+  die "could not read the LaunchServices database ($LSREGISTER -dump) — refusing to launch"
+fi
+# Records are separated by lines of dashes; a bundle's record carries `path: /x/Y.app (0x1a2b)`
+# and `identifier: <bundle id>`. Prints each path registered under the dogfood id, and exits 3
+# when the dump holds no bundle record at all (an empty or truncated dump is a failed read).
+registered="$(awk -v id="$DOGFOOD_ID" '
+  function flush() { if (rid == id && rpath != "") print rpath; rid = ""; rpath = "" }
+  /^-+$/ { flush(); next }
+  /^path:/ && rpath == "" { rpath = $0; sub(/^path:[ \t]*/, "", rpath); sub(/ \(0x[0-9a-fA-F]+\)$/, "", rpath) }
+  /^identifier:/ { seen = 1; rid = $2 }
+  END { flush(); if (!seen) exit 3 }' "$ls_dump")" \
+  || { rm -f "$ls_dump"; die "the LaunchServices dump lists no bundles — refusing to launch"; }
+rm -f "$ls_dump"
+
+running_apps="$(lsappinfo list 2>/dev/null)" || die "could not list running apps (lsappinfo list) — refusing to launch"
+# Prints "<pid><tab><bundle path>" for each running app with the dogfood id; exits 3 when no
+# app is listed at all (loginwindow is always there in a login session).
+running="$(printf '%s\n' "$running_apps" | awk -v id="$DOGFOOD_ID" '
+  function flush() { if (bid == id) print pid "\t" bpath; bid = ""; bpath = ""; pid = "" }
+  /^ *[0-9]+\) / { flush(); n++; next }
+  /^ *bundleID="/ { bid = $0; sub(/^ *bundleID="/, "", bid); sub(/".*$/, "", bid) }
+  /^ *bundle path="/ { bpath = $0; sub(/^ *bundle path="/, "", bpath); sub(/"[^"]*$/, "", bpath) }
+  /^ *pid = / { pid = $3 }
+  END { flush(); if (!n) exit 3 }')" \
+  || die "lsappinfo lists no running apps — refusing to launch"
+
+offenders=""
+while IFS= read -r path; do
+  [ -n "$path" ] || continue
+  # A registration whose bundle is gone cannot be launched, so it is skipped. A bundle in the
+  # Trash still exists, and still counts.
+  [ -d "$path" ] || continue
+  if ! same_as_staged "$path"; then
+    offenders="$offenders
+  installed: $path — delete it, then: $LSREGISTER -u '$path'"
+  fi
+done <<EOF
+$registered
+EOF
+# A copy running AT the staged path is a previous sandbox run, fenced; staging stops it first.
+while IFS=$'\t' read -r pid path; do
+  [ -n "$pid$path" ] || continue
+  if ! same_as_staged "$path"; then
+    offenders="$offenders
+  running:   pid $pid, $path — quit it (kill $pid)"
+  fi
+done <<EOF
+$running
+EOF
+[ -z "$offenders" ] || die "another copy is registered or running as $DOGFOOD_ID outside $STAGED; a reopen or open -b would start it outside the fence:$offenders
+Clear each one and re-run. Refusing to launch."
+
+if [ "$bundle_id" != "$DOGFOOD_ID" ]; then
   # Never rsync over a running bundle: stop a previous sandbox run first (TERM, wait, refuse).
   old_pids="$(pgrep -f "$STAGED/$EXEC_REL" 2>/dev/null || true)"
   if [ -n "$old_pids" ]; then

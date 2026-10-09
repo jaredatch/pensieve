@@ -6,7 +6,9 @@
 # Kit copy: install as script/briefing-lint.sh.
 #
 # Usage
-#   briefing-lint.sh [--budget N] [--warn] [files…]   default files: CLAUDE.md AGENTS.md at the repo root
+#   briefing-lint.sh [--budget N] [--warn] [files…]   default files: CLAUDE.md AGENTS.md at the repo root; in split-repo
+#                                                     mode (RATCHET_RECORDS, from script/ratchet.conf or the environment),
+#                                                     the records repo's CLAUDE.md, AGENTS.md and docs/CHECKLISTS.md
 #   briefing-lint.sh --self-test                      two fixture files under mktemp sharing one sentence, one over
 #                                                     budget; prints SELF-TEST OK
 #
@@ -179,10 +181,67 @@ if [ "$selftest" -eq 1 ]; then
   TMPDIR="$d/trt" PATH="$d/trk:$PATH" "$BASH" "$0" "$d/B.md" "$d/C.md" >/dev/null 2>&1 & trp=$!
   echo "$trp" > "$d/trk/pid"; rc=0; wait "$trp" || rc=$?
   [ -s "$d/trk/sent" ] && [ "$rc" -ne 0 ] && [ -z "$(ls -A "$d/trt")" ] || fail "the work dir must be made under TMPDIR, and a TERM mid-run must leave none there (rc=$rc; held when signalled: $(cat "$d/trk/sent" 2>/dev/null); left: $(ls -A "$d/trt"))"
+  # split-repo mode (EVO-163): with no files named, a copy at <repo>/script/ reads RATCHET_RECORDS from its ratchet.conf and lints the
+  # records repo's two briefings and its checklist, never the root's stubs; a records path that isn't there is exit 2, never a pass
+  mkdir -p "$d/sr/script" "$d/sr/private/docs" && cp "$0" "$d/sr/script/briefing-lint.sh" && printf 'RATCHET_RECORDS=private/\n' > "$d/sr/script/ratchet.conf" \
+    && printf '# stub\n' > "$d/sr/CLAUDE.md" && printf '# stub\n' > "$d/sr/AGENTS.md" && cp "$d/C.md" "$d/sr/private/CLAUDE.md" \
+    && printf '# Agents\n\nA different short file.\n' > "$d/sr/private/AGENTS.md" && printf '# Checklists\n\n- [ ] one\n' > "$d/sr/private/docs/CHECKLISTS.md" \
+    || fail "the split-repo fixture could not be written"
+  git -C "$d/sr/private" init -q 2>/dev/null || fail "the records fixture could not be made a repo"
+  out="$("$BASH" "$d/sr/script/briefing-lint.sh" 2>&1)" || fail "split-repo defaults should pass: $out"
+  for f in private/CLAUDE.md private/AGENTS.md private/docs/CHECKLISTS.md; do grep -Eq "^$f: words=" <<< "$out" || fail "split-repo defaults should lint $f: $out"; done
+  grep -Eq '^(CLAUDE|AGENTS)\.md: ' <<< "$out" && fail "split-repo defaults linted the root's stubs: $out"
+  printf 'RATCHET_RECORDS=gone\n' > "$d/sr/script/ratchet.conf"
+  set +e; out="$("$BASH" "$d/sr/script/briefing-lint.sh" 2>&1)"; rc=$?; set -e
+  [ "$rc" -eq 2 ] || fail "a records path that isn't there should exit 2 (got $rc): $out"
+  # a non-empty RATCHET_RECORDS in the environment wins over the conf, as ratchet.sh reads it
+  out="$(RATCHET_RECORDS=private "$BASH" "$d/sr/script/briefing-lint.sh" 2>&1)" && grep -Eq '^private/CLAUDE\.md: words=' <<< "$out" \
+    || fail "the environment's RATCHET_RECORDS should win over the conf's: $out"
+  # `.`, a directory that isn't its own repo, and a missing checklist are no verdict (exit 2), never a pass
+  mkdir -p "$d/sr/plain" && cp "$d/sr/private/CLAUDE.md" "$d/sr/private/AGENTS.md" "$d/sr/plain/" && mkdir -p "$d/sr/plain/docs" && cp "$d/sr/private/docs/CHECKLISTS.md" "$d/sr/plain/docs/" \
+    || fail "the plain-folder fixture could not be written"
+  for bad in / // /tmp . ./private plain; do
+    set +e; out="$(RATCHET_RECORDS="$bad" "$BASH" "$d/sr/script/briefing-lint.sh" 2>&1)"; rc=$?; set -e
+    [ "$rc" -eq 2 ] || fail "RATCHET_RECORDS=$bad should exit 2 (got $rc): $out"
+  done
+  mv "$d/sr/private/docs/CHECKLISTS.md" "$d/sr/CL.md" || fail "fixture: hide the checklist"
+  set +e; out="$(RATCHET_RECORDS=private "$BASH" "$d/sr/script/briefing-lint.sh" 2>&1)"; rc=$?; set -e
+  [ "$rc" -eq 2 ] || fail "a records repo with no checklist should exit 2 (got $rc): $out"
+  mv "$d/sr/CL.md" "$d/sr/private/docs/CHECKLISTS.md" || fail "fixture: the checklist back"
   echo "SELF-TEST OK"; exit 0
 fi
 
-if [ -z "$files" ]; then cd "$ROOT"; set -- CLAUDE.md AGENTS.md
+if [ -z "$files" ]; then
+  cd "$ROOT"
+  # split-repo mode: the root's briefings are stubs, so the defaults are the records repo's (modules/split-repo.md). Read the way
+  # ratchet.sh and kit/herdr's lib.sh read it: the conf sourced in a subshell, and a non-empty RATCHET_RECORDS in the environment wins
+  rec=""; env_rec="${RATCHET_RECORDS:-}"
+  if [ -f script/ratchet.conf ]; then
+    rec="$(unset RATCHET_RECORDS; . ./script/ratchet.conf >/dev/null 2>&1 || exit 2; printf '%s' "${RATCHET_RECORDS:-}")" \
+      || { echo "briefing-lint: script/ratchet.conf can't be read — no verdict" >&2; exit 2; }
+  fi
+  [ -z "$env_rec" ] || rec="$env_rec"
+  # an absolute path is refused before the trailing slashes are trimmed, so `/` can't trim to empty and lint the root as one repo
+  case "$rec" in /*) echo "briefing-lint: RATCHET_RECORDS must be a plain relative path (got $rec) — no verdict" >&2; exit 2 ;; esac
+  while :; do case "$rec" in */) rec="${rec%/}" ;; *) break ;; esac; done
+  if [ -z "$rec" ]; then set -- CLAUDE.md AGENTS.md
+  else
+    # the records-path rule every kit script holds (modules/split-repo.md): a plain relative path, no empty, `.` or `..` component, no
+    # symlink along it, and the top of its own git repo
+    case "$rec" in /*|*$'\n'*|*$'\t'*) echo "briefing-lint: RATCHET_RECORDS must be a plain relative path (got $rec) — no verdict" >&2; exit 2 ;; esac
+    rest="$rec/"; sofar=""
+    while [ -n "$rest" ]; do
+      c="${rest%%/*}"; rest="${rest#*/}"
+      case "$c" in ""|.|..) echo "briefing-lint: RATCHET_RECORDS '$rec' holds an empty, '.' or '..' component — no verdict" >&2; exit 2 ;; esac
+      sofar="${sofar:+$sofar/}$c"
+      [ ! -L "$sofar" ] || { echo "briefing-lint: RATCHET_RECORDS '$rec' passes through a symlink ($sofar) — no verdict" >&2; exit 2; }
+    done
+    [ -d "$rec" ] || { echo "briefing-lint: the records repo $rec isn't there — no verdict" >&2; exit 2; }
+    top="$(git -C "$rec" rev-parse --show-toplevel 2>/dev/null)" && phys="$(cd "$rec" && pwd -P)" \
+      || { echo "briefing-lint: $rec isn't a git repo (git rev-parse failed) — no verdict" >&2; exit 2; }
+    [ "$top" = "$phys" ] || { echo "briefing-lint: $rec isn't the top of its own git repo (git says $top) — no verdict" >&2; exit 2; }
+    set -- "$rec/CLAUDE.md" "$rec/AGENTS.md" "$rec/docs/CHECKLISTS.md"   # the checklist is required: a missing one is no verdict, never skipped
+  fi
 else
   set --
   while IFS= read -r f; do [ -n "$f" ] && set -- "$@" "$f"; done <<< "$files"

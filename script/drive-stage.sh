@@ -206,7 +206,12 @@ timeout_bin() {   # GNU coreutils `timeout` (homebrew); macOS ships none. gtimeo
   else return 1; fi
 }
 
-# resolve prompt + log for one invocation; prints "<prompt>\t<log>" (repo-relative) or fails with the refusal
+prompt_path() {   # $1 root, $2 a prompt file (repo-relative or absolute) → its path on disk
+  case "$2" in /*) printf '%s\n' "$2" ;; *) printf '%s/%s\n' "$1" "$2" ;; esac
+}
+
+# resolve prompt + log for one invocation; prints "<prompt>\t<log>" (the prompt as given — repo-relative or absolute; the log
+# repo-relative) or fails with the refusal
 resolve_paths() {   # $1 root, $2 plan, $3 stage, $4 resume(0/1), $5 resume_prompt (or --fix's prompt file), $6 again(0/1), $7 fix(0/1)
   local root="$1" plan="$2" stage="$3" resume="$4" rp="$5" again="$6" fix="${7:-0}" dir prompt log n
   dir="tmp/$plan"; [ "$plan" = bounded ] && dir="tmp/bounded"   # a bounded task's scratch: no plan cites it (§ Workspace)
@@ -217,7 +222,7 @@ resolve_paths() {   # $1 root, $2 plan, $3 stage, $4 resume(0/1), $5 resume_prom
   else
     prompt="$dir/$stage-prompt.md"; log="$dir/$stage-run.log"
   fi
-  [ -f "$root/$prompt" ] || { echo "drive-stage: prompt file missing: $prompt" >&2; return 1; }
+  [ -f "$(prompt_path "$root" "$prompt")" ] || { echo "drive-stage: prompt file missing: $prompt" >&2; return 1; }
   if [ -e "$root/$log" ]; then
     if [ "$again" -eq 1 ]; then
       n=2; while [ -e "$root/${log%.log}-r$n.log" ]; do n=$((n+1)); done
@@ -746,7 +751,7 @@ drive() {   # $1 root, $2 plan, $3 stage (`fix` for --fix), $4 heavy, $5 resume,
   fi
   unfilled "a build launch" "CODEX_MODEL=$CODEX_MODEL" "CODEX_REASONING=$CODEX_REASONING" "CODEX_SANDBOX=$CODEX_SANDBOX" || return 1
   [ "$no_preflight" -eq 1 ] || preflight "$root" "$CODEX_MODEL" "$CODEX_REASONING" || return 1
-  prompt_text="$(cat "$root/$prompt")" || { echo "drive-stage: cannot read the prompt $prompt (cat exit $?) — nothing launched" >&2; return 1; }   # read and checked BEFORE the header or the launch: an unreadable prompt once launched an Executor with an empty one
+  prompt_text="$(cat "$(prompt_path "$root" "$prompt")")" || { echo "drive-stage: cannot read the prompt $prompt (cat exit $?) — nothing launched" >&2; return 1; }   # read and checked BEFORE the header or the launch: an unreadable prompt once launched an Executor with an empty one
   [ -n "$prompt_text" ] || { echo "drive-stage: the prompt $prompt is empty — nothing launched" >&2; return 1; }
   mkdir -p "$root/$(dirname "$log")"   # only a --resume <file> from elsewhere can leave the log dir missing
   lock_take "$root/tmp/.run-lock" "$plan $stage build" 0 "$plan" "$stage" || return $?   # one writer per checkout; released on every exit before the send
@@ -1168,13 +1173,14 @@ drive_pane() {   # $1 root, $2 plan, $3 stage, $4 heavy, $5 again, $6 dry — a 
   local root="$1" plan="$2" stage="$3" heavy="$4" again="$5" dry="$6"
   local secs paths prompt log dir name sn attempt tag pointer grants g before started tab pane i sid drc=0 frc ws settled sq="'" note rbfull="" rhdr="" ptmp
   secs="$TIMEOUT_NORMAL"; [ "$heavy" -eq 1 ] && secs="$TIMEOUT_HEAVY"
-  paths="$(resolve_paths "$root" "$plan" "$stage" 0 "" "$again" 0)" || return 1
-  prompt="${paths%	*}"; log="${paths#*	}"; dir="tmp/$plan"; [ "$plan" = bounded ] && dir="tmp/bounded"; ROOT_BIND="$root/$dir/$stage-binding"
+  # the agent name first: a slug too long for Herdr is the refusal to read, before anything about its prompt file
   name="$(project_name "$root")" || return $?   # 2: git or tr failed (never a refusal's 1)
   sn="$(name_part "$stage")" || return 2
   name="$name-codex-$sn"   # NN.X → NN-X; a --bounded slug lowercased, anything outside [a-z0-9-] → -
   case "$name" in [a-z]*) ;; *) echo "drive-stage: the agent name '$name' must start with a letter (set DRIVE_STAGE_PROJECT) — nothing created" >&2; return 1 ;; esac
   [ "${#name}" -le 32 ] || { echo "drive-stage: the agent name '$name' is over Herdr's 32 characters — use a shorter --bounded slug or DRIVE_STAGE_PROJECT, or pass --headless; nothing created" >&2; return 1; }
+  paths="$(resolve_paths "$root" "$plan" "$stage" 0 "" "$again" 0)" || return 1
+  prompt="${paths%	*}"; log="${paths#*	}"; dir="tmp/$plan"; [ "$plan" = bounded ] && dir="tmp/bounded"; ROOT_BIND="$root/$dir/$stage-binding"
   bind_clear; bind_read "$ROOT_BIND" || return 2   # reads only: a dry-run changes no file
   attempt=$(( ${B_attempt:-0} + 1 )); tag="[planner $stage-c$attempt]"
   fresh_ok "$root" "$plan" "$stage" 0 || return $?
@@ -1195,7 +1201,7 @@ drive_pane() {   # $1 root, $2 plan, $3 stage, $4 heavy, $5 again, $6 dry — a 
   [ "$no_preflight" -eq 1 ] || preflight "$root" "$CODEX_MODEL" "$CODEX_REASONING" || return 1
   herdr_gate || { echo "drive-stage: to launch without a pane, pass --headless" >&2; return 1; }
   [ -n "$ws" ] || { echo "drive-stage: HERDR_WORKSPACE_ID is empty — a pane opens its tab in the caller's workspace; pass --headless to launch without one. Nothing created" >&2; return 1; }
-  [ -s "$root/$prompt" ] && [ -r "$root/$prompt" ] || { echo "drive-stage: the prompt $prompt is empty or unreadable — nothing launched" >&2; return 1; }
+  [ -s "$(prompt_path "$root" "$prompt")" ] && [ -r "$(prompt_path "$root" "$prompt")" ] || { echo "drive-stage: the prompt $prompt is empty or unreadable — nothing launched" >&2; return 1; }
   lock_take "$root/tmp/.run-lock" "$plan $stage build (pane)" 0 "$plan" "$stage" || return $?
   sweep_read_locks "$root" "$dir"
   close_settled_tabs "$root" "$dir"
@@ -1934,6 +1940,14 @@ FAKE
   [ "$(grep -c . "$d/smk4")" -eq 1 ] && grep -Fq 'fake-model-1' "$d/smk4" || fail "--fix's preflight should smoke the build pin alone: $(cat "$d/smk4")"
   out="$("$BASH" "$0" --root "$R" --fix PLAN-07 tmp/PLAN-07/fix-prompt.md --again --dry-run)" && grep -Fq ">> 'tmp/PLAN-07/fix-run-r2.log'" <<< "$out" || fail "--fix --again should pick fix-run-r2.log: $out"
   set +e; "$BASH" "$0" --root "$R" --fix PLAN-07 tmp/PLAN-07/fix-prompt.md --review --dry-run >/dev/null 2>&1; rc=$?; set -e; [ "$rc" -eq 64 ] || fail "--fix --review should be refused with 64 (got $rc)"
+  # an absolute prompt path works as well as a repo-relative one, for --fix and for --resume <file> (Pensieve LOG, 2026-10-07)
+  out="$("$BASH" "$0" --root "$R" --fix PLAN-07 "$R/tmp/PLAN-07/fix-prompt.md" --again --dry-run 2>&1)" && grep -Fq "cat '$R/tmp/PLAN-07/fix-prompt.md'" <<< "$out" \
+    || fail "--fix should take an absolute prompt path: $out"
+  printf 'resume from here\n' > "$d/abs-resume-prompt.md"
+  out="$("$BASH" "$0" --root "$R" PLAN-07 07.1 --resume "$d/abs-resume-prompt.md" --again --dry-run 2>&1)" && grep -Fq "cat '$d/abs-resume-prompt.md'" <<< "$out" \
+    || fail "--resume should take an absolute prompt path: $out"
+  set +e; out="$("$BASH" "$0" --root "$R" --fix PLAN-07 "$d/no-such-prompt.md" --dry-run 2>&1)"; rc=$?; set -e
+  [ "$rc" -eq 1 ] && grep -Fq "prompt file missing: $d/no-such-prompt.md" <<< "$out" || fail "a missing absolute --fix prompt should refuse, naming it (rc=$rc): $out"
   rm -f "$R/created-by-codex.txt"
   # a FILLED copy: the block's values (whatever this copy holds — EDIT-ME or a project's) replaced by fixed ones and every DRIVE_STAGE_* override
   # unset, so the file itself is the record: the stage runs the file's build pin, a read the file's review pin, and the file's pin gates the preflight
@@ -2332,7 +2346,10 @@ FAKE
     && grep -Fq '[planner Side_Bar.spacing-c1] Your prompt is the file tmp/bounded/Side_Bar.spacing-prompt.md' "$d/fh/calls.log" || fail "S30: the --bounded tab or agent start differs: $(cat "$d/fh/calls.log")"
   [ "$(kv_get "$SR/tmp/bounded/Side_Bar.spacing-binding" mode)" = pane ] && [ ! -e "$LK" ] || fail "S30: the --bounded pane binding differs, or the lock stayed: $(cat "$SR/tmp/bounded/Side_Bar.spacing-binding")"
   [ -z "$(kv_get "$SR/tmp/bounded/Side_Bar.spacing-binding" tab)" ] && grep -q '^tab close w1:t' "$d/fh/calls.log" || fail "S30: a settled small change should close its own tab at once (v0.29): $(cat "$d/fh/calls.log")"
-  # … a slug whose agent name is over Herdr's 32 characters refuses before anything is made, naming --headless (which still launches it)
+  # … a slug whose agent name is over Herdr's 32 characters refuses before anything is made, naming --headless (which still launches it);
+  # the name is checked before the prompt file, so a long slug with no prompt yet gets that refusal first (Pensieve LOG, 2026-10-08)
+  set +e; out="$(pe "$BASH" "$0" --root "$SR" --bounded a-very-long-slug-for-herdr --dry-run 2>&1)"; rc=$?; set -e
+  [ "$rc" -eq 1 ] && grep -Fq "over Herdr's 32 characters" <<< "$out" && ! grep -Fq 'prompt file missing' <<< "$out" || fail "S30: a long slug with no prompt should refuse on the name first (rc=$rc): $out"
   printf 'x\n' > "$SR/tmp/bounded/a-very-long-slug-for-herdr-prompt.md"
   set +e; out="$(pe "$BASH" "$0" --root "$SR" --bounded a-very-long-slug-for-herdr --dry-run 2>&1)"; rc=$?; set -e
   [ "$rc" -eq 1 ] && grep -Fq "over Herdr's 32 characters" <<< "$out" && grep -Fq -- '--headless' <<< "$out" || fail "S30: a long slug should refuse naming --headless (rc=$rc): $out"
