@@ -7,7 +7,8 @@ extension XCTestCase {
     @MainActor
     func makeSyncRecoveryHarness(outcomes: [Result<SyncOutcome, Error>] = [],
                                  probe: RuleProbe = RuleProbe(), initialProbeError: Error? = nil,
-                                 debounceSeconds: TimeInterval = 0) async throws -> RecoveryHarness {
+                                 debounceSeconds: TimeInterval = 0,
+                                 updateCheckOperation: AppRuntime.UpdateCheckOperation? = nil) async throws -> RecoveryHarness {
         let fixture = try GitFailureFixture()
         var ready = false
         defer { if !ready { try? fixture.remove() } }
@@ -26,6 +27,7 @@ extension XCTestCase {
             notifier: SyncStateNotifier.suppressed)
         let runtime = try AppRuntime(library: library, scheduler: scheduler, defaults: isolatedDefaults(),
             launchBackfill: { _ in }, postSyncConvergence: RecoveryConvergence(), paths: fixture.paths,
+            updateCheckOperation: updateCheckOperation,
             gitUsabilityProbe: {
                 // Reserve the failure for this invocation before another probe can change the count.
                 let failure = errorLock.withLock {

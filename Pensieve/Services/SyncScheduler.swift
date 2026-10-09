@@ -76,6 +76,9 @@ final class SyncScheduler {
     private var isConfigured: () -> Bool = { true }
     private var isGitUsable: () -> Bool = { true }
     private var isConflicted: () -> Bool = { false }
+    private var isGitUnknown: () -> Bool = { false }
+    private var recheckGit: (() async -> Void)?
+    private var isRecheckingGit = false
 
     init(
         interval: TimeInterval = 900,
@@ -119,17 +122,22 @@ final class SyncScheduler {
         drainIfPossible()
     }
 
+    func installGitRecheck(isUnknown: @escaping () -> Bool, action: @escaping () async -> Void) {
+        isGitUnknown = isUnknown
+        recheckGit = action
+    }
+
     func launchIngestCompleted() {
         isLaunchIngestReady = true
         drainIfPossible()
     }
 
     func tick() {
-        enqueueTrigger()
+        enqueueAfterGitRecheck()
     }
 
     func wake() {
-        enqueueTrigger()
+        enqueueAfterGitRecheck()
     }
 
     func nudge() {
@@ -183,6 +191,7 @@ final class SyncScheduler {
         guard hasPendingTrigger,
               isCoordinatorReady,
               isLaunchIngestReady,
+              !isRecheckingGit,
               !isSyncing,
               let syncAction else { return }
         guard backgroundSyncEnabled || pendingRequest.isPrivileged else { return }
@@ -217,5 +226,19 @@ final class SyncScheduler {
     private func fireDebouncedNudge() {
         debounceTask = nil
         enqueueTrigger()
+    }
+
+    private func enqueueAfterGitRecheck() {
+        guard isGitUnknown(), let recheckGit else { enqueueTrigger(); return }
+        guard !isRecheckingGit else { return }
+        isRecheckingGit = true
+        // Recovery and overlapping triggers join this pending request before admission resumes.
+        enqueueTrigger()
+        Task { [weak self] in
+            await recheckGit()
+            guard let self else { return }
+            self.isRecheckingGit = false
+            self.drainIfPossible()
+        }
     }
 }

@@ -1,3 +1,3 @@
-2720
+2723
 # lowered 2707 -> 2706 2026-10-09T07:23:04Z: PLAN-49 revert at the bound: R3 receipt scope reverted
 # lowered 2749 -> 2720 2026-10-09T17:38:54Z: PLAN-54 removes obsolete Scenario carry and compatibility-row tests; manifest guards and serialization remain in ManifestRetirementTests, copy errors in FileServiceAdmissionTests, and disk migration plus mixed-version sync have regression coverage
