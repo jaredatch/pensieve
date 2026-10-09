@@ -98,6 +98,9 @@ def lex(source, base=0):
             pos += len(match[0])
         elif source[pos].isspace():
             pos += 1
+        elif source.startswith("->", pos):
+            yield "->", base + pos
+            pos += 2
         else:
             yield source[pos], base + pos
             pos += 1
@@ -127,6 +130,8 @@ def owner_functions(tokens):
     ranges = []
     for index, (word, _) in enumerate(tokens):
         if word not in {"func", "init"}:
+            continue
+        if word == "init" and index > 0 and tokens[index - 1][0] == ".":
             continue
         name = tokens[index + 1][0] if word == "func" else "init"
         opening = next((i for i in range(index + 1, len(tokens)) if tokens[i][0] in {"(", "{", "}"}), None)
@@ -193,6 +198,65 @@ def separator_bindings(source, tokens):
     return bindings
 
 
+def receiver_chain(tokens, member):
+    """Walk only connected member accesses; adjacent statements cannot become receivers.
+
+    A dot continues an expression across a newline. A bare identifier or semicolon
+    before the receiver ends the walk, including statements ending in byte/scalar members.
+    """
+    parts, start = [], member - 2
+    cursor = start
+    while cursor >= 0 and re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", tokens[cursor][0]):
+        parts.append(tokens[cursor][0])
+        start = cursor
+        cursor -= 1
+        if cursor < 0 or tokens[cursor][0] != ".":
+            break
+        cursor -= 1
+        if cursor >= 0 and tokens[cursor][0] in {"?", "!"}:
+            cursor -= 1
+    return parts, start
+
+
+def comparison_operand(tokens, member, receiver_start):
+    """Read ==/!= operands in either order, including parentheses and Character(...)."""
+    words = [token for token, _ in tokens]
+    operators = (["=", "="], ["!", "="])
+    if words[member + 1:member + 3] in operators:
+        start = member + 3
+        if start >= len(tokens):
+            return []
+        end = start
+        if words[start] == "Character" and words[start + 1:start + 2] == ["("]:
+            end += 1
+        if words[end] == "(":
+            depth = 0
+            for cursor in range(end, len(tokens)):
+                depth += (words[cursor] == "(") - (words[cursor] == ")")
+                if depth == 0:
+                    end = cursor
+                    break
+            else:
+                return []
+        return tokens[start:end + 1]
+    if receiver_start < 3 or words[receiver_start - 2:receiver_start] not in operators:
+        return []
+    end = receiver_start - 3
+    start = end
+    if words[end] == ")":
+        depth = 0
+        for cursor in range(end, -1, -1):
+            depth += (words[cursor] == ")") - (words[cursor] == "(")
+            if depth == 0:
+                start = cursor
+                if start > 0 and words[start - 1] == "Character":
+                    start -= 1
+                break
+        else:
+            return []
+    return tokens[start:end + 1]
+
+
 def violations(source, relative):
     if relative == HELPER:
         return []
@@ -204,20 +268,18 @@ def violations(source, relative):
         calls = {"hasPrefix", "hasSuffix", "contains", "split", "firstIndex", "starts"}
         if word not in calls | {"first", "last"} or index == 0 or tokens[index - 1][0] != ".":
             continue
-        receiver = []
-        cursor = index - 2
-        while cursor >= 0 and (re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", tokens[cursor][0])
-                               or tokens[cursor][0] in {".", "?"}):
-            receiver.append(tokens[cursor][0])
-            cursor -= 1
+        receiver, receiver_start = receiver_chain(tokens, index)
         if any(part in {"PathSyntax", "unicodeScalars", "utf8", "utf16"} for part in receiver):
             continue
         comparison = word in {"first", "last"}
         if comparison:
-            if [token for token, _ in tokens[index + 1:index + 3]] != ["=", "="]:
+            expression = comparison_operand(tokens, index, receiver_start)
+            if not expression:
                 continue
         elif index + 1 >= len(tokens) or tokens[index + 1][0] != "(":
             continue
+        else:
+            expression = tokens[index + 1:]
         # A collection predicate may call PathSyntax inside its closure. UInt8(ascii:) is byte syntax.
         argument = [token for token, _ in tokens[index + 2:index + 10]]
         if argument[:2] in (["of", ":"], ["separator", ":"], ["with", ":"]):
@@ -225,7 +287,6 @@ def violations(source, relative):
         if argument[:2] == ["where", ":"] or argument[:4] == ["UInt8", "(", "ascii", ":"]:
             continue
         depth, literals, identifiers = 0, [], []
-        expression = tokens[index + 3:index + 4] if comparison else tokens[index + 1:]
         for token, _ in expression:
             if token == "(":
                 depth += 1

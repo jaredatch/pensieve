@@ -23,14 +23,12 @@ extension ConflictResolutionModelTests {
         XCTAssertEqual(groups[0].subtitle, "Body and settings differ")
         XCTAssertEqual(groups[0].items.count, 2)
         XCTAssertFalse(model.canApply)
-        try await assertDistinctEntityNamespaces()
     }
 
     func testUnknownSkillSlugFallsBackToSlugTitle() async throws {
         let history = try ConflictHistoryFixture(test: self)
         defer { try? history.remove() }
         await history.runtime.bootstrapTask.value
-        try await assertEquivalentRowsDoNotTrap()
         let context = try makeContext()
         let engine = StubResolutionEngine()
         engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: "new-skill")]))]
@@ -59,7 +57,7 @@ extension ConflictResolutionModelTests {
         }
     }
 
-    func assertDistinctEntityNamespaces() async throws {
+    func testDistinctKindsAndRawPathsHaveSeparateSelectableGroups() async throws {
         let context = try makeContext()
         context.insert(Skill(name: "Projects Skill", directoryName: "projects"))
         try context.save()
@@ -83,20 +81,22 @@ extension ConflictResolutionModelTests {
         XCTAssertEqual(chosen.filter { $0.chosen != nil }.map(\.id), ["skill:projects"])
     }
 
-    func assertEquivalentRowsDoNotTrap() async throws {
-        let context = try makeContext()
+    func testCanonicalEquivalentSlugsUseStableTitle() async throws {
         let names = ["caf\u{00E9}", "cafe\u{0301}"]
-        for (index, slug) in names.enumerated() {
-            context.insert(Skill(name: "Equivalent \(index)", directoryName: slug))
+        for order in [[0, 1], [1, 0]] {
+            let context = try makeContext()
+            for index in order {
+                context.insert(Skill(name: index == 0 ? "Zebra" : "Alpha", directoryName: names[index]))
+            }
+            try context.save()
+            let engine = StubResolutionEngine()
+            engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: names[0]), overlayItem(slug: names[1])]))]
+            let model = makeModel(engine: engine)
+            await model.loadAndReport(context: context)
+            let groups = try readyGroups(from: model.phase)
+            XCTAssertEqual(groups.count, 1)
+            XCTAssertEqual(groups.first?.title, "Alpha", "Equivalent slugs choose the lexicographically smallest title")
+            XCTAssertEqual(groups.first?.items.count, 2)
         }
-        try context.save()
-        let engine = StubResolutionEngine()
-        engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: names[0]), overlayItem(slug: names[1])]))]
-        let model = makeModel(engine: engine)
-        await model.loadAndReport(context: context)
-        let groups = try readyGroups(from: model.phase)
-        XCTAssertEqual(groups.count, 1)
-        XCTAssertTrue(["Equivalent 0", "Equivalent 1"].contains(try XCTUnwrap(groups.first).title))
-        XCTAssertEqual(groups.first?.items.count, 2)
     }
 }

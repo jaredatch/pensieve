@@ -170,7 +170,7 @@ final class ConflictResolutionModel {
 
     private func groups(from set: ConflictSet, context: ModelContext) throws -> [ConflictGroup] {
         let skills = try context.fetch(FetchDescriptor<Skill>())
-        let namesBySlug = Dictionary(skills.map { ($0.directoryName, $0.name) }, uniquingKeysWith: { first, _ in first })
+        let namesBySlug = Dictionary(skills.map { ($0.directoryName, $0.name) }, uniquingKeysWith: { min($0, $1) })
         var order: [String] = []
         var itemsByID: [String: [ConflictItem]] = [:]
         for item in set.items {
