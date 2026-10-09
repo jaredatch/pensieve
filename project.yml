@@ -81,6 +81,8 @@ targets:
       - path: PensieveTests
         excludes:
           - Fixtures/GitProcessProbe
+          - Fixtures/PreScenarioRemoval.store
+          - Fixtures/PreScenarioRemoval.json
     settings:
       base:
         SWIFT_VERSION: "5.10"
@@ -124,7 +126,7 @@ targets:
       - path: Pensieve/Services/ProjectFolderError.swift
       - path: Pensieve/Services/FileService+BoundedRead.swift
       - path: Pensieve/Services/FileService+RuleHeader.swift
-      - path: Pensieve/Services/FileService+DirectoryCopy.swift
+      - path: Pensieve/Services/FileService+DescriptorCopy.swift
       - path: Pensieve/Services/FileService+DirectoryProbe.swift
       - path: Pensieve/Services/FileTreeComparison.swift
       - path: Pensieve/Services/FileService+ImportCopy.swift
@@ -159,7 +161,7 @@ targets:
       - path: Pensieve/Services/FileService+RuleHeader.swift
       - path: Pensieve/Services/DeployArtifactOwnership.swift
       - path: Pensieve/Services/DeployRemovalService.swift
-      - path: Pensieve/Services/FileService+DirectoryCopy.swift
+      - path: Pensieve/Services/FileService+DescriptorCopy.swift
       - path: Pensieve/Services/FileService+DirectoryProbe.swift
       - path: Pensieve/Services/FileTreeComparison.swift
       - path: Pensieve/Services/FileService+ImportCopy.swift

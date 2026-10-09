@@ -22,7 +22,23 @@ final class ScenarioStoreMigrationTests: XCTestCase {
 
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(url: url))
         XCTAssertEqual(try rows(in: ModelContext(container)), expected)
+        try assertRetiredTablesRemoved(at: url)
         XCTAssertEqual(Set(container.schema.entities.map(\.name)), Set(expected.keys))
+    }
+
+    private func assertRetiredTablesRemoved(at url: URL) throws {
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil), SQLITE_OK)
+        let opened = try XCTUnwrap(database)
+        defer { sqlite3_close(opened) }
+        let sql = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' "
+            + "AND name IN ('ZSCENARIO', 'ZSCENARIOASSIGNMENT')"
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(opened, sql, -1, &statement, nil), SQLITE_OK)
+        let query = try XCTUnwrap(statement)
+        defer { sqlite3_finalize(query) }
+        XCTAssertEqual(sqlite3_step(query), SQLITE_ROW)
+        XCTAssertEqual(sqlite3_column_int(query, 0), 0, "Retired tables remain in the migrated store")
     }
 
     /// Verify the frozen old-build fixture actually contains both retired entities before migration.
