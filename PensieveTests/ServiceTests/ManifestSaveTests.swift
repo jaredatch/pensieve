@@ -20,13 +20,11 @@ final class ManifestSaveTests: XCTestCase {
         XCTAssertEqual(h.local.projectKeys, ["local-key"])
         XCTAssertEqual(h.local.skillSlugs, ["alpha"])
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Pensieve.Category>()), 2)
-        // Allow the worker to try the lock; unrelated main-actor work must still finish.
-        await Task.yield()
-        XCTAssertEqual(try h.manifestBytes(), before)
         h.categories.setProject(h.project, inCategory: h.local, member: false, context: h.context)
         h.categories.setSkill(h.alpha, inCategory: h.local, assigned: false, context: h.context)
         XCTAssertTrue(h.local.projectKeys.isEmpty)
         XCTAssertTrue(h.local.skillSlugs.isEmpty)
+        await h.assertWaitingBehindHeldLock(pending: 7, before: before)
         var pulled = try h.manifest.read(fromRoot: h.root)
         pulled.categories[0].projectKeys = ["pulled-key"]
         pulled.categories[0].skillSlugs = ["pulled-skill"]
@@ -78,8 +76,7 @@ final class ManifestSaveTests: XCTestCase {
             projects: [], context: h.context))
         XCTAssertEqual(new.tags, ["new"])
         XCTAssertEqual(h.alpha.tags, ["local"])
-        await Task.yield()
-        XCTAssertEqual(try h.manifestBytes(), before)
+        await h.assertWaitingBehindHeldLock(pending: 4, before: before)
         var pulled = try h.manifest.read(fromRoot: h.root)
         let index = try XCTUnwrap(pulled.skills.firstIndex { $0.slug == "alpha" })
         pulled.skills[index].tags = ["remote-same-field"]

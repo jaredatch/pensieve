@@ -24,6 +24,10 @@ final class PendingSaveTermination {
             guard generation == request else { return }
             finish(true, reply: reply)
         }
+        scheduleQuestion(for: saves, request: request, reply: reply)
+    }
+
+    private func scheduleQuestion(for saves: ManifestSaveModel, request: Int, reply: @escaping (Bool) -> Void) {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard generation == request, saves.pendingCount > 0 else { return }
@@ -35,6 +39,7 @@ final class PendingSaveTermination {
                     let close = self.dismiss
                     self.dismiss = nil
                     close?()
+                    self.scheduleQuestion(for: saves, request: request, reply: reply)
                 }
             }
         }

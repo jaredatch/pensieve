@@ -53,34 +53,49 @@ final class PendingSaveTerminationTests: XCTestCase {
     }
 
     func testWaitKeepsAppRunningAndQuitAnywayCompletesWhileSaveStillWaits() async throws {
-        for quitAnyway in [false, true] {
+        for outcome in ["save after Wait", "Quit Anyway after Wait", "Quit Anyway"] {
             let h = try ManifestSaveFixture()
             defer { h.cleanup() }
             let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
             defer { lock.release() }
             h.categories.rename(h.local, to: "Waiting", context: h.context)
-            var choices: ((Bool) -> Void)?
+            var questions: [(Bool) -> Void] = []
             var dismissals = 0
-            let quit = PendingSaveTermination(delay: 0.05, present: { choices = $0; return { dismissals += 1 } })
+            let quit = PendingSaveTermination(delay: 0.05, present: { questions.append($0); return { dismissals += 1 } })
             var replies: [Bool] = []
             let answer = PensieveAppDelegate.terminationReply(hasUnsavedChanges: false, questionOpen: false,
                 confirm: { _ in XCTFail("No draft") }, reply: { replies.append($0) }, saves: h.saves, saveTermination: quit)
             XCTAssertEqual(answer, .terminateLater)
-            await TestWait.until(failureMessage: "Quit did not ask about the waiting save") { choices != nil }
-            choices?(quitAnyway)
+            await TestWait.until(failureMessage: "Quit did not ask about the waiting save") { !questions.isEmpty }
+            let first = try XCTUnwrap(questions.first)
+            let quitAnyway = outcome == "Quit Anyway"
+            first(quitAnyway)
             XCTAssertEqual(dismissals, 1)
             XCTAssertEqual(replies, quitAnyway ? [true] : [], "Wait must leave AppKit's quit deferred")
             XCTAssertEqual(quit.isWaiting, !quitAnyway)
             XCTAssertEqual(h.saves.pendingCount, 1)
             XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories.first?.name, "Local")
-            choices?(!quitAnyway)
+            first(!quitAnyway)
             XCTAssertEqual(replies, quitAnyway ? [true] : [], "A dismissed question cannot answer again")
+            if !quitAnyway {
+                await TestWait.until(failureMessage: "Quit Anyway became unreachable after Wait") { questions.count == 2 }
+                XCTAssertTrue(replies.isEmpty, "The original quit must stay deferred between questions")
+                XCTAssertEqual(h.saves.pendingCount, 1)
+                guard questions.count == 2 else { return }
+                first(true)
+                XCTAssertTrue(replies.isEmpty, "The old question cannot answer the renewed question")
+                if outcome == "Quit Anyway after Wait" {
+                    questions[1](true)
+                    XCTAssertEqual(replies, [true], "Quit Anyway must finish the original quit while the lock stays held")
+                    XCTAssertFalse(quit.isWaiting)
+                }
+            }
             lock.release()
             await h.saves.waitUntilIdle()
             await TestWait.until(failureMessage: "The deferred quit did not finish") { !replies.isEmpty }
             XCTAssertEqual(replies, [true], "Wait must complete the original quit when the save lands")
             XCTAssertFalse(quit.isWaiting)
-            XCTAssertEqual(dismissals, 1)
+            XCTAssertEqual(dismissals, quitAnyway ? 1 : 2)
         }
     }
 

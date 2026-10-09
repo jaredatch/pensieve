@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import XCTest
 @testable import Pensieve
 
 @MainActor
@@ -50,6 +51,17 @@ final class ManifestSaveFixture {
 
     func manifestBytes() throws -> [String: Data] {
         try Self.manifestBytes(root: root, files: files)
+    }
+
+    func assertWaitingBehindHeldLock(pending: Int, before: [String: Data],
+                                     file: StaticString = #filePath, line: UInt = #line) async {
+        await TestWait.until(failureMessage: "The queued saves never reached their lock wait or completion") {
+            self.saves.isWaiting || self.saves.pendingCount == 0
+        }
+        XCTAssertTrue(saves.isWaiting, "Saves must wait for the held sync.lock", file: file, line: line)
+        XCTAssertEqual(saves.pendingCount, pending, file: file, line: line)
+        XCTAssertTrue(recording.writes.isEmpty, "No queued writer may publish through the held lock", file: file, line: line)
+        XCTAssertEqual(try manifestBytes(), before, file: file, line: line)
     }
 
     static func manifestBytes(root: String, files: FileServiceProtocol) throws -> [String: Data] {
