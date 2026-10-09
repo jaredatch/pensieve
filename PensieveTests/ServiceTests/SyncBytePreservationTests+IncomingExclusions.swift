@@ -192,6 +192,7 @@ extension SyncBytePreservationTests {
 
     func testIncomingTrackedExcludedFilesPauseBeforeAppWritesAndResumeAfterMovingThem() throws {
         try assertFilesystemEquivalentIncomingNames()
+        try assertHardLinksRemainDistinctEntries()
         try assertIndexedNestedRepositoryReplacementIsProtected()
         try assertUnchangedLegacyEntryProtectsLocalFolderReplacement()
         for hidden in [false, true] {
@@ -202,6 +203,23 @@ extension SyncBytePreservationTests {
                     XCTFail("\(path), skill ignores=\(hidden): \(error)")
                 }
             }
+        }
+    }
+
+    private func assertHardLinksRemainDistinctEntries() throws {
+        for local in ["skills/x/.env", "skills/x/node_modules/pkg/cache"] {
+            let fixture = try ExcludedFileCollisionFixture(path: local, hidden: true, localCommit: true,
+                                                           incomingPath: "skills/x/ordinary.txt")
+            defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+            let linked = fixture.storeB + "/skills/x/ordinary.txt"
+            XCTAssertEqual(link(fixture.storeB + "/" + local, linked), 0)
+            try fixture.git.runOrThrow(["-C", fixture.storeB, "add", "--", "skills/x/ordinary.txt"], in: nil)
+            try fixture.git.runOrThrow(["-C", fixture.storeB, "commit", "-m", "hard linked ordinary entry"], in: nil)
+            try fixture.git.fetch(at: fixture.storeB, credential: nil)
+            let operation = try fixture.git.storeOperation(at: fixture.storeB)
+            XCTAssertNoThrow(try operation.requireNoExcludedCollision(with: "FETCH_HEAD"),
+                             "R8: distinct hard-link directory entries cannot pause sync")
+            XCTAssertEqual(try fixture.files.readData(at: fixture.storeB + "/" + local), fixture.localBytes)
         }
     }
 

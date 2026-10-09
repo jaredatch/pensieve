@@ -144,6 +144,11 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     /// Physical-path consumers compare physical literals; containment still applies to every lookup.
     var translatesSymlinkTargets = true
 
+    func directoryEntryIdentity(at path: String) -> Data? {
+        if nonSymlinkAncestors.contains(path) { return nil }
+        return wrapped.directoryEntryIdentity(at: resolved(path))
+    }
+
     func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? {
         if nonSymlinkAncestors.contains(path) { return nil }
         return wrapped.fileIdentity(at: resolved(path), followingLinks: followingLinks)
@@ -235,6 +240,11 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         let physical = resolved(path)
         try beforeRuleRead?(physical)
         return try wrapped.readRegularFileData(at: physical, maximumBytes: maximumBytes)
+    }
+    func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data {
+        let physical = resolved(path)
+        try beforeRuleRead?(physical)
+        return try wrapped.readRegularFileData(at: physical, maximumBytes: maximumBytes, containedIn: resolved(directory))
     }
     func readRegularFileHeader(at path: String, maximumBytes: Int) throws -> Data {
         let physical = resolved(path)

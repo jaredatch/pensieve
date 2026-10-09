@@ -6,6 +6,7 @@ extension SyncConflictResolutionTests {
     func testUnreadableGitlinkPickCannotDeleteThePathAndOtherPickStillResolves() throws {
         try assertInvalidRootIgnoreCannotBlockRetirement()
         try assertGitlinkFilePicksRemainTracked()
+        try assertThisFileAgainstRemoteGitlink()
         for both in [false, true] {
             for side in [ConflictSide.thisMachine, .otherMachine] {
                 let fixture = try SyncConflictByteFixture.gitlinkConflict(both: both)
@@ -70,6 +71,9 @@ extension SyncConflictResolutionTests {
             XCTAssertEqual(try fixture.files.readFile(at: fixture.root + "/outside-key"), "outside sentinel")
             let ignore = try fixture.git.runData(["--git-dir", fixture.remote, "show", "main:.gitignore"], in: nil)
             XCTAssertFalse(ignore.stdout.contains(Data("outside sentinel".utf8)))
+            let children = try fixture.git.runData(["--git-dir", fixture.remote, "ls-tree", "-r", "main",
+                                                   "--", ".gitignore/never-picked"], in: nil)
+            XCTAssertTrue(children.stdout.isEmpty, "R7: resolving a gitlink must not stage unrelated user data")
         }
     }
 
@@ -238,22 +242,40 @@ extension SyncConflictResolutionTests {
 
     @MainActor
     private func assertFileFolderPickKeepsTheFolder() throws {
-        let fixture = try SyncConflictByteFixture(name: "file-folder", initial: .file(Data("base".utf8)),
-            this: .file(Data("edited file".utf8)), other: .folder, indexMerge: true)
-        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
-        let items = try fixture.inspectAll()
-        let item = try XCTUnwrap(items.first)
-        XCTAssertNil(item.otherMachine, "The folder side deletes the former file entry")
-        let picks = items.reduce(into: [String: ResolutionPick]()) { result, item in
-            result[item.path] = ResolutionPick(side: .otherMachine, expectedThis: item.thisMachine,
-                expectedOther: item.otherMachine, expectedThisMode: item.thisMode, expectedOtherMode: item.otherMode)
+        for folderSide in [ConflictSide.thisMachine, .otherMachine] {
+            for pickSide in [ConflictSide.thisMachine, .otherMachine] {
+                let bytes = Data("edited file".utf8)
+                let fixture = try SyncConflictByteFixture(name: "file-folder", initial: .file(Data("base".utf8)),
+                    this: folderSide == .thisMachine ? .folder : .file(bytes),
+                    other: folderSide == .otherMachine ? .folder : .file(bytes), indexMerge: true)
+                defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+                let items = try fixture.inspectAll()
+                let picks = items.reduce(into: [String: ResolutionPick]()) { result, item in
+                    result[item.path] = ResolutionPick(side: pickSide, expectedThis: item.thisMachine,
+                        expectedOther: item.otherMachine, expectedThisMode: item.thisMode, expectedOtherMode: item.otherMode)
+                }
+                if folderSide == .thisMachine, pickSide == .otherMachine {
+                    // This child exists only in the local, unpushed folder version.
+                    XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB, picks: picks,
+                        credential: nil, context: fixture.contextB))
+                    XCTAssertEqual(try fixture.files.readFile(at: fixture.storeB + "/" + fixture.path + "/keep"),
+                                   "chosen folder bytes")
+                    continue
+                }
+                do {
+                    _ = try fixture.engine.resolveConflicts(root: fixture.storeB, picks: picks,
+                        credential: nil, context: fixture.contextB)
+                    if pickSide == folderSide {
+                        let fresh = fixture.root + "/folder-fresh"
+                        try fixture.git.clone(remote: "file://" + fixture.remote, into: fresh, credential: nil)
+                        for store in [fixture.storeB, fresh] {
+                            XCTAssertEqual(try fixture.files.readFile(at: store + "/" + fixture.path + "/keep"),
+                                           "chosen folder bytes")
+                        }
+                    } else { try fixture.assertPublished(bytes) }
+                } catch { XCTFail("Folder side \(folderSide), pick \(pickSide): \(error)") }
+            }
         }
-        _ = try fixture.engine.resolveConflicts(root: fixture.storeB, picks: picks,
-                                                credential: nil, context: fixture.contextB)
-        XCTAssertEqual(try fixture.files.readFile(at: fixture.storeB + "/" + fixture.path + "/keep"), "chosen folder bytes")
-        let fresh = fixture.root + "/folder-fresh"
-        try fixture.git.clone(remote: "file://" + fixture.remote, into: fresh, credential: nil)
-        XCTAssertEqual(try fixture.files.readFile(at: fresh + "/" + fixture.path + "/keep"), "chosen folder bytes")
     }
 
     @MainActor

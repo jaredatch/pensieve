@@ -107,6 +107,7 @@ struct StoreGitOperation {
     init(git: GitService, root: String, aborting: Bool = false) throws {
         self.git = git
         self.root = root
+        let retired = aborting ? [] : try StoreIgnoreRules.retiredPaths(at: root, files: git.fileService)
         var resolved = ""
         var failure: Error?
         do {
@@ -118,6 +119,7 @@ struct StoreGitOperation {
             }
             resolved = info
             let attributes = "* -text -eol -ident -filter -working-tree-encoding\nskills/** !merge\n"
+                + StoreIgnoreRules.receiptFile + " merge=union\n"
             let path = info + "/attributes"
             if (try? git.fileService.readFile(at: path)) != attributes {
                 try git.fileService.writeFile(at: path, content: attributes)
@@ -129,7 +131,7 @@ struct StoreGitOperation {
         infoDirectory = resolved
         repairFailure = failure
         if !aborting {
-            let rules = StoreIgnoreRules.ignoreText(paths: StoreIgnoreRules.retiredPaths(at: root, files: git.fileService))
+            let rules = StoreIgnoreRules.ignoreText(paths: retired)
             try git.fileService.writeFile(at: resolved + "/pensieve-ignore", content: rules)
         }
     }
@@ -279,8 +281,8 @@ struct StoreGitOperation {
         let args = ["ls-tree", "-r", "--name-only", "-z", revision]
         let incoming = try runData(args)
         guard incoming.exit == 0 else { throw git.dataCommandError(incoming, args: ["-C", root] + args) }
-        // Identity is the candidate key itself. This admits every filesystem alias without a
-        // guessed Unicode folding and never opens or follows the protected leaf.
+        // Directory-entry identity admits filesystem aliases without conflating hard links.
+        // It never opens or follows a protected leaf.
         var containingPaths: [Data: [(prefix: Data, path: Data)]] = [:]
         for path in local {
             for prefix in pathPrefixes(path) {
@@ -306,15 +308,15 @@ struct StoreGitOperation {
 
     private func collisionKey(_ path: Data) -> Data {
         guard let text = String(data: path, encoding: .utf8),
-              let identity = git.fileService.fileIdentity(at: root + "/" + text, followingLinks: false) else { return path }
-        return Data([0]) + Data("\(identity.device):\(identity.inode)".utf8)
+              let entry = git.fileService.directoryEntryIdentity(at: root + "/" + text) else { return path }
+        return Data([0]) + entry
     }
 
     private func sameDestination(_ first: Data, _ second: Data) -> Bool {
         if first == second { return true }
         guard let first = String(data: first, encoding: .utf8), let second = String(data: second, encoding: .utf8),
-              let identity = git.fileService.fileIdentity(at: root + "/" + first, followingLinks: false) else { return false }
-        return identity == git.fileService.fileIdentity(at: root + "/" + second, followingLinks: false)
+              let entry = git.fileService.directoryEntryIdentity(at: root + "/" + first) else { return false }
+        return entry == git.fileService.directoryEntryIdentity(at: root + "/" + second)
     }
 
     private func pathPrefixes(_ path: Data) -> [Data] {

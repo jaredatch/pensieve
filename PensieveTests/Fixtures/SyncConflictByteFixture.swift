@@ -51,7 +51,11 @@ struct SyncConflictByteFixture {
         storeA = root + "/A"
         storeB = root + "/B"
         path = "skills/conflict/assets/" + name
-        if case .folder = other { expectedPaths = [path, path + "/keep"] } else { expectedPaths = [path] }
+        if case .folder = other {
+            expectedPaths = [path, path + "/keep"]
+        } else if case .folder = this {
+            expectedPaths = [path, path + "/keep"]
+        } else { expectedPaths = [path] }
         git = indexMerge ? GitService(askpassHelperPath: root + "/askpass", executablePath: root + "/index-merge-git")
             : TestPaths.git
         engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: git), lockPath: root + "/sync.lock")
@@ -167,7 +171,7 @@ struct SyncConflictByteFixture {
         } else if try files.entryExistsWithoutFollowingLinks(at: path) { try files.deleteFile(at: path) }
     }
 
-    static func gitlinkConflict(both: Bool = false, otherEntry: Entry? = nil) throws -> Self {
+    static func gitlinkConflict(both: Bool = false, otherEntry: Entry? = nil, fileOnThisMachine: Data? = nil) throws -> Self {
         let root = TestTemporaryDirectory.path + "GitlinkSource-" + UUID().uuidString
         let files = FileService()
         let git = TestPaths.git
@@ -183,8 +187,10 @@ struct SyncConflictByteFixture {
         try files.writeFile(at: root + "/source.txt", content: "third nested commit\n")
         try git.stageAllAndCommit(at: root, message: "third nested commit")
         let third = try git.commitSHA(at: root)
-        return try Self(name: "legacy-link", initial: .gitlink(first), this: .gitlink(second),
-                        other: otherEntry ?? (both ? .gitlink(third) : .deleted), indexMerge: otherEntry != nil)
+        return try Self(name: "legacy-link", initial: .gitlink(first),
+                        this: fileOnThisMachine.map(Entry.file) ?? .gitlink(second),
+                        other: fileOnThisMachine != nil ? .gitlink(third) : otherEntry ?? (both ? .gitlink(third) : .deleted),
+                        indexMerge: otherEntry != nil || fileOnThisMachine != nil)
     }
 
     func ignoreFaultEngine(_ kind: String) throws -> SyncEngine {
@@ -195,7 +201,7 @@ struct SyncConflictByteFixture {
         switch kind {
         case "binary": change = "printf '\\377\\376' > '\(ignore)'"
         case "link": change = "ln -s '\(root)/outside-key' '\(ignore)'"
-        case "folder": change = "mkdir '\(ignore)'"
+        case "folder": change = "mkdir '\(ignore)'; printf 'unpicked user bytes' > '\(ignore)/never-picked'"
         case "fifo": change = "mkfifo '\(ignore)'"
         case "unreadable": change = "printf '*\\n' > '\(ignore)'; chmod 000 '\(ignore)'"
         default: change = ":"

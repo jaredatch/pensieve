@@ -56,6 +56,9 @@ protocol FileServiceProtocol {
     /// of one directory (case on a case-insensitive volume, a link and its target) share it; two
     /// directories never do. (PLAN-30 / 30.2 review; inert default below.)
     func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity?
+    /// The parent directory's identity and the filesystem's stored leaf name, without following the leaf.
+    /// Aliases share it; two hard links to one inode retain distinct entries.
+    func directoryEntryIdentity(at path: String) -> Data?
     /// `realpath(3)`: every link resolved and `/private` kept, unlike `resolvingSymlinksInPath`. A path
     /// that does not exist comes back as given. (Inert default below.)
     func realPath(at path: String) -> String
@@ -120,6 +123,8 @@ extension FileServiceProtocol {
     /// Inert default: a double that does not model identity answers "unknown", and a
     /// consumer falls back to spelling.
     func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? { nil }
+    /// Inert default: unmodeled entry identity performs no host I/O.
+    func directoryEntryIdentity(at path: String) -> Data? { nil }
 
     /// Inert default: no resolution.
     func realPath(at path: String) -> String { path }
@@ -209,7 +214,7 @@ extension FileServiceProtocol {
     /// to touch `FileManager`/Darwin — so it is inside the single-chokepoint boundary, not a bypass.
     /// (PLAN-12 / 12.3 — the atomic manifest write.)
     func replaceItem(at path: String, with sourcePath: String) throws {
-        if FileManager.default.fileExists(atPath: path) {
+        if FileManager.default.fileExists(atPath: path) || isSymlink(at: path) {
             guard renamex_np(sourcePath, path, UInt32(RENAME_SWAP)) == 0 else {
                 throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno),
                               userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))])
@@ -336,12 +341,6 @@ final class FileService: FileServiceProtocol {
     func isSymlink(at path: String) -> Bool {
         let attrs = try? fm.attributesOfItem(atPath: path)
         return attrs?[.type] as? FileAttributeType == .typeSymbolicLink
-    }
-
-    func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? {
-        var info = stat()
-        let status = followingLinks ? stat(path, &info) : lstat(path, &info)
-        return status == 0 ? FileIdentity(device: info.st_dev, inode: info.st_ino) : nil
     }
 
     /// Reads size and recency from one `lstat`, refusing links and non-regular nodes without opening them.
