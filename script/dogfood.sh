@@ -196,28 +196,43 @@ if ! "$LSREGISTER" -dump > "$ls_dump" 2>/dev/null; then
   die "could not read the LaunchServices database ($LSREGISTER -dump) — refusing to launch"
 fi
 # Records are separated by lines of dashes; a bundle's record carries `path: /x/Y.app (0x1a2b)`
-# and `identifier: <bundle id>`. Prints each path registered under the dogfood id, and exits 3
-# when the dump holds no bundle record at all (an empty or truncated dump is a failed read).
+# and `identifier: <bundle id>`. Prints each path registered under the dogfood id. Exits 3
+# when the dump holds no bundle record at all (an empty or truncated dump is a failed read),
+# and 4 when a dogfood record has no path (a partial record can't be cleared as "not outside").
+rc=0
 registered="$(awk -v id="$DOGFOOD_ID" '
-  function flush() { if (rid == id && rpath != "") print rpath; rid = ""; rpath = "" }
+  function flush() { if (rid == id) { if (rpath == "") bad = 1; else print rpath }; rid = ""; rpath = "" }
   /^-+$/ { flush(); next }
   /^path:/ && rpath == "" { rpath = $0; sub(/^path:[ \t]*/, "", rpath); sub(/ \(0x[0-9a-fA-F]+\)$/, "", rpath) }
   /^identifier:/ { seen = 1; rid = $2 }
-  END { flush(); if (!seen) exit 3 }' "$ls_dump")" \
-  || { rm -f "$ls_dump"; die "the LaunchServices dump lists no bundles — refusing to launch"; }
+  END { flush(); if (!seen) exit 3; if (bad) exit 4 }' "$ls_dump")" || rc=$?
 rm -f "$ls_dump"
+case "$rc" in
+  0) ;;
+  4) die "the LaunchServices dump has a $DOGFOOD_ID record with no path — refusing to launch" ;;
+  *) die "the LaunchServices dump lists no bundles — refusing to launch" ;;
+esac
 
 running_apps="$(lsappinfo list 2>/dev/null)" || die "could not list running apps (lsappinfo list) — refusing to launch"
-# Prints "<pid><tab><bundle path>" for each running app with the dogfood id; exits 3 when no
-# app is listed at all (loginwindow is always there in a login session).
+# Prints "<pid><tab><bundle path>" for each running app with the dogfood id. Exits 3 when no
+# app is listed at all (loginwindow is always there in a login session), and 4 when a dogfood
+# record lacks a numeric pid or a bundle path.
+rc=0
 running="$(printf '%s\n' "$running_apps" | awk -v id="$DOGFOOD_ID" '
-  function flush() { if (bid == id) print pid "\t" bpath; bid = ""; bpath = ""; pid = "" }
+  function flush() {
+    if (bid == id) { if (pid !~ /^[0-9]+$/ || bpath == "") bad = 1; else print pid "\t" bpath }
+    bid = ""; bpath = ""; pid = ""
+  }
   /^ *[0-9]+\) / { flush(); n++; next }
   /^ *bundleID="/ { bid = $0; sub(/^ *bundleID="/, "", bid); sub(/".*$/, "", bid) }
   /^ *bundle path="/ { bpath = $0; sub(/^ *bundle path="/, "", bpath); sub(/"[^"]*$/, "", bpath) }
   /^ *pid = / { pid = $3 }
-  END { flush(); if (!n) exit 3 }')" \
-  || die "lsappinfo lists no running apps — refusing to launch"
+  END { flush(); if (!n) exit 3; if (bad) exit 4 }')" || rc=$?
+case "$rc" in
+  0) ;;
+  4) die "lsappinfo lists a $DOGFOOD_ID app with no pid or bundle path — refusing to launch" ;;
+  *) die "lsappinfo lists no running apps — refusing to launch" ;;
+esac
 
 offenders=""
 while IFS= read -r path; do
@@ -233,8 +248,10 @@ done <<EOF
 $registered
 EOF
 # A copy running AT the staged path is a previous sandbox run, fenced; staging stops it first.
-while IFS=$'\t' read -r pid path; do
-  [ -n "$pid$path" ] || continue
+# Split on the first tab only, so every byte of the path survives (read would trim a trailing tab).
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  pid="${line%%$'\t'*}"; path="${line#*$'\t'}"
   if ! same_as_staged "$path"; then
     offenders="$offenders
   running:   pid $pid, $path — quit it (kill $pid)"

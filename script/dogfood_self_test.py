@@ -217,5 +217,26 @@ class DogfoodOtherCopyTests(DogfoodTestCase):
             self.assert_refused(self.dry_run(), 'lsappinfo lists no running apps')
 
 
+    def test_partial_lsregister_record_refuses(self):
+        # A dogfood record with no path can't be cleared as "not outside the staging folder".
+        self.set_launchservices([self.app], [])
+        self.dump_file.write_text(self.dump_file.read_text().replace(
+            SEPARATOR + '\n', SEPARATOR + '\nbundle id:                  Pensieve (0x1)\n'
+            f'identifier:                 {DOGFOOD_ID}\n' + SEPARATOR + '\n', 1))
+        self.assert_refused(self.dry_run(), f'has a {DOGFOOD_ID} record with no path')
+
+    def test_partial_lsappinfo_record_refuses(self):
+        for name, cut in (('no bundle path', '    bundle path='), ('no pid', '    pid = ')):
+            with self.subTest(name):
+                self.set_launchservices([self.app], [(4242, self.root / 'Elsewhere' / 'Pensieve.app')])
+                text = self.apps_file.read_text()
+                head, tail = text.rsplit(cut, 1)
+                self.apps_file.write_text(head + '    ignored=' + tail)
+                self.assert_refused(self.dry_run(), f'lsappinfo lists a {DOGFOOD_ID} app with no pid or bundle path')
+
+    def test_running_path_with_a_trailing_tab_is_not_the_staged_copy(self):
+        self.set_launchservices([self.app], [(4242, f'{self.app}\t')])
+        self.assert_refused(self.dry_run(), 'running:   pid 4242')
+
 if __name__ == '__main__':
     unittest.main()
