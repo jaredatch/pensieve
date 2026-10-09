@@ -195,7 +195,7 @@ struct ConflictResolutionView: View {
     }
 
     private func bodySkill(for item: ConflictItem) -> Skill? {
-        let path = SyncEngine.conflictPath(for: item.path)
+        let path = SyncEngine.conflictPath(for: item)
         guard path.kind == .body, let slug = path.skillSlug else { return nil }
         return skills.first { $0.directoryName == slug }
     }

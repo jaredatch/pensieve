@@ -204,7 +204,7 @@ extension UpdatesViewModel {
     private nonisolated static func repositoryDisplay(_ parsed: SkillInstallURL?) -> String {
         guard let parsed,
               let components = URLComponents(string: parsed.repo) else { return "" }
-        let segments = components.path.split(separator: "/").map(String.init)
+        let segments = PathSyntax.components(components.path)
         guard segments.count == 2 else { return "" }
         var repository = segments[1]
         if repository.hasSuffix(".git") {

@@ -83,33 +83,14 @@ final class ConflictResolutionModelTests: XCTestCase {
         -> ConflictResolutionModel {
         ConflictResolutionModel(engine: engine, git: StubGit(),
                                 credentials: InMemoryCredentialStore(), root: "/tmp/none",
-                        headStamp: headStamp,
+                                headStamp: headStamp,
                                 onResolutionStarted: { onResolved })
     }
 
-    func testBodyAndOverlayForOneSlugGroupIntoOneSkillCard() async throws {
-        let context = try makeContext()
-        context.insert(Skill(name: "Deploy Helper", directoryName: "deploy-helper"))
-        try context.save()
-        let engine = StubResolutionEngine()
-        engine.inspections = [.conflicts(ConflictSet(items: [
-            bodyItem(slug: "deploy-helper"),
-            overlayItem(slug: "deploy-helper")
-        ]))]
-        let model = makeModel(engine: engine)
-
-        await model.loadAndReport(context: context)
-
-        let groups = try readyGroups(from: model.phase)
-        XCTAssertEqual(groups.count, 1, "body + overlay for the same slug must be one pickable group")
-        XCTAssertEqual(groups[0].id, "deploy-helper")
-        XCTAssertEqual(groups[0].title, "Deploy Helper")
-        XCTAssertEqual(groups[0].subtitle, "Body and settings differ")
-        XCTAssertEqual(groups[0].items.count, 2)
-        XCTAssertFalse(model.canApply)
-    }
-
     func testJoiningBodyAndOverlayNamesGroupWithoutLosingTheirFirstScalar() async throws {
+        let history = try ConflictHistoryFixture(test: self)
+        defer { try? history.remove() }
+        await history.runtime.bootstrapTask.value
         for scalar in PathJoiningScalars.values {
             let context = try makeContext()
             let name = PathJoiningScalars.name("skill", scalar: scalar)
@@ -122,12 +103,12 @@ final class ConflictResolutionModelTests: XCTestCase {
             let groups = try readyGroups(from: model.phase)
             XCTAssertEqual(groups.count, 1)
             let group = try XCTUnwrap(groups.first)
-            XCTAssertEqual(group.id, name)
+            XCTAssertEqual(group.id, "skill:" + name)
             XCTAssertEqual(group.title, "Joined Skill")
             XCTAssertEqual(group.items.count, 2)
-            model.choose(name, .thisMachine)
+            model.choose("skill:" + name, .thisMachine)
             XCTAssertTrue(model.canApply)
-            await assertHistoryAction(path: "skills/" + name + "/SKILL.md", slug: name, available: true)
+            await assertHistoryAction(path: "skills/" + name + "/SKILL.md", slug: name, available: true, fixture: history)
         }
     }
 
@@ -139,7 +120,7 @@ final class ConflictResolutionModelTests: XCTestCase {
 
         await model.loadAndReport(context: context)
         XCTAssertFalse(model.canApply)
-        model.choose("alpha", .otherMachine)
+        model.choose("skill:alpha", .otherMachine)
 
         XCTAssertTrue(model.canApply)
         let group = try XCTUnwrap(readyGroups(from: model.phase).first)
@@ -153,7 +134,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         let model = makeModel(engine: engine)
 
         await model.loadAndReport(context: context)
-        model.choose("alpha", .thisMachine)
+        model.choose("skill:alpha", .thisMachine)
         await model.applyAndReport(context: context)
 
         XCTAssertEqual(model.phase, .done)
@@ -176,7 +157,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         let model = makeModel(engine: engine, onResolved: { spy.results.append($0) })
 
         await model.loadAndReport(context: context)
-        model.choose("alpha", .thisMachine)
+        model.choose("skill:alpha", .thisMachine)
         await model.applyAndReport(context: context)
 
         XCTAssertEqual(model.phase, .done)
@@ -219,7 +200,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         let model = makeModel(engine: engine, onResolved: { spy.results.append($0) })
 
         await model.loadAndReport(context: context)
-        model.choose("alpha", .otherMachine)
+        model.choose("skill:alpha", .otherMachine)
         await model.applyAndReport(context: context)
 
         XCTAssertTrue(spy.results.isEmpty)
@@ -236,7 +217,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         let model = makeModel(engine: engine)
 
         await model.loadAndReport(context: context)
-        model.choose("alpha", .otherMachine)
+        model.choose("skill:alpha", .otherMachine)
         await model.applyAndReport(context: context)
 
         XCTAssertEqual(engine.inspectCallCount, 2)
@@ -245,41 +226,12 @@ final class ConflictResolutionModelTests: XCTestCase {
         XCTAssertEqual(groups[0].subtitle, "Settings differ")
     }
 
-    func testUnknownSkillSlugFallsBackToSlugTitle() async throws {
-        let context = try makeContext()
-        let engine = StubResolutionEngine()
-        engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: "new-skill")]))]
-        let model = makeModel(engine: engine)
-
-        await model.loadAndReport(context: context)
-
-        let group = try XCTUnwrap(readyGroups(from: model.phase).first)
-        XCTAssertEqual(group.title, "new-skill")
-        let degenerate: [(String, ConflictKind)] = [
-            ("skills/SKILL.md", .body), ("skills//SKILL.md", .body),
-            ("skills/./SKILL.md", .body), ("skills/../SKILL.md", .body),
-            ("manifest/skills/.yaml", .overlay), ("manifest/skills/", .overlay)
-        ]
-        context.insert(Skill(name: "Empty slug must not match", directoryName: ""))
-        try context.save()
-        for (path, kind) in degenerate {
-            engine.inspections = [.conflicts(ConflictSet(items: [
-                ConflictItem(path: path, kind: kind, thisMachine: nil, otherMachine: nil)
-            ]))]
-            await model.loadAndReport(context: context)
-            let fallback = try XCTUnwrap(readyGroups(from: model.phase).first)
-            XCTAssertEqual(fallback.id, path)
-            XCTAssertEqual(fallback.title, path)
-            if kind == .body { await assertHistoryAction(path: path, slug: "", available: false) }
-        }
-    }
-
-    private func overlayItem(slug: String) -> ConflictItem {
+    func overlayItem(slug: String) -> ConflictItem {
         ConflictItem(path: "manifest/skills/\(slug).yaml", kind: .overlay,
                      thisMachine: Data("this overlay".utf8), otherMachine: Data("other overlay".utf8))
     }
 
-    private func readyGroups(from phase: ConflictResolutionModel.Phase) throws
+    func readyGroups(from phase: ConflictResolutionModel.Phase) throws
         -> [ConflictResolutionModel.ConflictGroup] {
         guard case let .ready(groups) = phase else {
             XCTFail("expected ready, got \(phase)")

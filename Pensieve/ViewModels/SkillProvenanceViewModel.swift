@@ -231,13 +231,13 @@ private extension SkillProvenanceViewModel {
     }
 
     static func isSafeGitHubLinkPath(_ value: String) -> Bool {
-        let segments = value.split(separator: "/", omittingEmptySubsequences: false)
+        let segments = PathSyntax.components(value, omittingEmptySubsequences: false)
         return !segments.isEmpty && segments.allSatisfy {
             !$0.isEmpty
                 && $0 != "."
                 && $0 != ".."
                 && !$0.contains("..")
-                && !$0.hasPrefix("-")
+                && !PathSyntax.startsWithDash($0)
                 && !$0.contains("\\")
         }
     }

@@ -21,6 +21,8 @@ final class PathSyntaxTests: XCTestCase {
             XCTAssertEqual(PathSyntax.relativePath("/" + name, under: "/"), name)
             XCTAssertEqual(PathSyntax.relativePath(name + "/file", under: name), "file")
         }
+        XCTAssertNil(PathSyntax.relativePath("", under: "/"))
+        XCTAssertFalse(PathSyntax.isWithin("", root: "/"))
         XCTAssertNil(PathSyntax.relativePath("file", under: ""))
         XCTAssertFalse(PathSyntax.isWithin("/root", root: "/root", includingRoot: false))
         XCTAssertTrue(PathSyntax.isWithin("/root", root: "/root"))

@@ -170,7 +170,7 @@ final class ConflictResolutionModel {
 
     private func groups(from set: ConflictSet, context: ModelContext) throws -> [ConflictGroup] {
         let skills = try context.fetch(FetchDescriptor<Skill>())
-        let namesBySlug = Dictionary(uniqueKeysWithValues: skills.map { ($0.directoryName, $0.name) })
+        let namesBySlug = Dictionary(skills.map { ($0.directoryName, $0.name) }, uniquingKeysWith: { first, _ in first })
         var order: [String] = []
         var itemsByID: [String: [ConflictItem]] = [:]
         for item in set.items {
@@ -189,24 +189,25 @@ final class ConflictResolutionModel {
     }
 
     private func entityID(for item: ConflictItem) -> String {
-        let path = SyncEngine.conflictPath(for: item.path)
+        let path = SyncEngine.conflictPath(for: item)
         switch path.kind {
-        case .body, .overlay:
-            return path.skillSlug ?? item.path
+        case .body:
+            return path.skillSlug.map { "skill:" + $0 } ?? "body-path:" + item.path
+        case .overlay:
+            return path.skillSlug.map { "skill:" + $0 } ?? "overlay-path:" + item.path
         case .category:
-            return "category:" + (path.slug ?? item.path)
+            return path.slug.map { "category:" + $0 } ?? "category-path:" + item.path
         case .project:
-            return "projects"
+            return "project:registry"
         }
     }
 
     private func title(for id: String, items: [ConflictItem], namesBySlug: [String: String]) -> String {
-        if id == "projects" { return "Project registry" }
-        if let item = items.first {
-            let path = SyncEngine.conflictPath(for: item.path)
-            if path.kind == .category { return "Category: " + (path.slug ?? item.path) }
-        }
-        let slug = items.compactMap { SyncEngine.conflictPath(for: $0.path).skillSlug }.first ?? id
+        guard let item = items.first else { return id }
+        let path = SyncEngine.conflictPath(for: item)
+        if path.kind == .project { return "Project registry" }
+        if path.kind == .category { return "Category: " + (path.slug ?? item.path) }
+        guard let slug = path.skillSlug else { return item.path }
         return namesBySlug[slug] ?? slug
     }
 

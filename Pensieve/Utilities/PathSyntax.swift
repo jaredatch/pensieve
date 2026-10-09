@@ -12,11 +12,14 @@ enum PathSyntax {
 
     static func isAbsolute(_ path: String) -> Bool { path.unicodeScalars.first == "/" }
     static func hasSeparator(_ path: String) -> Bool { path.unicodeScalars.contains("/") }
+    static func startsWithDash(_ path: String) -> Bool { path.unicodeScalars.first == "-" }
     static func startsWithTilde(_ path: String) -> Bool { path.unicodeScalars.first == "~" }
 
     static func hasPrefix(_ path: String, _ prefix: String) -> Bool {
-        let value = components(path, omittingEmptySubsequences: false)
         let expected = components(prefix, omittingEmptySubsequences: false)
+        let value = path.unicodeScalars.split(separator: "/", maxSplits: expected.count,
+                                              omittingEmptySubsequences: false)
+            .prefix(expected.count).map { String(String.UnicodeScalarView($0)) }
         guard value.count >= expected.count else { return false }
         for index in expected.indices.dropLast() where !equalComponent(value[index], expected[index]) { return false }
         guard let last = expected.last else { return true }
@@ -24,18 +27,21 @@ enum PathSyntax {
     }
 
     static func hasSuffix(_ path: String, _ suffix: String) -> Bool {
-        let value = normalized(components(path, omittingEmptySubsequences: false).joined(separator: "/"))
-        let expected = normalized(components(suffix, omittingEmptySubsequences: false).joined(separator: "/"))
+        let value = normalized(path)
+        let expected = normalized(suffix)
         return value.suffix(expected.count).elementsEqual(expected)
     }
 
     /// A boundary-aware descendant suffix, including an empty suffix for the root itself.
     /// Trailing root separators don't create an extra component. Interior empty components stay.
     static func relativePath(_ path: String, under root: String) -> String? {
-        let value = components(path, omittingEmptySubsequences: false)
+        guard !path.isEmpty, !root.isEmpty else { return nil }
         var expected = components(root, omittingEmptySubsequences: false)
         while expected.count > 1, expected.last == "" { expected.removeLast() }
-        guard !root.isEmpty, value.count >= expected.count else { return nil }
+        let value = path.unicodeScalars.split(separator: "/", maxSplits: expected.count,
+                                              omittingEmptySubsequences: false)
+            .map { String(String.UnicodeScalarView($0)) }
+        guard value.count >= expected.count else { return nil }
         for index in expected.indices where !equalComponent(value[index], expected[index]) { return nil }
         return value.dropFirst(expected.count).joined(separator: "/")
     }

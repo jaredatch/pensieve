@@ -40,7 +40,7 @@ Each ExecPlan Stage's Validation & Acceptance is phrased as observable behavior 
 
 CI also runs the public hygiene self-test and workflow checks in its existing build job. Run them locally with `./script/public-hygiene.sh --self-test` and `ruby script/workflow_self_test.rb`. The workflow checks cover secret scope, the release condition, permissions, action pins and triggers. Use `actionlint .github/workflows/ci.yml .github/workflows/release.yml` to check workflow syntax.
 
-The path-syntax source guard runs before every suite and in lint. `PathSyntaxGuardTests` verifies that new slash or tilde checks fail with the app or daemon filename, while helper calls, byte comparisons and inert text remain admitted. `PathJoiningScalars` supplies combining-mark, ZWJ, ZWNJ, emoji-modifier, tag and Prepend-ending name cases to the filesystem owner tests.
+The path-syntax source guard runs before every suite and in lint. `PathSyntaxGuardTests` verifies that new slash or tilde checks (including split, first-index, starts-with and first/last equality) fail with the app or daemon filename, while helper calls, scalar/byte comparisons and inert text remain admitted. URL/ref/MIME exemptions identify the nominal owner and parameter signature; an unrelated initializer remains guarded. `PathJoiningScalars` supplies combining-mark, ZWJ, ZWNJ, emoji-modifier, tag and Prepend-ending name cases to the filesystem owner tests.
 
 ## 5. Flaky-test policy & the ratchet
 

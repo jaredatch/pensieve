@@ -16,6 +16,8 @@ final class PathSyntaxGuardTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let rejected = [
             "path.hasPrefix(\"/\")", "path.hasSuffix(\"/\")", "path.contains(\"/\")", "path.hasPrefix(\"~\")",
+            "path.split(separator: \"/\")", "path.firstIndex(of: \"/\")", "path.starts(with: \"/\")",
+            "path.first == \"/\"", "path.last == \"/\"",
             "path.hasPrefix(root + \"/\")", "path.hasSuffix(\"/SKILL.md\")",
             "path . hasPrefix /* nested /* c */ c */ (\nroot + #\"/\"#)",
             "path.contains(\"\\u{2F}\")", "path.hasPrefix(\"\\(root)/\")",
@@ -39,6 +41,9 @@ final class PathSyntaxGuardTests: XCTestCase {
                     let text = "path.hasPrefix(\\\"/\\\")"
                     let accepted = PathSyntax.hasPrefix(path, root + "/")
                     let byte = bytes.contains(UInt8(ascii: "/"))
+                    let byteIndex = bytes.firstIndex(of: UInt8(ascii: "/"))
+                    let scalar = path.unicodeScalars.first == "/"
+                    let scalarParts = path.unicodeScalars.split(separator: "/")
                     let collection = roots.contains(where: { PathSyntax.hasPrefix(path, $0 + "/") })
                 }
                 """
@@ -53,6 +58,23 @@ final class PathSyntaxGuardTests: XCTestCase {
         let result = try runGuard(root: root)
         XCTAssertEqual(result.status, 1, "A URL file isn't exempt as a whole")
         XCTAssertTrue(result.output.contains("SkillInstallURL.swift:1:"), result.output)
+        try FileManager.default.removeItem(at: urlFile)
+        try assertInitializerExemptionIsScoped(root: root)
+    }
+
+    private func assertInitializerExemptionIsScoped(root: URL) throws {
+        let updates = root.appendingPathComponent("Pensieve/Services/SkillInstallService+Updates.swift")
+        let initializers = """
+            struct PinnedSkillUpdate {
+                init(skill: Skill) { repo.hasSuffix("/") }
+                init(path: String) { path.hasPrefix("/") }
+            }
+            """
+        try initializers.write(to: updates, atomically: true, encoding: .utf8)
+        let scoped = try runGuard(root: root)
+        XCTAssertEqual(scoped.status, 1, "Only the stored-URL initializer is exempt")
+        XCTAssertTrue(scoped.output.contains("SkillInstallService+Updates.swift:3:"), scoped.output)
+        XCTAssertFalse(scoped.output.contains("SkillInstallService+Updates.swift:2:"), scoped.output)
     }
 
     private func runGuard(root: URL) throws -> (status: Int32, output: String) {

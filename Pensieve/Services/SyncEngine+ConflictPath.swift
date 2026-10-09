@@ -12,6 +12,12 @@ extension SyncEngine {
 
     static func kind(for path: String) -> ConflictKind { conflictPath(for: path).kind }
 
+    /// Item metadata also drives the sheet. A disagreement cannot identify an unrelated entity.
+    static func conflictPath(for item: ConflictItem) -> ConflictPath {
+        let parsed = conflictPath(for: item.path)
+        return parsed.kind == item.kind ? parsed : ConflictPath(kind: item.kind, slug: nil)
+    }
+
     static func conflictPath(for path: String) -> ConflictPath {
         let parts = PathSyntax.components(path, omittingEmptySubsequences: false)
         if parts.count >= 3, parts[0] == "manifest" {

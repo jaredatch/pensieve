@@ -15,15 +15,21 @@ import sys
 HELPER = "Pensieve/Utilities/PathSyntax.swift"
 EXEMPTIONS = {
     "Pensieve/Services/SkillInstallURL.swift": {
-        "canonicalizeShorthand", "decodedPathSegments", "isValidPathSegment"},  # GitHub URL segments.
-    "Pensieve/Services/RemoteURLPolicy.swift": {"parseScpStyle"},  # Remote URL scheme.
-    "Pensieve/Services/SkillInstallService.swift": {"repositoryName"},  # Repository URL.
-    "Pensieve/Services/SkillInstallService+Updates.swift": {"init"},  # Stored repository URL.
-    "Pensieve/Services/ProjectIdentityService.swift": {"normalizeRemoteURL"},  # Origin URL.
-    "Pensieve/Services/GitService.swift": {"remoteDefaultBranch", "remoteBranches"},  # Git refs.
-    "Pensieve/Services/UpstreamHistoryService.swift": {"isSafeRef"},  # Git ref syntax.
-    "Pensieve/ViewModels/SyncSetupModel.swift": {"isValidBranchName"},  # Git ref syntax.
-    "Pensieve/Services/PreviewImageLoader.swift": {"embeddedData"},  # MIME image type.
+        "SkillInstallURL.canonicalizeShorthand(_:String)",
+        "SkillInstallURL.decodedPathSegments(_:String)",
+        "SkillInstallURL.isValidPathSegment(_:String)"},  # GitHub URL segments.
+    "Pensieve/Services/RemoteURLPolicy.swift": {"RemoteURLPolicy.parseScpStyle(_:String)"},  # URL scheme.
+    "Pensieve/Services/SkillInstallService.swift": {"SkillInstallService.repositoryName(for:String)"},  # URL.
+    "Pensieve/Services/SkillInstallService+Updates.swift": {"PinnedSkillUpdate.init(skill:Skill)"},  # Stored URL.
+    "Pensieve/Services/ProjectIdentityService.swift": {
+        "ProjectIdentityService.normalizeRemoteURL(_:String)",
+        "ProjectIdentityService.parseURLForm(_:String)"},  # Origin URL.
+    "Pensieve/Services/GitService.swift": {
+        "GitService.remoteDefaultBranch(remote:String,credential:GitCredential?)",
+        "GitService.remoteBranches(remote:String,credential:GitCredential?)"},  # Git refs.
+    "Pensieve/Services/UpstreamHistoryService.swift": {"UpstreamHistoryService.isSafeRef(_:String)"},  # Git refs.
+    "Pensieve/ViewModels/SyncSetupModel.swift": {"SyncSetupModel.isValidBranchName(_:String)"},  # Git refs.
+    "Pensieve/Services/PreviewImageLoader.swift": {"PreviewImageLoader.embeddedData(_:URL)"},  # MIME image.
 }
 
 
@@ -98,24 +104,58 @@ def lex(source, base=0):
 
 
 def owner_functions(tokens):
-    """Match declaration bodies, including initializers; no file-wide URL exemptions."""
+    """Identify nominal owner and external labels/types, distinguishing initializer overloads."""
     stack, pairs = [], {}
     for index, (word, _) in enumerate(tokens):
-        if word == "{":
+        if word in {"{", "("}:
             stack.append(index)
-        elif word == "}" and stack:
+        elif word in {"}", ")"} and stack:
             pairs[stack.pop()] = index
+    types = []
+    for index, (word, _) in enumerate(tokens[:-1]):
+        if word not in {"struct", "enum", "class", "actor", "extension", "protocol"}:
+            continue
+        if tokens[index + 1][0] in {"func", "var"}:
+            continue
+        for body in range(index + 2, len(tokens)):
+            if tokens[body][0] == "{":
+                if body in pairs:
+                    types.append((index, pairs[body], tokens[index + 1][0]))
+                break
+            if tokens[body][0] in {";", "}"}:
+                break
     ranges = []
     for index, (word, _) in enumerate(tokens):
         if word not in {"func", "init"}:
             continue
         name = tokens[index + 1][0] if word == "func" else "init"
-        for body in range(index + 1, len(tokens)):
+        opening = next((i for i in range(index + 1, len(tokens)) if tokens[i][0] in {"(", "{", "}"}), None)
+        if opening is None or tokens[opening][0] != "(" or opening not in pairs:
+            continue
+        closing = pairs[opening]
+        params, current, depth = [], [], 0
+        for token, _ in tokens[opening + 1:closing] + [("comma-end", 0)]:
+            if (token == "," and depth == 0) or token == "comma-end":
+                if ":" in current:
+                    colon = current.index(":")
+                    label = current[0]
+                    kind = current[colon + 1:]
+                    if "=" in kind:
+                        kind = kind[:kind.index("=")]
+                    params.append(label + ":" + "".join(kind))
+                current = []
+            else:
+                depth += (token in {"(", "[", "<"}) - (token in {")", "]", ">"})
+                current.append(token)
+        enclosing = sorted((start, end, owner) for start, end, owner in types if start < index < end)
+        owner = ".".join(entry[2] for entry in enclosing)
+        signature = owner + "." + name + "(" + ",".join(params) + ")"
+        for body in range(closing + 1, len(tokens)):
             if tokens[body][0] in {";", "}", "func", "init"}:
                 break
             if tokens[body][0] == "{":
                 if body in pairs:
-                    ranges.append((index, pairs[body], name))
+                    ranges.append((index, pairs[body], signature))
                 break
     return ranges
 
@@ -161,18 +201,32 @@ def violations(source, relative):
     bindings = separator_bindings(source, tokens)
     failures = []
     for index, (word, offset) in enumerate(tokens):
-        if word not in {"hasPrefix", "hasSuffix", "contains"} or index == 0 or tokens[index - 1][0] != ".":
+        calls = {"hasPrefix", "hasSuffix", "contains", "split", "firstIndex", "starts"}
+        if word not in calls | {"first", "last"} or index == 0 or tokens[index - 1][0] != ".":
             continue
-        if index + 1 >= len(tokens) or tokens[index + 1][0] != "(":
+        receiver = []
+        cursor = index - 2
+        while cursor >= 0 and (re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", tokens[cursor][0])
+                               or tokens[cursor][0] in {".", "?"}):
+            receiver.append(tokens[cursor][0])
+            cursor -= 1
+        if any(part in {"PathSyntax", "unicodeScalars", "utf8", "utf16"} for part in receiver):
             continue
-        if index >= 2 and tokens[index - 2][0] == "PathSyntax":
+        comparison = word in {"first", "last"}
+        if comparison:
+            if [token for token, _ in tokens[index + 1:index + 3]] != ["=", "="]:
+                continue
+        elif index + 1 >= len(tokens) or tokens[index + 1][0] != "(":
             continue
         # A collection predicate may call PathSyntax inside its closure. UInt8(ascii:) is byte syntax.
-        argument = [token for token, _ in tokens[index + 2:index + 6]]
+        argument = [token for token, _ in tokens[index + 2:index + 10]]
+        if argument[:2] in (["of", ":"], ["separator", ":"], ["with", ":"]):
+            argument = argument[2:]
         if argument[:2] == ["where", ":"] or argument[:4] == ["UInt8", "(", "ascii", ":"]:
             continue
         depth, literals, identifiers = 0, [], []
-        for token, _ in tokens[index + 1:]:
+        expression = tokens[index + 3:index + 4] if comparison else tokens[index + 1:]
+        for token, _ in expression:
             if token == "(":
                 depth += 1
             elif token == ")":
@@ -186,7 +240,9 @@ def violations(source, relative):
         bound_separator = any(name in identifiers and start < index < end for name, start, end in bindings)
         if not bound_separator and not any("/" in value or "~" in value for value in literals):
             continue
-        if any(start <= index <= end and name in EXEMPTIONS.get(relative, set()) for start, end, name in functions):
+        enclosing = [entry for entry in functions if entry[0] <= index <= entry[1]]
+        owner = min(enclosing, key=lambda entry: entry[1] - entry[0])[2] if enclosing else None
+        if owner in EXEMPTIONS.get(relative, set()):
             continue
         line = source.count("\n", 0, offset) + 1
         failures.append(f"{relative}:{line}: use PathSyntax for scalar path separators ({word})")

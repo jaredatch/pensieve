@@ -339,7 +339,7 @@ extension UpstreamHistoryService {
 
     static func isSafeRef(_ value: String) -> Bool {
         guard !value.isEmpty,
-              !value.hasPrefix("-"),
+              !PathSyntax.startsWithDash(value),
               !value.hasPrefix("/"),
               !value.hasSuffix("/"),
               !value.hasSuffix("."),

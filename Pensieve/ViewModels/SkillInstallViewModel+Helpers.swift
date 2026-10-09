@@ -77,7 +77,7 @@ extension SkillInstallViewModel {
               let components = URLComponents(string: repository),
               components.scheme == "https",
               components.host?.lowercased() == "github.com" else { return nil }
-        let parts = components.path.split(separator: "/").map(String.init)
+        let parts = PathSyntax.components(components.path)
         guard parts.count == 2 else { return nil }
         let repo = parts[1].hasSuffix(".git") ? String(parts[1].dropLast(4)) : parts[1]
         guard !parts[0].isEmpty, !repo.isEmpty else { return nil }

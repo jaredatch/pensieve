@@ -16,7 +16,9 @@ final class SyncModel {
         case branchless
     }
 
-    private(set) var state: SyncState
+    private(set) var state: SyncState {
+        didSet { if oldValue != state { conflictedSlugs = Self.slugs(for: state) } }
+    }
     private(set) var remoteURL: String?
     private var remoteReadError: String?
     var configurationError: String? {
@@ -48,7 +50,9 @@ final class SyncModel {
 
     /// The skill slugs currently in conflict, for row/detail badges. Strips `skills/<slug>/SKILL.md` and
     /// `manifest/skills/<slug>.yaml` to `<slug>`; category/project manifest paths are not skills.
-    var conflictedSlugs: Set<String> {
+    private(set) var conflictedSlugs: Set<String>
+
+    private static func slugs(for state: SyncState) -> Set<String> {
         guard case let .conflicted(paths) = state else { return [] }
         return Set(paths.compactMap { SyncEngine.conflictPath(for: $0).skillSlug })
     }
@@ -59,6 +63,7 @@ final class SyncModel {
         self.git = git
         self.root = root
         self.state = initialState
+        self.conflictedSlugs = Self.slugs(for: initialState)
         self.knownBranchless = initialState == .branchless
     }
 

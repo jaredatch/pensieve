@@ -2,7 +2,7 @@ import Foundation
 
 enum InstallRelativePathPolicy {
     static func isValid(_ path: String) -> Bool {
-        guard path.unicodeScalars.first != "-", !PathSyntax.isAbsolute(path), !path.contains("\\"),
+        guard !PathSyntax.startsWithDash(path), !PathSyntax.isAbsolute(path), !path.contains("\\"),
               !path.unicodeScalars.contains(where: isUnsafeScalar) else {
             return false
         }
