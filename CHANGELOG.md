@@ -37,6 +37,10 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 - Path checks now recognize filesystem separators beside combining marks, joiners, emoji modifiers, tag characters and names ending in Prepend characters. Sync refuses escaping links while existing accented skill names and decomposed link targets keep working.
 - A connected store with no branch now says why it can't sync, instead of showing an old sync time. When git starts working again, sync catches up promptly; with background sync off, it retries your failed Sync Now once.
+- Sync now keeps every file in a skill exactly as it is. Line endings, executable bits and files a skill's own `.gitignore` hides all come through unchanged. It still leaves out `.env` files (except `.env.example`, `.env.sample` and `.env.template`), `node_modules`, `.env` and `.venv` folders, and `.DS_Store`.
+- If another Mac's change would land on top of one of those left-out files here, like your `.env`, sync pauses and names the file instead. Move it and sync picks up again.
+- Resolving a sync conflict keeps the version you pick exactly, including binary files, executable bits and symbolic links. A version the sheet can't show as text says so, and one git can't read can't be picked by mistake.
+- A nested repository committed by an older build no longer leaves a conflict you can't resolve. Choosing it stops syncing that path and leaves whatever is there on this Mac.
 - Slow git operations no longer tie up the threads the app needs to stay responsive. Sync, update checks and upstream history can make progress independently.
 - Short rendered skills now line up with the file row in Content and stay aligned to the left in History.
 - Links in rendered skills now open web pages, jump to headings or select another skill file without showing a system error.
