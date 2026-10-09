@@ -19,10 +19,12 @@ final class ManifestSaveModel {
     private let waitSeconds: TimeInterval
     private let log: (String) -> Void
     @ObservationIgnored private var items: [Item] = []
+    @ObservationIgnored private var refused: [ManifestRefusedEdit] = []
     @ObservationIgnored private var worker: Task<Void, Never>?
 
     private struct Item {
         let change: ManifestChange
+        let presentation: ManifestRefusedEdit
         let fallback: () throws -> ManifestSnapshot
         let accept: (ManifestSnapshot) throws -> Void
         let report: (Error?) -> Void
@@ -41,7 +43,8 @@ final class ManifestSaveModel {
 
     func submit(_ change: ManifestChange, context: ModelContext, report: @escaping (Error?) -> Void) {
         precondition(Thread.isMainThread)
-        items.append(Item(change: change, fallback: { try self.manifest.snapshot(from: context) },
+        items.append(Item(change: change, presentation: ManifestRefusedEdit(change, context: context, manifest: manifest),
+            fallback: { try self.manifest.snapshot(from: context) },
             accept: { snapshot in
                 let result = StoreRebuildService(fileService: self.files, manifestService: self.manifest)
                     .rebuild(snapshot: snapshot, fromRoot: self.root, context: context)
@@ -85,18 +88,33 @@ final class ManifestSaveModel {
                     return (snapshot, applied)
                 }
                 savedAny = savedAny || applied
-                if !applied { log("Skipped queued manifest change: its target was removed by sync.") }
                 var displayed = saved
+                try projectRefused(durable: saved, onto: &displayed)
+                if !applied {
+                    var probe = displayed
+                    if item.change.apply(to: &probe) { throw ManifestSaveError.unsavedTarget }
+                    log("Skipped queued manifest change: its target was removed by sync.")
+                }
                 for pending in items.dropFirst() { pending.change.apply(to: &displayed) }
                 try item.accept(displayed)
                 item.report(nil)
-            } catch { item.report(error) }
+            } catch {
+                refused.append(item.presentation)
+                item.report(error)
+            }
             items.removeFirst()
             pendingCount = items.count
             isWaiting = false
         }
         worker = nil
         if savedAny { didSave() }
+    }
+
+    @MainActor
+    private func projectRefused(durable: ManifestSnapshot, onto displayed: inout ManifestSnapshot) throws {
+        var remaining: [ManifestRefusedEdit] = []
+        for edit in refused where try edit.project(durable: durable, onto: &displayed) { remaining.append(edit) }
+        refused = remaining
     }
 
     @MainActor
@@ -123,9 +141,11 @@ final class ManifestSaveModel {
 
 private enum ManifestSaveError: LocalizedError {
     case mergeFailed(String)
+    case unsavedTarget
     var errorDescription: String? {
         switch self {
         case .mergeFailed(let message): message
+        case .unsavedTarget: "This change depends on an earlier change that could not be saved."
         }
     }
 }

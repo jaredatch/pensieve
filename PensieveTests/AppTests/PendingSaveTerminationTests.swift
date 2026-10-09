@@ -53,34 +53,35 @@ final class PendingSaveTerminationTests: XCTestCase {
     }
 
     func testWaitKeepsAppRunningAndQuitAnywayCompletesWhileSaveStillWaits() async throws {
-        let h = try ManifestSaveFixture()
-        defer { h.cleanup() }
-        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
-        defer { lock.release() }
-        h.categories.rename(h.local, to: "Waiting", context: h.context)
-        var choices: ((Bool) -> Void)?
-        let quit = PendingSaveTermination(delay: 0.05, present: { choices = $0; return {} })
-        var replies: [Bool] = []
-        func request() -> NSApplication.TerminateReply {
-            PensieveAppDelegate.terminationReply(hasUnsavedChanges: false, questionOpen: false,
+        for quitAnyway in [false, true] {
+            let h = try ManifestSaveFixture()
+            defer { h.cleanup() }
+            let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+            defer { lock.release() }
+            h.categories.rename(h.local, to: "Waiting", context: h.context)
+            var choices: ((Bool) -> Void)?
+            var dismissals = 0
+            let quit = PendingSaveTermination(delay: 0.05, present: { choices = $0; return { dismissals += 1 } })
+            var replies: [Bool] = []
+            let answer = PensieveAppDelegate.terminationReply(hasUnsavedChanges: false, questionOpen: false,
                 confirm: { _ in XCTFail("No draft") }, reply: { replies.append($0) }, saves: h.saves, saveTermination: quit)
+            XCTAssertEqual(answer, .terminateLater)
+            await TestWait.until(failureMessage: "Quit did not ask about the waiting save") { choices != nil }
+            choices?(quitAnyway)
+            XCTAssertEqual(dismissals, 1)
+            XCTAssertEqual(replies, quitAnyway ? [true] : [], "Wait must leave AppKit's quit deferred")
+            XCTAssertEqual(quit.isWaiting, !quitAnyway)
+            XCTAssertEqual(h.saves.pendingCount, 1)
+            XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories.first?.name, "Local")
+            choices?(!quitAnyway)
+            XCTAssertEqual(replies, quitAnyway ? [true] : [], "A dismissed question cannot answer again")
+            lock.release()
+            await h.saves.waitUntilIdle()
+            await TestWait.until(failureMessage: "The deferred quit did not finish") { !replies.isEmpty }
+            XCTAssertEqual(replies, [true], "Wait must complete the original quit when the save lands")
+            XCTAssertFalse(quit.isWaiting)
+            XCTAssertEqual(dismissals, 1)
         }
-        XCTAssertEqual(request(), .terminateLater)
-        await TestWait.until(failureMessage: "Quit did not ask about the waiting save") { choices != nil }
-        XCTAssertEqual(request(), .terminateCancel)
-        choices?(false)
-        XCTAssertEqual(replies, [false], "Wait cancels quit while the background save stays pending")
-        XCTAssertEqual(h.saves.pendingCount, 1)
-        choices = nil
-        XCTAssertEqual(request(), .terminateLater)
-        await TestWait.until(failureMessage: "Second quit did not ask") { choices != nil }
-        choices?(true)
-        XCTAssertEqual(replies, [false, true])
-        XCTAssertEqual(h.saves.pendingCount, 1)
-        XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories.first?.name, "Local")
-        lock.release()
-        await h.saves.waitUntilIdle()
-        XCTAssertEqual(replies, [false, true])
     }
 
     func testNativeQuitQuestionButtonsAndHostClosureResolve() async throws {

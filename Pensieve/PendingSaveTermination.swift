@@ -27,9 +27,15 @@ final class PendingSaveTermination {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard generation == request, saves.pendingCount > 0 else { return }
+            var answered = false
             dismiss = presenter { [weak self] quitAnyway in
-                guard let self, self.generation == request else { return }
-                self.finish(quitAnyway, reply: reply)
+                guard let self, self.generation == request, !answered else { return }
+                answered = true
+                if quitAnyway { self.finish(true, reply: reply) } else {
+                    let close = self.dismiss
+                    self.dismiss = nil
+                    close?()
+                }
             }
         }
     }

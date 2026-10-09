@@ -12,7 +12,7 @@ enum ManifestChange {
     case deleteSkill(String)
     case retireSkill(String)
 
-    /// False means a pull removed the target. Deletions remain idempotent.
+    /// False means the target is absent from this snapshot. Deletions remain idempotent.
     @discardableResult
     func apply(to snapshot: inout ManifestSnapshot) -> Bool {
         switch self {

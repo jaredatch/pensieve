@@ -74,14 +74,21 @@ final class RecordingSaveManifest: ManifestSnapshotting {
     private let base = ManifestService()
     private let lock = NSLock()
     private var snapshots: [ManifestSnapshot] = []
+    var failingWrites = 0
+    var failingSnapshots = 0
+    struct Refused: Error {}
     var writes: [ManifestSnapshot] {
         lock.lock()
         defer { lock.unlock() }
         return snapshots
     }
-    func snapshot(from context: ModelContext) throws -> ManifestSnapshot { try base.snapshot(from: context) }
+    func snapshot(from context: ModelContext) throws -> ManifestSnapshot {
+        if failingSnapshots > 0 { failingSnapshots -= 1; throw Refused() }
+        return try base.snapshot(from: context)
+    }
     func read(fromRoot root: String) throws -> ManifestSnapshot { try base.read(fromRoot: root) }
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
+        if failingWrites > 0 { failingWrites -= 1; throw Refused() }
         try base.write(snapshot, toRoot: root)
         lock.lock()
         snapshots.append(snapshot)

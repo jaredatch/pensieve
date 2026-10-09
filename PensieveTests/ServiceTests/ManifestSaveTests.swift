@@ -122,22 +122,55 @@ final class ManifestSaveTests: XCTestCase {
     }
 
     func testNewerSchemaRefusesCategoryAndSkillSavesWithoutLosingWindowEdit() async throws {
-        let h = try ManifestSaveFixture()
-        defer { h.cleanup() }
-        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
-        defer { lock.release() }
-        h.categories.rename(h.local, to: "Kept", context: h.context)
-        h.library.updateMetadata(h.alpha, tags: ["kept"], scope: .project, context: h.context)
-        try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "schema_version: 99\n")
-        let before = try h.manifestBytes()
-        lock.release()
-        await h.saves.waitUntilIdle()
-        XCTAssertEqual(try h.manifestBytes(), before)
-        XCTAssertEqual(h.local.name, "Kept")
-        XCTAssertEqual(h.alpha.tags, ["kept"])
-        XCTAssertTrue(h.messages.lines.contains { $0.contains("Category mutation") })
-        XCTAssertNotNil(h.library.error)
-        XCTAssertFalse(h.saves.isWaiting)
+        for refusal in ["newer schema", "write", "snapshot"] {
+            let h = try ManifestSaveFixture()
+            defer { h.cleanup() }
+            let disk = try h.manifest.read(fromRoot: h.root)
+            let header = try h.files.readFile(at: h.root + "/manifest/manifest.yaml")
+            let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+            defer { lock.release() }
+            let created = try XCTUnwrap(h.categories.create(name: "Kept", context: h.context))
+            h.categories.rename(h.local, to: "Renamed Kept", context: h.context)
+            h.library.updateMetadata(h.alpha, tags: ["kept"], scope: .project, context: h.context)
+            if refusal == "newer schema" {
+                try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "schema_version: 99\n")
+            } else if refusal == "write" { h.recording.failingWrites = 3 } else { h.recording.failingSnapshots = 3 }
+            let before = try h.manifestBytes()
+            lock.release()
+            await h.saves.waitUntilIdle()
+            XCTAssertEqual(try h.manifestBytes(), before, refusal)
+            XCTAssertEqual(created.name, "Kept")
+            XCTAssertEqual(h.local.name, "Renamed Kept")
+            XCTAssertEqual(h.alpha.tags, ["kept"])
+            XCTAssertTrue(h.messages.lines.contains { $0.contains("Category mutation") })
+            XCTAssertNotNil(h.library.error)
+            XCTAssertFalse(h.saves.isWaiting)
+            var remote = disk
+            remote.categories.append(CategoryRecord(name: "Remote", projectKeys: [], skillSlugs: []))
+            try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: header)
+            try h.manifest.write(remote, toRoot: h.root)
+            h.categories.setSkill(h.alpha, inCategory: created, assigned: true, context: h.context)
+            h.categories.rename(h.doomed, to: "Saved Other", context: h.context)
+            await h.saves.waitUntilIdle()
+            let window = try h.context.fetch(FetchDescriptor<Pensieve.Category>())
+            XCTAssertEqual(Set(window.map(\.name)), ["Renamed Kept", "Kept", "Remote", "Saved Other"], refusal)
+            XCTAssertEqual(window.first { $0.name == "Kept" }?.skillSlugs, ["alpha"], refusal)
+            XCTAssertEqual(h.alpha.tags, ["kept"], refusal)
+            XCTAssertEqual(h.alpha.scope, .project, refusal)
+            XCTAssertFalse(h.messages.lines.contains { $0.contains("removed by sync") }, refusal)
+            XCTAssertFalse(try h.manifest.read(fromRoot: h.root).categories.contains { $0.name == "Kept" })
+            // A later successful field must retire its refusal overlay without retiring another field's.
+            h.library.updateMetadata(h.alpha, tags: ["kept"], scope: .user, context: h.context)
+            await h.saves.waitUntilIdle()
+            var laterPull = try h.manifest.read(fromRoot: h.root)
+            laterPull.skills[0].scope = .project
+            try h.manifest.write(laterPull, toRoot: h.root)
+            let other = try XCTUnwrap(window.first { $0.name == "Saved Other" })
+            h.categories.rename(other, to: "Saved Again", context: h.context)
+            await h.saves.waitUntilIdle()
+            XCTAssertEqual(h.alpha.scope, .project, "An acknowledged field must accept a later pull")
+            XCTAssertEqual(h.alpha.tags, ["kept"], "The still-refused field must remain local")
+        }
     }
 
     func testCorruptManifestHealsFromCurrentWindowAfterWaiting() async throws {
