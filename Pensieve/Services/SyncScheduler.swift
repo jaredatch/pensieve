@@ -191,7 +191,7 @@ final class SyncScheduler {
         guard hasPendingTrigger,
               isCoordinatorReady,
               isLaunchIngestReady,
-              !isRecheckingGit,
+              !isRecheckingGit || !isGitUnknown(),
               !isSyncing,
               let syncAction else { return }
         guard backgroundSyncEnabled || pendingRequest.isPrivileged else { return }
@@ -225,14 +225,16 @@ final class SyncScheduler {
 
     private func fireDebouncedNudge() {
         debounceTask = nil
-        enqueueTrigger()
+        enqueueAfterGitRecheck()
     }
 
     private func enqueueAfterGitRecheck() {
         guard isGitUnknown(), let recheckGit else { enqueueTrigger(); return }
+        guard backgroundSyncEnabled, isConfigured(), !isConflicted() else { enqueueTrigger(); return }
         guard !isRecheckingGit else { return }
         isRecheckingGit = true
-        // Recovery and overlapping triggers join this pending request before admission resumes.
+        // Overlapping scheduled events join one pending request. Newer known evidence may drain it
+        // before this recheck finishes.
         enqueueTrigger()
         Task { [weak self] in
             await recheckGit()

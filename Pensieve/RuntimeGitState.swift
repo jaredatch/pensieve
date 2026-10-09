@@ -14,7 +14,6 @@ final class RuntimeGitState {
     private var evidenceOrder = 0
     private var appliedEvidenceOrder = 0
     private let probe: () throws -> GitUsability
-    @ObservationIgnored private var unknownProbe: (order: Int, task: Task<Result<GitUsability, Error>, Never>)?
 
     init(probe: @escaping () throws -> GitUsability) { self.probe = probe }
 
@@ -67,17 +66,9 @@ final class RuntimeGitState {
     }
 
     private func probeGit() async -> (order: Int, result: Result<GitUsability, Error>) {
-        let pending: (order: Int, task: Task<Result<GitUsability, Error>, Never>)
-        if usability == nil, let unknownProbe {
-            pending = unknownProbe
-        } else {
-            let probe = probe
-            pending = (beginEvidence(), BlockingWork.task(priority: .utility) { Result { try probe() } })
-            if usability == nil { unknownProbe = pending }
-        }
-        let result = await pending.task.value
-        // Share only the probe: a slow configuration read must not prevent fresh git evidence.
-        if unknownProbe?.order == pending.order { unknownProbe = nil }
-        return (pending.order, result)
+        let order = beginEvidence()
+        let probe = probe
+        let result = await BlockingWork.task(priority: .utility) { Result { try probe() } }.value
+        return (order, result)
     }
 }

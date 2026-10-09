@@ -129,11 +129,15 @@ final class SyncCoordinatorTests: XCTestCase {
     func testPreBootstrapTriggerFiresAfterCoordinatorReady() async {
         let fired = expectation(description: "late coordinator drains launch")
         var cycles = 0
+        var unknown = true
+        var probes = 0
         let scheduler = makeScheduler {
             cycles += 1
             fired.fulfill()
         }
+        scheduler.installGitRecheck(isUnknown: { unknown }, action: { probes += 1; unknown = false })
         scheduler.tick()
+        await TestWait.until(failureMessage: "recheck must run before coordinator bootstrap") { probes == 1 }
         scheduler.launchIngestCompleted()
         await Task.yield()
         XCTAssertEqual(cycles, 0)

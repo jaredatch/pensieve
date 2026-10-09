@@ -8,7 +8,8 @@ extension XCTestCase {
     func makeSyncRecoveryHarness(outcomes: [Result<SyncOutcome, Error>] = [],
                                  probe: RuleProbe = RuleProbe(), initialProbeError: Error? = nil,
                                  debounceSeconds: TimeInterval = 0,
-                                 updateCheckOperation: AppRuntime.UpdateCheckOperation? = nil) async throws -> RecoveryHarness {
+                                 updateCheckOperation: AppRuntime.UpdateCheckOperation? = nil,
+                                 configurationGit: IngestRecordingGit? = nil) async throws -> RecoveryHarness {
         let fixture = try GitFailureFixture()
         var ready = false
         defer { if !ready { try? fixture.remove() } }
@@ -25,7 +26,9 @@ extension XCTestCase {
                 storeRoot: fixture.paths.skillsDir),
             fileService: fixture.files, fileWatchService: RecordingWatcher(), manifestRoot: fixture.root,
             notifier: SyncStateNotifier.suppressed)
-        let runtime = try AppRuntime(library: library, scheduler: scheduler, defaults: isolatedDefaults(),
+        let runtime = try AppRuntime(library: library,
+            syncModel: configurationGit.map { SyncModel(git: $0, root: fixture.root) },
+            scheduler: scheduler, defaults: isolatedDefaults(),
             launchBackfill: { _ in }, postSyncConvergence: RecoveryConvergence(), paths: fixture.paths,
             updateCheckOperation: updateCheckOperation,
             gitUsabilityProbe: {
@@ -77,8 +80,8 @@ final class RecoveryHarness {
         self.release = release; self.preference = preference; self.probe = probe
     }
 
-    func waitForCycle(_ count: Int) async {
-        await TestWait.until(failureMessage: "cycle \(count) did not block in the engine") {
+    func waitForCycle(_ count: Int, timeout: Duration = .seconds(TestWait.timeoutSeconds)) async {
+        await TestWait.until(timeout: timeout, failureMessage: "cycle \(count) did not block in the engine") {
             self.engine.count == count && self.release.waiterCount == 1
         }
     }
@@ -93,6 +96,13 @@ final class RecoveryHarness {
     func waitForIdle() async {
         await TestWait.until(failureMessage: "runtime did not settle") {
             !self.runtime.syncModel.isCycleInFlight && !self.runtime.scheduler.isSyncing
+        }
+    }
+
+    func waitForDrain() async {
+        await TestWait.until(failureMessage: "scheduled request did not drain") {
+            !self.runtime.scheduler.hasPendingTrigger && !self.runtime.scheduler.isSyncing
+                && !self.runtime.syncModel.isCycleInFlight
         }
     }
 

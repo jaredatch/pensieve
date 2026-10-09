@@ -107,6 +107,35 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
             XCTAssertEqual(runtime.syncModel.configurationError, newer.message)
             XCTAssertEqual(runtime.syncModel.state, newer == .usable ? .idle : .error(newer.message ?? ""))
         }
+        try await assertUnknownSettingsRefreshDoesNotJoinOlderProbe()
+    }
+
+    private func assertUnknownSettingsRefreshDoesNotJoinOlderProbe() async throws {
+        let h = try await makeSyncRecoveryHarness(initialProbeError: GitError.outputReadFailed(detail: "launch EIO"))
+        h.preference.enabled = false
+        let held = TestWait.Gate(owner: self)
+        h.probe.set {
+            XCTAssertFalse(Thread.isMainThread)
+            try? held.wait()
+            return .licenseNotAccepted
+        }
+        let older = Task { await h.runtime.refreshGitUsability() }
+        await TestWait.until(failureMessage: "older unknown-state probe did not start") { held.waiterCount == 1 }
+        h.probe.set { XCTAssertFalse(Thread.isMainThread); return .usable }
+        var refreshed = false
+        let settings = Task {
+            await h.runtime.refreshGitUsability()
+            refreshed = true
+        }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Settings joined the held unknown-state probe") { refreshed }
+        XCTAssertEqual(h.probe.count, 3, "Settings must ask a fresh question while the older probe is held")
+        XCTAssertEqual(h.runtime.gitUsability, .usable)
+        held.open()
+        await older.value
+        await settings.value
+        XCTAssertEqual(h.runtime.gitUsability, .usable, "the older license answer must not replace Settings evidence")
+        await h.finish()
     }
 
     func testUnreadableRepositoryAndMissingStoreHavePlainSettingsErrors() async throws {
