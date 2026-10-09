@@ -8,6 +8,7 @@ final class CursorOwnershipTests: XCTestCase {
     var store: SkillStore!
     var compiler: CursorCompiler!
     var skill: Skill!
+    var pendingManifestSaves: [ManifestSaveModel] = []
 
     override func setUpWithError() throws {
         root = TestTemporaryDirectory.path + "CursorOwnership-\(UUID().uuidString)"
@@ -26,7 +27,18 @@ final class CursorOwnershipTests: XCTestCase {
         try files.createDirectory(at: root + "/project")
     }
 
-    override func tearDownWithError() throws { try files.deleteDirectory(at: root) }
+    override func tearDown() async throws {
+        for saves in pendingManifestSaves { await saves.waitUntilIdle() }
+        pendingManifestSaves.removeAll()
+        try files.deleteDirectory(at: root)
+    }
+
+    func trackedManifestSaves(manifest: ManifestSnapshotting, root: String,
+                              lockPath: String, files: FileServiceProtocol) -> ManifestSaveModel {
+        let saves = ManifestSaveModel(manifest: manifest, root: root, lockPath: lockPath, files: files)
+        pendingManifestSaves.append(saves)
+        return saves
+    }
 
     func testForeignRuleDeployAndRemovalPreserveBytesInBothScopes() throws {
         for project: String? in [nil, root + "/project"] {

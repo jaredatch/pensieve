@@ -17,8 +17,6 @@ struct SidebarView: View {
 @discardableResult
 @MainActor
 func registerProject(_ project: Project,
-                     manifestService: ManifestSnapshotting? = nil,
-                     manifestRoot: String,
                      context: ModelContext,
                      intentReconciler: (@MainActor (ModelContext) -> BatchResult)? = nil,
                      notifier: SyncStateNotifying = SyncStateNotifier.suppressed) -> Project {
@@ -43,10 +41,18 @@ func removeRegisteredProject(_ project: Project,
                              context: ModelContext,
                              notifier: SyncStateNotifying = SyncStateNotifier.suppressed,
                              logFailure: @escaping (String) -> Void = logProjectRemovalFailure,
-                             lockPath: String? = nil) -> BatchResult {
-    guard let lock = SyncLock.tryAcquire(at: lockPath ?? manifestRoot + "/sync.lock") else {
+                             lockPath: String) -> BatchResult {
+    let lock: SyncLock
+    do {
+        guard let acquired = try SyncLock.tryAcquireReportingErrors(at: lockPath) else {
+            var result = BatchResult()
+            result.operationFailures.append("Sync is running. Try again when it finishes.")
+            return result
+        }
+        lock = acquired
+    } catch {
         var result = BatchResult()
-        result.operationFailures.append("Sync is running. Try again when it finishes.")
+        result.operationFailures.append("Couldn't open the sync lock: " + error.localizedDescription)
         return result
     }
     defer { lock.release() }

@@ -16,8 +16,8 @@ final class ManifestLockRegressionTests: XCTestCase {
         try manifest.write(try manifest.snapshot(from: context), toRoot: root)
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: root + "/sync.lock"))
         defer { lock.release() }
-        let saves = ManifestSaveModel(manifest: manifest, root: root, lockPath: root + "/sync.lock")
-        CategoryStore(manifestService: manifest, manifestRoot: root, manifestSaves: saves)
+        let saves = ManifestSaveModel(manifest: manifest, root: root, lockPath: root + "/sync.lock", waitSeconds: 0)
+        CategoryStore( manifestSaves: saves)
             .rename(category, to: "After", context: context)
         XCTAssertEqual(category.name, "After")
         // Yielding main work must neither block on the lock nor let a manifest swap pass it.

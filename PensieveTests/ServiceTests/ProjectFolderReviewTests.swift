@@ -51,7 +51,8 @@ final class ProjectFolderReviewTests: XCTestCase {
                 reconciler: h.category, manifestService: ManifestService(fileService: h.files),
                 manifestRoot: h.root + "/store", platformVM: h.platformVM,
                 localMachineID: ProjectIntentHarness.localID, confirmedPreview: plan,
-            context: h.context)
+            context: h.context,
+            lockPath: h.root + "/store" + ".sync.lock")
         }
         let removalError = model.error
         XCTAssertNil(removalError, "Removing B shows no alert when only another project's work fails")
@@ -76,7 +77,8 @@ final class ProjectFolderReviewTests: XCTestCase {
                     reconciler: reconciler, manifestService: ManifestService(fileService: h.files),
                     manifestRoot: h.root + "/store", platformVM: h.platformVM,
                     localMachineID: ProjectIntentHarness.localID, confirmedPreview: plan,
-            context: h.context)
+            context: h.context,
+            lockPath: h.root + "/store" + ".sync.lock")
             }
             let removalError = model.error
             XCTAssertTrue(removalError?.contains("stays registered") == true,
@@ -171,7 +173,8 @@ final class ProjectFolderReviewTests: XCTestCase {
         let result = removeRegisteredProject(h.otherProject,
             reconciler: h.category, manifestService: ManifestService(fileService: h.files),
             manifestRoot: h.root + "/store", platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
-            context: h.context)
+            context: h.context,
+            lockPath: h.root + "/store" + ".sync.lock")
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.project.id])
     }
@@ -188,8 +191,7 @@ final class ProjectFolderReviewTests: XCTestCase {
             h.context.insert(acted)
             try h.files.deleteDirectory(at: h.otherProject.path)
             try h.context.save()
-            let model = CategoryDetailModel(store: CategoryStore(
-                manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store"),
+            let model = CategoryDetailModel(store: CategoryStore(),
                 reconciler: h.category)
             if addingSkill { model.setSkill(h.skill, inCategory: acted, assigned: true, context: h.context) } else {
                 model.setProject(h.otherProject, inCategory: acted, member: true, context: h.context)

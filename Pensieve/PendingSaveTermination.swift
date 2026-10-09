@@ -14,6 +14,8 @@ final class PendingSaveTermination {
         self.presenter = present
     }
     private var dismiss: (() -> Void)?
+    private var askAgain: (() -> Void)?
+    private var questionScheduled = false
 
     func wait(for saves: ManifestSaveModel, reply: @escaping (Bool) -> Void) {
         isWaiting = true
@@ -24,23 +26,29 @@ final class PendingSaveTermination {
             guard generation == request else { return }
             finish(true, reply: reply)
         }
-        scheduleQuestion(for: saves, request: request, reply: reply)
-    }
-
-    private func scheduleQuestion(for saves: ManifestSaveModel, request: Int, reply: @escaping (Bool) -> Void) {
+        questionScheduled = true
+        askAgain = { [weak self] in self?.showQuestion(for: saves, request: request, reply: reply) }
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            guard generation == request, saves.pendingCount > 0 else { return }
-            var answered = false
-            dismiss = presenter { [weak self] quitAnyway in
-                guard let self, self.generation == request, !answered else { return }
-                answered = true
-                if quitAnyway { self.finish(true, reply: reply) } else {
-                    let close = self.dismiss
-                    self.dismiss = nil
-                    close?()
-                    self.scheduleQuestion(for: saves, request: request, reply: reply)
-                }
+            guard generation == request, questionScheduled else { return }
+            showQuestion(for: saves, request: request, reply: reply)
+        }
+    }
+
+    /// Another Quit reopens the question for the original deferred request, without a timer after Wait.
+    func requestQuestion() { askAgain?() }
+
+    private func showQuestion(for saves: ManifestSaveModel, request: Int, reply: @escaping (Bool) -> Void) {
+        guard generation == request, saves.pendingCount > 0, dismiss == nil else { return }
+        questionScheduled = false
+        var answered = false
+        dismiss = presenter { [weak self] quitAnyway in
+            guard let self, self.generation == request, !answered else { return }
+            answered = true
+            if quitAnyway { self.finish(true, reply: reply) } else {
+                let close = self.dismiss
+                self.dismiss = nil
+                close?()
             }
         }
     }
@@ -48,6 +56,8 @@ final class PendingSaveTermination {
     private func finish(_ quit: Bool, reply: (Bool) -> Void) {
         generation += 1
         isWaiting = false
+        askAgain = nil
+        questionScheduled = false
         let close = dismiss
         dismiss = nil
         close?()

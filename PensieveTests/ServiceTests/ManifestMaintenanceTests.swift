@@ -82,9 +82,9 @@ final class ManifestMaintenanceTests: XCTestCase {
         let context = try makeContext()
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let vm = SkillLibraryViewModel(
-            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: manifest, manifestRoot: tempDir
-        )
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: tempDir,
+            manifestSaves: ManifestSaveModel(manifest: manifest, root: tempDir,
+                lockPath: tempDir + ".sync.lock"))
         vm.createSkill(name: "My Skill", description: "d", body: "# b", tags: ["x"], context: context)
         await vm.manifestSaves?.waitUntilIdle()
         XCTAssertTrue(overlayExists(slug: "my-skill"))
@@ -97,9 +97,9 @@ final class ManifestMaintenanceTests: XCTestCase {
         let context = try makeContext()
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let vm = SkillLibraryViewModel(
-            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: manifest, manifestRoot: tempDir
-        )
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: tempDir,
+            manifestSaves: ManifestSaveModel(manifest: manifest, root: tempDir,
+                lockPath: tempDir + ".sync.lock"))
 
         vm.createSkill(name: "Scoped", description: "d", body: "# b", tags: [], context: context)
         await vm.manifestSaves?.waitUntilIdle()
@@ -152,9 +152,9 @@ final class ManifestMaintenanceTests: XCTestCase {
         try seedProjectIntent(context)
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let vm = SkillLibraryViewModel(
-            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: manifest, manifestRoot: tempDir
-        )
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: tempDir,
+            manifestSaves: ManifestSaveModel(manifest: manifest, root: tempDir,
+                lockPath: tempDir + ".sync.lock"))
         vm.createSkill(name: "Editable", description: "d", body: "# b", tags: [], context: context)
         let skill = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
         vm.updateMetadata(skill, tags: ["edited"], scope: .project, context: context)
@@ -170,9 +170,9 @@ final class ManifestMaintenanceTests: XCTestCase {
         let context = try makeContext()
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let vm = SkillLibraryViewModel(
-            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: manifest, manifestRoot: tempDir
-        )
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: tempDir,
+            manifestSaves: ManifestSaveModel(manifest: manifest, root: tempDir,
+                lockPath: tempDir + ".sync.lock"))
         vm.createSkill(name: "Doomed", description: "d", body: "# b", tags: [], context: context)
         await vm.manifestSaves?.waitUntilIdle()
         XCTAssertTrue(overlayExists(slug: "doomed"))
@@ -201,9 +201,9 @@ final class ManifestMaintenanceTests: XCTestCase {
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let failing = ManifestService(fileService: ThrowingWriteFileService())
         let vm = SkillLibraryViewModel(
-            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: failing, manifestRoot: tempDir
-        )
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: tempDir,
+            manifestSaves: ManifestSaveModel(manifest: failing, root: tempDir,
+                lockPath: tempDir + ".sync.lock"))
         vm.createSkill(name: "Resilient", description: "d", body: "# b", tags: [], context: context)
         await vm.manifestSaves?.waitUntilIdle()
         XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).count, 1)
@@ -217,7 +217,7 @@ final class ManifestMaintenanceTests: XCTestCase {
         let context = try makeContext()
         try seedProjectIntent(context)
         let saves = ManifestSaveModel(manifest: manifest, root: tempDir, lockPath: tempDir + "/sync.lock")
-        let store = CategoryStore(manifestService: manifest, manifestRoot: tempDir, manifestSaves: saves)
+        let store = CategoryStore( manifestSaves: saves)
         let category = try XCTUnwrap(store.create(name: "Swift", context: context))
         await saves.waitUntilIdle()
         let file = tempDir + "/manifest/categories/" + ManifestService.categoryFileName("Swift")
@@ -253,7 +253,7 @@ final class ManifestMaintenanceTests: XCTestCase {
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: tempDir + "/sync.lock"))
         defer { lock.release() }
         let projectFile = try fileService.readData(at: tempDir + "/manifest/projects.yaml")
-        registerProject(project, manifestService: manifest, manifestRoot: tempDir, context: context)
+        registerProject(project, context: context)
         XCTAssertEqual(try ModelContext(context.container).fetch(FetchDescriptor<Project>()).map(\.id), [project.id])
         XCTAssertEqual(try manifest.read(fromRoot: tempDir), before)
         XCTAssertEqual(try ManifestSaveFixture.manifestBytes(root: tempDir, files: fileService), beforeBytes)
@@ -275,8 +275,8 @@ final class ManifestMaintenanceTests: XCTestCase {
                 deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
             ),
             localMachineID: ProjectIntentHarness.localID,
-            context: context
-        )
+            context: context,
+            lockPath: tempDir + ".sync.lock")
         XCTAssertEqual(try fileService.readFile(at: tempDir + "/manifest/projects.yaml"), "projects:\n")
         XCTAssertEqual(try fileService.readFile(at: intentPath), intentBytesBeforeRemoval)
         try assertProjectIntentSurvives()

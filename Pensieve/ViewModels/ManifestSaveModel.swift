@@ -43,7 +43,8 @@ final class ManifestSaveModel {
 
     func submit(_ change: ManifestChange, context: ModelContext, report: @escaping (Error?) -> Void) {
         precondition(Thread.isMainThread)
-        items.append(Item(change: change, presentation: ManifestRefusedEdit(change, context: context, manifest: manifest),
+        for edit in refused where edit.context === context { edit.observe(change) }
+        items.append(Item(change: change, presentation: ManifestRefusedEdit(change, context: context),
             fallback: { try self.manifest.snapshot(from: context) },
             accept: { snapshot in
                 let result = StoreRebuildService(fileService: self.files, manifestService: self.manifest)
@@ -65,40 +66,38 @@ final class ManifestSaveModel {
         var savedAny = false
         while !items.isEmpty {
             let item = items[0]
+            var readDisk = false
             do {
                 let lock = try await takeLock()
                 defer { lock.release() }
-                // The fallback is used only for an unreadable tree; take it after waiting, so it
-                // includes edits made during the wait. No ModelContext enters the native job.
-                let fallback = try item.fallback()
-                let manifest = manifest, root = root, change = item.change, files = files
-                let (saved, applied) = try await BlockingWork.run {
-                    var snapshot: ManifestSnapshot
-                    var usingFallback = false
-                    do {
-                        usingFallback = !files.fileExists(at: root + "/manifest/manifest.yaml")
-                        snapshot = usingFallback ? fallback : try manifest.read(fromRoot: root)
-                    } catch {
-                        if case ManifestError.unsupportedSchema = error { throw error }
-                        snapshot = fallback
-                        usingFallback = true
-                    }
-                    let applied = usingFallback || change.apply(to: &snapshot)
-                    if applied { try manifest.write(snapshot, toRoot: root) }
-                    return (snapshot, applied)
+                let disk = try await readCurrentManifest()
+                let manifest = manifest, root = root
+                let usingFallback = disk == nil
+                var saved: ManifestSnapshot
+                if let disk, !usingFallback { saved = disk } else { saved = try item.fallback() }
+                if let disk { item.presentation.remember(durable: disk); readDisk = true }
+                let applied = usingFallback || item.change.apply(to: &saved)
+                if applied {
+                    let snapshot = saved
+                    try await BlockingWork.run { try manifest.write(snapshot, toRoot: root) }
+                    savedAny = true
                 }
-                savedAny = savedAny || applied
                 var displayed = saved
-                try projectRefused(durable: saved, onto: &displayed)
+                projectRefused(durable: saved, onto: &displayed)
                 if !applied {
-                    var probe = displayed
-                    if item.change.apply(to: &probe) { throw ManifestSaveError.unsavedTarget }
+                    if refused.contains(where: { $0.suppliesTarget(for: item.presentation) }) {
+                        throw ManifestSaveError.unsavedTarget
+                    }
                     log("Skipped queued manifest change: its target was removed by sync.")
                 }
                 for pending in items.dropFirst() { pending.change.apply(to: &displayed) }
                 try item.accept(displayed)
                 item.report(nil)
             } catch {
+                if readDisk {
+                    item.presentation.cache(local: try? manifest.snapshot(from: item.presentation.context),
+                        categories: try? item.presentation.context.fetch(FetchDescriptor<Category>()))
+                }
                 refused.append(item.presentation)
                 item.report(error)
             }
@@ -111,10 +110,37 @@ final class ManifestSaveModel {
     }
 
     @MainActor
-    private func projectRefused(durable: ManifestSnapshot, onto displayed: inout ManifestSnapshot) throws {
-        var remaining: [ManifestRefusedEdit] = []
-        for edit in refused where try edit.project(durable: durable, onto: &displayed) { remaining.append(edit) }
-        refused = remaining
+    private func readCurrentManifest() async throws -> ManifestSnapshot? {
+        let manifest = manifest, root = root, files = files
+        return try await BlockingWork.run {
+            do {
+                guard files.fileExists(at: root + "/manifest/manifest.yaml") else { return nil }
+                return try manifest.read(fromRoot: root)
+            } catch {
+                if case ManifestError.unsupportedSchema = error { throw error }
+                return nil
+            }
+        }
+    }
+
+    @MainActor
+    private func projectRefused(durable: ManifestSnapshot, onto displayed: inout ManifestSnapshot) {
+        var locals: [ObjectIdentifier: (ManifestSnapshot?, [Category]?)] = [:]
+        for edit in refused {
+            let key = ObjectIdentifier(edit.context)
+            if locals[key] == nil {
+                do {
+                    locals[key] = (try manifest.snapshot(from: edit.context),
+                        try edit.context.fetch(FetchDescriptor<Category>()))
+                } catch {
+                    log("Couldn't refresh a refused edit's presentation: " + error.localizedDescription)
+                    locals[key] = (nil, nil)
+                }
+            }
+            if let (local, categories) = locals[key] { edit.cache(local: local, categories: categories) }
+        }
+        let supplied = Set(refused.compactMap { $0.suppliesCategory(in: durable) })
+        refused = refused.filter { $0.project(durable: durable, supplied: supplied, onto: &displayed) }
     }
 
     @MainActor

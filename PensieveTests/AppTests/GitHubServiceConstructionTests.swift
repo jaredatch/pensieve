@@ -40,7 +40,7 @@ final class GitHubServiceConstructionTests: XCTestCase {
             ("ImportScanner", [("fileService", "files"), ("claudeSkillsDir", "root"), ("grokSkillsDir", "root"),
                                ("cursorRulesDir", "root"), ("codexSkillsDir", "root"), ("storeRoot", "root")]),
             ("StoreMigrationService", [("skillStore", "store")]),
-            ("CategoryStore", [("manifestRoot", "root")]),
+            ("ManifestSaveModel", [("manifest", "ManifestService()"), ("root", "root"), ("lockPath", "root")]),
             ("LaunchReconciler", [("migrationService", "StoreMigrationService(skillStore: store)"),
                                   ("root", "root"), ("lockPath", "root"), ("git", "git")]),
             ("SyncSetupModel", [("context", "context"), ("git", "git"), ("credentials", "credentials"),

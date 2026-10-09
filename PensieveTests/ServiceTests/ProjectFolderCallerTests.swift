@@ -56,7 +56,7 @@ final class ProjectFolderCallerTests: XCTestCase {
         try harness.context.save()
         let saves = ManifestSaveModel(manifest: ManifestService(fileService: harness.files),
             root: harness.root + "/store", lockPath: harness.root + "/sync.lock")
-        let store = CategoryStore(manifestRoot: harness.root + "/store", manifestSaves: saves)
+        let store = CategoryStore( manifestSaves: saves)
         let model = CategoryDetailModel(store: store, reconciler: harness.category)
         model.setSkill(harness.skill, inCategory: rule, assigned: true, context: harness.context)
         await saves.waitUntilIdle()
@@ -113,8 +113,8 @@ final class ProjectFolderCallerTests: XCTestCase {
             reconciler: harness.category, manifestService: ManifestService(fileService: harness.files),
             manifestRoot: harness.root + "/store", platformVM: harness.platformVM,
             localMachineID: ProjectIntentHarness.localID,
-            context: harness.context
-        )
+            context: harness.context,
+            lockPath: harness.root + "/store" + ".sync.lock")
         XCTAssertFalse(unregister.hasFailures)
         XCTAssertEqual(try harness.context.fetch(FetchDescriptor<Project>()).map(\.id), [harness.otherProject.id])
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0)
@@ -134,7 +134,7 @@ final class ProjectFolderCallerTests: XCTestCase {
         try harness.files.deleteDirectory(at: harness.root + "/absent")
         let saves = ManifestSaveModel(manifest: ManifestService(fileService: harness.files),
             root: harness.root + "/store", lockPath: harness.root + "/sync.lock")
-        let model = CategoryDetailModel(store: CategoryStore(manifestRoot: harness.root + "/store", manifestSaves: saves),
+        let model = CategoryDetailModel(store: CategoryStore( manifestSaves: saves),
                                        reconciler: harness.category)
         if removingSkill {
             model.setSkill(harness.skill, inCategory: rule, assigned: false, context: harness.context)

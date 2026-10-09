@@ -92,9 +92,10 @@ final class WaitingRemovalDeletionSafetyTests: XCTestCase {
             let library = phase == "row" ? h.library : SkillLibraryViewModel(
                 skillStore: failing,
                 fileService: h.mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-                manifestService: ManifestService(fileService: h.base.files), manifestRoot: h.base.root + "/store",
-                notifier: {}
-            )
+                manifestRoot: h.base.root + "/store",
+                notifier: {},
+            manifestSaves: ManifestSaveModel(manifest: ManifestService(fileService: h.base.files), root: h.base.root + "/store",
+                lockPath: h.base.root + "/store" + ".sync.lock", files: h.mapped))
             h.base.mapped.beforeDeployStateWrite = { _ in throw CocoaError(.fileWriteNoPermission) }
             var saves = 0
             XCTAssertFalse(SkillDeletionFlow.delete(skill: h.base.skill, library: library, platformVM: h.vm,

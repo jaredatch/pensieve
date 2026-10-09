@@ -52,7 +52,7 @@ struct DetailColumnView: View {
             remoteProjectDetail(key)
         case .category(let id):
             CategoryDetailView(
-                categoryID: id, platformVM: platformVM, manifestRoot: library.manifestRoot,
+                categoryID: id, platformVM: platformVM,
                 manifestSaves: library.manifestSaves, notifier: notifier, onReveal: onReveal
             )
                 .id(id)

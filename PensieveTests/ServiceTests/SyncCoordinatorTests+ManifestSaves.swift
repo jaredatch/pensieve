@@ -24,7 +24,7 @@ extension SyncCoordinatorTests {
         assertSynced(await coordinator.runCycle())
         try publishRemoteCategory(h)
         let saves = ManifestSaveModel(manifest: manifest, root: h.clone, lockPath: lockPath)
-        let store = CategoryStore(manifestService: manifest, manifestRoot: h.clone, manifestSaves: saves)
+        let store = CategoryStore( manifestSaves: saves)
         let cycle = Task { await coordinator.runCycle() }
         await TestWait.until(failureMessage: "Sync did not pause between pull and rebuild") { gate.waiterCount == 1 }
         XCTAssertTrue(try manifest.read(fromRoot: h.clone).categories.contains { $0.name == "Remote" })
@@ -65,7 +65,7 @@ extension SyncCoordinatorTests {
         let run = BlockingWork.task { daemon.runOnce() }
         await TestWait.until(failureMessage: "Daemon did not hold the lock before fast-forward") { gate.waiterCount == 1 }
         let saves = ManifestSaveModel(manifest: manifest, root: h.clone, lockPath: lockPath)
-        CategoryStore(manifestService: manifest, manifestRoot: h.clone, manifestSaves: saves)
+        CategoryStore( manifestSaves: saves)
             .rename(local, to: "Edited", context: context)
         await Task.yield()
         XCTAssertEqual(try manifest.read(fromRoot: h.clone).categories.map(\.name), ["Local"])

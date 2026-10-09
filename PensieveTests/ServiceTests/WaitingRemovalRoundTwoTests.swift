@@ -94,8 +94,8 @@ final class WaitingRemovalRoundTwoTests: XCTestCase {
                 platformVM: h.vm,
                 localMachineID: ProjectIntentHarness.localID,
                 confirmedPreview: preview,
-                context: h.base.context
-            )
+                context: h.base.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
             XCTAssertEqual(result.operationFailures,
                 ["The project changed while confirmation was open. Please review removal again."],
                 "A changed waiting-cleanup promise must require a fresh confirmation")

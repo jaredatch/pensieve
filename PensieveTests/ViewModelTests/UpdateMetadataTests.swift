@@ -41,10 +41,10 @@ final class UpdateMetadataTests: XCTestCase {
         let context = try makeContext()
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let library = SkillLibraryViewModel(
-            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: manifest, manifestRoot: tempDir,
-            notifier: notifier
-        )
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: tempDir,
+            notifier: notifier,
+            manifestSaves: ManifestSaveModel(manifest: manifest, root: tempDir,
+                lockPath: tempDir + ".sync.lock"))
         library.createSkill(name: "Editable", description: "d", body: "# b", tags: [], context: context)
         let skill = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
         return Fixture(library: library, context: context, skill: skill)

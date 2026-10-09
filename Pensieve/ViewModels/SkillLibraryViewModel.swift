@@ -6,8 +6,6 @@ import SwiftUI
 final class SkillLibraryViewModel {
     enum SkillDeletionResult: Equatable {
         case deleted
-        /// Deleted, but the manifest rewrite failed (`error` carries the message); the manifest lags until the next mutation.
-        case deletedManifestStale
         /// `skillStore.deleteSkill` threw; the directory and the row are both still there. The pending
         /// edit was already cancelled.
         case retainedDirectoryDeleteFailed(String)
@@ -95,7 +93,6 @@ final class SkillLibraryViewModel {
         skillStore: SkillStoreProtocol,
         fileService: FileServiceProtocol? = nil,
         fileWatchService: FileWatchServiceProtocol,
-        manifestService: ManifestSnapshotting? = nil,
         manifestRoot: String,
         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
         manifestSaves: ManifestSaveModel? = nil
@@ -104,9 +101,7 @@ final class SkillLibraryViewModel {
         self.fileService = fs
         self.skillStore = skillStore
         self.fileWatchService = fileWatchService
-        self.manifestSaves = manifestSaves ?? manifestService.map {
-            ManifestSaveModel(manifest: $0, root: manifestRoot, lockPath: manifestRoot + "/sync.lock", files: fs)
-        }
+        self.manifestSaves = manifestSaves
         self.manifestRoot = manifestRoot
         self.notifier = notifier
     }
@@ -114,7 +109,8 @@ final class SkillLibraryViewModel {
         fileWatchService.stop()
     }
     // MARK: - CRUD
-    func regenerateManifest(_ change: ManifestChange, context: ModelContext) {
+    func regenerateManifest(_ change: ManifestChange, context: ModelContext,
+                            completion: ((Error?) -> Void)? = nil) {
         manifestSaves?.submit(change, context: context) { [weak self] failure in
             guard let self else { return }
             if let failure {
@@ -125,6 +121,7 @@ final class SkillLibraryViewModel {
                 if self.error == self.lastManifestError { self.error = nil }
                 self.lastManifestError = nil
             }
+            completion?(failure)
         }
     }
 
@@ -181,6 +178,7 @@ extension SkillLibraryViewModel {
     func deleteSkillEntry(_ skill: Skill, context: ModelContext,
                           persist: (ModelContext) throws -> Void = { try $0.save() }) -> SkillDeletionResult {
         let quarantined = pendingRowCleanup.contains(skill.id), deletedSlug = skill.directoryName
+        let deletedName = skill.name
         if quarantined {
             // Probe BEFORE any destructive step: a retry proceeds only when the leaf is not readable and the
             // no-follow, case-folded listing proves the entry absent. Any entry retains; a readable regular
@@ -238,9 +236,18 @@ extension SkillLibraryViewModel {
         }
         pendingRowCleanup.remove(skill.id)
         self.error = nil
-        regenerateManifest(.deleteSkill(deletedSlug), context: context)
-        return self.error == nil ? .deleted : .deletedManifestStale
+        return queueDeletedSkill(slug: deletedSlug, name: deletedName, context: context)
     }
+
+    private func queueDeletedSkill(slug: String, name: String, context: ModelContext) -> SkillDeletionResult {
+        regenerateManifest(.deleteSkill(slug), context: context) { [weak self] failure in
+            guard let self, let failure else { return }
+            let notice = self.deletionNotice?.message ?? "Deleted “\(name)”."
+            self.deletionNotice = .warning(notice + " The sync manifest couldn't be updated: " + failure.localizedDescription)
+        }
+        return .deleted
+    }
+
 }
 
 extension SkillLibraryViewModel {

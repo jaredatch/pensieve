@@ -73,7 +73,7 @@ final class ProjectRemovalLocalityTests: XCTestCase {
         XCTAssertTrue(try h.deployState.read().records.isEmpty, "An unregistered key deploys nowhere")
         let replacement = Project(name: "Added again", path: path)
         replacement.identityKey = "github.com/owner/project"
-        registerProject(replacement, manifestService: manifest, manifestRoot: h.root + "/sync",
+        registerProject(replacement,
             context: h.context, intentReconciler: { h.intent.reconcile(context: $0) })
         XCTAssertTrue(try h.deployState.read().records.isEmpty, "Registration alone does not run category fan-out")
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), 0)
@@ -133,6 +133,7 @@ final class ProjectRemovalLocalityTests: XCTestCase {
                         root: String? = nil) -> BatchResult {
         removeRegisteredProject(h.project, reconciler: h.category, manifestService: manifest,
             manifestRoot: root ?? h.root + "/sync", platformVM: h.platformVM,
-            localMachineID: ProjectIntentHarness.localID, context: h.context)
+            localMachineID: ProjectIntentHarness.localID, context: h.context,
+            lockPath: (root ?? h.root + "/sync") + ".sync.lock")
     }
 }

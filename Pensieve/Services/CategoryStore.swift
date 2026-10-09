@@ -69,16 +69,11 @@ extension CategoryStoreProtocol {
 
 struct CategoryStore: CategoryStoreProtocol {
     private let manifestSaves: ManifestSaveModel?
-    private let manifestRoot: String
     let notifier: SyncStateNotifying
 
-    init(manifestService: ManifestSnapshotting? = nil, manifestRoot: String,
-         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
+    init(notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
          manifestSaves: ManifestSaveModel? = nil) {
-        self.manifestSaves = manifestSaves ?? manifestService.map {
-            ManifestSaveModel(manifest: $0, root: manifestRoot, lockPath: manifestRoot + "/sync.lock")
-        }
-        self.manifestRoot = manifestRoot
+        self.manifestSaves = manifestSaves
         self.notifier = notifier
     }
 

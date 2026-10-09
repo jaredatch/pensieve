@@ -27,7 +27,7 @@ struct ProjectRemovalWithdrawal {
             if context.hasChanges { try context.save() }
         } catch {
             context.rollback()
-            repairManifest(context: context)
+            repairManifest(project: project, request: request, context: context)
             throw failure("save project withdrawal", error)
         }
         do {
@@ -47,7 +47,7 @@ struct ProjectRemovalWithdrawal {
                 withdrawalRemainsSaved = changed
                 logFailure("Couldn't restore project withdrawal: " + error.localizedDescription)
             }
-            repairManifest(context: context)
+            repairManifest(project: project, request: request, context: context)
             throw failure("publish project withdrawal", publicationError, detail: restoration,
                           didWithdrawRequests: withdrawalRemainsSaved)
         }
@@ -67,16 +67,16 @@ struct ProjectRemovalWithdrawal {
         try context.save()
     }
 
-    func repairManifest(context: ModelContext) {
+    private func repairManifest(project: Project, request: ProjectRemovalWithdrawalRequest, context: ModelContext) {
         do {
-            try publish(context: context)
+            try publish(context: context, project: project, request: request)
         } catch {
             logFailure("Couldn't rewrite the project manifest from the saved store: " + error.localizedDescription)
         }
     }
 
-    private func publish(context: ModelContext, project: Project? = nil,
-                         request: ProjectRemovalWithdrawalRequest? = nil) throws {
+    private func publish(context: ModelContext, project: Project,
+                         request: ProjectRemovalWithdrawalRequest) throws {
         guard let manifestService else { return }
         let local = try manifestService.snapshot(from: context)
         var snapshot: ManifestSnapshot
@@ -87,8 +87,11 @@ struct ProjectRemovalWithdrawal {
             if case ManifestError.unsupportedSchema = error { throw error }
             snapshot = local
         }
-        if let project, let request, !request.keepingSharedKey, let key = project.identityKey {
+        if !request.keepingSharedKey, let key = project.identityKey {
             snapshot.deployIntents.removeAll { $0.machineID == request.localMachineID && $0.projectKey == key }
+            snapshot.deployIntents += local.deployIntents.filter {
+                $0.machineID == request.localMachineID && $0.projectKey == key
+            }
         }
         try manifestService.write(snapshot, toRoot: manifestRoot)
     }

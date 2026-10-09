@@ -25,7 +25,8 @@ final class WaitingRemovalAttemptTests: XCTestCase {
             }
             let result = removeRegisteredProject(h.base.project, reconciler: reconciler,
                 manifestService: manifest, manifestRoot: h.base.root + "/store", platformVM: h.vm,
-                localMachineID: ProjectIntentHarness.localID, context: h.base.context)
+                localMachineID: ProjectIntentHarness.localID, context: h.base.context,
+            lockPath: h.base.root + "/store" + ".sync.lock")
             XCTAssertTrue(result.hasFailures, phase)
             XCTAssertEqual(try h.base.context.fetchCount(FetchDescriptor<Project>()), 2)
             XCTAssertEqual(try h.vm.waitingRemovalStore.read(), [old], "Failed attempts withdraw only their new UUIDs")

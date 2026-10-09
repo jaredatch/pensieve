@@ -228,7 +228,6 @@ struct AppRuntimePaths {
             skillStore: SkillStore(fileService: fileService, baseDir: skillsDir, storeRoot: storeRoot),
             fileService: fileService,
             fileWatchService: fileWatchService ?? FileWatchService(rootDir: skillsDir),
-            manifestService: ManifestService(),
             manifestRoot: storeRoot,
             notifier: notifier,
             manifestSaves: saves

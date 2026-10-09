@@ -82,7 +82,8 @@ final class ProjectRemovalConfirmationTests: XCTestCase {
                 removeRegisteredProject(project, reconciler: h.category,
                     manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/sync",
                     platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, confirmedPreview: plan,
-                    context: h.context)
+                    context: h.context,
+            lockPath: h.root + "/sync" + ".sync.lock")
             }
             XCTAssertNil(model.error)
             XCTAssertFalse(try h.context.fetch(FetchDescriptor<Project>()).contains { $0.id == id })

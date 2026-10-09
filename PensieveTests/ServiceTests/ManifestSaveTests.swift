@@ -20,6 +20,7 @@ final class ManifestSaveTests: XCTestCase {
         XCTAssertEqual(h.local.projectKeys, ["local-key"])
         XCTAssertEqual(h.local.skillSlugs, ["alpha"])
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Pensieve.Category>()), 2)
+        await h.assertWaitingBehindHeldLock(pending: 5, before: before)
         h.categories.setProject(h.project, inCategory: h.local, member: false, context: h.context)
         h.categories.setSkill(h.alpha, inCategory: h.local, assigned: false, context: h.context)
         XCTAssertTrue(h.local.projectKeys.isEmpty)
@@ -116,6 +117,35 @@ final class ManifestSaveTests: XCTestCase {
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name), ["ZDelete"])
         XCTAssertTrue(h.messages.lines.contains { $0.contains("Skipped") && $0.contains("removed by sync") })
         XCTAssertTrue(h.recording.writes.isEmpty)
+        for edit in ["rename", "membership", "delete", "recreated delete"] {
+            let r = try ManifestSaveFixture()
+            defer { r.cleanup() }
+            r.recording.failingWrites = 1
+            if edit == "rename" { r.categories.rename(r.local, to: "Refused", context: r.context) } else if edit == "membership" {
+                r.categories.setSkill(r.alpha, inCategory: r.local, assigned: true, context: r.context)
+            } else { r.categories.delete(r.local, context: r.context) }
+            await r.saves.waitUntilIdle()
+            var remote = try r.manifest.read(fromRoot: r.root)
+            remote.categories.removeAll { $0.name == "Local" }
+            if edit == "recreated delete" {
+                remote.categories.append(CategoryRecord(name: "Local", projectKeys: [], skillSlugs: ["remote"]))
+            }
+            try r.manifest.write(remote, toRoot: r.root)
+            r.categories.rename(r.doomed, to: "Other", context: r.context)
+            await r.saves.waitUntilIdle()
+            let expected: Set<String> = edit == "recreated delete" ? ["Local", "Other"] : ["Other"]
+            XCTAssertEqual(Set(try r.context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name)), expected, edit)
+            remote = try r.manifest.read(fromRoot: r.root)
+            if !remote.categories.contains(where: { $0.name == "Local" }) {
+                remote.categories.append(CategoryRecord(name: "Local", projectKeys: [], skillSlugs: []))
+            }
+            try r.manifest.write(remote, toRoot: r.root)
+            let other = try XCTUnwrap(try r.context.fetch(FetchDescriptor<Pensieve.Category>()).first { $0.name == "Other" })
+            r.categories.rename(other, to: "Again", context: r.context)
+            await r.saves.waitUntilIdle()
+            XCTAssertEqual(Set(try r.context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name)),
+                ["Again", "Local"], "A retired refusal must not hide or recreate pulled categories")
+        }
     }
 
     func testNewerSchemaRefusesCategoryAndSkillSavesWithoutLosingWindowEdit() async throws {
@@ -131,7 +161,10 @@ final class ManifestSaveTests: XCTestCase {
             h.library.updateMetadata(h.alpha, tags: ["kept"], scope: .project, context: h.context)
             if refusal == "newer schema" {
                 try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "schema_version: 99\n")
-            } else if refusal == "write" { h.recording.failingWrites = 3 } else { h.recording.failingSnapshots = 3 }
+            } else if refusal == "write" { h.recording.failingWrites = 3 } else {
+                try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "not: [yaml\n")
+                h.recording.failingSnapshots = 3
+            }
             let before = try h.manifestBytes()
             lock.release()
             await h.saves.waitUntilIdle()
@@ -156,18 +189,15 @@ final class ManifestSaveTests: XCTestCase {
             XCTAssertEqual(h.alpha.scope, .project, refusal)
             XCTAssertFalse(h.messages.lines.contains { $0.contains("removed by sync") }, refusal)
             XCTAssertFalse(try h.manifest.read(fromRoot: h.root).categories.contains { $0.name == "Kept" })
-            // A later successful field must retire its refusal overlay without retiring another field's.
-            h.library.updateMetadata(h.alpha, tags: ["kept"], scope: .user, context: h.context)
+            let reported = h.messages.lines.count
+            h.categories.rename(created, to: "K2", context: h.context)
             await h.saves.waitUntilIdle()
-            var laterPull = try h.manifest.read(fromRoot: h.root)
-            laterPull.skills[0].scope = .project
-            try h.manifest.write(laterPull, toRoot: h.root)
-            let other = try XCTUnwrap(window.first { $0.name == "Saved Other" })
-            h.categories.rename(other, to: "Saved Again", context: h.context)
-            await h.saves.waitUntilIdle()
-            XCTAssertEqual(h.alpha.scope, .project, "An acknowledged field must accept a later pull")
-            XCTAssertEqual(h.alpha.tags, ["kept"], "The still-refused field must remain local")
+            XCTAssertEqual(h.messages.lines.count, reported + 1, "The dependent rename must report its own refusal")
+            XCTAssertTrue(h.messages.lines.last?.contains("depends on an earlier change") == true, refusal)
+            XCTAssertFalse(h.messages.lines.contains { $0.contains("removed by sync") }, refusal)
+            try await checkRefusedFieldAcknowledgement(h, window: window)
         }
+        try await checkPresentationReadFailureAfterDurableWrite()
     }
 
     func testCorruptManifestHealsFromCurrentWindowAfterWaiting() async throws {
@@ -175,11 +205,20 @@ final class ManifestSaveTests: XCTestCase {
         defer { h.cleanup() }
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
         defer { lock.release() }
+        h.recording.failingSnapshots = 1
+        h.library.updateMetadata(h.alpha, tags: ["readable"], scope: .user, context: h.context)
+        lock.release()
+        await h.saves.waitUntilIdle()
+        XCTAssertNil(h.library.error, "A readable manifest must not fetch the unused fallback")
+        XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "alpha" }?.tags, ["readable"])
+        h.recording.failingSnapshots = 0
+        let corruptLock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+        defer { corruptLock.release() }
         h.categories.rename(h.local, to: "Healed", context: h.context)
         h.library.updateMetadata(h.alpha, tags: ["latest"], scope: .project, context: h.context)
         try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "not: [yaml\n")
         let expected = try h.manifest.snapshot(from: h.context)
-        lock.release()
+        corruptLock.release()
         await h.saves.waitUntilIdle()
         let saved = try h.manifest.read(fromRoot: h.root)
         XCTAssertEqual(saved.categories, expected.categories.sorted { $0.name < $1.name })
@@ -202,4 +241,51 @@ final class ManifestSaveTests: XCTestCase {
         XCTAssertTrue(h.messages.lines.contains { $0.contains("Category mutation") })
         XCTAssertNotNil(h.library.error)
     }
+}
+
+extension ManifestSaveTests {
+    private func checkRefusedFieldAcknowledgement(_ h: ManifestSaveFixture,
+                                                  window: [Pensieve.Category]) async throws {
+        // A later successful field must retire its refusal overlay without retiring another field's.
+        h.library.updateMetadata(h.alpha, tags: ["kept"], scope: .user, context: h.context)
+        await h.saves.waitUntilIdle()
+        var laterPull = try h.manifest.read(fromRoot: h.root)
+        laterPull.skills[0].scope = .project
+        try h.manifest.write(laterPull, toRoot: h.root)
+        let other = try XCTUnwrap(window.first { $0.name == "Saved Other" })
+        h.categories.rename(other, to: "Saved Again", context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(h.alpha.scope, .project, "An acknowledged field must accept a later pull")
+        XCTAssertEqual(h.alpha.tags, ["kept"], "The still-refused field must remain local")
+    }
+
+    private func checkPresentationReadFailureAfterDurableWrite() async throws {
+        // Projection failures cannot turn a durable success into a refused save or hide a pull.
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        h.recording.failingWrites = 1
+        h.categories.rename(h.local, to: "Refused", context: h.context)
+        await h.saves.waitUntilIdle()
+        var remote = try h.manifest.read(fromRoot: h.root)
+        remote.categories.append(CategoryRecord(name: "Pulled", projectKeys: [], skillSlugs: []))
+        try h.manifest.write(remote, toRoot: h.root)
+        h.recording.afterWrite = { h.recording.failingSnapshots = 1 }
+        h.library.updateMetadata(h.alpha, tags: ["saved"], scope: .user, context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "alpha" }?.tags, ["saved"])
+        XCTAssertNil(h.library.error, "Presentation read failure cannot report a durable write as refused")
+        XCTAssertEqual(Set(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name)),
+            ["Refused", "Pulled", "ZDelete"])
+        h.recording.afterWrite = nil
+        h.recording.failingWrites = 1
+        h.library.updateMetadata(h.alpha, tags: ["refused"], scope: .project, context: h.context)
+        await h.saves.waitUntilIdle()
+        h.recording.afterWrite = { h.recording.failingSnapshots = 1 }
+        h.library.updateMetadata(h.alpha, tags: ["newer"], scope: .project, context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertNil(h.library.error)
+        XCTAssertEqual(h.alpha.tags, ["newer"], "A later save must supersede the cached refused field")
+        XCTAssertEqual(h.alpha.scope, .project, "The other refused field stays local")
+    }
+
 }

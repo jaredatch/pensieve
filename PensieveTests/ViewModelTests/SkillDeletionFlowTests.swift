@@ -41,8 +41,10 @@ final class SkillDeletionFlowTests: XCTestCase {
         let state = DeployStateStore(fileService: stateFS, appSupportDir: stateRoot)
         let library = SkillLibraryViewModel(
             skillStore: store, fileService: stateFS,
-            fileWatchService: watcher, manifestService: manifest, manifestRoot: stateRoot + "/manifest",
-            notifier: counter.notify)
+            fileWatchService: watcher, manifestRoot: stateRoot + "/manifest",
+            notifier: counter.notify,
+            manifestSaves: ManifestSaveModel(manifest: manifest, root: stateRoot + "/manifest",
+                lockPath: stateRoot + "/manifest" + ".sync.lock", files: stateFS))
         library.startWatching()
         let platform = PlatformViewModel(
             fileService: stateFS,
@@ -130,6 +132,12 @@ final class SkillDeletionFlowTests: XCTestCase {
         let f = try fixture(); f.manifest.failingWrites = [1, 2]
         let deleted = await delete(f); XCTAssertTrue(deleted); XCTAssertEqual(f.counter.value, 1)
         XCTAssertTrue(f.library.error?.contains("manifest") == true)
+        XCTAssertTrue(f.library.deletionNotice?.message.contains("sync manifest couldn't be updated") == true)
+        f.manifest.failingWrites = []
+        f.library.regenerateManifest(.deleteSkill("other"), context: f.context)
+        await f.library.manifestSaves?.waitUntilIdle()
+        XCTAssertTrue(f.library.deletionNotice?.message.contains("sync manifest couldn't be updated") == true,
+            "An unrelated successful save cannot erase the deletion warning")
     }
 
     func testDeleteIsQuietWhenFinalManifestWriteSucceedsAfterEarlierFailure() async throws {

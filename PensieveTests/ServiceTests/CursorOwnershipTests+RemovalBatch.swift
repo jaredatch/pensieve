@@ -19,8 +19,9 @@ extension CursorOwnershipTests {
         let library = SkillLibraryViewModel(
             skillStore: store,
             fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
-        )
+            manifestRoot: root + "/manifest",
+            manifestSaves: trackedManifestSaves(manifest: RecordingDeletionManifest(), root: root + "/manifest",
+                lockPath: root + "/manifest" + ".sync.lock", files: mapped))
         XCTAssertTrue(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project], context: harness.context))
         XCTAssertEqual(writes, 1, "Skill deletion retires its records in one durable batch")

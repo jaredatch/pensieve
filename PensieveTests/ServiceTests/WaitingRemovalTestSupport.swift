@@ -31,9 +31,10 @@ struct WaitingRemovalHarness {
         library = SkillLibraryViewModel(
             skillStore: SkillStore(fileService: mapped, baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: ManifestService(fileService: base.files), manifestRoot: base.root + "/store",
-            notifier: {}
-        )
+            manifestRoot: base.root + "/store",
+            notifier: {},
+            manifestSaves: ManifestSaveModel(manifest: ManifestService(fileService: base.files), root: base.root + "/store",
+                lockPath: base.root + "/store" + ".sync.lock", files: mapped))
         try base.files.writeFile(at: base.root + "/support/machine-id", content: ProjectIntentHarness.localID + "\n")
     }
 
@@ -68,7 +69,8 @@ struct WaitingRemovalHarness {
     func removeProject() -> BatchResult {
         removeRegisteredProject(base.project, reconciler: base.category,
             manifestService: ManifestService(fileService: base.files), manifestRoot: base.root + "/store",
-            platformVM: vm, localMachineID: ProjectIntentHarness.localID, context: base.context)
+            platformVM: vm, localMachineID: ProjectIntentHarness.localID, context: base.context,
+            lockPath: base.root + "/store" + ".sync.lock")
     }
 
     func converge() -> [String] {

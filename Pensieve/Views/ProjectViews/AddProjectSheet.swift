@@ -9,23 +9,17 @@ struct AddProjectSheet: View {
     @State private var didSubmit = false
     @FocusState private var nameFocused: Bool
 
-    private let manifestService: ManifestSnapshotting
-    private let manifestRoot: String
     private let notifier: SyncStateNotifying
     private let intentReconciler: @MainActor (ModelContext) -> BatchResult
     private let onCreated: (Project) -> Void
 
     init(
         model: AddProjectModel = AddProjectModel(),
-        manifestService: ManifestSnapshotting = ManifestService(),
-        manifestRoot: String,
         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
         intentReconciler: @escaping @MainActor (ModelContext) -> BatchResult = { _ in BatchResult() },
         onCreated: @escaping (Project) -> Void = { _ in }
     ) {
         _model = State(initialValue: model)
-        self.manifestService = manifestService
-        self.manifestRoot = manifestRoot
         self.notifier = notifier
         self.intentReconciler = intentReconciler
         self.onCreated = onCreated
@@ -76,8 +70,6 @@ struct AddProjectSheet: View {
         didSubmit = true
         let created = registerProject(
             project,
-            manifestService: manifestService,
-            manifestRoot: manifestRoot,
             context: context,
             intentReconciler: intentReconciler,
             notifier: notifier

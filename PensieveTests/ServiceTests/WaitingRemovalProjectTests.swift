@@ -106,8 +106,8 @@ final class WaitingRemovalProjectTests: XCTestCase {
             reconciler: h.base.category, manifestRoot: TestPaths.storeRoot,
             platformVM: vm,
             localMachineID: ProjectIntentHarness.localID,
-            context: h.base.context
-        )
+            context: h.base.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(try h.base.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.base.otherProject.id])
         XCTAssertTrue(try vm.waitingRemovalStore.read().isEmpty)

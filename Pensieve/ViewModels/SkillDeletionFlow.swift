@@ -82,7 +82,7 @@ enum SkillDeletionFlow {
                 let message = library.deletionNotice?.message ?? ""
                 let namedMessage: String
                 switch outcome {
-                case .deleted, .deletedManifestStale:
+                case .deleted:
                     namedMessage = message.isEmpty ? "Deleted “\(skill.name)”." : message
                 case .directoryDeletedRowRetained:
                     namedMessage = message.isEmpty ? "Removed “\(skill.name)”'s files; its entry stays listed." : message
@@ -132,7 +132,7 @@ enum SkillDeletionFlow {
         library: SkillLibraryViewModel
     ) -> Bool {
         switch outcome {
-        case .deleted, .deletedManifestStale:
+        case .deleted:
             if manifestNote.isEmpty {
                 library.deletionNotice = nil
             } else {

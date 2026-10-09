@@ -100,7 +100,7 @@ final class CategoryDetailModelTests: XCTestCase {
             deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
         )
         return CategoryDetailModel(
-            store: CategoryStore(manifestRoot: TestPaths.storeRoot),
+            store: CategoryStore(),
             reconciler: CategoryReconciler(platformVM: platformVM)
         )
     }

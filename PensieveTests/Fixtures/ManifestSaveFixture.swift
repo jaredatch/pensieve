@@ -22,17 +22,18 @@ final class ManifestSaveFixture {
     let beta = Skill(name: "Beta", directoryName: "beta")
     let project: Project
 
-    init(unopenableLock: Bool = false) throws {
+    init(unopenableLock: Bool = false, waitSeconds: TimeInterval = 0.01) throws {
         root = TestTemporaryDirectory.path + "manifest-save-" + UUID().uuidString
         lockPath = root + "/support/sync.lock"
         context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
         recording = RecordingSaveManifest()
         let messages = messages
-        saves = ManifestSaveModel(manifest: recording, root: root, lockPath: lockPath, log: { messages.lines.append($0) })
+        saves = ManifestSaveModel(manifest: recording, root: root, lockPath: lockPath,
+        waitSeconds: waitSeconds, log: { messages.lines.append($0) })
         library = SkillLibraryViewModel(skillStore: SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root),
-            fileWatchService: FileWatchService(rootDir: root + "/skills"), manifestService: manifest,
+            fileWatchService: FileWatchService(rootDir: root + "/skills"),
             manifestRoot: root, manifestSaves: saves)
-        categories = CategoryStore(manifestService: manifest, manifestRoot: root, manifestSaves: saves)
+        categories = CategoryStore( manifestSaves: saves)
         project = Project(name: "Local", path: root + "/project")
         project.identityKey = "local-key"
         for skill in [alpha, beta] {
@@ -88,6 +89,7 @@ final class RecordingSaveManifest: ManifestSnapshotting {
     private var snapshots: [ManifestSnapshot] = []
     var failingWrites = 0
     var failingSnapshots = 0
+    var afterWrite: (() -> Void)?
     struct Refused: Error {}
     var writes: [ManifestSnapshot] {
         lock.lock()
@@ -105,5 +107,6 @@ final class RecordingSaveManifest: ManifestSnapshotting {
         lock.lock()
         snapshots.append(snapshot)
         lock.unlock()
+        afterWrite?()
     }
 }

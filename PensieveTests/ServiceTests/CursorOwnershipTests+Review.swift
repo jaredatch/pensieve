@@ -159,8 +159,9 @@ extension CursorOwnershipTests {
         let library = SkillLibraryViewModel(
             skillStore: store,
             fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
-        )
+            manifestRoot: root + "/manifest",
+            manifestSaves: trackedManifestSaves(manifest: RecordingDeletionManifest(), root: root + "/manifest",
+                lockPath: root + "/manifest" + ".sync.lock", files: mapped))
         XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: vm,
             projects: [project], context: h.context))
         XCTAssertFalse(adapter.preparedPaths.contains(path), "A failed admission has no artifact operation")

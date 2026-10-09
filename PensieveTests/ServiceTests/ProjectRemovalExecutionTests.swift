@@ -21,8 +21,8 @@ final class ProjectRemovalExecutionTests: XCTestCase {
             reconciler: h.category, manifestRoot: TestPaths.storeRoot,
             platformVM: h.platformVM,
             localMachineID: ProjectIntentHarness.localID,
-            context: h.context
-        )
+            context: h.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
         XCTAssertTrue(result.hasFailures)
         XCTAssertFalse(result.didRetireProjectEvidence, "Saving another project's edit did not retire this project's evidence")
         XCTAssertFalse(h.context.hasChanges, "The unrelated pending edit reached the final save")
@@ -47,8 +47,8 @@ final class ProjectRemovalExecutionTests: XCTestCase {
             reconciler: h.category, manifestRoot: TestPaths.storeRoot,
             platformVM: h.platformVM,
             localMachineID: ProjectIntentHarness.localID,
-            context: h.context
-        )
+            context: h.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(result.didRetireProjectEvidence, "A saved project ledger retirement is evidence even without state rows")
         let remaining = try h.context.fetch(FetchDescriptor<IntentAssignment>())
@@ -79,8 +79,8 @@ final class ProjectRemovalExecutionTests: XCTestCase {
             reconciler: h.category, manifestRoot: TestPaths.storeRoot,
             platformVM: h.platformVM,
             localMachineID: ProjectIntentHarness.localID,
-            context: h.context
-        )
+            context: h.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
         XCTAssertEqual(result.failureCount, 2)
         let message = ProjectRemovalModel.removalFailureMessage(projectName: h.project.name, result: result)
         let artifact = try XCTUnwrap(message.range(of: "Artifact delete failed"))
@@ -114,8 +114,8 @@ final class ProjectRemovalExecutionTests: XCTestCase {
             reconciler: reconciler, manifestRoot: TestPaths.storeRoot,
             platformVM: h.platformVM,
             localMachineID: ProjectIntentHarness.localID,
-            context: h.context
-        )
+            context: h.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
         XCTAssertEqual(result.failureCount, 1)
         XCTAssertTrue(result.failures.first?.error?.contains("Could not check ownership") == true)
         XCTAssertTrue(result.failures.first?.error?.contains(path) == true)
@@ -142,8 +142,8 @@ final class ProjectRemovalExecutionTests: XCTestCase {
                 platformVM: h.platformVM,
                 localMachineID: ProjectIntentHarness.localID,
                 confirmedPreview: plan,
-                context: h.context
-            )
+                context: h.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
         }
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(model.error?.contains("changed") == true)
@@ -169,8 +169,8 @@ final class ProjectRemovalExecutionTests: XCTestCase {
             platformVM: h.platformVM,
             localMachineID: ProjectIntentHarness.localID,
             confirmedPreview: model.preview,
-            context: h.context
-        )
+            context: h.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
         let message = ProjectRemovalModel.removalFailureMessage(projectName: h.project.name, result: result)
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(message.contains("folder"))
@@ -207,7 +207,8 @@ extension ProjectRemovalExecutionTests {
         let result = model.confirm { project, preview in
             removeRegisteredProject(project, reconciler: reconciler, manifestService: manifest,
                 manifestRoot: root, platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
-                confirmedPreview: preview, context: h.context)
+                confirmedPreview: preview, context: h.context,
+            lockPath: root + ".sync.lock")
         }
         XCTAssertTrue(checkpoint)
         XCTAssertTrue(result.hasFailures)
@@ -220,7 +221,8 @@ extension ProjectRemovalExecutionTests {
         try h.files.replaceItem(at: h.project.path, with: h.root + "/offline")
         XCTAssertFalse(removeRegisteredProject(h.project, reconciler: h.category, manifestService: manifest,
             manifestRoot: root, platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
-            context: h.context).hasFailures)
+            context: h.context,
+            lockPath: root + ".sync.lock").hasFailures)
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 1)
         XCTAssertFalse(try h.files.entryExistsWithoutFollowingLinks(at: h.artifact(.codex)))
         XCTAssertTrue(try h.deployState.read().records.isEmpty)
@@ -244,8 +246,8 @@ extension ProjectRemovalExecutionTests {
                 platformVM: h.platformVM,
                 localMachineID: ProjectIntentHarness.localID,
                 confirmedPreview: plan,
-                context: h.context
-            )
+                context: h.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
         }
         XCTAssertNil(model.error)
         XCTAssertEqual(targetReads, 9, "Confirmation, current execution classification and the protective leaf check")
@@ -272,7 +274,8 @@ extension ProjectRemovalExecutionTests {
         }
         XCTAssertFalse(removeRegisteredProject(h.project, reconciler: h.category, manifestService: manifest,
             manifestRoot: h.root + "/sync", platformVM: h.platformVM,
-            localMachineID: ProjectIntentHarness.localID, context: h.context).hasFailures)
+            localMachineID: ProjectIntentHarness.localID, context: h.context,
+            lockPath: h.root + "/sync" + ".sync.lock").hasFailures)
         XCTAssertEqual(writes, 1)
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 1)
     }

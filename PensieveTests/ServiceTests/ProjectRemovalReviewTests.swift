@@ -52,8 +52,8 @@ final class ProjectRemovalReviewTests: XCTestCase {
             platformVM: h.platformVM,
             localMachineID: ProjectIntentHarness.localID,
             confirmedPreview: confirmed.preview,
-            context: h.context
-        )
+            context: h.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
         XCTAssertFalse(result.hasFailures)
         XCTAssertTrue(h.files.isSymlink(at: path), "An artifact outside the confirmed owned set survives")
         XCTAssertTrue(try h.deployState.read().records.isEmpty)

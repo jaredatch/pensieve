@@ -55,7 +55,11 @@ final class PensieveAppDelegate: NSObject, NSApplicationDelegate {
         saves: ManifestSaveModel? = nil,
         saveTermination: PendingSaveTermination? = nil
     ) -> NSApplication.TerminateReply {
-        guard !questionOpen, saveTermination?.isWaiting != true else { return .terminateCancel }
+        if saveTermination?.isWaiting == true {
+            saveTermination?.requestQuestion()
+            return .terminateCancel
+        }
+        guard !questionOpen else { return .terminateCancel }
         let hasPendingSave = (saves?.pendingCount ?? 0) > 0
         guard hasUnsavedChanges || hasPendingSave else { return .terminateNow }
         let finish: (Bool) -> Void = { allowed in
