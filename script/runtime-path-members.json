@@ -1,0 +1,12 @@
+{
+  "location": [
+    "homeDirectory", "pensieveBaseDir", "pensieveSkillsDir", "pensieveAppSupportDir", "gitAskpassHelperPath",
+    "claudeCodeUserSkillsDir", "grokUserSkillsDir", "codexUserSkillsDir", "openClawUserSkillsDir",
+    "hermesUserSkillsDir", "cursorUserRulesDir"
+  ],
+  "nonLocation": [
+    "hermesDefaultCategory", "claudeCodeProjectSkillsRel", "grokProjectSkillsRel", "codexAgentsRel",
+    "defaultClaudeCodeTokenBudget", "defaultGrokTokenBudget", "defaultCursorTokenBudget",
+    "defaultCodexTokenBudget", "defaultSkillSizeTokenBudget", "charsPerToken"
+  ]
+}

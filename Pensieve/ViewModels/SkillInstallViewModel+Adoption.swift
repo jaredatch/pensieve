@@ -67,7 +67,7 @@ extension SkillInstallViewModel {
     ) async {
         guard operationID == id, !Task.isCancelled else { return }
         let service = service
-        let task = Task.detached(priority: .userInitiated) {
+        let task = BlockingWork.task(priority: .userInitiated) {
             try Self.performTargetedAdoptionRequest(request, service: service)
         }
         backgroundCancel = { task.cancel() }

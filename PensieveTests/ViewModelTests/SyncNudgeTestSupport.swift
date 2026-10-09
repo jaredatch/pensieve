@@ -17,12 +17,22 @@ final class Counter {
 }
 
 final class MemorySkillStore: SkillStoreProtocol {
+    let baseDir = TestPaths.skillsDir
     var bodies: [String: String] = [:]
 
     func createSkill(name: String, description: String, body: String) throws -> String {
-        let slug = SkillStore.slugify(name)
-        bodies[slug] = SkillSerializer.serialize(name: name, description: description, body: body)
-        return slug
+        try createSkill(name: name, description: description, body: body, avoiding: [])
+    }
+
+    func createSkill(name: String, description: String, body: String, avoiding: Set<String>) throws -> String {
+        try createSkill(name: name, content: SkillSerializer.serialize(name: name, description: description, body: body),
+                        avoiding: avoiding)
+    }
+
+    func createSkill(name: String, content: String, avoiding: Set<String>) throws -> String {
+        let candidate = SkillStore.availableDirectoryName(for: name, occupied: Set(bodies.keys).union(avoiding))
+        bodies[candidate] = content
+        return candidate
     }
 
     func readBody(directoryName: String) throws -> String { bodies[directoryName] ?? "" }

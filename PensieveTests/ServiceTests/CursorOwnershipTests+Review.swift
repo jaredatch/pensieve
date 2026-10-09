@@ -13,8 +13,13 @@ extension CursorOwnershipTests {
         let path = link.path(skill, .claudeCode, project.path)
         link.linkedPaths.insert(path)
         try reviewRecord(h.state, path: path, platform: .claudeCode, target: .project(project))
-        let vm = PlatformViewModel(fileService: mapped, linkService: link,
-            agentDetection: DeployStubDetection(installed: [.claudeCode]), deployStateStore: h.state)
+        let vm = PlatformViewModel(
+            fileService: mapped,
+            linkService: link,
+            cursorCompiler: TestPaths.cursorCompiler(fileService: mapped),
+            agentDetection: DeployStubDetection(installed: [.claudeCode]),
+            deployStateStore: h.state, skillsDirectory: TestPaths.skillsDir
+        )
         let result = vm.removeOwnedBatch(pairs: [DeployRemovalPair(skill: skill, platform: .claudeCode),
             DeployRemovalPair(skill: second, platform: .claudeCode)], target: .project(project))
         XCTAssertFalse(result.hasFailures)
@@ -31,11 +36,11 @@ extension CursorOwnershipTests {
         let project = reviewProject(h.context)
         let second = Skill(name: "Other pair", directoryName: "other-pair")
         h.context.insert(second)
-        let link = LinkService(fileService: mapped)
+        let link = TestPaths.linkService(fileService: mapped)
         let firstPath = artifactPath(.claudeCode, project: project.path)
         let secondPath = link.linkPath(skill: second, platform: .claudeCode, projectPath: project.path)
         try plant(owned: true, legacy: false, platform: .claudeCode, path: firstPath, project: project.path)
-        try mapped.createSymlink(at: secondPath, pointingTo: Constants.pensieveSkillsDir + "/" + second.directoryName)
+        try mapped.createSymlink(at: secondPath, pointingTo: TestPaths.skillsDir + "/" + second.directoryName)
         mapped.beforeSymlinkRead = { path in
             guard path == secondPath else { return }
             if try self.mapped.entryExistsWithoutFollowingLinks(at: firstPath) {
@@ -94,7 +99,7 @@ extension CursorOwnershipTests {
         let invalid = Skill(name: "Invalid", directoryName: "../escape")
         h.context.insert(project)
         h.context.insert(invalid)
-        let link = LinkService(fileService: mapped)
+        let link = TestPaths.linkService(fileService: mapped)
         let path = link.linkPath(skill: invalid, platform: .claudeCode, projectPath: project.path)
         try reviewRecord(h.state, path: path, platform: .claudeCode, target: .project(project))
         XCTAssertThrowsError(try link.unlink(skill: invalid, platform: .claudeCode, projectPath: project.path))
@@ -112,9 +117,14 @@ extension CursorOwnershipTests {
         let path = artifactPath(.claudeCode, project: project.path)
         try plant(owned: true, legacy: false, platform: .claudeCode, path: path, project: project.path)
         try reviewRecord(h.state, path: path, platform: .claudeCode, target: .project(project))
-        let adapter = ReviewLinkAdapter(wrapped: LinkService(fileService: mapped))
-        let vm = PlatformViewModel(fileService: mapped, linkService: adapter,
-            agentDetection: DeployStubDetection(installed: [.claudeCode]), deployStateStore: h.state)
+        let adapter = ReviewLinkAdapter(wrapped: TestPaths.linkService(fileService: mapped))
+        let vm = PlatformViewModel(
+            fileService: mapped,
+            linkService: adapter,
+            cursorCompiler: TestPaths.cursorCompiler(fileService: mapped),
+            agentDetection: DeployStubDetection(installed: [.claudeCode]),
+            deployStateStore: h.state, skillsDirectory: TestPaths.skillsDir
+        )
         var reads = 0
         mapped.beforeSymlinkRead = { _ in reads += 1 }
         let result = vm.removeOwnedBatch(pairs: [DeployRemovalPair(skill: skill, platform: .claudeCode)],
@@ -136,13 +146,21 @@ extension CursorOwnershipTests {
             targetPath: path, contentHash: "local", projectID: project.id))
         try h.context.save()
         let adapter = ReviewCursorAdapter(wrapped: compiler)
-        let vm = PlatformViewModel(fileService: mapped, cursorCompiler: adapter,
-            agentDetection: DeployStubDetection(installed: [.cursor]), deployStateStore: h.state)
+        let vm = PlatformViewModel(
+            fileService: mapped,
+            linkService: TestPaths.linkService(fileService: mapped),
+            cursorCompiler: adapter,
+            agentDetection: DeployStubDetection(installed: [.cursor]),
+            deployStateStore: h.state, skillsDirectory: TestPaths.skillsDir
+        )
         mapped.beforeEntryTypeProbe = { candidate in
             if candidate == path { throw DeletionTestError() }
         }
-        let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+        let library = SkillLibraryViewModel(
+            skillStore: store,
+            fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
+        )
         XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: vm,
             projects: [project], context: h.context))
         XCTAssertFalse(adapter.preparedPaths.contains(path), "A failed admission has no artifact operation")

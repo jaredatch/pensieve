@@ -13,9 +13,9 @@ final class RuntimeGitState {
     private(set) var usability: GitUsability?
     private var evidenceOrder = 0
     private var appliedEvidenceOrder = 0
-    private let probe: () -> GitUsability
+    private let probe: () throws -> GitUsability
 
-    init(probe: @escaping () -> GitUsability) { self.probe = probe }
+    init(probe: @escaping () throws -> GitUsability) { self.probe = probe }
 
     func failureClassifier() -> (Error) -> ClassifiedUpdateFailure {
         let probe = probe
@@ -36,7 +36,7 @@ final class RuntimeGitState {
         let recovered = usability != nil && usability != .usable && value == .usable
         let wasUnavailable = model.configurationError != nil
         usability = value
-        model.gitUsabilityDidChange(wasUnavailable: wasUnavailable)
+        model.gitUsabilityDidChange(wasUnavailable: wasUnavailable, recovered: recovered)
         return Change(usability: value, recovered: recovered)
     }
 
@@ -46,10 +46,16 @@ final class RuntimeGitState {
         let cached = usability
         let probe = probe
         let read = model.configurationRead()
-        let (observed, remote) = await Task.detached(priority: .utility) {
-            let observed = probingGit ? probe() : nil
-            let remote = (observed ?? cached) == .usable ? read() : nil
-            return (observed, remote)
+        let (observed, remote) = await BlockingWork.task(priority: .utility) {
+            () -> (GitUsability?, Result<SyncModel.Configuration, Error>?) in
+            do {
+                let observed = probingGit ? try probe() : nil
+                let remote = (observed ?? cached) == .usable ? read() : nil
+                return (observed, remote)
+            } catch {
+                // A failed probe supplies no host evidence. Only known unusable git gates configuration failures.
+                return (nil, cached == nil || cached == .usable ? .failure(error) : nil)
+            }
         }.value
         let change: Change?
         if let observed, let evidence {

@@ -24,14 +24,12 @@ final class PostSyncConvergence: PostSyncConverging {
     private let didConverge: () -> Void
 
     init(
-        root: String = Constants.pensieveBaseDir,
+        root: String,
         deployReconciler: DeployReconciling,
         contextFactory: @escaping ContextFactory,
         categoryReconciler: CategoryReconcilerProtocol,
         intentReconciler: IntentReconcilerProtocol,
-        auditLog: @escaping (_ category: String, _ detail: String) -> Void = {
-            SyncAudit().append(category: $0, detail: $1)
-        },
+        auditLog: @escaping (_ category: String, _ detail: String) -> Void,
         didConverge: @escaping () -> Void = {}
     ) {
         self.root = root

@@ -26,8 +26,11 @@ extension CursorOwnershipTests {
         let foreignPath = artifactPath(.cursor, project: unrecorded.path)
         let shared = "---\n# pensieve: managed\n---\nTeammate's rule"
         try mapped.writeFile(at: foreignPath, content: shared)
-        let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+        let library = SkillLibraryViewModel(
+            skillStore: store,
+            fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
+        )
         XCTAssertTrue(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project, unrecorded], context: harness.context))
         XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path))

@@ -20,7 +20,8 @@ final class UpdatesViewModelTests: XCTestCase {
         )
         context = ModelContext(container)
         library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: tempDir + "/skills"), fileService: fileService,
+            skillStore: SkillStore(fileService: fileService, baseDir: tempDir + "/skills",
+                storeRoot: tempDir), fileService: fileService,
             fileWatchService: FileWatchService(rootDir: tempDir + "/skills"), manifestRoot: tempDir
         )
     }

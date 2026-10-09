@@ -13,15 +13,24 @@ final class SyncModel {
         case conflicted([String])
         case error(String)
         case unconfigured
+        case branchless
     }
 
-    private(set) var state: SyncState
+    private(set) var state: SyncState {
+        didSet { if oldValue != state { conflictedSlugs = Self.slugs(for: state) } }
+    }
     private(set) var remoteURL: String?
     private var remoteReadError: String?
     var configurationError: String? {
         gitState?.usability?.message ?? remoteReadError
     }
+    struct Configuration {
+        let remoteURL: String?
+        let hasLocalBranches: Bool
+    }
+
     private var knownAbsent = false
+    private var knownBranchless = false
     private var gitState: RuntimeGitState?
     private var configurationOrder = 0
     private var appliedConfigurationOrder = 0
@@ -31,35 +40,31 @@ final class SyncModel {
     private let git: GitServiceProtocol
     private let root: String
     private var syncRequest: (() async -> Void)?
-    private var pendingManualSyncRequest: (() -> Void)?
-    private var pendingScheduledSyncRequest: (() -> Void)?
+    private var pendingSyncRequest: ((SyncRequest) -> Void)?
     private(set) var isCycleInFlight = false
-    private var hasQueuedManualFollowUp = false
-    private var hasQueuedScheduledFollowUp = false
+    private var queuedRequest: SyncRequest?
     private var recoveredDuringCycle = false
-    private var cycleProvedGitUsable = false
+    private var cycleFailed = false
+    private enum ManualRetry { case awaitingOutage, inOutage, ready, queued }
+    private var manualRetry: ManualRetry?
 
     /// The skill slugs currently in conflict, for row/detail badges. Strips `skills/<slug>/SKILL.md` and
     /// `manifest/skills/<slug>.yaml` to `<slug>`; category/project manifest paths are not skills.
-    var conflictedSlugs: Set<String> {
+    private(set) var conflictedSlugs: Set<String>
+
+    private static func slugs(for state: SyncState) -> Set<String> {
         guard case let .conflicted(paths) = state else { return [] }
-        var slugs = Set<String>()
-        for path in paths {
-            if path.hasPrefix("skills/"), path.hasSuffix("/SKILL.md") {
-                slugs.insert(String(path.dropFirst("skills/".count).dropLast("/SKILL.md".count)))
-            } else if path.hasPrefix("manifest/skills/"), path.hasSuffix(".yaml") {
-                slugs.insert(String(path.dropFirst("manifest/skills/".count).dropLast(".yaml".count)))
-            }
-        }
-        return slugs
+        return Set(paths.compactMap { SyncEngine.conflictPath(for: $0).skillSlug })
     }
 
-    init(git: GitServiceProtocol = GitService(),
-         root: String = Constants.pensieveBaseDir,
+    init(git: GitServiceProtocol,
+         root: String,
          initialState: SyncState = .idle) {
         self.git = git
         self.root = root
         self.state = initialState
+        self.conflictedSlugs = Self.slugs(for: initialState)
+        self.knownBranchless = initialState == .branchless
     }
 
     /// Body-safe: derives from observed configuration, never from a live git read.
@@ -82,6 +87,8 @@ final class SyncModel {
     }
 
     var canSyncNow: Bool { isConfigured && !isConflicted && !isCycleInFlight }
+    /// Recovery catch-ups refuse known branchlessness; ordinary requests can discover an external branch.
+    var canScheduleSync: Bool { isConfigured && !knownBranchless && !isConflicted }
     var canResolve: Bool { isConflicted && canStartConflictResolution }
     var canStartConflictResolution: Bool { !isCycleInFlight }
 
@@ -89,24 +96,35 @@ final class SyncModel {
         syncRequest = request
     }
 
-    func installPendingSyncRequest(_ request: @escaping () -> Void) {
-        pendingManualSyncRequest = request
-    }
-
-    func installPendingScheduledSyncRequest(_ request: @escaping () -> Void) {
-        pendingScheduledSyncRequest = request
+    func installPendingSyncRequest(_ request: @escaping (SyncRequest) -> Void) {
+        pendingSyncRequest = request
     }
 
     /// Captures leaf collaborators for the runtime's off-main configuration read.
-    func configurationRead() -> () -> Result<String?, Error> {
+    func configurationRead() -> () -> Result<Configuration, Error> {
         let git = git
         let root = root
-        return { Result { try git.remoteURL(at: root) } }
+        return { Result {
+            let remote = try git.remoteURL(at: root)
+            let hasBranches = remote == nil ? true : try git.hasLocalBranches(at: root)
+            return Configuration(remoteURL: remote, hasLocalBranches: hasBranches)
+        } }
     }
 
     func observeGitState(_ state: RuntimeGitState) { gitState = state }
 
-    func gitUsabilityDidChange(wasUnavailable: Bool) {
+    func gitUsabilityDidChange(wasUnavailable: Bool, recovered: Bool) {
+        if gitState?.usability == .usable {
+            if recovered && manualRetry == .inOutage {
+                manualRetry = .ready
+            } else if manualRetry != .queued {
+                manualRetry = nil
+            }
+        } else if manualRetry == .awaitingOutage {
+            manualRetry = .inOutage
+        } else if manualRetry == .ready || manualRetry == .queued {
+            manualRetry = nil
+        }
         updateConfigurationState(wasUnavailable: wasUnavailable)
     }
 
@@ -115,20 +133,23 @@ final class SyncModel {
         return configurationOrder
     }
 
-    func applyConfiguration(_ remote: Result<String?, Error>, order: Int) {
+    func applyConfiguration(_ remote: Result<Configuration, Error>, order: Int) {
         guard order > appliedConfigurationOrder else { return }
         appliedConfigurationOrder = order
         let wasUnavailable = configurationError != nil
         switch remote {
         case let .failure(error):
             knownAbsent = false
+            knownBranchless = false
             remoteReadError = DisplayTextSanitizer.singleLine(error.localizedDescription)
-        case let .success(url):
-            knownAbsent = url == nil
-            remoteURL = url
+        case let .success(configuration):
+            knownAbsent = configuration.remoteURL == nil
+            knownBranchless = !knownAbsent && !configuration.hasLocalBranches
+            remoteURL = configuration.remoteURL
             remoteReadError = nil
         }
         updateConfigurationState(wasUnavailable: wasUnavailable)
+        enqueueManualRetryIfPossible()
     }
 
     private func updateConfigurationState(wasUnavailable: Bool) {
@@ -137,7 +158,9 @@ final class SyncModel {
             state = .error(configurationError)
         } else if knownAbsent {
             state = .unconfigured
-        } else if wasUnavailable || state == .unconfigured {
+        } else if knownBranchless {
+            state = .branchless
+        } else if wasUnavailable || state == .unconfigured || state == .branchless {
             state = lastSyncedAt.map { .synced(at: $0) } ?? .idle
         }
     }
@@ -155,58 +178,67 @@ final class SyncModel {
         await syncNowAndReport()
     }
 
-    func syncNowAndReport() async {
-        await requestSync(isScheduled: false)
-    }
+    func syncNowAndReport() async { await syncAndReport(.manual) }
 
-    func syncScheduledAndReport() async {
-        await requestSync(isScheduled: true)
+    func syncScheduledAndReport() async { await syncAndReport(.scheduled) }
+
+    func syncRequestWasDiscarded(_ request: SyncRequest) {
+        if request.contains(.manualRecovery), manualRetry == .queued { manualRetry = .ready }
     }
 
     func resumeAfterGitRecovery() {
         if isCycleInFlight {
             recoveredDuringCycle = true
         } else {
-            pendingScheduledSyncRequest?()
+            if manualRetry != nil {
+                enqueueManualRetryIfPossible()
+            } else if canScheduleSync {
+                pendingSyncRequest?(.scheduled)
+            }
         }
     }
 
-    private func requestSync(isScheduled: Bool) async {
+    func syncAndReport(_ request: SyncRequest, onCycleStart: (() -> Void)? = nil) async {
+        guard !redispatchIfRecoveryIsRefused(request) else { return }
         guard !isCycleInFlight else {
-            if isScheduled {
-                hasQueuedScheduledFollowUp = true
-            } else {
-                hasQueuedManualFollowUp = true
-            }
+            queuedRequest = queuedRequest.map { $0.absorbing(request) } ?? request
             return
         }
         guard canSyncNow else { return }
-        guard let syncRequest else {
-            (isScheduled ? pendingScheduledSyncRequest : pendingManualSyncRequest)?()
-            return
-        }
+        guard let syncRequest else { pendingSyncRequest?(request); return }
         isCycleInFlight = true
         recoveredDuringCycle = false
-        cycleProvedGitUsable = false
-        defer {
-            if recoveredDuringCycle && !cycleProvedGitUsable { hasQueuedScheduledFollowUp = true }
-            recoveredDuringCycle = false
-            isCycleInFlight = false
-            if hasQueuedManualFollowUp {
-                hasQueuedManualFollowUp = false
-                hasQueuedScheduledFollowUp = false
-                if canSyncNow { pendingManualSyncRequest?() }
-            } else if hasQueuedScheduledFollowUp {
-                hasQueuedScheduledFollowUp = false
-                if canSyncNow { pendingScheduledSyncRequest?() }
-            }
-        }
+        cycleFailed = false
+        manualRetry = nil
+        defer { finishCycle(request) }
         state = .syncing
+        onCycleStart?()
         await syncRequest()
     }
 
+    private func finishCycle(_ request: SyncRequest) {
+        if request.contains(.manual) && cycleFailed {
+            manualRetry = recoveredDuringCycle ? .ready
+                : gitState?.usability?.message != nil ? .inOutage : .awaitingOutage
+        }
+        if recoveredDuringCycle && canScheduleSync {
+            let catchUp: SyncRequest = manualRetry == .ready ? .manualRecovery : .scheduled
+            queuedRequest = queuedRequest.map { $0.absorbing(catchUp) } ?? catchUp
+        }
+        recoveredDuringCycle = false
+        isCycleInFlight = false
+        let followUp = queuedRequest
+        queuedRequest = nil
+        if let followUp, canSyncNow {
+            if followUp.contains(.manualRecovery) { manualRetry = .queued }
+            pendingSyncRequest?(followUp)
+        }
+    }
+
     func apply(_ result: SyncCycleResult) {
-        if isCycleInFlight { cycleProvedGitUsable = result.provesGitUsable }
+        if isCycleInFlight {
+            if case .failed = result { cycleFailed = true }
+        }
         defer {
             // Usability keeps its own clock, including when no configuration read follows.
             if let message = gitState?.usability?.message, state != .syncing, !isConflicted {
@@ -215,15 +247,19 @@ final class SyncModel {
         }
         switch result {
         case let .synced(_, warnings, completedAt, _):
+            knownBranchless = false
             lastSyncedAt = completedAt
             lastWarnings = warnings
             state = .synced(at: completedAt)
         case let .conflicted(paths):
             state = .conflicted(paths)
         case .noRemote:
-            // Branchless stores also return noRemote. Only a configuration read answers whether origin is absent.
+            // Only a configuration read answers whether origin is absent.
             state = configurationError.map { .error($0) }
                 ?? (knownAbsent ? .unconfigured : lastSyncedAt.map { .synced(at: $0) } ?? .idle)
+        case .branchless:
+            knownBranchless = true
+            state = .branchless
         case .locked:
             state = configurationError.map { .error($0) } ?? lastSyncedAt.map { .synced(at: $0) } ?? .idle
         case let .failed(message):
@@ -243,6 +279,29 @@ final class SyncModel {
         let now = Date()
         lastSyncedAt = now
         state = configurationError.map { .error($0) } ?? .synced(at: now)
+        enqueueManualRetryIfPossible()
     }
 
+}
+
+private extension SyncModel {
+    func redispatchIfRecoveryIsRefused(_ request: SyncRequest) -> Bool {
+        guard request.contains(.manualRecovery) else { return false }
+        let retryAvailable = manualRetry == .ready || manualRetry == .queued
+        guard retryAvailable && canScheduleSync else {
+            if retryAvailable { manualRetry = .ready }
+            let remaining = request.subtracting(.manualRecovery)
+            // Redispatch applies the surviving request's own preference and priority rules.
+            if !remaining.isEmpty { pendingSyncRequest?(remaining) }
+            return true
+        }
+        return false
+    }
+
+    func enqueueManualRetryIfPossible() {
+        guard manualRetry == .ready, !isCycleInFlight, canScheduleSync,
+              gitState?.usability == .usable, let pendingSyncRequest else { return }
+        manualRetry = .queued
+        pendingSyncRequest(.manualRecovery)
+    }
 }

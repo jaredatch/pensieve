@@ -40,12 +40,7 @@ extension UpdateCheckServiceTests {
         let skill = insertSkill(slug: "drift", repo: "fixture://repo", path: "skills/drift")
         let directory = tempDir + "/store/skills/drift"
         try fileService.writeFile(at: directory + "/SKILL.md", content: "pristine")
-        let hasher = SkillInstallService(
-            credentialStore: InMemoryCredentialStore(),
-            fileService: fileService,
-            storeRoot: tempDir + "/store",
-            remoteValidator: fixtureRemoteValidator
-        )
+        let hasher = makeContentHasher()
         var origin = try XCTUnwrap(skill.installedOrigin); origin.contentHash = try hasher.stableContentHash(at: directory)
         skill.installedOrigin = origin
         let service = makeService()

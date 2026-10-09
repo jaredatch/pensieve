@@ -20,7 +20,7 @@ struct SidebarView: View {
 @MainActor
 func registerProject(_ project: Project,
                      manifestService: ManifestSnapshotting? = nil,
-                     manifestRoot: String = Constants.pensieveBaseDir,
+                     manifestRoot: String,
                      context: ModelContext,
                      intentReconciler: (@MainActor (ModelContext) -> BatchResult)? = nil,
                      notifier: SyncStateNotifying = SyncStateNotifier.suppressed) -> Project {
@@ -51,7 +51,7 @@ private func regenerateProjectManifest(manifestService: ManifestSnapshotting?,
 func removeRegisteredProject(_ project: Project,
                              reconciler: CategoryReconcilerProtocol,
                              manifestService: ManifestSnapshotting? = nil,
-                             manifestRoot: String = Constants.pensieveBaseDir,
+                             manifestRoot: String,
                              stateFetcher: ReconcilerStateFetching = ReconcilerStateFetcher(),
                              platformVM: PlatformViewModel, localMachineID: String? = nil,
                              confirmedPreview: ProjectRemovalPreview? = nil,

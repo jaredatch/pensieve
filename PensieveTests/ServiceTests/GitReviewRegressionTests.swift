@@ -61,8 +61,8 @@ final class GitReviewRegressionTests: XCTestCase {
                 MESSAGE
                 exit 1
                 """)
-            XCTAssertEqual(git.probeUsability(), .developerToolsMissing)
-            XCTAssertTrue(git.probeUsability().message?.contains("xcode-select --install") == true)
+            XCTAssertEqual(try git.probeUsability(), .developerToolsMissing)
+            XCTAssertTrue(try git.probeUsability().message?.contains("xcode-select --install") == true)
         }
     }
 
@@ -114,6 +114,7 @@ final class GitReviewRegressionTests: XCTestCase {
         XCTAssertEqual(backfills, 0)
         XCTAssertEqual(convergence.launches, 0)
         let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: git,
+                                hasLocalBranches: git.hasLocalBranches,
                                 credentials: InMemoryCredentialStore(), reconciler: ReviewReconciler(), now: Date.init)
         XCTAssertEqual(daemon.runOnce().category, "failed")
     }
@@ -130,12 +131,12 @@ final class GitReviewRegressionTests: XCTestCase {
         XCTAssertFalse(fixture.files.fileExists(at: fixture.trace))
         try fixture.files.deleteDirectory(at: target)
         try fixture.files.writeFile(at: target, content: "not a directory")
-        XCTAssertThrowsError(try GitService().remoteURL(at: fixture.root)) { error in
+        XCTAssertThrowsError(try TestPaths.git.remoteURL(at: fixture.root)) { error in
             guard case GitError.repositoryUnreadable = error else { return XCTFail("\(error)") }
         }
         try fixture.files.deleteFile(at: fixture.root)
         try fixture.files.writeFile(at: fixture.root, content: "not a directory")
-        XCTAssertThrowsError(try GitService().remoteURL(at: fixture.root)) { error in
+        XCTAssertThrowsError(try TestPaths.git.remoteURL(at: fixture.root)) { error in
             guard case GitError.repositoryUnreadable = error else { return XCTFail("\(error)") }
         }
     }
@@ -148,7 +149,7 @@ final class GitReviewRegressionTests: XCTestCase {
         try FileManager.default.moveItem(atPath: fixture.root + "/metadata", toPath: fixture.root + "/.GIT")
         XCTAssertTrue(try fixture.files.listDirectory(at: fixture.root).contains(".GIT"))
         let expected = fixture.files.directoryExists(at: fixture.root + "/.git") ? "https://fixture.test/store.git" : nil
-        XCTAssertEqual(try GitService().remoteURL(at: fixture.root), expected)
+        XCTAssertEqual(try TestPaths.git.remoteURL(at: fixture.root), expected)
     }
 
     func testDeniedRootLookupRemainsUnknown() throws {
@@ -156,7 +157,7 @@ final class GitReviewRegressionTests: XCTestCase {
         defer { try? fixture.remove() }
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: fixture.root)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fixture.root) }
-        XCTAssertThrowsError(try GitService().remoteURL(at: fixture.root)) { error in
+        XCTAssertThrowsError(try TestPaths.git.remoteURL(at: fixture.root)) { error in
             guard case let GitError.repositoryUnreadable(path, _) = error else { return XCTFail("\(error)") }
             XCTAssertEqual(path, fixture.root)
         }
@@ -169,6 +170,7 @@ final class GitReviewRegressionTests: XCTestCase {
         try fixture.seedRepository()
         let git = try fixture.broken(.failed(GitFailureDetail("first line\nsecond line\r\nthird line\u{2028}last line")))
         let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: git,
+                                hasLocalBranches: git.hasLocalBranches,
                                 credentials: InMemoryCredentialStore(), reconciler: ReviewReconciler(), now: Date.init)
         let output = DaemonCLI.execute(["run"], appSupport: fixture.support,
                                        readFile: { try? fixture.files.readData(at: $0) },
@@ -190,11 +192,15 @@ final class GitReviewRegressionTests: XCTestCase {
         defer { try? fixture.remove() }
         try fixture.seedRepository()
         let git = try fixture.executable("""
-            if [ "$1" = '--version' ]; then echo 'git version fixture'; exit 0; fi
-            case "$3" in
-              fetch|pull|push) echo 'Authentication failed' >&2; exit 128 ;;
-              remote) echo 'repository config unreadable' >&2; exit 128 ;;
-            esac
+            simulate_failure() {
+                \(FakeGitScript.skipGlobalOptions)
+                case "$1" in
+                  --version) echo 'git version fixture'; exit 0 ;;
+                  fetch|pull|push) echo 'Authentication failed' >&2; exit 128 ;;
+                  remote) echo 'repository config unreadable' >&2; exit 128 ;;
+                esac
+            }
+            simulate_failure "$@"
             exec /usr/bin/git "$@"
             """)
         let operations: [() throws -> Void] = [

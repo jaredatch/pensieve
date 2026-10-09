@@ -14,7 +14,12 @@ final class ImportScanRevisionTests: XCTestCase {
     func testAllSkippedNoticeExplainsScanDepthBeforeLatestFolderSummary() {
         let scanner = RevisionReportScanner()
         scanner.report = ImportScanReport(skipped: [.init(path: "skip", reason: .tooLarge)])
-        let model = ImportViewModel(scanner: scanner)
+        let model = ImportViewModel(
+            scanner: scanner,
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot
+        )
         XCTAssertEqual(model.scanFolder("/chosen"), .nothingFound)
         XCTAssertEqual(model.nothingFoundMessage(folder: "Chosen"),
                        "Chosen holds no readable SKILL.md. Pensieve looks in it and in its folders, never deeper.\n\n"
@@ -23,7 +28,12 @@ final class ImportScanRevisionTests: XCTestCase {
 
     func testNothingFoundNoticeUsesLatestFolderSkipsWhileRetainingEarlierResultsAndReport() {
         let scanner = RevisionReportScanner()
-        let model = ImportViewModel(scanner: scanner)
+        let model = ImportViewModel(
+            scanner: scanner,
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot
+        )
         scanner.report = ImportScanReport(skills: [skill("old")], skipped: [.init(path: "old", reason: .notRegular)])
         model.scan()
         let oldSummary = model.scanSummary
@@ -36,7 +46,12 @@ final class ImportScanRevisionTests: XCTestCase {
         XCTAssertEqual(model.discoveredSkills.map(\.name), ["old"])
         XCTAssertEqual(model.scanSummary, oldSummary)
         scanner.report = ImportScanReport(skipped: [.init(path: "one", reason: .invalidUTF8)])
-        let fresh = ImportViewModel(scanner: scanner)
+        let fresh = ImportViewModel(
+            scanner: scanner,
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot
+        )
         XCTAssertEqual(fresh.scanFolder("/new"), .nothingFound)
         XCTAssertEqual(fresh.nothingFoundMessage(folder: "New"),
                        "New holds no readable SKILL.md. Pensieve looks in it and in its folders, never deeper.\n\n"
@@ -49,7 +64,12 @@ final class ImportScanRevisionTests: XCTestCase {
 
     func testRejectedFolderScanRetainsResultsAndTheirReport() {
         let scanner = RevisionReportScanner()
-        let model = ImportViewModel(scanner: scanner)
+        let model = ImportViewModel(
+            scanner: scanner,
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot
+        )
         scanner.report = ImportScanReport(skills: [skill("old")], skipped: [.init(path: "old-skip", reason: .notRegular)])
         model.scan()
         let retained = model.discoveredSkills
@@ -176,7 +196,12 @@ final class ImportScanRevisionTests: XCTestCase {
     func testDoneMessageAcknowledgesAllSkippedEntries() {
         let scanner = RevisionReportScanner()
         scanner.report = ImportScanReport(skipped: (0..<3).map { .init(path: "skip-\($0)", reason: .notRegular) })
-        let model = ImportViewModel(scanner: scanner)
+        let model = ImportViewModel(
+            scanner: scanner,
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot
+        )
         model.scan()
 
         XCTAssertEqual(model.doneTitle, "No Skills Imported")
@@ -188,12 +213,24 @@ final class ImportScanRevisionTests: XCTestCase {
         XCTAssertEqual(model.doneMessage, "No existing skills were found. Create your first skill to get started.")
     }
 
+}
+
+extension ImportScanRevisionTests {
     func testDoneMessageCountsSuccessfulImportsAndResetsForNextAttempt() throws {
         let scanner = RevisionReportScanner()
         scanner.report = ImportScanReport(skills: (0..<5).map { skill("skill-\($0)") })
-        let store = RevisionSkillStore()
-        store.failures = ["skill-1", "skill-3"]
-        let model = ImportViewModel(scanner: scanner, skillStore: store)
+        let root = TestTemporaryDirectory.path + "ImportDone-" + UUID().uuidString
+        let files = ImportPublicationFileService()
+        defer { try? files.files.deleteDirectory(at: root) }
+        let store = SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root)
+        files.beforeWrite = { _, content in
+            if content.contains("name: skill-1\n") || content.contains("name: skill-3\n") {
+                throw CocoaError(.fileWriteNoPermission)
+            }
+        }
+        let model = ImportViewModel(scanner: scanner, skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: root)
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         model.scan()
         model.importSelected(context: container.mainContext)
@@ -203,7 +240,7 @@ final class ImportScanRevisionTests: XCTestCase {
         XCTAssertEqual(model.doneTitle, "Import Finished")
         XCTAssertEqual(model.doneMessage, "3 skills imported into Pensieve.", "Count completed imports, not five selected skills")
         model.selectedSkills = ["skill-1"]
-        store.failures = []
+        files.beforeWrite = { _, _ in }
         model.importSelected(context: container.mainContext)
         XCTAssertNil(model.error)
         XCTAssertEqual(model.doneMessage, "1 skill imported into Pensieve.", "A second import resets the completed count")
@@ -214,11 +251,20 @@ final class ImportScanRevisionTests: XCTestCase {
     func testFailedLibrarySaveDoesNotPublishSuccessfulImports() throws {
         let scanner = RevisionReportScanner()
         scanner.report = ImportScanReport(skills: (0..<5).map { skill("skill-\($0)") })
-        let store = RevisionSkillStore()
+        let root = TestTemporaryDirectory.path + "ImportSave-" + UUID().uuidString
+        let files = FileService()
+        defer { try? files.deleteDirectory(at: root) }
+        let store = SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root)
         var notifications = 0
         var echoes: [[String]] = []
-        let model = ImportViewModel(scanner: scanner, skillStore: store,
-                                    notifier: { notifications += 1 }, echoRegistrar: { echoes.append($0) })
+        let model = ImportViewModel(
+            scanner: scanner,
+            skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: root,
+            notifier: { notifications += 1 },
+            echoRegistrar: { echoes.append($0) }
+        )
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         let context = ModelContext(container)
         context.autosaveEnabled = false
@@ -231,7 +277,8 @@ final class ImportScanRevisionTests: XCTestCase {
         })
 
         XCTAssertEqual(saves, 1)
-        XCTAssertEqual(store.createdNames.count, 5, "All five file creates succeed before the failed save")
+        XCTAssertEqual(try files.listDirectory(at: root + "/skills").count, 5,
+                       "All five file creates succeed before the failed save")
         XCTAssertEqual(try ModelContext(container).fetch(FetchDescriptor<Skill>()).count, 0)
         XCTAssertNotNil(model.error)
         XCTAssertEqual(model.importedSkillCount, 0, "The done count must reflect saved library rows")
@@ -244,7 +291,13 @@ final class ImportScanRevisionTests: XCTestCase {
     func testImportCountIsPublishedOnlyAfterTheLibrarySaveSucceeds() throws {
         let scanner = RevisionReportScanner()
         scanner.report = ImportScanReport(skills: (0..<5).map { skill("skill-\($0)") })
-        let model = ImportViewModel(scanner: scanner, skillStore: RevisionSkillStore())
+        let root = TestTemporaryDirectory.path + "ImportCount-" + UUID().uuidString
+        let files = FileService()
+        defer { try? files.deleteDirectory(at: root) }
+        let model = ImportViewModel(scanner: scanner,
+            skillStore: SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root),
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: root)
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         let context = ModelContext(container)
         context.autosaveEnabled = false
@@ -283,22 +336,4 @@ private final class RevisionReportScanner: ImportScannerProtocol {
     func scanWithReport() -> ImportScanReport { report }
     func scanFolderWithReport(_ path: String) -> ImportScanReport { report }
     func isInsideStore(_ path: String) -> Bool { path == "/library" }
-}
-
-private final class RevisionSkillStore: SkillStoreProtocol {
-    var failures: Set<String> = []
-    private(set) var createdNames: [String] = []
-    func createSkill(name: String, description: String, body: String) throws -> String {
-        if failures.contains(name) { throw CocoaError(.fileWriteNoPermission) }
-        createdNames.append(name)
-        return name
-    }
-    func readBody(directoryName: String) throws -> String { throw CocoaError(.featureUnsupported) }
-    func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
-                      fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
-        throw CocoaError(.featureUnsupported)
-    }
-    func writeBody(directoryName: String, body: String) throws { throw CocoaError(.featureUnsupported) }
-    func deleteSkill(directoryName: String) throws { throw CocoaError(.featureUnsupported) }
-    func listSkills() throws -> [String] { [] }
 }

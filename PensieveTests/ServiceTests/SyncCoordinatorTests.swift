@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import SwiftData
 import XCTest
 @testable import Pensieve
@@ -86,7 +87,7 @@ final class SyncCoordinatorTests: XCTestCase {
     func testLockBusyTickSkips() async throws {
         let container = try inMemoryContainer()
         let lockPath = tempDir + "/sync.lock"
-        let engine = SyncEngine(lockPath: lockPath)
+        let engine = SyncEngine(gitService: TestPaths.git, lockPath: lockPath)
         let coordinator = await configuredCoordinator(container: container, engine: engine, root: tempDir)
         let startupCompleted = expectation(description: "startup cycle")
         let tickCompleted = expectation(description: "locked tick cycle")
@@ -116,7 +117,7 @@ final class SyncCoordinatorTests: XCTestCase {
             startAutomatically: false,
             backgroundSyncEnabled: { true }
         )
-        scheduler.installDrain(hasRemote: { false }, action: { cycles += 1 })
+        scheduler.installDrain(isConfigured: { false }, action: { _ in cycles += 1 })
         scheduler.coordinatorBecameReady()
         scheduler.launchIngestCompleted()
         scheduler.tick()
@@ -148,7 +149,7 @@ final class SyncCoordinatorTests: XCTestCase {
             startAutomatically: false,
             backgroundSyncEnabled: { true }
         )
-        scheduler.installDrain(isConflicted: { true }, action: { cycles += 1 })
+        scheduler.installDrain(isConflicted: { true }, action: { _ in cycles += 1 })
         scheduler.coordinatorBecameReady()
         scheduler.launchIngestCompleted()
         scheduler.tick()
@@ -160,19 +161,21 @@ final class SyncCoordinatorTests: XCTestCase {
 
 extension SyncCoordinatorTests {
     func testMainActorHeartbeatDuringBlockedSync() async throws {
-        let engine = BlockingEngine()
-        let coordinator = await configuredCoordinator(container: try inMemoryContainer(), engine: engine, root: tempDir)
-        let cycle = Task.detached {
-            _ = await coordinator.runCycle()
+        for (priority, expectedQoS) in [(TaskPriority.medium, QOS_CLASS_DEFAULT), (.userInitiated, QOS_CLASS_USER_INITIATED)] {
+            let engine = BlockingEngine()
+            let coordinator = await configuredCoordinator(container: try inMemoryContainer(), engine: engine, root: tempDir)
+            let cycle = Task.detached(priority: priority) { _ = await coordinator.runCycle() }
+            await TestWait.until(failureMessage: "the sync engine did not start") { engine.qosClass != nil }
+            let heartbeat = Task { @MainActor in
+                try await Task.sleep(nanoseconds: 20_000_000)
+                return Date()
+            }
+            let beat = try await heartbeat.value
+            await cycle.value
+            let engineFinished = try XCTUnwrap(engine.finishedAt)
+            XCTAssertLessThan(beat, engineFinished, "the main actor heartbeat must advance before the blocking engine returns")
+            XCTAssertEqual(engine.qosClass, expectedQoS, "the sync cycle must run at its caller's \(priority) QoS")
         }
-        let heartbeat = Task { @MainActor in
-            try await Task.sleep(nanoseconds: 20_000_000)
-            return Date()
-        }
-        let beat = try await heartbeat.value
-        await cycle.value
-        let engineFinished = try XCTUnwrap(engine.finishedAt)
-        XCTAssertLessThan(beat, engineFinished, "the main actor heartbeat must advance before the blocking engine returns")
     }
 
     func testRegisteredObjectFieldChangeVisibleToFreshMainContext() async throws {
@@ -223,7 +226,7 @@ extension SyncCoordinatorTests {
             startAutomatically: false,
             backgroundSyncEnabled: { true }
         )
-        scheduler.installDrain(action: action)
+        scheduler.installDrain { _ in await action() }
         return scheduler
     }
 
@@ -231,10 +234,10 @@ extension SyncCoordinatorTests {
         try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
     }
 
-    private func configuredCoordinator(
+    func configuredCoordinator(
         container: ModelContainer,
         engine: SyncEngineProtocol,
-        git: GitServiceProtocol = GitService(),
+        git: GitServiceProtocol = TestPaths.git,
         root: String
     ) async -> SyncCoordinator {
         let coordinator = await Task.detached { SyncCoordinator(modelContainer: container) }.value
@@ -244,19 +247,18 @@ extension SyncCoordinatorTests {
             credentials: EmptyCredentialStore(),
             root: root,
             audit: NullAudit(),
-            machineIdentity: InertMachineIdentity(),
-            machineStateService: InertMachineStateService()
+            machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService())
         )
         return coordinator
     }
 
-    private func makeRemoteHarness() throws -> RemoteHarness {
+    func makeRemoteHarness() throws -> RemoteHarness {
         let remotePath = tempDir + "/remote.git"
         XCTAssertEqual(try rawGit(["init", "--bare", remotePath]), 0)
         let remote = "file://" + remotePath
         let seed = tempDir + "/seed"
         try FileManager.default.createDirectory(atPath: seed, withIntermediateDirectories: true)
-        let git = GitService()
+        let git = TestPaths.git
         try git.initRepository(at: seed)
         try git.setRemote(remote, at: seed)
         try ManifestService().write(
@@ -302,14 +304,14 @@ extension SyncCoordinatorTests {
         process.waitUntilExit()
         return (process.terminationStatus, data)
     }
-    private func rawGitOutput(_ args: [String]) throws -> String {
+    func rawGitOutput(_ args: [String]) throws -> String {
         let result = try rawGitRun(args)
         XCTAssertEqual(result.status, 0)
         return (String(bytes: result.data, encoding: .utf8) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-private struct RemoteHarness {
+struct RemoteHarness {
     let remotePath, remote, clone: String
     let git: GitService
     let allowlistedGit: AllowlistedRemoteGit
@@ -323,31 +325,6 @@ private struct EmptyCredentialStore: CredentialStoreProtocol {
 }
 private struct NullAudit: SyncAuditWriting {
     func record(category: String, detail: String) {}
-}
-private final class BlockingEngine: SyncEngineProtocol, @unchecked Sendable {
-    private let stateLock = NSLock()
-    private var recordedFinishedAt: Date?
-    var finishedAt: Date? {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return recordedFinishedAt
-    }
-    func sync(root: String, message: String, credential: GitCredential?, context: ModelContext,
-              prepare: ((ModelContext) throws -> Void)?) throws -> SyncOutcome {
-        try prepare?(context)
-        Thread.sleep(forTimeInterval: 0.3)
-        stateLock.lock()
-        recordedFinishedAt = Date()
-        stateLock.unlock()
-        return .synced(pushed: false, warnings: [])
-    }
-    func inspectConflicts(root: String, credential: GitCredential?, context: ModelContext) throws -> ConflictInspection {
-        fatalError("unused")
-    }
-    func resolveConflicts(root: String, picks: [String: ResolutionPick], credential: GitCredential?,
-                          context: ModelContext) throws -> SyncOutcome {
-        fatalError("unused")
-    }
 }
 private struct CategoryMutatingEngine: SyncEngineProtocol {
     let newName: String?

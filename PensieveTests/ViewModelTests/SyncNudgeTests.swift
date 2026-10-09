@@ -51,8 +51,12 @@ final class SyncNudgeTests: XCTestCase {
         let skill = try insertSkill(slug: "delete", store: fixture.store, context: fixture.context)
         XCTAssertTrue(SkillDeletionFlow.delete(
             skill: skill, library: fixture.library,
-            platformVM: PlatformViewModel(agentDetection: DeployStubDetection(installed: []),
-                                          deployStateStore: .memoryBacked),
+            platformVM: PlatformViewModel(
+                linkService: TestPaths.linkService(fileService: FileService()),
+                cursorCompiler: TestPaths.cursorCompiler(fileService: FileService()),
+                agentDetection: DeployStubDetection(installed: []),
+                deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
+            ),
             projects: [], context: fixture.context
         ))
         XCTAssertEqual(fixture.counter.value, 1)
@@ -74,7 +78,7 @@ final class SyncNudgeTests: XCTestCase {
     func testCategoryRuleChangeNudges() throws {
         let context = try makeContext()
         let counter = Counter()
-        let store = CategoryStore(notifier: counter.notify)
+        let store = CategoryStore(manifestRoot: TestPaths.storeRoot, notifier: counter.notify)
         let category = try XCTUnwrap(store.create(name: "Rules", context: context))
         let skill = Skill(name: "Skill", skillDescription: "Description", directoryName: "skill")
         context.insert(skill)
@@ -87,7 +91,9 @@ final class SyncNudgeTests: XCTestCase {
         let context = try makeContext()
         let counter = Counter()
         _ = registerProject(
-            Project(name: "App", path: tempDir + "/app"), context: context, notifier: counter.notify
+            Project(name: "App", path: tempDir + "/app"), manifestRoot: TestPaths.storeRoot,
+            context: context,
+            notifier: counter.notify
         )
         XCTAssertEqual(counter.value, 1)
     }
@@ -95,7 +101,7 @@ final class SyncNudgeTests: XCTestCase {
     func testCategoryRenameNudges() throws {
         let context = try makeContext()
         let counter = Counter()
-        let store = CategoryStore(notifier: counter.notify)
+        let store = CategoryStore(manifestRoot: TestPaths.storeRoot, notifier: counter.notify)
         let category = try XCTUnwrap(store.create(name: "Before", context: context))
         counter.reset()
         store.rename(category, to: "After", context: context)
@@ -103,22 +109,33 @@ final class SyncNudgeTests: XCTestCase {
     }
 
     func testImportCompletionNudges() throws {
+        let files = FileService()
+        let before = files.directoryExists(at: TestPaths.skillsDir) ? try files.listDirectory(at: TestPaths.skillsDir) : nil
         let fixture = try libraryFixture()
-        let discovered = DiscoveredSkill(
-            name: "Imported", body: "Body", sourcePlatform: "codex",
-            sourcePath: "/fixture/imported/SKILL.md", skillDescription: "Description"
-        )
-        let model = ImportViewModel(
-            scanner: FixedImportScanner(skills: [discovered]),
-            skillStore: fixture.store,
-            notifier: fixture.counter.notify,
-            echoRegistrar: { fixture.library.noteAppAuthoredBodies(directoryNames: $0) }
-        )
+        let discovered = DiscoveredSkill(name: "Imported", body: "Body", sourcePlatform: "codex",
+            sourcePath: "/fixture/imported/SKILL.md", skillDescription: "Description")
+        let lockPath = TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString
+        let model = ImportViewModel(scanner: FixedImportScanner(skills: [discovered]), skillStore: fixture.store,
+            lockPath: lockPath, manifestRoot: TestPaths.storeRoot, notifier: fixture.counter.notify,
+            echoRegistrar: { fixture.library.noteAppAuthoredBodies(directoryNames: $0) })
         fixture.library.startWatching()
         model.scan()
-        model.importSelected(context: fixture.context)
+        let selection = model.selectedSkills
+        let held = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
+        XCTAssertEqual(model.importSelected(context: fixture.context), .refused)
+        XCTAssertEqual(model.selectedSkills, selection)
+        XCTAssertTrue(fixture.store.bodies.isEmpty)
+        XCTAssertEqual(fixture.counter.value, 0)
+        held.release()
+        XCTAssertEqual(model.importSelected(context: fixture.context), .finished)
         fixture.watcher.emit("imported")
         XCTAssertEqual(fixture.counter.value, 1)
+        XCTAssertEqual(Set(fixture.store.bodies.keys), ["imported"])
+        XCTAssertTrue(fixture.store.bodies["imported"]?.contains("Body") == true)
+        XCTAssertEqual(try fixture.context.fetch(FetchDescriptor<Skill>()).map(\.directoryName), ["imported"])
+        XCTAssertFalse(fixture.library.externallyModified.contains("imported"))
+        let after = files.directoryExists(at: TestPaths.skillsDir) ? try files.listDirectory(at: TestPaths.skillsDir) : nil
+        XCTAssertEqual(after, before, "Memory-store imports must not write to their neutral disk path")
     }
 
     func testUpdateApplyNudges() async throws {
@@ -182,32 +199,43 @@ final class SyncNudgeTests: XCTestCase {
     func testCompoundProjectRemovalNudgesExactlyOnce() throws {
         let context = try makeContext()
         let counter = Counter()
-        let store = CategoryStore(notifier: counter.notify)
+        let store = CategoryStore(manifestRoot: TestPaths.storeRoot, notifier: counter.notify)
         let project = Project(name: "App", path: tempDir + "/app")
         project.identityKey = "github.com/example/app"
-        registerProject(project, context: context, notifier: counter.notify)
+        registerProject(project, manifestRoot: TestPaths.storeRoot, context: context, notifier: counter.notify)
         let category = try XCTUnwrap(store.create(name: "Rules", context: context))
         store.setProject(project, inCategory: category, member: true, context: context)
         counter.reset()
 
         _ = removeRegisteredProject(
-            project, reconciler: ResultReconciler(),
-            platformVM: PlatformViewModel(fileService: FileService(),
-                agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked),
+            project,
+            reconciler: ResultReconciler(), manifestRoot: TestPaths.storeRoot,
+            platformVM: PlatformViewModel(
+                fileService: FileService(),
+                linkService: TestPaths.linkService(fileService: FileService()),
+                cursorCompiler: TestPaths.cursorCompiler(fileService: FileService()),
+                agentDetection: DeployStubDetection(installed: []),
+                deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
+            ),
             localMachineID: ProjectIntentHarness.localID,
-            context: context, notifier: counter.notify
+            context: context,
+            notifier: counter.notify
         )
         XCTAssertEqual(counter.value, 1)
     }
 
+}
+
+extension SyncNudgeTests {
     func testCompoundSkillRemovalNudgesExactlyOnce() throws {
         let context = try makeContext()
         let counter = Counter()
-        let categoryStore = CategoryStore(notifier: counter.notify)
+        let categoryStore = CategoryStore(manifestRoot: TestPaths.storeRoot, notifier: counter.notify)
         let memoryStore = MemorySkillStore()
         let library = SkillLibraryViewModel(
-            skillStore: memoryStore, fileService: FileService(),
-            fileWatchService: RecordingWatcher(), notifier: counter.notify
+            skillStore: memoryStore,
+            fileService: FileService(), fileWatchService: RecordingWatcher(), manifestRoot: TestPaths.storeRoot,
+            notifier: counter.notify
         )
         let skill = try insertSkill(slug: "compound", store: memoryStore, context: context)
         let category = try XCTUnwrap(categoryStore.create(name: "Rules", context: context))
@@ -216,8 +244,12 @@ final class SyncNudgeTests: XCTestCase {
 
         XCTAssertTrue(SkillDeletionFlow.delete(
             skill: skill, library: library,
-            platformVM: PlatformViewModel(agentDetection: DeployStubDetection(installed: []),
-                                          deployStateStore: .memoryBacked),
+            platformVM: PlatformViewModel(
+                linkService: TestPaths.linkService(fileService: FileService()),
+                cursorCompiler: TestPaths.cursorCompiler(fileService: FileService()),
+                agentDetection: DeployStubDetection(installed: []),
+                deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
+            ),
             projects: [], context: context
         ))
         XCTAssertEqual(counter.value, 1)
@@ -226,10 +258,10 @@ final class SyncNudgeTests: XCTestCase {
     func testReconcileFailedRemovalStillNudgesOnce() throws {
         let context = try makeContext()
         let counter = Counter()
-        let store = CategoryStore(notifier: counter.notify)
+        let store = CategoryStore(manifestRoot: TestPaths.storeRoot, notifier: counter.notify)
         let project = Project(name: "App", path: tempDir + "/app")
         project.identityKey = "github.com/example/app"
-        registerProject(project, context: context, notifier: counter.notify)
+        registerProject(project, manifestRoot: TestPaths.storeRoot, context: context, notifier: counter.notify)
         let category = try XCTUnwrap(store.create(name: "Rules", context: context))
         store.setProject(project, inCategory: category, member: true, context: context)
         context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.localID,
@@ -244,11 +276,18 @@ final class SyncNudgeTests: XCTestCase {
             return ResultReconciler(fails: true).reconcile(context: context)
         }
         let result = removeRegisteredProject(
-            project, reconciler: reconciler,
-            platformVM: PlatformViewModel(fileService: FileService(),
-                agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked),
+            project,
+            reconciler: reconciler, manifestRoot: TestPaths.storeRoot,
+            platformVM: PlatformViewModel(
+                fileService: FileService(),
+                linkService: TestPaths.linkService(fileService: FileService()),
+                cursorCompiler: TestPaths.cursorCompiler(fileService: FileService()),
+                agentDetection: DeployStubDetection(installed: []),
+                deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
+            ),
             localMachineID: ProjectIntentHarness.localID,
-            context: context, notifier: counter.notify
+            context: context,
+            notifier: counter.notify
         )
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(reconciled)
@@ -278,8 +317,7 @@ extension SyncNudgeTests {
         let context = try makeContext()
         let library = SkillLibraryViewModel(
             skillStore: store,
-            fileService: FileService(),
-            fileWatchService: watcher,
+            fileService: FileService(), fileWatchService: watcher, manifestRoot: TestPaths.storeRoot,
             notifier: counter.notify
         )
         return LibraryFixture(library: library, store: store, watcher: watcher,

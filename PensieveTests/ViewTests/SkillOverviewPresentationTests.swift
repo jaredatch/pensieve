@@ -77,8 +77,14 @@ final class SkillOverviewPresentationTests: XCTestCase {
         let skill = Skill(name: "basecamp", directoryName: "basecamp")
         let (provenance, origin) = linkedProvenance()
 
-        let rows = SkillOverviewPresentation.sourceRows(skill: skill, provenance: provenance, origin: origin,
-                                                        homeDirectory: Constants.homeDirectory, now: now, locale: locale)
+        let rows = SkillOverviewPresentation.sourceRows(
+            skill: skill,
+            provenance: provenance,
+            origin: origin,
+            homeDirectory: TestPaths.root, skillsDirectory: TestPaths.skillsDir,
+            now: now,
+            locale: locale
+        )
 
         XCTAssertEqual(rows.map(\.label), ["Repository", "Tracked ref", "Local path", "Installed", "Last updated"])
         XCTAssertEqual(rows[0].value, "basecamp/basecamp-cli")
@@ -89,7 +95,7 @@ final class SkillOverviewPresentationTests: XCTestCase {
         XCTAssertEqual(rows[1].separator, "@")
         XCTAssertEqual(rows[1].action, .copy(origin.installedCommit))
         XCTAssertEqual(rows[2].value, "~/.pensieve/skills/basecamp")
-        XCTAssertEqual(rows[2].action, .reveal(skill.canonicalDir))
+        XCTAssertEqual(rows[2].action, .reveal(skill.canonicalDir(skillsDirectory: TestPaths.skillsDir)))
         XCTAssertEqual(rows[3].value, "Aug 9, 2026")
         XCTAssertEqual(rows[3].detail, "1 month ago")
         XCTAssertEqual(rows[4].value, "Sep 7, 2026")
@@ -105,8 +111,14 @@ final class SkillOverviewPresentationTests: XCTestCase {
                                          repositoryURL: URL(string: "https://github.com/"), skillURL: linked.skillURL,
                                          localEditNote: nil, checkError: nil, updateAvailable: false)
 
-        let rows = SkillOverviewPresentation.sourceRows(skill: skill, provenance: provenance, origin: origin,
-                                                        homeDirectory: Constants.homeDirectory, now: now, locale: locale)
+        let rows = SkillOverviewPresentation.sourceRows(
+            skill: skill,
+            provenance: provenance,
+            origin: origin,
+            homeDirectory: TestPaths.root, skillsDirectory: TestPaths.skillsDir,
+            now: now,
+            locale: locale
+        )
 
         XCTAssertEqual(rows.first { $0.label == "Repository" }?.value, origin.repo)
     }
@@ -119,8 +131,14 @@ final class SkillOverviewPresentationTests: XCTestCase {
                                      skillURL: provenance.skillURL, localEditNote: nil, checkError: nil, updateAvailable: false)
         origin.ref = ""
 
-        let rows = SkillOverviewPresentation.sourceRows(skill: skill, provenance: provenance, origin: origin,
-                                                        homeDirectory: Constants.homeDirectory, now: now, locale: locale)
+        let rows = SkillOverviewPresentation.sourceRows(
+            skill: skill,
+            provenance: provenance,
+            origin: origin,
+            homeDirectory: TestPaths.root, skillsDirectory: TestPaths.skillsDir,
+            now: now,
+            locale: locale
+        )
 
         XCTAssertEqual(rows[1].label, "Tracked ref")
         XCTAssertEqual(rows[1].value, "d3cc757")
@@ -134,8 +152,14 @@ final class SkillOverviewPresentationTests: XCTestCase {
         skill.createdAt = day(8, 9)
         skill.updatedAt = day(8, 19)
 
-        let rows = SkillOverviewPresentation.sourceRows(skill: skill, provenance: nil, origin: nil,
-                                                        homeDirectory: Constants.homeDirectory, now: now, locale: locale)
+        let rows = SkillOverviewPresentation.sourceRows(
+            skill: skill,
+            provenance: nil,
+            origin: nil,
+            homeDirectory: TestPaths.root, skillsDirectory: TestPaths.skillsDir,
+            now: now,
+            locale: locale
+        )
 
         XCTAssertEqual(rows.map(\.label), ["Local path", "Created", "Modified"])
         XCTAssertEqual(rows[0].value, "~/.pensieve/skills/public-user-docs")

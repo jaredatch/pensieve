@@ -69,8 +69,11 @@ final class PlatformViewModelDeployIndexTests: XCTestCase {
 
     private func makeVM(link: DeletionTestLinkService, store: DeployStateStore) -> PlatformViewModel {
         PlatformViewModel(
-            fileService: RegularLeafFileService(), linkService: link, cursorCompiler: DeletionTestCursorCompiler(),
-            agentDetection: DeletionTestDetection(installed: [.claudeCode]), deployStateStore: store
+            fileService: RegularLeafFileService(),
+            linkService: link,
+            cursorCompiler: DeletionTestCursorCompiler(),
+            agentDetection: DeletionTestDetection(installed: [.claudeCode]),
+            deployStateStore: store, skillsDirectory: TestPaths.skillsDir
         )
     }
 

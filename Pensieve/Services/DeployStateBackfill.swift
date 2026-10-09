@@ -8,14 +8,8 @@ protocol DeployStateBackfilling {
 struct DeployStateBackfillPaths {
     var pensieveSkillsDir: String
     var cursorUserRulesDir: String
-    var userSkillsRoot: (PlatformTarget) -> String? = DeployPaths.userSkillsRoot(for:)
+    var userSkillsRoot: (PlatformTarget) -> String?
 
-    static var defaults: DeployStateBackfillPaths {
-        DeployStateBackfillPaths(
-            pensieveSkillsDir: Constants.pensieveSkillsDir,
-            cursorUserRulesDir: Constants.cursorUserRulesDir
-        )
-    }
 }
 
 struct DeployStateBackfill: DeployStateBackfilling {
@@ -29,18 +23,21 @@ struct DeployStateBackfill: DeployStateBackfilling {
 
     private let fileService: FileServiceProtocol
     private let store: DeployStateStore
-    private let paths: DeployStateBackfillPaths
+    private let deployPaths: DeployPaths
     private let now: () -> Date
 
     init(
         fileService: FileServiceProtocol = FileService(),
-        store: DeployStateStore? = nil,
-        paths: DeployStateBackfillPaths = .defaults,
+        store: DeployStateStore,
+        paths: DeployStateBackfillPaths,
         now: @escaping () -> Date = Date.init
     ) {
         self.fileService = fileService
-        self.store = store ?? DeployStateStore(fileService: fileService)
-        self.paths = paths
+        self.store = store
+        deployPaths = DeployPaths(skillsDirectory: paths.pensieveSkillsDir,
+            userSkillsDirectories: Dictionary(uniqueKeysWithValues: PlatformTarget.allCases.compactMap { platform in
+                paths.userSkillsRoot(platform).map { (platform, $0) }
+            }), cursorUserRulesDirectory: paths.cursorUserRulesDir)
         self.now = now
     }
 
@@ -99,7 +96,7 @@ struct DeployStateBackfill: DeployStateBackfilling {
 
     private func userWideSymlinkCandidates() -> [Candidate] {
         var candidates: [Candidate] = []
-        for (dir, platform) in Self.userWideSymlinkDirectories(paths: paths) {
+        for (dir, platform) in Self.userWideSymlinkDirectories(paths: deployPaths) {
             if fileService.isSymlink(at: dir) || !isRealpathContained(dir) {
                 continue
             }
@@ -108,11 +105,11 @@ struct DeployStateBackfill: DeployStateBackfilling {
             for entry in entries {
                 guard SkillStore.safeSkillDirectory(
                     slug: entry,
-                    base: paths.pensieveSkillsDir,
+                    base: deployPaths.skillsDirectory,
                     fileService: fileService
                 ) != nil else { continue }
                 let artifactPath = dir + "/" + entry
-                let target = paths.pensieveSkillsDir + "/" + entry
+                let target = deployPaths.skillsDirectory + "/" + entry
                 guard fileService.isSymlink(at: artifactPath),
                       (try? fileService.symlinkTarget(at: artifactPath)) == target,
                       fileService.directoryExists(at: target) else { continue }
@@ -129,10 +126,10 @@ struct DeployStateBackfill: DeployStateBackfilling {
     }
 
     static func userWideSymlinkDirectories(
-        paths: DeployStateBackfillPaths
+        paths: DeployPaths
     ) -> [(directory: String, platform: PlatformTarget)] {
         PlatformTarget.allCases.compactMap { platform in
-            guard let directory = paths.userSkillsRoot(platform) else { return nil }
+            guard let directory = paths.userSkillsRoot(for: platform) else { return nil }
             return (directory, platform)
         }
     }
@@ -142,8 +139,7 @@ struct DeployStateBackfill: DeployStateBackfilling {
         var candidates: [Candidate] = []
         for record in deployRecords where record.platform == .cursor && record.projectID == nil {
             guard seen.insert(record.targetPath).inserted,
-                  let slug = DeployPaths.slug(artifactPath: record.targetPath, platform: .cursor, projectPath: nil,
-                                              cursorUserRulesDirectory: paths.cursorUserRulesDir),
+                  let slug = deployPaths.slug(artifactPath: record.targetPath, platform: .cursor, projectPath: nil),
                   fileService.fileExists(at: record.targetPath) else { continue }
             candidates.append(Candidate(
                 slug: slug,
@@ -170,12 +166,12 @@ struct DeployStateBackfill: DeployStateBackfilling {
                   ProjectDirectory.canAccess(project.path) else { continue }
 
             if record.platform.usesSymlinks {
-                let expectedLink = DeployPaths.linkPath(
+                let expectedLink = deployPaths.linkPath(
                     directoryName: skill.directoryName,
                     platform: record.platform,
                     projectPath: project.path
                 )
-                let expectedTarget = DeployPaths.targetPath(
+                let expectedTarget = deployPaths.targetPath(
                     directoryName: skill.directoryName,
                     platform: record.platform,
                     projectPath: project.path
@@ -184,7 +180,7 @@ struct DeployStateBackfill: DeployStateBackfilling {
                       fileService.isSymlink(at: record.targetPath),
                       (try? fileService.symlinkTarget(at: record.targetPath)) == expectedTarget else { continue }
             } else {
-                let expectedPath = DeployPaths.cursorPath(directoryName: skill.directoryName, projectPath: project.path)
+                let expectedPath = deployPaths.cursorPath(directoryName: skill.directoryName, projectPath: project.path)
                 guard record.targetPath == expectedPath,
                       fileService.fileExists(at: record.targetPath) else { continue }
             }

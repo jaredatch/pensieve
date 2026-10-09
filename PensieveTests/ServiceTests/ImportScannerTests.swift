@@ -123,7 +123,8 @@ final class ImportScannerTests: XCTestCase {
             claudeSkillsDir: skillsDir,
             grokSkillsDir: tempDir + "/missing-grok-skills",
             cursorRulesDir: tempDir + "/missing-cursor-rules",
-            codexSkillsDir: tempDir + "/missing-codex-skills"
+            codexSkillsDir: tempDir + "/missing-codex-skills",
+            storeRoot: TestPaths.storeRoot
         )
 
         let results = scanner.scan()

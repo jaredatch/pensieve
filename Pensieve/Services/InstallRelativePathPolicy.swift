@@ -2,12 +2,12 @@ import Foundation
 
 enum InstallRelativePathPolicy {
     static func isValid(_ path: String) -> Bool {
-        guard !path.hasPrefix("-"), !path.hasPrefix("/"), !path.contains("\\"),
+        guard !PathSyntax.startsWithDash(path), !PathSyntax.isAbsolute(path), !path.contains("\\"),
               !path.unicodeScalars.contains(where: isUnsafeScalar) else {
             return false
         }
         if path.isEmpty { return true }
-        return path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy {
+        return PathSyntax.components(path, omittingEmptySubsequences: false).allSatisfy {
             !$0.isEmpty && $0 != "." && $0 != ".."
         }
     }

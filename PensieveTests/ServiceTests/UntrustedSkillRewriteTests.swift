@@ -21,7 +21,7 @@ final class UntrustedSkillRewriteTests: XCTestCase {
         ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
     }
 
-    private var store: SkillStore { SkillStore(fileService: files, baseDir: root + "/store/skills") }
+    private var store: SkillStore { SkillStore(fileService: files, baseDir: root + "/store/skills", storeRoot: root + "/store") }
 
     @MainActor
     func testGeneratedMigrationSweepPreservesRefusedFilesAndWarns() throws {
@@ -65,7 +65,9 @@ final class UntrustedSkillRewriteTests: XCTestCase {
                 fileService: files, claudeSkillsDir: root + "/claude", grokSkillsDir: root + "/grok",
                 cursorRulesDir: root + "/cursor", codexSkillsDir: root + "/codex", storeRoot: root + "/store"
             )
-            let model = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: root + "/store")
+            let model = ImportViewModel(scanner: scanner, skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: root + "/store")
             let context = try context()
             let folder = root + "/source-\(index)"
             try files.writeFile(at: folder + "/SKILL.md", content: fixture.source)
@@ -105,8 +107,17 @@ final class UntrustedSkillRewriteTests: XCTestCase {
                 let skill = Skill(name: "New", skillDescription: "New description", directoryName: slug)
                 context.insert(skill)
                 try files.writeFile(at: path, content: source)
-                let scanner = ImportScanner(fileService: files, storeRoot: root + "/store")
-                let model = ImportViewModel(scanner: scanner, skillStore: store, manifestRoot: root + "/store")
+                let scanner = ImportScanner(
+                    fileService: files,
+                    claudeSkillsDir: TestPaths.root + "/claude",
+                    grokSkillsDir: TestPaths.root + "/grok",
+                    cursorRulesDir: TestPaths.root + "/cursor",
+                    codexSkillsDir: TestPaths.root + "/codex",
+                    storeRoot: root + "/store"
+                )
+                let model = ImportViewModel(scanner: scanner, skillStore: store,
+            lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: root + "/store")
                 model.discoveredSkills = [DiscoveredSkill(name: "New", body: SkillParser.stripFrontmatter(source),
                     sourcePlatform: "Claude Code", sourcePath: path, skillDescription: "New description", sourceContent: source)]
                 model.selectedSkills = [path]
@@ -132,7 +143,10 @@ final class UntrustedSkillRewriteTests: XCTestCase {
 
     @MainActor
     func testGeneratedBodySavesKeepFrontmatterAndExactEditedBytes() throws {
-        let model = SkillLibraryViewModel(skillStore: store, fileService: files, manifestRoot: root + "/store")
+        let model = SkillLibraryViewModel(
+            skillStore: store,
+            fileService: files, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: root + "/store"
+        )
         let edited = "First\nSecond\r\nThird\rFourth\u{85}Fifth\u{2028}Sixth\u{2029}Last"
         for (index, fixture) in FrontmatterRewriteFixture.sweep.enumerated() {
             let slug = "case-\(index)"

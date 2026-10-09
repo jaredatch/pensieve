@@ -3,15 +3,31 @@ import Foundation
 /// Pure, SwiftData-free symlink path resolution (PLAN-12 / 12.1). Extracted from
 /// `LinkService.linkPath`/`targetPath` so the GUI deploy path and the daemon's reconcile share one
 /// implementation. Takes a plain `directoryName` instead of a `@Model` `Skill`.
-enum DeployPaths {
+struct DeployPaths {
+    let skillsDirectory: String
+    let userSkillsDirectories: [PlatformTarget: String]
+    let cursorUserRulesDirectory: String
+
     /// Invert only the exact builder layout, without resolving or normalizing recorded paths.
-    static func slug(artifactPath: String, platform: PlatformTarget, projectPath: String?,
-                     cursorUserRulesDirectory: String = PathConstants.cursorUserRulesDir) -> String? {
-        guard projectPath == nil || platform.supportsProjectScope else { return nil }
+    func slug(artifactPath: String, platform: PlatformTarget, projectPath: String?) -> String? {
+        if let projectPath {
+            return Self.projectSlug(artifactPath: artifactPath, platform: platform, projectPath: projectPath)
+        }
         let sentinel = "pensieve-artifact-slug"
         let template = platform == .cursor
-            ? cursorPath(directoryName: sentinel, projectPath: projectPath, userRulesDirectory: cursorUserRulesDirectory)
-            : linkPath(directoryName: sentinel, platform: platform, projectPath: projectPath)
+            ? cursorPath(directoryName: sentinel, projectPath: nil)
+            : linkPath(directoryName: sentinel, platform: platform, projectPath: nil)
+        return Self.slug(artifactPath: artifactPath, template: template, sentinel: sentinel)
+    }
+
+    static func projectSlug(artifactPath: String, platform: PlatformTarget, projectPath: String) -> String? {
+        let sentinel = "pensieve-artifact-slug"
+        guard let template = projectArtifactPath(directoryName: sentinel, platform: platform,
+                                                 projectPath: projectPath) else { return nil }
+        return slug(artifactPath: artifactPath, template: template, sentinel: sentinel)
+    }
+
+    private static func slug(artifactPath: String, template: String, sentinel: String) -> String? {
         guard let slot = template.range(of: sentinel, options: .backwards) else { return nil }
         let prefix = Array(template[..<slot.lowerBound].utf8)
         let suffix = Array(template[slot.upperBound...].utf8)
@@ -23,73 +39,57 @@ enum DeployPaths {
         return String(bytes: leaf, encoding: .utf8)
     }
 
-    static func cursorPath(directoryName: String, projectPath: String?,
-                           userRulesDirectory: String = PathConstants.cursorUserRulesDir) -> String {
-        let root = projectPath.map { $0 + "/.cursor/rules" } ?? userRulesDirectory
-        return root + "/" + directoryName + ".mdc"
-    }
-
-    static func userSkillsRoot(for platform: PlatformTarget) -> String? {
+    /// Project paths have no dependency on the canonical store or any user-wide root.
+    static func projectArtifactPath(directoryName: String, platform: PlatformTarget, projectPath: String) -> String? {
         switch platform {
-        case .claudeCode:
-            return PathConstants.claudeCodeUserSkillsDir
-        case .grok:
-            return PathConstants.grokUserSkillsDir
-        case .cursor:
-            return nil
-        case .codex:
-            return PathConstants.codexUserSkillsDir
-        case .openClaw:
-            return PathConstants.openClawUserSkillsDir
-        case .hermes:
-            return PathConstants.hermesUserSkillsDir + "/" + PathConstants.hermesDefaultCategory
+        case .claudeCode: return projectPath + "/" + PathConstants.claudeCodeProjectSkillsRel + "/" + directoryName
+        case .grok: return projectPath + "/" + PathConstants.grokProjectSkillsRel + "/" + directoryName
+        case .codex: return projectPath + "/" + PathConstants.codexAgentsRel + "/" + directoryName + ".md"
+        case .cursor: return cursorPath(directoryName: directoryName, rulesDirectory: projectPath + "/.cursor/rules")
+        case .openClaw, .hermes: return nil
         }
     }
 
-    static func linkPath(directoryName: String, platform: PlatformTarget, projectPath: String?) -> String {
-        switch platform {
-        case .claudeCode:
-            if let projectPath {
-                return projectPath + "/" + PathConstants.claudeCodeProjectSkillsRel + "/" + directoryName
-            } else {
-                return PathConstants.claudeCodeUserSkillsDir + "/" + directoryName
-            }
-        case .grok:
-            if let projectPath {
-                return projectPath + "/" + PathConstants.grokProjectSkillsRel + "/" + directoryName
-            } else {
-                return PathConstants.grokUserSkillsDir + "/" + directoryName
-            }
-        case .codex:
-            guard let projectPath else {
-                return PathConstants.codexUserSkillsDir + "/" + directoryName
-            }
-            return projectPath + "/" + PathConstants.codexAgentsRel + "/" + directoryName + ".md"
-        case .openClaw:
-            return PathConstants.openClawUserSkillsDir + "/" + directoryName
-        case .hermes:
-            return PathConstants.hermesUserSkillsDir + "/" + PathConstants.hermesDefaultCategory + "/" + directoryName
-        case .cursor:
-            return ""
-        }
+    static func cursorPath(directoryName: String, rulesDirectory: String) -> String {
+        rulesDirectory + "/" + directoryName + ".mdc"
     }
 
-    static func targetPath(directoryName: String, platform: PlatformTarget, projectPath: String?) -> String {
+    func cursorPath(directoryName: String, projectPath: String?) -> String {
+        Self.cursorPath(directoryName: directoryName,
+                        rulesDirectory: projectPath.map { $0 + "/.cursor/rules" } ?? cursorUserRulesDirectory)
+    }
+
+    func userSkillsRoot(for platform: PlatformTarget) -> String? {
+        userSkillsDirectories[platform]
+    }
+
+    /// An unavailable root has no artifact path. Never turn a missing root into `/<slug>`.
+    func linkPath(directoryName: String, platform: PlatformTarget, projectPath: String?) -> String {
+        guard platform.usesSymlinks else { return "" }
+        if let projectPath, platform.supportsProjectScope {
+            return Self.projectArtifactPath(directoryName: directoryName, platform: platform,
+                                            projectPath: projectPath) ?? ""
+        }
+        guard let root = userSkillsRoot(for: platform), !root.isEmpty else { return "" }
+        return root + "/" + directoryName
+    }
+
+    func targetPath(directoryName: String, platform: PlatformTarget, projectPath: String?) -> String {
         switch platform {
         case .claudeCode:
-            return PathConstants.pensieveSkillsDir + "/" + directoryName
+            return skillsDirectory + "/" + directoryName
         case .grok:
-            return PathConstants.pensieveSkillsDir + "/" + directoryName
+            return skillsDirectory + "/" + directoryName
         case .codex:
             if projectPath == nil {
-                return PathConstants.pensieveSkillsDir + "/" + directoryName
+                return skillsDirectory + "/" + directoryName
             } else {
-                return PathConstants.pensieveSkillsDir + "/" + directoryName + "/SKILL.md"
+                return skillsDirectory + "/" + directoryName + "/SKILL.md"
             }
         case .openClaw:
-            return PathConstants.pensieveSkillsDir + "/" + directoryName
+            return skillsDirectory + "/" + directoryName
         case .hermes:
-            return PathConstants.pensieveSkillsDir + "/" + directoryName
+            return skillsDirectory + "/" + directoryName
         case .cursor:
             return ""
         }

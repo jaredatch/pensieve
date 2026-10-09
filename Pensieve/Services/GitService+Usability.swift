@@ -48,7 +48,7 @@ extension GitService {
         (try? remoteURL(at: path)) ?? "origin"
     }
 
-    func probeUsability() -> GitUsability {
+    func probeUsability() throws -> GitUsability {
         do {
             let result = try run(["--version"], in: nil)
             guard result.exit != 0 else { return .usable }
@@ -56,6 +56,7 @@ extension GitService {
             return GitUsability.environmentFailure(exit: result.exit, output: detail)
                 ?? .failed(GitFailureDetail(detail.isEmpty ? "git --version exited \(result.exit)." : detail))
         } catch {
+            if case GitError.outputReadFailed = error { throw error }
             return .failed(GitFailureDetail(error.localizedDescription))
         }
     }
@@ -87,6 +88,7 @@ extension GitService {
             }
         } catch {
             if case GitError.unusable = error { throw error }
+            if case GitError.outputReadFailed = error { throw error }
             try probeUsability().requireUsable()
             if case GitError.repositoryUnreadable = error { throw error }
             throw GitError.repositoryUnreadable(path: path, detail: error.localizedDescription)

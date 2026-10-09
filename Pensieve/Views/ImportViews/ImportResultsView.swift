@@ -31,6 +31,14 @@ struct ImportResultsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding([.horizontal, .bottom])
 
+            if let error = importVM.error {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding([.horizontal, .bottom])
+            }
+
             Divider()
 
             // Skill list

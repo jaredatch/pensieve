@@ -126,7 +126,7 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
         for record in deployments where record.scope == "project" {
             guard let skill = bySlug[record.slug], let platform = PlatformTarget(rawValue: record.platform),
                   platform.supportsProjectScope else { continue }
-            for project in registered where record.artifactPath.hasPrefix(project.path + "/") {
+            for project in registered where PathSyntax.hasPrefix(record.artifactPath, project.path + "/") {
                 let path = platformVM.artifactPath(skill: skill, platform: platform, target: .project(project))
                 guard path == record.artifactPath else { continue }
                 paths.insert(folders.isAvailable(project.path) ? try entryPath(path) : path)
@@ -149,7 +149,7 @@ struct WaitingRemovalReconciler: WaitingRemovalReconciling {
     private func occupant(_ entry: WaitingRemoval) throws -> DeployArtifactOccupant {
         let ownership = DeployArtifactOwnership(fileService: fileService)
         if entry.platform.usesSymlinks {
-            return try ownership.link(at: entry.artifactPath, skillsDirectory: Constants.pensieveSkillsDir,
+            return try ownership.link(at: entry.artifactPath, skillsDirectory: platformVM.skillsDirectory,
                 linksFile: entry.platform == .codex)
         }
         let occupant = try ownership.cursor(at: entry.artifactPath, legacyContent: nil)

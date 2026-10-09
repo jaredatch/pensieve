@@ -15,7 +15,7 @@ final class StoreMigrationServiceTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         manifest = ManifestService(fileService: fileService)
-        skillStore = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        skillStore = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         service = StoreMigrationService(fileService: fileService, manifestService: manifest, skillStore: skillStore)
     }
 
@@ -355,7 +355,7 @@ extension StoreMigrationServiceTests {
             wrapped: fileService, directory: tempDir + "/skills/victim", outsideDirectory: outside)
         let service = StoreMigrationService(
             fileService: swapping, manifestService: manifest,
-            skillStore: SkillStore(fileService: swapping, baseDir: tempDir + "/skills"))
+            skillStore: SkillStore(fileService: swapping, baseDir: tempDir + "/skills", storeRoot: tempDir))
 
         let result = service.migrateIfNeeded(fromRoot: tempDir, context: context)
 

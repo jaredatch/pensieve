@@ -7,7 +7,7 @@ import Foundation
 /// implements all four (concretely + in the `GitService+FastForward` extension), so the conformance is
 /// declaration-only. SwiftData-free — the daemon target compiles it.
 protocol FastForwardGitService {
-    func probeUsability() -> GitUsability
+    func probeUsability() throws -> GitUsability
     func remoteURL(at path: String) throws -> String?
     func isWorktreeClean(at path: String) -> Bool
     func fetch(at path: String, credential: GitCredential?) throws

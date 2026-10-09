@@ -311,11 +311,14 @@ extension SkillPreviewLinkHostTests {
                          geometry: PreviewHostGeometry = PreviewHostGeometry())
         -> (host: NSHostingView<AnyView>, window: NSWindow) {
         let base = TestTemporaryDirectory.path + "PreviewLinkHost-" + UUID().uuidString
+        let skillsDirectory = base + "/skills"
         let files = DeployRecordingFileService()
-        files.contents[Constants.pensieveSkillsDir + "/link-test/references/x.md"] = otherMarkdown
-        files.contents[Constants.pensieveSkillsDir + "/link-test/scripts/x.sh"] = "echo hi"
-        let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: files, baseDir: base),
-                                            fileService: files, manifestRoot: base)
+        files.contents[skillsDirectory + "/link-test/references/x.md"] = otherMarkdown
+        files.contents[skillsDirectory + "/link-test/scripts/x.sh"] = "echo hi"
+        let library = SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: files, baseDir: skillsDirectory, storeRoot: skillsDirectory),
+            fileService: files, fileWatchService: FileWatchService(rootDir: skillsDirectory), manifestRoot: base
+        )
         let skill = Skill(name: "Link test", directoryName: "link-test")
         var snapshot = DetailContentSnapshot(body: markdown)
         snapshot.inventory.files = ["SKILL.md", "references/x.md", "scripts/x.sh"].map {

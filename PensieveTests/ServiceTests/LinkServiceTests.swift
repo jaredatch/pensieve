@@ -13,7 +13,7 @@ final class LinkServiceTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: skillsDir, withIntermediateDirectories: true)
 
         fileService = FileService()
-        linkService = LinkService(fileService: fileService)
+        linkService = TestPaths.linkService(fileService: fileService)
     }
 
     override func tearDownWithError() throws {
@@ -96,7 +96,7 @@ final class LinkServiceTests: XCTestCase {
     func testGrokTargetPathIsCanonicalSkillDirectory() {
         let skill = makeSkill()
         let target = linkService.targetPath(skill: skill, platform: .grok, projectPath: "/tmp/project")
-        XCTAssertEqual(target, PathConstants.pensieveSkillsDir + "/test-skill")
+        XCTAssertEqual(target, TestPaths.skillsDir + "/test-skill")
         XCTAssertFalse(target.hasSuffix("/SKILL.md"))
     }
 
@@ -215,9 +215,9 @@ final class LinkServiceTests: XCTestCase {
         let target = skillsDir + "/" + skill.directoryName
         let mapped = LinkServiceCanonicalDirectoryFileService(
             wrapped: fileService,
-            pathMappings: [(Constants.pensieveSkillsDir + "/" + skill.directoryName, target)],
+            pathMappings: [(TestPaths.skillsDir + "/" + skill.directoryName, target)],
             physicalSandbox: tempDir)
-        let service = LinkService(fileService: mapped)
+        let service = TestPaths.linkService(fileService: mapped)
 
         XCTAssertNoThrow(try service.link(skill: skill, platform: .claudeCode, projectPath: project),
                          "Claude Code project deploy must succeed for a real skill and project")
@@ -269,7 +269,7 @@ final class LinkServiceTests: XCTestCase {
 
     func testLinkEnforcesPathComponentBeforeSymlink() {
         let spy = SpyFileService()
-        let service = LinkService(fileService: spy)
+        let service = TestPaths.linkService(fileService: spy)
         let skill = makeSkill(name: "evil", dirName: "../evil")
         XCTAssertThrowsError(try service.link(skill: skill, platform: .openClaw, projectPath: nil)) { error in
             guard case LinkError.invalidPathComponent = error else {
@@ -281,7 +281,7 @@ final class LinkServiceTests: XCTestCase {
 
     func testUnlinkEnforcesPathComponentBeforeDelete() {
         let spy = SpyFileService()
-        let service = LinkService(fileService: spy)
+        let service = TestPaths.linkService(fileService: spy)
         let skill = makeSkill(name: "evil", dirName: "../evil")
         XCTAssertThrowsError(try service.unlink(skill: skill, platform: .openClaw, projectPath: nil)) { error in
             guard case LinkError.invalidPathComponent = error else {

@@ -120,6 +120,11 @@ final class SkillProvenanceViewModelTests: XCTestCase {
     }
 
     func testSkillURLRejectsUnsafeStoredCoordinates() {
+        for scalar in PathJoiningScalars.values {
+            let absolute = origin(path: "/" + PathJoiningScalars.name("pdf", scalar: scalar))
+            XCTAssertNil(SkillProvenanceViewModel.provenance(
+                origin: absolute, driftedLocally: false, checkError: nil).skillURL)
+        }
         let unsafePath = origin(path: "skills/../private")
         XCTAssertNil(SkillProvenanceViewModel.provenance(
             origin: unsafePath,

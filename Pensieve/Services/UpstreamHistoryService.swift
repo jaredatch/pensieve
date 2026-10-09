@@ -148,8 +148,7 @@ protocol UpstreamHistoryGitServing {
 
 extension GitService: UpstreamHistoryGitServing {}
 
-struct UpstreamHistoryService {
-    static let defaultScratchRoot = PathConstants.pensieveAppSupportDir + "/upstream-history-scratch"
+struct UpstreamHistoryService: ScratchRootCleaning {
     static let commitWindow = 200
     static let rowWindow = 20
     static let textByteLimit = 256 * 1_024
@@ -171,11 +170,11 @@ struct UpstreamHistoryService {
     let requestedBaselineByteLimit: Int
 
     init(
-        gitService: UpstreamHistoryGitServing = GitService(),
-        credentialStore: CredentialStoreProtocol = KeychainCredentialStore(),
+        gitService: UpstreamHistoryGitServing,
+        credentialStore: CredentialStoreProtocol,
         fileService: FileServiceProtocol = FileService(),
         contentHasher: SkillContentHashing,
-        scratchRoot: String = Self.defaultScratchRoot,
+        scratchRoot: String,
         commitWindow: Int = Self.commitWindow,
         rowWindow: Int = Self.rowWindow,
         textByteLimit: Int = Self.textByteLimit,
@@ -267,17 +266,6 @@ struct UpstreamHistoryService {
             throw SkillInstallService.mappedRepositoryError(error)
         }
     }
-
-    static func cleanupScratchRoot(
-        fileService: FileServiceProtocol = FileService(),
-        scratchRoot: String = Self.defaultScratchRoot
-    ) {
-        if fileService.directoryExists(at: scratchRoot) || fileService.isSymlink(at: scratchRoot) {
-            try? fileService.deleteDirectory(at: scratchRoot)
-        } else if fileService.fileExists(at: scratchRoot) {
-            try? fileService.deleteFile(at: scratchRoot)
-        }
-    }
 }
 
 extension UpstreamHistoryService {
@@ -351,7 +339,7 @@ extension UpstreamHistoryService {
 
     static func isSafeRef(_ value: String) -> Bool {
         guard !value.isEmpty,
-              !value.hasPrefix("-"),
+              !PathSyntax.startsWithDash(value),
               !value.hasPrefix("/"),
               !value.hasSuffix("/"),
               !value.hasSuffix("."),

@@ -128,6 +128,7 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     private let wrapped: FileServiceProtocol
     private let pathMappings: [(logical: String, physical: String)]
     private let physicalSandbox: String?
+    private let nonSymlinkAncestors: Set<String>
     /// Checkpoints act on translated sandbox paths immediately before their real FileService operation.
     var beforeDirectoryCreation: ((String) throws -> Void)?
     var beforeArtifactCreation: ((String) throws -> Void)?
@@ -143,8 +144,14 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
     /// Physical-path consumers compare physical literals; containment still applies to every lookup.
     var translatesSymlinkTargets = true
 
+    func directoryEntryIdentity(at path: String) -> Data? {
+        if nonSymlinkAncestors.contains(path) { return nil }
+        return wrapped.directoryEntryIdentity(at: resolved(path))
+    }
+
     func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? {
-        wrapped.fileIdentity(at: resolved(path), followingLinks: followingLinks)
+        if nonSymlinkAncestors.contains(path) { return nil }
+        return wrapped.fileIdentity(at: resolved(path), followingLinks: followingLinks)
     }
 
     init(
@@ -155,16 +162,19 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         self.wrapped = wrapped
         pathMappings = [(canonicalDirectory, substituteDirectory)]
         physicalSandbox = nil
+        nonSymlinkAncestors = []
     }
 
     init(
         wrapped: FileServiceProtocol,
         pathMappings: [(logical: String, physical: String)],
-        physicalSandbox: String? = nil
+        physicalSandbox: String? = nil,
+        nonSymlinkAncestors: Set<String> = []
     ) {
         self.wrapped = wrapped
         self.pathMappings = pathMappings.sorted { $0.logical.count > $1.logical.count }
         self.physicalSandbox = physicalSandbox
+        self.nonSymlinkAncestors = nonSymlinkAncestors
     }
 
     private func physicalPath(for logicalPath: String) -> String {
@@ -231,6 +241,11 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         try beforeRuleRead?(physical)
         return try wrapped.readRegularFileData(at: physical, maximumBytes: maximumBytes)
     }
+    func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data {
+        let physical = resolved(path)
+        try beforeRuleRead?(physical)
+        return try wrapped.readRegularFileData(at: physical, maximumBytes: maximumBytes, containedIn: resolved(directory))
+    }
     func readRegularFileHeader(at path: String, maximumBytes: Int) throws -> Data {
         let physical = resolved(path)
         try beforeRuleRead?(physical)
@@ -241,6 +256,11 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         if physical.hasSuffix("/deploy-state.json") { try beforeDeployStateWrite?(physical) }
         try beforeFileWrite?(physical)
         try wrapped.writeFile(at: physical, content: content)
+    }
+    func writeData(at path: String, data: Data) throws {
+        let physical = resolved(path)
+        try beforeFileWrite?(physical)
+        try wrapped.writeData(at: physical, data: data)
     }
     func writeExecutableFile(at path: String, content: String) throws {
         try wrapped.writeExecutableFile(at: resolved(path), content: content)
@@ -313,7 +333,9 @@ final class LinkServiceCanonicalDirectoryFileService: FileServiceProtocol {
         return translatesSymlinkTargets ? logicalPath(for: target) : target
     }
     func isSymlink(at path: String) -> Bool {
-        wrapped.isSymlink(at: resolved(path))
+        // ImportScanner walks ancestry. Supply fixture metadata without forwarding outside the sandbox.
+        if nonSymlinkAncestors.contains(path) { return false }
+        return wrapped.isSymlink(at: resolved(path))
     }
     func isRegularFile(at path: String) -> Bool {
         wrapped.isRegularFile(at: resolved(path))

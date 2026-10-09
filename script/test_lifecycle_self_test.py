@@ -27,7 +27,10 @@ class TestLifecycleTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         scripts = self.root / "script"
         scripts.mkdir()
-        for name in ("test.sh", "test_diagnostics.py", "test_runs.py", "test_temp_cleanup.py"):
+        (self.root / "Pensieve").mkdir()
+        (self.root / "PensieveDaemon").mkdir()
+        for name in ("test.sh", "test_diagnostics.py", "test_runs.py", "test_temp_cleanup.py", "check-live-defaults.py",
+                     "runtime-path-members.json", "check-path-syntax.py"):
             source = SCRIPTS / name
             if source.exists():
                 shutil.copy2(source, scripts / name)
@@ -53,7 +56,10 @@ if exists:
         blocked.parent.chmod(0)
 pathlib.Path(os.environ['TEST_LIFECYCLE_READY']).write_text(json.dumps({
     'pid': os.getpid(), 'directory': str(bundle.parent), 'fixture_root': root, 'fixture_root_exists': exists,
-    'git_ceiling': os.environ.get('TEST_RUNNER_GIT_CEILING_DIRECTORIES')}))
+    'git_ceiling': os.environ.get('TEST_RUNNER_GIT_CEILING_DIRECTORIES'),
+    'strict_pool': os.environ.get('TEST_RUNNER_LIBDISPATCH_COOPERATIVE_POOL_STRICT'),
+    'workers': [arg for arg in sys.argv
+        if arg in ('-parallel-testing-worker-count', '-maximum-parallel-testing-workers')]}))
 if os.environ.get('TEST_LIFECYCLE_MODE') == 'cascade':
     directory = pathlib.Path(os.environ['TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR'])
     directory.mkdir(parents=True, exist_ok=True)
@@ -86,6 +92,7 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
         self.env = dict(os.environ, PATH=str(self.bin) + ":" + os.environ["PATH"], XP_TEST_LOCK_HELD="1")
         self.env.pop("TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR", None)
         self.env.pop("TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT", None)
+        self.env.pop("TEST_RUNNER_LIBDISPATCH_COOPERATIVE_POOL_STRICT", None)
         self.system_temp = self.root / "system-temp"
         self.system_temp.mkdir()
         self.env["TEST_LIFECYCLE_SYSTEM_TEMP"] = str(self.system_temp)
@@ -161,11 +168,15 @@ sys.exit(0 if os.environ.get('TEST_LIFECYCLE_MODE') == 'pass' else 65)
         roots = []
         for index in range(2):
             self.env['TEST_LIFECYCLE_UNREADABLE_FIXTURE'] = str(index)
+            if index == 1:
+                self.env['TEST_RUNNER_LIBDISPATCH_COOPERATIVE_POOL_STRICT'] = '0'
             process, ready = self.launch(mode="pass", label=f"pass-{index}")
             output = process.communicate(timeout=10)[0].decode()
             self.assertEqual(process.returncode, 0, output)
             self.assertIn("PENSIEVE_TEST_COUNT=1", output)
             observed = json.loads(ready.read_text())
+            self.assertEqual(observed['strict_pool'], '1', 'normal suite hosts must use the strict cooperative pool')
+            self.assertEqual(observed['workers'], [], 'the wrapper must leave the test host count to Xcode')
             self.assertTrue(observed["fixture_root_exists"], "builder did not receive an existing fixture root")
             root = Path(observed["fixture_root"])
             self.assertEqual(observed["git_ceiling"], str(root), "Git discovery can escape into the checkout")

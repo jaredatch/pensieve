@@ -12,11 +12,12 @@ struct DeployStateRecord: Codable, Equatable {
     var projectReference: String {
         if let projectIdentityKey { return projectIdentityKey }
         guard let platform = PlatformTarget(rawValue: platform), platform.supportsProjectScope else { return artifactPath }
-        let suffix = platform == .cursor
-            ? DeployPaths.cursorPath(directoryName: slug, projectPath: "")
-            : DeployPaths.linkPath(directoryName: slug, platform: platform, projectPath: "")
-        guard artifactPath.hasSuffix(suffix) else { return artifactPath }
-        let path = String(artifactPath.dropLast(suffix.count))
+        guard let suffix = DeployPaths.projectArtifactPath(directoryName: slug, platform: platform,
+                                                            projectPath: "") else { return artifactPath }
+        guard PathSyntax.hasSuffix(artifactPath, suffix) else { return artifactPath }
+        let suffixComponents = PathSyntax.components(suffix).count
+        let path = PathSyntax.components(artifactPath, omittingEmptySubsequences: false)
+            .dropLast(suffixComponents).joined(separator: "/")
         return path.isEmpty ? "/" : path
     }
 }
@@ -42,7 +43,7 @@ final class DeployStateStore {
 
     init(
         fileService: FileServiceProtocol,
-        appSupportDir: String = PathConstants.pensieveAppSupportDir,
+        appSupportDir: String,
         now: @escaping () -> Date = Date.init
     ) {
         self.fileService = fileService

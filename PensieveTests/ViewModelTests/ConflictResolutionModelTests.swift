@@ -10,7 +10,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         var results: [SyncCycleResult] = []
     }
 
-    private final class StubResolutionEngine: SyncEngineProtocol {
+    final class StubResolutionEngine: SyncEngineProtocol {
         var inspections: [ConflictInspection] = []
         var resolveOutcome: SyncOutcome = .synced(pushed: true, warnings: [])
         var resolveError: Error?
@@ -50,21 +50,26 @@ final class ConflictResolutionModelTests: XCTestCase {
         func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool { false }
         @discardableResult
         func stageAllAndCommit(at path: String, message: String) throws -> Bool { false }
+        func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+        func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+            try pullRebase(at: path, credential: nil)
+        }
         func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult { .upToDate }
         func push(at path: String, credential: GitCredential?) throws {}
         func abortRebase(at path: String) throws {}
         func conflictedFiles(at path: String) -> [String] { [] }
-        func blob(atStage stage: Int, path: String, in workingDir: String) -> String? { nil }
+        func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
         func continueRebase(at path: String) throws -> PullResult { .upToDate }
         func skipRebase(at path: String) throws -> PullResult { .upToDate }
         func stagePath(_ path: String, at root: String) throws {}
-        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?) throws -> Bool {
+        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                    fetchedRevision: FetchedStoreRevision?) throws -> Bool {
             false
         }
         func hasCommitsToPush(at path: String) -> Bool { false }
     }
 
-    private func makeContext() throws -> ModelContext {
+    func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
             for: Skill.self, Project.self, SkillProjectAssignment.self,
             DeployRecord.self, PensieveCategory.self, Scenario.self,
@@ -73,9 +78,9 @@ final class ConflictResolutionModelTests: XCTestCase {
         return ModelContext(container)
     }
 
-    private func makeModel(engine: StubResolutionEngine,
-                           headStamp: @escaping () -> String? = { "before" },
-                           onResolved: @escaping (SyncCycleResult) -> Void = { _ in })
+    func makeModel(engine: StubResolutionEngine,
+                   headStamp: @escaping () -> String? = { "before" },
+                   onResolved: @escaping (SyncCycleResult) -> Void = { _ in })
         -> ConflictResolutionModel {
         ConflictResolutionModel(engine: engine, git: StubGit(),
                                 credentials: InMemoryCredentialStore(), root: "/tmp/none",
@@ -83,26 +88,29 @@ final class ConflictResolutionModelTests: XCTestCase {
                                 onResolutionStarted: { onResolved })
     }
 
-    func testBodyAndOverlayForOneSlugGroupIntoOneSkillCard() async throws {
-        let context = try makeContext()
-        context.insert(Skill(name: "Deploy Helper", directoryName: "deploy-helper"))
-        try context.save()
-        let engine = StubResolutionEngine()
-        engine.inspections = [.conflicts(ConflictSet(items: [
-            bodyItem(slug: "deploy-helper"),
-            overlayItem(slug: "deploy-helper")
-        ]))]
-        let model = makeModel(engine: engine)
-
-        await model.loadAndReport(context: context)
-
-        let groups = try readyGroups(from: model.phase)
-        XCTAssertEqual(groups.count, 1, "body + overlay for the same slug must be one pickable group")
-        XCTAssertEqual(groups[0].id, "deploy-helper")
-        XCTAssertEqual(groups[0].title, "Deploy Helper")
-        XCTAssertEqual(groups[0].subtitle, "Body and settings differ")
-        XCTAssertEqual(groups[0].items.count, 2)
-        XCTAssertFalse(model.canApply)
+    func testJoiningBodyAndOverlayNamesGroupWithoutLosingTheirFirstScalar() async throws {
+        let history = try ConflictHistoryFixture(test: self)
+        defer { try? history.remove() }
+        await history.runtime.bootstrapTask.value
+        for scalar in PathJoiningScalars.values {
+            let context = try makeContext()
+            let name = PathJoiningScalars.name("skill", scalar: scalar)
+            context.insert(Skill(name: "Joined Skill", directoryName: name))
+            try context.save()
+            let engine = StubResolutionEngine()
+            engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: name), overlayItem(slug: name)]))]
+            let model = makeModel(engine: engine)
+            await model.loadAndReport(context: context)
+            let groups = try readyGroups(from: model.phase)
+            XCTAssertEqual(groups.count, 1)
+            let group = try XCTUnwrap(groups.first)
+            XCTAssertEqual(group.id, "skill:" + name)
+            XCTAssertEqual(group.title, "Joined Skill")
+            XCTAssertEqual(group.items.count, 2)
+            model.choose("skill:" + name, .thisMachine)
+            XCTAssertTrue(model.canApply)
+            await assertHistoryAction(path: "skills/" + name + "/SKILL.md", slug: name, available: true, fixture: history)
+        }
     }
 
     func testChooseEnablesApply() async throws {
@@ -113,7 +121,7 @@ final class ConflictResolutionModelTests: XCTestCase {
 
         await model.loadAndReport(context: context)
         XCTAssertFalse(model.canApply)
-        model.choose("alpha", .otherMachine)
+        model.choose("skill:alpha", .otherMachine)
 
         XCTAssertTrue(model.canApply)
         let group = try XCTUnwrap(readyGroups(from: model.phase).first)
@@ -127,14 +135,14 @@ final class ConflictResolutionModelTests: XCTestCase {
         let model = makeModel(engine: engine)
 
         await model.loadAndReport(context: context)
-        model.choose("alpha", .thisMachine)
+        model.choose("skill:alpha", .thisMachine)
         await model.applyAndReport(context: context)
 
         XCTAssertEqual(model.phase, .done)
         XCTAssertEqual(engine.resolveCallCount, 1)
         let pick = try XCTUnwrap(engine.resolvedPicks["skills/alpha/SKILL.md"])
-        XCTAssertEqual(pick, ResolutionPick(side: .thisMachine, expectedThis: "this body",
-                                            expectedOther: "other body"))
+        XCTAssertEqual(pick, ResolutionPick(side: .thisMachine, expectedThis: Data("this body".utf8),
+                                            expectedOther: Data("other body".utf8)))
     }
 
     func testSuccessfulResolveFiresOnResolved() async throws {
@@ -150,7 +158,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         let model = makeModel(engine: engine, onResolved: { spy.results.append($0) })
 
         await model.loadAndReport(context: context)
-        model.choose("alpha", .thisMachine)
+        model.choose("skill:alpha", .thisMachine)
         await model.applyAndReport(context: context)
 
         XCTAssertEqual(model.phase, .done)
@@ -193,7 +201,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         let model = makeModel(engine: engine, onResolved: { spy.results.append($0) })
 
         await model.loadAndReport(context: context)
-        model.choose("alpha", .otherMachine)
+        model.choose("skill:alpha", .otherMachine)
         await model.applyAndReport(context: context)
 
         XCTAssertTrue(spy.results.isEmpty)
@@ -210,7 +218,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         let model = makeModel(engine: engine)
 
         await model.loadAndReport(context: context)
-        model.choose("alpha", .otherMachine)
+        model.choose("skill:alpha", .otherMachine)
         await model.applyAndReport(context: context)
 
         XCTAssertEqual(engine.inspectCallCount, 2)
@@ -219,29 +227,12 @@ final class ConflictResolutionModelTests: XCTestCase {
         XCTAssertEqual(groups[0].subtitle, "Settings differ")
     }
 
-    func testUnknownSkillSlugFallsBackToSlugTitle() async throws {
-        let context = try makeContext()
-        let engine = StubResolutionEngine()
-        engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: "new-skill")]))]
-        let model = makeModel(engine: engine)
-
-        await model.loadAndReport(context: context)
-
-        let group = try XCTUnwrap(readyGroups(from: model.phase).first)
-        XCTAssertEqual(group.title, "new-skill")
-    }
-
-    private func bodyItem(slug: String) -> ConflictItem {
-        ConflictItem(path: "skills/\(slug)/SKILL.md", kind: .body,
-                     thisMachine: "this body", otherMachine: "other body")
-    }
-
-    private func overlayItem(slug: String) -> ConflictItem {
+    func overlayItem(slug: String) -> ConflictItem {
         ConflictItem(path: "manifest/skills/\(slug).yaml", kind: .overlay,
-                     thisMachine: "this overlay", otherMachine: "other overlay")
+                     thisMachine: Data("this overlay".utf8), otherMachine: Data("other overlay".utf8))
     }
 
-    private func readyGroups(from phase: ConflictResolutionModel.Phase) throws
+    func readyGroups(from phase: ConflictResolutionModel.Phase) throws
         -> [ConflictResolutionModel.ConflictGroup] {
         guard case let .ready(groups) = phase else {
             XCTFail("expected ready, got \(phase)")

@@ -11,7 +11,7 @@ final class SkillEditorIdentityPreservationTests: XCTestCase {
         tempDir = TestTemporaryDirectory.path + "PensieveEditorIdentityTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
-        store = SkillStore(fileService: fileService, baseDir: tempDir)
+        store = SkillStore(fileService: fileService, baseDir: tempDir, storeRoot: tempDir)
     }
 
     override func tearDownWithError() throws {
@@ -37,7 +37,9 @@ final class SkillEditorIdentityPreservationTests: XCTestCase {
             directoryName: "identity"
         )
         try writeSkillFile(original, directoryName: skill.directoryName)
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
 
         XCTAssertEqual(library.editorBody(for: skill), "Original body")
         library.noteEditorChanged(skill, body: "Edited body")
@@ -63,7 +65,9 @@ final class SkillEditorIdentityPreservationTests: XCTestCase {
         """ + "\n"
         let skill = Skill(name: "Model Fallback Name", skillDescription: "", directoryName: "repair")
         try writeSkillFile(original, directoryName: skill.directoryName)
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
 
         XCTAssertEqual(library.editorBody(for: skill), "Original body")
         library.noteEditorChanged(skill, body: "Edited body")

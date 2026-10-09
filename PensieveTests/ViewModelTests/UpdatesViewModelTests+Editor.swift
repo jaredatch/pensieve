@@ -5,7 +5,8 @@ extension UpdatesViewModelTests {
     func testReplacementFailureInvalidatesEditorAndSaveKeepsReplacedBody() async throws {
         let fixture = try prepareRealPinnedUpdate()
         let service = SkillInstallService(
-            gitService: GitService(fileService: fileService), credentialStore: InMemoryCredentialStore(),
+            gitService: GitService(fileService: fileService, askpassHelperPath: TestPaths.gitAskpassHelperPath),
+                credentialStore: InMemoryCredentialStore(),
             fileService: fileService, scratchRoot: tempDir + "/editor-failure", storeRoot: fixture.storeRoot,
             manifestService: CrashManifest(wrapped: ManifestService(fileService: fileService), failurePoint: .beforeUpsert),
             lockPath: tempDir + "/sync.lock", remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) }

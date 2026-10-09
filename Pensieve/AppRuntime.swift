@@ -20,6 +20,7 @@ final class AppRuntime {
     let scheduler: SyncScheduler
     let provenanceVM: SkillProvenanceViewModel
     let updatesViewModelOperations: UpdatesViewModel.DefaultOperations
+    let machineObservability: MachineObservabilityDependencies
     let reconcileIntent: @MainActor (ModelContext) -> BatchResult
 
     private(set) var coordinator: SyncCoordinator?
@@ -48,7 +49,7 @@ final class AppRuntime {
     private let launchIngestRetryNanoseconds: UInt64
     private let launchIngestLockPath: String
     /// Where the store and App Support live; every collaborator built here is pointed at them (`AppRuntime+Paths.swift`).
-    private let paths: AppRuntimePaths
+    let paths: AppRuntimePaths
     private var didPerformLaunchWork = false
     private var didCompleteLaunchIngest = false
     private var didFinishInitialLaunchCallbacks = false
@@ -67,10 +68,11 @@ final class AppRuntime {
         let container = container
         let configure = coordinatorConfigure
         let paths = paths
+        let defaults = defaults
         return Task.detached { [weak self] in
             await self?.refreshGitUsability()
             let coordinator = SyncCoordinator(modelContainer: container)
-            await paths.configureCoordinator(coordinator)
+            await paths.configureCoordinator(coordinator, defaults: defaults)
             await configure(coordinator)
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -119,7 +121,7 @@ final class AppRuntime {
         updateCheckOperation: UpdateCheckOperation? = nil,
         updateCheckApply: (([UUID: SkillUpdateCheckResult]) throws -> Void)? = nil,
         now: @escaping () -> Date = Date.init,
-        gitUsabilityProbe: @escaping () -> GitUsability = { GitService().probeUsability() },
+        gitUsabilityProbe: (() throws -> GitUsability)? = nil,
         // The paths configure the coordinator first (`bootstrapTask`); this hook runs after, so a test
         // can swap in stubs. A bare `configure()` here would reset the paths to production.
         coordinatorConfigure: @escaping CoordinatorConfigure = { _ in }
@@ -129,7 +131,7 @@ final class AppRuntime {
         let notifier: SyncStateNotifying = { [weak resolvedScheduler] in
             resolvedScheduler?.nudge()
         }
-        let resolvedSyncModel = syncModel ?? SyncModel(root: paths.storeRoot)
+        let resolvedSyncModel = syncModel ?? SyncModel(git: paths.makeGitService(), root: paths.storeRoot)
         let resolvedContainer = try container ?? paths.makeContainer()
         let resolvedPlatformVM = platformVM ?? paths.makePlatformViewModel()
         let resolvedProvenanceVM = provenanceVM ?? paths.makeSkillProvenanceViewModel()
@@ -147,6 +149,7 @@ final class AppRuntime {
         self.scheduler = resolvedScheduler
         self.provenanceVM = resolvedProvenanceVM
         self.updatesViewModelOperations = paths.makeUpdatesViewModelOperations()
+        self.machineObservability = paths.makeMachineObservability(defaults: resolvedDefaults)
         self.reconcileIntent = { context in
             resolvedIntentReconciler.reconcile(context: context)
         }
@@ -165,11 +168,9 @@ final class AppRuntime {
         self.updateCheckOperation = updateCheckOperation ?? paths.makeUpdateCheckOperation()
         self.updateCheckApply = updateCheckApply
         self.now = now
-        self.gitState = RuntimeGitState(probe: gitUsabilityProbe)
+        self.gitState = RuntimeGitState(probe: gitUsabilityProbe ?? { try paths.makeGitService().probeUsability() })
         resolvedSyncModel.observeGitState(gitState)
-
         installRuntimeCallbacks()
-
         _ = bootstrapTask
     }
 
@@ -177,12 +178,11 @@ final class AppRuntime {
     func refreshGitUsability() async { await refreshGitConfiguration(probingGit: true) }
 
     var syncLockPath: String { paths.syncLockPath }
-
     var backgroundSyncEnabled: Bool {
         get { defaults.object(forKey: Self.backgroundSyncEnabledKey) as? Bool ?? true }
         set {
             defaults.set(newValue, forKey: Self.backgroundSyncEnabledKey)
-            scheduler.backgroundPreferenceChanged()
+            scheduler.drainPendingRequests()
         }
     }
 
@@ -270,7 +270,7 @@ private extension AppRuntime {
             guard let self else { return }
             if self.forceLaunchPreflight {
                 self.forceLaunchPreflight = false
-                self.scheduler.enqueueManualTrigger()
+                self.scheduler.enqueueLaunchPreflight()
             }
             self.scheduler.launchIngestCompleted()
         }
@@ -351,11 +351,14 @@ extension AppRuntime {
     }
 
     private func handleGitChange(_ change: RuntimeGitState.Change?) {
-        guard let change, change.recovered else { return }
-        let retry = automaticUpdateRetryDeferred
-        automaticUpdateRetryDeferred = false
-        if retry { checkForSkillUpdatesIfDue() }
-        syncModel.resumeAfterGitRecovery()
+        guard let change, change.usability == .usable else { return }
+        if change.recovered {
+            let retry = automaticUpdateRetryDeferred
+            automaticUpdateRetryDeferred = false
+            if retry { checkForSkillUpdatesIfDue() }
+            syncModel.resumeAfterGitRecovery()
+        }
+        scheduler.drainPendingRequests()
     }
 
     private func startUpdateCheck(at checkedAt: Date? = nil, showsFailureAlert: Bool, automatic: Bool = false) {

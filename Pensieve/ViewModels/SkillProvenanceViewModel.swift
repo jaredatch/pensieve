@@ -78,7 +78,7 @@ final class SkillProvenanceViewModel {
     func present(skillID: UUID, context: ModelContext) async {
         let container = context.container
         let operation = driftOperation
-        let task = Task.detached(priority: .utility) {
+        let task = BlockingWork.task(priority: .utility) {
             try Task.checkCancellation()
             return try operation(skillID, container)
         }
@@ -187,7 +187,7 @@ private extension SkillProvenanceViewModel {
     ) async {
         guard checkOperationIDs[skillID] == operationID, !Task.isCancelled else { return }
         let operation = checkOperation
-        let task = Task.detached(priority: .userInitiated) {
+        let task = BlockingWork.task(priority: .userInitiated) {
             try Task.checkCancellation()
             return try operation(skillID, container)
         }
@@ -231,13 +231,13 @@ private extension SkillProvenanceViewModel {
     }
 
     static func isSafeGitHubLinkPath(_ value: String) -> Bool {
-        let segments = value.split(separator: "/", omittingEmptySubsequences: false)
+        let segments = PathSyntax.components(value, omittingEmptySubsequences: false)
         return !segments.isEmpty && segments.allSatisfy {
             !$0.isEmpty
                 && $0 != "."
                 && $0 != ".."
                 && !$0.contains("..")
-                && !$0.hasPrefix("-")
+                && !PathSyntax.startsWithDash($0)
                 && !$0.contains("\\")
         }
     }

@@ -98,12 +98,28 @@ targets:
     type: tool
     platform: macOS
     sources:
+      - path: PensieveTests/Fixtures/FakeGitScript.swift
+      - path: PensieveTests/Fixtures/ImportPublicationFileService.swift
       - path: PensieveTests/Fixtures/GitProcessProbe
+      - path: Pensieve/Services/SkillStore.swift
+      - path: Pensieve/Services/SkillParser.swift
+      - path: Pensieve/Services/SkillParser+Preservation.swift
+      - path: Pensieve/Services/SkillSerializer.swift
+      - path: Pensieve/Services/CheckedYAMLLoader.swift
+      - path: Pensieve/Models/AdapterConfig.swift
+      - path: Pensieve/Models/SkillScope.swift
+      - path: Pensieve/Utilities/BlockingWork.swift
+      - path: Pensieve/Services/SyncLock.swift
       - path: Pensieve/Services/GitService.swift
+      - path: Pensieve/Services/GitService+StoreRules.swift
+      - path: Pensieve/Services/StoreIgnoreRules.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
+      - path: Pensieve/Services/GitProcess.swift
       - path: Pensieve/Services/GitService+Usability.swift
       - path: Pensieve/Services/GitServiceConflict.swift
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+Publication.swift
+      - path: Pensieve/Services/VendorTemporaryDirectory.swift
       - path: Pensieve/Services/FileService+ProjectFolder.swift
       - path: Pensieve/Services/ProjectFolderError.swift
       - path: Pensieve/Services/FileService+BoundedRead.swift
@@ -111,17 +127,23 @@ targets:
       - path: Pensieve/Services/FileService+DirectoryCopy.swift
       - path: Pensieve/Services/FileService+DirectoryProbe.swift
       - path: Pensieve/Services/FileTreeComparison.swift
+      - path: Pensieve/Services/FileService+ImportCopy.swift
       - path: Pensieve/Services/FileService+TreeWalk.swift
       - path: Pensieve/Services/FileService+TreeComparison.swift
       - path: Pensieve/Services/RemoteURLPolicy.swift
       - path: Pensieve/Utilities/PathConstants.swift
+      - path: Pensieve/Utilities/PathSyntax.swift
       - path: Pensieve/Utilities/DisplayTextSanitizer.swift
     settings:
       base:
         PRODUCT_NAME: GitProcessProbe
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) GIT_PROCESS_PROBE"
         SWIFT_VERSION: "5.10"
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGNING_REQUIRED: NO
+
+    dependencies:
+      - package: Yams
 
   PensieveDaemon:
     type: tool
@@ -129,6 +151,8 @@ targets:
     sources:
       - path: PensieveDaemon
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+Publication.swift
+      - path: Pensieve/Services/VendorTemporaryDirectory.swift
       - path: Pensieve/Services/FileService+ProjectFolder.swift
       - path: Pensieve/Services/ProjectFolderError.swift
       - path: Pensieve/Services/FileService+BoundedRead.swift
@@ -138,10 +162,14 @@ targets:
       - path: Pensieve/Services/FileService+DirectoryCopy.swift
       - path: Pensieve/Services/FileService+DirectoryProbe.swift
       - path: Pensieve/Services/FileTreeComparison.swift
+      - path: Pensieve/Services/FileService+ImportCopy.swift
       - path: Pensieve/Services/FileService+TreeWalk.swift
       - path: Pensieve/Services/FileService+TreeComparison.swift
       - path: Pensieve/Services/GitService.swift
+      - path: Pensieve/Services/GitService+StoreRules.swift
+      - path: Pensieve/Services/StoreIgnoreRules.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
+      - path: Pensieve/Services/GitProcess.swift
       - path: Pensieve/Services/GitService+Usability.swift
       - path: Pensieve/Services/GitService+FastForward.swift
       - path: Pensieve/Services/GitServiceConflict.swift
@@ -169,6 +197,8 @@ targets:
       - path: Pensieve/Models/SkillScope.swift
       - path: Pensieve/Models/AdapterConfig.swift
       - path: Pensieve/Utilities/PathConstants.swift
+      - path: Pensieve/Utilities/PathSyntax.swift
+      - path: Pensieve/Utilities/RuntimePaths.swift
       - path: Pensieve/Utilities/DisplayTextSanitizer.swift
     settings:
       base:

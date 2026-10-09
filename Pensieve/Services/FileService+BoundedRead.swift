@@ -31,7 +31,7 @@ extension FileService {
                 throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
             }
             let resolved = String(cString: openedPath)
-            guard resolved.hasPrefix(root + "/") else { throw CocoaError(.fileReadNoPermission) }
+            guard PathSyntax.hasPrefix(resolved, root + "/") else { throw CocoaError(.fileReadNoPermission) }
         }
         guard status.st_size >= 0, status.st_size <= maximumBytes else {
             throw CocoaError(.fileReadTooLarge)

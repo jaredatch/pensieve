@@ -10,7 +10,9 @@ final class SkillLibraryLeaveLoopTests: XCTestCase {
 
     func testAGlobalWayOutSettlesAnEntryTheFileCaughtUpWith() {
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let skill = Skill(name: "Skill", directoryName: "skill")
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "B")
@@ -25,7 +27,10 @@ final class SkillLibraryLeaveLoopTests: XCTestCase {
         XCTAssertNil(library.pendingUnsavedChanges)
         XCTAssertTrue(library.drafts.isEmpty)
 
-        let cycleLibrary = SkillLibraryViewModel(skillStore: CountingSkillStore(body: "A"))
+        let cycleLibrary = SkillLibraryViewModel(
+            skillStore: CountingSkillStore(body: "A"), fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
+        )
         let cycleSkill = Skill(name: "Cycle Skill", directoryName: "cycle-skill")
         _ = cycleLibrary.editorBody(for: cycleSkill)
         cycleLibrary.noteEditorChanged(cycleSkill, body: "B")
@@ -42,7 +47,9 @@ final class SkillLibraryLeaveLoopTests: XCTestCase {
         // change while another skill was edited): quit, the window's close, and the Updates sheet ask about each
         // in turn and proceed only once both were answered — round 2 found the quit asking about one.
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let presenter = RecordingPresenter()
         presenter.answer = .save
         library.unsavedChangesPresenter = presenter.present
@@ -64,7 +71,9 @@ final class SkillLibraryLeaveLoopTests: XCTestCase {
 
     func testAGlobalLeaveStopsAtTheFirstCancel() {
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let presenter = RecordingPresenter()   // holds each question open
         library.unsavedChangesPresenter = presenter.present
         let alpha = Skill(name: "Alpha", directoryName: "alpha")
@@ -95,7 +104,9 @@ final class SkillLibraryLeaveLoopTests: XCTestCase {
         // moves on under it — a second question is refused, beta is dirty now, and the global loop must reach
         // it once alpha is answered: a loop over the drafts dirty at the start would not (round 3).
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let presenter = RecordingPresenter()
         library.unsavedChangesPresenter = presenter.present
         let alpha = Skill(name: "Alpha", directoryName: "alpha")
@@ -126,7 +137,9 @@ final class SkillLibraryLeaveLoopTests: XCTestCase {
     func testLeavingSeveralSkillsAsksAboutEachDirtyOneInTurn() {
         // A multi-selection moving on: the dirty ones are asked about in turn, the clean one is not.
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let presenter = RecordingPresenter()
         presenter.answer = .discard
         library.unsavedChangesPresenter = presenter.present
@@ -148,7 +161,9 @@ final class SkillLibraryLeaveLoopTests: XCTestCase {
 
     func testLeavingSeveralSkillsStopsAtTheFirstCancel() {
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let presenter = RecordingPresenter()   // holds each question open
         library.unsavedChangesPresenter = presenter.present
         let alpha = Skill(name: "Alpha", directoryName: "alpha")
@@ -176,7 +191,9 @@ final class SkillLibraryLeaveLoopTests: XCTestCase {
         // refused, and the gate must ask about alpha again before proceeding: a loop that drops answered
         // skills would not (round 5).
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let presenter = RecordingPresenter()   // holds each question open
         library.unsavedChangesPresenter = presenter.present
         let alpha = Skill(name: "Alpha", directoryName: "alpha")
@@ -210,7 +227,9 @@ final class SkillLibraryLeaveLoopTests: XCTestCase {
         // file moves on while gamma's question is open — its own question refused — and the gate must reach
         // alpha after gamma is answered: a snapshot of the dirty departures would not (round 4).
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let presenter = RecordingPresenter()   // holds each question open
         library.unsavedChangesPresenter = presenter.present
         let alpha = Skill(name: "Alpha", directoryName: "alpha")

@@ -113,6 +113,9 @@ final class SkillDetailScrollLayoutTests: XCTestCase {
         XCTAssertTrue(originalContent === updatedContent)
     }
 
+}
+
+extension SkillDetailScrollLayoutTests {
     func testOverviewDeploymentsAndBothHistoriesDoNotOwnVerticalScrollViews() throws {
         let skill = Skill(name: "Example", directoryName: "example")
         let views: [(String, AnyView)] = [
@@ -121,7 +124,8 @@ final class SkillDetailScrollLayoutTests: XCTestCase {
                 snapshot: DetailContentSnapshot(),
                 provenance: nil,
                 installedCount: 0,
-                now: Date()
+                now: Date(),
+                homeDirectory: TestPaths.homeDirectory, skillsDirectory: TestPaths.skillsDir
             ))),
             ("Deployments", try deploymentsTab())
         ] + (try historyTabs())
@@ -138,8 +142,11 @@ final class SkillDetailScrollLayoutTests: XCTestCase {
         let fileService = DeployRecordingFileService()
         let platformVM = PlatformViewModel(
             fileService: fileService,
+            linkService: TestPaths.linkService(fileService: fileService),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: fileService),
             agentDetection: EmptyMachineDetection(),
-            deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: base)
+            deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: base),
+            skillsDirectory: TestPaths.skillsDir
         )
         let dependencies = DeployIntentDependencies(
             identity: InertMachineIdentity(),
@@ -163,6 +170,7 @@ final class SkillDetailScrollLayoutTests: XCTestCase {
             intentDependencies: dependencies,
             machineStates: [],
             localMachineID: InertMachineIdentity.value,
+            homeDirectory: TestPaths.homeDirectory,
             onAddProject: {}
         ).modelContainer(container))
     }
@@ -170,7 +178,10 @@ final class SkillDetailScrollLayoutTests: XCTestCase {
     private func historyTabs() throws -> [(String, AnyView)] {
         let base = TestTemporaryDirectory.path + "SkillDetailScrollLayoutTests-\(UUID().uuidString)"
         let skill = Skill(name: "Example", directoryName: "example")
-        let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: FileService(), baseDir: base))
+        let library = SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills", storeRoot: base),
+            fileWatchService: FileWatchService(rootDir: base + "/skills"), manifestRoot: base
+        )
         let history = UpstreamHistoryViewModel(
             readOperation: { _, _, _ in historyResult() },
             localEditsOperation: { _, _, _ in .none },
@@ -180,8 +191,16 @@ final class SkillDetailScrollLayoutTests: XCTestCase {
         let installedOrigin = try XCTUnwrap(installedSkill.installedOrigin)
         return [
             ("Authored History", AnyView(SkillHistoryTab(
-                skill: skill, currentBody: "", library: library, upstreamHistory: history,
-                localRevision: .initial, onOpenUpdates: {}, onUpdateCheck: { _ in }, workingDir: base
+                skill: skill,
+                currentBody: "",
+                library: library,
+                upstreamHistory: history,
+                localRevision: .initial,
+                onOpenUpdates: {},
+                onUpdateCheck: { _ in },
+                git: TestPaths.git,
+                store: library.skillStore,
+                workingDir: base
             ))),
             ("Installed History", AnyView(InstalledSkillHistoryView(
                 skill: installedSkill, currentBody: "", origin: installedOrigin, updateAvailable: false,

@@ -78,7 +78,7 @@ final class SkillStoreTests: XCTestCase {
         // symlink baseDir/victim -> outside (a symlinked DIRECTORY)
         try FileManager.default.createSymbolicLink(atPath: baseDir + "/victim", withDestinationPath: outside)
 
-        let store = SkillStore(fileService: fileService, baseDir: baseDir)
+        let store = SkillStore(fileService: fileService, baseDir: baseDir, storeRoot: baseDir)
 
         XCTAssertThrowsError(
             try store.rewriteSkill(
@@ -109,7 +109,7 @@ final class SkillStoreTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: baseDir + "/ok", withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: tempDir) }
 
-        let store = SkillStore(fileService: fileService, baseDir: baseDir)
+        let store = SkillStore(fileService: fileService, baseDir: baseDir, storeRoot: baseDir)
         try store.rewriteSkill(
             directoryName: "ok",
             body: "# Body",
@@ -125,13 +125,13 @@ final class SkillStoreTests: XCTestCase {
     func testEstimatedTokensZeroForSymlinkedDir() {
         let skill = Skill(name: "S", skillDescription: "d", directoryName: "victim")
         let body = String(repeating: "x", count: 1000)
-        XCTAssertEqual(SkillLibraryViewModel(fileService: FakeFS(symlink: true, body: body)).estimatedTokens(skill), 0)
+        XCTAssertEqual(SkillLibraryViewModel.testTokenEstimate(skill, fileService: FakeFS(symlink: true, body: body)), 0)
     }
 
     func testEstimatedTokensNonZeroForRealDir() {
         let skill = Skill(name: "S", skillDescription: "d", directoryName: "ok")
         let body = String(repeating: "x", count: 1000)
-        XCTAssertGreaterThan(SkillLibraryViewModel(fileService: FakeFS(symlink: false, body: body)).estimatedTokens(skill), 0)
+        XCTAssertGreaterThan(SkillLibraryViewModel.testTokenEstimate(skill, fileService: FakeFS(symlink: false, body: body)), 0)
     }
 
     func testEstimatedTokensReturnsZeroForInvalidDirectoryName() {
@@ -140,11 +140,11 @@ final class SkillStoreTests: XCTestCase {
         // non-symlink FakeFS would return a 1000-char body.
         let skill = Skill(name: "S", skillDescription: "d", directoryName: "../evil")
         let body = String(repeating: "x", count: 1000)
-        XCTAssertEqual(SkillLibraryViewModel(fileService: FakeFS(symlink: false, body: body)).estimatedTokens(skill), 0)
+        XCTAssertEqual(SkillLibraryViewModel.testTokenEstimate(skill, fileService: FakeFS(symlink: false, body: body)), 0)
     }
 
     func testCreateSkillAvoidsGivenSlugs() throws {
-        let root = try tempRoot(), store = SkillStore(fileService: FileService(), baseDir: root)
+        let root = try tempRoot(), store = SkillStore(fileService: FileService(), baseDir: root, storeRoot: root)
         XCTAssertEqual(try store.createSkill(name: "Foo", description: "d", body: "b", avoiding: ["foo"]), "foo-2")
         XCTAssertEqual(
             try store.createSkill(name: "Foo", description: "d", body: "b", avoiding: ["foo", "foo-3"]),
@@ -156,10 +156,19 @@ final class SkillStoreTests: XCTestCase {
             "foo-6"
         )
         XCTAssertEqual(try store.createSkill(name: "Foo", description: "d", body: "b"), "foo")
+        let files = FileService()
+        try files.writeFile(at: root + "/BAR", content: "occupant")
+        try files.createSymlink(at: root + "/bar-2", pointingTo: root + "/absent")
+        try files.createDirectory(at: root + "/bar-3")
+        XCTAssertEqual(try store.createSkill(name: "Bar", description: "d", body: "b"), "bar-4")
+        XCTAssertEqual(try files.readFile(at: root + "/BAR"), "occupant")
+        XCTAssertTrue(files.isSymlink(at: root + "/bar-2"))
+        XCTAssertEqual(try files.symlinkTarget(at: root + "/bar-2"), root + "/absent")
+        XCTAssertTrue(try files.listDirectory(at: root + "/bar-3").isEmpty)
     }
 
     func testReadBodyRefusesSymlinkedLeafAndDirectoryLeaf() throws {
-        let root = try tempRoot(), fs = FileService(), store = SkillStore(fileService: fs, baseDir: root)
+        let root = try tempRoot(), fs = FileService(), store = SkillStore(fileService: fs, baseDir: root, storeRoot: root)
         try fs.createDirectory(at: root + "/outside")
         try fs.writeFile(at: root + "/outside/source", content: "body")
         try fs.createDirectory(at: root + "/linked")
@@ -176,7 +185,7 @@ final class SkillStoreTests: XCTestCase {
     }
 
     func testSlugEntryProbeSeesEveryEntryShape() throws {
-        let root = try tempRoot(), fs = FileService(), store = SkillStore(fileService: fs, baseDir: root)
+        let root = try tempRoot(), fs = FileService(), store = SkillStore(fileService: fs, baseDir: root, storeRoot: root)
         XCTAssertFalse(try store.slugEntryExists("absent"))
         try fs.createDirectory(at: root + "/empty")
         try fs.createDirectory(at: root + "/directory-leaf/SKILL.md")
@@ -191,14 +200,14 @@ final class SkillStoreTests: XCTestCase {
         for slug in [".", "..", "a/b", ".foo"] {
             XCTAssertThrowsError(try store.slugEntryExists(slug))
         }
-        let missingStore = SkillStore(fileService: fs, baseDir: root + "/missing-parent")
+        let missingStore = SkillStore(fileService: fs, baseDir: root + "/missing-parent", storeRoot: root + "/missing-parent")
         XCTAssertThrowsError(try missingStore.slugEntryExists("foo"))
-        XCTAssertThrowsError(try SkillStore(fileService: UnlistableFS(), baseDir: "/x").slugEntryExists("foo"))
+        XCTAssertThrowsError(try SkillStore(fileService: UnlistableFS(), baseDir: "/x", storeRoot: "/x").slugEntryExists("foo"))
     }
 
     func testDeleteSkillRefusesTraversingAndSymlinkedNames() throws {
         let root = try tempRoot(), base = root + "/skills", sentinel = root + "/sentinel"
-        let fs = FileService(), store = SkillStore(fileService: fs, baseDir: base)
+        let fs = FileService(), store = SkillStore(fileService: fs, baseDir: base, storeRoot: base)
         try fs.createDirectory(at: base + "/real")
         try fs.writeFile(at: base + "/real/SKILL.md", content: "real")
         try fs.createDirectory(at: sentinel)
@@ -212,5 +221,16 @@ final class SkillStoreTests: XCTestCase {
         XCTAssertTrue(fs.isSymlink(at: base + "/linked"))
         try store.deleteSkill(directoryName: "real")
         XCTAssertFalse(fs.directoryExists(at: base + "/real"))
+    }
+}
+
+extension SkillLibraryViewModel {
+    /// Builds a library over the test skills folder and returns its token estimate for `skill`.
+    static func testTokenEstimate(_ skill: Skill, fileService: FileServiceProtocol) -> Int {
+        SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: fileService, baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
+            fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot
+        ).estimatedTokens(skill)
     }
 }

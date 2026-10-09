@@ -19,6 +19,9 @@ protocol FileServiceProtocol {
     func writeData(at path: String, data: Data) throws
     func writeExecutableFile(at path: String, content: String) throws
     func copyFile(at sourcePath: String, to destinationPath: String) throws
+    func copyFile(at sourcePath: String, to destinationPath: String, checkingCancellation: Bool) throws
+    /// Fill an import temp with bounded regular contents, excluding its prepared SKILL.md.
+    func copyImportedSkillContents(fromDirectory source: String, toDirectory destination: String) throws -> [SkillFolderCopySkip]
     /// Copies regular entries from one no-follow directory descriptor; never traverses child links.
     func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws -> RegularFileCopyReceipt
     func deleteFile(at path: String) throws
@@ -39,6 +42,8 @@ protocol FileServiceProtocol {
     /// Replaces only links. A non-link occupant throws SymlinkCreationError.occupiedPath.
     func createSymlinkWithoutParents(at linkPath: String, pointingTo targetPath: String) throws
     func deleteDirectory(at path: String) throws
+    /// Atomically publish a sibling directory over an absent or empty directory only.
+    func publishDirectory(at sourcePath: String, to destinationPath: String) throws
     /// Replaces only links. A non-link occupant throws SymlinkCreationError.occupiedPath.
     func createSymlink(at linkPath: String, pointingTo targetPath: String) throws
     func symlinkTarget(at path: String) throws -> String
@@ -51,6 +56,9 @@ protocol FileServiceProtocol {
     /// of one directory (case on a case-insensitive volume, a link and its target) share it; two
     /// directories never do. (PLAN-30 / 30.2 review; inert default below.)
     func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity?
+    /// The parent directory's identity and the filesystem's stored leaf name, without following the leaf.
+    /// Aliases share it; two hard links to one inode retain distinct entries.
+    func directoryEntryIdentity(at path: String) -> Data?
     /// `realpath(3)`: every link resolved and `/private` kept, unlike `resolvingSymlinksInPath`. A path
     /// that does not exist comes back as given. (Inert default below.)
     func realPath(at path: String) -> String
@@ -76,6 +84,11 @@ struct RegularFileMetadata: Equatable {
 // MARK: - Default implementations
 
 extension FileServiceProtocol {
+    /// Unmodeled folder copies refuse without host I/O.
+    func copyImportedSkillContents(fromDirectory source: String,
+                                   toDirectory destination: String) throws -> [SkillFolderCopySkip] {
+        throw CocoaError(.featureUnsupported)
+    }
     /// Inert default: unmodeled prefix reads never fall back to whole-file reads.
     func readRegularFilePrefix(at path: String, maximumBytes: Int) throws -> Data {
         throw CocoaError(.featureUnsupported)
@@ -110,6 +123,8 @@ extension FileServiceProtocol {
     /// Inert default: a double that does not model identity answers "unknown", and a
     /// consumer falls back to spelling.
     func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? { nil }
+    /// Inert default: unmodeled entry identity performs no host I/O.
+    func directoryEntryIdentity(at path: String) -> Data? { nil }
 
     /// Inert default: no resolution.
     func realPath(at path: String) -> String { path }
@@ -151,7 +166,14 @@ extension FileServiceProtocol {
     func copyFile(at sourcePath: String, to destinationPath: String) throws {
         let (fd, status) = try FileService.openRegularFile(at: sourcePath)
         defer { close(fd) }
-        try DescriptorFileCopy.copy(from: fd, status: status, sourcePath: sourcePath, to: destinationPath)
+        try DescriptorFileCopy.copy(from: fd, status: status, sourcePath: sourcePath, to: destinationPath, options: .init())
+    }
+
+    /// Forward modeled copies without introducing host I/O. Concrete FileService opts in between chunks.
+    func copyFile(at sourcePath: String, to destinationPath: String, checkingCancellation: Bool) throws {
+        if checkingCancellation { try Task.checkCancellation() }
+        try copyFile(at: sourcePath, to: destinationPath)
+        if checkingCancellation { try Task.checkCancellation() }
     }
 
     /// True iff the owner/user executable bit is set on a regular file. Group/world execute bits do
@@ -165,14 +187,21 @@ extension FileServiceProtocol {
         return permissions.uint16Value & 0o100 != 0
     }
 
-    /// Write `content`, then set the file mode to 0700 (owner rwx only). Provided as a default so every
-    /// conformer (the concrete `FileService`, any test stub) inherits it unchanged. The `setAttributes`
-    /// call lives INSIDE the FileService layer — the one layer permitted to touch `FileManager` — so it
-    /// is within the single-chokepoint boundary, not a bypass. Used for the git askpass helper.
-    /// (PLAN-08 / 08.2)
+    /// Stage complete bytes and owner-only executable permissions before publishing the file.
+    /// Concurrent askpass writers can replace the shared path without exposing a non-executable file.
     func writeExecutableFile(at path: String, content: String) throws {
-        try writeFile(at: path, content: content)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path)
+        let temporary = path + ".executable-" + UUID().uuidString + ".tmp"
+        do {
+            try writeFile(at: temporary, content: content)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: temporary)
+            guard Darwin.rename(temporary, path) == 0 else {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno),
+                              userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))])
+            }
+        } catch {
+            try? deleteFile(at: temporary)
+            throw error
+        }
     }
 
     /// Atomically replace the item at `path` with the freshly-built one at `sourcePath` (which is
@@ -217,6 +246,13 @@ final class FileService: FileServiceProtocol {
 
     init(directoryProbe: @escaping (String) throws -> Bool = FileService.probeDirectory) {
         self.directoryProbe = directoryProbe
+    }
+
+    func copyFile(at sourcePath: String, to destinationPath: String, checkingCancellation: Bool) throws {
+        let (descriptor, status) = try Self.openRegularFile(at: sourcePath)
+        defer { close(descriptor) }
+        try DescriptorFileCopy.copy(from: descriptor, status: status, sourcePath: sourcePath, to: destinationPath,
+                                    options: .init(checkingCancellation: checkingCancellation))
     }
 
     func readFile(at path: String) throws -> String {
@@ -305,12 +341,6 @@ final class FileService: FileServiceProtocol {
     func isSymlink(at path: String) -> Bool {
         let attrs = try? fm.attributesOfItem(atPath: path)
         return attrs?[.type] as? FileAttributeType == .typeSymbolicLink
-    }
-
-    func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? {
-        var info = stat()
-        let status = followingLinks ? stat(path, &info) : lstat(path, &info)
-        return status == 0 ? FileIdentity(device: info.st_dev, inode: info.st_ino) : nil
     }
 
     /// Reads size and recency from one `lstat`, refusing links and non-regular nodes without opening them.

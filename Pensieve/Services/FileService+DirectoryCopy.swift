@@ -72,7 +72,7 @@ extension FileService {
                 throw DescriptorFileCopy.error("source changed", path: path, code: ESTALE)
             }
             try DescriptorFileCopy.copy(from: child, status: status, sourcePath: path, to: destination + "/" + name,
-                                        copiedChunk: { count in
+                                        options: .init(), copiedChunk: { count in
                 try checkpoint(.copiedChunk(name, count))
             })
             guard try DirectoryCopySource.descriptorStamp(child, path: path) == opened.entries[name] else {
@@ -191,6 +191,16 @@ private final class DirectoryCopySource {
 /// Shared by single-file copying and directory-relative carrying. A sibling temporary file preserves
 /// the destination until rename; descriptor chunks keep memory use independent of file size.
 enum DescriptorFileCopy {
+    struct Options {
+        var maximumBytes = Int.max
+        var checkingCancellation = false
+        var renameFile: (String, String) -> Int32 = { Darwin.rename($0, $1) }
+        var read: (Int32, UnsafeMutableRawPointer?, Int) -> Int = Darwin.read
+        func checkCancellation() throws {
+            if checkingCancellation { try Task.checkCancellation() }
+        }
+    }
+
     static func error(_ operation: String, path: String, code: Int32) -> NSError {
         NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [
             NSFilePathErrorKey: path,
@@ -199,9 +209,13 @@ enum DescriptorFileCopy {
     }
 
     /// The source descriptor and metadata must come from FileService.openRegularFile.
+    @discardableResult
     static func copy(from descriptor: Int32, status: stat, sourcePath: String, to destination: String,
-                     renameFile: (String, String) -> Int32 = { Darwin.rename($0, $1) },
-                     copiedChunk: (Int) throws -> Void = { _ in }) throws {
+                     options: Options, copiedChunk: (Int) throws -> Void = { _ in }) throws -> Int {
+        try options.checkCancellation()
+        guard options.maximumBytes >= 0, status.st_size >= 0, status.st_size <= options.maximumBytes else {
+            throw CocoaError(.fileReadTooLarge)
+        }
         let parent = URL(fileURLWithPath: destination).deletingLastPathComponent().path
         let temporary = parent + "/.pensieve-copy-" + UUID().uuidString + ".tmp"
         let output = try createTemporary(at: temporary, for: destination, permissions: status.st_mode & 0o777)
@@ -212,18 +226,26 @@ enum DescriptorFileCopy {
         }
         guard fchmod(output, status.st_mode & 0o777) == 0 else { throw error("fchmod", path: destination, code: errno) }
         var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
+        var total = 0
         while true {
-            let count = buffer.withUnsafeMutableBytes { read(descriptor, $0.baseAddress, $0.count) }
+            try options.checkCancellation()
+            let remaining = options.maximumBytes - total
+            let requested = remaining < buffer.count ? remaining + 1 : buffer.count
+            let count = buffer.withUnsafeMutableBytes { options.read(descriptor, $0.baseAddress, requested) }
             if count == 0 { break }
             if count < 0 {
                 if errno == EINTR { continue }
                 throw error("read", path: sourcePath, code: errno)
             }
+            guard count <= remaining else { throw CocoaError(.fileReadTooLarge) }
             try writeChunk(buffer, count: count, output: output, destination: destination)
+            total += count
             try copiedChunk(count)
         }
-        guard renameFile(temporary, destination) == 0 else { throw error("rename", path: destination, code: errno) }
+        try options.checkCancellation()
+        guard options.renameFile(temporary, destination) == 0 else { throw error("rename", path: destination, code: errno) }
         renamed = true
+        return total
     }
 
     private static func createTemporary(at temporary: String, for destination: String, permissions: mode_t) throws -> Int32 {

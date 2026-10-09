@@ -7,7 +7,7 @@ import SwiftData
 /// the suite synced the developer's live store through one harness gap). Lives beside `AppRuntime.swift`
 /// for the file's and the initializer's lint budgets (PLAN-29's precedent, `AppRuntime+DeployIndex.swift`).
 struct AppRuntimePaths {
-    private struct NoAgentDetection: AgentDetectionServiceProtocol {
+    struct NoAgentDetection: AgentDetectionServiceProtocol {
         func isInstalled(_ platform: PlatformTarget) -> Bool { false }
         func installedPlatforms() -> [PlatformTarget] { [] }
     }
@@ -18,7 +18,7 @@ struct AppRuntimePaths {
             DeployRemovalOperation(classify: { false }, delete: { false })
         }
 
-        let outputRoot: String
+        let paths: DeployPaths
 
         func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {}
         func unlink(skill: Skill, platform: PlatformTarget, projectPath: String?) throws -> Bool { false }
@@ -26,10 +26,10 @@ struct AppRuntimePaths {
 
         func isLinked(skill: Skill, platform: PlatformTarget, projectPath: String?) -> Bool { false }
         func linkPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
-            outputRoot + "/" + platform.rawValue + "/" + skill.directoryName
+            paths.linkPath(directoryName: skill.directoryName, platform: platform, projectPath: projectPath)
         }
         func targetPath(skill: Skill, platform: PlatformTarget, projectPath: String?) -> String {
-            outputRoot + "/targets/" + skill.directoryName
+            paths.targetPath(directoryName: skill.directoryName, platform: platform, projectPath: projectPath)
         }
         func validateAll(skills: [Skill]) -> [BrokenLink] { [] }
     }
@@ -56,28 +56,42 @@ struct AppRuntimePaths {
         }
     }
 
-    let storeRoot: String
-    let appSupportDir: String
+    let runtimePaths: RuntimePaths
+    var storeRoot: String { runtimePaths.storeRoot }
+    var appSupportDir: String { runtimePaths.appSupportDir }
+    var homeDirectory: String { runtimePaths.homeDirectory }
+    var deployPaths: DeployPaths { runtimePaths.deployPaths }
+
+    init(storeRoot: String, appSupportDir: String) {
+        runtimePaths = RuntimePaths(storeRoot: storeRoot, appSupportDir: appSupportDir)
+    }
 
     static let production = AppRuntimePaths(
-        storeRoot: Constants.pensieveBaseDir,
-        appSupportDir: PathConstants.pensieveAppSupportDir
+        storeRoot: RuntimePaths.production.storeRoot,
+        appSupportDir: RuntimePaths.production.appSupportDir
     )
 
-    var syncLockPath: String { appSupportDir + "/sync.lock" }
+    var syncLockPath: String { runtimePaths.syncLockPath }
 
-    var skillsDir: String { storeRoot + "/skills" }
+    var gitAskpassHelperPath: String { runtimePaths.gitAskpassHelperPath }
+
+    var skillInstallScratchRoot: String { appSupportDir + "/skill-install-scratch" }
+
+    var updateCheckScratchRoot: String { appSupportDir + "/update-check-scratch" }
+
+    var upstreamHistoryScratchRoot: String { appSupportDir + "/upstream-history-scratch" }
+
+    var skillsDir: String { runtimePaths.skillsDir }
 
     var upstreamHistoryCacheDir: String { appSupportDir + "/upstream-history-cache" }
 
-    /// The agent directories (`~/.claude/skills`, Cursor's rules, …) sit outside both roots, so only the
-    /// production pair may reach them; any other pair gets none, and a Cursor rules directory of its own.
+    /// Only the production pair reaches user-wide roots. Other pairs select sandboxed agent and Cursor roots.
     private var isProduction: Bool {
-        storeRoot == Constants.pensieveBaseDir && appSupportDir == PathConstants.pensieveAppSupportDir
+        runtimePaths.isProduction
     }
 
     private var cursorRulesDir: String {
-        isProduction ? PathConstants.cursorUserRulesDir : appSupportDir + "/cursor-rules"
+        deployPaths.cursorUserRulesDirectory
     }
 
     struct HermeticDefaultsUnavailable: Error {}
@@ -106,14 +120,15 @@ struct AppRuntimePaths {
         })
     }
 
-    func hasRemoteConfigured(git: GitServiceProtocol = GitService()) -> Bool {
+    func hasRemoteConfigured(git suppliedGit: GitServiceProtocol? = nil) -> Bool {
+        let git = suppliedGit ?? makeGitService()
         do { return try git.remoteURL(at: storeRoot) != nil } catch {
             return true // Unknown must defer backfill just like a configured remote.
         }
     }
 
     func isWorktreeClean() -> Bool {
-        GitService().isWorktreeClean(at: storeRoot)
+        makeGitService().isWorktreeClean(at: storeRoot)
     }
 
     @MainActor
@@ -125,26 +140,38 @@ struct AppRuntimePaths {
     }
 
     func makePlatformViewModel() -> PlatformViewModel {
-        guard !isProduction else { return PlatformViewModel() }
+        if isProduction {
+            let files = FileService()
+            return PlatformViewModel(fileService: files, linkService: LinkService(fileService: files, paths: deployPaths),
+                cursorCompiler: CursorCompiler(fileService: files, skillStore: SkillStore(fileService: files, baseDir: skillsDir,
+                    storeRoot: storeRoot),
+                    userRulesDirectory: cursorRulesDir), agentDetection: makeAgentDetection(),
+                deployStateStore: DeployStateStore(fileService: files, appSupportDir: appSupportDir), skillsDirectory: skillsDir)
+        }
         let fileService = FileService()
         return PlatformViewModel(
             fileService: fileService,
-            linkService: NoDeploymentLinkService(outputRoot: appSupportDir + "/agent-links"),
+            linkService: NoDeploymentLinkService(paths: deployPaths),
             cursorCompiler: NoDeploymentCursorCompiler(outputRoot: cursorRulesDir),
-            agentDetection: NoAgentDetection(),
-            deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: appSupportDir)
+            agentDetection: makeAgentDetection(fileService: fileService),
+            deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: appSupportDir),
+            skillsDirectory: skillsDir
         )
     }
 
     /// A `@ModelActor` takes only its container; its collaborators arrive through `configure`. Every
     /// path-bearing one is set here, before any injected `coordinatorConfigure` runs.
-    func configureCoordinator(_ coordinator: SyncCoordinator) async {
+    func configureCoordinator(_ coordinator: SyncCoordinator, defaults: UserDefaults,
+                              fileService: FileServiceProtocol = FileService()) async {
         await coordinator.configure(
-            engine: SyncEngine(lockPath: syncLockPath),
+            engine: makeSyncEngine(fileService: fileService),
+            git: makeGitService(fileService: fileService),
             credentials: makeCredentialStore(),
+            rebuildService: makeStoreRebuildService(fileService: fileService),
             root: storeRoot,
-            audit: SyncAudit(appSupport: appSupportDir),
-            machineIdentity: MachineIdentity(appSupportDir: appSupportDir)
+            audit: SyncAudit(appSupport: appSupportDir, fileService: fileService),
+            machine: (identity: MachineIdentity(fileService: fileService, appSupportDir: appSupportDir),
+                stateService: makeMachineStateService(defaults: defaults, fileService: fileService))
         )
     }
 
@@ -156,13 +183,14 @@ struct AppRuntimePaths {
             let migrationService = StoreMigrationService(
                 fileService: fileService,
                 manifestService: ManifestService(),
-                skillStore: SkillStore(fileService: fileService, baseDir: skillsDir)
+                skillStore: SkillStore(fileService: fileService, baseDir: skillsDir, storeRoot: storeRoot)
             )
             return LaunchReconciler(
                 migrationService: migrationService,
                 fileService: fileService,
                 root: storeRoot,
-                lockPath: syncLockPath
+                lockPath: syncLockPath,
+                git: makeGitService()
             ).reconcileOnLaunch(
                 context: context,
                 alreadyMigrated: alreadyMigrated,
@@ -171,13 +199,12 @@ struct AppRuntimePaths {
         }
     }
 
-    /// The launch backfill writes `deploy-state.json` in App Support and reads the store's skills; the
-    /// user-wide agent roots it probes are reachable only from the production pair.
+    /// Backfill probes the runtime's roots: user-wide in production, under App Support for temporary pairs.
     func makeLaunchBackfill() -> AppRuntime.LaunchBackfill {
         { context in
             let fileService = FileService()
-            var backfillPaths = DeployStateBackfillPaths(pensieveSkillsDir: skillsDir, cursorUserRulesDir: cursorRulesDir)
-            if !isProduction { backfillPaths.userSkillsRoot = { _ in nil } }
+            let backfillPaths = DeployStateBackfillPaths(pensieveSkillsDir: skillsDir, cursorUserRulesDir: cursorRulesDir,
+                userSkillsRoot: deployPaths.userSkillsRoot)
             DeployStateBackfill(
                 fileService: fileService,
                 store: DeployStateStore(fileService: fileService, appSupportDir: appSupportDir),
@@ -195,7 +222,7 @@ struct AppRuntimePaths {
     ) -> SkillLibraryViewModel {
         let fileService = FileService()
         return SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: skillsDir),
+            skillStore: SkillStore(fileService: fileService, baseDir: skillsDir, storeRoot: storeRoot),
             fileService: fileService,
             fileWatchService: fileWatchService ?? FileWatchService(rootDir: skillsDir),
             manifestService: ManifestService(),
@@ -206,6 +233,15 @@ struct AppRuntimePaths {
 }
 
 extension AppRuntimePaths {
+    /// Launch sweeps the same paths the services use, before the runtime starts its work.
+    func cleanupGitHubSkillTemps(fileService: FileServiceProtocol = FileService()) {
+        SkillInstallService.cleanupScratchRoot(fileService: fileService, scratchRoot: skillInstallScratchRoot)
+        GitService.cleanupCloneTemps(fileService: fileService, storeRoot: storeRoot, lockPath: syncLockPath)
+        SkillInstallService.cleanupVendorTemps(fileService: fileService, storeRoot: storeRoot, lockPath: syncLockPath)
+        UpdateCheckService.cleanupScratchRoot(fileService: fileService, scratchRoot: updateCheckScratchRoot)
+        UpstreamHistoryService.cleanupScratchRoot(fileService: fileService, scratchRoot: upstreamHistoryScratchRoot)
+    }
+
     @MainActor
     func makeUpstreamHistoryViewModel() -> UpstreamHistoryViewModel {
         let fileService = FileService()
@@ -222,13 +258,14 @@ extension AppRuntimePaths {
     ) -> UpstreamHistoryService {
         let credentials = makeCredentialStore()
         return UpstreamHistoryService(
+            gitService: makeGitService(fileService: fileService),
             credentialStore: credentials,
             fileService: fileService,
             contentHasher: makeSkillInstallService(
                 credentialStore: credentials,
                 fileService: fileService
             ),
-            scratchRoot: appSupportDir + "/upstream-history-scratch"
+            scratchRoot: upstreamHistoryScratchRoot
         )
     }
 
@@ -250,15 +287,18 @@ extension AppRuntimePaths {
         }
     }
 
-    func makeUpdatesViewModelOperations() -> UpdatesViewModel.DefaultOperations {
+    func makeUpdatesViewModelOperations(
+        fileService: FileServiceProtocol = FileService()
+    ) -> UpdatesViewModel.DefaultOperations {
         let credentials = makeCredentialStore()
         let installer = makeSkillInstallService(
             credentialStore: credentials,
-            fileService: FileService()
+            fileService: fileService
         )
         return UpdatesViewModel.DefaultOperations(
             updateCheckService: makeUpdateCheckService(
                 credentialStore: credentials,
+                fileService: fileService,
                 contentHasher: installer
             ),
             skillInstallService: installer
@@ -282,25 +322,29 @@ extension AppRuntimePaths {
         { makeUpdateCheckService() }
     }
 
-    func makeUpdateCheckService() -> UpdateCheckService {
+    func makeUpdateCheckService(fileService: FileServiceProtocol = FileService()) -> UpdateCheckService {
         let credentials = makeCredentialStore()
         return makeUpdateCheckService(
             credentialStore: credentials,
+            fileService: fileService,
             contentHasher: makeSkillInstallService(
                 credentialStore: credentials,
-                fileService: FileService()
+                fileService: fileService
             )
         )
     }
 
     private func makeUpdateCheckService(
         credentialStore: CredentialStoreProtocol,
+        fileService: FileServiceProtocol,
         contentHasher: SkillContentHashing
     ) -> UpdateCheckService {
         return UpdateCheckService(
+            gitService: makeGitService(fileService: fileService),
             credentialStore: credentialStore,
+            fileService: fileService,
             contentHasher: contentHasher,
-            scratchRoot: appSupportDir + "/update-check-scratch",
+            scratchRoot: updateCheckScratchRoot,
             storeRoot: storeRoot
         )
     }
@@ -310,43 +354,17 @@ extension AppRuntimePaths {
         fileService: FileServiceProtocol
     ) -> SkillInstallService {
         SkillInstallService(
+            gitService: makeGitService(fileService: fileService),
             credentialStore: credentialStore,
             fileService: fileService,
-            scratchRoot: appSupportDir + "/skill-install-scratch",
+            scratchRoot: skillInstallScratchRoot,
             storeRoot: storeRoot,
             lockPath: syncLockPath
         )
     }
 
-    private func makeCredentialStore() -> CredentialStoreProtocol {
-        isProduction ? KeychainCredentialStore() : InMemoryCredentialStore()
+    func makeCredentialStore() -> CredentialStoreProtocol {
+        runtimePaths.credentialStore
     }
 
-    @MainActor
-    func makeConvergence(
-        container: ModelContainer,
-        platformVM: PlatformViewModel,
-        intentReconciler: IntentReconciler
-    ) -> PostSyncConvergence {
-        PostSyncConvergence(
-            root: storeRoot,
-            deployReconciler: makeDeployReconciler(),
-            contextFactory: { ModelContext(container) },
-            categoryReconciler: CategoryReconciler(platformVM: platformVM),
-            intentReconciler: intentReconciler,
-            auditLog: { SyncAudit(appSupport: appSupportDir).append(category: $0, detail: $1) },
-            didConverge: { platformVM.noteDeployStateChanged() }
-        )
-    }
-
-    private func makeDeployReconciler() -> DeployReconciler {
-        let fileService = FileService()
-        return DeployReconciler(
-            fileService: fileService,
-            deployState: DeployStateStore(fileService: fileService, appSupportDir: appSupportDir),
-            pensieveSkillsDir: skillsDir,
-            agentSkillDirs: isProduction ? DeployReconciler.defaultAgentSkillDirs : [],
-            cursorRulesDir: cursorRulesDir
-        )
-    }
 }

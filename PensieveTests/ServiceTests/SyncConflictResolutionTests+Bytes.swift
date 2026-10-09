@@ -1,0 +1,385 @@
+import XCTest
+@testable import Pensieve
+
+extension SyncConflictResolutionTests {
+    @MainActor
+    func testUnreadableGitlinkPickCannotDeleteThePathAndOtherPickStillResolves() throws {
+        try assertInvalidRootIgnoreCannotBlockRetirement()
+        try assertThisMachineFileAgainstGitlinkRefuses()
+        try assertGitlinkFilePicksRemainTracked()
+        try assertGitlinkRetirement(both: true, side: .thisMachine, skillRoot: true)
+        for both in [false, true] {
+            for side in [ConflictSide.thisMachine, .otherMachine] {
+                try assertGitlinkRetirement(both: both, side: side, skillRoot: false)
+            }
+        }
+    }
+
+    @MainActor
+    private func assertThisMachineFileAgainstGitlinkRefuses() throws {
+        let fixture = try SyncConflictByteFixture.gitlinkConflict(
+            otherEntry: .file(Data("this Mac file".utf8)), changedEntryOnThisMachine: true)
+        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+        let item = try fixture.inspect()
+        XCTAssertEqual(item.thisMachine, Data("this Mac file".utf8))
+        XCTAssertEqual(item.otherUnavailable?.mode, "160000")
+        let remoteBefore = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout
+        let pick = ResolutionPick(side: .thisMachine, expectedThis: item.thisMachine,
+            expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
+            expectedOtherUnavailable: item.otherUnavailable, expectedThisMode: item.thisMode,
+            expectedOtherMode: item.otherMode)
+        XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB,
+            picks: [item.path: pick], credential: nil, context: fixture.contextB)) { error in
+            XCTAssertEqual(error as? SyncError, .conflictFolderMustMove(path: item.path))
+            XCTAssertEqual(error.localizedDescription,
+                "Move the folder at \(item.path), then choose this version again. You can also choose the other version.")
+        }
+        XCTAssertEqual(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout,
+                       remoteBefore)
+        XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
+        _ = try fixture.engine.resolveConflicts(root: fixture.storeB,
+            picks: [item.path: ResolutionPick(side: .otherMachine, expectedThis: item.thisMachine,
+                expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
+                expectedOtherUnavailable: item.otherUnavailable, expectedThisMode: item.thisMode,
+                expectedOtherMode: item.otherMode)], credential: nil, context: fixture.contextB)
+        XCTAssertTrue(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "ls-tree", "-r", "main", "--", item.path],
+                                               in: nil).stdout.isEmpty)
+        try fixture.files.writeFile(at: fixture.storeB + "/" + item.path + "/keep", content: "retired child")
+        _ = try fixture.engine.sync(root: fixture.storeB, message: "retirement persists", credential: nil,
+                                    context: fixture.contextB)
+        XCTAssertEqual(try fixture.files.readFile(at: fixture.storeB + "/" + item.path + "/keep"), "retired child")
+        XCTAssertTrue(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "ls-tree", "-r", "main", "--", item.path],
+                                               in: nil).stdout.isEmpty)
+    }
+
+    @MainActor
+    private func assertInvalidRootIgnoreCannotBlockRetirement() throws {
+        for kind in ["missing", "binary", "link", "folder", "fifo", "unreadable"] {
+            let fixture = try SyncConflictByteFixture.gitlinkConflict()
+            defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+            let item = try fixture.inspect()
+            let engine = try fixture.ignoreFaultEngine(kind)
+            let full = fixture.storeB + "/" + item.path
+            try fixture.files.writeFile(at: full + "/keep", content: "local folder work")
+            _ = try engine.resolveConflicts(root: fixture.storeB,
+                picks: [item.path: ResolutionPick(side: .thisMachine, expectedThis: item.thisMachine,
+                    expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
+                    expectedOtherUnavailable: item.otherUnavailable)], credential: nil, context: fixture.contextB)
+            XCTAssertEqual(try fixture.files.readFile(at: full + "/keep"), "local folder work")
+            XCTAssertEqual(try fixture.files.readFile(at: fixture.root + "/outside-key"), "outside sentinel")
+            let ignore = try fixture.git.runData(["--git-dir", fixture.remote, "show", "main:.gitignore"], in: nil)
+            XCTAssertFalse(ignore.stdout.contains(Data("outside sentinel".utf8)))
+            let children = try fixture.git.runData(["--git-dir", fixture.remote, "ls-tree", "-r", "main",
+                                                   "--", ".gitignore/never-picked"], in: nil)
+            XCTAssertTrue(children.stdout.isEmpty, "R7: resolving a gitlink must not stage unrelated user data")
+        }
+    }
+
+    @MainActor
+    private func assertGitlinkFilePicksRemainTracked() throws {
+        for entry in [SyncConflictByteFixture.Entry.file(Data("chosen file".utf8)), .symlink("../kept-link")] {
+            let fixture = try SyncConflictByteFixture.gitlinkConflict(otherEntry: entry)
+            defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+            var item = try fixture.inspect()
+            let full = fixture.storeB + "/" + fixture.path
+            let filePick = ResolutionPick(side: .otherMachine, expectedThis: item.thisMachine,
+                expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
+                expectedOtherUnavailable: item.otherUnavailable, expectedThisMode: item.thisMode,
+                expectedOtherMode: item.otherMode)
+            if case .file = entry {
+                try fixture.files.writeFile(at: fixture.root + "/resolution-marker", content: "local folder work")
+                XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB, picks: [item.path: filePick],
+                    credential: nil, context: fixture.contextB)) { error in
+                    XCTAssertEqual(error.localizedDescription,
+                        "Move the folder at \(item.path), then choose this version again. You can also choose the other version.")
+                }
+                XCTAssertEqual(try fixture.files.readFile(at: full + "/keep"), "local folder work")
+                try fixture.files.replaceItem(at: fixture.root + "/moved-folder", with: full)
+                try fixture.files.deleteFile(at: fixture.root + "/resolution-marker")
+                item = try fixture.inspect()
+            }
+            let refreshedPick = ResolutionPick(side: .otherMachine, expectedThis: item.thisMachine,
+                expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
+                expectedOtherUnavailable: item.otherUnavailable, expectedThisMode: item.thisMode,
+                expectedOtherMode: item.otherMode)
+            _ = try fixture.engine.resolveConflicts(root: fixture.storeB, picks: [item.path: refreshedPick],
+                credential: nil, context: fixture.contextB)
+            let tree = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "ls-tree", "main", "--", item.path], in: nil)
+            XCTAssertTrue(tree.stdout.hasPrefix(item.otherMode! + " blob"), "A chosen file or link stays tracked")
+            let fresh = fixture.root + "/kept-fresh"
+            try fixture.git.clone(remote: "file://" + fixture.remote, into: fresh, credential: nil)
+            for store in [fixture.storeB, fresh] {
+                if case let .symlink(target) = entry {
+                    XCTAssertTrue(fixture.files.isSymlink(at: store + "/" + item.path))
+                    XCTAssertEqual(try fixture.files.symlinkTarget(at: store + "/" + item.path), target)
+                } else {
+                    XCTAssertEqual(try fixture.files.readData(at: store + "/" + item.path), item.otherMachine)
+                }
+            }
+            if case .file = entry {
+                XCTAssertEqual(try fixture.files.readFile(at: fixture.root + "/moved-folder/keep"), "local folder work")
+            }
+        }
+    }
+
+    @MainActor
+    func testBinaryAndUTF16PicksKeepExactBytesAcrossRemoteAndFreshClone() throws {
+        try assertConflictEntryTypesAndModes()
+        for payload in SyncConflictByteFixture.payloads {
+            for side in [ConflictSide.thisMachine, .otherMachine] {
+                let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
+                defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+                let item = try fixture.inspect()
+                let outcome = try fixture.engine.resolveConflicts(root: fixture.storeB,
+                    picks: [item.path: ResolutionPick(side: side, expectedThis: item.thisMachine,
+                                                      expectedOther: item.otherMachine)],
+                    credential: nil, context: fixture.contextB)
+                guard case .synced = outcome else { return XCTFail("The pick must finish sync") }
+                try fixture.assertPublished(side == .thisMachine ? payload.this : payload.other)
+            }
+        }
+    }
+
+    @MainActor
+    private func assertConflictPreparationUsesOneCheckedFetch() throws {
+        let payload = SyncConflictByteFixture.payloads[0]
+        let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
+        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+        try fixture.files.writeFile(at: fixture.storeB + "/skills/conflict/.env", content: "protected local bytes")
+        let executable = fixture.root + "/advancing-git"
+        let trace = fixture.root + "/fetches"
+        try fixture.files.writeExecutableFile(at: executable, content: """
+            #!/bin/sh
+            advance() {
+                \(FakeGitScript.skipGlobalOptions)
+                if [ "$1" = fetch ]; then
+                    echo fetch >> '\(trace)'
+                    /usr/bin/git -C '\(fixture.storeA)' -c user.name=Fixture -c user.email=fixture@example.com \
+                        commit --allow-empty -m unrelated >/dev/null || exit 1
+                    /usr/bin/git -C '\(fixture.storeA)' push origin main >/dev/null 2>&1 || exit 1
+                fi
+            }
+            advance "$@"
+            exec /usr/bin/git "$@"
+            """ + "\n")
+        let git = GitService(askpassHelperPath: fixture.root + "/askpass", executablePath: executable)
+        let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: git), lockPath: fixture.root + "/sync.lock")
+        guard case let .conflicts(set) = try engine.inspectConflicts(root: fixture.storeB, credential: nil,
+                                                                   context: fixture.contextB) else {
+            return XCTFail("Unrelated remote changes must leave the conflict inspectable")
+        }
+        XCTAssertEqual(try fixture.files.readFile(at: trace).split(separator: "\n").count, 1)
+        let item = try XCTUnwrap(set.items.first)
+        try fixture.files.writeFile(at: trace, content: "")
+        _ = try engine.resolveConflicts(root: fixture.storeB,
+            picks: [item.path: ResolutionPick(side: .thisMachine, expectedThis: item.thisMachine,
+                                              expectedOther: item.otherMachine, expectedThisMode: item.thisMode,
+                        expectedOtherMode: item.otherMode)], credential: nil, context: fixture.contextB)
+        XCTAssertEqual(try fixture.files.readFile(at: trace).split(separator: "\n").count, 1)
+        try fixture.assertPublished(payload.this)
+    }
+
+    @MainActor
+    private func assertConflictEntryTypesAndModes() throws {
+        for link in [false, true] {
+            for side in [ConflictSide.thisMachine, .otherMachine] {
+                let bytes = Data("#!/bin/sh\necho chosen\n".utf8)
+                let initial: SyncConflictByteFixture.Entry = link ? .symlink("../base") : .file(Data("base".utf8))
+                let this: SyncConflictByteFixture.Entry = link ? .symlink("../shared")
+                    : side == .thisMachine ? .executable(bytes) : .file(Data("this edit".utf8))
+                let other: SyncConflictByteFixture.Entry = link ? .symlink("../other")
+                    : side == .otherMachine ? .executable(bytes) : .file(Data("other edit".utf8))
+                let fixture = try SyncConflictByteFixture(name: "typed-entry", initial: initial, this: this, other: other)
+                defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+                try fixture.git.runOrThrow(["-C", fixture.storeB, "config", "core.symlinks", "false"], in: nil)
+                try fixture.git.runOrThrow(["-C", fixture.storeB, "config", "core.filemode", "false"], in: nil)
+                let item = try fixture.inspect()
+                _ = try fixture.engine.resolveConflicts(root: fixture.storeB,
+                    picks: [item.path: ResolutionPick(side: side, expectedThis: item.thisMachine,
+                        expectedOther: item.otherMachine, expectedThisMode: item.thisMode,
+                        expectedOtherMode: item.otherMode)], credential: nil, context: fixture.contextB)
+                let fresh = fixture.root + "/typed-fresh"
+                try fixture.git.clone(remote: "file://" + fixture.remote, into: fresh, credential: nil)
+                for store in [fixture.storeB, fresh] {
+                    let path = store + "/" + item.path
+                    if link {
+                        XCTAssertTrue(fixture.files.isSymlink(at: path), "A link pick stays a link")
+                        XCTAssertEqual(try fixture.files.symlinkTarget(at: path), side == .thisMachine ? "../shared" : "../other")
+                    } else {
+                        XCTAssertEqual(try fixture.files.readData(at: path), bytes)
+                        XCTAssertTrue(fixture.files.isUserExecutableFile(at: path), "The chosen executable mode survives")
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func testBinaryAndUTF16DriftRefusesStalePicksAndLeavesRemoteUnchanged() throws {
+        try assertConflictPreparationUsesOneCheckedFetch()
+        for payload in SyncConflictByteFixture.payloads {
+            let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
+            defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+            let stale = try fixture.inspect()
+            try fixture.change(payload.drift, at: fixture.storeA)
+            _ = try fixture.engine.sync(root: fixture.storeA, message: "remote drifts", credential: nil,
+                context: fixture.contextA)
+            let before = try fixture.git.headSHA(at: fixture.storeA)
+            XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB,
+                picks: [stale.path: ResolutionPick(side: .thisMachine, expectedThis: stale.thisMachine,
+                                                   expectedOther: stale.otherMachine)],
+                credential: nil, context: fixture.contextB)) { error in
+                XCTAssertEqual(error as? SyncError, .conflictsChanged)
+            }
+            let remote = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil)
+            XCTAssertEqual(remote.stdout.trimmingCharacters(in: .newlines), before)
+            XCTAssertEqual(try fixture.files.readData(at: fixture.storeB + "/" + fixture.path), payload.this)
+            XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
+        }
+    }
+
+    @MainActor
+    private func assertFileFolderPickKeepsTheFolder() throws {
+        let fixture = try SyncConflictByteFixture(name: "file-folder", initial: .file(Data("base".utf8)),
+            this: .file(Data("edited file".utf8)), other: .folder, indexMerge: true)
+        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+        let items = try fixture.inspectAll()
+        let item = try XCTUnwrap(items.first)
+        XCTAssertNil(item.otherMachine, "The folder side deletes the former file entry")
+        let remoteBefore = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout
+        let refused = items.reduce(into: [String: ResolutionPick]()) { result, item in
+            result[item.path] = ResolutionPick(side: .thisMachine, expectedThis: item.thisMachine,
+                expectedOther: item.otherMachine, expectedThisMode: item.thisMode, expectedOtherMode: item.otherMode)
+        }
+        XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB, picks: refused,
+            credential: nil, context: fixture.contextB)) { error in
+            XCTAssertEqual(error as? SyncError, .conflictFolderMustMove(path: item.path))
+            XCTAssertEqual(error.localizedDescription,
+                "Move the folder at \(item.path), then choose this version again. You can also choose the other version.")
+        }
+        XCTAssertEqual(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout,
+                       remoteBefore)
+        XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
+        let picks = items.reduce(into: [String: ResolutionPick]()) { result, item in
+            result[item.path] = ResolutionPick(side: .otherMachine, expectedThis: item.thisMachine,
+                expectedOther: item.otherMachine, expectedThisMode: item.thisMode, expectedOtherMode: item.otherMode)
+        }
+        _ = try fixture.engine.resolveConflicts(root: fixture.storeB, picks: picks,
+                                                credential: nil, context: fixture.contextB)
+        XCTAssertEqual(try fixture.files.readFile(at: fixture.storeB + "/" + fixture.path + "/keep"), "chosen folder bytes")
+        let fresh = fixture.root + "/folder-fresh"
+        try fixture.git.clone(remote: "file://" + fixture.remote, into: fresh, credential: nil)
+        XCTAssertEqual(try fixture.files.readFile(at: fresh + "/" + fixture.path + "/keep"), "chosen folder bytes")
+    }
+
+    @MainActor
+    func testAbsentAndEmptyConflictSidesRemainDistinct() throws {
+        try assertFileFolderPickKeepsTheFolder()
+        for deletedSide in [ConflictSide.thisMachine, .otherMachine] {
+            for pickSide in [ConflictSide.thisMachine, .otherMachine] {
+                let fixture = try SyncConflictByteFixture(name: "empty.bin",
+                    this: deletedSide == .thisMachine ? nil : Data(),
+                    other: deletedSide == .otherMachine ? nil : Data())
+                defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+                let item = try fixture.inspect()
+                let absent = deletedSide == .thisMachine ? item.thisMachine : item.otherMachine
+                let present = deletedSide == .thisMachine ? item.otherMachine : item.thisMachine
+                XCTAssertNil(absent)
+                XCTAssertTrue(try XCTUnwrap(present).isEmpty)
+                _ = try fixture.engine.resolveConflicts(root: fixture.storeB,
+                    picks: [item.path: ResolutionPick(side: pickSide, expectedThis: item.thisMachine,
+                                                      expectedOther: item.otherMachine)],
+                    credential: nil, context: fixture.contextB)
+                try fixture.assertPublished(pickSide == deletedSide ? nil : Data())
+            }
+        }
+    }
+    @MainActor
+    private func assertMissingConflictObjectRefusesOnlyThatSide() throws {
+        for stage in [2, 3] {
+            let payload = SyncConflictByteFixture.payloads[0]
+            let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
+            defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+            let engine = try fixture.missingObjectEngine(stage: stage)
+            guard case let .conflicts(set) = try engine.inspectConflicts(root: fixture.storeB, credential: nil,
+                                                                         context: fixture.contextB) else {
+                return XCTFail("Missing objects must remain distinct from deletion")
+            }
+            let item = try XCTUnwrap(set.items.first)
+            XCTAssertEqual((stage == 3 ? item.thisUnavailable : item.otherUnavailable)?.mode, "100644")
+            let pick = ResolutionPick(side: stage == 3 ? .thisMachine : .otherMachine,
+                expectedThis: item.thisMachine, expectedOther: item.otherMachine,
+                expectedThisUnavailable: item.thisUnavailable, expectedOtherUnavailable: item.otherUnavailable,
+                expectedThisMode: item.thisMode, expectedOtherMode: item.otherMode)
+            let remote = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout
+            XCTAssertThrowsError(try engine.resolveConflicts(root: fixture.storeB, picks: [item.path: pick],
+                credential: nil, context: fixture.contextB)) {
+                XCTAssertEqual($0 as? SyncError, .conflictSideUnavailable(path: item.path))
+            }
+            XCTAssertEqual(try fixture.files.readData(at: fixture.storeB + "/" + item.path), payload.this)
+            XCTAssertEqual(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout, remote)
+            let otherPick = ResolutionPick(side: stage == 3 ? .otherMachine : .thisMachine,
+                expectedThis: item.thisMachine, expectedOther: item.otherMachine,
+                expectedThisUnavailable: item.thisUnavailable, expectedOtherUnavailable: item.otherUnavailable,
+                expectedThisMode: item.thisMode, expectedOtherMode: item.otherMode)
+            _ = try engine.resolveConflicts(root: fixture.storeB, picks: [item.path: otherPick], credential: nil,
+                                            context: fixture.contextB)
+            try fixture.assertPublished(stage == 3 ? payload.other : payload.this)
+        }
+    }
+
+    @MainActor
+    func testFailedConflictBlobReadStopsInspectionAndResolutionWithoutDeletingFiles() throws {
+        try assertMissingConflictObjectRefusesOnlyThatSide()
+        for stage in [2, 3] {
+            for resolving in [false, true] {
+                let payload = SyncConflictByteFixture.payloads[0]
+                let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
+                defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+                let item = try fixture.inspect()
+                let executable = fixture.root + "/read-failure-git", receipt = fixture.root + "/read-fault"
+                try fixture.files.writeExecutableFile(at: executable, content: """
+                    #!/bin/sh
+                    fail_blob() {
+                        \(FakeGitScript.skipGlobalOptions)
+                        if [ "$1" = show ]; then
+                            case "$2" in
+                              :\(stage):*) touch '\(receipt)'; echo 'fixture blob read failed' >&2; exit 128 ;;
+                            esac
+                        fi
+                    }
+                    fail_blob "$@"
+                    exec /usr/bin/git "$@"
+                    """ + "\n")
+                let faulty = GitService(askpassHelperPath: fixture.root + "/askpass", executablePath: executable)
+                let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: faulty), lockPath: fixture.root + "/sync.lock")
+                let before = try fixture.git.runOrThrow(["-C", fixture.storeB, "rev-parse", "HEAD^{tree}"], in: nil).stdout
+                let remote = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout
+                XCTAssertThrowsError(try {
+                    if resolving {
+                        _ = try engine.resolveConflicts(root: fixture.storeB,
+                            picks: [item.path: ResolutionPick(side: .thisMachine, expectedThis: item.thisMachine,
+                                                              expectedOther: item.otherMachine)],
+                            credential: nil, context: fixture.contextB)
+                    } else {
+                        _ = try engine.inspectConflicts(root: fixture.storeB, credential: nil, context: fixture.contextB)
+                    }
+                }()) { error in
+                    guard case let GitError.commandFailed(_, code, detail, _) = error else {
+                        return XCTFail("A failed blob read must be an error, never a deletion: \(error)")
+                    }
+                    XCTAssertEqual(code, 128)
+                    XCTAssertEqual(detail.trimmingCharacters(in: .newlines), "fixture blob read failed")
+                }
+                XCTAssertTrue(fixture.files.fileExists(at: receipt), "This iteration must reach its read fault")
+                XCTAssertEqual(try fixture.git.runOrThrow(["-C", fixture.storeB, "rev-parse", "HEAD^{tree}"], in: nil).stdout,
+                               before, "Abort must restore the pre-pull tree; preparation may rewrite its commit")
+                XCTAssertEqual(try fixture.files.readData(at: fixture.storeB + "/" + item.path), payload.this)
+                XCTAssertEqual(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout,
+                               remote)
+                XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
+            }
+        }
+    }
+
+}

@@ -4,7 +4,7 @@ import XCTest
 
 extension ManifestDeployIntentTests {
     func testConcurrentRetractVsAddConverges() throws {
-        let git = GitService()
+        let git = TestPaths.git
         let remote = try seedRemote(git: git, intents: [record(slug: "alpha")])
         let cloneA = tempDir + "/retract-a"
         let cloneB = tempDir + "/retract-b"
@@ -26,7 +26,7 @@ extension ManifestDeployIntentTests {
     }
 
     func testSameEntryRetractVsModifyConflicts() throws {
-        let git = GitService()
+        let git = TestPaths.git
         let remote = try seedRemote(git: git, intents: [record()])
         let cloneA = tempDir + "/delete-a"
         let cloneB = tempDir + "/modify-b"
@@ -43,7 +43,7 @@ extension ManifestDeployIntentTests {
     }
 
     func testSameEntryConcurrentEditConflicts() throws {
-        let git = GitService()
+        let git = TestPaths.git
         let remote = try seedRemote(git: git, intents: [record()])
         let cloneA = tempDir + "/edit-a"
         let cloneB = tempDir + "/edit-b"
@@ -60,7 +60,7 @@ extension ManifestDeployIntentTests {
     }
 
     func testDeploysTreeExcludedFromUnionAttributes() throws {
-        let git = GitService()
+        let git = TestPaths.git
         let remote = try seedRemote(git: git, intents: [])
         let clone = tempDir + "/attributes"
         try git.clone(remote: remote, into: clone, credential: nil)

@@ -243,7 +243,7 @@ final class SkillInstallViewModelTests: XCTestCase {
         )
         let container = try makeContainer()
         let gate = TestWait.Gate(owner: self)
-        let task = Task.detached {
+        let task = BlockingWork.task {
             try gate.wait()
             return try SkillInstallViewModel.performUnlessCancelled { () throws -> SkillInstallResult in
                 let context = ModelContext(container)

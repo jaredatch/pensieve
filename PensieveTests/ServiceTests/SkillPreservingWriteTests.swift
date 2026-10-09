@@ -11,7 +11,7 @@ final class SkillPreservingWriteTests: XCTestCase {
         tempDir = TestTemporaryDirectory.path + "PensievePreservingWriteTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
-        store = SkillStore(fileService: fileService, baseDir: tempDir)
+        store = SkillStore(fileService: fileService, baseDir: tempDir, storeRoot: tempDir)
     }
 
     override func tearDownWithError() throws {
@@ -27,7 +27,9 @@ final class SkillPreservingWriteTests: XCTestCase {
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = ModelContext(container)
-        let vm = SkillLibraryViewModel(skillStore: store)
+        let vm = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let original = """
         ---
         # upstream comment

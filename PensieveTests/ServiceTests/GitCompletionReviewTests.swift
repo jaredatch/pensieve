@@ -35,6 +35,7 @@ final class GitCompletionReviewTests: XCTestCase {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         let git = try fixture.executable("""
+            \(FakeGitScript.skipGlobalOptions)
             if [ "$1" = '--version' ]; then echo 'git version fixture'; exit 0; fi
             echo 'checkout failed for xcrun: error: invalid active developer path' >&2
             exit 128
@@ -80,11 +81,11 @@ final class GitCompletionReviewTests: XCTestCase {
         XCTAssertEqual(GitUsability.failed(GitFailureDetail(raw)), .failed(GitFailureDetail("failed repo")))
     }
 
-    func testOrdinaryConflictReadFailuresKeepTheirFallbacks() throws {
+    func testConflictBlobReadFailureThrowsWhileBestEffortReadsKeepFallbacks() throws {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         let git = try fixture.executable("echo 'ordinary missing revision' >&2; exit 128")
-        XCTAssertNil(try git.blob(atStage: 2, path: "missing", in: fixture.root))
+        XCTAssertThrowsError(try git.blob(atStage: 2, path: "missing", in: fixture.root))
         XCTAssertTrue(try git.conflictedFiles(at: fixture.root).isEmpty)
         XCTAssertFalse(try git.hasCommitsToPush(at: fixture.root))
         XCTAssertNil(try git.headSHA(at: fixture.root))
@@ -96,23 +97,37 @@ final class GitCompletionReviewTests: XCTestCase {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         try fixture.seedRepository()
+        // The successful fake fetch below leaves a real fetched commit for the guarded rebase.
+        try TestPaths.git.runOrThrow(["-C", fixture.root, "fetch", ".", "HEAD:refs/remotes/origin/main"], in: nil)
+        let blob = try TestPaths.git.runOrThrow(["-C", fixture.root, "rev-parse", "HEAD:skills/example/SKILL.md"], in: nil)
+            .stdout.trimmingCharacters(in: .newlines)
         let git = try fixture.executable("""
-            if [ "$3" = show ]; then touch '\(fixture.failureSwitch)'; fi
-            if [ -f '\(fixture.failureSwitch)' ]; then
-              echo 'Xcode license not accepted' >&2; exit 69
-            fi
-            if [ "$1" = '--version' ]; then echo 'git version fixture'; exit 0; fi
-            case "$3" in
-              fetch) exit 0 ;;
-              pull) exit 1 ;;
-              diff) if [ "$4" = '--name-only' ]; then printf 'skills/example/SKILL.md\\0'; exit 0; fi ;;
-            esac
+            simulate_failure() {
+                \(FakeGitScript.skipGlobalOptions)
+                if [ "$1" = show ]; then touch '\(fixture.failureSwitch)'; fi
+                if [ -f '\(fixture.failureSwitch)' ]; then
+                  echo 'Xcode license not accepted' >&2; exit 69
+                fi
+                case "$1" in
+                  --version) echo 'git version fixture'; exit 0 ;;
+                  fetch) exit 0 ;;
+                  rebase)
+                    printf '%s\\n' \\
+                      '0 0000000000000000000000000000000000000000\tskills/example/SKILL.md' \\
+                      '100644 \(blob) 2\tskills/example/SKILL.md' \\
+                      '100644 \(blob) 3\tskills/example/SKILL.md' |
+                      /usr/bin/git -C '\(fixture.root)' update-index --index-info
+                    exit 1 ;;
+                  diff) if [ "$2" = '--name-only' ]; then printf 'skills/example/SKILL.md\\0'; exit 0; fi ;;
+                esac
+            }
+            simulate_failure "$@"
             exec /usr/bin/git "$@"
             """)
         let engine = SyncEngine(gitService: git, lockPath: fixture.support + "/sync.lock")
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         let picks = ["skills/example/SKILL.md": ResolutionPick(side: .thisMachine,
-            expectedThis: "current", expectedOther: "remote")]
+            expectedThis: Data("current".utf8), expectedOther: Data("remote".utf8))]
         XCTAssertThrowsError(try engine.resolveConflicts(root: fixture.root, picks: picks,
             credential: nil, context: container.mainContext)) {
             XCTAssertEqual($0 as? GitError, .unusable(.licenseNotAccepted))

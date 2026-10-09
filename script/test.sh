@@ -52,6 +52,9 @@ fi
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 DESTINATION="platform=macOS,arch=arm64"
 DERIVED_DATA="$REPO/DerivedData"
+# Reject live-state defaults before any test can construct an unsafe collaborator.
+python3 "$REPO/script/check-live-defaults.py" || exit 1
+python3 "$REPO/script/check-path-syntax.py" || exit 1
 export HOME="$DERIVED_DATA/Home"
 export CLANG_MODULE_CACHE_PATH="$DERIVED_DATA/ModuleCache.noindex"
 export SWIFT_MODULE_CACHE_PATH="$DERIVED_DATA/ModuleCache.noindex"
@@ -60,6 +63,11 @@ export XDG_CACHE_HOME="$DERIVED_DATA/XDGCache"
 SCHEME="Pensieve"
 # Only failing timeout tests create this directory; TEST_RUNNER_ forwards it into each host.
 export TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR="${TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR:-$DERIVED_DATA/TestDiagnostics}"
+# These scheduling guards must also catch pool starvation in the normal suite, hooks and CI.
+# Set this before xcodebuild launches the hosts; changing it in a running host is too late.
+export TEST_RUNNER_LIBDISPATCH_COOPERATIVE_POOL_STRICT=1
+# Hosted UI assertions inspect SwiftUI's rendered tree, including state and visible Text values.
+export TEST_RUNNER_SWIFTUI_VIEW_DEBUG=1
 
 usage() {
   echo "usage: $0 [--filter TEST_IDENTIFIER] | --self-test" >&2

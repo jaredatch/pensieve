@@ -30,7 +30,7 @@ enum RemoteURLPolicy {
     /// / `fd::` / `git://` / `http://` / `file://` / a bare path all return nil.
     static func parse(_ raw: String) -> RemoteSpec? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.hasPrefix("-") else { return nil }
+        guard !trimmed.isEmpty, !PathSyntax.startsWithDash(trimmed) else { return nil }
         // C2: reject an interior newline. Trimming strips only leading/trailing newlines; a middle `\n`
         // survives and could smuggle a second line/command into a downstream consumer of the URL.
         guard !trimmed.contains(where: \.isNewline) else { return nil }
@@ -82,7 +82,7 @@ enum RemoteURLPolicy {
         guard let colonIndex = afterAt.firstIndex(of: ":") else { return nil }
         let host = String(afterAt[afterAt.startIndex..<colonIndex])
         let path = afterAt[afterAt.index(after: colonIndex)...]
-        guard !host.isEmpty, !host.hasPrefix("-"), !path.isEmpty else { return nil }
+        guard !host.isEmpty, !PathSyntax.startsWithDash(host), !path.isEmpty else { return nil }
         return RemoteSpec(url: url, host: host, transport: .ssh)
     }
 
@@ -119,11 +119,11 @@ enum RemoteURLPolicy {
             let host = String(hostPort[hostPort.index(after: hostPort.startIndex)..<close])
             // Same dash-leading ban as the non-bracket path: `ssh://[-oProxyCommand=…]/x` would otherwise
             // smuggle a dash-host past the whole-remote leading-dash check (the remote starts `ssh://[`).
-            return (host.isEmpty || host.hasPrefix("-")) ? nil : host
+            return (host.isEmpty || PathSyntax.startsWithDash(host)) ? nil : host
         }
         let host = hostPort.split(separator: ":", maxSplits: 1).first.map(String.init) ?? hostPort
         // Reject a dash-leading host (defense-in-depth vs an `ssh://-oProxyCommand=…` style host that
         // an older git could treat as an ssh option — orthogonal to the whole-remote leading-dash ban).
-        return (host.isEmpty || host.hasPrefix("-")) ? nil : host
+        return (host.isEmpty || PathSyntax.startsWithDash(host)) ? nil : host
     }
 }

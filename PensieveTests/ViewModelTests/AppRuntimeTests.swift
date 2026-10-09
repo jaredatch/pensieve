@@ -8,12 +8,10 @@ final class AppRuntimeTests: XCTestCase {
         var onChange: (String) -> Void = { _ in }
         private(set) var startCount = 0
         private(set) var stopCount = 0
-
         func start() -> Bool {
             startCount += 1
             return true
         }
-
         func stop() {
             stopCount += 1
         }
@@ -30,7 +28,6 @@ final class AppRuntimeTests: XCTestCase {
 
     private final class RecordingDeployReconciler: DeployReconciling {
         private(set) var calls = 0
-
         func reconcile(root: String) throws -> ReconcileOutcome {
             calls += 1
             return ReconcileOutcome()
@@ -40,24 +37,19 @@ final class AppRuntimeTests: XCTestCase {
     private struct NoopLedgerReconciler: CategoryReconcilerProtocol,
         IntentReconcilerProtocol {
         func reconcileWaitingRemovals(context: ModelContext) -> BatchResult { BatchResult() }
-
         func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
             reconcile(context: context)
         }
-
         func reconcile(context: ModelContext) -> BatchResult { BatchResult() }
     }
 
     private final class RecordingLedgerReconciler: CategoryReconcilerProtocol,
         IntentReconcilerProtocol {
         func reconcileWaitingRemovals(context: ModelContext) -> BatchResult { BatchResult() }
-
         func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
             reconcile(context: context)
         }
-
         private(set) var calls = 0
-
         func reconcile(context: ModelContext) -> BatchResult {
             calls += 1
             return BatchResult()
@@ -69,7 +61,6 @@ final class AppRuntimeTests: XCTestCase {
         let library: SkillLibraryViewModel
         let platformVM: PlatformViewModel
         let syncModel: SyncModel
-
         init(runtime: AppRuntime) {
             library = runtime.library
             platformVM = runtime.platformVM
@@ -106,8 +97,12 @@ final class AppRuntimeTests: XCTestCase {
             configuration: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let defaults = try isolatedDefaults(defaultsLabel)
-        let library = SkillLibraryViewModel(fileWatchService: watcher)
-        let platformVM = PlatformViewModel(agentDetection: StubDetection(), deployStateStore: .memoryBacked)
+        let library = SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir,
+                storeRoot: TestPaths.storeRoot), fileWatchService: watcher,
+            manifestRoot: TestPaths.storeRoot
+        )
+        let platformVM = neutralPlatformVM()
         var returnedInitialLaunchOutcome = false
         let convergence = PostSyncConvergence(
             root: "/tmp/AppRuntimeTests",
@@ -147,15 +142,22 @@ final class AppRuntimeTests: XCTestCase {
         )
     }
 
+    private func neutralPlatformVM() -> PlatformViewModel {
+        return PlatformViewModel(
+            linkService: TestPaths.linkService(fileService: FileService()),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: FileService()),
+            agentDetection: StubDetection(),
+            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
+        )
+    }
+
     func testLaunchWorkRunsOnce() throws {
         var launchCallCount = 0
         let harness = try makeRuntime {
             launchCallCount += 1
         }
-
         XCTAssertTrue(harness.runtime.performLaunchWorkIfNeeded(context: harness.context))
         XCTAssertFalse(harness.runtime.performLaunchWorkIfNeeded(context: harness.context))
-
         XCTAssertEqual(harness.runtime.launchWorkInvocationCount, 1)
         XCTAssertEqual(launchCallCount, 1)
         XCTAssertEqual(harness.watcher.startCount, 1)
@@ -165,7 +167,6 @@ final class AppRuntimeTests: XCTestCase {
         XCTAssertTrue(AppRuntime.shouldAutoShowImportWizard(skillCount: 0, storeQuarantined: false, storeUnreadable: false))
         XCTAssertFalse(AppRuntime.shouldAutoShowImportWizard(skillCount: 0, storeQuarantined: true, storeUnreadable: false))
         XCTAssertFalse(AppRuntime.shouldAutoShowImportWizard(skillCount: 1, storeQuarantined: false, storeUnreadable: false))
-
         let lockPath = TestTemporaryDirectory.path + "/AppRuntimeQuarantine-\(UUID().uuidString)/sync.lock"
         let launchLock = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
         let harness = try makeRuntime(launchIngestLockPath: lockPath)
@@ -177,7 +178,6 @@ final class AppRuntimeTests: XCTestCase {
             storeUnreadable: false
         ))
         launchLock.release()
-
         // Layer-2 P1 regression (PLAN-24 / 24.2): a quarantined outcome must take the deferral arm
         // UNCONDITIONALLY — never launchBackfill or post-ingest convergence, even though the same
         // origin-probe failure makes hasRemoteConfigured read nil (the no-remote arm's condition).
@@ -206,12 +206,10 @@ final class AppRuntimeTests: XCTestCase {
         let harness = try makeRuntime {
             launchCallCount += 1
         }
-
         var firstWindow: WindowModels? = WindowModels(runtime: harness.runtime)
         XCTAssertNotNil(firstWindow)
         harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
         firstWindow = nil
-
         let secondWindow = WindowModels(runtime: harness.runtime)
         XCTAssertNotNil(secondWindow)
         harness.runtime.performLaunchWorkIfNeeded(context: harness.context)

@@ -49,6 +49,10 @@ final class ImportReadSpy: FileServiceProtocol {
         returnedBytes.append(data)
         return data
     }
+    func copyImportedSkillContents(fromDirectory source: String,
+                                   toDirectory destination: String) throws -> [SkillFolderCopySkip] {
+        try files.copyImportedSkillContents(fromDirectory: source, toDirectory: destination)
+    }
     func writeFile(at path: String, content: String) throws {
         writtenPaths.append(path)
         try files.writeFile(at: path, content: content)
@@ -57,6 +61,9 @@ final class ImportReadSpy: FileServiceProtocol {
     func fileExists(at path: String) -> Bool { files.fileExists(at: path) }
     func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {
         try files.entryExistsWithoutFollowingLinks(at: path)
+    }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try files.entryTypeWithoutFollowingLinks(at: path)
     }
     func realPath(at path: String) -> String { files.realPath(at: path) }
     func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? {

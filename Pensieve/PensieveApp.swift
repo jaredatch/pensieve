@@ -50,10 +50,8 @@ struct PensieveApp: App {
 
     init() {
         WindowPolicy.apply()
-        SkillInstallService.cleanupScratchRoot()
-        SkillInstallService.cleanupVendorTemps()
-        UpdateCheckService.cleanupScratchRoot()
-        UpstreamHistoryService.cleanupScratchRoot()
+        let paths = AppRuntimePaths.production
+        paths.cleanupGitHubSkillTemps()
 
         let updaterDelegate = UpdaterDelegate()
         self.updaterDelegate = updaterDelegate
@@ -64,7 +62,7 @@ struct PensieveApp: App {
         )
 
         do {
-            runtime = try AppRuntime()
+            runtime = try AppRuntime(paths: paths)
         } catch {
             fatalError("Unable to initialize Pensieve's data store: \(error.localizedDescription)")
         }
@@ -80,7 +78,10 @@ struct PensieveApp: App {
             notifier: runtime.syncStateNotifier,
             echoRegistrar: runtime.syncWriteEchoRegistrar,
             bodyWriteRegistration: runtime.syncBodyWriteRegistration,
-            updatesModel: runtime.updates
+            updatesModel: runtime.updates,
+            machineDependencies: runtime.machineObservability,
+            importModel: runtime.paths.makeImportViewModel(notifier: runtime.syncStateNotifier,
+                echoRegistrar: runtime.syncWriteEchoRegistrar)
         )
     }
 
@@ -152,7 +153,7 @@ private struct PensieveMenuBarView: View {
         }
         Toggle("Background sync", isOn: $backgroundSyncEnabled)
             .onChange(of: backgroundSyncEnabled) { _, _ in
-                runtime.scheduler.backgroundPreferenceChanged()
+                runtime.scheduler.drainPendingRequests()
             }
         Divider()
         Button("Open Pensieve") {
@@ -182,13 +183,14 @@ private struct PensieveMenuBarView: View {
         case .conflicted: return "Conflict needs attention"
         case .error: return "Sync failed"
         case .unconfigured: return "Sync not configured"
+        case .branchless: return SyncFooterPresentation.branchlessMessage
         }
     }
 
     private var syncSymbol: String {
         switch runtime.syncModel.state {
         case .synced: return "checkmark.circle"
-        case .conflicted, .error: return "exclamationmark.triangle"
+        case .conflicted, .error, .branchless: return "exclamationmark.triangle"
         case .unconfigured: return "arrow.triangle.branch"
         case .idle, .syncing: return "arrow.triangle.2.circlepath"
         }

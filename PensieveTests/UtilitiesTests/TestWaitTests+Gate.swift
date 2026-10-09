@@ -1,6 +1,28 @@
 import XCTest
+@testable import Pensieve
 
 extension TestWaitTests {
+    func testGateWaitAllowsASamePriorityTaskToOpenIt() async throws {
+        let gate = TestWait.Gate(owner: self)
+        let worker = BlockingWork.task(priority: .utility) { try gate.wait() }
+        let progressed = await withCheckedContinuation { continuation in
+            Thread {
+                let deadline = ProcessInfo.processInfo.systemUptime + TestWait.hostedActionTimeoutSeconds
+                while gate.waiterCount == 0 && ProcessInfo.processInfo.systemUptime < deadline {
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+                let didWait = gate.waiterCount == 1
+                let opened = DispatchSemaphore(value: 0)
+                if didWait { Task.detached(priority: .utility) { gate.open(); opened.signal() } }
+                let didOpen = didWait && opened.wait(timeout: .now() + TestWait.hostedActionTimeoutSeconds) == .success
+                if !didOpen { gate.open() }
+                continuation.resume(returning: didOpen)
+            }.start()
+        }
+        try await worker.value
+        XCTAssertTrue(progressed, "A proven gate waiter must leave its own priority available to the opener")
+    }
+
     func testEarlyOwnerExitAbandonsHeldStubWithoutReturningItsValue() async throws {
         var worker: Task<String, Error>?
         // Registered first so this assertion runs after the gate's automatic teardown.
@@ -14,7 +36,7 @@ extension TestWaitTests {
             }
         }
         let gate = TestWait.Gate(owner: self)
-        worker = Task.detached {
+        worker = BlockingWork.task {
             try gate.wait()
             return "stub value"
         }
@@ -39,7 +61,7 @@ extension TestWaitTests {
         gate.open()
         gate.finish()
 
-        let worker = Task.detached { () throws -> String in
+        let worker = BlockingWork.task { () throws -> String in
             try gate.wait(timeout: .zero)
             try gate.wait(timeout: .zero)
             return "stub value"
@@ -49,9 +71,15 @@ extension TestWaitTests {
         XCTAssertNil(gate.failure)
     }
 
-    func testGateTimeoutThrowsAndIsReportedAtTeardown() {
+    func testGateTimeoutThrowsAndIsReportedAtTeardown() async {
         let gate = TestWait.Gate(owner: self)
-        XCTAssertThrowsError(try gate.wait(timeout: .zero))
+        let worker = BlockingWork.task(priority: .utility) {
+            try gate.wait(timeout: .milliseconds(50)) // upper-bound: Deliberately expire a never-opened gate.
+        }
+        switch await worker.result {
+        case let .failure(error): XCTAssertEqual(error as? TestWait.GateFailure, .timedOut)
+        case .success: XCTFail("A never-opened gate must throw when its deadline expires")
+        }
         expectGateFailureAtTeardown(.timedOut)
         XCTAssertEqual(gate.failure, .timedOut)
     }
@@ -59,7 +87,7 @@ extension TestWaitTests {
     func testFinishAbandonsOnlyWaitsWithoutPermits() async {
         let gate = TestWait.Gate(owner: self)
         let workers = (0..<2).map { _ in
-            Task.detached { () -> Bool in
+            BlockingWork.task { () -> Bool in
                 do {
                     try gate.wait()
                     return true

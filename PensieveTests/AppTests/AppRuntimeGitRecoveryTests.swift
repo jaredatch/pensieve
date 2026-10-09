@@ -85,14 +85,20 @@ final class AppRuntimeGitRecoveryTests: XCTestCase {
                 coordinatorConfigure: { coordinator in
                     let engine = RecoveredPresentationEngine(finish: {
                         if absent {
-                            try GitService().removeRemote(at: fixture.root)
+                            try TestPaths.git.removeRemote(at: fixture.root)
                         } else {
                             try fixture.files.deleteFile(at: fixture.root + "/.git/HEAD")
                         }
                     })
-                    await coordinator.configure(engine: engine, git: GitService(),
-                                                credentials: InMemoryCredentialStore(), root: fixture.root,
-                                                audit: SyncAudit(appSupport: fixture.support))
+                    await coordinator.configure(
+                        engine: engine,
+                        git: TestPaths.git,
+                        credentials: InMemoryCredentialStore(),
+                        root: fixture.root,
+                        audit: SyncAudit(appSupport: fixture.support),
+                        machine: (identity: MachineIdentity(appSupportDir: TestPaths.appSupportDir),
+                            stateService: TestPaths.stateService)
+                    )
                 }
             )
             await runtime.bootstrapTask.value
@@ -120,9 +126,15 @@ final class AppRuntimeGitRecoveryTests: XCTestCase {
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { true }),
             defaults: isolatedDefaults(), paths: fixture.paths, gitUsabilityProbe: { .usable },
             coordinatorConfigure: { coordinator in
-                await coordinator.configure(engine: RecoveredPresentationEngine(), git: GitService(),
-                                            credentials: InMemoryCredentialStore(), root: fixture.root,
-                                            audit: SyncAudit(appSupport: fixture.support))
+                await coordinator.configure(
+                    engine: RecoveredPresentationEngine(),
+                    git: TestPaths.git,
+                    credentials: InMemoryCredentialStore(),
+                    root: fixture.root,
+                    audit: SyncAudit(appSupport: fixture.support),
+                    machine: (identity: MachineIdentity(appSupportDir: TestPaths.appSupportDir),
+                        stateService: TestPaths.stateService)
+                )
             }
         )
         await runtime.bootstrapTask.value

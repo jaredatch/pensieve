@@ -2,6 +2,7 @@ import SwiftData
 import SwiftUI
 
 struct ProjectListView: View {
+    @Environment(AppRuntime.self) private var runtime
     @Binding var entitySelection: EntitySelection?
     @Binding var searchText: String
     let platformVM: PlatformViewModel
@@ -36,7 +37,7 @@ struct ProjectListView: View {
         ProjectListModel(
             projects: projects,
             remoteProjects: remoteProjects,
-            deployIndex: platformVM.deployIndex, homeDirectory: Constants.homeDirectory, searchText: searchText
+            deployIndex: platformVM.deployIndex, homeDirectory: runtime.paths.homeDirectory, searchText: searchText
         )
     }
 
@@ -87,6 +88,7 @@ struct ProjectListView: View {
                     removal.confirm { project, preview in
                         removeRegisteredProject(project,
                             reconciler: CategoryReconciler(platformVM: platformVM), manifestService: ManifestService(),
+                            manifestRoot: runtime.paths.storeRoot,
                             platformVM: platformVM, localMachineID: localMachineID, confirmedPreview: preview,
                             context: context, notifier: notifier)
                     }

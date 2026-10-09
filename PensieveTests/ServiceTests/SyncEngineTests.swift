@@ -5,7 +5,6 @@ import SwiftData
 private typealias PensieveCategory = Pensieve.Category
 /// Stand-in for a SwiftData fetch failure inside `ThrowingSnapshotManifest.snapshot`.
 private struct SnapshotFetchBoom: Error {}
-
 /// PLAN-08 / 08.4 — SyncEngine orchestration + union-merge over stubs and real `file://` clones.
 final class SyncEngineTests: XCTestCase {
     var tempDir: String!; var lockPath: String { tempDir + "-sync.lock" }
@@ -14,7 +13,6 @@ final class SyncEngineTests: XCTestCase {
         tempDir = TestTemporaryDirectory.path + "PensieveSyncEngineTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
     }
-
     override func tearDownWithError() throws {
         if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
             try FileManager.default.removeItem(atPath: tempDir)
@@ -26,6 +24,7 @@ final class SyncEngineTests: XCTestCase {
         private(set) var calls: [String] = []
         var remote: String? = "https://fixture.test/x.git"
         var pullResult: PullResult = .merged
+        var pullError: Error?
         /// Simulates a pull mutating the working tree before rebuild sees it.
         var pullSideEffect: ((String) -> Void)?
         var hasLocalBranchesResult: Result<Bool, Error> = .success(true)
@@ -44,8 +43,13 @@ final class SyncEngineTests: XCTestCase {
             return true
         }
 
+        func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+        func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+            try pullRebase(at: path, credential: nil)
+        }
         func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
             calls.append("pull")
+            if let pullError { throw pullError }
             pullSideEffect?(path)
             return pullResult
         }
@@ -53,12 +57,13 @@ final class SyncEngineTests: XCTestCase {
         func push(at path: String, credential: GitCredential?) throws { calls.append("push") }
         func abortRebase(at path: String) throws { calls.append("abort") }
         func conflictedFiles(at path: String) -> [String] { [] }
-        func blob(atStage stage: Int, path: String, in workingDir: String) -> String? { nil }
+        func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
         func continueRebase(at path: String) throws -> PullResult { .upToDate }
         func skipRebase(at path: String) throws -> PullResult { .upToDate }
         func stagePath(_ path: String, at root: String) throws {}
         func hasCommitsToPush(at path: String) -> Bool { false }
-        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?) throws -> Bool { false }
+        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                    fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
     }
 
     /// ManifestService whose `snapshot` throws, proving sync aborts before any write/git op.
@@ -238,7 +243,7 @@ extension SyncEngineTests {
     // MARK: (e) two-clone category union: both skill slugs survive, deduped, both converge
 
     func testTwoCloneCategoryUnionMergeYieldsBothSlugs() throws {
-        let git = GitService()
+        let git = TestPaths.git
         let manifest = ManifestService()
         let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: git), manifestService: manifest,
                                 storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)
@@ -273,7 +278,7 @@ extension SyncEngineTests {
     // MARK: (f) two-clone project union: same identity_key, different names → deterministic winner
 
     func testTwoCloneProjectUnionConvergesToDeterministicWinner() throws {
-        let git = GitService()
+        let git = TestPaths.git
         let manifest = ManifestService()
         let remote = try seedRemote(git: git) { seed in
             try manifest.write(ManifestSnapshot(schemaVersion: 1, categories: [], projects: [], skills: []),
@@ -315,7 +320,7 @@ extension SyncEngineTests {
 
     /// BETTER-1 payoff: real GitService/SyncEngine/StoreRebuildService over a bare `file://` remote.
     func testTwoMachineRoundTripSkillBodyAndCategoryPropagate() throws {
-        let git = GitService()
+        let git = TestPaths.git
         let manifest = ManifestService()
         let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: git), manifestService: manifest,
                                 storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)

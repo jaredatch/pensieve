@@ -162,7 +162,7 @@ private extension IntentEndToEndTests {
     }
 
     func makeHarness() throws -> Harness {
-        let git = GitService()
+        let git = TestPaths.git
         let manifest = ManifestService()
         let remote = try seedRemote(git: git, manifest: manifest)
         let cloneA = tempDir + "/cloneA"
@@ -271,7 +271,7 @@ private extension IntentEndToEndTests {
             linkService: resolvedLink,
             cursorCompiler: DeployRecordingCursorCompiler(fileService: fileService),
             agentDetection: DeployStubDetection(installed: installed),
-            deployStateStore: DeployStateStore.memoryBacked
+            deployStateStore: DeployStateStore.memoryBacked, skillsDirectory: TestPaths.skillsDir
         )
     }
 

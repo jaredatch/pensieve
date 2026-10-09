@@ -10,12 +10,13 @@ final class SkillLibrarySaveTests: XCTestCase {
         let files = FileService()
         let root = TestTemporaryDirectory.path + "CRLFSave-" + UUID().uuidString
         defer { try? files.deleteDirectory(at: root) }
-        let store = SkillStore(fileService: files, baseDir: root)
+        let store = SkillStore(fileService: files, baseDir: root, storeRoot: root)
         let slug = try store.createSkill(name: "Test", description: "D", body: "Old")
         try files.writeFile(at: root + "/" + slug + "/SKILL.md",
                             content: "---\r\nname: Test\r\ndescription: D\r\n---\r\n\r\nOld\r\n")
         let watcher = RecordingWatcher()
-        let library = SkillLibraryViewModel(skillStore: store, fileService: files, fileWatchService: watcher)
+        let library = SkillLibraryViewModel(skillStore: store, fileService: files, fileWatchService: watcher,
+            manifestRoot: TestPaths.storeRoot)
         let skill = Skill(name: "Test", directoryName: slug)
         library.startWatching()
         _ = library.editorBody(for: skill)
@@ -34,7 +35,9 @@ final class SkillLibrarySaveTests: XCTestCase {
 
     func testLoadIsCleanAndSeedsTheFingerprint() {
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let skill = makeSkill()
 
         XCTAssertEqual(library.editorBody(for: skill), "A")
@@ -47,7 +50,9 @@ final class SkillLibrarySaveTests: XCTestCase {
 
     func testAChangeMakesTheDraftDirtyAndWritesNothing() {
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let skill = makeSkill()
         _ = library.editorBody(for: skill)
 
@@ -60,7 +65,9 @@ final class SkillLibrarySaveTests: XCTestCase {
 
     func testAChangeBackToTheFileIsClean() {
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let skill = makeSkill()
         _ = library.editorBody(for: skill)
 
@@ -74,7 +81,9 @@ final class SkillLibrarySaveTests: XCTestCase {
 
     func testTypingBackToTheFileWithATrailingNewlineIsClean() {
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let skill = makeSkill()
         _ = library.editorBody(for: skill)
 
@@ -88,7 +97,9 @@ final class SkillLibrarySaveTests: XCTestCase {
 
     func testEditorBodyReturnsTheDraftWhileDirty() {
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let skill = makeSkill()
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "B")
@@ -100,7 +111,11 @@ final class SkillLibrarySaveTests: XCTestCase {
     func testSaveWritesOnceRecordsTheFingerprintAndNotifies() {
         let store = CountingSkillStore(body: "A")
         var nudges = 0
-        let library = SkillLibraryViewModel(skillStore: store, notifier: { nudges += 1 })
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot,
+            notifier: { nudges += 1 }
+        )
         let skill = makeSkill()
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "B")
@@ -117,7 +132,11 @@ final class SkillLibrarySaveTests: XCTestCase {
     func testSaveWithNoDraftWritesNothing() {
         let store = CountingSkillStore(body: "A")
         var nudges = 0
-        let library = SkillLibraryViewModel(skillStore: store, notifier: { nudges += 1 })
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot,
+            notifier: { nudges += 1 }
+        )
         let skill = makeSkill()
         _ = library.editorBody(for: skill)
 
@@ -129,7 +148,9 @@ final class SkillLibrarySaveTests: XCTestCase {
 
     func testAnEmptyDraftOverAVanishedFileReadsCleanAndSaveStillRefuses() {
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let skill = makeSkill()
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "")
@@ -145,7 +166,9 @@ final class SkillLibrarySaveTests: XCTestCase {
 
     func testRevertDropsTheDraftWithoutWritingAndAsksTheEditorToReload() {
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let skill = makeSkill()
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "B")
@@ -163,7 +186,11 @@ final class SkillLibrarySaveTests: XCTestCase {
 
     func testAFailedSaveKeepsTheDraftAndSurfacesTheError() {
         var nudges = 0
-        let library = SkillLibraryViewModel(skillStore: ThrowingSkillStore(), notifier: { nudges += 1 })
+        let library = SkillLibraryViewModel(
+            skillStore: ThrowingSkillStore(), fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestRoot: TestPaths.storeRoot,
+            notifier: { nudges += 1 }
+        )
         let skill = makeSkill()
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "B")
@@ -180,7 +207,9 @@ final class SkillLibrarySaveTests: XCTestCase {
         // ⌘S with two dirty drafts (reachable: an entry kept clean by a file that caught up, made dirty again
         // by an external change while another skill was edited) writes both, first by name.
         let store = CountingSkillStore(body: "A")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let skillX = Skill(name: "Skill X", directoryName: "skill-x")
         let skillY = Skill(name: "Skill Y", directoryName: "skill-y")
         _ = library.editorBody(for: skillX)
@@ -210,14 +239,21 @@ final class SkillLibrarySaveTests: XCTestCase {
         )
         let context = ModelContext(container)
         let store = CountingSkillStore(body: "original")
-        let library = SkillLibraryViewModel(skillStore: store)
+        let library = SkillLibraryViewModel(
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
+        )
         let skill = Skill(name: "Doomed", directoryName: "doomed")
         context.insert(skill)
         _ = library.editorBody(for: skill)
         library.noteEditorChanged(skill, body: "edited")
         XCTAssertTrue(SkillDeletionFlow.delete(
             skill: skill, library: library,
-            platformVM: PlatformViewModel(agentDetection: ZeroInstalledAgentDetection(), deployStateStore: .memoryBacked),
+            platformVM: PlatformViewModel(
+                linkService: TestPaths.linkService(fileService: FileService()),
+                cursorCompiler: TestPaths.cursorCompiler(fileService: FileService()),
+                agentDetection: ZeroInstalledAgentDetection(),
+                deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
+            ),
             projects: [], context: context
         ))
 
@@ -249,6 +285,7 @@ private struct FilesGone: Error {}
 
 /// A store whose canonical writer refuses every write; reads answer "A".
 final class ThrowingSkillStore: SkillStoreProtocol {
+    let baseDir = TestPaths.skillsDir
     func createSkill(name: String, description: String, body: String) throws -> String { "created-skill" }
     func readBody(directoryName: String) throws -> String { "A" }
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
@@ -259,6 +296,7 @@ final class ThrowingSkillStore: SkillStoreProtocol {
 }
 
 final class CountingSkillStore: SkillStoreProtocol {
+    let baseDir = TestPaths.skillsDir
     private(set) var writeCount = 0
     private(set) var lastWrittenBody: String?
     /// The skill's files removed from under the app: every read fails, as `FileService` would.

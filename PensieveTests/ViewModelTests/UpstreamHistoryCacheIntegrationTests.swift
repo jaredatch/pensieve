@@ -155,6 +155,8 @@ final class UpstreamHistoryCacheIntegrationTests: UpstreamHistoryCacheTestCase {
 
         try fileService.writeFile(at: localDirectory + "/SKILL.md", content: "after\n")
         let service = UpstreamHistoryService(
+            gitService: GitService(fileService: fileService, askpassHelperPath: appSupport + "/askpass"),
+            credentialStore: InMemoryCredentialStore(),
             fileService: fileService,
             contentHasher: FixedContentHasher(value: "sha256:changed"),
             scratchRoot: scratchRoot

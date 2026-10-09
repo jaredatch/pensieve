@@ -9,7 +9,13 @@ final class PlatformSettingsPresentationTests: XCTestCase {
     func testSettingsShowsOneSkillSizeBudgetAndAdvisoryFooter() async throws {
         let defaults = try isolatedDefaults()
         defaults.set(6_100, forKey: "claudeCodeTokenBudget")
-        let host = NSHostingView(rootView: PlatformSettingsView(defaults: defaults)
+        // Platform Paths reads the runtime's paths, so the view needs one with temporary locations.
+        let paths = try AppRuntimePaths.temporary(named: "PlatformSettingsPresentation")
+        defer { try? FileService().deleteDirectory(at: (paths.storeRoot as NSString).deletingLastPathComponent) }
+        defaults.set(false, forKey: AppRuntime.backgroundSyncEnabledKey)
+        defaults.set(true, forKey: AppRuntime.migrationDefaultsKey)
+        let runtime = try AppRuntime(defaults: defaults, paths: paths, gitUsabilityProbe: { .usable })
+        let host = NSHostingView(rootView: PlatformSettingsView(defaults: defaults).environment(runtime)
             .background(Color(nsColor: .windowBackgroundColor)))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 420),
                               styleMask: [.titled], backing: .buffered, defer: false)
@@ -36,12 +42,16 @@ final class PlatformSettingsPresentationTests: XCTestCase {
     }
 
     func testGrokPathRowFollowsClaudeCodeAndShowsItsUserSkillsFolder() {
-        XCTAssertEqual(PlatformPathSetting.rows.map(\.platform), [.claudeCode, .grok, .cursor])
-        guard let grok = PlatformPathSetting.rows.first(where: { $0.platform == .grok }) else {
+        XCTAssertEqual(
+            PlatformPathSetting.rows(paths: TestPaths.deployPaths).map(\.platform),
+            [.claudeCode, .grok, .cursor]
+        )
+
+        guard let grok = PlatformPathSetting.rows(paths: TestPaths.deployPaths).first(where: { $0.platform == .grok }) else {
             return XCTFail("Grok is missing from Platform Paths")
         }
         XCTAssertEqual(grok.label, "Grok Skills")
-        XCTAssertEqual(grok.path, Constants.grokUserSkillsDir)
+        XCTAssertEqual(grok.path, TestPaths.deployPaths.userSkillsRoot(for: .grok)!)
     }
 
     func testBudgetDefaultsTo5000Tokens() throws {

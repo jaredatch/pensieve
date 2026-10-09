@@ -12,9 +12,12 @@ extension AppRuntimeFinalReviewTests {
             git.remoteRead = { _ = reads.run(); return "https://fixture.test/store.git" }
             let probe = RuleProbe()
             probe.set { .developerToolsMissing }
-            let bypass = GitService(upstreamHistoryNetworkRunner: { _, _ in
+            let bypass = GitService(
+                askpassHelperPath: TestPaths.gitAskpassHelperPath,
+                upstreamHistoryNetworkRunner: { _, _ in
                 .init(stdout: "", stderr: "xcrun: error: invalid active developer path", exit: 69)
-            })
+            }
+            )
             let runtime = try AppRuntime(syncModel: SyncModel(git: git, root: fixture.root),
                 scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }),
                 defaults: isolatedDefaults("evidence-\(index)"), paths: fixture.paths, updateCheckOperation: { _ in

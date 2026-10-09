@@ -9,7 +9,7 @@ final class GitServiceRebaseTests: XCTestCase {
     override func setUpWithError() throws {
         tempDir = TestTemporaryDirectory.path + "PensieveGitServiceRebaseTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
-        git = GitService()
+        git = TestPaths.git
     }
 
     override func tearDownWithError() throws {
@@ -109,8 +109,8 @@ final class GitServiceRebaseTests: XCTestCase {
 
     func testStageMappingAndContinueRebase() throws {
         let (cloneB, path) = try makeTwoCloneConflict(aBody: "OTHER machine line", bBody: "THIS machine line")
-        XCTAssertEqual(try git.blob(atStage: 2, path: path, in: cloneB), skillMarkdown(body: "OTHER machine line"))
-        XCTAssertEqual(try git.blob(atStage: 3, path: path, in: cloneB), skillMarkdown(body: "THIS machine line"))
+        XCTAssertEqual(try git.blob(atStage: 2, path: path, in: cloneB), Data(skillMarkdown(body: "OTHER machine line").utf8))
+        XCTAssertEqual(try git.blob(atStage: 3, path: path, in: cloneB), Data(skillMarkdown(body: "THIS machine line").utf8))
 
         try write(path, skillMarkdown(body: "THIS machine line"), in: cloneB)
         try git.stagePath(path, at: cloneB)
@@ -121,12 +121,12 @@ final class GitServiceRebaseTests: XCTestCase {
     func testKeepOtherEmptyCommitSkipsAndLeavesNothingToPush() throws {
         let (cloneB, path) = try makeTwoCloneConflict(aBody: "Other wins", bBody: "This loses")
         let otherSide = try XCTUnwrap(git.blob(atStage: 2, path: path, in: cloneB))
-        try write(path, otherSide, in: cloneB)
+        try FileService().writeData(at: cloneB + "/" + path, data: otherSide)
         try git.stagePath(path, at: cloneB)
 
         XCTAssertEqual(try git.continueRebase(at: cloneB), .merged)
         XCTAssertFalse(try git.hasCommitsToPush(at: cloneB))
-        XCTAssertEqual(try String(contentsOfFile: cloneB + "/" + path, encoding: .utf8), otherSide)
+        XCTAssertEqual(try FileService().readData(at: cloneB + "/" + path), otherSide)
     }
 
     func testAddAddAndDeleteModifyBlobShapes() throws {
@@ -184,10 +184,20 @@ final class GitServiceRebaseTests: XCTestCase {
         try write("two.txt", "two\n", in: cloneB)
         XCTAssertTrue(try git.stageAllAndCommit(at: cloneB, message: "two"))
 
+        let files = FileService()
+        let assets = cloneB + "/skills/bytes/assets"
+        try files.writeFile(at: assets + "/a", content: "asset")
+        XCTAssertTrue(try git.stageAllAndCommit(at: cloneB, message: "assets"))
+        try files.deleteDirectory(at: assets)
+        try files.createSymlink(at: assets, pointingTo: "../../other")
+
         XCTAssertTrue(try git.collapseToSingleCommit(at: cloneB, message: "collapsed", credential: nil))
         let count = try rawGit(["rev-list", "--count", "origin/main..HEAD"], in: cloneB).out
             .trimmingCharacters(in: .whitespacesAndNewlines)
         XCTAssertEqual(count, "1")
+        let tree = try rawGit(["ls-tree", "HEAD", "--", "skills/bytes/assets"], in: cloneB)
+        XCTAssertTrue(tree.out.hasPrefix("120000 blob"), "Collapse must stage the replacement symlink")
+        XCTAssertEqual(try rawGit(["show", "HEAD:skills/bytes/assets"], in: cloneB).out, "../../other")
     }
 
     func testNonEmptyContinueFailureDoesNotSkip() throws {

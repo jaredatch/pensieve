@@ -141,8 +141,7 @@ final class IngestPreflightTests: XCTestCase {
             rebuildService: rebuild,
             root: tempDir,
             audit: IngestNullAudit(),
-            machineIdentity: InertMachineIdentity(),
-            machineStateService: InertMachineStateService(),
+            machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService()),
             headStamp: {
                 stampReads += 1
                 return stamp
@@ -190,8 +189,7 @@ final class IngestPreflightTests: XCTestCase {
             rebuildService: rebuild,
             root: tempDir,
             audit: IngestNullAudit(),
-            machineIdentity: InertMachineIdentity(),
-            machineStateService: InertMachineStateService(),
+            machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService()),
             headStamp: { GitHeadStamp().read(root: self.tempDir) }
         )
         await coordinator.seedLastIngestedHeadStamp("previous")
@@ -211,7 +209,7 @@ final class IngestPreflightTests: XCTestCase {
             startAutomatically: false,
             backgroundSyncEnabled: { true }
         )
-        scheduler.installDrain {
+        scheduler.installDrain { _ in
             if let context {
                 _ = try? engine.sync(
                     root: self.tempDir,

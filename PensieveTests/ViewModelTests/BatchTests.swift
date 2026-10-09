@@ -128,8 +128,9 @@ final class Batch: XCTestCase {
         let vm = PlatformViewModel(
             fileService: StubFileService(),
             linkService: stub,
+            cursorCompiler: TestPaths.cursorCompiler(fileService: StubFileService()),
             agentDetection: StubDetection(),
-            deployStateStore: makeDeployStateStore()
+            deployStateStore: makeDeployStateStore(), skillsDirectory: TestPaths.skillsDir
         )
 
         let result = vm.deployBatch(
@@ -179,8 +180,9 @@ final class Batch: XCTestCase {
         let vm = PlatformViewModel(
             fileService: StubFileService(),
             linkService: stub,
+            cursorCompiler: TestPaths.cursorCompiler(fileService: StubFileService()),
             agentDetection: StubDetection(),
-            deployStateStore: makeDeployStateStore()
+            deployStateStore: makeDeployStateStore(), skillsDirectory: TestPaths.skillsDir
         )
         let result = vm.removeOwnedBatch(
             pairs: DeployRemovalPair.expand(skills: [alpha, bravo], platforms: [.claudeCode, .openClaw]),

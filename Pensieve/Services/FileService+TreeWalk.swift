@@ -77,7 +77,7 @@ final class ComparisonDirectory {
     }
 
     /// Stream entries into the shared budget before retaining metadata or opening a child.
-    func forEachEntry(excludingGit: Bool, budget: ComparisonInventoryBudget,
+    func forEachEntry(excludingGit: Bool, budget: ComparisonInventoryBudget, beforeEntry: (String) throws -> Void,
                       body: (String, stat) throws -> Void) throws {
         try validate()
         while true {
@@ -93,6 +93,7 @@ final class ComparisonDirectory {
                 $0.withMemoryRebound(to: CChar.self, capacity: capacity) { String(cString: $0) }
             }
             if name == "." || name == ".." || (excludingGit && name == ".git") { continue }
+            try beforeEntry(name)
             try budget.consumeEntry()
             var status = stat()
             guard fstatat(descriptor, name, &status, AT_SYMLINK_NOFOLLOW) == 0 else {
@@ -104,15 +105,21 @@ final class ComparisonDirectory {
 }
 
 final class ComparisonInventoryBudget {
+    enum Limit { case entries, depth }
     let limits: FileTreeComparisonLimits
     var entries = 0
-    init(limits: FileTreeComparisonLimits) { self.limits = limits }
+    private let limitError: (Limit) -> Error
+    init(limits: FileTreeComparisonLimits,
+         limitError: @escaping (Limit) -> Error = { _ in FileTreeComparisonError.treeTooLarge }) {
+        self.limits = limits
+        self.limitError = limitError
+    }
     func consumeEntry() throws {
-        guard entries < limits.maximumEntries else { throw FileTreeComparisonError.treeTooLarge }
+        guard entries < limits.maximumEntries else { throw limitError(.entries) }
         entries += 1
     }
     func checkDepth(_ depth: Int) throws {
-        guard depth <= limits.maximumDepth else { throw FileTreeComparisonError.treeTooLarge }
+        guard depth <= limits.maximumDepth else { throw limitError(.depth) }
     }
 }
 
@@ -142,6 +149,7 @@ final class ComparisonOpenedFile {
         self.initial = initial
     }
     deinit { close(descriptor) }
+    var changedSinceInventory: Bool { !Self.same(initial, entry.status) }
 
     func changed() throws -> Bool {
         try directory.validate()
@@ -156,7 +164,7 @@ final class ComparisonOpenedFile {
         guard named.st_mode & S_IFMT == S_IFREG else {
             throw DescriptorFileCopy.error("file type changed", path: entry.path, code: EFTYPE)
         }
-        return !Self.same(initial, current) || !Self.same(initial, named) || !Self.same(initial, entry.status)
+        return !Self.same(initial, current) || !Self.same(initial, named) || changedSinceInventory
     }
 
     private static func same(_ left: stat, _ right: stat) -> Bool {
@@ -169,29 +177,37 @@ extension FileService {
                              checkpoint: (String) throws -> Void) throws -> [String: ComparisonFile] {
         let root = try ComparisonDirectory(path: path, name: "", parent: nil)
         var files: [String: ComparisonFile] = [:]
-        try collectComparisonFiles(root, relative: "", excludingGit: excludingGit,
-                                   files: &files, budget: budget, checkpoint: checkpoint)
-        return files
-    }
-
-    private func collectComparisonFiles(_ directory: ComparisonDirectory, relative: String, excludingGit: Bool,
-                                        files: inout [String: ComparisonFile], budget: ComparisonInventoryBudget,
-                                        checkpoint: (String) throws -> Void) throws {
-        try checkpoint(directory.path)
-        try directory.forEachEntry(excludingGit: excludingGit, budget: budget) { name, status in
-            let path = relative.isEmpty ? name : relative + "/" + name
+        try walkComparisonEntries(root, excludingGit: excludingGit, budget: budget, checkpoint: checkpoint,
+                                  entry: { directory, name, path, status in
             switch status.st_mode & S_IFMT {
-            case S_IFDIR:
-                try budget.checkDepth(directory.reference.depth + 1)
-                let child = try ComparisonDirectory(path: directory.path + "/" + name, name: name, parent: directory)
-                try collectComparisonFiles(child, relative: path, excludingGit: false,
-                                           files: &files, budget: budget, checkpoint: checkpoint)
+            case S_IFDIR: return true
             case S_IFREG:
                 files[path] = ComparisonFile(directory: directory.reference, name: name, status: status)
+                return false
             default:
                 throw DescriptorFileCopy.error("symlink or special file", path: directory.path + "/" + name, code: EFTYPE)
             }
-        }
+        })
+        return files
+    }
+
+    /// The entry owner decides whether a directory is admitted; pruned subtrees never consume the budget.
+    func walkComparisonEntries(_ directory: ComparisonDirectory, relative: String = "", excludingGit: Bool,
+                               budget: ComparisonInventoryBudget, beforeEntry: (String) throws -> Void = { _ in },
+                               checkpoint: (String) throws -> Void = { _ in },
+                               entry: (ComparisonDirectory, String, String, stat) throws -> Bool) throws {
+        try checkpoint(directory.path)
+        try directory.forEachEntry(excludingGit: excludingGit, budget: budget, beforeEntry: { name in
+            try beforeEntry(relative.isEmpty ? name : relative + "/" + name)
+        }, body: { name, status in
+            let path = relative.isEmpty ? name : relative + "/" + name
+            if try entry(directory, name, path, status) {
+                try budget.checkDepth(directory.reference.depth + 1)
+                let child = try ComparisonDirectory(path: directory.path + "/" + name, name: name, parent: directory)
+                try walkComparisonEntries(child, relative: path, excludingGit: false, budget: budget,
+                                          beforeEntry: beforeEntry, checkpoint: checkpoint, entry: entry)
+            }
+        })
         try directory.validate()
     }
 }

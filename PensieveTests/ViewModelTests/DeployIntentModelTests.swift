@@ -309,7 +309,7 @@ extension DeployIntentModelTests {
             linkService: linkService,
             cursorCompiler: DeployRecordingCursorCompiler(fileService: fileService),
             agentDetection: DeployStubDetection(installed: [.codex]),
-            deployStateStore: DeployStateStore.memoryBacked
+            deployStateStore: DeployStateStore.memoryBacked, skillsDirectory: TestPaths.skillsDir
         )
         let root = TestTemporaryDirectory.path + "PensieveDeployIntent-" + UUID().uuidString
         let manifestFileService = FileService()

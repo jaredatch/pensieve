@@ -10,10 +10,11 @@ final class GitUsabilityTests: XCTestCase {
         for state in states {
             XCTAssertEqual(try fixture.broken(state).probeUsability(), state)
         }
-        let missing = GitService(executablePath: fixture.base + "/missing")
-        guard case let .failed(detail) = missing.probeUsability() else { return XCTFail("launch failure must be unknown") }
+        let missing = GitService(askpassHelperPath: TestPaths.gitAskpassHelperPath,
+            executablePath: fixture.base + "/missing")
+        guard case let .failed(detail) = try missing.probeUsability() else { return XCTFail("launch failure must be unknown") }
         XCTAssertFalse(detail.text.isEmpty)
-        XCTAssertEqual(GitService().probeUsability(), .usable)
+        XCTAssertEqual(try TestPaths.git.probeUsability(), .usable)
     }
 
     func testGeneratedRemoteOutcomeSweep() throws {
@@ -36,15 +37,17 @@ final class GitUsabilityTests: XCTestCase {
             defer { try? fixture.remove() }
             if sample.hasGitEntry { try fixture.files.createDirectory(at: fixture.root + "/.git") }
             let standIn = try fixture.executable("""
+                \(FakeGitScript.skipGlobalOptions)
                 if [ "$1" = '--version' ] && [ '\(sample.versionFails)' != true ]; then
                     echo 'git version fixture'; exit 0
                 fi
-                if [ "$3" = 'rev-parse' ]; then echo '.git'; exit 0; fi
+                if [ "$1" = 'rev-parse' ]; then echo '.git'; exit 0; fi
                 printf '%s\\n' '\(sample.output)'
                 printf '%s\\n' '\(sample.error)' >&2
                 exit \(sample.exit)
                 """)
-            let git = sample.launches ? standIn : GitService(executablePath: fixture.base + "/missing")
+            let git = sample.launches ? standIn : GitService(askpassHelperPath: TestPaths.gitAskpassHelperPath,
+                executablePath: fixture.base + "/missing")
             assertRemoteAnswer(git, sample: sample, fixture: fixture, index: index)
         }
     }
@@ -53,7 +56,7 @@ final class GitUsabilityTests: XCTestCase {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         try fixture.files.createSymlink(at: fixture.root + "/.git", pointingTo: fixture.base + "/missing")
-        XCTAssertThrowsError(try GitService().remoteURL(at: fixture.root)) { error in
+        XCTAssertThrowsError(try TestPaths.git.remoteURL(at: fixture.root)) { error in
             guard case GitError.repositoryUnreadable = error else { return XCTFail("\(error)") }
         }
         XCTAssertTrue(fixture.files.isSymlink(at: fixture.root + "/.git"))

@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct ConflictResolutionView: View {
+    @Environment(AppRuntime.self) private var runtime
     @Environment(\.modelContext) private var modelContext
     @State private var model: ConflictResolutionModel
     @State private var historySkill: Skill?
@@ -42,6 +43,8 @@ struct ConflictResolutionView: View {
             if let historySkill {
                 SkillHistoryView(
                     skill: historySkill,
+                    git: runtime.paths.makeGitService(),
+                    store: runtime.library.skillStore, workingDir: runtime.paths.storeRoot,
                     library: library,
                     notifier: notifier,
                     onDismiss: { self.historySkill = nil }
@@ -56,6 +59,11 @@ struct ConflictResolutionView: View {
             ProgressView()
                 .frame(maxWidth: .infinity, alignment: .center)
         case let .ready(groups):
+            if let message = model.selectionError {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.callout).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.md) {
                     ForEach(groups) { group in
@@ -132,7 +140,7 @@ struct ConflictResolutionView: View {
         switch item.kind {
         case .body:
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                LineDiffView(this: item.thisMachine ?? "", other: item.otherMachine ?? "")
+                ConflictFileComparison(item: item)
                 if let skill = bodySkill(for: item) {
                     Button("See history") { historySkill = skill }
                         .buttonStyle(.link)
@@ -187,15 +195,110 @@ struct ConflictResolutionView: View {
     }
 
     private func bodySkill(for item: ConflictItem) -> Skill? {
-        guard let slug = bodySlug(from: item.path) else { return nil }
+        let path = SyncEngine.conflictPath(for: item)
+        guard path.kind == .body, let slug = path.skillSlug else { return nil }
         return skills.first { $0.directoryName == slug }
     }
+}
 
-    private func bodySlug(from path: String) -> String? {
-        guard path.hasPrefix("skills/"), path.hasSuffix("/SKILL.md") else { return nil }
-        let start = path.index(path.startIndex, offsetBy: "skills/".count)
-        let end = path.index(path.endIndex, offsetBy: -"/SKILL.md".count)
-        guard start < end else { return nil }
-        return String(path[start..<end])
+/// The sheet's file comparison, separate from grouping and resolution controls.
+struct ConflictFileComparison: View {
+    private enum Side {
+        case deleted
+        case unavailable(UnavailableConflictSide)
+        case text(String, preview: String, hiddenLines: Int)
+        case nonText(bytes: Int)
+
+        var keepsFile: Bool {
+            switch self {
+            case .text, .nonText: return true
+            case .deleted, .unavailable: return false
+            }
+        }
+
+        var canRetire: Bool {
+            switch self {
+            case .deleted: return true
+            case let .unavailable(side): return side.canChoose
+            case .text, .nonText: return false
+            }
+        }
+
+        init(_ bytes: Data?, unavailable: UnavailableConflictSide?) {
+            if let unavailable { self = .unavailable(unavailable); return }
+            guard let bytes else { self = .deleted; return }
+            guard !bytes.contains(0), let text = UpstreamHistoryFileContent.utf8PreservingBOM(bytes) else {
+                self = .nonText(bytes: bytes.count)
+                return
+            }
+            var lines = text.components(separatedBy: "\n")
+            if text.hasSuffix("\n") { lines.removeLast() }
+            let visible = lines.prefix(LineDiffView.defaultMaxRows)
+            self = .text(text, preview: visible.joined(separator: "\n"), hiddenLines: lines.count - visible.count)
+        }
+    }
+
+    private let this: Side
+    private let other: Side
+    private let retiresGitlink: Bool
+    private let removesOtherFile: Bool
+
+    init(item: ConflictItem) {
+        this = Side(item.thisMachine, unavailable: item.thisUnavailable)
+        other = Side(item.otherMachine, unavailable: item.otherUnavailable)
+        retiresGitlink = item.retiresGitlink
+        removesOtherFile = item.otherMode != nil && item.otherUnavailable?.isGitlink != true
+    }
+
+    var body: some View {
+        if case let .text(this, _, _) = this, case let .text(other, _, _) = other,
+           !this.isEmpty, !other.isEmpty {
+            LineDiffView(this: this, other: other)
+        } else {
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                if retiresGitlink {
+                    if this.keepsFile || other.keepsFile {
+                        Text("Choosing a file or link keeps it in sync.").foregroundStyle(.secondary)
+                    }
+                    if this.canRetire || other.canRetire {
+                        Text("Choosing a nested repository or a deletion stops syncing this path. "
+                            + "Whatever is at this path on this Mac stays where it is.")
+                            .foregroundStyle(.secondary)
+                        if removesOtherFile {
+                            Text("The other Mac removes its copy the next time it syncs.").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                HStack(alignment: .top, spacing: Spacing.md) {
+                    side("This Mac", content: this)
+                    side("Other Mac", content: other)
+                }
+            }
+        }
+    }
+
+    private func side(_ title: String, content: Side) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            switch content {
+            case .deleted:
+                Text("Deleted").foregroundStyle(.secondary)
+            case let .unavailable(side):
+                Text(side.canChoose ? "Nested repository" : "Can’t be read")
+                    .foregroundStyle(.secondary)
+            case let .text(text, preview, hiddenLines):
+                Text(text.isEmpty ? "Empty file" : preview)
+                    .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                if hiddenLines > 0 {
+                    Text(verbatim: "Showing the first \(LineDiffView.defaultMaxRows) lines. "
+                         + "\(hiddenLines) more \(hiddenLines == 1 ? "isn’t" : "aren’t") shown.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            case let .nonText(bytes):
+                Text("This file can’t be shown as text.").foregroundStyle(.secondary)
+                Text("\(bytes) \(bytes == 1 ? "byte" : "bytes")").font(.caption)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

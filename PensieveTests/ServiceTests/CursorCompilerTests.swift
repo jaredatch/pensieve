@@ -13,8 +13,12 @@ final class CursorCompilerTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: skillsDir, withIntermediateDirectories: true)
 
         fileService = FileService()
-        skillStore = SkillStore(fileService: fileService, baseDir: skillsDir)
-        compiler = CursorCompiler(fileService: fileService, skillStore: skillStore)
+        skillStore = SkillStore(fileService: fileService, baseDir: skillsDir, storeRoot: skillsDir)
+        compiler = CursorCompiler(
+            fileService: fileService,
+            skillStore: skillStore,
+            userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
+        )
     }
 
     override func tearDownWithError() throws {

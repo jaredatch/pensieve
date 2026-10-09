@@ -5,11 +5,12 @@ import XCTest
 @MainActor
 final class AppRuntimeStatusOrderTests: XCTestCase {
     func testConflictedStateRefusesSyncNowFromEveryEntryPoint() async throws {
-        let model = SyncModel(initialState: .conflicted(["skills/example/SKILL.md"]))
+        let model = SyncModel(git: TestPaths.git, root: TestPaths.storeRoot,
+            initialState: .conflicted(["skills/example/SKILL.md"]))
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         XCTAssertFalse(model.canSyncNow)
         var pending = 0, cycles = 0
-        model.installPendingSyncRequest { pending += 1 }
+        model.installPendingSyncRequest { _ in pending += 1 }
         await model.syncNowAndReport()
         XCTAssertEqual(pending, 0, "a pre-coordinator request is refused")
         model.installSyncRequest { cycles += 1 }
@@ -45,9 +46,15 @@ final class AppRuntimeStatusOrderTests: XCTestCase {
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }),
             defaults: isolatedDefaults(), paths: fixture.paths, gitUsabilityProbe: { .usable },
             coordinatorConfigure: { coordinator in
-                await coordinator.configure(engine: StatusOrderEngine(operation: { .conflicted(["skills/example/SKILL.md"]) }),
-                    git: GitService(), credentials: InMemoryCredentialStore(), root: fixture.root,
-                    audit: SyncAudit(appSupport: fixture.support))
+                await coordinator.configure(
+                    engine: StatusOrderEngine(operation: { .conflicted(["skills/example/SKILL.md"]) }),
+                    git: TestPaths.git,
+                    credentials: InMemoryCredentialStore(),
+                    root: fixture.root,
+                    audit: SyncAudit(appSupport: fixture.support),
+                    machine: (identity: MachineIdentity(appSupportDir: TestPaths.appSupportDir),
+                        stateService: TestPaths.stateService)
+                )
             })
         await runtime.bootstrapTask.value
         let reading = expectation(description: "cycle configuration read")
@@ -61,7 +68,8 @@ final class AppRuntimeStatusOrderTests: XCTestCase {
         let resolution = ConflictResolutionModel(engine: StatusOrderEngine(operation: {
             resolutions += 1
             return .synced(pushed: false, warnings: [])
-        }), git: GitService(), credentials: InMemoryCredentialStore(), root: fixture.root,
+        }), git: TestPaths.git,
+            credentials: InMemoryCredentialStore(), root: fixture.root,
             onResolutionStarted: runtime.beginConflictResolution)
         await resolution.loadAndReport(context: runtime.container.mainContext)
         XCTAssertEqual(resolutions, 0, "resolution cannot overlap the post-cycle read")
@@ -82,12 +90,19 @@ final class AppRuntimeStatusOrderTests: XCTestCase {
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }),
             defaults: isolatedDefaults("older-success"), paths: fixture.paths, gitUsabilityProbe: probe.run,
             coordinatorConfigure: { coordinator in
-                await coordinator.configure(engine: StatusOrderEngine(operation: {
+                await coordinator.configure(
+                    engine: StatusOrderEngine(operation: {
                     started.fulfill()
                     release.wait()
                     return .synced(pushed: false, warnings: [])
-                }), git: GitService(), credentials: InMemoryCredentialStore(), root: fixture.root,
-                    audit: SyncAudit(appSupport: fixture.support))
+                }),
+                    git: TestPaths.git,
+                    credentials: InMemoryCredentialStore(),
+                    root: fixture.root,
+                    audit: SyncAudit(appSupport: fixture.support),
+                    machine: (identity: MachineIdentity(appSupportDir: TestPaths.appSupportDir),
+                        stateService: TestPaths.stateService)
+                )
             })
         await runtime.bootstrapTask.value
         let cycle = Task { await runtime.syncModel.syncNowAndReport() }

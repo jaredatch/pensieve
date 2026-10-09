@@ -199,7 +199,7 @@ struct ProjectRemovalPlan {
             }
         }
         let state = try platformVM.deployStateStore.read()
-        for row in state.records where row.scope == "project" && row.artifactPath.hasPrefix(project.path + "/") {
+        for row in state.records where row.scope == "project" && PathSyntax.hasPrefix(row.artifactPath, project.path + "/") {
             guard let platform = PlatformTarget(rawValue: row.platform) else { continue }
             let skill = evidence.bySlug[row.slug] ?? Skill(name: row.slug, directoryName: row.slug)
             try admit(skill: skill, platform: platform, project: project, platformVM: platformVM,
@@ -207,8 +207,8 @@ struct ProjectRemovalPlan {
         }
         let projectID = project.id
         let history = try context.fetch(FetchDescriptor<DeployRecord>(predicate: #Predicate { $0.projectID == projectID }))
-        for row in history where row.targetPath.hasPrefix(project.path + "/") {
-            guard let slug = DeployPaths.slug(artifactPath: row.targetPath, platform: row.platform,
+        for row in history where PathSyntax.hasPrefix(row.targetPath, project.path + "/") {
+            guard let slug = DeployPaths.projectSlug(artifactPath: row.targetPath, platform: row.platform,
                                               projectPath: project.path) else { continue }
             guard (try? LinkService.validatePathComponent(slug)) != nil else { continue }
             let matchingSkill = evidence.byID[row.skillID].flatMap { skill in

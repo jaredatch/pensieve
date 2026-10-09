@@ -8,23 +8,26 @@ extension SkillOverviewPresentationTests {
         let physicalFiles = FileService()
         let root = TestTemporaryDirectory.path + "AgentAdvisory-\(UUID().uuidString)"
         defer { try? physicalFiles.deleteDirectory(at: root) }
-        // The existing adapter confines canonical skills and all agent artifacts to this temporary root.
-        let files = LinkServiceCanonicalDirectoryFileService(wrapped: physicalFiles, pathMappings: [
-            (Constants.pensieveSkillsDir, root + "/skills"),
-            (Constants.codexUserSkillsDir, root + "/codex"),
-            (Constants.claudeCodeUserSkillsDir, root + "/claude"),
-            (Constants.cursorUserRulesDir, root + "/cursor")
-        ], physicalSandbox: root)
+        // Every location is explicit and under the temporary root.
+        let files = physicalFiles
+        let skillsDirectory = root + "/skills"
+        let paths = DeployPaths(skillsDirectory: skillsDirectory,
+            userSkillsDirectories: [.codex: root + "/codex", .claudeCode: root + "/claude"],
+            cursorUserRulesDirectory: root + "/cursor")
+        let store = SkillStore(fileService: files, baseDir: skillsDirectory, storeRoot: root)
         let skill = Skill(name: String(repeating: "n", count: 65), skillDescription: String(repeating: "d", count: 1_537),
                           directoryName: "advisory-\(UUID().uuidString)", cursorConfig: CursorAdapterConfig(alwaysApply: true))
         let document = "---\nname: " + skill.name + "\ndescription: " + skill.skillDescription
             + "\n---\n" + String(repeating: "b", count: 24_004)
-        try files.writeFile(at: skill.canonicalPath, content: document)
+        try files.writeFile(at: skill.canonicalPath(skillsDirectory: skillsDirectory), content: document)
         let agents: [PlatformTarget] = [.codex, .claudeCode, .cursor]
-        let platformVM = PlatformViewModel(fileService: files, agentDetection: DeployStubDetection(installed: agents),
-                                           deployStateStore: .memoryBacked)
-        let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: files), fileService: files,
-                                            manifestRoot: root)
+        let platformVM = PlatformViewModel(fileService: files, linkService: LinkService(fileService: files, paths: paths),
+                                           cursorCompiler: CursorCompiler(fileService: files, skillStore: store,
+                                                                          userRulesDirectory: root + "/cursor"),
+                                           agentDetection: DeployStubDetection(installed: agents),
+                                           deployStateStore: .memoryBacked, skillsDirectory: skillsDirectory)
+        let library = SkillLibraryViewModel(skillStore: store, fileService: files,
+                                            fileWatchService: FileWatchService(rootDir: skillsDirectory), manifestRoot: root)
         let container = try ModelContainer(for: Skill.self, DeployRecord.self,
                                            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         let context = ModelContext(container)

@@ -111,6 +111,9 @@ final class MachineStatePublishTests: XCTestCase {
                           remoteHeadBefore)
     }
 
+}
+
+extension MachineStatePublishTests {
     func testMissingOwnStateFileRewritten() async throws {
         let harness = try makeHarness()
         let clock = PublishClock(Date(timeIntervalSince1970: 1_700_000_000))
@@ -205,9 +208,13 @@ final class MachineStatePublishTests: XCTestCase {
         let stateService = injectedStateService ?? machineStateService(defaults: stateDefaults)
         let coordinator = await Task.detached { SyncCoordinator(modelContainer: container) }.value
         await coordinator.configure(
-            engine: engine, git: git, credentials: PublishEmptyCredentials(),
-            rebuildService: StoreRebuildService(), root: root, audit: PublishNullAudit(),
-            machineIdentity: FixedMachineIdentity(value: id), machineStateService: stateService,
+            engine: engine,
+            git: git,
+            credentials: PublishEmptyCredentials(),
+            rebuildService: StoreRebuildService(),
+            root: root,
+            audit: PublishNullAudit(),
+            machine: (identity: FixedMachineIdentity(value: id), stateService: stateService),
             now: { clock.value }
         )
         return coordinator
@@ -221,10 +228,14 @@ final class MachineStatePublishTests: XCTestCase {
 
     private func machineStateService(defaults: UserDefaults) -> MachineStateService {
         MachineStateService(
-            fileService: fileService, agentDetection: EmptyMachineDetection(),
+            fileService: fileService,
+            agentDetection: EmptyMachineDetection(),
             defaults: defaults,
             deployState: { DeployState(schemaVersion: 1, records: []) },
-            hostName: { "Fixture Mac" }, appVersion: { "0.12.0" }, warn: { _ in }
+            homeDirectory: TestPaths.homeDirectory,
+            hostName: { "Fixture Mac" },
+            appVersion: { "0.12.0" },
+            warn: { _ in }
         )
     }
 
@@ -234,7 +245,7 @@ final class MachineStatePublishTests: XCTestCase {
         let remote = "file://" + remotePath
         let seed = tempDir + "/seed"
         try fileService.createDirectory(at: seed)
-        let git = GitService()
+        let git = TestPaths.git
         try git.initRepository(at: seed)
         try git.setRemote(remote, at: seed)
         try ManifestService().write(

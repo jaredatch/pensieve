@@ -18,6 +18,19 @@ final class FileServiceTests: XCTestCase {
         }
     }
 
+    func testReplaceItemPreservesDanglingDestinationAndSourceOnFailure() throws {
+        let source = tempDir + "/replacement"
+        let destination = tempDir + "/dangling"
+        let target = tempDir + "/missing"
+        try fileService.writeFile(at: source, content: "replacement bytes")
+        try fileService.createSymlink(at: destination, pointingTo: target)
+        XCTAssertThrowsError(try fileService.replaceItem(at: destination, with: source))
+        XCTAssertTrue(fileService.isSymlink(at: destination))
+        XCTAssertEqual(try fileService.symlinkTarget(at: destination), target)
+        XCTAssertEqual(try fileService.readFile(at: source), "replacement bytes")
+        XCTAssertFalse(fileService.fileExists(at: target))
+    }
+
     func testCopyFileFailurePreservesDestinationAndCleansTemporaryFile() throws {
         let source = tempDir + "/source"
         let destination = tempDir + "/destination"
@@ -30,7 +43,7 @@ final class FileServiceTests: XCTestCase {
         var chunks = 0
         // Inject failure in the descriptor helper that the public copyFile entry uses.
         XCTAssertThrowsError(try DescriptorFileCopy.copy(from: descriptor, status: status,
-                                                        sourcePath: source, to: destination) { _ in
+                                                        sourcePath: source, to: destination, options: .init()) { _ in
             chunks += 1
             throw CocoaError(.fileWriteUnknown)
         })
@@ -50,7 +63,7 @@ final class FileServiceTests: XCTestCase {
         var reused: String?
         var identity: FileIdentity?
         try DescriptorFileCopy.copy(from: descriptor, status: status, sourcePath: source, to: destination,
-                                    renameFile: { temporary, target in
+                                    options: .init(renameFile: { temporary, target in
             let result = Darwin.rename(temporary, target)
             guard result == 0 else { return result }
             reused = temporary
@@ -59,7 +72,7 @@ final class FileServiceTests: XCTestCase {
             }
             identity = self.fileService.fileIdentity(at: temporary, followingLinks: false)
             return result
-        })
+        }))
         let temporary = try XCTUnwrap(reused, "The successful rename must run")
         XCTAssertEqual(try fileService.readFile(at: destination), "copied bytes")
         XCTAssertTrue(fileService.fileExists(at: temporary), "Success must not unlink a name reused after rename")

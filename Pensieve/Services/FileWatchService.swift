@@ -22,7 +22,7 @@ final class FileWatchService: FileWatchServiceProtocol {
     private let queue = DispatchQueue(label: "com.jaredatch.pensieve.filewatch")
 
     init(
-        rootDir: String = Constants.pensieveSkillsDir,
+        rootDir: String,
         onChange: @escaping (String) -> Void = FileWatchService.osLogSink
     ) {
         self.rootDir = URL(fileURLWithPath: rootDir).resolvingSymlinksInPath().path
@@ -103,15 +103,8 @@ final class FileWatchService: FileWatchServiceProtocol {
 
         for path in changedPaths {
             let normalizedPath = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-            guard normalizedPath == rootDir || normalizedPath.hasPrefix(rootDir + "/") else {
-                continue
-            }
-
-            let relativePath = String(normalizedPath.dropFirst(rootDir.count))
-                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            guard let directoryName = relativePath.split(separator: "/").first.map(String.init) else {
-                continue
-            }
+            guard let relativePath = PathSyntax.relativePath(normalizedPath, under: rootDir),
+                  let directoryName = PathSyntax.components(relativePath).first else { continue }
 
             directoryNames.insert(directoryName)
         }

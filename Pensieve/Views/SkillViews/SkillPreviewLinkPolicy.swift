@@ -27,10 +27,10 @@ enum SkillPreviewLinkPolicy {
             guard let fragment = components.fragment, !fragment.isEmpty else { return .ignore }
             return .scrollTo(fragment)
         }
-        guard !path.hasPrefix("/"), !path.contains("\\"),
+        guard !PathSyntax.isAbsolute(path), !path.contains("\\"),
               !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return .ignore }
-        let folder = documentRelativePath.split(separator: "/").dropLast().map(String.init)
-        guard let resolved = normalized(folder + path.split(separator: "/").map(String.init)) else { return .ignore }
+        let folder = Array(PathSyntax.components(documentRelativePath).dropLast())
+        guard let resolved = normalized(folder + PathSyntax.components(path)) else { return .ignore }
         if resolved == documentRelativePath {
             guard let fragment = components.fragment, !fragment.isEmpty else { return .ignore }
             return .scrollTo(fragment)

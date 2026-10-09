@@ -27,12 +27,11 @@ final class SyncAuditTests: XCTestCase {
         let coordinator = await Task.detached { SyncCoordinator(modelContainer: container) }.value
         await coordinator.configure(
             engine: AuditHealthyEngine(),
-            git: GitService(),
+            git: TestPaths.git,
             credentials: AuditEmptyCredentialStore(),
             root: tempDir,
             audit: SyncAudit(appSupport: tempDir, now: { date }),
-            machineIdentity: InertMachineIdentity(),
-            machineStateService: InertMachineStateService(),
+            machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService()),
             now: { date }
         )
         _ = await Task.detached { await coordinator.runCycle() }.value

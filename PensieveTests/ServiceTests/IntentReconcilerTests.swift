@@ -222,7 +222,7 @@ private extension IntentReconcilerTests {
             linkService: linkService,
             cursorCompiler: DeployRecordingCursorCompiler(fileService: fileService),
             agentDetection: DeployStubDetection(installed: installed),
-            deployStateStore: DeployStateStore.memoryBacked
+            deployStateStore: DeployStateStore.memoryBacked, skillsDirectory: TestPaths.skillsDir
         )
         return Harness(
             context: context,

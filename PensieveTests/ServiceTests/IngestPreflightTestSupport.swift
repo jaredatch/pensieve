@@ -26,6 +26,10 @@ final class IngestRecordingGit: GitServiceProtocol {
         calls.append("commit")
         return false
     }
+    func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+    func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+        try pullRebase(at: path, credential: nil)
+    }
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
         calls.append("pull")
         return .upToDate
@@ -33,12 +37,12 @@ final class IngestRecordingGit: GitServiceProtocol {
     func push(at path: String, credential: GitCredential?) throws { calls.append("push") }
     func abortRebase(at path: String) throws { calls.append("abort") }
     func conflictedFiles(at path: String) -> [String] { [] }
-    func blob(atStage stage: Int, path: String, in workingDir: String) -> String? { nil }
+    func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
     func continueRebase(at path: String) throws -> PullResult { .upToDate }
     func skipRebase(at path: String) throws -> PullResult { .upToDate }
     func stagePath(_ path: String, at root: String) throws {}
     func collapseToSingleCommit(at root: String, message: String,
-                                credential: GitCredential?) throws -> Bool { false }
+                                credential: GitCredential?, fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
     func hasCommitsToPush(at path: String) -> Bool { false }
 }
 

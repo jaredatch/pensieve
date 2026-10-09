@@ -8,7 +8,7 @@ extension SyncNudgeTests {
         let store = InstallEchoSkillStore()
         let watcher = InstallEchoWatcher()
         let library = SkillLibraryViewModel(
-            skillStore: store, fileWatchService: watcher,
+            skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot,
             notifier: { nudgeCount += 1 }
         )
         library.startWatching()
@@ -40,7 +40,7 @@ extension SyncNudgeTests {
         let store = InstallEchoSkillStore()
         let watcher = InstallEchoWatcher()
         let library = SkillLibraryViewModel(
-            skillStore: store, fileWatchService: watcher,
+            skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot,
             notifier: { nudgeCount += 1 }
         )
         library.startWatching()

@@ -97,6 +97,7 @@ final class UpstreamHistoryServiceTests: XCTestCase {
 
     func stableHash(at directory: String) throws -> String {
         try SkillInstallService(
+            gitService: GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass"),
             credentialStore: InMemoryCredentialStore(),
             fileService: fileService,
             scratchRoot: tempDir + "/install-scratch",
@@ -120,10 +121,11 @@ final class UpstreamHistoryServiceTests: XCTestCase {
                  baselineByteLimit: Int = UpstreamHistoryService.baselineByteLimit)
         -> UpstreamHistoryService {
         UpstreamHistoryService(
-            gitService: git ?? GitService(fileService: fileService),
+            gitService: git ?? GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass"),
             credentialStore: credentials,
             fileService: fileService,
             contentHasher: contentHasher ?? SkillInstallService(
+                gitService: GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass"),
                 credentialStore: credentials,
                 fileService: fileService,
                 scratchRoot: tempDir + "/install-scratch",

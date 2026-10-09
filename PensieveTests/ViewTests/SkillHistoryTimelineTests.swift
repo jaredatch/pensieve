@@ -143,14 +143,19 @@ final class SkillHistoryRecordingGit: GitServiceProtocol {
     func clone(remote: String, into path: String, credential: GitCredential?) throws {}
     func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool { false }
     @discardableResult func stageAllAndCommit(at path: String, message: String) throws -> Bool { false }
+    func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+    func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+        try pullRebase(at: path, credential: nil)
+    }
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult { .upToDate }
     func push(at path: String, credential: GitCredential?) throws {}
     func abortRebase(at path: String) throws {}
     func conflictedFiles(at path: String) -> [String] { [] }
-    func blob(atStage stage: Int, path: String, in workingDir: String) -> String? { nil }
+    func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
     func continueRebase(at path: String) throws -> PullResult { .upToDate }
     func skipRebase(at path: String) throws -> PullResult { .upToDate }
     func stagePath(_ path: String, at root: String) throws {}
-    func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?) throws -> Bool { false }
+    func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
     func hasCommitsToPush(at path: String) -> Bool { false }
 }

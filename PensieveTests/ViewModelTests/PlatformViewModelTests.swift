@@ -8,12 +8,21 @@ final class PlatformViewModelTests: XCTestCase {
         func installedPlatforms() -> [PlatformTarget] { installed }
     }
     func testInstalledPlatformsReflectsInjectedDetection() {
-        let vm = PlatformViewModel(agentDetection: StubDetection(installed: [.claudeCode, .hermes]),
-                                   deployStateStore: .memoryBacked)
+        let vm = PlatformViewModel(
+            linkService: TestPaths.linkService(fileService: FileService()),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: FileService()),
+            agentDetection: StubDetection(installed: [.claudeCode, .hermes]),
+            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
+        )
         XCTAssertEqual(vm.installedPlatforms(), [.claudeCode, .hermes])
     }
     func testInstalledPlatformsEmptyWhenNoneDetected() {
-        let vm = PlatformViewModel(agentDetection: StubDetection(installed: []), deployStateStore: .memoryBacked)
+        let vm = PlatformViewModel(
+            linkService: TestPaths.linkService(fileService: FileService()),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: FileService()),
+            agentDetection: StubDetection(installed: []),
+            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
+        )
         XCTAssertEqual(vm.installedPlatforms(), [])
     }
     private struct SymlinkFileService: FileServiceProtocol {
@@ -58,7 +67,6 @@ final class PlatformViewModelTests: XCTestCase {
         var linked = false
         private(set) var linkProjectPaths: [String?] = []
         private(set) var unlinkProjectPaths: [String?] = []
-
         func link(skill: Skill, platform: PlatformTarget, projectPath: String?) throws {
             linkProjectPaths.append(projectPath)
         }
@@ -114,10 +122,11 @@ final class PlatformViewModelTests: XCTestCase {
         let skill = Skill(name: "Victim", directoryName: "victim")
         context.insert(skill)
         let vm = PlatformViewModel(
-            fileService: SymlinkFileService(),   // isSymlink == true
+            fileService: SymlinkFileService(),
             linkService: NoopLinkService(),
             cursorCompiler: StubCursorCompiler(),
-            agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked
+            agentDetection: DeployStubDetection(installed: []),
+            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
         )
 
         let refreshBefore = vm.refreshCounter
@@ -136,10 +145,11 @@ final class PlatformViewModelTests: XCTestCase {
         let skill = Skill(name: "Evil", directoryName: "../evil")
         context.insert(skill)
         let vm = PlatformViewModel(
-            fileService: CleanFileService(),   // isSymlink == false - old guard would have deployed
+            fileService: CleanFileService(),
             linkService: NoopLinkService(),
             cursorCompiler: StubCursorCompiler(),
-            agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked
+            agentDetection: DeployStubDetection(installed: []),
+            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
         )
 
         vm.deploy(skill: skill, platform: .claudeCode, target: .userWide, context: context)
@@ -158,7 +168,8 @@ final class PlatformViewModelTests: XCTestCase {
             fileService: CleanFileService(),
             linkService: linkService,
             cursorCompiler: StubCursorCompiler(),
-            agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked
+            agentDetection: DeployStubDetection(installed: []),
+            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
         )
         let refreshBefore = vm.refreshCounter
 
@@ -188,7 +199,8 @@ final class PlatformViewModelTests: XCTestCase {
             fileService: CleanFileService(),
             linkService: linkService,
             cursorCompiler: StubCursorCompiler(),
-            agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked
+            agentDetection: DeployStubDetection(installed: []),
+            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
         )
         let refreshBefore = vm.refreshCounter
 
@@ -223,8 +235,11 @@ final class PlatformViewModelTests: XCTestCase {
         cursor: DeletionTestCursorCompiler = DeletionTestCursorCompiler(), store: DeployStateStore
     ) -> PlatformViewModel {
         PlatformViewModel(
-            fileService: CleanFileService(projectDirectories: ["/project", "/p"]), linkService: link, cursorCompiler: cursor,
-            agentDetection: DeletionTestDetection(installed: installed), deployStateStore: store
+            fileService: CleanFileService(projectDirectories: ["/project", "/p"]),
+            linkService: link,
+            cursorCompiler: cursor,
+            agentDetection: DeletionTestDetection(installed: installed),
+            deployStateStore: store, skillsDirectory: TestPaths.skillsDir
         )
     }
 }

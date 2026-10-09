@@ -50,19 +50,20 @@ extension AppRuntime {
     }
 
     func installRuntimeCallbacks() {
-        syncModel.installPendingSyncRequest { [weak scheduler] in
-            scheduler?.enqueueManualTrigger()
-        }
-        syncModel.installPendingScheduledSyncRequest { [weak scheduler] in
-            scheduler?.enqueueTrigger()
+        syncModel.installPendingSyncRequest { [weak scheduler] request in
+            scheduler?.enqueue(request)
         }
         scheduler.installDrain(
-            hasRemote: { [weak self] in
+            isConfigured: { [weak self] in
                 guard let self else { return false }
-                return gitUsability == .usable && syncModel.isConfigured
+                return syncModel.isConfigured
             },
+            isGitUsable: { [weak self] in self?.gitUsability == .usable },
             isConflicted: { [weak syncModel] in syncModel?.isConflicted ?? false },
-            action: { [weak syncModel] in await syncModel?.syncScheduledAndReport() }
+            requestDiscarded: { [weak syncModel] request in syncModel?.syncRequestWasDiscarded(request) },
+            action: { [weak syncModel, weak scheduler] request in
+                await syncModel?.syncAndReport(request, onCycleStart: { scheduler?.cycleDidStart() })
+            }
         )
     }
 }

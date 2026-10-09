@@ -11,17 +11,18 @@ final class CursorOwnershipTests: XCTestCase {
 
     override func setUpWithError() throws {
         root = TestTemporaryDirectory.path + "CursorOwnership-\(UUID().uuidString)"
-        store = SkillStore(fileService: files, baseDir: root + "/store/skills")
+        store = SkillStore(fileService: files, baseDir: root + "/store/skills", storeRoot: root + "/store")
         let slug = try store.createSkill(name: "Owned", description: "Description", body: "# Body")
         skill = Skill(name: "Owned", skillDescription: "Description", directoryName: slug)
         let mappings: [(logical: String, physical: String)] = [
-            (Constants.pensieveSkillsDir, root + "/store/skills"),
-            (Constants.cursorUserRulesDir, root + "/user/rules")
+            (TestPaths.skillsDir, root + "/store/skills"),
+            (TestPaths.deployPaths.cursorUserRulesDirectory, root + "/user/rules")
         ] + PlatformTarget.allCases.compactMap { platform in
-            DeployPaths.userSkillsRoot(for: platform).map { ($0, root + "/user/" + platform.rawValue) }
+            TestPaths.deployPaths.userSkillsRoot(for: platform).map { ($0, root + "/user/" + platform.rawValue) }
         }
         mapped = LinkServiceCanonicalDirectoryFileService(wrapped: files, pathMappings: mappings, physicalSandbox: root)
-        compiler = CursorCompiler(fileService: mapped, skillStore: store)
+        compiler = CursorCompiler(fileService: mapped, skillStore: store,
+            userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory)
         try files.createDirectory(at: root + "/project")
     }
 

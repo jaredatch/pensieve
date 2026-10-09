@@ -15,13 +15,18 @@ extension UpdatesViewModelTests {
         fixture: RealFixture, service: SkillInstallService? = nil
     ) -> (UpdatesViewModel.DefaultOperations, SkillLibraryViewModel) {
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: fileService, baseDir: fixture.storeRoot + "/skills"), fileService: fileService,
+            skillStore: SkillStore(fileService: fileService, baseDir: fixture.storeRoot + "/skills",
+                storeRoot: fixture.storeRoot), fileService: fileService,
             fileWatchService: FileWatchService(rootDir: fixture.storeRoot + "/skills"), manifestRoot: fixture.storeRoot
         )
         let installer = service ?? fixture.service
         let checker = UpdateCheckService(
-            credentialStore: InMemoryCredentialStore(), fileService: fileService, contentHasher: installer,
-            scratchRoot: tempDir + "/check-scratch", storeRoot: fixture.storeRoot,
+            gitService: GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass"),
+            credentialStore: InMemoryCredentialStore(),
+            fileService: fileService,
+            contentHasher: installer,
+            scratchRoot: tempDir + "/check-scratch",
+            storeRoot: fixture.storeRoot,
             remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) }
         )
         let defaults = UpdatesViewModel.DefaultOperations(updateCheckService: checker, skillInstallService: installer)

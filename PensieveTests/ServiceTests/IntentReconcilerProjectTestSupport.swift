@@ -45,7 +45,7 @@ struct ProjectIntentHarness {
             linkService: linkService,
             cursorCompiler: DeployRecordingCursorCompiler(fileService: fileService),
             agentDetection: DeployStubDetection(installed: installed),
-            deployStateStore: deployStateStore,
+            deployStateStore: deployStateStore, skillsDirectory: TestPaths.skillsDir,
             persist: persist
         )
         reconciler = IntentReconciler(
@@ -104,7 +104,7 @@ struct ProjectIntentHarness {
             linkService: linkService,
             cursorCompiler: DeployRecordingCursorCompiler(fileService: fileService),
             agentDetection: DeployStubDetection(installed: installed),
-            deployStateStore: deployStateStore
+            deployStateStore: deployStateStore, skillsDirectory: TestPaths.skillsDir
         )
     }
 

@@ -112,7 +112,7 @@ struct SkillContentTab: View {
     @ViewBuilder private func content(proxy: ScrollViewProxy) -> some View {
         if choice.isSkillFile {
             if shownMode == .rendered {
-                preview(markdownBody: snapshot.body, skillsBase: Constants.pensieveSkillsDir,
+                preview(markdownBody: snapshot.body, skillsBase: library.skillsDirectory,
                         onSelectFile: { followLink($0, proxy: proxy) })
             } else {
                 SkillEditorView(skill: skill, library: library)
@@ -123,7 +123,7 @@ struct SkillContentTab: View {
                     .padding(.top, DesignTokens.contentRowTop)
             }
         } else if shownMode == .rendered {
-            preview(markdownBody: otherFileText ?? "", skillsBase: Constants.pensieveSkillsDir,
+            preview(markdownBody: otherFileText ?? "", skillsBase: library.skillsDirectory,
                     onSelectFile: { followLink($0, proxy: proxy) })
         } else if let otherFileText {
             MarkdownEditorWebView(bodyToLoad: otherFileText, loadVersion: otherFileText.hashValue, readOnly: true)

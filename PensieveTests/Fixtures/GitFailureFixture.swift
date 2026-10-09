@@ -23,7 +23,11 @@ struct GitFailureFixture {
 
     func executable(_ body: String, fileService: FileServiceProtocol = FileService()) throws -> GitService {
         try files.writeExecutableFile(at: script, content: "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '\(trace)'\n" + body + "\n")
-        return GitService(fileService: fileService, executablePath: script)
+        return GitService(
+            fileService: fileService,
+            askpassHelperPath: support + "/askpass",
+            executablePath: script
+        )
     }
 
     /// Records each subprocess's actual argv and whether its password environment variable matches
@@ -33,19 +37,21 @@ struct GitFailureFixture {
     func credentialRecordingExecutable(expectedToken: String) throws -> GitService {
         let fileService = LinkServiceCanonicalDirectoryFileService(
             wrapped: files,
-            pathMappings: [(PathConstants.gitAskpassHelperPath, support + "/askpass")],
+            pathMappings: [((TestPaths.gitAskpassHelperPath), support + "/askpass")],
             physicalSandbox: base
         )
         return try executable("""
             marker=missing
             if [ "$PENSIEVE_GIT_PASSWORD" = '\(expectedToken)' ]; then marker=received; fi
             printf '%s\\t%s\\n' "$marker" "$*" >> '\(credentialTrace)'
-            if [ "$1" = '-c' ]; then shift 2; fi
-            if [ "$1" = '-C' ]; then shift 2; fi
+            repository='\(root)'
+            \(FakeGitScript.skipGlobalOptions)
             case "$1 $2" in
+              clone*) for destination in "$@"; do :; done; mkdir -p "$destination/.git" ;;
               'ls-remote --symref') printf 'ref: refs/heads/main\\tHEAD\\n' ;;
               ls-remote*) printf '%s\\trefs/heads/main\\n' '\(String(repeating: "a", count: 40))' ;;
               'rev-parse --is-shallow-repository') printf 'true\\n' ;;
+              'rev-parse --path-format=absolute') printf '%s/.git/%s\\n' "$repository" "$4" ;;
               rev-parse*|rev-list*) printf '%s\\n' '\(String(repeating: "a", count: 40))' ;;
               'cat-file -e') exit 1 ;;
               fetch*)
@@ -72,7 +78,7 @@ struct GitFailureFixture {
     }
 
     func seedRepository(remote: String? = "https://fixture.test/store.git") throws {
-        let git = GitService()
+        let git = GitService(askpassHelperPath: support + "/askpass")
         try git.initRepository(at: root)
         try files.writeFile(at: root + "/skills/example/SKILL.md",
                             content: "---\nname: Example\ndescription: Fixture\n---\nBody\n")

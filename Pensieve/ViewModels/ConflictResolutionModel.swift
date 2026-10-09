@@ -27,6 +27,7 @@ final class ConflictResolutionModel {
     }
 
     private(set) var phase: Phase = .loading
+    private(set) var selectionError: String?
 
     private let engine: SyncEngineProtocol
     private let git: GitServiceProtocol
@@ -36,10 +37,10 @@ final class ConflictResolutionModel {
     private let now: () -> Date
     private let onResolutionStarted: () throws -> (SyncCycleResult) -> Void
 
-    init(engine: SyncEngineProtocol = SyncEngine(),
-         git: GitServiceProtocol = GitService(),
-         credentials: CredentialStoreProtocol = KeychainCredentialStore(),
-         root: String = Constants.pensieveBaseDir,
+    init(engine: SyncEngineProtocol,
+         git: GitServiceProtocol,
+         credentials: CredentialStoreProtocol,
+         root: String,
          headStamp: (() -> String?)? = nil,
          now: @escaping () -> Date = Date.init,
          onResolutionStarted: @escaping () throws -> (SyncCycleResult) -> Void = { { _ in } }) {
@@ -66,6 +67,7 @@ final class ConflictResolutionModel {
     /// Awaitable seam (tests await this; the sheet goes through `load`).
     func loadAndReport(context: ModelContext) async {
         phase = .loading
+        selectionError = nil
         let previousHeadStamp = headStamp()
         do {
             let onResolved = try onResolutionStarted()
@@ -90,6 +92,14 @@ final class ConflictResolutionModel {
     func choose(_ groupID: String, _ side: ConflictSide) {
         guard case var .ready(groups) = phase,
               let index = groups.firstIndex(where: { $0.id == groupID }) else { return }
+        if let unavailable = groups[index].items.first(where: {
+            let receipt = side == .thisMachine ? $0.thisUnavailable : $0.otherUnavailable
+            return receipt != nil && receipt?.canChoose != true
+        }) {
+            selectionError = SyncError.conflictSideUnavailable(path: unavailable.path).errorDescription
+            return
+        }
+        selectionError = nil
         groups[index].chosen = side
         phase = .ready(groups)
     }
@@ -115,7 +125,10 @@ final class ConflictResolutionModel {
             guard let side = group.chosen else { return }
             for item in group.items {
                 partial[item.path] = ResolutionPick(side: side, expectedThis: item.thisMachine,
-                                                    expectedOther: item.otherMachine)
+                                                    expectedOther: item.otherMachine,
+                                                    expectedThisUnavailable: item.thisUnavailable,
+                                                    expectedOtherUnavailable: item.otherUnavailable,
+                                                    expectedThisMode: item.thisMode, expectedOtherMode: item.otherMode)
             }
         }
         let previousHeadStamp = headStamp()
@@ -130,11 +143,17 @@ final class ConflictResolutionModel {
                 phase = .done
             case .conflicted:
                 await loadAndReport(context: context)
-            case .noRemote:
+            case .noRemote, .branchless:
                 phase = .empty
             }
         } catch SyncError.conflictsChanged {
             await loadAndReport(context: context)
+        } catch SyncError.conflictSideUnavailable(let path) {
+            selectionError = SyncError.conflictSideUnavailable(path: path).errorDescription
+            phase = .ready(groups)
+        } catch SyncError.conflictFolderMustMove(let path) {
+            selectionError = SyncError.conflictFolderMustMove(path: path).errorDescription
+            phase = .ready(groups)
         } catch let error as LocalizedError {
             phase = .error(error.errorDescription ?? "Couldn't resolve conflicts.")
         } catch {
@@ -156,7 +175,7 @@ final class ConflictResolutionModel {
 
     private func groups(from set: ConflictSet, context: ModelContext) throws -> [ConflictGroup] {
         let skills = try context.fetch(FetchDescriptor<Skill>())
-        let namesBySlug = Dictionary(uniqueKeysWithValues: skills.map { ($0.directoryName, $0.name) })
+        let namesBySlug = Dictionary(skills.map { ($0.directoryName, $0.name) }, uniquingKeysWith: { min($0, $1) })
         var order: [String] = []
         var itemsByID: [String: [ConflictItem]] = [:]
         for item in set.items {
@@ -175,27 +194,25 @@ final class ConflictResolutionModel {
     }
 
     private func entityID(for item: ConflictItem) -> String {
-        switch item.kind {
+        let path = SyncEngine.conflictPath(for: item)
+        switch path.kind {
         case .body:
-            if let slug = skillBodySlug(from: item.path) { return slug }
+            return path.skillSlug.map { "skill:" + $0 } ?? "body-path:" + item.path
         case .overlay:
-            if let slug = skillOverlaySlug(from: item.path) { return slug }
+            return path.skillSlug.map { "skill:" + $0 } ?? "overlay-path:" + item.path
         case .category:
-            return "category:" + categoryName(from: item.path)
+            return path.slug.map { "category:" + $0 } ?? "category-path:" + item.path
         case .project:
-            return "projects"
+            return "project:registry"
         }
-        return item.path
     }
 
     private func title(for id: String, items: [ConflictItem], namesBySlug: [String: String]) -> String {
-        if id == "projects" { return "Project registry" }
-        if id.hasPrefix("category:") {
-            return "Category: " + String(id.dropFirst("category:".count))
-        }
-        let slug = items.compactMap { item -> String? in
-            skillBodySlug(from: item.path) ?? skillOverlaySlug(from: item.path)
-        }.first ?? id
+        guard let item = items.first else { return id }
+        let path = SyncEngine.conflictPath(for: item)
+        if path.kind == .project { return "Project registry" }
+        if path.kind == .category { return "Category: " + (path.slug ?? item.path) }
+        guard let slug = path.skillSlug else { return item.path }
         return namesBySlug[slug] ?? slug
     }
 
@@ -204,30 +221,6 @@ final class ConflictResolutionModel {
         if kinds.contains(.body) && kinds.contains(.overlay) { return "Body and settings differ" }
         if kinds.contains(.body) { return "Body differs" }
         return "Settings differ"
-    }
-
-    private func skillBodySlug(from path: String) -> String? {
-        guard path.hasPrefix("skills/"), path.hasSuffix("/SKILL.md") else { return nil }
-        let start = path.index(path.startIndex, offsetBy: "skills/".count)
-        let end = path.index(path.endIndex, offsetBy: -"/SKILL.md".count)
-        guard start < end else { return nil }
-        return String(path[start..<end])
-    }
-
-    private func skillOverlaySlug(from path: String) -> String? {
-        guard path.hasPrefix("manifest/skills/"), path.hasSuffix(".yaml") else { return nil }
-        let start = path.index(path.startIndex, offsetBy: "manifest/skills/".count)
-        let end = path.index(path.endIndex, offsetBy: -".yaml".count)
-        guard start < end else { return nil }
-        return String(path[start..<end])
-    }
-
-    private func categoryName(from path: String) -> String {
-        guard path.hasPrefix("manifest/categories/"), path.hasSuffix(".yaml") else { return path }
-        let start = path.index(path.startIndex, offsetBy: "manifest/categories/".count)
-        let end = path.index(path.endIndex, offsetBy: -".yaml".count)
-        guard start < end else { return path }
-        return String(path[start..<end])
     }
 
     private func resolveCredential() throws -> GitCredential? {

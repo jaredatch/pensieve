@@ -23,7 +23,7 @@ extension UpstreamHistoryServiceTests {
             "topic/.hidden", "topic:other", "feature*", "feature?", "feature[0]",
             "feature\\name", "feature~1", "feature^2", "feature name", "line\nname",
             "topic..name", "topic@{upstream}", "@", "*:refs/pensieve/all/*"
-        ]
+        ] + PathJoiningScalars.values.map { "-" + PathJoiningScalars.name("main", scalar: $0) }
 
         for invalidRef in invalidRefs {
             let git = RecordingUpstreamHistoryGit(result: .success(emptySnapshot()))

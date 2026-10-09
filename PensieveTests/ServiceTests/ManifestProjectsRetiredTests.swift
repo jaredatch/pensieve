@@ -38,6 +38,7 @@ final class ManifestProjectsRetiredTests: XCTestCase {
             agentDetection: EmptyMachineDetection(),
             defaults: try isolatedDefaults(),
             deployState: { DeployState(schemaVersion: 1, records: []) },
+            homeDirectory: TestPaths.homeDirectory,
             hostName: { "Fixture Mac" },
             appVersion: { "0.0.0" },
             warn: { _ in }

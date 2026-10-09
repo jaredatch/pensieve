@@ -19,11 +19,12 @@ extension CursorOwnershipTests {
                         + (project == nil ? "/user/" : "/project/") + name
                     // Exact leaf mappings avoid the shared fixture's own grapheme-prefix residual.
                     let boundary = LinkServiceCanonicalDirectoryFileService(wrapped: files, pathMappings: [
-                        (Constants.pensieveSkillsDir + "/" + name, root + "/store/skills/" + name),
+                        (TestPaths.skillsDir + "/" + name, root + "/store/skills/" + name),
                         (path, physical)
                     ], physicalSandbox: root)
-                    let links = LinkService(fileService: boundary)
-                    let rules = CursorCompiler(fileService: boundary, skillStore: store)
+                    let links = TestPaths.linkService(fileService: boundary)
+                    let rules = CursorCompiler(fileService: boundary, skillStore: store,
+                        userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory)
                     for occupant in ["link", "file", "directory"] {
                         if occupant == "link" { try files.createSymlink(at: physical, pointingTo: foreign) } else {
                             try files.writeFile(at: physical + (occupant == "directory" ? "/payload" : ""),
@@ -73,7 +74,7 @@ extension CursorOwnershipTests {
 
     func testCanonicalEquivalentSkillTargetsAreOwnedRealizedHealedAndRemoved() throws {
         try useOwnershipSkill(named: "caf\u{00e9}")
-        let links = LinkService(fileService: mapped)
+        let links = TestPaths.linkService(fileService: mapped)
         for platform in PlatformTarget.allCases where platform.usesSymlinks {
             let scopes: [String?] = platform.supportsProjectScope ? [nil, root + "/project"] : [nil]
             for project in scopes {
@@ -91,7 +92,7 @@ extension CursorOwnershipTests {
                 XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path))
                 // An older install's canonically equivalent target naming another skill is healable.
                 try mapped.createSymlink(at: path, pointingTo:
-                    (Constants.pensieveSkillsDir + "/caf\u{00e9}-old"
+                    (TestPaths.skillsDir + "/caf\u{00e9}-old"
                      + (platform == .codex && project != nil ? "/SKILL.md" : "")).decomposedStringWithCanonicalMapping)
                 XCTAssertNoThrow(try links.link(skill: skill, platform: platform, projectPath: project))
                 XCTAssertTrue(links.isLinked(skill: skill, platform: platform, projectPath: project))
@@ -148,9 +149,14 @@ extension CursorOwnershipTests {
         XCTAssertNil(model.error)
         XCTAssertEqual(model.preview?.artifactCount, 1, "History alone must admit a project Codex file link")
         let result = model.confirm { project, preview in
-            removeRegisteredProject(project, reconciler: CategoryReconciler(platformVM: harness.vm),
-                platformVM: harness.vm, localMachineID: ProjectIntentHarness.localID,
-                confirmedPreview: preview, context: harness.context)
+            removeRegisteredProject(
+                project,
+                reconciler: CategoryReconciler(platformVM: harness.vm), manifestRoot: TestPaths.storeRoot,
+                platformVM: harness.vm,
+                localMachineID: ProjectIntentHarness.localID,
+                confirmedPreview: preview,
+                context: harness.context
+            )
         }
         XCTAssertFalse(result.hasFailures)
         XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path))
@@ -182,9 +188,14 @@ extension CursorOwnershipTests {
             XCTAssertEqual(plan.preview.artifactCount, 1, earlierEvidence)
             XCTAssertEqual(plan.candidates.first?.pair.skill.id, skill.id,
                            "The live skill supplies legacy bytes and ledger identity")
-            let result = removeRegisteredProject(project, reconciler: CategoryReconciler(platformVM: harness.vm),
-                platformVM: harness.vm, localMachineID: ProjectIntentHarness.localID,
-                confirmedPreview: plan.preview, context: harness.context)
+            let result = removeRegisteredProject(
+                project,
+                reconciler: CategoryReconciler(platformVM: harness.vm), manifestRoot: TestPaths.storeRoot,
+                platformVM: harness.vm,
+                localMachineID: ProjectIntentHarness.localID,
+                confirmedPreview: plan.preview,
+                context: harness.context
+            )
             XCTAssertFalse(result.hasFailures, earlierEvidence)
             XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path), earlierEvidence)
             XCTAssertTrue(try harness.state.read().records.isEmpty)
@@ -205,15 +216,20 @@ extension CursorOwnershipTests {
                     targetPath: path, contentHash: "valid", projectID: project.id))
             }
             harness.context.insert(DeployRecord(skillID: UUID(), platform: .cursor,
-                targetPath: DeployPaths.cursorPath(directoryName: invalidSlug, projectPath: project.path),
+                targetPath: TestPaths.deployPaths.cursorPath(directoryName: invalidSlug, projectPath: project.path),
                 contentHash: "invalid", projectID: project.id))
             try harness.context.save()
             let plan = try ProjectRemovalPlan.prepare(project: project, platformVM: harness.vm, context: harness.context)
             XCTAssertEqual(plan.preview.artifactCount, 2, invalidSlug)
             XCTAssertEqual(Set(plan.candidates.map(\.path)), Set(validPaths), invalidSlug)
-            let result = removeRegisteredProject(project, reconciler: CategoryReconciler(platformVM: harness.vm),
-                platformVM: harness.vm, localMachineID: ProjectIntentHarness.localID,
-                confirmedPreview: plan.preview, context: harness.context)
+            let result = removeRegisteredProject(
+                project,
+                reconciler: CategoryReconciler(platformVM: harness.vm), manifestRoot: TestPaths.storeRoot,
+                platformVM: harness.vm,
+                localMachineID: ProjectIntentHarness.localID,
+                confirmedPreview: plan.preview,
+                context: harness.context
+            )
             XCTAssertFalse(result.hasFailures, invalidSlug)
             for path in validPaths { XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path), invalidSlug) }
             XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<Project>()), 0, invalidSlug)
@@ -235,7 +251,7 @@ extension CursorOwnershipTests {
             if platform == .cursor {
                 try mapped.writeFile(at: renamedPath, content: renamedBytes)
             } else {
-                try mapped.createSymlink(at: renamedPath, pointingTo: Constants.pensieveSkillsDir + "/renamed/SKILL.md")
+                try mapped.createSymlink(at: renamedPath, pointingTo: TestPaths.skillsDir + "/renamed/SKILL.md")
             }
             harness.context.insert(DeployRecord(skillID: renamed.id, platform: platform,
                 targetPath: path, contentHash: "before rename", projectID: project.id))
@@ -246,15 +262,20 @@ extension CursorOwnershipTests {
             XCTAssertEqual(plan.candidates.map(\.path), [path])
             XCTAssertEqual(plan.candidates.first?.pair.skill.directoryName, skill.directoryName)
             if hasRecordedSkill { XCTAssertEqual(plan.candidates.first?.pair.skill.id, skill.id) }
-            let result = removeRegisteredProject(project, reconciler: CategoryReconciler(platformVM: harness.vm),
-                platformVM: harness.vm, localMachineID: ProjectIntentHarness.localID,
-                confirmedPreview: plan.preview, context: harness.context)
+            let result = removeRegisteredProject(
+                project,
+                reconciler: CategoryReconciler(platformVM: harness.vm), manifestRoot: TestPaths.storeRoot,
+                platformVM: harness.vm,
+                localMachineID: ProjectIntentHarness.localID,
+                confirmedPreview: plan.preview,
+                context: harness.context
+            )
             XCTAssertFalse(result.hasFailures)
             XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path))
             if platform == .cursor {
                 XCTAssertEqual(try mapped.readFile(at: renamedPath), renamedBytes)
             } else {
-                XCTAssertEqual(try mapped.symlinkTarget(at: renamedPath), Constants.pensieveSkillsDir + "/renamed/SKILL.md")
+                XCTAssertEqual(try mapped.symlinkTarget(at: renamedPath), TestPaths.skillsDir + "/renamed/SKILL.md")
             }
             XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<Project>()), 0)
             try mapped.deleteFile(at: renamedPath)

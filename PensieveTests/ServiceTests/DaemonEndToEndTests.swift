@@ -18,7 +18,7 @@ final class DaemonEndToEndTests: XCTestCase {
     private var cursorRulesDir: String!
 
     private let fileService = FileService()
-    private let git = GitService()
+    private let git = TestPaths.git
     private let manifest = ManifestService()
     private let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
 
@@ -59,6 +59,7 @@ final class DaemonEndToEndTests: XCTestCase {
             root: cloneB,
             appSupport: appSupport,
             git: AllowlistedFastForwardGit(wrapping: git),
+            hasLocalBranches: self.git.hasLocalBranches,
             credentials: NilCredentialStore(),
             reconciler: DeployReconciler(
                 fileService: fileService,
@@ -108,12 +109,13 @@ final class DaemonEndToEndTests: XCTestCase {
             migrationService: StoreMigrationService(
                 fileService: fileService,
                 manifestService: manifest,
-                skillStore: SkillStore(fileService: fileService, baseDir: cloneB + "/skills")
+                skillStore: SkillStore(fileService: fileService, baseDir: cloneB + "/skills", storeRoot: cloneB)
             ),
             fileService: fileService,
             manifestService: manifest,
             root: cloneB,
-            lockPath: appSupport + "/sync.lock"
+            lockPath: appSupport + "/sync.lock",
+            git: TestPaths.git
         )
 
         let outcome = launch.reconcileOnLaunch(context: context, alreadyMigrated: false)
@@ -271,7 +273,7 @@ final class DaemonEndToEndTests: XCTestCase {
     }
 }
 
-private final class AllowlistedFastForwardGit: FastForwardGitService {
+final class AllowlistedFastForwardGit: FastForwardGitService {
     private let wrapped: GitService
 
     init(wrapping wrapped: GitService) {

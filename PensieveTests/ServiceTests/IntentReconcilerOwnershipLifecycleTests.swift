@@ -64,8 +64,9 @@ final class IntentReconcilerOwnershipLifecycleTests: XCTestCase {
 
         let result = removeRegisteredProject(
             first,
-            reconciler: NoopProjectCategoryReconciler(),
-            platformVM: harness.platformVM, localMachineID: ProjectIntentHarness.localID,
+            reconciler: NoopProjectCategoryReconciler(), manifestRoot: TestPaths.storeRoot,
+            platformVM: harness.platformVM,
+            localMachineID: ProjectIntentHarness.localID,
             context: harness.context
         )
 
@@ -80,7 +81,7 @@ final class IntentReconcilerOwnershipLifecycleTests: XCTestCase {
         let replacement = Project(name: "First Again", path: first.path)
         replacement.identityKey = "shared-key"
         registerProject(
-            replacement,
+            replacement, manifestRoot: TestPaths.storeRoot,
             context: harness.context,
             intentReconciler: harness.reconciler.reconcile
         )

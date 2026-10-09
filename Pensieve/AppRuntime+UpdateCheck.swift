@@ -6,7 +6,7 @@ extension AppRuntime {
                             container: ModelContainer,
                             classifyFailure: @escaping (Error) -> ClassifiedUpdateFailure,
                             apply: (([UUID: SkillUpdateCheckResult]) throws -> Void)? = nil) async -> UpdateCheckCompletion {
-        let result = await Task.detached(priority: .utility) {
+        let result = await BlockingWork.task(priority: .utility) {
             Result { try operation(container) }
         }.value
         switch result {
@@ -24,7 +24,7 @@ extension AppRuntime {
                 return UpdateCheckCompletion(report: failure.report,
                     errors: [failure.report.environmentError, failure.underlying].compactMap { $0 })
             }
-            let classified = await Task.detached(priority: .utility) { classifyFailure(error) }.value
+            let classified = await BlockingWork.task(priority: .utility) { classifyFailure(error) }.value
             let report = UpdateCheckReport(
                 environmentError: classified.environment ? classified.error : nil, gitUsability: classified.usability)
             return UpdateCheckCompletion(report: report, errors: [classified.error])

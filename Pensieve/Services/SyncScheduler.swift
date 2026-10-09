@@ -37,8 +37,22 @@ struct SyncedStateMutationError: LocalizedError {
     }
 }
 
-/// Main-actor trigger coordinator. One Boolean carries all queued work, so any number of triggers while
-/// a cycle is running collapse into exactly one follow-up cycle.
+/// Coalescing retains each request kind so refusing a recovery retry cannot discard ordinary work.
+/// A recovery retry bypasses background-off like Sync Now, but cannot re-arm the user's spent retry.
+struct SyncRequest: OptionSet {
+    let rawValue: Int
+    static let scheduled = SyncRequest(rawValue: 1 << 0)
+    static let launchPreflight = SyncRequest(rawValue: 1 << 1)
+    static let manualRecovery = SyncRequest(rawValue: 1 << 2)
+    static let manual = SyncRequest(rawValue: 1 << 3)
+
+    var isManual: Bool { contains(.manual) || contains(.manualRecovery) }
+    var isPrivileged: Bool { isManual || contains(.launchPreflight) }
+    func absorbing(_ other: SyncRequest) -> SyncRequest { union(other) }
+}
+
+/// Main-actor trigger coordinator. Triggers coalesce into one follow-up cycle; the pending request
+/// retains its priority and preference bypass when that work is admitted.
 @MainActor
 @Observable
 final class SyncScheduler {
@@ -46,7 +60,7 @@ final class SyncScheduler {
     private(set) var isCoordinatorReady = false
     private(set) var isLaunchIngestReady = false
     private(set) var isSyncing = false
-    private var hasPendingManualTrigger = false
+    private var pendingRequest: SyncRequest = .scheduled
 
     @ObservationIgnored @AppStorage("backgroundSyncEnabled")
     private var storedBackgroundSyncEnabled = true
@@ -57,8 +71,10 @@ final class SyncScheduler {
     private let interval: TimeInterval
     private let debounceNanoseconds: UInt64
     private let backgroundSyncOverride: (() -> Bool)?
-    private var syncAction: (() async -> Void)?
-    private var hasRemote: () -> Bool = { true }
+    private var requestDiscarded: (SyncRequest) -> Void = { _ in }
+    private var syncAction: ((SyncRequest) async -> Void)?
+    private var isConfigured: () -> Bool = { true }
+    private var isGitUsable: () -> Bool = { true }
     private var isConflicted: () -> Bool = { false }
 
     init(
@@ -84,12 +100,16 @@ final class SyncScheduler {
     }
 
     func installDrain(
-        hasRemote: @escaping () -> Bool = { true },
+        isConfigured: @escaping () -> Bool = { true },
+        isGitUsable: @escaping () -> Bool = { true },
         isConflicted: @escaping () -> Bool = { false },
-        action: @escaping () async -> Void
+        requestDiscarded: @escaping (SyncRequest) -> Void = { _ in },
+        action: @escaping (SyncRequest) async -> Void
     ) {
-        self.hasRemote = hasRemote
+        self.isConfigured = isConfigured
+        self.isGitUsable = isGitUsable
         self.isConflicted = isConflicted
+        self.requestDiscarded = requestDiscarded
         syncAction = action
         drainIfPossible()
     }
@@ -124,18 +144,21 @@ final class SyncScheduler {
         }
     }
 
-    func backgroundPreferenceChanged() {
-        drainIfPossible()
+    func drainPendingRequests() { drainIfPossible() }
+
+    /// Cancel a nudge only after this scheduler's request starts a model cycle.
+    func cycleDidStart() {
+        debounceTask?.cancel()
+        debounceTask = nil
     }
 
-    func enqueueTrigger() {
-        hasPendingTrigger = true
-        drainIfPossible()
-    }
+    func enqueueTrigger() { enqueue(.scheduled) }
+    func enqueueManualTrigger() { enqueue(.manual) }
+    func enqueueLaunchPreflight() { enqueue(.launchPreflight) }
 
-    func enqueueManualTrigger() {
+    func enqueue(_ request: SyncRequest) {
+        pendingRequest = hasPendingTrigger ? pendingRequest.absorbing(request) : request
         hasPendingTrigger = true
-        hasPendingManualTrigger = true
         drainIfPossible()
     }
 
@@ -162,23 +185,29 @@ final class SyncScheduler {
               isLaunchIngestReady,
               !isSyncing,
               let syncAction else { return }
-        guard backgroundSyncEnabled || hasPendingManualTrigger else { return }
-        guard hasRemote(), !isConflicted() else {
+        guard backgroundSyncEnabled || pendingRequest.isPrivileged else { return }
+        guard isConfigured(), !isConflicted() else {
+            let discarded = pendingRequest
             hasPendingTrigger = false
-            hasPendingManualTrigger = false
+            pendingRequest = .scheduled
+            requestDiscarded(discarded)
+            return
+        }
+        // Host unavailability holds privileged requests; scheduled-only work is still dropped.
+        guard isGitUsable() else {
+            if !pendingRequest.isPrivileged { hasPendingTrigger = false }
             return
         }
 
-        // A cycle that starts after a nudge was received already covers that mutation. This matters when
-        // a tick/wake queued the follow-up while the 30-second debounce was still sleeping: without the
-        // cancellation, the delayed nudge would launch a redundant third cycle.
-        debounceTask?.cancel()
-        debounceTask = nil
+        // Main-actor callbacks inherit UI priority. Background cycles retain the previous default QoS;
+        // a queued Sync Now keeps its manual priority even when background triggers coalesce with it.
+        let request = pendingRequest
+        let priority: TaskPriority = request.isManual ? .userInitiated : .medium
         hasPendingTrigger = false
-        hasPendingManualTrigger = false
+        pendingRequest = .scheduled
         isSyncing = true
-        Task { [weak self] in
-            await syncAction()
+        Task(priority: priority) { [weak self] in
+            await syncAction(request)
             guard let self else { return }
             self.isSyncing = false
             self.drainIfPossible()

@@ -39,12 +39,11 @@ extension StoreRebuildServiceTests {
         try manifest.write(manifest.snapshot(from: context), toRoot: tempDir)
         XCTAssertEqual(try installedOriginBlock(slug: "pdf"), originalOriginBlock)
 
-        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let viewModel = SkillLibraryViewModel(
             skillStore: store,
-            fileService: fileService,
-            manifestService: manifest,
-            manifestRoot: tempDir
+            fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: manifest, manifestRoot: tempDir
         )
         viewModel.updateMetadata(skill, tags: ["documents", "edited"], scope: .project, context: context)
 

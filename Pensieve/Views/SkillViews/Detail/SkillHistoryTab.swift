@@ -8,6 +8,7 @@ enum SkillHistorySyncSignal: Hashable {
     case conflicted([String])
     case error(String)
     case unconfigured
+    case branchless
 
     init(_ state: SyncModel.SyncState) {
         switch state {
@@ -17,6 +18,7 @@ enum SkillHistorySyncSignal: Hashable {
         case let .conflicted(paths): self = .conflicted(paths)
         case let .error(message): self = .error(message)
         case .unconfigured: self = .unconfigured
+        case .branchless: self = .branchless
         }
     }
 }
@@ -83,9 +85,9 @@ struct SkillHistoryTab: View {
          localRevision: UpstreamHistoryLocalRevision,
          onOpenUpdates: @escaping () -> Void,
          onUpdateCheck: @escaping UpstreamHistoryViewModel.UpdateCheckRequest,
-         git: GitServiceProtocol = GitService(),
-         store: SkillStoreProtocol = SkillStore(fileService: FileService()),
-         workingDir: String = Constants.pensieveBaseDir,
+         git: GitServiceProtocol,
+         store: SkillStoreProtocol,
+         workingDir: String,
          hostedPresentation: SkillHistoryTabPresentation? = nil) {
         self.skill = skill
         self.currentBody = currentBody

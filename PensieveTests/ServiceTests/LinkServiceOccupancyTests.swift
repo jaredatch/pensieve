@@ -9,11 +9,11 @@ extension LinkServiceTests {
         let projectPath = tempDir + "/scripted-project"
         let linkPath = linkService.linkPath(
             skill: skill, platform: .claudeCode, projectPath: projectPath)
-        let canonicalDirectory = Constants.pensieveSkillsDir + "/" + skill.directoryName
+        let canonicalDirectory = TestPaths.skillsDir + "/" + skill.directoryName
         let scriptedFileService = LinkServiceScriptedFileService(
             linkPath: linkPath, canonicalDirectory: canonicalDirectory, state: state)
         return LinkServiceScriptedContext(
-            service: LinkService(fileService: scriptedFileService),
+            service: TestPaths.linkService(fileService: scriptedFileService),
             fileService: scriptedFileService,
             projectPath: projectPath)
     }
@@ -48,13 +48,16 @@ extension LinkServiceTests {
         let originalContents = "real directory contents"
         try fileService.writeFile(at: originalPath, content: originalContents)
 
-        let canonicalDirectory = Constants.pensieveSkillsDir + "/" + skill.directoryName
+        let canonicalDirectory = TestPaths.skillsDir + "/" + skill.directoryName
         let substituteDirectory = tempDir + "/canonical-directory-skill"
         try fileService.createDirectory(at: substituteDirectory)
-        let service = LinkService(fileService: LinkServiceCanonicalDirectoryFileService(
+        let service = LinkService(
+            fileService: LinkServiceCanonicalDirectoryFileService(
             wrapped: fileService,
             canonicalDirectory: canonicalDirectory,
-            substituteDirectory: substituteDirectory))
+            substituteDirectory: substituteDirectory),
+            paths: TestPaths.deployPaths
+        )
 
         XCTAssertThrowsError(try service.link(
             skill: skill, platform: .claudeCode, projectPath: projectPath
@@ -76,13 +79,16 @@ extension LinkServiceTests {
         let originalContents = "real file contents"
         try fileService.writeFile(at: occupant, content: originalContents)
 
-        let canonicalDirectory = Constants.pensieveSkillsDir + "/" + skill.directoryName
+        let canonicalDirectory = TestPaths.skillsDir + "/" + skill.directoryName
         let substituteDirectory = tempDir + "/canonical-file-skill"
         try fileService.createDirectory(at: substituteDirectory)
-        let service = LinkService(fileService: LinkServiceCanonicalDirectoryFileService(
+        let service = LinkService(
+            fileService: LinkServiceCanonicalDirectoryFileService(
             wrapped: fileService,
             canonicalDirectory: canonicalDirectory,
-            substituteDirectory: substituteDirectory))
+            substituteDirectory: substituteDirectory),
+            paths: TestPaths.deployPaths
+        )
 
         XCTAssertThrowsError(try service.link(
             skill: skill, platform: .claudeCode, projectPath: projectPath

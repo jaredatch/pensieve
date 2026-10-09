@@ -58,8 +58,7 @@ extension CursorOwnershipTests {
                     machineIdentity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID))
                     .reconcile(context: context).failureCount, 1)
             default:
-                let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
-                    manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+                let library = deletionLibrary()
                 XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: vm,
                                                        projects: [project], context: context))
                 XCTAssertTrue(library.deletionNotice?.message.contains(path) == true)
@@ -72,5 +71,11 @@ extension CursorOwnershipTests {
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<SkillProjectAssignment>()), route == "intent" ? 0 : 1)
             XCTAssertEqual(try state.read().records.map(\.artifactPath), [path])
         }
+    }
+    @MainActor
+    private func deletionLibrary() -> SkillLibraryViewModel {
+        SkillLibraryViewModel(skillStore: store, fileService: mapped,
+            fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
     }
 }

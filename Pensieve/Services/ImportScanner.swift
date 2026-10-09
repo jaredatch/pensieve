@@ -51,11 +51,11 @@ final class ImportScanner: ImportScannerProtocol {
 
     init(
         fileService: FileServiceProtocol,
-        claudeSkillsDir: String = Constants.claudeCodeUserSkillsDir,
-        grokSkillsDir: String = Constants.grokUserSkillsDir,
-        cursorRulesDir: String = Constants.cursorUserRulesDir,
-        codexSkillsDir: String = Constants.codexUserSkillsDir,
-        storeRoot: String = Constants.pensieveBaseDir
+        claudeSkillsDir: String,
+        grokSkillsDir: String,
+        cursorRulesDir: String,
+        codexSkillsDir: String,
+        storeRoot: String
     ) {
         self.fileService = fileService
         self.claudeSkillsDir = claudeSkillsDir
@@ -152,7 +152,7 @@ final class ImportScanner: ImportScannerProtocol {
         // differently cased spelling on a case-insensitive volume is the same directory and a
         // same-named directory on a case-sensitive one is not.
         func within(_ candidate: String) -> Bool {
-            if roots.contains(where: { candidate == $0 || candidate.hasPrefix($0 + "/") }) { return true }
+            if roots.contains(where: { candidate == $0 || PathSyntax.hasPrefix(candidate, $0 + "/") }) { return true }
             guard let store = storeIdentity,
                   let own = fileService.fileIdentity(at: candidate, followingLinks: false) else { return false }
             return own == store
@@ -171,7 +171,7 @@ final class ImportScanner: ImportScannerProtocol {
             if budget < 0 || within(candidate) { return true }
             if fileService.isSymlink(at: candidate), let target = try? fileService.symlinkTarget(at: candidate) {
                 let targetComponents = (target as NSString).pathComponents
-                if target.hasPrefix("/") {
+                if PathSyntax.isAbsolute(target) {
                     physical = "/"
                     components = Array(targetComponents.dropFirst()) + components[index...]
                 } else {

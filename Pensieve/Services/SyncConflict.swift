@@ -14,12 +14,48 @@ enum ConflictKind: Equatable {
 
 /// One conflicted path with both sides' blobs. `thisMachine` = git stage 3 (the replayed local
 /// commit - THIS machine); `otherMachine` = git stage 2 (origin/main - the OTHER machine).
-/// nil = that side is absent, DISTINCT from "" (empty).
+/// nil without an unavailable receipt = absent, DISTINCT from empty data or an unreadable entry.
 struct ConflictItem: Equatable {
     let path: String
     let kind: ConflictKind
-    let thisMachine: String?
-    let otherMachine: String?
+    let thisMachine: Data?
+    let otherMachine: Data?
+    let thisUnavailable: UnavailableConflictSide?
+    let otherUnavailable: UnavailableConflictSide?
+    let thisMode: String?
+    let otherMode: String?
+    var retiresGitlink: Bool { thisUnavailable?.isGitlink == true || otherUnavailable?.isGitlink == true }
+
+    init(path: String, kind: ConflictKind, thisMachine: Data?, otherMachine: Data?,
+         thisUnavailable: UnavailableConflictSide? = nil, otherUnavailable: UnavailableConflictSide? = nil,
+         thisMode: String? = nil, otherMode: String? = nil) {
+        self.path = path
+        self.kind = kind
+        self.thisMachine = thisMachine
+        self.otherMachine = otherMachine
+        self.thisUnavailable = thisUnavailable
+        self.otherUnavailable = otherUnavailable
+        self.thisMode = thisMode ?? thisUnavailable?.mode ?? (thisMachine == nil ? nil : "100644")
+        self.otherMode = otherMode ?? otherUnavailable?.mode ?? (otherMachine == nil ? nil : "100644")
+    }
+}
+
+struct ConflictVersion {
+    let entry: ConflictEntry?
+    var bytes: Data? { entry?.bytes }
+    var mode: String? { entry?.mode ?? unavailable?.mode }
+    let unavailable: UnavailableConflictSide?
+    var isGitlink: Bool { entry?.isGitlink == true || unavailable?.isGitlink == true }
+
+    init(read: () throws -> ConflictEntry?) throws {
+        do {
+            entry = try read()
+            unavailable = nil
+        } catch let entry as UnavailableConflictSide {
+            self.entry = nil
+            unavailable = entry
+        }
+    }
 }
 
 struct ConflictSet: Equatable {
@@ -30,8 +66,25 @@ struct ConflictSet: Equatable {
 /// world didn't move under the choice. Single unified payload type.
 struct ResolutionPick: Equatable {
     let side: ConflictSide
-    let expectedThis: String?
-    let expectedOther: String?
+    let expectedThis: Data?
+    let expectedOther: Data?
+    let expectedThisUnavailable: UnavailableConflictSide?
+    let expectedOtherUnavailable: UnavailableConflictSide?
+    let expectedThisMode: String?
+    let expectedOtherMode: String?
+
+    init(side: ConflictSide, expectedThis: Data?, expectedOther: Data?,
+         expectedThisUnavailable: UnavailableConflictSide? = nil,
+         expectedOtherUnavailable: UnavailableConflictSide? = nil,
+         expectedThisMode: String? = nil, expectedOtherMode: String? = nil) {
+        self.side = side
+        self.expectedThis = expectedThis
+        self.expectedOther = expectedOther
+        self.expectedThisUnavailable = expectedThisUnavailable
+        self.expectedOtherUnavailable = expectedOtherUnavailable
+        self.expectedThisMode = expectedThisMode ?? expectedThisUnavailable?.mode ?? (expectedThis == nil ? nil : "100644")
+        self.expectedOtherMode = expectedOtherMode ?? expectedOtherUnavailable?.mode ?? (expectedOther == nil ? nil : "100644")
+    }
 }
 
 /// Result of inspecting: real conflicts to show, or the conflict cleared itself upstream.

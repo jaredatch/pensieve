@@ -81,7 +81,7 @@ extension SkillInstallServiceTests {
         let migration = StoreMigrationService(
             fileService: fileService,
             manifestService: durableManifest,
-            skillStore: SkillStore(fileService: fileService, baseDir: root + "/skills")
+            skillStore: SkillStore(fileService: fileService, baseDir: root + "/skills", storeRoot: root)
         )
         let outcome = LaunchReconciler(
             rebuildService: rebuild,
@@ -89,7 +89,8 @@ extension SkillInstallServiceTests {
             fileService: fileService,
             manifestService: durableManifest,
             root: root,
-            lockPath: root + "-sync.lock"
+            lockPath: root + "-sync.lock",
+            git: TestPaths.git
         ).reconcileOnLaunch(context: rebuiltContext, alreadyMigrated: true)
         let rebuilt = try XCTUnwrap(try rebuiltContext.fetch(FetchDescriptor<Skill>()).first)
         XCTAssertEqual(outcome.rebuild.skillsInserted, 1)

@@ -48,7 +48,7 @@ struct ContentColumnView: View {
                 entitySelection: $entitySelection,
                 searchText: $searchText,
                 platformVM: platformVM,
-                notifier: notifier,
+                manifestRoot: library.manifestRoot, notifier: notifier,
                 onAdd: { onAdd(.categories) },
                 addsFenced: library.addsFenced
             )

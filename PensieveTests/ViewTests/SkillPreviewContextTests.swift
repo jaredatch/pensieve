@@ -13,7 +13,10 @@ final class SkillPreviewContextTests: XCTestCase {
         let root = base + "/skill"
         try files.files.writeData(at: root + "/references/diagram.png", data: PreviewImageFixture.png())
         try files.files.writeData(at: base + "/outside.png", data: PreviewImageFixture.png())
-        let library = SkillLibraryViewModel(fileService: files, manifestRoot: base)
+        let library = SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: files, baseDir: base, storeRoot: base),
+            fileService: files, fileWatchService: FileWatchService(rootDir: base), manifestRoot: base
+        )
         let preview = tab(library, file: "references/guide.md")
             .preview(markdownBody: "", skillsBase: base, onSelectFile: { _ in })
         let provider = preview.imageProvider(budget: PreviewImageDecodeBudget(), colorScheme: .light)
@@ -33,9 +36,14 @@ final class SkillPreviewContextTests: XCTestCase {
         defer { try? files.files.deleteDirectory(at: base) }
         try files.files.writeData(at: base + "/skills/skill/diagram.png", data: PreviewImageFixture.png())
         let skill = Skill(name: "Skill", directoryName: "skill")
-        let history = SkillHistoryView(skill: skill, fileService: files,
-                                       store: SkillStore(fileService: files, baseDir: base + "/skills"),
-                                       workingDir: base, onDismiss: {})
+        let history = SkillHistoryView(
+            skill: skill,
+            git: TestPaths.git,
+            fileService: files,
+            store: SkillStore(fileService: files, baseDir: base + "/skills", storeRoot: base),
+            workingDir: base,
+            onDismiss: {}
+        )
         let preview = history.preview(for: SkillHistorySelection(sha: "old", document: "Past version"))
         let provider = preview.imageProvider(budget: PreviewImageDecodeBudget(), colorScheme: .light)
         let local = await provider.loadImage(url: URL(string: "diagram.png"))
@@ -52,14 +60,13 @@ final class SkillPreviewContextTests: XCTestCase {
         let files = PreviewImageFileSpy()
         let base = files.files.realPath(at: TestTemporaryDirectory.path) + "/ImageRefresh-" + UUID().uuidString
         defer { try? files.files.deleteDirectory(at: base) }
-        let store = SkillStore(fileService: files, baseDir: base)
+        let store = SkillStore(fileService: files, baseDir: base, storeRoot: base)
         let slug = try store.createSkill(name: "Skill", description: "D", body: "Body")
         XCTAssertEqual(slug, "skill")
         let imagePath = base + "/skill/diagram.png"
         try files.files.writeData(at: imagePath, data: PreviewImageFixture.png())
         let watcher = RecordingWatcher()
-        let library = SkillLibraryViewModel(skillStore: store, fileService: files,
-                                            fileWatchService: watcher, manifestRoot: base)
+        let library = SkillLibraryViewModel(skillStore: store, fileService: files, fileWatchService: watcher, manifestRoot: base)
         let skill = Skill(name: "Skill", directoryName: "skill")
         _ = library.editorBody(for: skill)
         library.startWatching()

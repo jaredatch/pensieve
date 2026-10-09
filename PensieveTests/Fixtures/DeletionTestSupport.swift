@@ -141,6 +141,7 @@ final class MemoryDeployFileService: FileServiceProtocol {
 }
 
 final class RecordingDeletionSkillStore: SkillStoreProtocol {
+    let baseDir = TestPaths.skillsDir
     var bodies: [String: String] = [:]
     var entries: Set<String> = []
     var unsafeLeaves: Set<String> = []

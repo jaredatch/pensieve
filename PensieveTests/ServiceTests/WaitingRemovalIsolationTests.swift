@@ -15,8 +15,11 @@ final class WaitingRemovalIsolationTests: XCTestCase {
         let bytes = try h.base.files.readData(at: h.storePath)
         try h.base.files.writeFile(at: h.base.root + "/support/deploy-state.json", content: "corrupt derived state")
         DeployStateBackfill(fileService: h.mapped, store: h.base.deployState,
-            paths: DeployStateBackfillPaths(pensieveSkillsDir: Constants.pensieveSkillsDir,
-                cursorUserRulesDir: Constants.cursorUserRulesDir)).backfill(context: h.base.context)
+            paths: DeployStateBackfillPaths(
+                pensieveSkillsDir: TestPaths.skillsDir,
+                cursorUserRulesDir: TestPaths.deployPaths.cursorUserRulesDirectory,
+                userSkillsRoot: TestPaths.deployPaths.userSkillsRoot
+            )).backfill(context: h.base.context)
         XCTAssertTrue(try h.base.deployState.read().records.isEmpty)
         XCTAssertEqual(try h.base.files.readData(at: h.storePath), bytes)
         try h.base.deployState.replaceAll([])
@@ -25,8 +28,12 @@ final class WaitingRemovalIsolationTests: XCTestCase {
         XCTAssertTrue(h.vm.deployIndex.records(for: entry.slug).isEmpty)
         let manifest = ManifestService(fileService: h.base.files)
         try manifest.write(try manifest.snapshot(from: h.base.context), toRoot: h.base.root + "/store")
-        let machine = MachineStateService(fileService: h.mapped,
-            agentDetection: DeployStubDetection(installed: [.codex]), deployState: { try h.base.deployState.read() })
+        let machine = MachineStateService(
+            fileService: h.mapped,
+            agentDetection: DeployStubDetection(installed: [.codex]),
+            deployState: { try h.base.deployState.read() },
+            homeDirectory: TestPaths.homeDirectory
+        )
         let observation = try machine.compose(machineID: ProjectIntentHarness.localID,
             context: h.base.context, publishedAt: Date())
         XCTAssertTrue(observation.userDeploys.isEmpty)
@@ -63,7 +70,8 @@ final class WaitingRemovalIsolationTests: XCTestCase {
             agentSkillDirs: [.init(platform: .claudeCode, path: userDirectory)],
             cursorRulesDir: h.base.root + "/daemon-rules")
         let daemon = SyncDaemon(root: h.base.root + "/store", appSupport: h.base.root + "/support",
-            git: WaitingDaemonGit(), credentials: InMemoryCredentialStore(), reconciler: reconciler, now: Date.init)
+            git: WaitingDaemonGit(), hasLocalBranches: { _ in true }, credentials: InMemoryCredentialStore(),
+            reconciler: reconciler, now: Date.init)
         XCTAssertEqual(daemon.runOnce(), .synced(changed: false))
         XCTAssertFalse(h.base.files.isSymlink(at: userLink), "The daemon's real removal pass must run")
         XCTAssertTrue(h.base.files.isSymlink(at: h.base.artifact(.codex)))

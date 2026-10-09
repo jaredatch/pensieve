@@ -60,12 +60,12 @@ final class Skill {
 
     // MARK: - Computed
 
-    var canonicalPath: String {
-        Constants.pensieveSkillsDir + "/" + directoryName + "/SKILL.md"
+    func canonicalPath(skillsDirectory: String) -> String {
+        skillsDirectory + "/" + directoryName + "/SKILL.md"
     }
 
-    var canonicalDir: String {
-        Constants.pensieveSkillsDir + "/" + directoryName
+    func canonicalDir(skillsDirectory: String) -> String {
+        skillsDirectory + "/" + directoryName
     }
 
     var cursorConfig: CursorAdapterConfig? {

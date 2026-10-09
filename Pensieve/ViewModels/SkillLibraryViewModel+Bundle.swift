@@ -3,13 +3,13 @@ import Foundation
 extension SkillLibraryViewModel {
     /// The skill's directory inventory, read off the render path (a snapshot loader's call, never `body`).
     func bundleInventory(_ skill: Skill) -> SkillBundleInventory {
-        Self.bundleInventory(slug: skill.directoryName, base: Constants.pensieveSkillsDir, fileService: fileService)
+        Self.bundleInventory(slug: skill.directoryName, base: skillsDirectory, fileService: fileService)
     }
 
     /// One bundle file's text for the Content tab, or nil.
     func bundleFileText(_ skill: Skill, relativePath: String) -> String? {
         Self.bundleFileText(slug: skill.directoryName, relativePath: relativePath,
-                            base: Constants.pensieveSkillsDir, fileService: fileService)
+                            base: skillsDirectory, fileService: fileService)
     }
 
     /// An unsafe or missing directory reads as empty (C7: `SkillStore.safeSkillDirectory`, which does not
@@ -27,7 +27,7 @@ extension SkillLibraryViewModel {
     static func bundleFileText(slug: String, relativePath: String, base: String,
                                fileService: FileServiceProtocol) -> String? {
         guard let dir = SkillStore.safeSkillDirectory(slug: slug, base: base, fileService: fileService) else { return nil }
-        let components = relativePath.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        let components = PathSyntax.components(relativePath, omittingEmptySubsequences: false)
         guard !components.isEmpty, components.allSatisfy(SkillStore.isPathSafeSlug) else { return nil }
         var path = dir
         for component in components {

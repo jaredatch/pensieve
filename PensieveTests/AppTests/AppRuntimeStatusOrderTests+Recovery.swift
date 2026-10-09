@@ -31,8 +31,10 @@ extension AppRuntimeStatusOrderTests {
         XCTAssertEqual(cycles.count, 1, "only the scheduled follow-up reaches the engine")
     }
 
-    func testResolveAvailabilityRefusesConflictWhileCycleRemainsInFlight() async {
-        let model = SyncModel()
+    func testResolveAvailabilityRefusesConflictWhileCycleRemainsInFlight() async throws {
+        let fixture = try GitFailureFixture()
+        defer { try? fixture.remove() }
+        let model = SyncModel(git: IngestRecordingGit(), root: fixture.root)
         model.installSyncRequest {
             model.apply(.conflicted(["skills/example/SKILL.md"]))
             await Task.yield()

@@ -60,12 +60,12 @@ final class SyncSetupModel {
     private let syncedFamiliesEmpty: () -> Bool?
 
     init(context: ModelContext,
-         git: GitServiceProtocol = GitService(),
-         credentials: CredentialStoreProtocol = KeychainCredentialStore(),
+         git: GitServiceProtocol,
+         credentials: CredentialStoreProtocol,
          rebuilder: StoreRebuildServiceProtocol = StoreRebuildService(),
          fileService: FileServiceProtocol = FileService(),
-         root: String = Constants.pensieveBaseDir,
-         lockPath: String = PathConstants.pensieveAppSupportDir + "/sync.lock",
+         root: String,
+         lockPath: String,
          syncedFamiliesEmpty: (() -> Bool?)? = nil) {
         self.context = context
         self.git = git

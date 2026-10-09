@@ -23,6 +23,7 @@ enum CornerRadius {
 /// Path/config constants live in the SwiftUI-free `PathConstants` (PLAN-12 / 12.1). `Constants`
 /// re-exports them so app call sites keep the `Constants.` spelling with zero churn; daemon-compiled
 /// shared files reference `PathConstants` directly.
+/// Static members share PathConstants' classification in script/runtime-path-members.json.
 enum Constants {
     static var homeDirectory: String { PathConstants.homeDirectory }
     static var pensieveBaseDir: String { PathConstants.pensieveBaseDir }

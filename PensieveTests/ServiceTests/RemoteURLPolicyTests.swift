@@ -27,7 +27,12 @@ final class RemoteURLPolicyTests: XCTestCase {
     /// Iterates the SHARED reject list (`RemoteURLTestVectors.rejected`) — the same list the sync-time
     /// gating test uses, so connect and sync are provably gated over the identical class set.
     func testRejectsEveryDisallowedForm() {
-        for input in RemoteURLTestVectors.rejected {
+        let joined = PathJoiningScalars.values.flatMap { scalar -> [String] in
+            let dash = "-" + PathJoiningScalars.name("host", scalar: scalar)
+            return [dash + "@host:path", "git@" + dash + ":path", "ssh://git@" + dash + "/path",
+                    "https://" + dash + "/path", "ssh://git@[" + dash + "]/path"]
+        }
+        for input in RemoteURLTestVectors.rejected + joined {
             XCTAssertNil(RemoteURLPolicy.parse(input), "should reject \(input)")
         }
     }

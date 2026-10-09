@@ -14,7 +14,11 @@ extension DeployIntentModelTests {
         try writeIntegrationManifest(harness)
 
         _ = LaunchReconciler(
-            root: harness.root, lockPath: lockPath
+            migrationService: StoreMigrationService(skillStore: SkillStore(fileService: FileService(),
+                baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot)),
+            root: harness.root,
+            lockPath: lockPath,
+            git: TestPaths.git
         ).reconcileOnLaunch(context: harness.context, alreadyMigrated: true)
         _ = IntentReconciler(
             platformVM: harness.platformVM,

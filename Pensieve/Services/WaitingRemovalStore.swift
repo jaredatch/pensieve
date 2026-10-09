@@ -28,11 +28,10 @@ struct WaitingRemoval: Codable, Equatable {
     let legacyFingerprint: CursorRemovalFingerprint?
 
     var isValid: Bool {
-        guard projectPath.hasPrefix("/"), platform.supportsProjectScope,
+        guard PathSyntax.isAbsolute(projectPath), platform.supportsProjectScope,
               (try? LinkService.validatePathComponent(slug)) != nil, !source.isEmpty else { return false }
-        let expected = platform == .cursor
-            ? DeployPaths.cursorPath(directoryName: slug, projectPath: projectPath)
-            : DeployPaths.linkPath(directoryName: slug, platform: platform, projectPath: projectPath)
+        guard let expected = DeployPaths.projectArtifactPath(directoryName: slug, platform: platform,
+                                                              projectPath: projectPath) else { return false }
         guard artifactPath == expected else { return false }
         if let fingerprint = legacyFingerprint {
             return platform == .cursor && fingerprint.byteCount >= 0 && fingerprint.digest.utf8.count == 64

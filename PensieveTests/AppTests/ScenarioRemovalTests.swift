@@ -95,8 +95,13 @@ final class ScenarioRemovalTests: XCTestCase {
             echoRegistrar: runtime.syncWriteEchoRegistrar, bodyWriteRegistration: runtime.syncBodyWriteRegistration,
             updatesModel: runtime.updates,
             machineDependencies: MachineObservabilityDependencies(
-                stateService: MachineStateService(), identity: MachineIdentity(appSupportDir: paths.appSupportDir),
-                root: paths.storeRoot, now: Date.init))
+                stateService: MachineStateService(
+                    agentDetection: AgentDetectionService(homeDirectory: TestPaths.homeDirectory),
+                    deployState: { DeployState(schemaVersion: DeployStateStore.currentSchemaVersion, records: []) },
+                    homeDirectory: TestPaths.homeDirectory
+                ), identity: MachineIdentity(appSupportDir: paths.appSupportDir),
+                root: paths.storeRoot, now: Date.init),
+            importModel: paths.makeImportViewModel(notifier: {}, echoRegistrar: { _ in }))
         let rendered = LaunchRenderFence(content: content, onRendered: onLaunchRendered)
             .environment(runtime).modelContainer(runtime.container)
         return NSHostingView(rootView: AnyView(rendered))

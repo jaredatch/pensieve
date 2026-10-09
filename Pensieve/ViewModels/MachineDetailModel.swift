@@ -6,14 +6,6 @@ struct MachineObservabilityDependencies {
     let root: String
     let now: () -> Date
 
-    static var live: Self {
-        Self(
-            stateService: MachineStateService(),
-            identity: MachineIdentity(),
-            root: Constants.pensieveBaseDir,
-            now: Date.init
-        )
-    }
 }
 
 @Observable

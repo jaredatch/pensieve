@@ -18,7 +18,7 @@ final class GitStageTwoRegressionTests: XCTestCase {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         let files = VanishingRootFiles(root: fixture.root)
-        let git = GitService(fileService: files)
+        let git = GitService(fileService: files, askpassHelperPath: TestPaths.gitAskpassHelperPath)
         XCTAssertThrowsError(try git.remoteURL(at: fixture.root)) { error in
             guard case GitError.repositoryUnreadable = error else { return XCTFail("\(error)") }
         }

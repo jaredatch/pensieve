@@ -23,11 +23,11 @@ struct ProjectFolderCallerHarness {
          persistent: Bool = false) throws {
         self.files = files
         root = TestTemporaryDirectory.path + "ProjectFolderCallers-\(UUID().uuidString)"
-        let store = SkillStore(fileService: files, baseDir: root + "/store/skills")
+        let store = SkillStore(fileService: files, baseDir: root + "/store/skills", storeRoot: root + "/store")
         let slug = try store.createSkill(name: "Caller Skill", description: "Caller", body: "# Body")
         mapped = LinkServiceCanonicalDirectoryFileService(
             wrapped: files,
-            pathMappings: [(logical: Constants.pensieveSkillsDir, physical: root + "/store/skills")],
+            pathMappings: [(logical: TestPaths.skillsDir, physical: root + "/store/skills")],
             physicalSandbox: root
         )
         context = ModelContext(try AppRuntime.makeContainer(
@@ -37,8 +37,10 @@ struct ProjectFolderCallerHarness {
         deployState = DeployStateStore(fileService: mapped, appSupportDir: root + "/support")
         platformVM = PlatformViewModel(
             fileService: mapped,
+            linkService: TestPaths.linkService(fileService: mapped),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: mapped),
             agentDetection: DeployStubDetection(installed: installed),
-            deployStateStore: deployState
+            deployStateStore: deployState, skillsDirectory: TestPaths.skillsDir
         )
         intent = IntentReconciler(
             platformVM: platformVM,
@@ -78,7 +80,7 @@ struct ProjectFolderCallerHarness {
     }
 
     func addDirectSkill(platforms: [PlatformTarget]) throws -> Skill {
-        let slug = try SkillStore(fileService: files, baseDir: root + "/store/skills")
+        let slug = try SkillStore(fileService: files, baseDir: root + "/store/skills", storeRoot: root + "/store")
             .createSkill(name: "Direct Skill", description: "Direct", body: "# Direct")
         let direct = Skill(name: "Direct Skill", directoryName: slug)
         context.insert(direct)
@@ -92,7 +94,12 @@ struct ProjectFolderCallerHarness {
         let manifest = ManifestService(fileService: files)
         return DeployIntentModel(platformVM: platformVM, dependencies: DeployIntentDependencies(
             identity: ProjectIntentIdentityStub(id: ProjectIntentHarness.localID),
-            stateService: MachineStateService(fileService: mapped), root: root + "/store",
+            stateService: MachineStateService(
+                fileService: mapped,
+                agentDetection: AgentDetectionService(homeDirectory: TestPaths.homeDirectory),
+                deployState: { DeployState(schemaVersion: DeployStateStore.currentSchemaVersion, records: []) },
+                homeDirectory: TestPaths.homeDirectory
+            ), root: root + "/store",
             writeManifest: { context in
                 try manifest.write(try manifest.snapshot(from: context), toRoot: root + "/store")
             }, notifier: {}, reconcile: { intent.reconcile(context: $0) },
@@ -109,6 +116,7 @@ struct ProjectFolderCallerHarness {
     }
 
     func artifact(_ platform: PlatformTarget, project: Project? = nil) -> String {
-        DeployPaths.linkPath(directoryName: skill.directoryName, platform: platform, projectPath: (project ?? self.project).path)
+        TestPaths.deployPaths.linkPath(directoryName: skill.directoryName, platform: platform,
+            projectPath: (project ?? self.project).path)
     }
 }

@@ -5,19 +5,25 @@ extension LinkServiceTests {
     func testUnsupportedProjectScopePreservesUserWideLinksAndReportsUndeployed() throws {
         let skill = makeSkill()
         let project = Project(name: "Stale", path: tempDir + "/project")
-        let canonical = Constants.pensieveSkillsDir + "/" + skill.directoryName
+        let canonical = TestPaths.skillsDir + "/" + skill.directoryName
         let physicalSkill = tempDir + "/store/" + skill.directoryName
         try fileService.writeFile(at: physicalSkill + "/SKILL.md", content: "body")
         for platform in [PlatformTarget.openClaw, .hermes] {
-            let userPath = DeployPaths.linkPath(directoryName: skill.directoryName, platform: platform, projectPath: nil)
+            let userPath = TestPaths.deployPaths.linkPath(directoryName: skill.directoryName, platform: platform,
+                projectPath: nil)
             let physicalLink = tempDir + "/user/" + platform.rawValue
             let mapped = LinkServiceCanonicalDirectoryFileService(
                 wrapped: fileService, pathMappings: [(canonical, physicalSkill), (userPath, physicalLink)],
                 physicalSandbox: tempDir
             )
-            let links = LinkService(fileService: mapped)
-            let vm = PlatformViewModel(fileService: mapped, linkService: links,
-                                       agentDetection: DeployStubDetection(installed: []), deployStateStore: .memoryBacked)
+            let links = TestPaths.linkService(fileService: mapped)
+            let vm = PlatformViewModel(
+                fileService: mapped,
+                linkService: links,
+                cursorCompiler: TestPaths.cursorCompiler(fileService: mapped),
+                agentDetection: DeployStubDetection(installed: []),
+                deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
+            )
             try links.link(skill: skill, platform: platform, projectPath: nil)
             XCTAssertTrue(links.isLinked(skill: skill, platform: platform, projectPath: nil))
             XCTAssertTrue(try vm.removalOperation(skill: skill, platform: platform, target: .userWide).classify().isOwned)

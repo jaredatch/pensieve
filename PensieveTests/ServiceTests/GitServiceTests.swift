@@ -15,11 +15,14 @@ final class GitServiceTests: XCTestCase {
     override func setUpWithError() throws {
         tempDir = TestTemporaryDirectory.path + "PensieveGitServiceTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
-        git = GitService(fileService: LinkServiceCanonicalDirectoryFileService(
+        git = GitService(
+            fileService: LinkServiceCanonicalDirectoryFileService(
             wrapped: FileService(),
-            pathMappings: [(PathConstants.gitAskpassHelperPath, tempDir + "/askpass")],
+            pathMappings: [((TestPaths.gitAskpassHelperPath), tempDir + "/askpass")],
             physicalSandbox: tempDir
-        ))
+        ),
+            askpassHelperPath: TestPaths.gitAskpassHelperPath
+        )
     }
 
     override func tearDownWithError() throws {
@@ -140,6 +143,16 @@ final class GitServiceTests: XCTestCase {
         let remote = try seededRemote()
         let b = try clone(remote, "b")
         XCTAssertTrue(FileManager.default.fileExists(atPath: b + "/README.md"))
+        let originalHead = try git.commitSHA(at: b)
+        try assertCloneRefusesOccupiedStore(remote: remote, destination: b)
+        XCTAssertEqual(try git.commitSHA(at: b), originalHead, "Publication must preserve an occupied store")
+        XCTAssertEqual(try FileService().readFile(at: b + "/README.md"), "seed\n")
+        try assertClonePublicationRace(remote: remote)
+        let failures = ["clone", "metadata-write", "metadata-path", "head-probe", "head-read",
+                        "checkout", "terminated-checkout"]
+        for failure in failures {
+            try assertFailedCloneCanRetry(remote: remote, failure: failure)
+        }
     }
 
     func testRemoteURLRoundTrip() throws {
@@ -207,6 +220,28 @@ final class GitServiceTests: XCTestCase {
         let remote = try seededRemote()
         let a = try clone(remote, "a")
         XCTAssertFalse(try git.stageAllAndCommit(at: a, message: "noop"))
+
+        let files = FileService()
+        let blocked = a + "/skills/bytes/cache"
+        try files.createDirectory(at: blocked)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: blocked)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: blocked) }
+        XCTAssertThrowsError(try files.listDirectory(at: blocked), "The fixture must actually be unreadable")
+        XCTAssertNoThrow(try git.stageAllAndCommit(at: a, message: "unreadable directory"))
+        XCTAssertNoThrow(try git.stagePath("README.md", at: a))
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: blocked)
+
+        let assets = a + "/skills/bytes/assets"
+        try files.writeFile(at: assets + "/a", content: "tracked asset")
+        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "assets"))
+        try files.deleteDirectory(at: assets)
+        try files.createSymlink(at: assets, pointingTo: "cache")
+        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "directory becomes symlink"))
+        XCTAssertFalse(try git.stageAllAndCommit(at: a, message: "symlink noop"))
+        try git.push(at: a, credential: nil)
+        let b = try clone(remote, "b")
+        XCTAssertTrue(files.isSymlink(at: b + "/skills/bytes/assets"))
+        XCTAssertEqual(try files.symlinkTarget(at: b + "/skills/bytes/assets"), "cache")
     }
 
     func testPullRebaseUpToDate() throws {
@@ -229,6 +264,104 @@ final class GitServiceTests: XCTestCase {
         XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .merged)
         XCTAssertTrue(FileManager.default.fileExists(atPath: b + "/a.txt"))   // A's change arrived
     }
+
+}
+
+extension GitServiceTests {
+    func testPullRebaseDropsRewrittenUpstreamCommitsAndKeepsTheCheckedTree() throws {
+        let remote = try seededRemote()
+        let a = try clone(remote, "rewrite-a")
+        let base = try git.commitSHA(at: a)
+        try write("purged.txt", "removed upstream fixture\n", in: a)
+        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "upstream commit to purge"))
+        try git.push(at: a, credential: nil)
+        let b = try clone(remote, "rewrite-b")
+        let pinned = try clone(remote, "rewrite-pinned")
+        let control = try clone(remote, "rewrite-control")
+        for (root, name) in [(b, "b.txt"), (pinned, "pinned.txt"), (control, "control.txt")] {
+            try configureNativeRebaseDefaults(at: root)
+            try write(name, "local sync commit\n", in: root)
+            XCTAssertTrue(try git.stageAllAndCommit(at: root, message: "local sync commit"))
+        }
+        let reset = try rawGit(["reset", "--hard", base], in: a)
+        XCTAssertEqual(reset.code, 0, reset.err)
+        try write("rewritten.txt", "safe rewritten upstream\n", in: a)
+        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "rewritten upstream"))
+        let force = try rawGit(["push", "--force", "origin", "main"], in: a)
+        XCTAssertEqual(force.code, 0, force.err)
+        // Independent control: the original git pull drops the purged upstream commit.
+        let oldPull = try rawGit(["pull", "--rebase", "origin", "main"], in: control)
+        XCTAssertEqual(oldPull.code, 0, oldPull.err)
+        let files = FileService()
+        XCTAssertFalse(files.fileExists(at: control + "/purged.txt"))
+        XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .merged)
+        XCTAssertFalse(files.fileExists(at: b + "/purged.txt"), "A purged upstream commit must not replay")
+        XCTAssertEqual(try files.readFile(at: b + "/b.txt"), "local sync commit\n")
+        try git.push(at: b, credential: nil)
+        let bare = String(remote.dropFirst("file://".count))
+        let tree = try git.runOrThrow(["--git-dir", bare, "ls-tree", "-r", "--name-only", "main"], in: nil)
+        XCTAssertFalse(tree.stdout.split(separator: "\n").contains("purged.txt"), "Push must not restore the purge")
+
+        try files.writeFile(at: pinned + "/.env", content: "local excluded fixture\n")
+        let checked = try XCTUnwrap(git.preflightStoreUpdate(at: pinned, credential: nil))
+        let checkedHead = try git.runOrThrow(["-C", pinned, "rev-parse", "origin/main"], in: nil).stdout
+        _ = try git.pullRebase(at: a, credential: nil)
+        try files.writeFile(at: a + "/.env", content: "later upstream fixture\n")
+        try git.runOrThrow(["-C", a, "add", "--force", ".env"], in: nil)
+        try git.runOrThrow(["-C", a, "commit", "-m", "later unchecked tree"], in: nil)
+        try git.push(at: a, credential: nil)
+        XCTAssertEqual(try git.pullRebase(at: pinned, fetchedRevision: checked), .merged)
+        XCTAssertFalse(files.fileExists(at: pinned + "/purged.txt"))
+        XCTAssertEqual(try files.readFile(at: pinned + "/pinned.txt"), "local sync commit\n")
+        XCTAssertEqual(try files.readFile(at: pinned + "/.env"), "local excluded fixture\n")
+        XCTAssertEqual(try git.runOrThrow(["-C", pinned, "rev-parse", "origin/main"], in: nil).stdout, checkedHead,
+                       "The guarded update must not fetch the later remote tree")
+        XCTAssertFalse(git.isRebaseInProgress(at: pinned))
+    }
+
+    func testPinnedPullRefusesMovedTrackingRefWithoutChangingTheStore() throws {
+        let remote = try seededRemote()
+        let a = try clone(remote, "pin-a")
+        let b = try clone(remote, "pin-b")
+        try write("local.txt", "local work\n", in: b)
+        XCTAssertTrue(try git.stageAllAndCommit(at: b, message: "local"))
+        try write("incoming.txt", "checked upstream\n", in: a)
+        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "checked"))
+        try git.push(at: a, credential: nil)
+        try FileService().writeFile(at: b + "/.env", content: "protected local fixture\n")
+        let checked = try XCTUnwrap(git.preflightStoreUpdate(at: b, credential: nil))
+        try write("later.txt", "unchecked upstream\n", in: a)
+        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "later"))
+        try git.push(at: a, credential: nil)
+        try git.fetch(at: b, credential: nil)
+        let files = FileService()
+        let beforeHead = try git.headSHA(at: b)
+        let beforeIndex = try files.readData(at: b + "/.git/index")
+        let beforeStatus = try git.runOrThrow(["-C", b, "status", "--porcelain"], in: nil).stdout
+        XCTAssertThrowsError(try git.pullRebase(at: b, fetchedRevision: checked)) { error in
+            guard case let GitError.commandFailed(_, _, detail, _) = error else {
+                return XCTFail("A moved tracking ref must refuse the checked rebase: \(error)")
+            }
+            XCTAssertEqual(detail, "The fetched branch no longer matches the checked commit. Sync again.")
+        }
+        XCTAssertEqual(try git.headSHA(at: b), beforeHead)
+        XCTAssertEqual(try files.readData(at: b + "/.git/index"), beforeIndex)
+        XCTAssertEqual(try git.runOrThrow(["-C", b, "status", "--porcelain"], in: nil).stdout, beforeStatus)
+        XCTAssertEqual(try files.readFile(at: b + "/local.txt"), "local work\n")
+        XCTAssertEqual(try files.readFile(at: b + "/.env"), "protected local fixture\n")
+        XCTAssertFalse(files.fileExists(at: b + "/incoming.txt"))
+        XCTAssertFalse(files.fileExists(at: b + "/later.txt"))
+        XCTAssertFalse(git.isRebaseInProgress(at: b))
+        let current = try XCTUnwrap(git.preflightStoreUpdate(at: b, credential: nil))
+        XCTAssertEqual(try git.pullRebase(at: b, fetchedRevision: current), .merged)
+        XCTAssertEqual(try files.readFile(at: b + "/later.txt"), "unchecked upstream\n")
+    }
+
+    private func configureNativeRebaseDefaults(at root: String) throws {
+        try git.runOrThrow(["-C", root, "config", "pull.ff", "only"], in: nil)
+        try git.runOrThrow(["-C", root, "config", "pull.rebase", "false"], in: nil)
+    }
+
 }
 
 // MARK: PLAN-24 / 24.2 git-state and adoption seams
@@ -339,6 +472,20 @@ extension GitServiceTests {
         XCTAssertTrue(try git.conflictedFiles(at: b).isEmpty)
         let body = try String(contentsOfFile: b + "/README.md", encoding: .utf8)
         XCTAssertEqual(body, "B version\n")   // B's edit survives the abort
+        let before = try git.commitSHA(at: b)
+        for failure in ["metadata-write", "metadata-path"] {
+            if FileService().fileExists(at: b + "-fault") { try FileService().deleteFile(at: b + "-fault") }
+            XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .conflicted(["README.md"]))
+            try FileService().deleteFile(at: b + "/.git/info/attributes")
+            let failing = try failingMetadataGit(failure, root: b)
+            XCTAssertThrowsError(try failing.abortRebase(at: b), "Repair failure may be reported")
+            XCTAssertTrue(FileService().fileExists(at: b + "-fault"))
+            XCTAssertFalse(git.isRebaseInProgress(at: b), "Repair failure must never skip abort")
+            XCTAssertTrue(try git.conflictedFiles(at: b).isEmpty)
+            XCTAssertEqual(try git.commitSHA(at: b), before)
+            XCTAssertEqual(try FileService().readFile(at: b + "/README.md"), "B version\n")
+            XCTAssertEqual(try rawGit(["-C", b, "status", "--porcelain"]).out, "")
+        }
     }
 
     // MARK: 10.5 — conflicted-path NUL enumeration (C8): an embedded-newline path must not fragment
@@ -393,6 +540,50 @@ extension GitServiceTests {
         let helperBody = try git.fileService.readFile(at: helper)
         XCTAssertFalse(helperBody.contains(secret))   // the helper reads env; it holds NO secret at rest
         XCTAssertTrue(helperBody.contains("PENSIEVE_GIT_PASSWORD"))
+        try assertHelperRemainsExecutableDuringRewrite(body: helperBody, environment: env, secret: secret)
+    }
+
+    private func assertHelperRemainsExecutableDuringRewrite(
+        body: String, environment: [String: String], secret: String
+    ) throws {
+        let helper = tempDir + "/askpass"
+        try FileService().deleteFile(at: helper)
+        var observations = 0
+        var executions = 0
+        // A second caller executes the shared helper while the first caller's write is paused.
+        let files = AskpassWriteObservingFileService {
+            observations += 1
+            // Before first publication, an absent helper is valid; a visible one must be executable.
+            guard FileService().fileExists(at: helper) else { return }
+            executions += 1
+            let mode = try FileManager.default.attributesOfItem(atPath: helper)[.posixPermissions] as? NSNumber
+            XCTAssertEqual(mode?.intValue, 0o700, "A published helper must already be owner-only and executable")
+            XCTAssertEqual(try FileService().readFile(at: helper), body)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: helper)
+            process.arguments = ["Password"]
+            process.environment = environment
+            let output = Pipe()
+            process.standardOutput = output
+            do { try process.run() } catch {
+                XCTFail("The shared helper could not execute during replacement: \(error)")
+                return
+            }
+            let bytes = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+            XCTAssertEqual(String(bytes: bytes, encoding: .utf8), secret)
+        }
+        let writer = GitService(fileService: files, askpassHelperPath: helper)
+        for _ in 0..<2 {
+            _ = try writer.childEnvironment(credential: .httpsToken(username: "other", token: "other-fixture-token"))
+        }
+        XCTAssertGreaterThan(observations, 0, "The replacement must be observed")
+        XCTAssertGreaterThan(executions, 0, "A second caller must execute the shared helper")
+        let mode = try FileManager.default.attributesOfItem(atPath: helper)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(mode?.intValue, 0o700)
+        XCTAssertEqual(try FileService().readFile(at: helper), body)
+        XCTAssertEqual(try FileService().listDirectory(at: tempDir), ["askpass"])
     }
 
     private struct NetworkCredentialOperation {
@@ -431,7 +622,7 @@ extension GitServiceTests {
             .init("remoteHead", "ls-remote", { _ = try service.remoteHead(remote: remote, ref: "main", credential: credential) }),
             .init("fetch", "fetch", { try service.fetch(at: root, credential: credential) }),
             .init("fetchBranch", "fetch", { try service.fetchBranch("main", at: root, credential: credential) }),
-            .init("pullRebase", "pull", { _ = try service.pullRebase(at: root, credential: credential) }),
+            .init("pullRebase", "fetch", { _ = try service.pullRebase(at: root, credential: credential) }),
             .init("push", "push", { try service.push(at: root, credential: credential) }),
             .init("collapseToSingleCommit", "fetch", {
                 _ = try service.collapseToSingleCommit(at: root, message: "collapsed", credential: credential)
@@ -522,9 +713,164 @@ extension GitServiceTests {
     }
 
     func testAskpassHelperWriteFailurePropagates() throws {
-        let failingGit = GitService(fileService: AskpassWriteFailingFileService())
+        let failingGit = GitService(fileService: AskpassWriteFailingFileService(),
+            askpassHelperPath: TestPaths.gitAskpassHelperPath)
         XCTAssertThrowsError(
             try failingGit.childEnvironment(credential: .httpsToken(username: "u", token: "ghp_x"))
         )
+    }
+}
+
+/// Uses the real filesystem and observes completed writes through the existing FileService boundary.
+/// Executable writes inherit the production default, so the observation falls before its next step.
+private struct AskpassWriteObservingFileService: FileServiceProtocol {
+    let beforeWrite: (String) throws -> Void
+    let afterWrite: () throws -> Void
+    let beforeDelete: (String) -> Void
+    private let wrapped = FileService()
+
+    init(beforeWrite: @escaping (String) throws -> Void = { _ in },
+         beforeDelete: @escaping (String) -> Void = { _ in },
+         afterWrite: @escaping () throws -> Void = {}) {
+        self.beforeWrite = beforeWrite
+        self.afterWrite = afterWrite
+        self.beforeDelete = beforeDelete
+    }
+
+    func writeFile(at path: String, content: String) throws {
+        try beforeWrite(path)
+        try wrapped.writeFile(at: path, content: content)
+        try afterWrite()
+    }
+    func readFile(at path: String) throws -> String { try wrapped.readFile(at: path) }
+    func deleteFile(at path: String) throws { try wrapped.deleteFile(at: path) }
+    func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
+    func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
+    func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
+    func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }
+    func deleteDirectory(at path: String) throws {
+        beforeDelete(path)
+        try wrapped.deleteDirectory(at: path)
+    }
+    func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
+        try wrapped.entryTypeWithoutFollowingLinks(at: path)
+    }
+    func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
+        try wrapped.createSymlink(at: linkPath, pointingTo: targetPath)
+    }
+    func symlinkTarget(at path: String) throws -> String { try wrapped.symlinkTarget(at: path) }
+    func isSymlink(at path: String) -> Bool { wrapped.isSymlink(at: path) }
+    func listDirectory(at path: String) throws -> [String] { try wrapped.listDirectory(at: path) }
+    func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
+}
+
+extension GitServiceTests {
+    private func assertFailedCloneCanRetry(remote: String, failure: String) throws {
+        let files = FileService()
+        let destination = tempDir + "/clone-" + failure
+        try files.createDirectory(at: destination)
+        let failed = try failingMetadataGit(failure, root: destination)
+        XCTAssertThrowsError(try failed.clone(remote: remote, into: destination, credential: nil), failure) { error in
+            if failure == "head-probe" { XCTAssertEqual(error as? GitError, .unusable(.licenseNotAccepted)) }
+        }
+        XCTAssertTrue(files.fileExists(at: destination + "-fault"), "The injected failure must be reached")
+        XCTAssertFalse(files.directoryExists(at: destination + "/.git"), "Failed connect must not leave a syncable repo")
+        XCTAssertEqual(try files.listDirectory(at: destination), [], "Failed connect must preserve the empty store")
+        XCTAssertFalse(files.fileExists(at: destination + "-published"), "Checkout must finish before publication")
+        do { try git.clone(remote: remote, into: destination, credential: nil) } catch {
+            XCTFail("Retry failed for \(failure): \(error)")
+            return
+        }
+        XCTAssertEqual(try files.readFile(at: destination + "/README.md"), "seed\n", "Retry must deliver the remote")
+        XCTAssertTrue(git.isWorktreeClean(at: destination))
+    }
+
+    /// Real git delegates keep their argv. Only metadata/checkout failures are simulated; receipts
+    /// prove the fault fired and observe whether the canonical store was exposed during checkout.
+    private func failingMetadataGit(_ failure: String, root: String) throws -> GitService {
+        let files = FileService()
+        let executable = root + "-git"
+        try files.writeExecutableFile(at: executable, content: metadataFailureScript(failure, root: root))
+        let observing = AskpassWriteObservingFileService(beforeWrite: { path in
+            if failure == "metadata-write", path.hasSuffix("/info/attributes") {
+                try files.writeFile(at: root + "-fault", content: "metadata write refused")
+                throw AskpassWriteBoom()
+            }
+        }, beforeDelete: { path in
+            XCTAssertTrue(files.directoryExists(at: path), "Cleanup must not delete an absent clone folder")
+        })
+        return GitService(fileService: observing, askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+    }
+
+    private func metadataFailureScript(_ failure: String, root: String) -> String {
+        """
+            #!/bin/sh
+            fail_command() {
+                repository=''
+                \(FakeGitScript.skipGlobalOptions)
+                failure='\(failure)'
+                if [ "$1" = clone ] && [ "$failure" = clone ]; then
+                    touch '\(root)-fault'; echo 'clone failed' >&2; exit 128
+                fi
+                if [ "$1 $2" = 'rev-parse --path-format=absolute' ] && [ "$failure" = metadata-path ]; then
+                    touch '\(root)-fault'; echo 'metadata lookup failed' >&2; exit 128
+                fi
+                if [ "$1 $2" = 'rev-parse HEAD' ] || [ "$1" = for-each-ref ]; then
+                    case "$failure" in
+                      head-probe) touch '\(root)-fault'; echo 'Xcode license not accepted' >&2; exit 69 ;;
+                      head-read) touch '\(root)-fault'; echo 'head observation failed' >&2; exit 128 ;;
+                    esac
+                fi
+                if [ "$1" = --version ] && [ "$failure" = head-probe ] && [ -f '\(root)-fault' ]; then
+                    echo 'Xcode license not accepted' >&2; exit 69
+                fi
+                if [ "$1" = checkout ]; then
+                    if [ -d '\(root)/.git' ]; then touch '\(root)-published'; fi
+                    case "$failure" in
+                      checkout|terminated-checkout)
+                        touch '\(root)-fault'; echo 'partial checkout' > "$repository/README.md"
+                        if [ "$failure" = terminated-checkout ]; then kill -TERM "$$"; fi
+                        echo 'checkout failed' >&2; exit 128 ;;
+                    esac
+                fi
+            }
+            fail_command "$@"
+            exec /usr/bin/git "$@"
+            """ + "\n"
+    }
+}
+
+extension GitServiceTests {
+    private func assertCloneRefusesOccupiedStore(remote: String, destination: String) throws {
+        let files = FileService()
+        let trace = tempDir + "/occupied-trace"
+        let executable = tempDir + "/occupied-git"
+        try files.writeExecutableFile(at: executable, content: """
+            #!/bin/sh
+            touch '\(trace)'
+            exec /usr/bin/git "$@"
+            """ + "\n")
+        let recording = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+        XCTAssertThrowsError(try recording.clone(remote: remote, into: destination, credential: nil)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("already exists and is not an empty directory"))
+        }
+        XCTAssertFalse(files.fileExists(at: trace), "An occupied store must refuse before downloading")
+    }
+
+    private func assertClonePublicationRace(remote: String) throws {
+        let files = FileService()
+        let destination = tempDir + "/publication-race"
+        try files.createDirectory(at: destination)
+        let observing = AskpassWriteObservingFileService(beforeWrite: { path in
+            if path.hasSuffix("/info/attributes") {
+                try files.writeFile(at: destination + "/keep", content: "arrived during download")
+            }
+        })
+        let cloning = GitService(fileService: observing, askpassHelperPath: tempDir + "/askpass")
+        XCTAssertThrowsError(try cloning.clone(remote: remote, into: destination, credential: nil)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("already exists and is not an empty directory"))
+        }
+        XCTAssertEqual(try files.readFile(at: destination + "/keep"), "arrived during download")
+        XCTAssertFalse(files.directoryExists(at: destination + "/.git"))
     }
 }

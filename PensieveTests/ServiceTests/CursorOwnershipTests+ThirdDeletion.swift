@@ -21,8 +21,11 @@ extension CursorOwnershipTests {
             if reads == 1 { throw NSError(domain: NSPOSIXErrorDomain, code: Int(EIO)) }
         }
         defer { mapped.beforeDeployStateRead = nil }
-        let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+        let library = SkillLibraryViewModel(
+            skillStore: store,
+            fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
+        )
         let deleted = SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project], context: harness.context)
         XCTAssertGreaterThan(reads, 0, "The state read fault must fire")
@@ -59,8 +62,11 @@ extension CursorOwnershipTests {
                     throw NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))
                 }
             }
-            let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
-                manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+            let library = SkillLibraryViewModel(
+                skillStore: store,
+                fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+                manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
+            )
             let deleted = SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
                 projects: [project], context: harness.context)
             mapped.beforeRuleRead = nil
@@ -87,8 +93,11 @@ extension CursorOwnershipTests {
         try renameHistoryTable(at: url.path, broken: true)
         defer { try? renameHistoryTable(at: url.path, broken: false) }
         XCTAssertThrowsError(try context.fetch(FetchDescriptor<DeployRecord>()))
-        let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+        let library = SkillLibraryViewModel(
+            skillStore: store,
+            fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
+        )
         XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project], context: context))
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Skill>()), 1)
@@ -110,8 +119,11 @@ extension CursorOwnershipTests {
         try renameHistoryTable(at: url.path, broken: true)
         defer { try? renameHistoryTable(at: url.path, broken: false) }
         XCTAssertThrowsError(try context.fetch(FetchDescriptor<DeployRecord>()))
-        let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+        let library = SkillLibraryViewModel(
+            skillStore: store,
+            fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
+        )
         XCTAssertTrue(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project], context: context), library.deletionNotice?.message ?? "Deletion failed")
         XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path))
@@ -132,8 +144,11 @@ extension CursorOwnershipTests {
         harness.context.insert(DeployRecord(skillID: UUID(), platform: .cursor,
             targetPath: path, contentHash: "other skill", projectID: project.id))
         try harness.context.save()
-        let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+        let library = SkillLibraryViewModel(
+            skillStore: store,
+            fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
+        )
         XCTAssertTrue(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project], context: harness.context))
         XCTAssertEqual(try mapped.readFile(at: path), bytes)
@@ -153,8 +168,11 @@ extension CursorOwnershipTests {
         XCTAssertThrowsError(try harness.context.fetch(FetchDescriptor<DeployRecord>())) {
             historyMessage = $0.localizedDescription
         }
-        let library = SkillLibraryViewModel(skillStore: store, fileService: mapped,
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest")
+        let library = SkillLibraryViewModel(
+            skillStore: store,
+            fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
+        )
         XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project], context: harness.context))
         XCTAssertFalse(historyMessage.isEmpty)
@@ -174,8 +192,13 @@ extension CursorOwnershipTests {
         context.insert(skill)
         try context.save()
         let state = DeployStateStore(fileService: mapped, appSupportDir: root + "/support")
-        let vm = PlatformViewModel(fileService: mapped, cursorCompiler: compiler,
-            agentDetection: DeployStubDetection(installed: PlatformTarget.allCases), deployStateStore: state)
+        let vm = PlatformViewModel(
+            fileService: mapped,
+            linkService: TestPaths.linkService(fileService: mapped),
+            cursorCompiler: compiler,
+            agentDetection: DeployStubDetection(installed: PlatformTarget.allCases),
+            deployStateStore: state, skillsDirectory: TestPaths.skillsDir
+        )
         let project = reviewProject(context)
         let projectPath = projectRule ? project.path : nil
         try compiler.compile(skill: skill, projectPath: projectPath)

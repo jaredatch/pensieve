@@ -280,13 +280,4 @@ extension GitService {
         "--diff-merges=first-parent"
     ]
 
-    func dataCommandError(_ output: GitDataOutput, args: [String]) -> GitError {
-        GitError.commandFailed(
-            args: args,
-            exitCode: output.exit,
-            stderr: String(
-                bytes: output.stderr.isEmpty ? output.stdout : output.stderr,
-                encoding: .utf8
-            ) ?? "", confirmingProbe: output.confirmingProbe)
-    }
 }

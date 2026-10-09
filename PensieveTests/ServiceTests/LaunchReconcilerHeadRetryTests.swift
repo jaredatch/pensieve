@@ -59,16 +59,20 @@ private final class DefiniteBornHeadRetryGitService: GitServiceProtocol {
         false
     }
     func stageAllAndCommit(at path: String, message: String) throws -> Bool { false }
+    func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+    func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+        try pullRebase(at: path, credential: nil)
+    }
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult { .upToDate }
     func push(at path: String, credential: GitCredential?) throws {}
     func abortRebase(at path: String) throws {}
     func conflictedFiles(at path: String) -> [String] { [] }
-    func blob(atStage stage: Int, path: String, in workingDir: String) -> String? { nil }
+    func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
     func continueRebase(at path: String) throws -> PullResult { .upToDate }
     func skipRebase(at path: String) throws -> PullResult { .upToDate }
     func stagePath(_ path: String, at root: String) throws {}
     func collapseToSingleCommit(at root: String, message: String,
-                                credential: GitCredential?) throws -> Bool { false }
+                                credential: GitCredential?, fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
     func hasCommitsToPush(at path: String) -> Bool { false }
 }
 
@@ -86,7 +90,7 @@ final class LaunchReconcilerHeadRetryTests: XCTestCase {
         migrationService = StoreMigrationService(
             fileService: fileService,
             manifestService: manifest,
-            skillStore: SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+            skillStore: SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         )
     }
 
@@ -241,10 +245,19 @@ final class LaunchReconcilerHeadRetryTests: XCTestCase {
         let outerLock = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
         defer { outerLock.release() }
 
+        let parent = (tempDir as NSString).deletingLastPathComponent
+        let cloneTemp = parent + "/.pensieve-clone-" + UUID().uuidString
+        let vendorTemp = tempDir + ".vendor-" + UUID().uuidString + ".tmp"
+        let sentinel = parent + "/.pensieve-clone-backup-" + UUID().uuidString
+        for path in [cloneTemp, vendorTemp, sentinel] { try fileService.writeFile(at: path + "/keep", content: "bytes") }
+        defer { for path in [cloneTemp, vendorTemp, sentinel] { try? fileService.deleteDirectory(at: path) } }
+
         // Without the vouch, validation self-conflicts against the outer lock: needs-retry forever.
         let conflicted = rec.reconcileOnLaunch(context: ctx, alreadyMigrated: true)
         XCTAssertTrue(conflicted.ingestionNeedsRetry)
         XCTAssertNil(conflicted.ingestedHeadStamp)
+        XCTAssertTrue(fileService.directoryExists(at: cloneTemp))
+        XCTAssertTrue(fileService.directoryExists(at: vendorTemp))
 
         // With the vouch, ingestion completes under the caller's lock.
         let completed = rec.reconcileOnLaunch(
@@ -252,6 +265,10 @@ final class LaunchReconcilerHeadRetryTests: XCTestCase {
         )
         XCTAssertFalse(completed.ingestionNeedsRetry)
         XCTAssertNotNil(completed.ingestedHeadStamp)
+        XCTAssertFalse(fileService.directoryExists(at: cloneTemp), "Launch must sweep under its caller's held lock")
+        XCTAssertFalse(fileService.directoryExists(at: vendorTemp), "Vendor cleanup shares the held-lock contract")
+        XCTAssertEqual(try fileService.readFile(at: sentinel + "/keep"), "bytes")
+        XCTAssertNil(SyncLock.tryAcquire(at: lockPath), "Cleanup must not release the caller's lock")
     }
 
     private func seedManifestAndHead() throws -> String {

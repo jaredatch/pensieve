@@ -38,21 +38,24 @@ extension SkillInstallService {
             at: sourceDirectory,
             excludingTopLevelGitMetadata: excludingTopLevelGitMetadata
         )
-        let parent = (storeRoot as NSString).deletingLastPathComponent
-        let base = (storeRoot as NSString).lastPathComponent
-        let temp = parent + "/" + base + ".vendor-" + UUID().uuidString + ".tmp"
+        let temp = VendorTemporaryDirectory.makePath(storeRoot: storeRoot)
         do {
             try fileService.createDirectory(at: temp)
             for entry in entries where entry.isDirectory {
+                try Task.checkCancellation()
                 try fileService.createDirectory(at: temp + "/" + entry.relativePath)
             }
             for entry in entries where !entry.isDirectory {
+                try Task.checkCancellation()
                 try fileService.copyFile(
                     at: sourceDirectory + "/" + entry.relativePath,
-                    to: temp + "/" + entry.relativePath
+                    to: temp + "/" + entry.relativePath,
+                    checkingCancellation: true
                 )
             }
+            try Task.checkCancellation()
             try beforeReplace()
+            try Task.checkCancellation()
             try fileService.replaceItem(at: destination, with: temp)
         } catch {
             if fileService.directoryExists(at: temp) || fileService.isSymlink(at: temp) {
@@ -64,25 +67,21 @@ extension SkillInstallService {
 
     static func cleanupVendorTemps(
         fileService: FileServiceProtocol = FileService(),
-        storeRoot: String = Constants.pensieveBaseDir,
-        lockPath: String = PathConstants.pensieveAppSupportDir + "/sync.lock"
+        storeRoot: String,
+        lockPath: String,
+        externallyHeldLock: Bool = false
     ) {
-        guard let lock = SyncLock.tryAcquire(at: lockPath) else { return }
-        defer { lock.release() }
-        let parent = (storeRoot as NSString).deletingLastPathComponent
-        let prefix = (storeRoot as NSString).lastPathComponent + ".vendor-"
+        let lock = externallyHeldLock ? nil : SyncLock.tryAcquire(at: lockPath)
+        guard externallyHeldLock || lock != nil else { return }
+        defer { lock?.release() }
+        let (parent, prefix) = VendorTemporaryDirectory.namespace(storeRoot: storeRoot)
         guard !fileService.isSymlink(at: parent),
               fileService.directoryExists(at: parent),
               let entries = try? fileService.listDirectory(at: parent) else {
             return
         }
-        for entry in entries
-        where entry.hasPrefix(prefix) && entry.hasSuffix(".tmp") {
-            // Only the exact UUID namespace vendor() emits: this sweep runs against the store
-            // PARENT (the user's home for the default root), where a prefix match alone would
-            // recursively delete a user's own `.pensieve.vendor-backup.tmp`-style sibling.
-            let middle = String(entry.dropFirst(prefix.count).dropLast(".tmp".count))
-            guard UUID(uuidString: middle) != nil else { continue }
+        // Match only our UUID namespace, never a user's similarly named sibling.
+        for entry in entries where VendorTemporaryDirectory.contains(entry, prefix: prefix) {
             let path = parent + "/" + entry
             if fileService.directoryExists(at: path) || fileService.isSymlink(at: path) {
                 try? fileService.deleteDirectory(at: path)
@@ -112,6 +111,7 @@ extension SkillInstallService {
                                     into entries: inout [VendorEntry]) throws {
         let directory = relativeDirectory.isEmpty ? root : root + "/" + relativeDirectory
         for name in try fileService.listDirectory(at: directory) {
+            try Task.checkCancellation()
             if excludingTopLevelGitMetadata, relativeDirectory.isEmpty, name == ".git" {
                 continue
             }

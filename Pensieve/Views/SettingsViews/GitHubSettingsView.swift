@@ -1,7 +1,11 @@
 import SwiftUI
 
 struct GitHubSettingsView: View {
-    @State private var model = GitHubCredentialSettingsModel()
+    @State private var model: GitHubCredentialSettingsModel
+
+    init(credentialStore: CredentialStoreProtocol) {
+        _model = State(initialValue: GitHubCredentialSettingsModel(credentialStore: credentialStore))
+    }
 
     private let tokenPage = URL(string: "https://github.com/settings/personal-access-tokens/new")
 

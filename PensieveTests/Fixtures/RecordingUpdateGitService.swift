@@ -4,10 +4,10 @@ import Foundation
 final class RecordingUpdateGitService: UpdateCheckGitServing {
     var confirmsHints = false
     var usability: GitUsability = .usable
-    var onProbe: (() -> GitUsability)?
+    var onProbe: (() throws -> GitUsability)?
     var cloneErrors: [String: GitError] = [:]
     private(set) var probeCalls = 0
-    func probeUsability() -> GitUsability { probeCalls += 1; return onProbe?() ?? usability }
+    func probeUsability() throws -> GitUsability { probeCalls += 1; return try onProbe?() ?? usability }
     var heads: [String: String] = [:]
     var trees: [String: String] = [:]
     var failingRemotes: Set<String> = []
@@ -60,7 +60,7 @@ final class RecordingUpdateGitService: UpdateCheckGitServing {
     private func confirmed(_ error: GitError) throws -> GitError {
         guard confirmsHints, case let .commandFailed(args, exit, detail, _) = error,
               GitUsability.environmentFailure(exit: exit, output: detail) != nil else { return error }
-        let answer = probeUsability()
+        let answer = try probeUsability()
         try answer.requireUsable()
         return .commandFailed(args: args, exitCode: exit, stderr: detail, confirmingProbe: answer)
     }

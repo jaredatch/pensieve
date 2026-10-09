@@ -13,7 +13,7 @@ final class CategoryDetailModel {
     private let store: CategoryStoreProtocol
     private let reconciler: CategoryReconcilerProtocol
 
-    init(store: CategoryStoreProtocol = CategoryStore(), reconciler: CategoryReconcilerProtocol) {
+    init(store: CategoryStoreProtocol, reconciler: CategoryReconcilerProtocol) {
         self.store = store
         self.reconciler = reconciler
     }

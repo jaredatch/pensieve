@@ -17,7 +17,8 @@ final class SkillDetailTabResetTests: XCTestCase {
         let git = SkillDetailTabResetGit(thirdCommit: thirdCommit)
         let base = TestTemporaryDirectory.path + "SkillDetailTabResetTests-\(UUID().uuidString)"
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: base)
+            skillStore: SkillStore(fileService: FileService(), baseDir: base + "/skills", storeRoot: base),
+            fileWatchService: FileWatchService(rootDir: base + "/skills"), manifestRoot: base
         )
         let history = UpstreamHistoryViewModel(
             readOperation: { _, _, _ in historyResult() },
@@ -64,8 +65,11 @@ final class SkillDetailTabResetTests: XCTestCase {
         let fileService = DeployRecordingFileService()
         let platformVM = PlatformViewModel(
             fileService: fileService,
+            linkService: TestPaths.linkService(fileService: fileService),
+            cursorCompiler: TestPaths.cursorCompiler(fileService: fileService),
             agentDetection: EmptyMachineDetection(),
-            deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: base)
+            deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: base),
+            skillsDirectory: TestPaths.skillsDir
         )
         let dependencies = DeployIntentDependencies(
             identity: InertMachineIdentity(),
@@ -136,6 +140,7 @@ private struct SkillHistoryTabResetHarness: View {
             onOpenUpdates: {},
             onUpdateCheck: { _ in },
             git: git,
+            store: library.skillStore,
             workingDir: workingDir,
             hostedPresentation: presentation
         )
@@ -164,15 +169,20 @@ private final class SkillDetailTabResetGit: GitServiceProtocol {
     func clone(remote: String, into path: String, credential: GitCredential?) throws {}
     func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool { false }
     @discardableResult func stageAllAndCommit(at path: String, message: String) throws -> Bool { false }
+    func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+    func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+        try pullRebase(at: path, credential: nil)
+    }
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult { .upToDate }
     func push(at path: String, credential: GitCredential?) throws {}
     func abortRebase(at path: String) throws {}
     func conflictedFiles(at path: String) -> [String] { [] }
-    func blob(atStage stage: Int, path: String, in workingDir: String) -> String? { nil }
+    func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
     func continueRebase(at path: String) throws -> PullResult { .upToDate }
     func skipRebase(at path: String) throws -> PullResult { .upToDate }
     func stagePath(_ path: String, at root: String) throws {}
-    func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?) throws -> Bool { false }
+    func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
     func hasCommitsToPush(at path: String) -> Bool { false }
 }
 
@@ -197,6 +207,7 @@ private struct SkillDeploymentsTabResetHarness: View {
             localMachineID: InertMachineIdentity.value,
             hostedIntentModel: intentModel,
             hostedPresentation: presentation,
+            homeDirectory: TestPaths.homeDirectory,
             onAddProject: {}
         )
     }

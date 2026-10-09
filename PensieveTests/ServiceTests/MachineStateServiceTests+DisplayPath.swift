@@ -86,6 +86,11 @@ final class MachineStateDisplayPathTests: XCTestCase {
         for value in invalidValues {
             try assertParsedPath(valueLine: value, expected: nil)
         }
+        for scalar in PathJoiningScalars.values {
+            let path = "~/" + PathJoiningScalars.name("project", scalar: scalar)
+            try assertParsedPath(valueLine: "\"" + path + "\"", expected: path)
+            try assertParsedPath(valueLine: "\"" + path + "/../secret\"", expected: nil)
+        }
         try assertParsedPath(valueLine: "\"~\"", expected: "~")
         try assertParsedPath(valueLine: "\"~/Projects/demo\"", expected: "~/Projects/demo")
     }
@@ -254,6 +259,9 @@ final class MachineStateDisplayPathTests: XCTestCase {
 
     private func statePath(root: String) -> String { root + "/machines/" + machineID + ".yaml" }
 
+}
+
+extension MachineStateDisplayPathTests {
     private func rawState(projectLine: String) -> String {
         """
         schema_version: 1

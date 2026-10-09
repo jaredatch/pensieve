@@ -105,10 +105,14 @@ extension SkillOverviewPresentationTests {
         try files.writeFile(at: root + "/skills/small/SKILL.md", content: document)
         // Only the injected store reads disk; inventory and platform probes use an empty fixture.
         let neutralFiles = DeployRecordingFileService()
-        let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: files, baseDir: root + "/skills"),
-                                            fileService: neutralFiles, manifestRoot: root)
-        let platformVM = PlatformViewModel(fileService: neutralFiles, agentDetection: DeployStubDetection(installed: []),
-                                           deployStateStore: .memoryBacked)
+        let store = SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root)
+        let library = SkillLibraryViewModel(skillStore: store, fileService: neutralFiles,
+                                            fileWatchService: FileWatchService(rootDir: root + "/skills"), manifestRoot: root)
+        let platformVM = PlatformViewModel(fileService: neutralFiles,
+                                           linkService: TestPaths.linkService(fileService: neutralFiles),
+                                           cursorCompiler: TestPaths.cursorCompiler(fileService: neutralFiles),
+                                           agentDetection: DeployStubDetection(installed: []),
+                                           deployStateStore: .memoryBacked, skillsDirectory: root + "/skills")
         let skill = Skill(name: "Small body", directoryName: "small")
         var snapshot = DetailContentSnapshot.load(skill: skill, projects: [], library: library, platformVM: platformVM)
         snapshot.macStatus = [.codex: true]

@@ -62,6 +62,10 @@ final class AppRuntimePathsTests: XCTestCase {
             paths: paths,
             usesMemoryCredentials: true
         )
+        try assertLaunchCleanup(paths: paths, scratchRoots: [
+            updateOperations.skillInstallService.scratchRoot, updateOperations.updateCheckService.scratchRoot,
+            upstreamHistoryService.scratchRoot
+        ])
     }
 
     func testProductionUpdateAndProvenanceOperationsMatchServiceDefaults() throws {
@@ -90,8 +94,6 @@ final class AppRuntimePathsTests: XCTestCase {
             paths: paths,
             usesMemoryCredentials: false
         )
-        XCTAssertEqual(UpdateCheckService.defaultScratchRoot, paths.appSupportDir + "/update-check-scratch")
-        XCTAssertEqual(SkillInstallService.defaultScratchRoot, paths.appSupportDir + "/skill-install-scratch")
     }
 
     func testHistoryCacheUsesInjectedAppSupportOutsideStoreAndScratch() throws {
@@ -118,15 +120,19 @@ final class AppRuntimePathsTests: XCTestCase {
         XCTAssertTrue(defaults.bool(forKey: key))
         XCTAssertNil(UserDefaults.standard.object(forKey: key))
     }
+}
 
+extension AppRuntimePathsTests {
     func testRetryDrivenSyncCycleTouchesOnlyTheInjectedPaths() async throws {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         let paths = fixture.paths
-        // A configured unborn repository passes the scheduler gate, then stops before store writes or network I/O.
-        try GitService().initRepository(at: paths.storeRoot)
-        try GitService().setRemote("https://fixture.test/store.git", at: paths.storeRoot)
-        let before = try fixture.snapshot()
+        // Observe a born branch, then remove it before the retry-driven cycle. The real engine must
+        // report branchless before preparation or network I/O, without changing the store or .git.
+        let git = TestPaths.git
+        try git.initRepository(at: paths.storeRoot)
+        _ = try git.runOrThrow(["-C", paths.storeRoot, "commit", "--allow-empty", "-m", "fixture"], in: nil)
+        try git.setRemote("https://fixture.test/store.git", at: paths.storeRoot)
         let container = try AppRuntime.makeContainer(
             configuration: ModelConfiguration(isStoredInMemoryOnly: true)
         )
@@ -134,7 +140,12 @@ final class AppRuntimePathsTests: XCTestCase {
         var returnedInitialOutcome = false
         let runtime = try AppRuntime(
             container: container,
-            platformVM: PlatformViewModel(agentDetection: StubDetection(), deployStateStore: .memoryBacked),
+            platformVM: PlatformViewModel(
+                linkService: TestPaths.linkService(fileService: FileService()),
+                cursorCompiler: TestPaths.cursorCompiler(fileService: FileService()),
+                agentDetection: StubDetection(),
+                deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
+            ),
             library: paths.makeLibrary(fileWatchService: StubWatcher(), notifier: {}),
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { true }),
             defaults: defaults,
@@ -151,14 +162,18 @@ final class AppRuntimePathsTests: XCTestCase {
             paths: paths,
             gitUsabilityProbe: { .usable }
         )
+        await runtime.bootstrapTask.value
+        try fixture.files.deleteFile(at: paths.storeRoot + "/.git/refs/heads/main")
+        XCTAssertTrue(runtime.syncModel.canSyncNow, "branchlessness has not been observed yet")
+        let before = try fixture.snapshot()
         runtime.performLaunchWorkIfNeeded(context: ModelContext(container))
 
         let auditPath = paths.appSupportDir + "/daemon.log"
-        let audit = try await waitForRetryCycle(runtime, auditPath: auditPath)
+        let audit = try await waitForRetryCycle(runtime, auditPath: auditPath, detail: "branchless")
 
         XCTAssertFalse(runtime.syncModel.isCycleInFlight, "the model cycle must finish before inspecting its paths")
         XCTAssertFalse(runtime.scheduler.isSyncing, "the retry-driven cycle must finish before inspecting its paths")
-        XCTAssertTrue(audit.contains("skipped noRemote"), "the cycle ran against the injected App Support: \(audit)")
+        XCTAssertTrue(audit.contains("skipped branchless"), "the cycle ran against the injected App Support: \(audit)")
         XCTAssertFalse(try fixture.files.entryExistsWithoutFollowingLinks(at: paths.storeRoot + "/manifest"))
         XCTAssertEqual(try fixture.snapshot(), before, "the cycle must preserve all store entries and bytes, including .git")
     }
@@ -166,8 +181,10 @@ final class AppRuntimePathsTests: XCTestCase {
     func testPathSnapshotWaitIncludesModelCycleAfterScheduledFollowUpQueues() async throws {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
-        try GitService().initRepository(at: fixture.root)
-        try GitService().setRemote("https://fixture.test/store.git", at: fixture.root)
+        let git = TestPaths.git
+        try git.initRepository(at: fixture.root)
+        _ = try git.runOrThrow(["-C", fixture.root, "commit", "--allow-empty", "-m", "fixture"], in: nil)
+        try git.setRemote("https://fixture.test/store.git", at: fixture.root)
         let runtime = try AppRuntime(
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { true }),
             defaults: isolatedDefaults(), paths: fixture.paths, gitUsabilityProbe: { .usable }
@@ -208,13 +225,13 @@ final class AppRuntimePathsTests: XCTestCase {
         XCTAssertTrue(returned)
     }
 
-    private func waitForRetryCycle(_ runtime: AppRuntime, auditPath: String) async throws -> String {
+    private func waitForRetryCycle(_ runtime: AppRuntime, auditPath: String, detail: String = "noRemote") async throws -> String {
         var audit = ""
         // The audit precedes the runtime's final git status, which briefly creates .git/index.lock.
         // The scheduler can finish while a model cycle queues a follow-up. Wait for the model itself too.
-        for _ in 0..<60 where !audit.contains("noRemote") || runtime.syncModel.isCycleInFlight || runtime.scheduler.isSyncing {
+        for _ in 0..<60 where !audit.contains(detail) || runtime.syncModel.isCycleInFlight || runtime.scheduler.isSyncing {
             try await Task.sleep(nanoseconds: 50_000_000)
-            audit = (try? String(contentsOfFile: auditPath, encoding: .utf8)) ?? ""
+            audit = (try? FileService().readFile(at: auditPath)) ?? ""
         }
 
         return audit
@@ -227,6 +244,7 @@ final class AppRuntimePathsTests: XCTestCase {
     ) throws {
         XCTAssertEqual(service.storeRoot, paths.storeRoot)
         XCTAssertEqual(service.scratchRoot, paths.appSupportDir + "/update-check-scratch")
+        try assertGitService(service.gitService, paths: paths)
         assertCredentialStore(service.credentialStore, usesMemoryCredentials: usesMemoryCredentials)
         let contentHasher = try XCTUnwrap(service.contentHasher as? SkillInstallService)
         assertSkillInstallService(
@@ -244,6 +262,7 @@ final class AppRuntimePathsTests: XCTestCase {
         XCTAssertEqual(service.storeRoot, paths.storeRoot)
         XCTAssertEqual(service.scratchRoot, paths.appSupportDir + "/skill-install-scratch")
         XCTAssertEqual(service.lockPath, paths.syncLockPath)
+        XCTAssertEqual((service.gitService as? GitService)?.askpassHelperPath, paths.gitAskpassHelperPath)
         assertCredentialStore(service.credentialStore, usesMemoryCredentials: usesMemoryCredentials)
     }
 
@@ -254,6 +273,7 @@ final class AppRuntimePathsTests: XCTestCase {
         expectedFileService: FileService
     ) throws {
         XCTAssertEqual(service.scratchRoot, paths.appSupportDir + "/upstream-history-scratch")
+        try assertGitService(service.gitService, paths: paths)
         assertCredentialStore(service.credentialStore, usesMemoryCredentials: usesMemoryCredentials)
         let serviceFileService = try XCTUnwrap(service.fileService as? FileService)
         XCTAssertTrue(serviceFileService === expectedFileService)
@@ -276,5 +296,10 @@ final class AppRuntimePathsTests: XCTestCase {
         } else {
             XCTAssertTrue(store is KeychainCredentialStore)
         }
+    }
+
+    private func assertGitService(_ service: Any, paths: AppRuntimePaths) throws {
+        let git = try XCTUnwrap(service as? GitService)
+        XCTAssertEqual(git.askpassHelperPath, paths.appSupportDir + "/git-askpass.sh")
     }
 }

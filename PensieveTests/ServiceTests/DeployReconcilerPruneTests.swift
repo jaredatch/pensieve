@@ -16,7 +16,8 @@ final class DeployReconcilerPruneTests: XCTestCase {
             fileService: fileService,
             deployState: deployStateStore,
             pensieveSkillsDir: storeSkillsDir,
-            agentSkillDirs: (agentDirs ?? [agentDir]).map { .init(platform: .claudeCode, path: $0) }
+            agentSkillDirs: (agentDirs ?? [agentDir]).map { .init(platform: .claudeCode, path: $0) },
+            cursorRulesDir: TestPaths.deployPaths.cursorUserRulesDirectory
         )
     }
 
@@ -56,9 +57,13 @@ final class DeployReconcilerPruneTests: XCTestCase {
 
     func testInjectedPruneDirectoryKeepsItsAgentIdentity() throws {
         try link("gone", to: storeSkillsDir + "/gone")
-        let result = DeployReconciler(fileService: fileService, deployState: deployStateStore,
+        let result = DeployReconciler(
+            fileService: fileService,
+            deployState: deployStateStore,
             pensieveSkillsDir: storeSkillsDir,
-            agentSkillDirs: [.init(platform: .codex, path: agentDir)]).pruneDangling()
+            agentSkillDirs: [.init(platform: .codex, path: agentDir)],
+            cursorRulesDir: TestPaths.deployPaths.cursorUserRulesDirectory
+        ).pruneDangling()
         XCTAssertEqual(result.removed, [agentDir + "/gone"])
         XCTAssertEqual(result.removedKeys.map(\.platform), [.codex], "Injected directories retain their actual agent")
     }
@@ -96,11 +101,16 @@ final class DeployReconcilerPruneTests: XCTestCase {
             try self.fileService.createDirectory(at: restoredTarget)
             try self.fileService.writeFile(at: restoredTarget + "/SKILL.md", content: "Restored skill")
         }
-        let result = DeployReconciler(fileService: mapped, deployState: deployStateStore,
-            pensieveSkillsDir: storeSkillsDir, agentSkillDirs: [
+        let result = DeployReconciler(
+            fileService: mapped,
+            deployState: deployStateStore,
+            pensieveSkillsDir: storeSkillsDir,
+            agentSkillDirs: [
                 .init(platform: .claudeCode, path: agentDir),
                 .init(platform: .codex, path: secondDir)
-            ]).pruneDangling()
+            ],
+            cursorRulesDir: TestPaths.deployPaths.cursorUserRulesDirectory
+        ).pruneDangling()
         XCTAssertEqual(result.removed, [firstPath])
         XCTAssertFalse(fileService.isSymlink(at: firstPath))
         XCTAssertTrue(fileService.isSymlink(at: restoredPath))
@@ -140,11 +150,16 @@ final class DeployReconcilerPruneTests: XCTestCase {
         try FileManager.default.createSymbolicLink(atPath: realTarget + "/gone", withDestinationPath: storeSkillsDir + "/gone")
         let symlinkedAgentDir = tempDir + "/agent-symlinked"
         try FileManager.default.createSymbolicLink(atPath: symlinkedAgentDir, withDestinationPath: realTarget)
-        let result = DeployReconciler(fileService: fileService, deployState: deployStateStore,
-            pensieveSkillsDir: storeSkillsDir, agentSkillDirs: [
+        let result = DeployReconciler(
+            fileService: fileService,
+            deployState: deployStateStore,
+            pensieveSkillsDir: storeSkillsDir,
+            agentSkillDirs: [
                 .init(platform: .claudeCode, path: symlinkedAgentDir),
                 .init(platform: .cursor, path: agentDir)
-            ]).pruneDangling()
+            ],
+            cursorRulesDir: TestPaths.deployPaths.cursorUserRulesDirectory
+        ).pruneDangling()
         XCTAssertEqual(result.skippedDirs, [symlinkedAgentDir])
         XCTAssertEqual(result.removed, [])
         XCTAssertTrue(fileService.isSymlink(at: realTarget + "/gone"))
@@ -228,8 +243,13 @@ final class DeployReconcilerPruneTests: XCTestCase {
                     } else { throw DeletionTestError() }
                 }
             }
-            let result = DeployReconciler(fileService: mapped, deployState: deployStateStore,
-                pensieveSkillsDir: storeSkillsDir, agentSkillDirs: [.init(platform: .claudeCode, path: agentDir)]).pruneDangling()
+            let result = DeployReconciler(
+                fileService: mapped,
+                deployState: deployStateStore,
+                pensieveSkillsDir: storeSkillsDir,
+                agentSkillDirs: [.init(platform: .claudeCode, path: agentDir)],
+                cursorRulesDir: TestPaths.deployPaths.cursorUserRulesDirectory
+            ).pruneDangling()
             XCTAssertTrue(result.removed.isEmpty)
             XCTAssertEqual(reads, 2, "The dangling admission is followed by a fresh ownership check")
             XCTAssertTrue(fileService.isSymlink(at: path))

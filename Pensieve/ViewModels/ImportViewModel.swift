@@ -5,9 +5,11 @@ import SwiftUI
 @Observable
 final class ImportViewModel {
     enum FolderScanOutcome: Equatable { case found(Int), nothingFound, insideLibrary }
+    enum ImportOutcome { case refused, finished }
 
     private let scanner: ImportScannerProtocol
     private let skillStore: SkillStoreProtocol
+    private let lockPath: String
     private let manifestService: ManifestSnapshotting?
     private let manifestRoot: String
     private let notifier: SyncStateNotifying
@@ -20,6 +22,8 @@ final class ImportViewModel {
     var importProgress: Double = 0
     var error: String?
     var importNotices: [String] = []
+    private var noticedError: String?
+    var doneError: String? { error == noticedError ? nil : error }
     var scanSkips: [ImportScanSkip] = []
     private var latestFolderReport = ImportScanReport()
     private(set) var importedSkillCount = 0
@@ -45,17 +49,17 @@ final class ImportViewModel {
     }
 
     init(
-        fileService: FileServiceProtocol? = nil,
-        scanner: ImportScannerProtocol? = nil,
-        skillStore: SkillStoreProtocol? = nil,
+        scanner: ImportScannerProtocol,
+        skillStore: SkillStoreProtocol,
+        lockPath: String,
         manifestService: ManifestSnapshotting? = nil,
-        manifestRoot: String = Constants.pensieveBaseDir,
+        manifestRoot: String,
         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
         echoRegistrar: @escaping SyncWriteEchoRegistering = SyncWriteEchoRegistrar.suppressed
     ) {
-        let fs = fileService ?? FileService()
-        self.scanner = scanner ?? ImportScanner(fileService: fs)
-        self.skillStore = skillStore ?? SkillStore(fileService: fs)
+        self.scanner = scanner
+        self.skillStore = skillStore
+        self.lockPath = lockPath
         self.manifestService = manifestService
         self.manifestRoot = manifestRoot
         self.notifier = notifier
@@ -142,23 +146,26 @@ final class ImportViewModel {
         }
     }
 
+    @discardableResult
     func importSelected(
         context: ModelContext,
         takenSlugs: (ModelContext) throws -> Set<String> = { Set(try $0.fetch(FetchDescriptor<Skill>()).map(\.directoryName)) },
         saveContext: (ModelContext) throws -> Void = { try $0.save() }
-    ) {
+    ) -> ImportOutcome {
         importNotices = []
+        noticedError = nil
         importedSkillCount = 0
         error = nil
         let toImport = discoveredSkills.filter { selectedSkills.contains($0.sourcePath) }
-        guard !toImport.isEmpty else { return }
+        guard !toImport.isEmpty, let lock = acquireImportLock() else { return .refused }
+        defer { lock.release() }
 
         var taken: Set<String>
         do {
-            taken = try takenSlugs(context)
+            taken = try takenSlugs(context).union(skillStore.prepareImport())
         } catch {
             self.error = "Failed to import: couldn't read the library (\(error.localizedDescription))"
-            return
+            return .refused
         }
 
         importProgress = 0
@@ -168,8 +175,10 @@ final class ImportViewModel {
             do {
                 let resolvedDescription = resolvedDescription(for: discovered)
                 let prepared = preparedContent(for: discovered, description: resolvedDescription)
-                let dirName = try createImportedSkill(discovered, description: resolvedDescription,
+                let result = try createImportedSkill(discovered, description: resolvedDescription,
                                                       content: prepared.content, avoiding: taken)
+                let dirName = result.directoryName
+                importNotices += SkillFolderCopySkip.notices(for: result.skipped).map { "\(discovered.name): \($0)" }
                 if prepared.keptAsText {
                     importNotices.append("\(discovered.name): frontmatter was kept as text.")
                 }
@@ -186,10 +195,44 @@ final class ImportViewModel {
                 writtenSlugs.append(dirName)
                 importProgress = Double(writtenSlugs.count) / Double(toImport.count)
             } catch {
+                if let slug = occupiedSlug(reportedBy: error) { taken.insert(slug) }
                 self.error = "Failed to import \(discovered.name): \(error.localizedDescription)"
+                importNotices.append("\(discovered.name): \(error.localizedDescription)")
+                noticedError = self.error
             }
         }
 
+        finishImport(context: context, writtenSlugs: writtenSlugs, saveContext: saveContext)
+        return .finished
+    }
+
+    /// Exclusive publication reports its occupied destination. Remember that name for the
+    /// remaining batch without another listing; errors for unrelated paths reserve nothing.
+    private func occupiedSlug(reportedBy error: Error) -> String? {
+        let failure = error as NSError
+        guard failure.domain == NSPOSIXErrorDomain, failure.code == Int(POSIXErrorCode.EEXIST.rawValue),
+              let path = failure.userInfo[NSFilePathErrorKey] as? String else { return nil }
+        let slug = (path as NSString).lastPathComponent
+        return path == skillStore.baseDir + "/" + slug ? slug : nil
+    }
+
+    private func acquireImportLock() -> SyncLock? {
+        do {
+            guard let lock = try SyncLock.tryAcquireReportingErrors(at: lockPath) else {
+                error = "Pensieve is busy syncing or finishing another task. Try importing again in a moment."
+                return nil
+            }
+            return lock
+        } catch {
+            NSLog("Pensieve import lock access failed at %@: %@", lockPath, String(describing: error))
+            self.error = "Pensieve couldn't open its lock file, so nothing was imported. " +
+                "Make sure sync.lock in Pensieve's Application Support folder is a file you can write to, then try again."
+            return nil
+        }
+    }
+
+    private func finishImport(context: ModelContext, writtenSlugs: [String],
+                              saveContext: (ModelContext) throws -> Void) {
         do {
             try saveContext(context)
             importedSkillCount = writtenSlugs.count
@@ -209,13 +252,14 @@ final class ImportViewModel {
 
     private func createImportedSkill(
         _ discovered: DiscoveredSkill, description: String, content: String?, avoiding: Set<String>
-    ) throws -> String {
-        if let content {
-            return try skillStore.createSkill(name: discovered.name, content: content, avoiding: avoiding)
+    ) throws -> SkillFolderImportResult {
+        let text = content ?? SkillSerializer.serialize(name: discovered.name, description: description, body: discovered.body)
+        if discovered.sourceContent != nil, discovered.sourcePlatform != "cursor" {
+            return try skillStore.createSkill(name: discovered.name, content: text,
+                copying: (discovered.sourcePath as NSString).deletingLastPathComponent, avoiding: avoiding)
         }
-        return try skillStore.createSkill(
-            name: discovered.name, description: description, body: discovered.body, avoiding: avoiding
-        )
+        return SkillFolderImportResult(directoryName: try skillStore.createSkill(name: discovered.name,
+            content: text, avoiding: avoiding))
     }
 
     private func preparedContent(

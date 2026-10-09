@@ -43,7 +43,7 @@ final class AddProjectModel {
     /// editing either field cancels it. Submission revalidates the directory, including after a failed Add.
     var canSubmit: Bool {
         !didSubmit && !isCheckingIdentity && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && submissionPath.hasPrefix("/")
+            && PathSyntax.isAbsolute(submissionPath)
     }
 
     func refreshIdentityStatus() {
@@ -59,7 +59,7 @@ final class AddProjectModel {
             identityMessage = nil
             return
         }
-        guard expanded.hasPrefix("/") else {
+        guard PathSyntax.isAbsolute(expanded) else {
             isCheckingIdentity = false
             hasIdentityError = true
             identityMessage = "Enter a full path, starting with / or ~/"
@@ -77,7 +77,7 @@ final class AddProjectModel {
             guard !Task.isCancelled else { return }
             do { try await delay() } catch { return }
             guard !Task.isCancelled else { return }
-            let probe = Task.detached {
+            let preview = await BlockingWork.run {
                 do {
                     try Task.checkCancellation()
                     try files.requireProjectDirectory(at: path)
@@ -86,11 +86,6 @@ final class AddProjectModel {
                 } catch {
                     return (Optional<ProjectIdentity>.none, Optional(error.localizedDescription))
                 }
-            }
-            let preview = await withTaskCancellationHandler {
-                await probe.value
-            } onCancel: {
-                probe.cancel()
             }
             guard !Task.isCancelled, let self, self.previewGeneration == generation else { return }
             self.applyPreview(preview.0, error: preview.1)

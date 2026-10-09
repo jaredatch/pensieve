@@ -9,10 +9,14 @@ extension SkillOverviewPresentationTests {
         try files.writeFile(at: root + "/skills/fixture/SKILL.md", content: document)
         // The real store owns the file read. Other probes use a neutral fixture and no detected agents.
         let neutralFiles = DeployRecordingFileService()
-        let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: files, baseDir: root + "/skills"),
-                                            fileService: neutralFiles, manifestRoot: root)
-        let platformVM = PlatformViewModel(fileService: neutralFiles, agentDetection: DeployStubDetection(installed: []),
-                                           deployStateStore: .memoryBacked)
+        let store = SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root)
+        let library = SkillLibraryViewModel(skillStore: store, fileService: neutralFiles,
+                                            fileWatchService: FileWatchService(rootDir: root + "/skills"), manifestRoot: root)
+        let platformVM = PlatformViewModel(fileService: neutralFiles,
+                                           linkService: TestPaths.linkService(fileService: neutralFiles),
+                                           cursorCompiler: TestPaths.cursorCompiler(fileService: neutralFiles),
+                                           agentDetection: DeployStubDetection(installed: []),
+                                           deployStateStore: .memoryBacked, skillsDirectory: root + "/skills")
         let skill = Skill(name: String(repeating: "x", count: 65), skillDescription: String(repeating: "x", count: 10_000),
                           directoryName: "fixture", cursorConfig: CursorAdapterConfig(alwaysApply: alwaysApply))
         return DetailContentSnapshot.load(skill: skill, projects: [], library: library, platformVM: platformVM)

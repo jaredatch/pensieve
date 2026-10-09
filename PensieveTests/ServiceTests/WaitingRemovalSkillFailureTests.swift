@@ -34,9 +34,12 @@ final class WaitingRemovalSkillFailureTests: XCTestCase {
             failingStore.bodies[h.base.skill.directoryName] = "# Body"
             failingStore.entries.insert(h.base.skill.directoryName)
             failingStore.deleteFailures.insert(h.base.skill.directoryName)
-            let library = phase == "row" ? h.library : SkillLibraryViewModel(skillStore: failingStore,
-                fileService: h.mapped, manifestService: ManifestService(fileService: h.base.files),
-                manifestRoot: h.base.root + "/store", notifier: {})
+            let library = phase == "row" ? h.library : SkillLibraryViewModel(
+                skillStore: failingStore,
+                fileService: h.mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+                manifestService: ManifestService(fileService: h.base.files), manifestRoot: h.base.root + "/store",
+                notifier: {}
+            )
             var saves = 0
             XCTAssertFalse(SkillDeletionFlow.delete(skill: h.base.skill, library: library, platformVM: h.vm,
                 projects: [h.base.project, h.base.otherProject], context: h.base.context, persist: { context in
@@ -92,8 +95,12 @@ final class WaitingRemovalSkillFailureTests: XCTestCase {
             try h.hideFolder()
             let manifest = RecordingDeletionManifest()
             manifest.failingWrites = [1, 2]
-            let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: h.mapped), fileService: h.mapped,
-                manifestService: manifest, manifestRoot: h.base.root + "/store", notifier: {})
+            let library = SkillLibraryViewModel(
+                skillStore: SkillStore(fileService: h.mapped, baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
+                fileService: h.mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
+                manifestService: manifest, manifestRoot: h.base.root + "/store",
+                notifier: {}
+            )
             h.base.mapped.beforeDeployStateWrite = { _ in
                 if clearNotice { library.deletionNotice = nil }
                 throw CocoaError(.fileWriteNoPermission)

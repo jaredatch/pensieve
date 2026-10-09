@@ -17,6 +17,7 @@ final class SkillDeploymentsTabPresentation {
 /// drive the existing deploy/remove paths; the snapshot reloads on `refreshCounter`, and rows stay
 /// disabled until it has. The Add Project footer opens the app's Add Project sheet.
 struct SkillDeploymentsTab: View {
+    let homeDirectory: String
     let skill: Skill
     let snapshot: DetailContentSnapshot
     let statusIsCurrent: Bool
@@ -49,8 +50,10 @@ struct SkillDeploymentsTab: View {
         localMachineID: String?,
         hostedIntentModel: DeployIntentModel? = nil,
         hostedPresentation: SkillDeploymentsTabPresentation? = nil,
+        homeDirectory: String,
         onAddProject: @escaping () -> Void
     ) {
+        self.homeDirectory = homeDirectory
         self.skill = skill
         self.snapshot = snapshot
         self.statusIsCurrent = statusIsCurrent
@@ -90,7 +93,7 @@ struct SkillDeploymentsTab: View {
             projectPlatforms: platformVM.deployablePlatforms(forProject: true),
             macStatus: snapshot.macStatus,
             projectStatus: snapshot.projectStatus,
-            homeDirectory: Constants.homeDirectory,
+            homeDirectory: homeDirectory,
             statusIsCurrent: statusIsCurrent,
             prefixesThisMac: !remote.machines.isEmpty
         )

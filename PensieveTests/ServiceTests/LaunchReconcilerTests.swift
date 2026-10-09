@@ -47,15 +47,20 @@ private final class Plan24GitState: GitServiceProtocol {
     func clone(remote: String, into path: String, credential: GitCredential?) throws {}
     func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool { true }
     func stageAllAndCommit(at path: String, message: String) throws -> Bool { false }
+    func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+    func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+        try pullRebase(at: path, credential: nil)
+    }
     func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult { .upToDate }
     func push(at path: String, credential: GitCredential?) throws {}
     func abortRebase(at path: String) throws {}
     func conflictedFiles(at path: String) -> [String] { [] }
-    func blob(atStage stage: Int, path: String, in workingDir: String) -> String? { nil }
+    func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
     func continueRebase(at path: String) throws -> PullResult { .upToDate }
     func skipRebase(at path: String) throws -> PullResult { .upToDate }
     func stagePath(_ path: String, at root: String) throws {}
-    func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?) throws -> Bool { false }
+    func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
     func hasCommitsToPush(at path: String) -> Bool { false }
 }
 
@@ -110,12 +115,18 @@ final class LaunchReconcilerTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
         fileService = FileService()
         manifest = ManifestService(fileService: fileService)
-        skillStore = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        skillStore = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         rebuildService = StoreRebuildService(fileService: fileService, manifestService: manifest)
         migrationService = StoreMigrationService(fileService: fileService, manifestService: manifest,
                                                  skillStore: skillStore)
-        reconciler = LaunchReconciler(rebuildService: rebuildService, migrationService: migrationService,
-                                      manifestService: manifest, root: tempDir, lockPath: tempDir + "/sync.lock")
+        reconciler = LaunchReconciler(
+            rebuildService: rebuildService,
+            migrationService: migrationService,
+            manifestService: manifest,
+            root: tempDir,
+            lockPath: tempDir + "/sync.lock",
+            git: TestPaths.git
+        )
     }
 
     override func tearDownWithError() throws {
@@ -479,10 +490,17 @@ extension LaunchReconcilerTests {
         let faulty = UnlistableDirFileService(real: fileService, unlistableSuffix: "/manifest/skills")
         let rebuild = StoreRebuildService(fileService: faulty, manifestService: ManifestService(fileService: faulty))
         let migration = StoreMigrationService(fileService: faulty, manifestService: ManifestService(fileService: faulty),
-                                              skillStore: SkillStore(fileService: faulty, baseDir: tempDir + "/skills"))
-        let rec = LaunchReconciler(rebuildService: rebuild, migrationService: migration, fileService: faulty,
-                                   manifestService: ManifestService(fileService: faulty), root: tempDir,
-                                   lockPath: tempDir + "/sync.lock")
+                                              skillStore: SkillStore(fileService: faulty, baseDir: tempDir + "/skills",
+                                                  storeRoot: tempDir))
+        let rec = LaunchReconciler(
+            rebuildService: rebuild,
+            migrationService: migration,
+            fileService: faulty,
+            manifestService: ManifestService(fileService: faulty),
+            root: tempDir,
+            lockPath: tempDir + "/sync.lock",
+            git: TestPaths.git
+        )
 
         let outcome = rec.reconcileOnLaunch(context: ctx, alreadyMigrated: true)
 

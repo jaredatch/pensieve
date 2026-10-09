@@ -113,6 +113,10 @@ final class SyncSetupModelTests: XCTestCase {
             return true
         }
 
+        func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+        func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+            try pullRebase(at: path, credential: nil)
+        }
         func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
             calls.append("pull")
             return pullResult
@@ -126,11 +130,12 @@ final class SyncSetupModelTests: XCTestCase {
 
         func abortRebase(at path: String) throws { calls.append("abort") }
         func conflictedFiles(at path: String) -> [String] { [] }
-        func blob(atStage stage: Int, path: String, in workingDir: String) -> String? { nil }
+        func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
         func continueRebase(at path: String) throws -> PullResult { .upToDate }
         func skipRebase(at path: String) throws -> PullResult { .upToDate }
         func stagePath(_ path: String, at root: String) throws {}
-        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?) throws -> Bool { false }
+        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                    fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
         func hasCommitsToPush(at path: String) -> Bool { false }
     }
 
@@ -922,7 +927,7 @@ extension SyncSetupModelTests {
 
     @discardableResult
     private func fixtureGit(_ args: [String], in directory: String? = nil) throws -> GitService.GitOutput {
-        try GitService().runOrThrow(args, in: directory)
+        try TestPaths.git.runOrThrow(args, in: directory)
     }
 
     private func makeBareFixture(
@@ -936,7 +941,7 @@ extension SyncSetupModelTests {
         let bare = fixtures + "/\(suffix).git"
         let seed = fixtures + "/\(suffix)-seed"
         try FileManager.default.createDirectory(atPath: seed, withIntermediateDirectories: true)
-        let git = GitService()
+        let git = TestPaths.git
         try git.initRepository(at: seed)
         if branch != "main" { try git.checkoutUnbornBranch(branch, at: seed) }
         try ManifestService().write(
@@ -958,6 +963,9 @@ extension SyncSetupModelTests {
                 toFile: seed + "/manifest/categories", atomically: true, encoding: .utf8
             )
             try "remote ds\n".write(toFile: seed + "/.DS_Store", atomically: true, encoding: .utf8)
+            // Model an older build's tracked file independently of Pensieve's new-file exclusions.
+            try fixtureGit(["-C", seed, "add", "--force", "--", ".DS_Store"])
+            try fixtureGit(["-C", seed, "commit", "-m", "older build tracked Finder metadata"])
         }
         XCTAssertTrue(try git.stageAllAndCommit(at: seed, message: "seed"))
         try fixtureGit(["init", "--bare", bare])
@@ -986,7 +994,7 @@ extension SyncSetupModelTests {
         return (
             SyncSetupModel(
                 context: resolvedContext,
-                git: GitService(),
+                git: TestPaths.git,
                 credentials: InMemoryCredentialStore(),
                 rebuilder: StoreRebuildService(),
                 fileService: FileService(),
@@ -1013,7 +1021,7 @@ extension SyncSetupModelTests {
         try writeRealScaffold()
         let (model, context) = try makeRealModel()
         try performReal(model, remote: fixture.remote)
-        XCTAssertTrue(try GitService().hasLocalBranches(at: root))
+        XCTAssertTrue(try TestPaths.git.hasLocalBranches(at: root))
         XCTAssertEqual(try skillCount(context), 1)
     }
 
@@ -1051,7 +1059,7 @@ extension SyncSetupModelTests {
         XCTAssertEqual(try String(contentsOfFile: root + "/manifest/categories", encoding: .utf8),
                        "remote category collision\n")
         XCTAssertEqual(try String(contentsOfFile: root + "/.DS_Store", encoding: .utf8), "remote ds\n")
-        XCTAssertTrue(try GitService().hasLocalBranches(at: root))
+        XCTAssertTrue(try TestPaths.git.hasLocalBranches(at: root))
     }
 
     func testRealGitHeadlessRemoteFallbackAdopts() throws {
@@ -1059,13 +1067,14 @@ extension SyncSetupModelTests {
         try writeRealScaffold()
         let (model, _) = try makeRealModel()
         try performReal(model, remote: fixture.remote)
-        XCTAssertEqual(try GitService().currentBranch(at: root), "master")
+        XCTAssertEqual(try TestPaths.git.currentBranch(at: root),
+            "master")
     }
 
     func testRealGitCrashedHalfAdoptionRetryHeals() throws {
         let fixture = try makeBareFixture()
         try writeRealScaffold()
-        let git = GitService()
+        let git = TestPaths.git
         try git.initRepository(at: root)
         try git.setRemote(fixture.remote, at: root)
         try git.fetchBranch("main", at: root, credential: nil)
@@ -1078,7 +1087,7 @@ extension SyncSetupModelTests {
     func testRealGitPartialMaterializationRetryHeals() throws {
         let fixture = try makeBareFixture()
         try writeRealScaffold()
-        let git = GitService()
+        let git = TestPaths.git
         try git.initRepository(at: root); try git.setRemote(fixture.remote, at: root)
         try git.fetchBranch("main", at: root, credential: nil); try git.materializeFromFetchHead(at: root)
         try "garbage\n".write(toFile: root + "/manifest/manifest.yaml", atomically: true, encoding: .utf8)
@@ -1095,13 +1104,18 @@ extension SyncSetupModelTests {
     func testRealGitCrashRelaunchRetryHealsWithLaunchQuarantine() throws {
         let fixture = try makeBareFixture()
         try writeRealScaffold()
-        let git = GitService()
+        let git = TestPaths.git
         try git.initRepository(at: root); try git.setRemote(fixture.remote, at: root)
         try git.fetchBranch("main", at: root, credential: nil); try git.materializeFromFetchHead(at: root)
         let context = try makeContext()
         let launch = LaunchReconciler(
-            fileService: FileService(), manifestService: ManifestService(), root: root,
-            lockPath: root + "-launch.lock", git: git
+            migrationService: StoreMigrationService(skillStore: SkillStore(fileService: FileService(),
+                baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot)),
+            fileService: FileService(),
+            manifestService: ManifestService(),
+            root: root,
+            lockPath: root + "-launch.lock",
+            git: git
         ).reconcileOnLaunch(context: context, alreadyMigrated: true)
         XCTAssertTrue(launch.quarantined); XCTAssertEqual(try skillCount(context), 0)
         let (model, _) = try makeRealModel(context: context)
@@ -1117,7 +1131,7 @@ extension SyncSetupModelTests {
         )
         let skillPath = root + "/skills/local/SKILL.md"
         let before = try Data(contentsOf: URL(fileURLWithPath: skillPath))
-        let git = GitService(); try git.initRepository(at: root); try git.setRemote(fixture.remote, at: root)
+        let git = TestPaths.git; try git.initRepository(at: root); try git.setRemote(fixture.remote, at: root)
         try fixtureGit(["-C", root, "add", "-A"])
         let (model, _) = try makeRealModel()
         XCTAssertThrowsError(try performReal(model, remote: fixture.remote)) { error in
@@ -1135,11 +1149,16 @@ extension SyncSetupModelTests {
         )
         let skillPath = root + "/skills/local/SKILL.md"
         let before = try Data(contentsOf: URL(fileURLWithPath: skillPath))
-        let git = GitService(); try git.initRepository(at: root)
+        let git = TestPaths.git; try git.initRepository(at: root)
         let context = try makeContext()
         let launch = LaunchReconciler(
-            fileService: FileService(), manifestService: ManifestService(), root: root,
-            lockPath: root + "-launch.lock", git: git
+            migrationService: StoreMigrationService(skillStore: SkillStore(fileService: FileService(),
+                baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot)),
+            fileService: FileService(),
+            manifestService: ManifestService(),
+            root: root,
+            lockPath: root + "-launch.lock",
+            git: git
         ).reconcileOnLaunch(context: context, alreadyMigrated: true)
         XCTAssertFalse(launch.quarantined); XCTAssertEqual(try skillCount(context), 1)
         let (model, _) = try makeRealModel(context: context)
@@ -1153,11 +1172,16 @@ extension SyncSetupModelTests {
     func testRealGitPreOriginCrashLaunchNoopThenHeals() throws {
         let fixture = try makeBareFixture()
         try writeRealScaffold()
-        let git = GitService(); try git.initRepository(at: root)
+        let git = TestPaths.git; try git.initRepository(at: root)
         let context = try makeContext()
         let launch = LaunchReconciler(
-            fileService: FileService(), manifestService: ManifestService(), root: root,
-            lockPath: root + "-launch.lock", git: git
+            migrationService: StoreMigrationService(skillStore: SkillStore(fileService: FileService(),
+                baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot)),
+            fileService: FileService(),
+            manifestService: ManifestService(),
+            root: root,
+            lockPath: root + "-launch.lock",
+            git: git
         ).reconcileOnLaunch(context: context, alreadyMigrated: true)
         XCTAssertFalse(launch.quarantined); XCTAssertEqual(try skillCount(context), 0)
         let (model, _) = try makeRealModel(context: context)
@@ -1170,7 +1194,7 @@ extension SyncSetupModelTests {
         try writeRealScaffold()
         let userPath = root + "/user.txt"
         try "user bytes\n".write(toFile: userPath, atomically: true, encoding: .utf8)
-        let git = GitService(); try git.initRepository(at: root)
+        let git = TestPaths.git; try git.initRepository(at: root)
         XCTAssertTrue(try git.stageAllAndCommit(at: root, message: "user commit"))
         let original = try git.commitSHA(at: root)
         try fixtureGit(["-C", root, "symbolic-ref", "HEAD", "refs/heads/weird"])

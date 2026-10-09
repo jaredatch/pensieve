@@ -30,7 +30,6 @@ final class ViewChangesViewModel {
     private var identity: ViewChangesIdentity?
     private var sessionID = UUID()
     @ObservationIgnored private var previewTask: Task<Void, Never>?
-    @ObservationIgnored private var cancelWorker: (() -> Void)?
 
     init(library: SkillLibraryViewModel, operations: UpdateReviewOperations, updates: UpdatesViewModel? = nil,
          skillLookup: @escaping (UUID, ModelContext) throws -> Skill? = UpdatesViewModel.findSkill) {
@@ -170,29 +169,23 @@ final class ViewChangesViewModel {
         lineNotes = []
         sessionID = UUID()
         previewTask?.cancel()
-        cancelWorker?()
         previewTask = nil
-        cancelWorker = nil
     }
 
     private func loadPreview(context: ModelContext, session: UUID) async {
         guard sessionID == session, !Task.isCancelled, let requested = row else { return }
         let container = context.container
         let diff = operations.diffOperation
-        let worker = Task.detached(priority: .userInitiated) {
-            try Task.checkCancellation()
-            let preview = try diff(requested, container)
-            let notes = preview.files.map { file in
-                file.diff?.hunks.map { ViewChangesPresentation.lineNotes($0.lines) } ?? []
-            }
-            try Task.checkCancellation()
-            return (preview, notes)
-        }
-        cancelWorker = { worker.cancel() }
         do {
-            let (preview, notes) = try await withTaskCancellationHandler {
-                try await worker.value
-            } onCancel: { worker.cancel() }
+            let (preview, notes) = try await BlockingWork.run(priority: .userInitiated) {
+                try Task.checkCancellation()
+                let preview = try diff(requested, container)
+                let notes = preview.files.map { file in
+                    file.diff?.hunks.map { ViewChangesPresentation.lineNotes($0.lines) } ?? []
+                }
+                try Task.checkCancellation()
+                return (preview, notes)
+            }
             guard sessionID == session, !Task.isCancelled else { return }
             lineNotes = notes
             selectedFileID = preview.files.indices.first
@@ -204,7 +197,6 @@ final class ViewChangesViewModel {
         }
         guard sessionID == session else { return }
         previewTask = nil
-        cancelWorker = nil
     }
 
 }
@@ -220,13 +212,9 @@ extension ViewChangesViewModel {
         let container = context.container
         previewTask = Task {
             guard self.sessionID == session, !Task.isCancelled else { return }
-            let worker = Task.detached(priority: .userInitiated) {
-                try UpdatesViewModel.performUnlessCancelled { try operation(requestedSkillID, container) }
+            let result = await BlockingWork.run(priority: .userInitiated) {
+                Result { try UpdatesViewModel.performUnlessCancelled { try operation(requestedSkillID, container) } }
             }
-            self.cancelWorker = { worker.cancel() }
-            let result = await withTaskCancellationHandler {
-                await worker.result
-            } onCancel: { worker.cancel() }
             guard self.sessionID == session, !Task.isCancelled else { return }
             let failure: String?
             switch result {
@@ -248,7 +236,6 @@ extension ViewChangesViewModel {
                 self.state = .failed(failure ?? "The check failed.")
                 self.offersRecheck = true
                 self.previewTask = nil
-                self.cancelWorker = nil
             }
         }
     }

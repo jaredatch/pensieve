@@ -1,18 +1,14 @@
 import XCTest
 import SwiftData
 @testable import Pensieve
-
 private typealias PensieveCategory = Pensieve.Category
-
 /// PLAN-09 / 09.2 — reproduce-on-demand conflict inspection/resolution over real file:// clones.
 final class SyncConflictResolutionTests: XCTestCase {
     private var tempDir: String!; private var lockPath: String { tempDir + "-sync.lock" }
-
     override func setUpWithError() throws {
         tempDir = TestTemporaryDirectory.path + "PensieveSyncConflictTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
     }
-
     override func tearDownWithError() throws {
         if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
             try FileManager.default.removeItem(atPath: tempDir)
@@ -28,8 +24,8 @@ final class SyncConflictResolutionTests: XCTestCase {
         XCTAssertEqual(set.items.count, 1)
         XCTAssertEqual(item.kind, .body)
         XCTAssertEqual(item.path, Self.skillPath)
-        XCTAssertEqual(item.thisMachine, fixture.thisText)
-        XCTAssertEqual(item.otherMachine, fixture.otherText)
+        XCTAssertEqual(item.thisMachine, Data(fixture.thisText.utf8))
+        XCTAssertEqual(item.otherMachine, Data(fixture.otherText.utf8))
         XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.cloneB))
         XCTAssertEqual(try rawGit(["-C", fixture.cloneB, "status", "--porcelain"]), "")
     }
@@ -105,7 +101,7 @@ final class SyncConflictResolutionTests: XCTestCase {
         let finalThis = try writeSkillFile(root: fixture.cloneB, body: "This body final")
         XCTAssertTrue(try fixture.git.stageAllAndCommit(at: fixture.cloneB, message: "B two"))
         let item = try inspectedItem(in: fixture)
-        XCTAssertEqual(item.thisMachine, finalThis)
+        XCTAssertEqual(item.thisMachine, Data(finalThis.utf8))
         let outcome = try fixture.engine.resolveConflicts(
             root: fixture.cloneB,
             picks: [item.path: ResolutionPick(side: .thisMachine, expectedThis: item.thisMachine,
@@ -151,6 +147,7 @@ final class SyncConflictResolutionTests: XCTestCase {
         try FileManager.default.createSymbolicLink(atPath: root + "/skills/victim", withDestinationPath: inRootDecoy)
         try assertUnsafePath("skills/victim/SKILL.md", root: root, escapedPath: inRootDecoy + "/SKILL.md")
         try assertUnsafePath("skills/\u{85}/SKILL.md", root: root, escapedPath: nil)
+        try assertUnsafeJoiningScalarPaths(root: root)
         // Lexical guards (absolute / .. / . / empty component) — each must reject before any write.
         try assertUnsafePath("../outside/direct.txt", root: root, escapedPath: outside + "/direct.txt")
         try assertUnsafePath("/absolute.txt", root: root, escapedPath: nil)
@@ -158,23 +155,30 @@ final class SyncConflictResolutionTests: XCTestCase {
         try assertUnsafePath("skills//SKILL.md", root: root, escapedPath: root + "/skills/SKILL.md")
     }
 
-    /// inspectConflicts must NEVER leave a mid-rebase tree at rest: if pullRebase throws after starting a
-    /// rebase (e.g. a clean-applying replay that fails at commit-sign, with no unmerged paths), inspect
-    /// must abort. Proven with a stub whose pullRebase throws; the abort runs via the outer catch.
-    func testInspectConflictsAbortsWhenPullRebaseThrows() throws {
+    /// Inspection aborts a started rebase on either a git rejection or a local pipe failure.
+    @MainActor
+    func testInspectConflictsAbortsWhenPullRebaseThrows() async throws {
         let root = tempDir + "/inspectAbort"
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
-        let git = StubGit(conflictPath: "skills/x/SKILL.md",
-                          pullError: GitError.commandFailed(args: ["rebase"], exitCode: 1, stderr: "boom"))
-        let engine = SyncEngine(gitService: git, manifestService: ManifestService(),
-                                storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)
-        XCTAssertThrowsError(try engine.inspectConflicts(root: root, credential: nil, context: makeContext()))
-        XCTAssertEqual(git.abortsAfterPull, 1, "inspect must abort the rebase when pullRebase throws")
+        assertConflictIndexRemovalDefault(StubGit(conflictPath: "skills/x/SKILL.md"), at: root)
+        let failures: [(GitError, String)] = [
+            (.commandFailed(args: ["rebase"], exitCode: 1, stderr: "boom"), "git rebase failed (exit 1): boom"),
+            (.outputReadFailed(detail: "Authentication failed; CONFLICT; Xcode license not accepted"),
+             "Pensieve couldn’t read git’s output: Authentication failed; CONFLICT; Xcode license not accepted")
+        ]
+        for (failure, expectedMessage) in failures {
+            let git = StubGit(conflictPath: "skills/x/SKILL.md", pullError: failure)
+            let engine = SyncEngine(gitService: git, manifestService: ManifestService(),
+                                    storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)
+            let model = ConflictResolutionModel(engine: engine, git: git, credentials: InMemoryCredentialStore(), root: root)
+            await model.loadAndReport(context: try makeContext())
+            guard case let .error(message) = model.phase else { return XCTFail("must report failure, never conflicts") }
+            XCTAssertEqual(message, expectedMessage)
+            XCTAssertEqual(git.abortsAfterPull, 1, "inspect must abort the rebase when pullRebase throws")
+        }
     }
 }
-
 // MARK: - Conflict fixtures
-
 extension SyncConflictResolutionTests {
     private static let slug = "conflict"
     private static let skillPath = "skills/conflict/SKILL.md"
@@ -193,7 +197,7 @@ extension SyncConflictResolutionTests {
 
     private func makeBodyConflict(thisBody: String = "This machine body",
                                   otherBody: String = "Other machine body") throws -> BodyConflictFixture {
-        let git = GitService()
+        let git = TestPaths.git
         let manifest = ManifestService()
         let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: git), manifestService: manifest,
                                 storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)
@@ -262,7 +266,6 @@ extension SyncConflictResolutionTests {
         try context.save()
     }
 }
-
 // MARK: - Path-safety stubs
 extension SyncConflictResolutionTests {
     private final class StubGit: GitServiceProtocol {
@@ -286,6 +289,10 @@ extension SyncConflictResolutionTests {
         func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool { true }
         @discardableResult
         func stageAllAndCommit(at path: String, message: String) throws -> Bool { true }
+        func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+        func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+            try pullRebase(at: path, credential: nil)
+        }
         func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
             pullAttempted = true
             if let pullError { throw pullError }
@@ -294,24 +301,25 @@ extension SyncConflictResolutionTests {
         func push(at path: String, credential: GitCredential?) throws {}
         func abortRebase(at path: String) throws { if pullAttempted { abortsAfterPull += 1 } }
         func conflictedFiles(at path: String) -> [String] { [conflictPath] }
-        func blob(atStage stage: Int, path: String, in workingDir: String) -> String? {
-            stage == 3 ? "this" : "other"
+        func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? {
+            Data((stage == 3 ? "this" : "other").utf8)
         }
         func continueRebase(at path: String) throws -> PullResult { .merged }
         func skipRebase(at path: String) throws -> PullResult { .merged }
         func stagePath(_ path: String, at root: String) throws { stagedPaths.append(path) }
-        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?) throws -> Bool {
+        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                    fetchedRevision: FetchedStoreRevision?) throws -> Bool {
             true
         }
         func hasCommitsToPush(at path: String) -> Bool { false }
     }
 
-    private func assertUnsafePath(_ path: String, root: String, escapedPath: String?,
-                                  line: UInt = #line) throws {
+    func assertUnsafePath(_ path: String, root: String, escapedPath: String?,
+                          line: UInt = #line) throws {
         let git = StubGit(conflictPath: path)
         let engine = SyncEngine(gitService: git, manifestService: ManifestService(),
                                 storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)
-        let pick = ResolutionPick(side: .thisMachine, expectedThis: "this", expectedOther: "other")
+        let pick = ResolutionPick(side: .thisMachine, expectedThis: Data("this".utf8), expectedOther: Data("other".utf8))
         XCTAssertThrowsError(try engine.resolveConflicts(root: root, picks: [path: pick],
                                                          credential: nil, context: makeContext()),
                              line: line) { error in
@@ -325,7 +333,6 @@ extension SyncConflictResolutionTests {
 }
 
 // MARK: - Shared helpers
-
 extension SyncConflictResolutionTests {
     private struct TestFailure: Error, CustomStringConvertible {
         let description: String
@@ -389,11 +396,5 @@ extension SyncConflictResolutionTests {
 
     private func readSkill(root: String) throws -> String {
         try String(contentsOfFile: root + "/" + Self.skillPath, encoding: .utf8)
-    }
-
-    private func writeSyncControlFiles(at root: String) throws {
-        let attrs = "manifest/categories/*.yaml merge=union\nmanifest/projects.yaml merge=union\n"
-        try attrs.write(toFile: root + "/.gitattributes", atomically: true, encoding: .utf8)
-        try ".DS_Store\n".write(toFile: root + "/.gitignore", atomically: true, encoding: .utf8)
     }
 }

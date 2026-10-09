@@ -53,15 +53,20 @@ final class SyncModelTests: XCTestCase {
         func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool { false }
         @discardableResult
         func stageAllAndCommit(at path: String, message: String) throws -> Bool { false }
+        func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+        func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+            try pullRebase(at: path, credential: nil)
+        }
         func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult { .upToDate }
         func push(at path: String, credential: GitCredential?) throws {}
         func abortRebase(at path: String) throws {}
         func conflictedFiles(at path: String) -> [String] { [] }
-        func blob(atStage stage: Int, path: String, in workingDir: String) -> String? { nil }
+        func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
         func continueRebase(at path: String) throws -> PullResult { .upToDate }
         func skipRebase(at path: String) throws -> PullResult { .upToDate }
         func stagePath(_ path: String, at root: String) throws {}
-        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?) throws -> Bool { false }
+        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                    fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
         func hasCommitsToPush(at path: String) -> Bool { false }
     }
 
@@ -93,6 +98,8 @@ final class SyncModelTests: XCTestCase {
                 model.apply(.synced(pushed: pushed, warnings: warnings, completedAt: Date()))
             case let .conflicted(paths):
                 model.apply(.conflicted(paths))
+            case .branchless:
+                model.apply(.branchless)
             case .noRemote:
                 model.apply(.noRemote)
             }
@@ -112,6 +119,21 @@ final class SyncModelTests: XCTestCase {
             ])
         )
         XCTAssertEqual(model.conflictedSlugs, ["a", "b"])
+        for scalar in PathJoiningScalars.values {
+            let name = PathJoiningScalars.name("skill", scalar: scalar)
+            let joined = SyncModel(git: StubGit(), root: "/unused", initialState: .conflicted([
+                "skills/" + name + "/SKILL.md", "manifest/skills/" + name + ".yaml"
+            ]))
+            XCTAssertEqual(joined.conflictedSlugs, [name])
+            XCTAssertEqual(SyncEngine.kind(for: "manifest/skills/" + name + ".yaml"), .overlay)
+            XCTAssertEqual(SyncEngine.kind(for: "manifest/categories/" + name + ".yaml"), .category)
+        }
+
+        let malformed = SyncModel(git: StubGit(), root: "/unused", initialState: .conflicted([
+            "skills/SKILL.md", "skills//SKILL.md", "manifest/skills/.yaml",
+            "manifest/skills/", "skills/./SKILL.md", "skills/../SKILL.md"
+        ]))
+        XCTAssertTrue(malformed.conflictedSlugs.isEmpty, "Degenerate paths must never badge a skill")
 
         let idleModel = SyncModel(
             git: StubGit(),

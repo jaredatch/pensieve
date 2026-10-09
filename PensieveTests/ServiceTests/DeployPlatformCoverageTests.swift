@@ -3,10 +3,11 @@ import XCTest
 @testable import Pensieve
 
 final class DeployPlatformCoverageTests: XCTestCase {
+    private let paths = RuntimePaths.production
     func testEverySymlinkPlatformRootMatchesItsLinkPathParent() throws {
         for platform in PlatformTarget.allCases where platform.usesSymlinks {
-            let root = try XCTUnwrap(DeployPaths.userSkillsRoot(for: platform))
-            let linkPath = DeployPaths.linkPath(
+            let root = try XCTUnwrap(paths.deployPaths.userSkillsRoot(for: platform))
+            let linkPath = paths.deployPaths.linkPath(
                 directoryName: "coverage-fixture",
                 platform: platform,
                 projectPath: nil
@@ -16,18 +17,18 @@ final class DeployPlatformCoverageTests: XCTestCase {
     }
 
     func testEverySymlinkPlatformInDaemonPruneList() throws {
-        let pruneDirectories = DeployReconciler.defaultAgentSkillDirs
+        let pruneDirectories = DeployReconciler.agentSkillDirs(paths: paths.deployPaths)
         for platform in PlatformTarget.allCases where platform.usesSymlinks {
-            let root = try XCTUnwrap(DeployPaths.userSkillsRoot(for: platform))
+            let root = try XCTUnwrap(paths.deployPaths.userSkillsRoot(for: platform))
             XCTAssertTrue(pruneDirectories.contains { $0.path == root && $0.platform == platform },
                           "Missing \(platform) root from daemon prune list")
         }
     }
 
     func testEverySymlinkPlatformInBackfillCandidates() throws {
-        let directories = DeployStateBackfill.userWideSymlinkDirectories(paths: .defaults)
+        let directories = DeployStateBackfill.userWideSymlinkDirectories(paths: paths.deployPaths)
         for platform in PlatformTarget.allCases where platform.usesSymlinks {
-            let root = try XCTUnwrap(DeployPaths.userSkillsRoot(for: platform))
+            let root = try XCTUnwrap(paths.deployPaths.userSkillsRoot(for: platform))
             XCTAssertTrue(
                 directories.contains { $0.directory == root && $0.platform == platform },
                 "Missing \(platform) root from deploy-state backfill candidates"
@@ -36,18 +37,20 @@ final class DeployPlatformCoverageTests: XCTestCase {
     }
 
     func testCursorHasNoUserSkillsRoot() {
-        XCTAssertNil(DeployPaths.userSkillsRoot(for: .cursor))
-        XCTAssertFalse(DeployReconciler.defaultAgentSkillDirs.contains { $0.path == PathConstants.cursorUserRulesDir })
+        XCTAssertNil(paths.deployPaths.userSkillsRoot(for: .cursor))
+        XCTAssertFalse(DeployReconciler.agentSkillDirs(paths: paths.deployPaths).contains {
+            $0.path == PathConstants.cursorUserRulesDir
+        })
         XCTAssertFalse(
-            DeployStateBackfill.userWideSymlinkDirectories(paths: .defaults).contains { $0.platform == .cursor }
+            DeployStateBackfill.userWideSymlinkDirectories(paths: paths.deployPaths).contains { $0.platform == .cursor }
         )
     }
 
     func testPreExistingRootsUnchanged() {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        XCTAssertEqual(DeployPaths.userSkillsRoot(for: .claudeCode), home + "/.claude/skills")
-        XCTAssertEqual(DeployPaths.userSkillsRoot(for: .codex), home + "/.codex/skills")
-        XCTAssertEqual(DeployPaths.userSkillsRoot(for: .openClaw), home + "/.openclaw/skills")
-        XCTAssertEqual(DeployPaths.userSkillsRoot(for: .hermes), home + "/.hermes/skills/pensieve")
+        XCTAssertEqual(paths.deployPaths.userSkillsRoot(for: .claudeCode), home + "/.claude/skills")
+        XCTAssertEqual(paths.deployPaths.userSkillsRoot(for: .codex), home + "/.codex/skills")
+        XCTAssertEqual(paths.deployPaths.userSkillsRoot(for: .openClaw), home + "/.openclaw/skills")
+        XCTAssertEqual(paths.deployPaths.userSkillsRoot(for: .hermes), home + "/.hermes/skills/pensieve")
     }
 }

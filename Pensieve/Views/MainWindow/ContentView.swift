@@ -32,13 +32,12 @@ struct ContentView: View {
         echoRegistrar: @escaping SyncWriteEchoRegistering = SyncWriteEchoRegistrar.suppressed,
         bodyWriteRegistration: SyncBodyWriteRegistration = .suppressed,
         updatesModel: UpdatesViewModel,
-        machineDependencies: MachineObservabilityDependencies = .live
+        machineDependencies: MachineObservabilityDependencies,
+        importModel: ImportViewModel
     ) {
         self.notifier = notifier
         self.machineDependencies = machineDependencies
-        _importVM = State(initialValue: ImportViewModel(
-            manifestService: ManifestService(), notifier: notifier,
-            echoRegistrar: echoRegistrar))
+        _importVM = State(initialValue: importModel)
         _installVM = State(initialValue: SkillInstallViewModel(
             service: installService, notifier: notifier,
             echoRegistrar: echoRegistrar, bodyWriteRegistration: bodyWriteRegistration))
@@ -167,7 +166,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showConflictResolution, onDismiss: finishConflictResolution, content: {
             ConflictResolutionView(
-                model: ConflictResolutionModel(onResolutionStarted: runtime.beginConflictResolution),
+                model: runtime.paths.makeConflictResolutionModel(onResolutionStarted: runtime.beginConflictResolution),
                 library: library,
                 notifier: notifier,
                 onDismiss: { showConflictResolution = false }

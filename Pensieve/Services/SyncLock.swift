@@ -26,20 +26,21 @@ final class SyncLock {
     /// Non-blocking acquire. Returns a held lock, or `nil` if another holder has it. Fail-safe: also `nil`
     /// if the lock file cannot be opened — never proceed with git under an unestablished lock.
     static func tryAcquire(
-        at path: String = PathConstants.pensieveAppSupportDir + "/sync.lock"
+        at path: String
     ) -> SyncLock? {
-        // Ensure the containing dir exists (fresh install): a missing parent would fail `open`. The askpass
-        // helper also lives here but is written lazily by a later git op, so the lock must not rely on it.
-        let dir = (path as NSString).deletingLastPathComponent
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try? tryAcquireReportingErrors(at: path)
+    }
 
-        // O_CLOEXEC: git child processes we spawn must NOT inherit (and thus co-hold) this lock fd.
-        let fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { return nil }                 // can't establish the lock → fail safe (busy)
+    /// Returns nil only for contention; callers that offer a retry can distinguish an inaccessible lock.
+    /// The original nonthrowing API retains its fail-safe nil for either refusal.
+    static func tryAcquireReportingErrors(at path: String) throws -> SyncLock? {
+        let fd = try openLockFile(at: path)
 
         if flock(fd, LOCK_EX | LOCK_NB) != 0 {
-            close(fd)                                     // held by someone else (EWOULDBLOCK) → not ours
-            return nil
+            let code = errno
+            close(fd)
+            if code == EWOULDBLOCK { return nil }
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
         }
         return SyncLock(fd: fd)
     }
@@ -49,17 +50,25 @@ final class SyncLock {
     /// while holding it. The whole-cycle `sync.lock` stays non-blocking via `tryAcquire()` so the GUI never
     /// beachballs behind a daemon fetch.
     static func acquire(at path: String) -> SyncLock? {
-        let dir = (path as NSString).deletingLastPathComponent
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-
-        let fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { return nil }
+        guard let fd = try? openLockFile(at: path) else { return nil }
 
         guard flock(fd, LOCK_EX) == 0 else {
             close(fd)
             return nil
         }
         return SyncLock(fd: fd)
+    }
+
+    /// A fresh install has no parent. The askpass helper there is written lazily, so it cannot
+    /// create the folder for us. Creation is best effort: an existing parent can still be opened
+    /// when Foundation refuses mkdir. Both lock modes let open/flock decide access.
+    private static func openLockFile(at path: String) throws -> Int32 {
+        let dir = (path as NSString).deletingLastPathComponent
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        // A spawned git child must not inherit and co-hold this descriptor.
+        let descriptor = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        return descriptor
     }
 
     /// Release the lock and close the descriptor. Idempotent — safe to call more than once.

@@ -37,10 +37,10 @@ final class DeployReconciler: DeployReconciling {
 
     init(
         fileService: FileServiceProtocol,
-        deployState: DeployStateStore? = nil,
-        pensieveSkillsDir: String = PathConstants.pensieveSkillsDir,
-        agentSkillDirs: [AgentSkillsDirectory] = DeployReconciler.defaultAgentSkillDirs,
-        cursorRulesDir: String = PathConstants.cursorUserRulesDir,
+        deployState: DeployStateStore,
+        pensieveSkillsDir: String,
+        agentSkillDirs: [AgentSkillsDirectory],
+        cursorRulesDir: String,
         manifestService: ManifestReadWriting = ManifestService()
     ) {
         self.fileService = fileService
@@ -48,15 +48,15 @@ final class DeployReconciler: DeployReconciling {
         self.agentSkillDirs = agentSkillDirs
         self.cursorRulesDir = cursorRulesDir
         self.manifestService = manifestService
-        self.deployState = deployState ?? DeployStateStore(fileService: fileService)
+        self.deployState = deployState
         self.ownership = DeployArtifactOwnership(fileService: fileService)
     }
 
     /// User-wide agent skill dirs whose Pensieve symlinks the daemon prunes. Project-scoped agent dirs
     /// are NOT reconciled (daemon scope fence).
-    static var defaultAgentSkillDirs: [AgentSkillsDirectory] {
+    static func agentSkillDirs(paths: DeployPaths) -> [AgentSkillsDirectory] {
         PlatformTarget.allCases.compactMap { platform in
-            DeployPaths.userSkillsRoot(for: platform).map { AgentSkillsDirectory(platform: platform, path: $0) }
+            paths.userSkillsRoot(for: platform).map { AgentSkillsDirectory(platform: platform, path: $0) }
         }
     }
 
@@ -89,8 +89,9 @@ final class DeployReconciler: DeployReconciling {
               let entries = try? fileService.listDirectory(at: cursorRulesDir) else { return result }
         for entry in entries where entry.hasSuffix(".mdc") {
             let mdcPath = cursorRulesDir + "/" + entry
-            guard let slug = DeployPaths.slug(artifactPath: mdcPath, platform: .cursor, projectPath: nil,
-                                              cursorUserRulesDirectory: cursorRulesDir) else { continue }
+            guard let slug = DeployPaths(skillsDirectory: pensieveSkillsDir, userSkillsDirectories: [:],
+                                              cursorUserRulesDirectory: cursorRulesDir).slug(artifactPath: mdcPath,
+                                                  platform: .cursor, projectPath: nil) else { continue }
             guard records.contains(where: {
                 $0.artifactPath == mdcPath
                     && $0.scope == "user"

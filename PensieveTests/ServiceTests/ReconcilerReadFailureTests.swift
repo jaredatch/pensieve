@@ -122,7 +122,9 @@ final class ReconcilerReadFailureTests: XCTestCase {
         let result = removeRegisteredProject(
             project,
             reconciler: CategoryReconciler(platformVM: harness.platformVM, stateFetcher: fetcher),
-            platformVM: harness.platformVM, localMachineID: ProjectIntentHarness.localID,
+            manifestRoot: TestPaths.storeRoot,
+            platformVM: harness.platformVM,
+            localMachineID: ProjectIntentHarness.localID,
             context: harness.context
         )
 
@@ -156,9 +158,10 @@ final class ReconcilerReadFailureTests: XCTestCase {
 
         let result = removeRegisteredProject(
             project,
-            reconciler: reconciler,
+            reconciler: reconciler, manifestRoot: TestPaths.storeRoot,
             stateFetcher: fetcher,
-            platformVM: harness.platformVM, localMachineID: ProjectIntentHarness.localID,
+            platformVM: harness.platformVM,
+            localMachineID: ProjectIntentHarness.localID,
             context: harness.context
         )
 

@@ -115,9 +115,7 @@ protocol SkillInstallServiceProtocol {
                 context: ModelContext) throws
 }
 
-struct SkillInstallService: SkillInstallServiceProtocol {
-    static let defaultScratchRoot = PathConstants.pensieveAppSupportDir + "/skill-install-scratch"
-
+struct SkillInstallService: SkillInstallServiceProtocol, ScratchRootCleaning {
     static let invalidFrontmatterReason =
         "SKILL.md needs parseable frontmatter with non-empty name and description"
     private static let symlinkReason = "skill contains a symbolic link"
@@ -132,13 +130,13 @@ struct SkillInstallService: SkillInstallServiceProtocol {
     let now: () -> Date
     let validateRemote: InstallRemotePolicy.Validator
 
-    init(gitService: SkillInstallGitServing = GitService(),
-         credentialStore: CredentialStoreProtocol = KeychainCredentialStore(),
+    init(gitService: SkillInstallGitServing,
+         credentialStore: CredentialStoreProtocol,
          fileService: FileServiceProtocol = FileService(),
-         scratchRoot: String = Self.defaultScratchRoot,
-         storeRoot: String = Constants.pensieveBaseDir,
+         scratchRoot: String,
+         storeRoot: String,
          manifestService: ManifestReadWriting? = nil,
-         lockPath: String = PathConstants.pensieveAppSupportDir + "/sync.lock",
+         lockPath: String,
          now: @escaping () -> Date = Date.init,
          remoteValidator: @escaping InstallRemotePolicy.Validator =
              InstallRemotePolicy.validateGitHubRepository) {
@@ -199,15 +197,6 @@ struct SkillInstallService: SkillInstallServiceProtocol {
 }
 
 extension SkillInstallService {
-    static func cleanupScratchRoot(fileService: FileServiceProtocol = FileService(),
-                                   scratchRoot: String = Self.defaultScratchRoot) {
-        if fileService.directoryExists(at: scratchRoot) || fileService.isSymlink(at: scratchRoot) {
-            try? fileService.deleteDirectory(at: scratchRoot)
-        } else if fileService.fileExists(at: scratchRoot) {
-            try? fileService.deleteFile(at: scratchRoot)
-        }
-    }
-
     private func fetch(repo: String, ref: String?, targetPath: String?,
                        credential: GitCredential?) throws -> SkillFetchResult {
         guard let validatedRemote = validateRemote(repo) else {
@@ -374,7 +363,7 @@ extension SkillInstallService {
 
     private func hasSymlinkedComponent(at repositoryPath: String, relativePath: String) -> Bool {
         var path = repositoryPath
-        for component in relativePath.split(separator: "/", omittingEmptySubsequences: false) {
+        for component in PathSyntax.components(relativePath, omittingEmptySubsequences: false) {
             path += "/" + component
             if fileService.isSymlink(at: path) { return true }
         }

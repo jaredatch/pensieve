@@ -32,7 +32,7 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
             XCTAssertEqual(runtime.syncModel.remoteURL, "https://fixture.test/store.git")
             XCTAssertEqual(runtime.syncModel.state, .synced(at: syncedAt))
         }
-        try GitService().removeRemote(at: fixture.root)
+        try TestPaths.git.removeRemote(at: fixture.root)
         await runtime.refreshGitUsability()
         XCTAssertNil(runtime.syncModel.remoteURL)
         XCTAssertNil(runtime.syncModel.configurationError)
@@ -124,7 +124,9 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
         XCTAssertTrue(runtime.syncModel.configurationError?.contains("store folder can't be found") == true)
         XCTAssertFalse(runtime.syncModel.configurationError?.contains("couldn’t be opened") == true)
         XCTAssertNotEqual(runtime.syncModel.state, .unconfigured)
-        let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: GitService(),
+        let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support,
+            git: TestPaths.git,
+                                hasLocalBranches: TestPaths.git.hasLocalBranches,
                                 credentials: InMemoryCredentialStore(), reconciler: NoPresentationReconciler(), now: Date.init)
         XCTAssertTrue(daemon.runOnce().detail.contains("store folder can't be found"))
     }
@@ -150,9 +152,13 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         // A non-scaffold empty store selects clone after the successful preflight.
-        try fixture.files.writeFile(at: fixture.root + "/keep.txt", content: "fixture")
+        try fixture.files.createDirectory(at: fixture.root)
         let git = try fixture.executable("""
-        if [ "$1" = clone ]; then touch '\(fixture.failureSwitch)'; fi
+        simulate_failure() {
+            \(FakeGitScript.skipGlobalOptions)
+            if [ "$1" = clone ]; then touch '\(fixture.failureSwitch)'; fi
+        }
+        simulate_failure "$@"
         if [ -f '\(fixture.failureSwitch)' ]; then
           echo 'You have not agreed to the Xcode license.' >&2
           exit 69
@@ -164,7 +170,11 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
             credentials: InMemoryCredentialStore(), root: fixture.root, lockPath: fixture.support + "/sync.lock")
         await model.connectAndReport(url: "git@example.com:skills.git", username: "", token: "")
         XCTAssertEqual(model.state, .failed(GitUsability.licenseNotAccepted.message ?? ""))
-        let calls = try fixture.files.readFile(at: fixture.trace).split(separator: "\n")
+        let calls = try fixture.files.readFile(at: fixture.trace).split(separator: "\n").map { line in
+            var arguments = line.split(separator: " ")
+            while arguments.first == "-c", arguments.count >= 2 { arguments.removeFirst(2) }
+            return arguments.joined(separator: " ")
+        }
         XCTAssertEqual(calls.filter { $0 == "--version" }.count, 2, "one preflight and one confirming probe")
         XCTAssertTrue(calls.contains { $0.hasPrefix("clone ") })
     }
@@ -179,9 +189,15 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }),
             defaults: isolatedDefaults(), paths: fixture.paths, gitUsabilityProbe: probe.run,
             coordinatorConfigure: { coordinator in
-                await coordinator.configure(engine: RecoveredPresentationEngine(), git: GitService(),
-                                            credentials: InMemoryCredentialStore(), root: fixture.root,
-                                            audit: SyncAudit(appSupport: fixture.support))
+                await coordinator.configure(
+                    engine: RecoveredPresentationEngine(),
+                    git: TestPaths.git,
+                    credentials: InMemoryCredentialStore(),
+                    root: fixture.root,
+                    audit: SyncAudit(appSupport: fixture.support),
+                    machine: (identity: MachineIdentity(appSupportDir: TestPaths.appSupportDir),
+                        stateService: TestPaths.stateService)
+                )
             }
         )
         await runtime.bootstrapTask.value

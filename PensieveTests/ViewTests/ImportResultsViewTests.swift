@@ -4,7 +4,12 @@ import XCTest
 final class ImportResultsViewTests: XCTestCase {
     func testPlatformDisplayNameTitlesFolder() {
         let view = ImportResultsView(
-            importVM: ImportViewModel(scanner: EmptyImportScanner()),
+            importVM: ImportViewModel(
+                scanner: EmptyImportScanner(),
+                skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
+                lockPath: TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString,
+            manifestRoot: TestPaths.storeRoot
+            ),
             onImport: {}
         )
 

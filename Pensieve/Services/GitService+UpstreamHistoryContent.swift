@@ -59,9 +59,8 @@ extension GitService {
 
     func relativeTreePath(_ value: String, root: String) -> String? {
         guard !root.isEmpty else { return value }
-        let prefix = root + "/"
-        guard value.hasPrefix(prefix) else { return nil }
-        return String(value.dropFirst(prefix.count))
+        guard let relative = PathSyntax.relativePath(value, under: root), !relative.isEmpty else { return nil }
+        return relative
     }
 
     func objectExists(_ revision: String, at repositoryPath: String) throws -> Bool {

@@ -53,7 +53,7 @@ final class SafeSkillFileGUISinkTests: XCTestCase {
         let result = StoreMigrationService(
             fileService: fileService,
             manifestService: ManifestService(fileService: fileService),
-            skillStore: SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+            skillStore: SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         ).migrateIfNeeded(fromRoot: tempDir, context: context)
 
         XCTAssertEqual(result.skillsMigrated, 0)
@@ -67,14 +67,14 @@ final class SafeSkillFileGUISinkTests: XCTestCase {
         let fs = LeafRejectingFileService()
         let skill = Skill(name: "Victim", skillDescription: "victim", directoryName: "victim")
 
-        XCTAssertEqual(SkillLibraryViewModel(fileService: fs).estimatedTokens(skill), 0)
+        XCTAssertEqual(SkillLibraryViewModel.testTokenEstimate(skill, fileService: fs), 0)
         XCTAssertTrue(fs.readPaths.isEmpty)
     }
 
     func testReadBodyThrowsUnsafeLeafInsteadOfReturningForeignBytes() throws {
         let foreign = "FOREIGN-BYTES-SHOULD-NOT-LOAD"
         try plantSymlinkedLeaf(slug: "victim", foreign: foreign)
-        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
 
         do {
             let body = try store.readBody(directoryName: "victim")
@@ -87,8 +87,12 @@ final class SafeSkillFileGUISinkTests: XCTestCase {
     func testCursorCompilerIsUpToDateFalseAndCompileThrowsForSymlinkLeaf() throws {
         let foreign = foreignSkill(name: "Foreign", description: "pwned")
         try plantSymlinkedLeaf(slug: "victim", foreign: foreign)
-        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills")
-        let compiler = CursorCompiler(fileService: fileService, skillStore: store)
+        let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
+        let compiler = CursorCompiler(
+            fileService: fileService,
+            skillStore: store,
+            userRulesDirectory: TestPaths.deployPaths.cursorUserRulesDirectory
+        )
         let skill = Skill(name: "Victim", skillDescription: "victim", directoryName: "victim")
         let projectPath = tempDir + "/project"
         let outputPath = compiler.outputPath(skill: skill, projectPath: projectPath)
@@ -113,7 +117,8 @@ final class SafeSkillFileGUISinkTests: XCTestCase {
             linkService: link,
             cursorCompiler: NoopCursorCompiler(),
             agentDetection: StubDetection(),
-            deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: tempDir + "/app-support")
+            deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: tempDir + "/app-support"),
+            skillsDirectory: TestPaths.skillsDir
         )
 
         vm.deploy(skill: skill, platform: .claudeCode, target: .userWide, context: context)

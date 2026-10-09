@@ -10,14 +10,25 @@ enum SkillStoreError: Error, Equatable {
 // MARK: - Protocol
 
 protocol SkillStoreProtocol {
+    /// The canonical skills folder used by this store and its library's file reads.
+    var baseDir: String { get }
     /// Create a new skill directory and write a canonical, self-describing SKILL.md
     /// (`name`/`description` frontmatter + body). Returns the directory name (slug).
     func createSkill(name: String, description: String, body: String) throws -> String
     /// Create a skill whose slug also avoids `avoiding` — every slug a SwiftData row currently holds — so a
     /// row whose directory is missing can never be shadowed by a new directory under its own slug.
     func createSkill(name: String, description: String, body: String, avoiding: Set<String>) throws -> String
-    /// Create a new slug and write a complete, already prepared SKILL.md in one write.
+    /// Start an import batch under the caller-held sync.lock: ensure the skills folder exists and
+    /// snapshot every occupied entry name without following links. Union these with row-held slugs.
+    func prepareImport() throws -> Set<String>
+    /// Publish an already prepared SKILL.md from a vendor temp outside the configured store root.
+    /// The caller holds sync.lock through preparation, the entire batch, cleanup and metadata saves.
+    /// avoiding contains the batch's disk snapshot, row-held slugs, each successful publication
+    /// and destinations that a failed exclusive publication proved occupied.
     func createSkill(name: String, content: String, avoiding: Set<String>) throws -> String
+    /// Fill the same exclusive-publication temp with a selected local skill folder's safe contents.
+    func createSkill(name: String, content: String, copying sourceDirectory: String,
+                     avoiding: Set<String>) throws -> SkillFolderImportResult
     /// Read the raw SKILL.md content (INCLUDING any frontmatter). Callers that want only the
     /// markdown body must strip via `SkillParser.stripFrontmatter`.
     func readBody(directoryName: String) throws -> String
@@ -39,6 +50,11 @@ protocol SkillStoreProtocol {
 }
 
 extension SkillStoreProtocol {
+    func createSkill(name: String, content: String, copying sourceDirectory: String,
+                     avoiding: Set<String>) throws -> SkillFolderImportResult { throw CocoaError(.featureUnsupported) }
+    /// Doubles enumerate their modeled store; never fall through to host filesystem I/O.
+    func prepareImport() throws -> Set<String> { Set(try listSkills()) }
+
     func createSkill(name: String, content: String, avoiding: Set<String>) throws -> String {
         throw CocoaError(.featureUnsupported)
     }
@@ -57,11 +73,13 @@ extension SkillStoreProtocol {
 
 final class SkillStore: SkillStoreProtocol {
     private let fileService: FileServiceProtocol
-    private let baseDir: String
+    let baseDir: String
+    private let storeRoot: String
 
-    init(fileService: FileServiceProtocol, baseDir: String = PathConstants.pensieveSkillsDir) {
+    init(fileService: FileServiceProtocol, baseDir: String, storeRoot: String) {
         self.fileService = fileService
         self.baseDir = baseDir
+        self.storeRoot = storeRoot
     }
 
     func createSkill(name: String, description: String, body: String) throws -> String {
@@ -69,20 +87,49 @@ final class SkillStore: SkillStoreProtocol {
     }
 
     func createSkill(name: String, description: String, body: String, avoiding: Set<String>) throws -> String {
-        try createSkill(
-            name: name,
-            content: SkillSerializer.serialize(name: name, description: description, body: body),
-            avoiding: avoiding
-        )
+        let dirName = Self.availableDirectoryName(for: name, occupied: try occupiedDirectoryNames().union(avoiding))
+        try fileService.createDirectory(at: baseDir + "/" + dirName)
+        let path = try validatedSkillDirectory(dirName) + "/SKILL.md"
+        try fileService.writeFile(at: path,
+            content: SkillSerializer.serialize(name: name, description: description, body: body))
+        return dirName
+    }
+
+    func prepareImport() throws -> Set<String> { try occupiedDirectoryNames() }
+
+    private func occupiedDirectoryNames() throws -> Set<String> {
+        try fileService.createDirectory(at: baseDir)
+        return Set(try fileService.listDirectory(at: baseDir))
     }
 
     func createSkill(name: String, content: String, avoiding: Set<String>) throws -> String {
-        let slug = Self.slugify(name)
-        let dirName = try uniqueDirectoryName(for: slug, avoiding: avoiding)
-        try fileService.createDirectory(at: baseDir + "/" + dirName)
-        let path = try validatedSkillDirectory(dirName) + "/SKILL.md"
-        try fileService.writeFile(at: path, content: content)
-        return dirName
+        try publishSkill(name: name, content: content, sourceDirectory: nil, avoiding: avoiding).directoryName
+    }
+
+    func createSkill(name: String, content: String, copying sourceDirectory: String,
+                     avoiding: Set<String>) throws -> SkillFolderImportResult {
+        try publishSkill(name: name, content: content, sourceDirectory: sourceDirectory, avoiding: avoiding)
+    }
+
+    private func publishSkill(name: String, content: String, sourceDirectory: String?,
+                              avoiding: Set<String>) throws -> SkillFolderImportResult {
+        let candidate = Self.availableDirectoryName(for: name, occupied: avoiding)
+        let destination = try validatedSkillDirectory(candidate)
+        let temporary = VendorTemporaryDirectory.makePath(storeRoot: storeRoot)
+        do {
+            try fileService.createDirectory(at: temporary)
+            try fileService.writeFile(at: temporary + "/SKILL.md", content: content)
+            let skipped = try sourceDirectory.map {
+                try fileService.copyImportedSkillContents(fromDirectory: $0, toDirectory: temporary)
+            } ?? []
+            try fileService.publishNewDirectory(at: temporary, to: destination)
+            return SkillFolderImportResult(directoryName: candidate, skipped: skipped)
+        } catch {
+            if fileService.directoryExists(at: temporary) || fileService.isSymlink(at: temporary) {
+                try? fileService.deleteDirectory(at: temporary)
+            }
+            throw error
+        }
     }
 
     func readBody(directoryName: String) throws -> String {
@@ -157,7 +204,7 @@ final class SkillStore: SkillStoreProtocol {
     /// is always the slugified form — not as a gate on already-existing on-disk skill names.
     static func isCanonicalSlug(_ slug: String) -> Bool {
         !slug.isEmpty
-            && !slug.contains("/")
+            && !PathSyntax.hasSeparator(slug)
             && slug != "."
             && slug != ".."
             && slugify(slug) == slug
@@ -172,7 +219,7 @@ final class SkillStore: SkillStoreProtocol {
     /// scalar) are still rejected. (PLAN-19 security review.)
     static func isPathSafeSlug(_ slug: String) -> Bool {
         !slug.isEmpty
-            && !slug.contains("/")
+            && !PathSyntax.hasSeparator(slug)
             && !slug.contains("\\")
             && slug != "."
             && slug != ".."
@@ -182,7 +229,7 @@ final class SkillStore: SkillStoreProtocol {
 
     /// Pure path construction for render-time context. Filesystem admission still uses C7.
     static func skillDirectoryPath(slug: String, base: String) -> String? {
-        guard !slug.isEmpty, !slug.contains("/"), slug != ".", slug != ".." else { return nil }
+        guard !slug.isEmpty, !PathSyntax.hasSeparator(slug), slug != ".", slug != ".." else { return nil }
         return base + "/" + slug
     }
 
@@ -236,15 +283,16 @@ final class SkillStore: SkillStoreProtocol {
         return path
     }
 
-    /// Returns a unique directory name, appending -2, -3, etc. on collision.
-    private func uniqueDirectoryName(for slug: String, avoiding: Set<String>) throws -> String {
-        let avoided = Set(avoiding.map { $0.lowercased() })
-        func taken(_ candidate: String) -> Bool {
-            avoided.contains(candidate.lowercased()) || fileService.directoryExists(at: baseDir + "/" + candidate)
+    /// One case-insensitive policy for disk entry names, row reservations and modeled stores.
+    static func availableDirectoryName(for name: String, occupied: Set<String>) -> String {
+        let taken = Set(occupied.map { $0.lowercased() })
+        let slug = slugify(name)
+        var candidate = slug
+        var suffix = 2
+        while taken.contains(candidate) {
+            candidate = slug + "-\(suffix)"
+            suffix += 1
         }
-        if !taken(slug) { return slug }
-        var counter = 2
-        while taken(slug + "-\(counter)") { counter += 1 }
-        return slug + "-\(counter)"
+        return candidate
     }
 }

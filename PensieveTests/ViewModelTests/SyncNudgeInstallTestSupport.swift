@@ -111,6 +111,7 @@ enum NudgeFailure: LocalizedError {
 }
 
 final class InstallEchoSkillStore: SkillStoreProtocol {
+    let baseDir = TestPaths.skillsDir
     var bodies: [String: String] = [:]
 
     func createSkill(name: String, description: String, body: String) throws -> String { "unused" }

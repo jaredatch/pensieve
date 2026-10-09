@@ -14,7 +14,7 @@ extension SkillInstallViewModel {
         guard operationID == id, !Task.isCancelled, let source else { return }
         let service = service
         let existingSlug = collision.existing.slug
-        let task = Task.detached(priority: .userInitiated) {
+        let task = BlockingWork.task(priority: .userInitiated) {
             try Self.performUnlessCancelled { () throws -> (SkillAdoptResult, SkillInstallAdoptionCompletion?) in
                 let context = ModelContext(container)
                 let result = try service.adopt(
@@ -65,7 +65,7 @@ extension SkillInstallViewModel {
         guard operationID == id, !Task.isCancelled, let source else { return }
         let service = service
         let bodyWriteRegistration = bodyWriteRegistration
-        let task = Task.detached(priority: .userInitiated) {
+        let task = BlockingWork.task(priority: .userInitiated) {
             try Self.performUnlessCancelled { () throws -> SkillInstallResult in
                 let context = ModelContext(container)
                 return try service.install(

@@ -63,7 +63,8 @@ enum SkillOverviewPresentation {
     /// A linked skill: Repository, Tracked ref, Local path, Installed, Last updated. An authored or
     /// imported one: Local path, Created, Modified.
     static func sourceRows(skill: Skill, provenance: SkillProvenance?, origin: InstalledOrigin?,
-                           homeDirectory: String, now: Date, locale: Locale = .current) -> [SourceRow] {
+                           homeDirectory: String,
+                           skillsDirectory: String, now: Date, locale: Locale = .current) -> [SourceRow] {
         var rows: [SourceRow] = []
         if let provenance, let origin {
             let repositoryPath = SkillDetailHeaderPresentation.repositoryPath(provenance)
@@ -80,8 +81,9 @@ enum SkillOverviewPresentation {
             }
         }
         rows.append(SourceRow(label: "Local path",
-                              value: ListRows.abbreviatePath(skill.canonicalDir, homeDirectory: homeDirectory),
-                              detail: nil, separator: "•", action: .reveal(skill.canonicalDir)))
+                              value: ListRows.abbreviatePath(skill.canonicalDir(skillsDirectory: skillsDirectory),
+                                  homeDirectory: homeDirectory),
+                              detail: nil, separator: "•", action: .reveal(skill.canonicalDir(skillsDirectory: skillsDirectory))))
         if let provenance, provenance.installedAt != nil || provenance.updatedAt != nil {
             if let installed = provenance.installedAt {
                 rows.append(dateRow("Installed", installed, now: now, locale: locale))

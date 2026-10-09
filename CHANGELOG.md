@@ -21,6 +21,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 - The Projects list now shows projects from your other Macs too.
 - A GitHub link to a folder of skills now lists the skills in it, the same as a link to the whole repository.
+- Local import now brings scripts, references, assets and nested folders along with each skill, preserving executable bits. It keeps `.env.example`, `.env.sample` and `.env.template` files, and skips secret environment files, virtualenvs, `node_modules`, other dot-entries, links and special files with notices grouped by reason. Files changed during import are left out; names that differ only by case fail that skill. A lone `Skill.md` or `skill.md` imports as prepared `SKILL.md`. Contents of skipped folders do not count toward the 1,000-entry or 64 MiB limits; skills over 64 folder levels deep also fail, while other selections continue.
 - The Updates sheet is simpler: one row per skill, with its old and new commit and a View Changes button. A skill you've edited locally gets a "Replace my local edits" checkbox, and Update leaves it alone until you check it.
 - If a project folder is missing or unreadable when you delete a skill or remove the project, Pensieve remembers the cleanup on this Mac. Once the folder is reachable, a later launch or sync that brings changes removes its links and rules unless a current project still requests them.
 - Removing a project now affects only this Mac. It stays in its categories, so your other Macs keep their category deploys. Add the same project again and its category skills return at the next launch or sync that brings changes.
@@ -30,12 +31,19 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - Running `pensieve-daemon` with no command now shows its help instead of syncing; `pensieve-daemon run` still syncs.
 - Empty lists, searches that find nothing, and a detail pane with nothing selected now look the way Mail does it: a large, quiet title ("No Skill Selected") in place of the big icon.
 - The skill preview stays offline. An image a skill links from the web shows its alt text instead of loading, so opening a skill never pings someone else's server. Images in the skill's own folder, and images embedded in the file, still show.
-- Import from Folder skips linked files, pipes and anything over 4 MiB, and tells you how many it skipped and why. The "kept as text" notice now lists each skill on its own line.
+- Import discovery skips a linked or special `SKILL.md` or Cursor rule, and refuses one over 4 MiB, and tells you how many it skipped and why. The "kept as text" notice now lists each skill on its own line.
 - A skill's Content tab drops the line under the file picker, and the picker now has the same space above and below it.
 - Frontmatter has to start on a skill's first line, the way your agents read it. If there are blank lines above the opening `---`, Pensieve reads the whole file as text. Skills already in your library stay put either way.
 
 ### Fixed
 
+- Path checks now recognize filesystem separators beside combining marks, joiners, emoji modifiers, tag characters and names ending in Prepend characters. Sync refuses escaping links while existing accented skill names and decomposed link targets keep working.
+- A connected store with no branch now says why it can't sync, instead of showing an old sync time. When git starts working again, sync catches up promptly; with background sync off, it retries your failed Sync Now once.
+- Sync now keeps every file in a skill exactly as it is. Line endings, executable bits and files a skill's own `.gitignore` hides all come through unchanged. It still leaves out `.env` files (except `.env.example`, `.env.sample` and `.env.template`), `node_modules`, `.env` and `.venv` folders, and `.DS_Store`.
+- If another Mac's change would land on top of one of those left-out files here, like your `.env`, sync pauses and names the file instead. Move it and sync picks up again.
+- Resolving a sync conflict keeps the version you pick exactly, including binary files, executable bits and symbolic links. A version the sheet can't show as text says so, and one git can't read can't be picked by mistake.
+- A nested repository committed by an older build no longer leaves a conflict you can't resolve. Choosing it stops syncing that path and leaves whatever is there on this Mac.
+- Slow git operations no longer tie up the threads the app needs to stay responsive. Sync, update checks and upstream history can make progress independently.
 - Short rendered skills now line up with the file row in Content and stay aligned to the left in History.
 - Links in rendered skills now open web pages, jump to headings or select another skill file without showing a system error.
 - History rows keep the same spacing when you make the window taller.

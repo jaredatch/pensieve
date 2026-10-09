@@ -15,7 +15,7 @@ extension SyncEngineTests {
             } else {
                 XCTAssertEqual(
                     try engine.sync(root: tempDir, message: "m", credential: nil, context: context),
-                    .noRemote
+                    .branchless
                 )
                 XCTAssertEqual(
                     try engine.inspectConflicts(root: tempDir, credential: nil, context: context),
@@ -23,7 +23,7 @@ extension SyncEngineTests {
                 )
                 XCTAssertEqual(
                     try engine.resolveConflicts(root: tempDir, picks: [:], credential: nil, context: context),
-                    .noRemote
+                    .branchless
                 )
             }
             XCTAssertTrue(git.calls.isEmpty, "quarantine must precede every mutating git call")

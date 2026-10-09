@@ -73,7 +73,8 @@ final class ProjectRemovalFreshnessTests: XCTestCase {
                     try h.files.createSymlink(at: link, pointingTo: h.project.path)
                     h.otherProject.path = link
                 }
-                try LinkService(fileService: h.mapped).link(skill: h.skill, platform: .claudeCode, projectPath: h.project.path)
+                try TestPaths.linkService(fileService: h.mapped).link(skill: h.skill, platform: .claudeCode,
+                    projectPath: h.project.path)
                 let path = h.artifact(.claudeCode)
                 h.context.insert(DeployRecord(skillID: h.skill.id, platform: .claudeCode,
                     targetPath: path, contentHash: "local", projectID: h.project.id))
@@ -158,9 +159,14 @@ final class ProjectRemovalFreshnessTests: XCTestCase {
     private func confirm(_ model: ProjectRemovalModel, _ h: ProjectFolderCallerHarness,
                          reconciler: CategoryReconcilerProtocol? = nil) -> BatchResult {
         model.confirm { project, plan in
-            removeRegisteredProject(project, reconciler: reconciler ?? h.category,
-                platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID, confirmedPreview: plan,
-                context: h.context)
+            removeRegisteredProject(
+                project,
+                reconciler: reconciler ?? h.category, manifestRoot: TestPaths.storeRoot,
+                platformVM: h.platformVM,
+                localMachineID: ProjectIntentHarness.localID,
+                confirmedPreview: plan,
+                context: h.context
+            )
         }
     }
 }

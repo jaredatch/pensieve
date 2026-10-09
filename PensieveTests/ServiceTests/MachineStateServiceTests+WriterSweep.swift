@@ -139,7 +139,13 @@ final class MachineStateWriterSweepTests: XCTestCase {
     }
 
     private var service: MachineStateService {
-        MachineStateService(fileService: fileService, agentDetection: EmptyMachineDetection(), warn: { _ in })
+        MachineStateService(
+            fileService: fileService,
+            agentDetection: EmptyMachineDetection(),
+            deployState: { DeployState(schemaVersion: DeployStateStore.currentSchemaVersion, records: []) },
+            homeDirectory: TestPaths.homeDirectory,
+            warn: { _ in }
+        )
     }
 
     private func statePath(_ root: String) -> String { root + "/machines/" + machineID + ".yaml" }

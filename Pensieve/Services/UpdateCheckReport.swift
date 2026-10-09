@@ -19,13 +19,16 @@ struct ClassifiedUpdateFailure {
     let environment: Bool
     let usability: GitUsability?
 
-    static func classify(_ error: Error, probe: () -> GitUsability? = { nil }) -> Self {
-        if case let GitError.unusable(value) = error {
-            return Self(error: error, environment: true, usability: value)
+    static func classify(_ failure: Error, probe: () throws -> GitUsability? = { nil }) -> Self {
+        if case GitError.outputReadFailed = failure {
+            return Self(error: failure, environment: false, usability: nil)
+        }
+        if case let GitError.unusable(value) = failure {
+            return Self(error: failure, environment: true, usability: value)
         }
         let confirmation: GitUsability?
-        if case let GitError.commandFailed(_, _, _, answer) = error { confirmation = answer } else { confirmation = nil }
-        let mapped = SkillInstallService.mappedRepositoryError(error)
+        if case let GitError.commandFailed(_, _, _, answer) = failure { confirmation = answer } else { confirmation = nil }
+        let mapped = SkillInstallService.mappedRepositoryError(failure)
         if let install = mapped as? SkillInstallError {
             switch install {
             case .networkUnavailable: return Self(error: install, environment: true, usability: confirmation)
@@ -35,7 +38,10 @@ struct ClassifiedUpdateFailure {
             }
         }
         // A carried answer came from the runner. Otherwise the batch diagnostic must establish usability.
-        let value = confirmation ?? probe()
+        let value: GitUsability?
+        do { value = try confirmation ?? probe() } catch {
+            return Self(error: failure, environment: false, usability: nil)
+        }
         if let value, value != .usable {
             return Self(error: GitError.unusable(value), environment: true, usability: value)
         }
@@ -45,14 +51,14 @@ struct ClassifiedUpdateFailure {
 
 /// One diagnostic probe per batch, in addition to the run's preflight.
 final class UpdateBatchDiagnostics {
-    private var cached: GitUsability?
+    private var cached: Result<GitUsability, Error>?
     private(set) var evidence: GitUsability?
-    private let probe: () -> GitUsability
+    private let probe: () throws -> GitUsability
 
-    init(probe: @escaping () -> GitUsability) { self.probe = probe }
+    init(probe: @escaping () throws -> GitUsability) { self.probe = probe }
 
     func recordUsable() {
-        cached = .usable
+        cached = .success(.usable)
         evidence = .usable
     }
 
@@ -61,8 +67,8 @@ final class UpdateBatchDiagnostics {
 
     func classify(_ error: Error) -> ClassifiedUpdateFailure {
         let result = ClassifiedUpdateFailure.classify(error) {
-            if self.cached == nil { self.cached = self.probe() }
-            return self.cached
+            if self.cached == nil { self.cached = Result { try self.probe() } }
+            return try self.cached?.get()
         }
         if let value = result.usability { evidence = value }
         return result
