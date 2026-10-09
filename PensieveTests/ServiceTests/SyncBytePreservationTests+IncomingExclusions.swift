@@ -191,6 +191,9 @@ extension SyncBytePreservationTests {
     }
 
     func testIncomingTrackedExcludedFilesPauseBeforeAppWritesAndResumeAfterMovingThem() throws {
+        try assertFilesystemEquivalentIncomingNames()
+        try assertIndexedNestedRepositoryReplacementIsProtected()
+        try assertUnchangedLegacyEntryProtectsLocalFolderReplacement()
         for hidden in [false, true] {
             for path in ExcludedFileCollisionFixture.paths {
                 do {
@@ -200,6 +203,56 @@ extension SyncBytePreservationTests {
                 }
             }
         }
+    }
+
+    private func assertFilesystemEquivalentIncomingNames() throws {
+        for (local, incoming) in [("skills/x/.env", "skills/x/.ENV"),
+                                  ("skills/x/caf\u{00E9}/.env", "skills/x/cafe\u{0301}/.env")] {
+            let fixture = try ExcludedFileCollisionFixture(path: local, hidden: true, localCommit: true,
+                                                           incomingPath: incoming)
+            defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+            XCTAssertEqual(fixture.files.fileIdentity(at: fixture.storeB + "/" + local, followingLinks: false),
+                           fixture.files.fileIdentity(at: fixture.storeB + "/" + incoming, followingLinks: false),
+                           "These spellings identify the same protected destination")
+            let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: fixture.git),
+                                    lockPath: fixture.root + "/sync.lock")
+            XCTAssertThrowsError(try engine.sync(root: fixture.storeB, message: "equivalent name", credential: nil,
+                                                 context: fixture.context))
+            XCTAssertEqual(try fixture.files.readData(at: fixture.storeB + "/" + local), fixture.localBytes)
+            XCTAssertEqual(try fixture.git.headSHA(at: fixture.storeB), fixture.beforeHead)
+        }
+    }
+
+    private func assertIndexedNestedRepositoryReplacementIsProtected() throws {
+        let path = "skills/x/node_modules/b/.env"
+        let fixture = try ExcludedFileCollisionFixture(path: path, hidden: true, localCommit: true,
+            legacyPath: "skills/x/node_modules/b", replaceLegacyWithFolder: true, nestedReplacement: true)
+        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+        let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: fixture.git),
+                                lockPath: fixture.root + "/sync.lock")
+        XCTAssertThrowsError(try engine.sync(root: fixture.storeB, message: "type replacement", credential: nil,
+                                             context: fixture.context))
+        XCTAssertEqual(try fixture.files.readData(at: fixture.storeB + "/" + path), fixture.localBytes)
+        XCTAssertTrue(fixture.files.directoryExists(at: fixture.storeB + "/skills/x/node_modules/b/.git"))
+        let remote = try fixture.git.runData(["--git-dir", fixture.remote, "show", "main:" + path], in: nil)
+        XCTAssertEqual(remote.stdout, fixture.remoteBytes, "The local protected child must never be published")
+        XCTAssertNotEqual(remote.stdout, fixture.localBytes)
+        XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
+    }
+
+    private func assertUnchangedLegacyEntryProtectsLocalFolderReplacement() throws {
+        let fixture = try ExcludedFileCollisionFixture(path: "skills/x/.env/local.txt", hidden: true, localCommit: true,
+            incomingPath: "skills/x/unrelated.txt", legacyPath: "skills/x/.env", replaceLegacyWithFolder: true)
+        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+        let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: fixture.git),
+                                lockPath: fixture.root + "/sync.lock")
+        XCTAssertThrowsError(try engine.sync(root: fixture.storeB, message: "local replacement", credential: nil,
+                                             context: fixture.context))
+        XCTAssertTrue(fixture.files.directoryExists(at: fixture.storeB + "/skills/x/.env"))
+        XCTAssertEqual(try fixture.files.readData(at: fixture.storeB + "/" + fixture.path), fixture.localBytes)
+        let remote = try fixture.git.runData(["--git-dir", fixture.remote, "show", "main:skills/x/.env"], in: nil)
+        XCTAssertEqual(remote.stdout, Data([5, 255]), "The existing remote entry remains unchanged")
+        XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
     }
 
     private func assertIncomingExcludedCollision(path: String, hidden: Bool) throws {

@@ -93,7 +93,7 @@ final class ConflictResolutionModel {
         guard case var .ready(groups) = phase,
               let index = groups.firstIndex(where: { $0.id == groupID }) else { return }
         if let unavailable = groups[index].items.first(where: {
-            (side == .thisMachine ? $0.thisUnavailable : $0.otherUnavailable) != nil
+            !$0.retiresGitlink && (side == .thisMachine ? $0.thisUnavailable : $0.otherUnavailable) != nil
         }) {
             selectionError = SyncError.conflictSideUnavailable(path: unavailable.path).errorDescription
             return
@@ -126,7 +126,8 @@ final class ConflictResolutionModel {
                 partial[item.path] = ResolutionPick(side: side, expectedThis: item.thisMachine,
                                                     expectedOther: item.otherMachine,
                                                     expectedThisUnavailable: item.thisUnavailable,
-                                                    expectedOtherUnavailable: item.otherUnavailable)
+                                                    expectedOtherUnavailable: item.otherUnavailable,
+                                                    expectedThisMode: item.thisMode, expectedOtherMode: item.otherMode)
             }
         }
         let previousHeadStamp = headStamp()

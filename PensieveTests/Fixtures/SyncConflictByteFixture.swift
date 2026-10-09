@@ -7,6 +7,8 @@ import XCTest
 struct SyncConflictByteFixture {
     enum Entry {
         case file(Data)
+        case executable(Data)
+        case symlink(String)
         case gitlink(String)
         case deleted
     }
@@ -101,6 +103,11 @@ struct SyncConflictByteFixture {
         switch entry {
         case let .file(bytes):
             try files.writeData(at: full, data: bytes)
+        case let .executable(bytes):
+            try files.writeExecutableFile(at: full, content: XCTUnwrap(String(bytes: bytes, encoding: .utf8)))
+        case let .symlink(target):
+            if try files.entryExistsWithoutFollowingLinks(at: full) { try files.deleteFile(at: full) }
+            try files.createSymlink(at: full, pointingTo: target)
         case let .gitlink(object):
             try files.createDirectory(at: full)
             try git.runOrThrow(["-C", store, "update-index", "--add", "--cacheinfo", "160000," + object + "," + path], in: nil)
@@ -109,7 +116,7 @@ struct SyncConflictByteFixture {
         }
     }
 
-    static func gitlinkConflict() throws -> Self {
+    static func gitlinkConflict(both: Bool = false) throws -> Self {
         let root = TestTemporaryDirectory.path + "GitlinkSource-" + UUID().uuidString
         let files = FileService()
         let git = TestPaths.git
@@ -122,7 +129,11 @@ struct SyncConflictByteFixture {
         try files.writeFile(at: root + "/source.txt", content: "second nested commit\n")
         try git.stageAllAndCommit(at: root, message: "second nested commit")
         let second = try git.commitSHA(at: root)
-        return try Self(name: "legacy-link", initial: .gitlink(first), this: .gitlink(second), other: .deleted)
+        try files.writeFile(at: root + "/source.txt", content: "third nested commit\n")
+        try git.stageAllAndCommit(at: root, message: "third nested commit")
+        let third = try git.commitSHA(at: root)
+        return try Self(name: "legacy-link", initial: .gitlink(first), this: .gitlink(second),
+                        other: both ? .gitlink(third) : .deleted)
     }
 
     func assertPublished(_ expected: Data?, line: UInt = #line) throws {

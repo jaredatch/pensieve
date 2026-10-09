@@ -42,6 +42,8 @@ final class RuntimePathGuardTests: XCTestCase {
             ["init(root: String = Constants.\(member)) {}", "let root = PathConstants.\(member)"]
         } + ["init(credentials: CredentialStoreProtocol = KeychainCredentialStore()) {}",
              "let credentials = KeychainCredentialStore()", "let credentials = KeychainCredentialStore.init()",
+             "let credentials = KeychainCredentialStore.self.init()",
+             "init(credentials: CredentialStoreProtocol = KeychainCredentialStore.self.init()) {}",
              "init(lock: String = PathConstants /* nested /* text */ comment */ .\n" +
                  "pensieveAppSupportDir + \"/sync.lock\") {}",
              "let root = \"\\(Constants.pensieveBaseDir)\"", "let paths: RuntimePaths = .production",

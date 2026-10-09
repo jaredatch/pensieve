@@ -275,21 +275,41 @@ struct StoreGitOperation {
         let args = ["ls-tree", "-r", "--name-only", "-z", revision]
         let incoming = try runData(args)
         guard incoming.exit == 0 else { throw git.dataCommandError(incoming, args: ["-C", root] + args) }
-        let localSet = Set(local)
-        var containingPaths: [Data: Data] = [:]
+        // Fold only to find candidates. FileService's identities decide whether another spelling
+        // actually names the same entry on this volume, retaining case-sensitive destinations.
+        var containingPaths: [Data: [(prefix: Data, path: Data)]] = [:]
         for path in local {
-            for prefix in pathPrefixes(path) where containingPaths[prefix] == nil {
-                containingPaths[prefix] = path
+            for prefix in pathPrefixes(path) {
+                containingPaths[collisionKey(prefix), default: []].append((prefix, path))
             }
         }
         for path in incoming.stdout.split(separator: UInt8(0)).map({ Data($0) }) {
-            guard let collision = containingPaths[path] ?? pathPrefixes(path).first(where: { localSet.contains($0) })
-            else { continue }
-            let displayPath = String(bytes: collision, encoding: .utf8)
-                ?? collision.map { String(format: "%%%02X", $0) }.joined()
-            if folders.contains(collision) { throw StoreUpdateError.excludedLocalFolder(path: displayPath) }
-            throw StoreUpdateError.excludedLocalFile(path: displayPath)
+            for prefix in pathPrefixes(path) {
+                for candidate in containingPaths[collisionKey(prefix)] ?? [] {
+                    // A shared parent alone is harmless: either the incoming path or the protected
+                    // receipt must end at the shared component (a file/directory replacement).
+                    guard prefix == path || candidate.prefix == candidate.path,
+                          sameDestination(prefix, candidate.prefix) else { continue }
+                    let collision = candidate.path
+                    let displayPath = String(bytes: collision, encoding: .utf8)
+                        ?? collision.map { String(format: "%%%02X", $0) }.joined()
+                    if folders.contains(collision) { throw StoreUpdateError.excludedLocalFolder(path: displayPath) }
+                    throw StoreUpdateError.excludedLocalFile(path: displayPath)
+                }
+            }
         }
+    }
+
+    private func collisionKey(_ path: Data) -> Data {
+        guard let text = String(data: path, encoding: .utf8) else { return path }
+        return Data(text.precomposedStringWithCanonicalMapping.lowercased().utf8)
+    }
+
+    private func sameDestination(_ first: Data, _ second: Data) -> Bool {
+        if first == second { return true }
+        guard let first = String(data: first, encoding: .utf8), let second = String(data: second, encoding: .utf8),
+              let identity = git.fileService.fileIdentity(at: root + "/" + first, followingLinks: false) else { return false }
+        return identity == git.fileService.fileIdentity(at: root + "/" + second, followingLinks: false)
     }
 
     private func pathPrefixes(_ path: Data) -> [Data] {

@@ -21,7 +21,9 @@ struct ExcludedFileCollisionFixture {
     let beforeHead: String
     let beforeManifest: Data
 
-    init(path: String, hidden: Bool, localCommit: Bool, incomingPath: String? = nil, legacyPath: String? = nil) throws {
+    init(path: String, hidden: Bool, localCommit: Bool, incomingPath: String? = nil, legacyPath: String? = nil,
+         replaceLegacyWithFolder: Bool = false,
+         nestedReplacement: Bool = false) throws {
         root = TestTemporaryDirectory.path + "ExcludedCollision-" + UUID().uuidString
         remote = root + "/remote.git"
         storeA = root + "/A"
@@ -32,32 +34,22 @@ struct ExcludedFileCollisionFixture {
             MachineDeployIntent.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         context = ModelContext(container)
         do {
-            try files.createDirectory(at: root)
-            try git.runOrThrow(["init", "--bare", "--initial-branch=main", remote], in: nil)
-            let seed = root + "/seed"
-            try files.createDirectory(at: seed)
-            try git.initRepository(at: seed)
-            try files.writeFile(at: seed + "/skills/x/SKILL.md",
-                                content: "---\nname: X\ndescription: Collision fixture\n---\nbody\n")
-            try files.writeFile(at: seed + "/skills/x/.gitignore",
-                                content: hidden ? ".env\n.env.*\n.DS_Store\nnode_modules/\n.venv/\n" : "")
-            try files.writeFile(at: seed + "/.gitignore", content: ".DS_Store\n")
-            context.insert(Skill(name: "X", skillDescription: "Collision fixture", directoryName: "x"))
-            try context.save()
-            let manifest = ManifestService()
-            try manifest.write(manifest.snapshot(from: context), toRoot: seed)
-            if let legacyPath {
-                try files.writeData(at: seed + "/" + legacyPath, data: Data([5, 255]))
-                try git.runOrThrow(["-C", seed, "add", "--force", "--", legacyPath], in: nil)
-            }
-            try git.stageAllAndCommit(at: seed, message: "base")
-            try git.setRemote("file://" + remote, at: seed)
-            try git.push(at: seed, credential: nil)
+            try Self.seedRemote(root: root, remote: remote, hidden: hidden, legacyPath: legacyPath, context: context)
             try git.clone(remote: "file://" + remote, into: storeA, credential: nil)
             try git.clone(remote: "file://" + remote, into: storeB, credential: nil)
             if localCommit {
                 try files.writeFile(at: storeB + "/skills/x/local.txt", content: "local ordinary work\n")
                 try git.stageAllAndCommit(at: storeB, message: "local ordinary commit")
+            }
+            if replaceLegacyWithFolder, let legacyPath {
+                try files.deleteFile(at: storeB + "/" + legacyPath)
+                if self.incomingPath.hasPrefix(legacyPath + "/") {
+                    try files.deleteFile(at: storeA + "/" + legacyPath)
+                }
+                if nestedReplacement {
+                    try files.createDirectory(at: storeB + "/" + legacyPath)
+                    try git.initRepository(at: storeB + "/" + legacyPath)
+                }
             }
             try files.writeData(at: storeB + "/" + path, data: localBytes)
             try files.writeData(at: storeA + "/" + self.incomingPath, data: remoteBytes)
@@ -71,6 +63,33 @@ struct ExcludedFileCollisionFixture {
             try? files.deleteDirectory(at: root)
             throw error
         }
+    }
+
+    private static func seedRemote(root: String, remote: String, hidden: Bool,
+                                   legacyPath: String?, context: ModelContext) throws {
+        let files = FileService()
+        let git = TestPaths.git
+        try files.createDirectory(at: root)
+        try git.runOrThrow(["init", "--bare", "--initial-branch=main", remote], in: nil)
+        let seed = root + "/seed"
+        try files.createDirectory(at: seed)
+        try git.initRepository(at: seed)
+        try files.writeFile(at: seed + "/skills/x/SKILL.md",
+                            content: "---\nname: X\ndescription: Collision fixture\n---\nbody\n")
+        try files.writeFile(at: seed + "/skills/x/.gitignore",
+                            content: hidden ? ".env\n.env.*\n.DS_Store\nnode_modules/\n.venv/\n" : "")
+        try files.writeFile(at: seed + "/.gitignore", content: ".DS_Store\n")
+        context.insert(Skill(name: "X", skillDescription: "Collision fixture", directoryName: "x"))
+        try context.save()
+        let manifest = ManifestService()
+        try manifest.write(manifest.snapshot(from: context), toRoot: seed)
+        if let legacyPath {
+            try files.writeData(at: seed + "/" + legacyPath, data: Data([5, 255]))
+            try git.runOrThrow(["-C", seed, "add", "--force", "--", legacyPath], in: nil)
+        }
+        try git.stageAllAndCommit(at: seed, message: "base")
+        try git.setRemote("file://" + remote, at: seed)
+        try git.push(at: seed, credential: nil)
     }
 
     var message: String {

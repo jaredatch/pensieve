@@ -106,6 +106,7 @@ final class AppRuntimeSyncRecoveryTests: XCTestCase {
             await h.finish()
             XCTAssertEqual(h.engine.count, manual ? 2 : 1, "one retry spends the manual request, even if it fails")
         }
+        try await assertHeldRecoverySurvivesUsableProbe()
         try await assertRetryExpiresWithUsableEvidence()
         try await assertRecoveryWhileIneligible()
         try await assertSpentRetryCannotRearmAfterDirectSync()
@@ -292,6 +293,17 @@ private extension AppRuntimeSyncRecoveryTests {
         return h
     }
 
+    func assertHeldRecoverySurvivesUsableProbe() async throws {
+        let h = try await heldRecoveryBeforeIngest()
+        await h.runtime.refreshGitUsability()
+        h.runtime.scheduler.launchIngestCompleted()
+        await h.waitForFollowUpOrIdle()
+        XCTAssertEqual(h.engine.count, 2, "Reopening settings must retain the promised manual recovery retry")
+        if h.engine.count == 2 { h.release.open() }
+        await h.finish()
+        XCTAssertEqual(h.engine.count, 2, "The held retry runs exactly once with background sync off")
+    }
+
     func assertRefusedRetryPreservesAbsorbedStanding() async throws {
         for trigger in ["preflight", "tick", "branchless tick"] {
             let h = try await heldRecoveryBeforeIngest()
@@ -304,7 +316,7 @@ private extension AppRuntimeSyncRecoveryTests {
                 // An external branch appears after the observation, before the queued tick re-checks it.
                 try h.fixture.files.writeFile(at: branchPath, content: branch)
             } else {
-                await h.runtime.refreshGitUsability() // A later usable probe invalidates the held retry.
+                await h.runtime.refreshGitUsability() // Later usable evidence retains the queued manual retry.
             }
             h.preference.enabled = trigger != "preflight"
             if trigger == "preflight" {
@@ -314,10 +326,11 @@ private extension AppRuntimeSyncRecoveryTests {
             }
             h.runtime.scheduler.launchIngestCompleted()
             await h.waitForFollowUpOrIdle()
-            XCTAssertEqual(h.engine.count, 2, trigger + " must survive refusal of the retry it joined")
+            XCTAssertEqual(h.engine.count, 2, trigger + " must coalesce with the held retry or survive its branchless refusal")
             if h.engine.count == 2 {
-                XCTAssertEqual(h.engine.priorities.last, QOS_CLASS_DEFAULT,
-                               "refused manual recovery cannot lend its priority to ordinary work")
+                XCTAssertEqual(h.engine.priorities.last,
+                               trigger == "branchless tick" ? QOS_CLASS_DEFAULT : QOS_CLASS_USER_INITIATED,
+                               "retained manual recovery keeps its priority; a refused one cannot lend it")
                 h.release.open()
             }
             await h.finish()

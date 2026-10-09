@@ -13,7 +13,6 @@ final class SyncEngineTests: XCTestCase {
         tempDir = TestTemporaryDirectory.path + "PensieveSyncEngineTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
     }
-
     override func tearDownWithError() throws {
         if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
             try FileManager.default.removeItem(atPath: tempDir)
@@ -63,7 +62,8 @@ final class SyncEngineTests: XCTestCase {
         func skipRebase(at path: String) throws -> PullResult { .upToDate }
         func stagePath(_ path: String, at root: String) throws {}
         func hasCommitsToPush(at path: String) -> Bool { false }
-        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?) throws -> Bool { false }
+        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                    fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
     }
 
     /// ManifestService whose `snapshot` throws, proving sync aborts before any write/git op.

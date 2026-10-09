@@ -96,16 +96,35 @@ protocol GitServiceProtocol {
     func abortRebase(at path: String) throws
     func conflictedFiles(at path: String) throws -> [String]
     func blob(atStage stage: Int, path: String, in workingDir: String) throws -> Data?
+    func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry?
+    func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws
+    func retireConflictPath(_ path: String, at root: String) throws
     func continueRebase(at path: String) throws -> PullResult
     func skipRebase(at path: String) throws -> PullResult
     func stagePath(_ path: String, at root: String) throws
-    func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?) throws -> Bool
+    func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                fetchedRevision: FetchedStoreRevision?) throws -> Bool
     func hasCommitsToPush(at path: String) throws -> Bool
     func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit]
     func show(sha: String, path: String, at workingDir: String) -> String?
 }
 
 extension GitServiceProtocol {
+    /// Compatibility for scripted file-only collaborators; it performs no host filesystem access.
+    func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
+        try blob(atStage: stage, path: path, in: workingDir).map {
+            ConflictEntry(mode: "100644", objectID: "", bytes: $0)
+        }
+    }
+
+    func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+        throw GitError.repositoryUnreadable(path: root, detail: "Conflict entry restoration is unavailable.")
+    }
+
+    func retireConflictPath(_ path: String, at root: String) throws {
+        throw GitError.repositoryUnreadable(path: root, detail: "Legacy gitlink resolution is unavailable.")
+    }
+
     /// Inert default for doubles that do not model the host environment.
     func probeUsability() -> GitUsability { .usable }
     func remoteDefaultBranch(remote: String, credential: GitCredential?) throws -> String? { nil }

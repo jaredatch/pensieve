@@ -22,28 +22,36 @@ struct ConflictItem: Equatable {
     let otherMachine: Data?
     let thisUnavailable: UnavailableConflictSide?
     let otherUnavailable: UnavailableConflictSide?
+    let thisMode: String?
+    let otherMode: String?
+    var retiresGitlink: Bool { thisUnavailable?.mode == "160000" || otherUnavailable?.mode == "160000" }
 
     init(path: String, kind: ConflictKind, thisMachine: Data?, otherMachine: Data?,
-         thisUnavailable: UnavailableConflictSide? = nil, otherUnavailable: UnavailableConflictSide? = nil) {
+         thisUnavailable: UnavailableConflictSide? = nil, otherUnavailable: UnavailableConflictSide? = nil,
+         thisMode: String? = nil, otherMode: String? = nil) {
         self.path = path
         self.kind = kind
         self.thisMachine = thisMachine
         self.otherMachine = otherMachine
         self.thisUnavailable = thisUnavailable
         self.otherUnavailable = otherUnavailable
+        self.thisMode = thisMode ?? thisUnavailable?.mode ?? (thisMachine == nil ? nil : "100644")
+        self.otherMode = otherMode ?? otherUnavailable?.mode ?? (otherMachine == nil ? nil : "100644")
     }
 }
 
 struct ConflictVersion {
-    let bytes: Data?
+    let entry: ConflictEntry?
+    var bytes: Data? { entry?.bytes }
+    var mode: String? { entry?.mode ?? unavailable?.mode }
     let unavailable: UnavailableConflictSide?
 
-    init(read: () throws -> Data?) throws {
+    init(read: () throws -> ConflictEntry?) throws {
         do {
-            bytes = try read()
+            entry = try read()
             unavailable = nil
         } catch let entry as UnavailableConflictSide {
-            bytes = nil
+            self.entry = nil
             unavailable = entry
         }
     }
@@ -61,15 +69,20 @@ struct ResolutionPick: Equatable {
     let expectedOther: Data?
     let expectedThisUnavailable: UnavailableConflictSide?
     let expectedOtherUnavailable: UnavailableConflictSide?
+    let expectedThisMode: String?
+    let expectedOtherMode: String?
 
     init(side: ConflictSide, expectedThis: Data?, expectedOther: Data?,
          expectedThisUnavailable: UnavailableConflictSide? = nil,
-         expectedOtherUnavailable: UnavailableConflictSide? = nil) {
+         expectedOtherUnavailable: UnavailableConflictSide? = nil,
+         expectedThisMode: String? = nil, expectedOtherMode: String? = nil) {
         self.side = side
         self.expectedThis = expectedThis
         self.expectedOther = expectedOther
         self.expectedThisUnavailable = expectedThisUnavailable
         self.expectedOtherUnavailable = expectedOtherUnavailable
+        self.expectedThisMode = expectedThisMode ?? expectedThisUnavailable?.mode ?? (expectedThis == nil ? nil : "100644")
+        self.expectedOtherMode = expectedOtherMode ?? expectedOtherUnavailable?.mode ?? (expectedOther == nil ? nil : "100644")
     }
 }
 

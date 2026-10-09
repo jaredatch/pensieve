@@ -1,7 +1,13 @@
 import Foundation
 
-/// A present index entry that cannot be read or restored as a file. Its identity lets resolution
-/// detect drift without treating unavailable bytes as an absent (deleted) side.
+/// A readable conflict entry retains its Git type and object identity beside its exact bytes.
+struct ConflictEntry {
+    let mode: String
+    let objectID: String
+    let bytes: Data
+}
+
+/// A present entry whose bytes are unavailable, distinct from an absent (deleted) side.
 struct UnavailableConflictSide: Error, Equatable {
     let mode: String
     let objectID: String
@@ -15,9 +21,13 @@ struct UnavailableConflictSide: Error, Equatable {
 extension GitService {
 
     /// `git show :<stage>:<path>` — exact bytes, or nil when that stage is absent. Empty data is
-    /// a present empty file. Non-file or missing objects throw UnavailableConflictSide; command
+    /// a present empty file. Gitlinks or missing objects throw UnavailableConflictSide; command
     /// failures propagate. Only an absent index stage is a deletion.
     func blob(atStage stage: Int, path: String, in workingDir: String) throws -> Data? {
+        try conflictEntry(atStage: stage, path: path, in: workingDir)?.bytes
+    }
+
+    func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
         let indexArgs = ["--literal-pathspecs", "-C", workingDir, "ls-files", "--stage", "-z", "--", path]
         let index = try runData(indexArgs, in: nil)
         guard index.exit == 0 else { throw dataCommandError(index, args: indexArgs) }
@@ -34,12 +44,41 @@ extension GitService {
         guard entry.mode != "160000" else { throw entry }
         let args = ["-C", workingDir, "show", ":\(stage):\(path)"]
         let result = try runData(args, in: nil)
-        if result.exit == 0 { return result.stdout }
+        if result.exit == 0 {
+            return ConflictEntry(mode: entry.mode, objectID: entry.objectID, bytes: result.stdout)
+        }
         let objectArgs = ["-C", workingDir, "cat-file", "-e", entry.objectID]
         let object = try runData(objectArgs, in: nil)
         if object.exit == 1 && object.stdout.isEmpty && object.stderr.isEmpty { throw entry }
         guard object.exit == 0 else { throw dataCommandError(object, args: objectArgs) }
         throw dataCommandError(result, args: args)
+    }
+
+    /// Git restores the selected entry's link type and executable mode without byte conversions.
+    func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+        let store = try storeOperation(at: root)
+        try store.runOrThrow(["-c", "core.symlinks=true", "--literal-pathspecs", "checkout-index",
+                             "--force", "--stage=\(stage)", "--", path])
+        try store.runOrThrow(["--literal-pathspecs", "update-index", "--add", "--cacheinfo",
+                             entry.mode + "," + entry.objectID + "," + path])
+    }
+
+    /// A legacy gitlink is removed only from the index. Its anchored root ignore travels to other
+    /// Macs so later syncs cannot add ordinary local files beneath the retired path.
+    func retireConflictPath(_ path: String, at root: String) throws {
+        try storeOperation(at: root).runOrThrow(["--literal-pathspecs", "update-index", "--force-remove", "--", path])
+        let escaped = path.unicodeScalars.map { scalar -> String in
+            let text = String(scalar)
+            return "\\*?[]!# ".unicodeScalars.contains(scalar) ? "\\" + text : text
+        }.joined()
+        let ignore = root + "/.gitignore"
+        var rules = try fileService.readFile(at: ignore)
+        let rule = "/" + escaped
+        if !rules.split(separator: "\n").contains(where: { $0 == Substring(rule) }) {
+            if !rules.hasSuffix("\n") { rules += "\n" }
+            try fileService.writeFile(at: ignore, content: rules + rule + "\n")
+        }
+        try stagePath(".gitignore", at: root)
     }
 
     /// True iff a rebase is mid-flight. Git owns `.git`; this structural probe stays inside GitService.
@@ -93,19 +132,23 @@ extension GitService {
     }
 
     /// Collapse unpushed divergence to one commit so the following rebase replays exactly one commit.
-    func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?) throws -> Bool {
+    func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                fetchedRevision: FetchedStoreRevision? = nil) throws -> Bool {
         try ensureCommitIdentity(at: root)
-        let fetch = try run(["-C", root, "fetch", "origin", "main"], in: nil, credential: credential)
-        if fetch.exit != 0 {
-            let combined = fetch.stdout + fetch.stderr
-            if isAuthFailure(combined) {
-                throw GitError.authenticationFailed(remote: authenticationRemoteLabel(at: root), detail: combined)
+        if fetchedRevision == nil {
+            let fetch = try run(["-C", root, "fetch", "origin", "main"], in: nil, credential: credential)
+            if fetch.exit != 0 {
+                let combined = fetch.stdout + fetch.stderr
+                if isAuthFailure(combined) {
+                    throw GitError.authenticationFailed(remote: authenticationRemoteLabel(at: root), detail: combined)
+                }
+                return try stageAllAndCommit(at: root, message: message)
             }
-            return try stageAllAndCommit(at: root, message: message)
         }
         let store = try storeOperation(at: root)
         try store.stage()
-        guard let baseR = try runBestEffort(["-C", root, "merge-base", "HEAD", "origin/main"], in: nil),
+        let upstream = fetchedRevision?.commit ?? "origin/main"
+        guard let baseR = try runBestEffort(["-C", root, "merge-base", "HEAD", upstream], in: nil),
               baseR.exit == 0 else {
             return try store.commitStagedChanges(message: message)
         }

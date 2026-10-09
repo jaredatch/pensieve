@@ -184,7 +184,7 @@ struct SyncEngine: SyncEngineProtocol {
             throw SyncError.storeUnreadable([])
         }
         let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
-        _ = try prepareLocalHead(root: root, credential: credential, context: context)
+        _ = try prepareLocalHead(root: root, credential: credential, context: context, incoming: incoming)
         // Once prepareLocalHead succeeds, pullRebase may START a rebase; if it (or finishSync) then
         // throws for a non-conflict reason, abort so inspect NEVER leaves a mid-rebase tree at rest
         // (the safe-resting-state invariant). Mirrors resolveConflicts' outer catch.
@@ -194,11 +194,12 @@ struct SyncEngine: SyncEngineProtocol {
                 return .cleared(try finishSync(root: root, credential: credential, context: context))
             case let .conflicted(paths):
                 let items = try paths.map { path in
-                    let this = try ConflictVersion { try gitService.blob(atStage: 3, path: path, in: root) }
-                    let other = try ConflictVersion { try gitService.blob(atStage: 2, path: path, in: root) }
+                    let this = try ConflictVersion { try gitService.conflictEntry(atStage: 3, path: path, in: root) }
+                    let other = try ConflictVersion { try gitService.conflictEntry(atStage: 2, path: path, in: root) }
                     return ConflictItem(path: path, kind: Self.kind(for: path),
                                         thisMachine: this.bytes, otherMachine: other.bytes,
-                                        thisUnavailable: this.unavailable, otherUnavailable: other.unavailable)
+                                        thisUnavailable: this.unavailable, otherUnavailable: other.unavailable,
+                                        thisMode: this.mode, otherMode: other.mode)
                 }
                 try gitService.abortRebase(at: root)
                 return .conflicts(ConflictSet(items: items))
@@ -224,7 +225,7 @@ struct SyncEngine: SyncEngineProtocol {
             throw SyncError.storeUnreadable([])
         }
         let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
-        _ = try prepareLocalHead(root: root, credential: credential, context: context)
+        _ = try prepareLocalHead(root: root, credential: credential, context: context, incoming: incoming)
         do {
             switch try pullRebase(root: root, credential: credential, incoming: incoming) {
             case .upToDate, .merged:
@@ -256,7 +257,12 @@ struct SyncEngine: SyncEngineProtocol {
         manifest/projects.yaml merge=union
         """
         try fileService.writeFile(at: root + "/.gitattributes", content: attributes + "\n")
-        try fileService.writeFile(at: root + "/.gitignore", content: ".DS_Store\n")
+        let ignore = root + "/.gitignore"
+        let rules = (try? fileService.readFile(at: ignore)) ?? ""
+        if !rules.split(separator: "\n").contains(".DS_Store") {
+            try fileService.writeFile(at: ignore, content: rules + (rules.isEmpty || rules.hasSuffix("\n") ? "" : "\n")
+                                      + ".DS_Store\n")
+        }
     }
 
     private static let resolveMessage = "Pensieve sync (resolve)"
@@ -279,11 +285,11 @@ struct SyncEngine: SyncEngineProtocol {
 
     @discardableResult
     private func prepareLocalHead(root: String, credential: GitCredential?,
-                                  context: ModelContext) throws -> Bool {
+                                  context: ModelContext, incoming: FetchedStoreRevision?) throws -> Bool {
         try manifestService.write(manifestService.snapshot(from: context), toRoot: root)
         try ensureSyncAttributes(root: root)
         return try gitService.collapseToSingleCommit(at: root, message: Self.resolveMessage,
-                                                     credential: credential)
+                                                     credential: credential, fetchedRevision: incoming)
     }
 
     private func finishSync(root: String, credential: GitCredential?,
@@ -304,26 +310,45 @@ struct SyncEngine: SyncEngineProtocol {
                                         root: String) throws {
         guard Set(paths) == Set(picks.keys) else { throw SyncError.conflictsChanged }
         for path in paths {
-            let this = try ConflictVersion { try gitService.blob(atStage: 3, path: path, in: root) }
-            let other = try ConflictVersion { try gitService.blob(atStage: 2, path: path, in: root) }
+            let this = try ConflictVersion { try gitService.conflictEntry(atStage: 3, path: path, in: root) }
+            let other = try ConflictVersion { try gitService.conflictEntry(atStage: 2, path: path, in: root) }
             guard let pick = picks[path],
                   pick.expectedThis == this.bytes, pick.expectedOther == other.bytes,
                   pick.expectedThisUnavailable == this.unavailable,
-                  pick.expectedOtherUnavailable == other.unavailable else {
+                  pick.expectedOtherUnavailable == other.unavailable,
+                  pick.expectedThisMode == this.mode, pick.expectedOtherMode == other.mode else {
                 throw SyncError.conflictsChanged
             }
             guard let full = validatedWorktreePath(path, root: root) else {
                 throw SyncError.conflictsChanged
             }
-            let chosen = pick.side == .thisMachine ? this : other
-            guard chosen.unavailable == nil else { throw SyncError.conflictSideUnavailable(path: path) }
-            if let bytes = chosen.bytes {
-                try fileService.writeData(at: full, data: bytes)
-            } else {
-                try fileService.deleteFile(at: full)
+            if this.unavailable?.mode == "160000" || other.unavailable?.mode == "160000" {
+                try gitService.retireConflictPath(path, at: root)
+                continue
             }
-            try gitService.stagePath(path, at: root)
+            try applyConflictVersion(pick.side == .thisMachine ? this : other,
+                                     stage: pick.side == .thisMachine ? 3 : 2, path: path, full: full, root: root)
         }
+    }
+
+    private func applyConflictVersion(_ chosen: ConflictVersion, stage: Int, path: String,
+                                      full: String, root: String) throws {
+        guard chosen.unavailable == nil else { throw SyncError.conflictSideUnavailable(path: path) }
+        guard try fileService.entryTypeWithoutFollowingLinks(at: full) != .directory else {
+            throw SyncError.conflictsChanged
+        }
+        if let entry = chosen.entry {
+            if entry.mode == "120000" {
+                guard let target = String(data: entry.bytes, encoding: .utf8),
+                      !target.utf8.contains(0), symlinkTargetIsContained(target, at: full, root: root) else {
+                    throw SyncError.conflictsChanged
+                }
+            }
+            try gitService.restoreConflictEntry(entry, stage: stage, path: path, at: root)
+        } else if try fileService.entryExistsWithoutFollowingLinks(at: full) {
+            try fileService.deleteFile(at: full)
+        }
+        try gitService.stagePath(path, at: root)
     }
 
     /// Validate a git-relative path before writing/deleting through it. Reject: empty/absolute paths;
@@ -350,12 +375,16 @@ struct SyncEngine: SyncEngineProtocol {
             // escape-only check below).
             if index != components.count - 1 { return nil }
             guard let target = try? fileService.symlinkTarget(at: current) else { return nil }
-            let base = PathSyntax.isAbsolute(target)
-                ? target
-                : (current as NSString).deletingLastPathComponent + "/" + target
-            let resolved = URL(fileURLWithPath: base).resolvingSymlinksInPath().path
-            if resolved != realRoot && !PathSyntax.hasPrefix(resolved, realRoot + "/") { return nil }
+            if !symlinkTargetIsContained(target, at: current, root: realRoot) { return nil }
         }
         return root + "/" + path
     }
+
+    private func symlinkTargetIsContained(_ target: String, at path: String, root: String) -> Bool {
+        let realRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
+        let base = PathSyntax.isAbsolute(target) ? target : (path as NSString).deletingLastPathComponent + "/" + target
+        let resolved = URL(fileURLWithPath: base).resolvingSymlinksInPath().path
+        return resolved == realRoot || PathSyntax.hasPrefix(resolved, realRoot + "/")
+    }
+
 }

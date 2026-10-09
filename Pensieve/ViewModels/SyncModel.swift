@@ -115,7 +115,11 @@ final class SyncModel {
 
     func gitUsabilityDidChange(wasUnavailable: Bool, recovered: Bool) {
         if gitState?.usability == .usable {
-            manualRetry = recovered && manualRetry == .inOutage ? .ready : nil
+            if recovered && manualRetry == .inOutage {
+                manualRetry = .ready
+            } else if manualRetry != .queued {
+                manualRetry = nil
+            }
         } else if manualRetry == .awaitingOutage {
             manualRetry = .inOutage
         } else if manualRetry == .ready || manualRetry == .queued {

@@ -78,30 +78,31 @@ extension ConflictResolutionModelTests {
     }
 
     func testLegacyGitlinkConflictReachesTheSheetAndKeepsTheOtherSideAvailable() async throws {
-        let fixture = try SyncConflictByteFixture.gitlinkConflict()
-        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
-        let model = ConflictResolutionModel(engine: fixture.engine, git: fixture.git,
-            credentials: InMemoryCredentialStore(), root: fixture.storeB)
-        await model.loadAndReport(context: fixture.contextB)
-        guard case let .ready(groups) = model.phase else { return XCTFail("A non-file side must not block the sheet") }
-        let group = try XCTUnwrap(groups.first)
-        let item = try XCTUnwrap(group.items.first)
-        let strings = await renderedComparison(item)
-        XCTAssertTrue(strings.contains("This version can’t be shown or kept as a file. You can keep the other version."))
-        XCTAssertEqual(strings.filter { $0 == "Deleted" }.count, 1, "Only the genuinely absent side is Deleted")
-        model.choose(group.id, .thisMachine)
-        XCTAssertFalse(model.canApply, "An unavailable version must never turn into a deletion pick")
-        XCTAssertEqual(model.selectionError,
-                       "Pensieve can’t keep this version of \(item.path) as a file. Choose the other version.")
-        await model.applyAndReport(context: fixture.contextB)
-        guard case .ready = model.phase else { return XCTFail("The other side must remain available") }
-        XCTAssertTrue(fixture.files.directoryExists(at: fixture.storeB + "/" + fixture.path))
-        model.choose(group.id, .otherMachine)
-        XCTAssertNil(model.selectionError)
-        XCTAssertTrue(model.canApply)
-        await model.applyAndReport(context: fixture.contextB)
-        XCTAssertEqual(model.phase, .done)
-        try fixture.assertPublished(nil)
+        for both in [false, true] {
+            for side in [ConflictSide.thisMachine, .otherMachine] {
+                let fixture = try SyncConflictByteFixture.gitlinkConflict(both: both)
+                defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+                let model = ConflictResolutionModel(engine: fixture.engine, git: fixture.git,
+                    credentials: InMemoryCredentialStore(), root: fixture.storeB)
+                await model.loadAndReport(context: fixture.contextB)
+                guard case let .ready(groups) = model.phase else { return XCTFail("A gitlink must reach the sheet") }
+                let group = try XCTUnwrap(groups.first)
+                let item = try XCTUnwrap(group.items.first)
+                let strings = await renderedComparison(item)
+                XCTAssertTrue(strings.contains("Nested repository"))
+                XCTAssertTrue(strings.contains(
+                    "Either choice stops syncing this path and keeps its folder on this Mac and other Macs."))
+                XCTAssertEqual(strings.filter { $0 == "Deleted" }.count, both ? 0 : 1)
+                model.choose(group.id, side)
+                XCTAssertNil(model.selectionError)
+                XCTAssertTrue(model.canApply, "Either side must allow index-only retirement, including two gitlinks")
+                await model.applyAndReport(context: fixture.contextB)
+                XCTAssertEqual(model.phase, .done)
+                XCTAssertTrue(fixture.files.directoryExists(at: fixture.storeB + "/" + fixture.path))
+                let tree = try fixture.git.runData(["--git-dir", fixture.remote, "ls-tree", "main", "--", item.path], in: nil)
+                XCTAssertTrue(tree.stdout.isEmpty)
+            }
+        }
     }
 
     private func renderedComparison(_ item: ConflictItem) async -> [String] {

@@ -268,7 +268,7 @@ def violations(source, relative, locations, neutral):
                 reason = "live location must come from the runtime's paths value"
             elif tail[2] not in neutral:
                 reason = f'unclassified member {token}.{tail[2]}; classify it in {INVENTORY}'
-        elif token == "KeychainCredentialStore" and (tail[1:2] == ["("] or tail[1:] == [".", "init"]):
+        elif token == "KeychainCredentialStore" and (tail[1:2] == ["("] or tail[1:] == [".", "init"] or words[index + 1:index + 5] == [".", "self", ".", "init"]):
             reason = "real Keychain store must come from runtime resolution"
         elif tail[:2] == ['.', 'production'] and relative not in PRODUCTION_CALLERS and (start := paths_production(words, lexed, index, scopes)) is not None and not permitted_production(words, index, start):
             reason = 'production paths must be selected by the process runtime'

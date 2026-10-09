@@ -72,7 +72,7 @@ private final class DefiniteBornHeadRetryGitService: GitServiceProtocol {
     func skipRebase(at path: String) throws -> PullResult { .upToDate }
     func stagePath(_ path: String, at root: String) throws {}
     func collapseToSingleCommit(at root: String, message: String,
-                                credential: GitCredential?) throws -> Bool { false }
+                                credential: GitCredential?, fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
     func hasCommitsToPush(at path: String) -> Bool { false }
 }
 

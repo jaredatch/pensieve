@@ -54,11 +54,19 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
     func blob(atStage stage: Int, path: String, in workingDir: String) throws -> Data? {
         try wrapped.blob(atStage: stage, path: path, in: workingDir)
     }
+    func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
+        try wrapped.conflictEntry(atStage: stage, path: path, in: workingDir)
+    }
+    func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+        try wrapped.restoreConflictEntry(entry, stage: stage, path: path, at: root)
+    }
+    func retireConflictPath(_ path: String, at root: String) throws { try wrapped.retireConflictPath(path, at: root) }
     func continueRebase(at path: String) throws -> PullResult { try wrapped.continueRebase(at: path) }
     func skipRebase(at path: String) throws -> PullResult { try wrapped.skipRebase(at: path) }
     func stagePath(_ path: String, at root: String) throws { try wrapped.stagePath(path, at: root) }
-    func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?) throws -> Bool {
-        try wrapped.collapseToSingleCommit(at: root, message: message, credential: credential)
+    func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                fetchedRevision: FetchedStoreRevision?) throws -> Bool {
+        try wrapped.collapseToSingleCommit(at: root, message: message, credential: credential, fetchedRevision: fetchedRevision)
     }
     func hasCommitsToPush(at path: String) throws -> Bool { try wrapped.hasCommitsToPush(at: path) }
     func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] {

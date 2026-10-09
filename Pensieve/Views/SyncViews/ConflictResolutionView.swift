@@ -225,10 +225,12 @@ struct ConflictFileComparison: View {
 
     private let this: Side
     private let other: Side
+    private let retiresGitlink: Bool
 
     init(item: ConflictItem) {
         this = Side(item.thisMachine, unavailable: item.thisUnavailable)
         other = Side(item.otherMachine, unavailable: item.otherUnavailable)
+        retiresGitlink = item.retiresGitlink
     }
 
     var body: some View {
@@ -236,9 +238,15 @@ struct ConflictFileComparison: View {
            !this.isEmpty, !other.isEmpty {
             LineDiffView(this: this, other: other)
         } else {
-            HStack(alignment: .top, spacing: Spacing.md) {
-                side("This Mac", content: this)
-                side("Other Mac", content: other)
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                if retiresGitlink {
+                    Text("Either choice stops syncing this path and keeps its folder on this Mac and other Macs.")
+                        .foregroundStyle(.secondary)
+                }
+                HStack(alignment: .top, spacing: Spacing.md) {
+                    side("This Mac", content: this)
+                    side("Other Mac", content: other)
+                }
             }
         }
     }
@@ -250,7 +258,8 @@ struct ConflictFileComparison: View {
             case .deleted:
                 Text("Deleted").foregroundStyle(.secondary)
             case .unavailable:
-                Text("This version can’t be shown or kept as a file. You can keep the other version.")
+                Text(retiresGitlink ? "Nested repository"
+                     : "This version can’t be shown or kept as a file. You can keep the other version.")
                     .foregroundStyle(.secondary)
             case let .text(text, preview, hiddenLines):
                 Text(text.isEmpty ? "Empty file" : preview)

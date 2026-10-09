@@ -9,7 +9,6 @@ final class SyncConflictResolutionTests: XCTestCase {
         tempDir = TestTemporaryDirectory.path + "PensieveSyncConflictTests-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
     }
-
     override func tearDownWithError() throws {
         if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
             try FileManager.default.removeItem(atPath: tempDir)
@@ -307,7 +306,8 @@ extension SyncConflictResolutionTests {
         func continueRebase(at path: String) throws -> PullResult { .merged }
         func skipRebase(at path: String) throws -> PullResult { .merged }
         func stagePath(_ path: String, at root: String) throws { stagedPaths.append(path) }
-        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?) throws -> Bool {
+        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                    fetchedRevision: FetchedStoreRevision?) throws -> Bool {
             true
         }
         func hasCommitsToPush(at path: String) -> Bool { false }
