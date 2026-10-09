@@ -15,7 +15,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Removed
 
-- Scenarios and their legacy store data are gone. Skills they deployed stay in place. If you run Pensieve on more than one Mac, update every Mac.
+- Scenarios and their legacy store data are gone. If you run Pensieve on more than one Mac, update every Mac. A Mac left on 0.14 undeploys the skills its active scenario deployed the next time it syncs after another Mac updates. Updating that Mac later does not restore them. Deploy those skills again.
 
 ### Changed
 
