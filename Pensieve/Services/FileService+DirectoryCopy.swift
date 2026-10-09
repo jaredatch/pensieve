@@ -1,11 +1,6 @@
 import Darwin
 import Foundation
 
-/// Keeps the descriptor-bound source alive until the caller validates it immediately before swap.
-struct RegularFileCopyReceipt {
-    let validateSource: () throws -> Void
-}
-
 extension FileService {
     /// Admits one directory without following its leaf, optionally relative to a held parent.
     /// The caller owns the returned descriptor and preserves its operation and path in errors.
@@ -16,71 +11,6 @@ extension FileService {
             throw DescriptorFileCopy.error(operation, path: reportingPath ?? path, code: errno)
         }
         return descriptor
-    }
-
-    enum DirectoryCopyCheckpoint {
-        case opened
-        case unavailable
-        case copying(String)
-        case copiedChunk(String, Int)
-    }
-
-    @discardableResult
-    func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws -> RegularFileCopyReceipt {
-        try copyRegularFiles(fromDirectory: source, toDirectory: destination, checkpoint: { _ in })
-    }
-
-    /// Checkpoints expose opening, child copying and bounded progress, with no host path fallback.
-    @discardableResult
-    func copyRegularFiles(fromDirectory source: String, toDirectory destination: String,
-                          checkpoint: (DirectoryCopyCheckpoint) throws -> Void) throws -> RegularFileCopyReceipt {
-        let descriptor: Int32
-        do {
-            descriptor = try Self.openDirectory(at: source)
-        } catch {
-            let failure = error as NSError
-            guard failure.domain == NSPOSIXErrorDomain,
-                  failure.code == Int(ENOENT) || failure.code == Int(ENOTDIR) || failure.code == Int(ELOOP) else {
-                throw error
-            }
-            try checkpoint(.unavailable)
-            let initial = try DirectoryCopySource.pathStamp(source)
-            guard initial?.fileType != S_IFDIR else {
-                throw DescriptorFileCopy.error("source changed", path: source, code: ESTALE)
-            }
-            return RegularFileCopyReceipt {
-                guard try DirectoryCopySource.pathStamp(source) == initial else {
-                    throw DescriptorFileCopy.error("source changed", path: source, code: ESTALE)
-                }
-            }
-        }
-        guard let directory = fdopendir(descriptor) else {
-            let code = errno
-            close(descriptor)
-            throw DescriptorFileCopy.error("fdopendir", path: source, code: code)
-        }
-        let opened = try DirectoryCopySource(path: source, directory: directory)
-        try checkpoint(.opened)
-        try opened.captureEntries()
-        for name in opened.entries.keys.sorted() {
-            guard opened.entries[name]?.isRegular == true else { continue }
-            let path = source + "/" + name
-            try checkpoint(.copying(name))
-            let (child, status) = try Self.openRegularFile(at: name, relativeTo: descriptor, reportingPath: path)
-            defer { close(child) }
-            guard FileEntryStamp(status) == opened.entries[name] else {
-                throw DescriptorFileCopy.error("source changed", path: path, code: ESTALE)
-            }
-            try DescriptorFileCopy.copy(from: child, status: status, sourcePath: path, to: destination + "/" + name,
-                                        options: .init(), copiedChunk: { count in
-                try checkpoint(.copiedChunk(name, count))
-            })
-            guard try DirectoryCopySource.descriptorStamp(child, path: path) == opened.entries[name] else {
-                throw DescriptorFileCopy.error("source changed", path: path, code: ESTALE)
-            }
-        }
-        try opened.validate()
-        return RegularFileCopyReceipt { try opened.validate() }
     }
 }
 
@@ -93,7 +23,6 @@ struct FileEntryStamp: Equatable {
     let modifiedNanoseconds: Int
     let changedSeconds: Int
     let changedNanoseconds: Int
-    var isRegular: Bool { fileType == S_IFREG }
 
     init(_ status: stat) {
         device = status.st_dev
@@ -107,88 +36,7 @@ struct FileEntryStamp: Equatable {
     }
 }
 
-/// Owns one no-follow directory stream. Each validation re-lists it and checks the live path,
-/// directory identity/timestamps and every entry's identity, type, size, mtime and ctime.
-private final class DirectoryCopySource {
-    let path: String
-    let directory: UnsafeMutablePointer<DIR>
-    let initial: FileEntryStamp
-    var entries: [String: FileEntryStamp] = [:]
-    var descriptor: Int32 { dirfd(directory) }
-
-    init(path: String, directory: UnsafeMutablePointer<DIR>) throws {
-        self.path = path
-        self.directory = directory
-        do { initial = try Self.descriptorStamp(dirfd(directory), path: path) } catch {
-            closedir(directory)
-            throw error
-        }
-    }
-    deinit { closedir(directory) }
-
-    static func descriptorStamp(_ descriptor: Int32, path: String) throws -> FileEntryStamp {
-        var status = stat()
-        guard fstat(descriptor, &status) == 0 else {
-            throw DescriptorFileCopy.error("fstat", path: path, code: errno)
-        }
-        return FileEntryStamp(status)
-    }
-
-    static func pathStamp(_ path: String) throws -> FileEntryStamp? {
-        var status = stat()
-        guard lstat(path, &status) == 0 else {
-            let code = errno
-            if code == ENOENT || code == ENOTDIR { return nil }
-            throw DescriptorFileCopy.error("lstat", path: path, code: code)
-        }
-        return FileEntryStamp(status)
-    }
-
-    func captureEntries() throws {
-        try validateDirectory()
-        entries = try entryStamps()
-        try validateDirectory()
-    }
-
-    func validate() throws {
-        try validateDirectory()
-        guard try entryStamps() == entries else {
-            throw DescriptorFileCopy.error("source changed", path: path, code: ESTALE)
-        }
-        try validateDirectory()
-    }
-
-    private func validateDirectory() throws {
-        guard try Self.descriptorStamp(descriptor, path: path) == initial,
-              try Self.pathStamp(path) == initial else {
-            throw DescriptorFileCopy.error("source changed", path: path, code: ESTALE)
-        }
-    }
-
-    private func entryStamps() throws -> [String: FileEntryStamp] {
-        rewinddir(directory)
-        var result: [String: FileEntryStamp] = [:]
-        while true {
-            errno = 0
-            guard let entry = readdir(directory) else {
-                guard errno == 0 else { throw DescriptorFileCopy.error("readdir", path: path, code: errno) }
-                return result
-            }
-            let capacity = Int(entry.pointee.d_namlen) + 1
-            let name = withUnsafePointer(to: &entry.pointee.d_name) {
-                $0.withMemoryRebound(to: CChar.self, capacity: capacity) { String(cString: $0) }
-            }
-            if name == "." || name == ".." { continue }
-            var status = stat()
-            guard fstatat(descriptor, name, &status, AT_SYMLINK_NOFOLLOW) == 0 else {
-                throw DescriptorFileCopy.error("fstatat", path: path + "/" + name, code: errno)
-            }
-            result[name] = FileEntryStamp(status)
-        }
-    }
-}
-
-/// Shared by single-file copying and directory-relative carrying. A sibling temporary file preserves
+/// Shared by single-file copying and imported-folder copying. A sibling temporary file preserves
 /// the destination until rename; descriptor chunks keep memory use independent of file size.
 enum DescriptorFileCopy {
     struct Options {

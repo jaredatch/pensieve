@@ -12,7 +12,7 @@ final class SkillSaveRevisionTests: XCTestCase {
         let slug = try store.createSkill(name: "Test", description: "D", body: "Body")
         let container = try ModelContainer(
             for: Skill.self, Project.self, SkillProjectAssignment.self, IntentAssignment.self,
-            DeployRecord.self, Pensieve.Category.self, Scenario.self,
+            DeployRecord.self, Pensieve.Category.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = ModelContext(container)

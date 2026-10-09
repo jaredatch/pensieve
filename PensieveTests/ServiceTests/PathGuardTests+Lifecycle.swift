@@ -69,7 +69,7 @@ extension PathGuardTests {
         try manifest.write(manifest.snapshot(from: contextA), toRoot: storeA)
         try files.writeFile(at: storeA + "/.gitattributes", content:
             "manifest/categories/*.yaml merge=union\n"
-                + "manifest/scenarios/*.yaml merge=union\nmanifest/projects.yaml merge=union\n")
+                + "manifest/projects.yaml merge=union\n")
         try files.writeFile(at: storeA + "/.gitignore", content: ".DS_Store\n")
         try git.stageAllAndCommit(at: storeA, message: "existing accented skill")
         try git.setRemote("file://" + remote, at: storeA)

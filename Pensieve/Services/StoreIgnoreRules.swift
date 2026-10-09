@@ -13,12 +13,13 @@ enum StoreReceiptError: LocalizedError {
 }
 
 /// Receipts live separately from the control files older builds regenerate. Only metadata ignore
-/// rules consume them; root .gitignore and .gitattributes retain the older build's exact constants.
+/// rules consume them. Root .gitignore stays compatible with older builds; .gitattributes
+/// includes only the active manifest families.
 enum StoreIgnoreRules {
     static let receiptFile = ".pensieve-retired-paths"
     private static let marker = "# Pensieve retired path: "
     private static let attributes = "manifest/categories/*.yaml merge=union\n"
-        + "manifest/scenarios/*.yaml merge=union\nmanifest/projects.yaml merge=union\n"
+        + "manifest/projects.yaml merge=union\n"
 
     static func retiredPaths(at root: String, files: FileServiceProtocol) throws -> [String] {
         var paths: [String] = []

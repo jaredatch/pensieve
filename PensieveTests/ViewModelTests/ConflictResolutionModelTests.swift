@@ -72,7 +72,7 @@ final class ConflictResolutionModelTests: XCTestCase {
     func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
             for: Skill.self, Project.self, SkillProjectAssignment.self,
-            DeployRecord.self, PensieveCategory.self, Scenario.self,
+            DeployRecord.self, PensieveCategory.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         return ModelContext(container)

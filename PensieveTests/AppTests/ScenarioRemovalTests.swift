@@ -16,7 +16,7 @@ final class ScenarioRemovalTests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent()
         let retired = try NSRegularExpression(
             pattern: #"\b(?:ScenarioStore(?:Protocol)?|ScenarioReconciler(?:Protocol)?|"#
-                + #"ScenarioDetailView|ScenarioDetailModel|ScenarioListView|ScenarioRecord)\b"#
+                + #"ScenarioDetailView|ScenarioDetailModel|ScenarioListView|ScenarioRecord|Scenario|ScenarioAssignment)\b"#
         )
         var scanned = 0
         for folder in ["Pensieve", "PensieveDaemon"] {
@@ -38,6 +38,12 @@ final class ScenarioRemovalTests: XCTestCase {
         XCTAssertNil(AddSheet(rawValue: "scenario"))
         XCTAssertNotNil(AddSheet(rawValue: "project"))
         XCTAssertNotNil(AddSheet(rawValue: "category"))
+
+        let changelog = try String(contentsOf: root.appendingPathComponent("CHANGELOG.md"), encoding: .utf8)
+        let unreleased = try XCTUnwrap(changelog.components(separatedBy: "\n## [").first {
+            $0.hasPrefix("Unreleased]")
+        })
+        XCTAssertTrue(unreleased.contains("more than one Mac, update every Mac"))
     }
 
     @MainActor

@@ -212,7 +212,7 @@ final class SyncSetupModelTests: XCTestCase {
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
             for: Skill.self, Project.self, SkillProjectAssignment.self,
-            DeployRecord.self, PensieveCategory.self, Scenario.self,
+            DeployRecord.self, PensieveCategory.self,
             MachineDeployIntent.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
@@ -243,7 +243,7 @@ final class SyncSetupModelTests: XCTestCase {
     private func virginScaffold(trace: EventTrace = EventTrace(), gitDir: Bool = false) -> StubFileService {
         let file = StubFileService(trace: trace)
         let manifest = root + "/manifest"
-        let childNames = ["categories", "scenarios", "skills", "deploys"]
+        let childNames = ["categories", "skills", "deploys"]
         file.dirs = Set([root, manifest] + childNames.map { manifest + "/" + $0 })
         if gitDir { file.dirs.insert(root + "/.git") }
         file.listing[root] = gitDir ? ["manifest", ".git"] : ["manifest"]
@@ -533,24 +533,6 @@ extension SyncSetupModelTests {
             XCTAssertTrue(trace.events.first?.hasPrefix("clone:") == true, "trace: \(trace.events)")
         }
 
-        let context = try makeContext()
-        let legacy = Scenario(name: "Legacy")
-        context.insert(legacy)
-        let trace = EventTrace()
-        let model = try await runConnect(
-            file: virginScaffold(trace: trace),
-            git: RecordingGitService(trace: trace),
-            rebuilder: RecordingRebuilder(trace: trace),
-            context: context,
-            familiesEmpty: nil
-        )
-        XCTAssertEqual(model.state, .done)
-        XCTAssertEqual(trace.events, [
-            "lsremote-symref:\(remoteURL)", "lsremote-heads:\(remoteURL)", "init:\(root)",
-            "remote:\(remoteURL)", "fetch:main", "restore-fetch-head", "born:main",
-            "rebuild:\(root)", "upstream:main"
-        ])
-        XCTAssertEqual(try context.fetch(FetchDescriptor<Scenario>()).map(\.id), [legacy.id])
     }
 
     func testSwiftDataFetchFailureRefused() async throws {
@@ -1017,23 +999,33 @@ extension SyncSetupModelTests {
     }
 
     func testRealScaffoldJudgedVirgin() throws {
-        let fixture = try makeBareFixture()
-        try writeRealScaffold()
-        let (model, context) = try makeRealModel()
-        try performReal(model, remote: fixture.remote)
-        XCTAssertTrue(try TestPaths.git.hasLocalBranches(at: root))
-        XCTAssertEqual(try skillCount(context), 1)
+        for legacyFolder in [false, true] {
+            let fixture = try makeBareFixture()
+            try writeRealScaffold()
+            if legacyFolder { try FileService().createDirectory(at: root + "/manifest/scenarios") }
+            let rootIdentity = FileService().fileIdentity(at: root, followingLinks: false)
+            let (model, context) = try makeRealModel()
+            try performReal(model, remote: fixture.remote)
+            XCTAssertEqual(FileService().fileIdentity(at: root, followingLinks: false), rootIdentity)
+            XCTAssertTrue(try TestPaths.git.hasLocalBranches(at: root))
+            XCTAssertEqual(try skillCount(context), 1)
+            XCTAssertTrue(FileService().fileExists(at: root + "/skills/remote-skill/SKILL.md"))
+            try FileService().deleteDirectory(at: root)
+        }
     }
 
     func testRealScaffoldWithContentRefused() throws {
-        let fixture = try makeBareFixture()
-        try writeRealScaffold()
-        let localPath = root + "/manifest/skills/local.yaml"
-        try "local\n".write(toFile: localPath, atomically: true, encoding: .utf8)
-        let (model, _) = try makeRealModel()
-        XCTAssertThrowsError(try performReal(model, remote: fixture.remote))
-        XCTAssertEqual(try String(contentsOfFile: localPath, encoding: .utf8), "local\n")
-        XCTAssertFalse(FileService().directoryExists(at: root + "/.git"))
+        for child in ["skills/local.yaml", "scenarios/legacy.yaml"] {
+            let fixture = try makeBareFixture()
+            try writeRealScaffold()
+            let localPath = root + "/manifest/" + child
+            try FileService().writeFile(at: localPath, content: "local\n")
+            let (model, _) = try makeRealModel()
+            XCTAssertThrowsError(try performReal(model, remote: fixture.remote))
+            XCTAssertEqual(try FileService().readFile(at: localPath), "local\n")
+            XCTAssertFalse(FileService().directoryExists(at: root + "/.git"))
+            try FileService().deleteDirectory(at: root)
+        }
     }
 
     func testRealGitAdoptionEndToEndUntrackedSurvivesUpstreamSet() throws {

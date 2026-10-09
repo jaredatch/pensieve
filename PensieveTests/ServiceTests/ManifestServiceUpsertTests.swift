@@ -12,9 +12,9 @@ extension ManifestServiceTests {
             projectKey: "github.com/owner/project"
         )]
         try service.write(snapshot, toRoot: tempDir)
+        let before = try unrelatedManifestBytes(excludingSkill: "plain")
         let legacy = "id: " + scenarioID + "\nname: Release\nskill_slugs:\n  - plain\nagents:\n  - codex\n"
         try fileService.writeFile(at: tempDir + "/manifest/scenarios/release.yaml", content: legacy)
-        let before = try unrelatedManifestBytes(excludingSkill: "plain")
 
         let replacement = SkillOverlay(
             slug: "plain",
@@ -28,6 +28,7 @@ extension ManifestServiceTests {
         try service.upsertSkillOverlay(replacement, toRoot: tempDir)
 
         XCTAssertEqual(try unrelatedManifestBytes(excludingSkill: "plain"), before)
+        XCTAssertFalse(fileService.fileExists(at: tempDir + "/manifest/scenarios"))
         XCTAssertEqual(
             try service.read(fromRoot: tempDir).skills.first { $0.slug == "plain" },
             replacement

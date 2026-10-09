@@ -70,10 +70,7 @@ final class SkillDeletionFlowTests: XCTestCase {
                                                 platform: .claudeCode))
         let category = Category(name: "Category")
         category.skillSlugs = [f.skill.directoryName]
-        let scenario = Scenario(name: "Scenario")
-        scenario.skillSlugs = [f.skill.directoryName]
         f.context.insert(category)
-        f.context.insert(scenario)
         try f.context.save()
     }
 
@@ -104,8 +101,6 @@ final class SkillDeletionFlowTests: XCTestCase {
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<Skill>()).count, 0)
         XCTAssertEqual(try f.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.skillSlug), ["other"])
         XCTAssertTrue(try f.context.fetch(FetchDescriptor<Pensieve.Category>()).allSatisfy { $0.skillSlugs.isEmpty })
-        XCTAssertEqual(try f.context.fetch(FetchDescriptor<Scenario>()).map(\.skillSlugs), [["alpha"]])
-        XCTAssertEqual(try f.context.fetchCount(FetchDescriptor<ScenarioAssignment>()), 0)
         XCTAssertEqual(f.store.deleteCalls, ["alpha"]); XCTAssertNil(f.library.deletionNotice)
         XCTAssertTrue(f.manifest.snapshots.last?.skills.isEmpty == true)
         XCTAssertFalse(f.manifest.snapshots.last?.deployIntents.contains { $0.skillSlug == "alpha" } == true)
@@ -285,7 +280,6 @@ extension SkillDeletionFlowTests {
         f.cursor.ownedProjectPaths = [nil]
         XCTAssertTrue(delete(f)); XCTAssertEqual(f.cursor.removeProjectPaths.count, 1)
         XCTAssertNil(f.cursor.removeProjectPaths[0])
-        XCTAssertEqual(try f.context.fetch(FetchDescriptor<ScenarioAssignment>()).count, 0)
         XCTAssertEqual(f.counter.value, 1)
     }
 

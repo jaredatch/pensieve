@@ -56,7 +56,7 @@ extension SkillSerializerTests {
             "2023-11-14T22:13:20.000Z", "2023-11-14T22:13:20.123Z",
             "2026-07-30T16:00:00Z", "2026-07-30T16:00:00.000Z",
             "A, {weird} \"name\" with \\ and\ttab\nnewline",
-            // ManifestScenarioTests.
+            // ManifestRetirementTests.
             "Backend", "Frontend", "sql", "api", "cursor", "claudeCode", "react", "vite", "codex",
             "a/b", "", "日本語", "unicode", "openClaw", "Same", "a", "b", "one", "two", "x",
             "First", "Last", "Healed", "not-a-uuid",

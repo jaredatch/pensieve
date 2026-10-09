@@ -15,7 +15,7 @@ extension SkillInstallServiceTests {
     func makeInstallContext() throws -> ModelContext {
         let container = try ModelContainer(
             for: Skill.self, Project.self, SkillProjectAssignment.self,
-            DeployRecord.self, InstallCategory.self, Scenario.self,
+            DeployRecord.self, InstallCategory.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         return ModelContext(container)

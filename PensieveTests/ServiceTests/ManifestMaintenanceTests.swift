@@ -187,7 +187,7 @@ final class ManifestMaintenanceTests: XCTestCase {
             projects: [], context: context
         ))
         XCTAssertFalse(overlayExists(slug: "doomed"))
-        XCTAssertEqual(try fileService.readData(at: legacyPath), legacyBytes)
+        XCTAssertFalse(fileService.directoryExists(at: tempDir + "/manifest/scenarios"))
     }
 
     @MainActor

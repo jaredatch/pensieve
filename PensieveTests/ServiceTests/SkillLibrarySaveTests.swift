@@ -234,7 +234,7 @@ final class SkillLibrarySaveTests: XCTestCase {
         // draft would write an orphan SKILL.md back onto disk.
         let container = try ModelContainer(
             for: Skill.self, Project.self, SkillProjectAssignment.self, IntentAssignment.self,
-            MachineDeployIntent.self, ScenarioAssignment.self, DeployRecord.self, Category.self,
+            MachineDeployIntent.self, DeployRecord.self, Category.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = ModelContext(container)

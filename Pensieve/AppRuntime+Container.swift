@@ -8,10 +8,8 @@ extension AppRuntime {
             Skill.self,
             Project.self,
             SkillProjectAssignment.self,
-            ScenarioAssignment.self,
             DeployRecord.self,
             Category.self,
-            Scenario.self,
             RepoUpdateCursor.self,
             MachineDeployIntent.self,
             IntentAssignment.self

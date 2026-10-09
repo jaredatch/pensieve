@@ -31,7 +31,6 @@ final class IntentReconcilerTests: XCTestCase {
 
     func testRetractsOnIntentRemoval() throws {
         let harness = try makeHarness(installed: [.codex])
-        XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<ScenarioAssignment>()), 0)
         let skill = try insertSkill("alpha", context: harness.context)
         insertIntent(machineID: localID, skill: skill, platform: .codex, context: harness.context)
         try harness.context.save()

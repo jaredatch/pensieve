@@ -255,7 +255,6 @@ extension MachineStatePublishTests {
         )
         try fileService.writeFile(at: seed + "/.gitattributes",
                                   content: "manifest/categories/*.yaml merge=union\n"
-                                    + "manifest/scenarios/*.yaml merge=union\n"
                                     + "manifest/projects.yaml merge=union\n")
         try fileService.writeFile(at: seed + "/.gitignore", content: ".DS_Store\n")
         XCTAssertTrue(try git.stageAllAndCommit(at: seed, message: "seed"))

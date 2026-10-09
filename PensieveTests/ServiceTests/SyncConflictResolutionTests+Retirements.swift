@@ -31,7 +31,7 @@ extension SyncConflictResolutionTests {
     }
 
     @MainActor
-    func testOlderWriterPreservesRetirementWithoutRuleChurn() throws {
+    func testOlderWriterPreservesRetirementDuringRuleChurn() throws {
         let fixture = try SyncConflictByteFixture.gitlinkConflict()
         defer { try? fixture.files.deleteDirectory(at: fixture.root) }
         let item = try fixture.inspect()
@@ -45,20 +45,23 @@ extension SyncConflictResolutionTests {
             + "manifest/projects.yaml merge=union\n"
         let original = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout
         for _ in 0..<2 {
+            _ = try fixture.git.pullRebase(at: older, credential: nil)
             // The older build's ensureSyncAttributes and native staging/rebase/push sequence.
             try fixture.files.writeFile(at: older + "/.gitattributes", content: attributes)
             try fixture.files.writeFile(at: older + "/.gitignore", content: ".DS_Store\n")
-            try fixture.git.runOrThrow(["-C", older, "add", "-A"], in: nil)
-            XCTAssertEqual(try fixture.git.run(["-C", older, "diff", "--cached", "--quiet"], in: nil).exit, 0,
-                           "R4: older preparation must have nothing to commit")
+            XCTAssertTrue(try fixture.git.stageAllAndCommit(at: older, message: "older attributes"))
             _ = try fixture.git.pullRebase(at: older, credential: nil)
             try fixture.git.push(at: older, credential: nil)
-            _ = try fixture.engine.sync(root: fixture.storeB, message: "current writer", credential: nil,
-                                        context: fixture.contextB)
+            let ingested = try fixture.engine.sync(root: fixture.storeB, message: "current writer", credential: nil,
+                                                   context: fixture.contextB)
+            guard case .synced = ingested else { return XCTFail("Current writer stopped: \(ingested)") }
+            XCTAssertEqual(try fixture.engine.sync(root: fixture.storeB, message: "current attributes", credential: nil,
+                                                  context: fixture.contextB), .synced(pushed: true, warnings: []))
         }
-        XCTAssertEqual(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout,
-                       original, "R4: the two builds must not alternate commits")
-        XCTAssertEqual(try fixture.files.readFile(at: fixture.storeB + "/.gitattributes"), attributes)
+        XCTAssertNotEqual(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout,
+                          original, "Both builds publish their attributes while preserving retirement")
+        XCTAssertEqual(try fixture.files.readFile(at: fixture.storeB + "/.gitattributes"),
+                       "manifest/categories/*.yaml merge=union\nmanifest/projects.yaml merge=union\n")
         try fixture.files.writeFile(at: older + "/" + item.path + "/older-child", content: "older local work")
         try fixture.git.runOrThrow(["-C", older, "add", "-A"], in: nil)
         let staged = try fixture.git.runOrThrow(["-C", older, "diff", "--cached", "--name-only"], in: nil).stdout

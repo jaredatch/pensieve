@@ -5,8 +5,8 @@ import XCTest
 extension SyncEngineTests {
     func makeContext() throws -> ModelContext {
         let schema = Schema([
-            Skill.self, Project.self, SkillProjectAssignment.self, ScenarioAssignment.self,
-            DeployRecord.self, Pensieve.Category.self, Scenario.self, RepoUpdateCursor.self,
+            Skill.self, Project.self, SkillProjectAssignment.self,
+            DeployRecord.self, Pensieve.Category.self, RepoUpdateCursor.self,
             MachineDeployIntent.self, IntentAssignment.self
         ])
         return ModelContext(try ModelContainer(

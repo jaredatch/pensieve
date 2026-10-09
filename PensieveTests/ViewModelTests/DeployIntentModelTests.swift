@@ -250,8 +250,8 @@ final class DeployIntentModelTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: directory) }
         let url = URL(fileURLWithPath: directory + "/default.store")
         let oldSchema = Schema([
-            Skill.self, Project.self, SkillProjectAssignment.self, ScenarioAssignment.self,
-            DeployRecord.self, Category.self, Scenario.self, RepoUpdateCursor.self
+            Skill.self, Project.self, SkillProjectAssignment.self,
+            DeployRecord.self, Category.self, RepoUpdateCursor.self
         ])
         do {
             let oldContainer = try ModelContainer(

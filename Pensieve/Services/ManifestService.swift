@@ -25,7 +25,7 @@ struct ManifestService: ManifestReadWriting {
 
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
         let acquired = Self.writeLock.try()
-        // Reports contention before waiting; copy checkpoints independently prove exclusion.
+        // Reports contention before waiting; write checkpoints independently prove exclusion.
         writeLockAttempted(acquired)
         if !acquired { Self.writeLock.lock() }
         defer { Self.writeLock.unlock() }
@@ -39,12 +39,11 @@ struct ManifestService: ManifestReadWriting {
         let base = (root as NSString).lastPathComponent
         let tmpDir = parent + "/" + base + ".manifest-build-" + UUID().uuidString + ".tmp"
         let categoriesDir = tmpDir + "/categories"
-        let scenariosDir = tmpDir + "/scenarios"
         let skillsDir = tmpDir + "/skills"
         let deploysDir = tmpDir + "/deploys"
 
         do {
-            for directory in [categoriesDir, scenariosDir, skillsDir, deploysDir] {
+            for directory in [categoriesDir, skillsDir, deploysDir] {
                 try fileService.createDirectory(at: directory)
             }
             try fileService.writeFile(
@@ -57,7 +56,6 @@ struct ManifestService: ManifestReadWriting {
                     content: Self.serializeCategory(category)
                 )
             }
-            let carried = try carryScenarioFiles(from: manifestDir + "/scenarios", to: scenariosDir)
             for skill in snapshot.skills {
                 try fileService.writeFile(
                     at: skillsDir + "/" + skill.slug + ".yaml",
@@ -72,7 +70,6 @@ struct ManifestService: ManifestReadWriting {
             if !fileService.directoryExists(at: root) {
                 try fileService.createDirectory(at: root)
             }
-            try carried.validateSource()
             try fileService.replaceItem(at: manifestDir, with: tmpDir)
         } catch {
             try? fileService.deleteDirectory(at: tmpDir)
@@ -143,12 +140,6 @@ struct ManifestService: ManifestReadWriting {
             ))
         }
         return categories
-    }
-
-    /// Legacy definitions belong to older builds. Keep opaque regular-file bytes in the atomic
-    /// replacement tree, and never traverse a symlinked scenarios directory or entry.
-    private func carryScenarioFiles(from source: String, to destination: String) throws -> RegularFileCopyReceipt {
-        try fileService.copyRegularFiles(fromDirectory: source, toDirectory: destination)
     }
 
     private func readSkills(from manifestDir: String) throws -> [SkillOverlay] {

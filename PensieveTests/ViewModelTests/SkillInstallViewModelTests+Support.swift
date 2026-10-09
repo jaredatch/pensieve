@@ -113,8 +113,7 @@ extension SkillInstallViewModelTests {
 
     func makeContainer() throws -> ModelContainer {
         try ModelContainer(
-            for: Skill.self, Project.self, SkillProjectAssignment.self,
-            ScenarioAssignment.self, DeployRecord.self, Pensieve.Category.self, Scenario.self,
+            for: Skill.self, Project.self, SkillProjectAssignment.self, DeployRecord.self, Pensieve.Category.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
     }

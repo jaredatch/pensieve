@@ -22,8 +22,6 @@ protocol FileServiceProtocol {
     func copyFile(at sourcePath: String, to destinationPath: String, checkingCancellation: Bool) throws
     /// Fill an import temp with bounded regular contents, excluding its prepared SKILL.md.
     func copyImportedSkillContents(fromDirectory source: String, toDirectory destination: String) throws -> [SkillFolderCopySkip]
-    /// Copies regular entries from one no-follow directory descriptor; never traverses child links.
-    func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws -> RegularFileCopyReceipt
     func deleteFile(at path: String) throws
     func fileExists(at path: String) -> Bool
     /// The final entry itself, including dangling links. Only ENOENT is absence; other failures throw.

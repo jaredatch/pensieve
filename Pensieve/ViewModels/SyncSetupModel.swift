@@ -280,8 +280,8 @@ private extension SyncSetupModel {
               ),
               let manifestEntries = try? fileService.listDirectory(at: manifest),
               entriesMatch(
-                  manifestEntries,
-                  required: ["manifest.yaml", "projects.yaml", "categories", "scenarios", "skills", "deploys"],
+                  manifestEntries.filter { $0 != "scenarios" },
+                  required: ["manifest.yaml", "projects.yaml", "categories", "skills", "deploys"],
                   base: manifest,
                   toleratedGitDir: false
               ) else { return false }
@@ -292,7 +292,8 @@ private extension SyncSetupModel {
             return fileService.isRegularFile(at: path) && !fileService.isSymlink(at: path)
         }) else { return false }
 
-        for name in ["categories", "scenarios", "skills", "deploys"] {
+        // Older builds scaffolded an empty legacy folder. Admit it only under the same empty-directory checks.
+        for name in ["categories", "skills", "deploys"] + manifestEntries.filter({ $0 == "scenarios" }) {
             let path = manifest + "/" + name
             guard fileService.directoryExists(at: path),
                   !fileService.isSymlink(at: path),

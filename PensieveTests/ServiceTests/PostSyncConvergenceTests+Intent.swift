@@ -3,15 +3,11 @@ import XCTest
 @testable import Pensieve
 
 extension PostSyncConvergenceTests {
-    func testLaunchAndHeadAdvanceRealizeUserWideAndProjectIntentWithoutLegacyEffects() throws {
+    func testLaunchAndHeadAdvanceRealizeUserWideAndProjectIntentWithoutDeployingUnrequestedSkills() throws {
         let harness = try ProjectIntentHarness(installed: [.codex])
         let skill = try harness.insertSkill("intent")
-        let legacyOnly = try harness.insertSkill("legacy-only")
+        _ = try harness.insertSkill("unrequested")
         let project = try harness.insertProject(name: "Project", path: "/projects/intent", key: "key")
-        let legacy = Scenario(name: "Retired")
-        legacy.skillSlugs = [legacyOnly.directoryName]
-        legacy.agentRawValues = ["codex"]
-        harness.context.insert(legacy)
         let userIntent = try harness.insertIntent(skill: skill, platformRaw: "codex")
         _ = try harness.insertIntent(skill: skill, platformRaw: "codex", projectKey: "key")
         let recorder = ConvergenceRecorder()
@@ -50,6 +46,5 @@ extension PostSyncConvergenceTests {
             harness.artifactPath(skill: skill, platform: .codex, project: project)
         ])
         XCTAssertEqual(recorder.events, ["deploy", "deploy:0:0", "category:0:0:skipped:0", "intent:1:0:skipped:0"])
-        XCTAssertEqual(legacy.skillSlugs, [legacyOnly.directoryName])
     }
 }
