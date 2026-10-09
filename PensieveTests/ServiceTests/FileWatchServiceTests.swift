@@ -19,7 +19,7 @@ final class FileWatchServiceTests: XCTestCase {
     }
 
     func testStartDeliversChangedDirectoryNameForExternalSkillWrite() throws {
-        let directoryNames = ["external-edit"] + PathJoiningScalars.values.map { $0 + "edit" }
+        let directoryNames = ["external-edit"] + PathJoiningScalars.values.map { PathJoiningScalars.name("edit", scalar: $0) }
         for name in directoryNames {
             try FileManager.default.createDirectory(atPath: tempRoot + "/" + name, withIntermediateDirectories: true)
         }

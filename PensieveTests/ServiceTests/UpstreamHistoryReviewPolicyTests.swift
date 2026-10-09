@@ -41,7 +41,8 @@ extension UpstreamHistoryServiceTests {
     }
 
     func testInstallAndHistoryRejectTheSameMalformedRelativePaths() throws {
-        let invalid = ["skills/./demo", "skills//demo", "skills/demo/"]
+        let invalid = ["skills/./demo", "skills//demo", "skills/demo/", "-plain"]
+            + PathJoiningScalars.values.map { "-" + PathJoiningScalars.name("x", scalar: $0) }
         let git = RecordingUpstreamHistoryGit(result: .success(UpstreamHistoryGitSnapshot(
             headCommit: String(repeating: "a", count: 40),
             rows: [],

@@ -33,15 +33,15 @@ final class PreviewImageLoaderTests: XCTestCase {
             XCTAssertEqual(image.height, 24, url.absoluteString)
         }
         for scalar in PathJoiningScalars.values {
-            let name = scalar + "image.png"
+            let name = PathJoiningScalars.name("image.png", scalar: scalar)
             try spy.files.writeData(at: skillDirectory + "/" + name, data: png)
             let image = try loader.loadImage(at: XCTUnwrap(URL(string: name)), skillDirectory: skillDirectory)
             XCTAssertEqual(image.width, 32)
             XCTAssertEqual(image.height, 24)
         }
-        XCTAssertEqual(spy.reads.count, 8)
+        XCTAssertEqual(spy.reads.count, 3 + PathJoiningScalars.values.count)
         XCTAssertTrue(spy.reads.allSatisfy { $0.limit == 4 * 1_024 * 1_024 && $0.root == skillDirectory })
-        XCTAssertEqual(spy.bytesRead, png.count * 8)
+        XCTAssertEqual(spy.bytesRead, png.count * (3 + PathJoiningScalars.values.count))
         XCTAssertEqual(try loader.loadImage(at: URL(string: dataURL)!, skillDirectory: nil).width, 32)
     }
 

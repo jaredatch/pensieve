@@ -87,7 +87,7 @@ final class MachineStateDisplayPathTests: XCTestCase {
             try assertParsedPath(valueLine: value, expected: nil)
         }
         for scalar in PathJoiningScalars.values {
-            let path = "~/" + scalar + "project"
+            let path = "~/" + PathJoiningScalars.name("project", scalar: scalar)
             try assertParsedPath(valueLine: "\"" + path + "\"", expected: path)
             try assertParsedPath(valueLine: "\"" + path + "/../secret\"", expected: nil)
         }

@@ -119,7 +119,7 @@ final class SyncModelTests: XCTestCase {
         )
         XCTAssertEqual(model.conflictedSlugs, ["a", "b"])
         for scalar in PathJoiningScalars.values {
-            let name = scalar + "skill"
+            let name = PathJoiningScalars.name("skill", scalar: scalar)
             let joined = SyncModel(git: StubGit(), root: "/unused", initialState: .conflicted([
                 "skills/" + name + "/SKILL.md", "manifest/skills/" + name + ".yaml"
             ]))
@@ -127,6 +127,12 @@ final class SyncModelTests: XCTestCase {
             XCTAssertEqual(SyncEngine.kind(for: "manifest/skills/" + name + ".yaml"), .overlay)
             XCTAssertEqual(SyncEngine.kind(for: "manifest/categories/" + name + ".yaml"), .category)
         }
+
+        let malformed = SyncModel(git: StubGit(), root: "/unused", initialState: .conflicted([
+            "skills/SKILL.md", "skills//SKILL.md", "manifest/skills/.yaml",
+            "manifest/skills/", "skills/./SKILL.md", "skills/../SKILL.md"
+        ]))
+        XCTAssertTrue(malformed.conflictedSlugs.isEmpty, "Degenerate paths must never badge a skill")
 
         let idleModel = SyncModel(
             git: StubGit(),

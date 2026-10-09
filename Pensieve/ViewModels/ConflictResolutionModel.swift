@@ -189,27 +189,24 @@ final class ConflictResolutionModel {
     }
 
     private func entityID(for item: ConflictItem) -> String {
-        switch item.kind {
-        case .body:
-            if let slug = skillBodySlug(from: item.path) { return slug }
-        case .overlay:
-            if let slug = skillOverlaySlug(from: item.path) { return slug }
+        let path = SyncEngine.conflictPath(for: item.path)
+        switch path.kind {
+        case .body, .overlay:
+            return path.skillSlug ?? item.path
         case .category:
-            return "category:" + categoryName(from: item.path)
+            return "category:" + (path.slug ?? item.path)
         case .project:
             return "projects"
         }
-        return item.path
     }
 
     private func title(for id: String, items: [ConflictItem], namesBySlug: [String: String]) -> String {
         if id == "projects" { return "Project registry" }
-        if id.hasPrefix("category:") {
-            return "Category: " + String(id.dropFirst("category:".count))
+        if let item = items.first {
+            let path = SyncEngine.conflictPath(for: item.path)
+            if path.kind == .category { return "Category: " + (path.slug ?? item.path) }
         }
-        let slug = items.compactMap { item -> String? in
-            skillBodySlug(from: item.path) ?? skillOverlaySlug(from: item.path)
-        }.first ?? id
+        let slug = items.compactMap { SyncEngine.conflictPath(for: $0.path).skillSlug }.first ?? id
         return namesBySlug[slug] ?? slug
     }
 
@@ -218,27 +215,6 @@ final class ConflictResolutionModel {
         if kinds.contains(.body) && kinds.contains(.overlay) { return "Body and settings differ" }
         if kinds.contains(.body) { return "Body differs" }
         return "Settings differ"
-    }
-
-    private func skillBodySlug(from path: String) -> String? {
-        guard PathSyntax.hasPrefix(path, "skills/"), PathSyntax.hasSuffix(path, "/SKILL.md") else { return nil }
-        guard let relative = PathSyntax.relativePath(path, under: "skills"),
-              relative.count > "/SKILL.md".count else { return nil }
-        return String(relative.dropLast("/SKILL.md".count))
-    }
-
-    private func skillOverlaySlug(from path: String) -> String? {
-        guard PathSyntax.hasPrefix(path, "manifest/skills/"), path.hasSuffix(".yaml") else { return nil }
-        guard let relative = PathSyntax.relativePath(path, under: "manifest/skills"),
-              relative.count > ".yaml".count else { return nil }
-        return String(relative.dropLast(".yaml".count))
-    }
-
-    private func categoryName(from path: String) -> String {
-        guard PathSyntax.hasPrefix(path, "manifest/categories/"), path.hasSuffix(".yaml") else { return path }
-        guard let relative = PathSyntax.relativePath(path, under: "manifest/categories"),
-              relative.count > ".yaml".count else { return path }
-        return String(relative.dropLast(".yaml".count))
     }
 
     private func resolveCredential() throws -> GitCredential? {

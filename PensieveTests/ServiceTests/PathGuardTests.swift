@@ -5,7 +5,7 @@ import XCTest
 final class PathGuardTests: XCTestCase {
     func testJoiningScalarsKeepSeparatorsAndComponentRulesAtAdmissionBoundaries() throws {
         for (index, scalar) in PathJoiningScalars.values.enumerated() {
-            let name = scalar + "name"
+            let name = PathJoiningScalars.name("name", scalar: scalar)
             XCTAssertNoThrow(try LinkService.validatePathComponent(name))
             XCTAssertThrowsError(try LinkService.validatePathComponent("parent/" + name))
             XCTAssertThrowsError(try LinkService.validatePathComponent("~" + name))
@@ -45,7 +45,9 @@ final class PathGuardTests: XCTestCase {
         defer { try? files.deleteDirectory(at: root) }
         let store = root + "/caf\u{00E9}/skills"
         let ownership = DeployArtifactOwnership(fileService: files)
-        for (index, name) in (PathJoiningScalars.values.map { $0 + "name" } + ["caf\u{00E9}", "cafe\u{0301}"]).enumerated() {
+        let names = PathJoiningScalars.values.map { PathJoiningScalars.name("name", scalar: $0) }
+            + ["caf\u{00E9}", "cafe\u{0301}"]
+        for (index, name) in names.enumerated() {
             for linksFile in [false, true] {
                 let link = root + "/link-\(index)-\(linksFile)"
                 let target = (store + "/" + name + (linksFile ? "/SKILL.md" : "")).decomposedStringWithCanonicalMapping
@@ -64,7 +66,7 @@ final class PathGuardTests: XCTestCase {
         defer { try? files.deleteDirectory(at: root) }
         try files.createDirectory(at: root)
         for scalar in PathJoiningScalars.values {
-            let name = scalar + "folder"
+            let name = PathJoiningScalars.name("folder", scalar: scalar)
             let path = root + "/" + name + "/body.txt"
             try files.writeFileInProject(at: path, content: "body", projectPath: root)
             XCTAssertEqual(try files.readFile(at: path), "body")

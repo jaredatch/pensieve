@@ -326,14 +326,6 @@ struct SyncEngine: SyncEngineProtocol {
         }
     }
 
-    static func kind(for path: String) -> ConflictKind {
-        if PathSyntax.hasPrefix(path, "skills/") && PathSyntax.hasSuffix(path, "/SKILL.md") { return .body }
-        if PathSyntax.hasPrefix(path, "manifest/skills/") { return .overlay }
-        if PathSyntax.hasPrefix(path, "manifest/categories/") { return .category }
-        if path == "manifest/projects.yaml" { return .project }
-        return .body
-    }
-
     /// Validate a git-relative path before writing/deleting through it. Reject: empty/absolute paths;
     /// any `.`/`..`/empty/control-scalar component; any symlink at a directory/non-leaf component; and
     /// a symlinked leaf whose target resolves outside `root`. Containment is boundary-aware.

@@ -713,6 +713,8 @@
 		C4789A131812176751498A1B /* MachineStateService+Publishing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 355CD7A7FEDF8795168D8D78 /* MachineStateService+Publishing.swift */; };
 		C48ED6CD5C3239C117DFEFC9 /* SkillListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C16F0222C6D68451ECA4B00 /* SkillListView.swift */; };
 		C4D5B1706E9232ABDE1ECE01 /* UpdatesViewModel+Operations.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD3D24A02FD4C7F1D75CA955 /* UpdatesViewModel+Operations.swift */; };
+		C50FEDAD8C5751662AF6343F /* ConflictResolutionModelTests+History.swift in Sources */ = {isa = PBXBuildFile; fileRef = E325FCEA1AEDE86ED3F17AEE /* ConflictResolutionModelTests+History.swift */; };
+		C53304D9F96DEFAFB55FDE23 /* SyncEngine+ConflictPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2542BD828307819ADA51E2A /* SyncEngine+ConflictPath.swift */; };
 		C53B31DA3F619CDE927C317C /* GitHubCredentialSettingsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DADB85D81F03E7F83732AD0 /* GitHubCredentialSettingsModel.swift */; };
 		C5B74D20DA1D002BC0690889 /* GitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 564305166B0040EFCA588BA3 /* GitService.swift */; };
 		C629956A95033B2A4A55CB0D /* UpdateCheckServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 707C7924C9CB6A96629FF8DF /* UpdateCheckServiceTests.swift */; };
@@ -1536,6 +1538,7 @@
 		A1D65C2623F64F34B09588B0 /* DaemonStatusCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonStatusCommandTests.swift; sourceTree = "<group>"; };
 		A1FDE32CB9A748D8B54D49C5 /* SkillPreviewBudgetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillPreviewBudgetTests.swift; sourceTree = "<group>"; };
 		A233C222EE832AB997AE17BD /* DeployPlatformCoverageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeployPlatformCoverageTests.swift; sourceTree = "<group>"; };
+		A2542BD828307819ADA51E2A /* SyncEngine+ConflictPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SyncEngine+ConflictPath.swift"; sourceTree = "<group>"; };
 		A28DCAE650677292E246BAC3 /* SkillLibraryViewModel+Draft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillLibraryViewModel+Draft.swift"; sourceTree = "<group>"; };
 		A31C485DC33F810306E2CD09 /* UpstreamHistoryFlowReviewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpstreamHistoryFlowReviewTests.swift; sourceTree = "<group>"; };
 		A335A5BC072C7F729855856D /* InstalledSkillHistoryManualCheckHostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledSkillHistoryManualCheckHostTests.swift; sourceTree = "<group>"; };
@@ -1754,6 +1757,7 @@
 		E30CD0E5D7069B91C28AE9DD /* DeployIntentModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeployIntentModelTests.swift; sourceTree = "<group>"; };
 		E3128BCAEC2AA3A0CD0ECBDC /* sample-skill-basic.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "sample-skill-basic.md"; sourceTree = "<group>"; };
 		E324A028BD410B51E7567F13 /* SkillDeploymentsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDeploymentsTab.swift; sourceTree = "<group>"; };
+		E325FCEA1AEDE86ED3F17AEE /* ConflictResolutionModelTests+History.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ConflictResolutionModelTests+History.swift"; sourceTree = "<group>"; };
 		E32869D2DC39CBCD4717D133 /* UpdatesViewModelTests+Editor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UpdatesViewModelTests+Editor.swift"; sourceTree = "<group>"; };
 		E36E2B06EA83ED07102394A7 /* ViewChangesViewModelTests+RoundOne.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ViewChangesViewModelTests+RoundOne.swift"; sourceTree = "<group>"; };
 		E3A75484323D306FD5638971 /* WindowCloseGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowCloseGuardTests.swift; sourceTree = "<group>"; };
@@ -2349,6 +2353,7 @@
 				08B7BBA01BAD96A00F1F78F4 /* SyncCoordinator.swift */,
 				B2DA21D28AC1DDBFF031C3D5 /* SyncDaemon.swift */,
 				7982E62AE929F29F9978CAF0 /* SyncEngine.swift */,
+				A2542BD828307819ADA51E2A /* SyncEngine+ConflictPath.swift */,
 				F603CCC66023043826D64841 /* SyncLock.swift */,
 				84A04480BA5796CA201D60DE /* SyncScheduler.swift */,
 				E529E409A688C00DB69AF6E3 /* TokenCounter.swift */,
@@ -2431,6 +2436,7 @@
 				5DA6897904B8FB4C9C9E2E9B /* CategoryDetailModelTests.swift */,
 				7C19EDA8355F0AD1FF6B2835 /* ConflictResolutionModelTests.swift */,
 				7A7D882D52F780C336224C61 /* ConflictResolutionModelTests+Bytes.swift */,
+				E325FCEA1AEDE86ED3F17AEE /* ConflictResolutionModelTests+History.swift */,
 				579F8D6027103EC16BC5658D /* DeployIntentModelProjectIntentTests.swift */,
 				6963DE0E6591E6554F8C8743 /* DeployIntentModelRemoteTests.swift */,
 				0DE3737635B9E1246800081E /* DeployIntentModelRetryTests.swift */,
@@ -3285,6 +3291,7 @@
 				F674D4D5DA7CED09953E79F9 /* CheckedYAMLLoaderTests+SourceGuard.swift in Sources */,
 				87CA64119111AA931607A638 /* CheckedYAMLLoaderTests.swift in Sources */,
 				3075BA20A7D7B56A0EC27C0D /* ConflictResolutionModelTests+Bytes.swift in Sources */,
+				C50FEDAD8C5751662AF6343F /* ConflictResolutionModelTests+History.swift in Sources */,
 				8BFA7EC6C7E4954DF8BC4B9B /* ConflictResolutionModelTests.swift in Sources */,
 				38617EC9132EF166B8E9EC18 /* CredentialStoreTests.swift in Sources */,
 				11D54698FB1334EB0F4DC43B /* CursorCompilerTests.swift in Sources */,
@@ -4017,6 +4024,7 @@
 				F0CB00B187E22342DB9D054D /* SyncConflict.swift in Sources */,
 				936801A6C95E28BC72181CF3 /* SyncCoordinator.swift in Sources */,
 				6B01F6956FA7600A848F2049 /* SyncDaemon.swift in Sources */,
+				C53304D9F96DEFAFB55FDE23 /* SyncEngine+ConflictPath.swift in Sources */,
 				BB0AC416658C121E42FD6013 /* SyncEngine.swift in Sources */,
 				56F463350E97F2F5592957FF /* SyncFooterPresentation.swift in Sources */,
 				A26F4CC00E3DCAC206C890A7 /* SyncLock.swift in Sources */,

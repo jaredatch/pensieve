@@ -50,19 +50,7 @@ final class SyncModel {
     /// `manifest/skills/<slug>.yaml` to `<slug>`; category/project manifest paths are not skills.
     var conflictedSlugs: Set<String> {
         guard case let .conflicted(paths) = state else { return [] }
-        var slugs = Set<String>()
-        for path in paths {
-            if PathSyntax.hasPrefix(path, "skills/"), PathSyntax.hasSuffix(path, "/SKILL.md") {
-                if let relative = PathSyntax.relativePath(path, under: "skills") {
-                    slugs.insert(String(relative.dropLast("/SKILL.md".count)))
-                }
-            } else if PathSyntax.hasPrefix(path, "manifest/skills/"), path.hasSuffix(".yaml") {
-                if let relative = PathSyntax.relativePath(path, under: "manifest/skills") {
-                    slugs.insert(String(relative.dropLast(".yaml".count)))
-                }
-            }
-        }
-        return slugs
+        return Set(paths.compactMap { SyncEngine.conflictPath(for: $0).skillSlug })
     }
 
     init(git: GitServiceProtocol,

@@ -195,15 +195,9 @@ struct ConflictResolutionView: View {
     }
 
     private func bodySkill(for item: ConflictItem) -> Skill? {
-        guard let slug = bodySlug(from: item.path) else { return nil }
+        let path = SyncEngine.conflictPath(for: item.path)
+        guard path.kind == .body, let slug = path.skillSlug else { return nil }
         return skills.first { $0.directoryName == slug }
-    }
-
-    private func bodySlug(from path: String) -> String? {
-        guard PathSyntax.hasPrefix(path, "skills/"), PathSyntax.hasSuffix(path, "/SKILL.md") else { return nil }
-        guard let relative = PathSyntax.relativePath(path, under: "skills"),
-              relative.count > "/SKILL.md".count else { return nil }
-        return String(relative.dropLast("/SKILL.md".count))
     }
 }
 

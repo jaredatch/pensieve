@@ -4,7 +4,7 @@ import XCTest
 final class PathSyntaxTests: XCTestCase {
     func testComponentsAndCanonicalComparisonRetainFilesystemSpelling() {
         for scalar in PathJoiningScalars.values {
-            let name = scalar + "name"
+            let name = PathJoiningScalars.name("name", scalar: scalar)
             XCTAssertTrue(PathSyntax.isAbsolute("/" + name))
             XCTAssertFalse(PathSyntax.isAbsolute(name))
             XCTAssertTrue(PathSyntax.hasSeparator("parent/" + name))

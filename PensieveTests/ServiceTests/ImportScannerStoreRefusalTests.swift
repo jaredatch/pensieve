@@ -36,7 +36,7 @@ final class ImportScannerStoreRefusalTests: XCTestCase {
         let store = tempDir + "/.pensieve"
         let scanner = makeScanner(grokSkillsDir: tempDir + "/grok")
         for (index, scalar) in PathJoiningScalars.values.enumerated() {
-            let name = scalar + "skill"
+            let name = PathJoiningScalars.name("skill", scalar: scalar)
             let own = store + "/" + name
             let other = tempDir + "/external/" + name
             let text = "---\nname: Skill\ndescription: Fixture\n---\nbody"
