@@ -219,15 +219,14 @@ final class ImportViewModel {
     private func acquireImportLock() -> SyncLock? {
         do {
             guard let lock = try SyncLock.tryAcquireReportingErrors(at: lockPath) else {
-                error = "Pensieve's library is busy: sync is running or another operation is in progress. " +
-                    "Try importing again."
+                error = "Pensieve is busy syncing or finishing another task. Try importing again in a moment."
                 return nil
             }
             return lock
         } catch {
             NSLog("Pensieve import lock access failed at %@: %@", lockPath, String(describing: error))
-            self.error = "Couldn't access Pensieve's lock file. Check the App Support folder's permissions " +
-                "and make sure sync.lock is a file. Then try importing again."
+            self.error = "Pensieve couldn't open its lock file, so nothing was imported. " +
+                "Check that you can write to Pensieve's Application Support folder, then try again."
             return nil
         }
     }

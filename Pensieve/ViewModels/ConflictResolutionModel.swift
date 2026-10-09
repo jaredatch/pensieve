@@ -94,7 +94,7 @@ final class ConflictResolutionModel {
               let index = groups.firstIndex(where: { $0.id == groupID }) else { return }
         if let unavailable = groups[index].items.first(where: {
             let receipt = side == .thisMachine ? $0.thisUnavailable : $0.otherUnavailable
-            return receipt != nil && receipt?.mode != "160000"
+            return receipt != nil && receipt?.canChoose != true
         }) {
             selectionError = SyncError.conflictSideUnavailable(path: unavailable.path).errorDescription
             return

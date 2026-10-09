@@ -205,12 +205,27 @@ struct ConflictResolutionView: View {
 struct ConflictFileComparison: View {
     private enum Side {
         case deleted
-        case unavailable(mode: String)
+        case unavailable(UnavailableConflictSide)
         case text(String, preview: String, hiddenLines: Int)
         case nonText(bytes: Int)
 
+        var keepsFile: Bool {
+            switch self {
+            case .text, .nonText: return true
+            case .deleted, .unavailable: return false
+            }
+        }
+
+        var canRetire: Bool {
+            switch self {
+            case .deleted: return true
+            case let .unavailable(side): return side.canChoose
+            case .text, .nonText: return false
+            }
+        }
+
         init(_ bytes: Data?, unavailable: UnavailableConflictSide?) {
-            if let unavailable { self = .unavailable(mode: unavailable.mode); return }
+            if let unavailable { self = .unavailable(unavailable); return }
             guard let bytes else { self = .deleted; return }
             guard !bytes.contains(0), let text = UpstreamHistoryFileContent.utf8PreservingBOM(bytes) else {
                 self = .nonText(bytes: bytes.count)
@@ -226,11 +241,13 @@ struct ConflictFileComparison: View {
     private let this: Side
     private let other: Side
     private let retiresGitlink: Bool
+    private let removesOtherFile: Bool
 
     init(item: ConflictItem) {
         this = Side(item.thisMachine, unavailable: item.thisUnavailable)
         other = Side(item.otherMachine, unavailable: item.otherUnavailable)
         retiresGitlink = item.retiresGitlink
+        removesOtherFile = item.otherMode != nil && item.otherUnavailable?.isGitlink != true
     }
 
     var body: some View {
@@ -240,9 +257,16 @@ struct ConflictFileComparison: View {
         } else {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 if retiresGitlink {
-                    Text("Choosing a file or link keeps it in sync. Choosing Nested repository or Deleted "
-                         + "stops syncing this path and keeps its folder.")
-                        .foregroundStyle(.secondary)
+                    if this.keepsFile || other.keepsFile {
+                        Text("Choosing a file or link keeps it in sync.").foregroundStyle(.secondary)
+                    }
+                    if this.canRetire || other.canRetire {
+                        Text("Choosing Nested repository or Deleted stops syncing this path. Its folder stays on this Mac.")
+                            .foregroundStyle(.secondary)
+                        if removesOtherFile {
+                            Text("The other Mac removes its copy the next time it syncs.").foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 HStack(alignment: .top, spacing: Spacing.md) {
                     side("This Mac", content: this)
@@ -258,9 +282,8 @@ struct ConflictFileComparison: View {
             switch content {
             case .deleted:
                 Text("Deleted").foregroundStyle(.secondary)
-            case let .unavailable(mode):
-                Text(mode == "160000" ? "Nested repository"
-                     : "This version can’t be shown or kept as a file. You can keep the other version.")
+            case let .unavailable(side):
+                Text(side.canChoose ? "Nested repository" : "Can’t be read")
                     .foregroundStyle(.secondary)
             case let .text(text, preview, hiddenLines):
                 Text(text.isEmpty ? "Empty file" : preview)

@@ -139,6 +139,10 @@ jobs:
           ./script/test.sh | tee /tmp/ci-test.out
           count="$(grep -oE 'PENSIEVE_TEST_COUNT=[0-9]+' /tmp/ci-test.out | tail -1 | cut -d= -f2)"
           floor="$(head -n 1 .test-count)"
+          if [[ ! "$floor" =~ ^[0-9]+$ ]]; then
+            echo "::error::committed test floor must contain only digits"
+            exit 1
+          fi
           if [ -z "$count" ] || [ "$count" -lt "$floor" ]; then
             echo "::error::test count ${count:-none} below committed floor $floor"
             exit 1

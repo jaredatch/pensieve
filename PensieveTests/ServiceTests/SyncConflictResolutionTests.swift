@@ -160,6 +160,7 @@ final class SyncConflictResolutionTests: XCTestCase {
     func testInspectConflictsAbortsWhenPullRebaseThrows() async throws {
         let root = tempDir + "/inspectAbort"
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        assertConflictIndexRemovalDefault(StubGit(conflictPath: "skills/x/SKILL.md"), at: root)
         let failures: [(GitError, String)] = [
             (.commandFailed(args: ["rebase"], exitCode: 1, stderr: "boom"), "git rebase failed (exit 1): boom"),
             (.outputReadFailed(detail: "Authentication failed; CONFLICT; Xcode license not accepted"),
@@ -332,7 +333,6 @@ extension SyncConflictResolutionTests {
 }
 
 // MARK: - Shared helpers
-
 extension SyncConflictResolutionTests {
     private struct TestFailure: Error, CustomStringConvertible {
         let description: String

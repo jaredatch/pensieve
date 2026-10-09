@@ -23,8 +23,9 @@ final class SyncStatusWiringTests: XCTestCase {
     func testBranchlessCopyIsWiredIntoDetailBanner() throws {
         let header = try source("Pensieve/Views/SkillViews/Detail/SkillDetailHeader.swift")
         let presentation = try source("Pensieve/Views/SyncViews/SyncFooterPresentation.swift")
-        let message = try XCTUnwrap(capture(#"static\s+let\s+(\w+)\s*=\s*\"Can't sync yet: the store has no branch\""#,
-                                           in: presentation))
+        let copy = #"static\s+let\s+(\w+)\s*=\s*\"Can't sync yet\."#
+            + #" Pensieve's library has no sync history\.\""#
+        let message = try XCTUnwrap(capture(copy, in: presentation))
         let binding = #"if\s+[A-Za-z_][A-Za-z0-9_]*\.state\s*==\s*\.branchless\s*\{\s*Label\("#
             + #"\s*[A-Za-z_][A-Za-z0-9_]*\."# + message + #"\s*,"#
         XCTAssertEqual(matches(binding, in: header), 1, "the branchless status must reach the detail banner")

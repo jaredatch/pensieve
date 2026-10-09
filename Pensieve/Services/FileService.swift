@@ -214,7 +214,7 @@ extension FileServiceProtocol {
     /// to touch `FileManager`/Darwin — so it is inside the single-chokepoint boundary, not a bypass.
     /// (PLAN-12 / 12.3 — the atomic manifest write.)
     func replaceItem(at path: String, with sourcePath: String) throws {
-        if FileManager.default.fileExists(atPath: path) || isSymlink(at: path) {
+        if FileManager.default.fileExists(atPath: path) {
             guard renamex_np(sourcePath, path, UInt32(RENAME_SWAP)) == 0 else {
                 throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno),
                               userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(errno))])

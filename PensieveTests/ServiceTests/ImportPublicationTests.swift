@@ -101,7 +101,7 @@ final class ImportPublicationTests: XCTestCase {
         XCTAssertTrue(process.isRunning)
         // The holder's lock and readiness files are the only additions to the parent snapshot.
         model.importSelected(context: context)
-        XCTAssertTrue(model.error?.localizedCaseInsensitiveContains("sync is running") == true)
+        XCTAssertEqual(model.error, "Pensieve is busy syncing or finishing another task. Try importing again in a moment.")
         XCTAssertEqual(model.importedSkillCount, 0)
         XCTAssertTrue(try context.fetch(FetchDescriptor<Skill>()).isEmpty)
         XCTAssertTrue(try files.listDirectory(at: skills).isEmpty)

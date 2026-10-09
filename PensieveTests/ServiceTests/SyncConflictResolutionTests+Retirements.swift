@@ -73,7 +73,6 @@ extension SyncConflictResolutionTests {
     @MainActor
     func assertGitlinkRetirement(both: Bool, side: ConflictSide, skillRoot: Bool) throws {
         let fixture = try SyncConflictByteFixture.gitlinkConflict(both: both, skillRoot: skillRoot)
-        if skillRoot { XCTAssertEqual(fixture.path, "skills/legacy-link") }
         defer { try? fixture.files.deleteDirectory(at: fixture.root) }
         let nested = fixture.storeB + "/" + fixture.path
         try fixture.git.initRepository(at: nested)

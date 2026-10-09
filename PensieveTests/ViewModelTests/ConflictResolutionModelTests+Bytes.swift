@@ -39,7 +39,40 @@ extension ConflictResolutionModelTests {
         }
     }
 
+    private func assertUnavailableSideChoicesAndCopy() async throws {
+        for mode in ["100644", "160000"] {
+            let missing = UnavailableConflictSide(mode: mode, objectID: String(repeating: "1", count: 40))
+            let item = ConflictItem(path: "skills/missing/asset", kind: .body,
+                                    thisMachine: nil, otherMachine: nil, thisUnavailable: missing)
+            let strings = await renderedComparison(item)
+            XCTAssertTrue(strings.contains("Can’t be read"), "Missing objects must not be labeled by mode alone")
+            XCTAssertFalse(strings.contains("Nested repository"))
+            XCTAssertFalse(strings.contains("Choosing a file or link keeps it in sync."))
+            let engine = StubResolutionEngine()
+            engine.inspections = [.conflicts(ConflictSet(items: [item]))]
+            let model = makeModel(engine: engine)
+            await model.loadAndReport(context: try makeContext())
+            let group = try XCTUnwrap(readyGroups(from: model.phase).first)
+            model.choose(group.id, .thisMachine)
+            XCTAssertEqual(model.selectionError, SyncError.conflictSideUnavailable(path: item.path).errorDescription)
+            XCTAssertFalse(model.canApply)
+        }
+        let gitlink = try SyncConflictByteFixture.gitlinkConflict(otherEntry: .file(Data("missing file".utf8)))
+        defer { try? gitlink.files.deleteDirectory(at: gitlink.root) }
+        let missingEngine = try gitlink.missingObjectEngine(stage: 2)
+        guard case let .conflicts(set) = try missingEngine.inspectConflicts(root: gitlink.storeB, credential: nil,
+                                                                           context: gitlink.contextB) else {
+            return XCTFail("A missing file opposite a gitlink must load")
+        }
+        let unavailableStrings = await renderedComparison(try XCTUnwrap(set.items.first))
+        XCTAssertTrue(unavailableStrings.contains("Can’t be read"))
+        XCTAssertFalse(unavailableStrings.contains("Choosing a file or link keeps it in sync."))
+        XCTAssertTrue(unavailableStrings.contains("Choosing Nested repository or Deleted stops syncing this path. "
+            + "Its folder stays on this Mac."))
+    }
+
     private func assertMissingObjectSelectionAndCopy() async throws {
+        try await assertUnavailableSideChoicesAndCopy()
         for stage in [2, 3] {
             let payload = SyncConflictByteFixture.payloads[0]
             let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
@@ -52,7 +85,7 @@ extension ConflictResolutionModelTests {
             let group = try XCTUnwrap(groups.first)
             let item = try XCTUnwrap(group.items.first)
             let strings = await renderedComparison(item)
-            XCTAssertTrue(strings.contains("This version can’t be shown or kept as a file. You can keep the other version."))
+            XCTAssertTrue(strings.contains("Can’t be read"))
             XCTAssertFalse(strings.contains("Deleted"))
             XCTAssertFalse(strings.contains("Empty file"))
             model.choose(group.id, stage == 3 ? .thisMachine : .otherMachine)
@@ -120,9 +153,10 @@ extension ConflictResolutionModelTests {
                 let item = try XCTUnwrap(group.items.first)
                 let strings = await renderedComparison(item)
                 XCTAssertTrue(strings.contains("Nested repository"))
-                XCTAssertTrue(strings.contains(
-                    "Choosing a file or link keeps it in sync. Choosing Nested repository or Deleted "
-                    + "stops syncing this path and keeps its folder."))
+                XCTAssertFalse(strings.contains("Choosing a file or link keeps it in sync."))
+                XCTAssertTrue(strings.contains("Choosing Nested repository or Deleted stops syncing this path. "
+                    + "Its folder stays on this Mac."))
+                XCTAssertFalse(strings.contains("The other Mac removes its copy the next time it syncs."))
                 XCTAssertEqual(strings.filter { $0 == "Deleted" }.count, both ? 0 : 1)
                 model.choose(group.id, side)
                 XCTAssertNil(model.selectionError)
@@ -146,8 +180,10 @@ extension ConflictResolutionModelTests {
         guard case let .ready(groups) = model.phase else { return XCTFail("A mixed-type conflict must load") }
         let group = try XCTUnwrap(groups.first)
         let strings = await renderedComparison(try XCTUnwrap(group.items.first))
-        XCTAssertTrue(strings.contains("Choosing a file or link keeps it in sync. Choosing Nested repository or Deleted "
-            + "stops syncing this path and keeps its folder."))
+        XCTAssertTrue(strings.contains("Choosing a file or link keeps it in sync."))
+        XCTAssertTrue(strings.contains("Choosing Nested repository or Deleted stops syncing this path. "
+            + "Its folder stays on this Mac."))
+        XCTAssertTrue(strings.contains("The other Mac removes its copy the next time it syncs."))
         try fixture.files.writeFile(at: fixture.root + "/resolution-marker", content: "local folder work")
         model.choose(group.id, .otherMachine)
         await model.applyAndReport(context: fixture.contextB)

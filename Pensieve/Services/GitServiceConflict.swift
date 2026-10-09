@@ -5,12 +5,17 @@ struct ConflictEntry {
     let mode: String
     let objectID: String
     let bytes: Data
+    var isGitlink: Bool { mode == "160000" }
 }
 
 /// A present entry whose bytes are unavailable, distinct from an absent (deleted) side.
 struct UnavailableConflictSide: Error, Equatable {
     let mode: String
     let objectID: String
+    enum Reason: Equatable { case gitlink, missingObject }
+    var reason: Reason = .missingObject
+    var isGitlink: Bool { mode == "160000" }
+    var canChoose: Bool { isGitlink && reason == .gitlink }
 }
 
 // Stage mapping during `git pull --rebase origin main` is OPPOSITE a plain merge:
@@ -41,7 +46,9 @@ extension GitService {
             return UnavailableConflictSide(mode: mode, objectID: objectID)
         }.first
         guard let entry else { return nil }
-        guard entry.mode != "160000" else { throw entry }
+        if entry.isGitlink {
+            throw UnavailableConflictSide(mode: entry.mode, objectID: entry.objectID, reason: .gitlink)
+        }
         let args = ["-C", workingDir, "show", ":\(stage):\(path)"]
         let result = try runData(args, in: nil)
         if result.exit == 0 {
@@ -63,12 +70,13 @@ extension GitService {
                              entry.mode + "," + entry.objectID + "," + path])
     }
 
-    /// A legacy gitlink is removed only from the index. Its anchored root ignore travels to other
-    /// Macs so later syncs cannot add ordinary local files beneath the retired path.
+    /// Remove only the index entry, leaving the worktree path and its children in place.
     func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
         try storeOperation(at: root).runOrThrow(["--literal-pathspecs", "update-index", "--force-remove", "--", path])
     }
 
+    /// Retirement receipts travel in .pensieve-retired-paths. Current builds derive local metadata
+    /// ignore rules from them; older builds preserve the receipts but do not enforce them.
     func retireConflictPath(_ path: String, at root: String) throws {
         try StoreIgnoreRules.prepare(at: root, files: fileService, retiring: path)
         try removeConflictEntryFromIndex(path, at: root)

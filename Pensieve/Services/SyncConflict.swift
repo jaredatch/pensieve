@@ -24,7 +24,7 @@ struct ConflictItem: Equatable {
     let otherUnavailable: UnavailableConflictSide?
     let thisMode: String?
     let otherMode: String?
-    var retiresGitlink: Bool { thisUnavailable?.mode == "160000" || otherUnavailable?.mode == "160000" }
+    var retiresGitlink: Bool { thisUnavailable?.isGitlink == true || otherUnavailable?.isGitlink == true }
 
     init(path: String, kind: ConflictKind, thisMachine: Data?, otherMachine: Data?,
          thisUnavailable: UnavailableConflictSide? = nil, otherUnavailable: UnavailableConflictSide? = nil,
@@ -45,6 +45,7 @@ struct ConflictVersion {
     var bytes: Data? { entry?.bytes }
     var mode: String? { entry?.mode ?? unavailable?.mode }
     let unavailable: UnavailableConflictSide?
+    var isGitlink: Bool { entry?.isGitlink == true || unavailable?.isGitlink == true }
 
     init(read: () throws -> ConflictEntry?) throws {
         do {

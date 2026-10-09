@@ -3,7 +3,7 @@ import Foundation
 /// What the sidebar's sync line shows for a `SyncModel.SyncState`, at rest and under the pointer.
 /// Pure so the mapping is tested apart from the view; `SyncStatusView` renders it.
 struct SyncFooterPresentation: Equatable {
-    static let branchlessMessage = "Can't sync yet: the store has no branch"
+    static let branchlessMessage = "Can't sync yet. Pensieve's library has no sync history."
 
     enum Action: Equatable {
         case none

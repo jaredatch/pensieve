@@ -36,7 +36,7 @@ final class AppRuntimeBranchlessTests: XCTestCase {
         for hovering in [false, true] {
             let line = try XCTUnwrap(SyncFooterPresentation.make(state: model.state, canResolve: model.canResolve,
                                                                 hovering: hovering, now: Date()))
-            XCTAssertEqual(line.label, "Can't sync yet: the store has no branch")
+            XCTAssertEqual(line.label, "Can't sync yet. Pensieve's library has no sync history.")
             XCTAssertEqual(line.action, .sync)
         }
         await model.syncNowAndReport()

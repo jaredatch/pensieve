@@ -21,7 +21,11 @@ extension SyncBytePreservationTests {
                 }
                 let spy = RetirementFileService()
                 spy.readFailure = kind == "eio" ? path : nil
-                XCTAssertThrowsError(try StoreIgnoreRules.prepare(at: store, files: spy), "R2: \(source), \(kind)")
+                XCTAssertThrowsError(try StoreIgnoreRules.prepare(at: store, files: spy), "R2: \(source), \(kind)") {
+                    XCTAssertEqual($0.localizedDescription,
+                        "Pensieve can't read its list of retired paths (\(source)), so sync stopped. "
+                        + "Restore that file from another Mac, then sync again.")
+                }
                 XCTAssertTrue(spy.writes.isEmpty, "An unreadable source must precede any write")
                 let git = GitService(fileService: spy, askpassHelperPath: base + "/askpass")
                 XCTAssertThrowsError(try git.storeOperation(at: store), "Receipt refusal also precedes metadata writes")
@@ -34,7 +38,7 @@ extension SyncBytePreservationTests {
         XCTAssertNoThrow(try StoreIgnoreRules.prepare(at: missing, files: files), "Absence means no receipts")
     }
 
-    func testRetirementReceiptsCannotHideSyncedStructure() throws {
+    func testMalformedReceiptsRefuseWritesWhileRetiredChildrenStayUnstaged() throws {
         for source in [".gitattributes", ".pensieve-retired-paths"] {
             for path in ["", "skills//x", "skills/./x", "skills/../manifest", "skills/x/assets/../SKILL.md",
                          "skills/x/", "skills/x/\u{0001}child"] {
@@ -44,10 +48,9 @@ extension SyncBytePreservationTests {
                 try files.writeFile(at: store + "/" + source, content: receipt)
                 let spy = RetirementFileService()
                 XCTAssertThrowsError(try StoreIgnoreRules.prepare(at: store, files: spy), path) { error in
-                    guard case let StoreReceiptError.invalidPath(actual) = error else {
-                        return XCTFail("Expected invalidPath, got \(error)")
-                    }
-                    XCTAssertEqual(actual, String(receipt.dropLast()))
+                    XCTAssertEqual(error.localizedDescription,
+                        "Pensieve's list of retired paths (\(source)) names a path it can't use: \(path). "
+                        + "Remove that line, then sync again.")
                 }
                 XCTAssertTrue(spy.writes.isEmpty, "Invalid receipts must precede writes")
                 XCTAssertEqual(try files.readFile(at: store + "/" + source), receipt)
@@ -67,11 +70,16 @@ extension SyncBytePreservationTests {
     }
 
     func testControlFileFoldersSurvivePreparation() throws {
-        for source in [".gitattributes", ".pensieve-retired-paths"] {
+        for source in [".gitattributes", ".pensieve-retired-paths", ".gitignore"] {
             for arrivesAfterRead in [false, true] {
+                // Root ignore input is not read; its folder needs just one shape.
+                if source == ".gitignore" && arrivesAfterRead { continue }
                 let store = base + "/control-folder-" + UUID().uuidString
                 try files.createDirectory(at: store)
                 let path = store + "/" + source
+                let receiptPath = store + "/.pensieve-retired-paths"
+                let original = "# Pensieve retired path: " + Data("skills/x/assets/old".utf8).base64EncodedString() + "\n"
+                if source != ".pensieve-retired-paths" { try files.writeFile(at: receiptPath, content: original) }
                 let spy = RetirementFileService()
                 if arrivesAfterRead {
                     try files.writeFile(at: path, content: "")
@@ -83,8 +91,19 @@ extension SyncBytePreservationTests {
                 } else {
                     try files.writeFile(at: path + "/keep", content: "user folder bytes")
                 }
-                XCTAssertThrowsError(try StoreIgnoreRules.prepare(at: store, files: spy,
-                    retiring: "skills/x/assets/legacy"), "\(source), after read: \(arrivesAfterRead)")
+                if source == ".gitignore" {
+                    XCTAssertNoThrow(try StoreIgnoreRules.prepare(at: store, files: spy,
+                        retiring: "skills/x/assets/legacy"))
+                    XCTAssertEqual(try StoreIgnoreRules.retiredPaths(at: store, files: files),
+                                   ["skills/x/assets/legacy", "skills/x/assets/old"])
+                } else {
+                    XCTAssertThrowsError(try StoreIgnoreRules.prepare(at: store, files: spy,
+                        retiring: "skills/x/assets/legacy"), "\(source), after read: \(arrivesAfterRead)")
+                    if source == ".gitattributes" {
+                        XCTAssertEqual(try files.readFile(at: receiptPath), original,
+                                       "A failed attributes write must not publish an uncompleted retirement")
+                    }
+                }
                 XCTAssertEqual(try files.entryTypeWithoutFollowingLinks(at: path), .directory)
                 XCTAssertEqual(try files.readFile(at: path + "/keep"), "user folder bytes")
             }

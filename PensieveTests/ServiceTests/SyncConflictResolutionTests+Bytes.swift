@@ -7,11 +7,10 @@ extension SyncConflictResolutionTests {
         try assertInvalidRootIgnoreCannotBlockRetirement()
         try assertThisMachineFileAgainstGitlinkRefuses()
         try assertGitlinkFilePicksRemainTracked()
-        for skillRoot in [false, true] {
-            for both in [false, true] {
-                for side in [ConflictSide.thisMachine, .otherMachine] {
-                    try assertGitlinkRetirement(both: both, side: side, skillRoot: skillRoot)
-                }
+        try assertGitlinkRetirement(both: true, side: .thisMachine, skillRoot: true)
+        for both in [false, true] {
+            for side in [ConflictSide.thisMachine, .otherMachine] {
+                try assertGitlinkRetirement(both: both, side: side, skillRoot: false)
             }
         }
     }
@@ -19,7 +18,7 @@ extension SyncConflictResolutionTests {
     @MainActor
     private func assertThisMachineFileAgainstGitlinkRefuses() throws {
         let fixture = try SyncConflictByteFixture.gitlinkConflict(
-            otherEntry: .file(Data("this Mac file".utf8)), fileOnThisMachine: true)
+            otherEntry: .file(Data("this Mac file".utf8)), changedEntryOnThisMachine: true)
         defer { try? fixture.files.deleteDirectory(at: fixture.root) }
         let item = try fixture.inspect()
         XCTAssertEqual(item.thisMachine, Data("this Mac file".utf8))

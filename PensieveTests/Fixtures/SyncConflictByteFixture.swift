@@ -51,7 +51,10 @@ struct SyncConflictByteFixture {
         storeA = root + "/A"
         storeB = root + "/B"
         path = skillRoot ? "skills/" + name : "skills/conflict/assets/" + name
-        if case .folder = other { expectedPaths = [path, path + "/keep"] } else { expectedPaths = [path] }
+        switch (this, other) {
+        case (.folder, _), (_, .folder): expectedPaths = [path, path + "/keep"]
+        default: expectedPaths = [path]
+        }
         git = indexMerge ? GitService(askpassHelperPath: root + "/askpass", executablePath: root + "/index-merge-git")
             : TestPaths.git
         engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: git), lockPath: root + "/sync.lock")
@@ -168,7 +171,7 @@ struct SyncConflictByteFixture {
     }
 
     static func gitlinkConflict(both: Bool = false, otherEntry: Entry? = nil,
-                                fileOnThisMachine: Bool = false, skillRoot: Bool = false) throws -> Self {
+                                changedEntryOnThisMachine: Bool = false, skillRoot: Bool = false) throws -> Self {
         let root = TestTemporaryDirectory.path + "GitlinkSource-" + UUID().uuidString
         let files = FileService()
         let git = TestPaths.git
@@ -186,8 +189,8 @@ struct SyncConflictByteFixture {
         let third = try git.commitSHA(at: root)
         let changed = otherEntry ?? (both ? .gitlink(third) : .deleted)
         return try Self(name: "legacy-link", initial: .gitlink(first),
-                        this: fileOnThisMachine ? changed : .gitlink(second),
-                        other: fileOnThisMachine ? .gitlink(second) : changed,
+                        this: changedEntryOnThisMachine ? changed : .gitlink(second),
+                        other: changedEntryOnThisMachine ? .gitlink(second) : changed,
                         indexMerge: otherEntry != nil, skillRoot: skillRoot)
     }
 

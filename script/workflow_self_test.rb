@@ -676,6 +676,22 @@ class WorkflowTests < Minitest::Test
 
   def test_ci_test_baseline_includes_wrapper_self_test
     assert_ci_test_baseline_includes_wrapper_self_test
+    step = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test').fetch('steps').find { |entry| entry['id'] == 'tests' }
+    Dir.mktmpdir('pensieve-ci-floor-') do |directory|
+      Dir.mkdir(File.join(directory, 'script'))
+      runner = File.join(directory, 'script/test.sh')
+      File.write(runner, "#!/bin/sh\n[ \"${1:-}\" = --self-test ] || echo PENSIEVE_TEST_COUNT=2707\n")
+      File.chmod(0755, runner)
+      [['2707', true], ['002707', true], ["2707\n# metadata", true], ['2708', false],
+       ['', false], ['x', false], ['1x', false], ['+2707', false], [' 2707', false],
+       ['2707 ', false], ['2707.0', false], ["2707\r", false]].each do |floor, expected|
+        File.write(File.join(directory, '.test-count'), floor + "\n")
+        script = step.fetch('run').gsub('/tmp/ci-test.out', File.join(directory, 'test.out'))
+        stdout, stderr, status = Open3.capture3('/bin/bash', '-c', script, chdir: directory)
+        assert_equal expected, status.success?, "floor #{floor.inspect}: #{stdout}#{stderr}"
+        assert_includes stdout + stderr, '::error::' unless expected
+      end
+    end
   end
 
   def assert_ci_test_baseline_includes_wrapper_self_test

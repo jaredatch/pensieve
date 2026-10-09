@@ -18,6 +18,19 @@ final class FileServiceTests: XCTestCase {
         }
     }
 
+    func testReplaceItemPreservesDanglingDestinationAndSourceOnFailure() throws {
+        let source = tempDir + "/replacement"
+        let destination = tempDir + "/dangling"
+        let target = tempDir + "/missing"
+        try fileService.writeFile(at: source, content: "replacement bytes")
+        try fileService.createSymlink(at: destination, pointingTo: target)
+        XCTAssertThrowsError(try fileService.replaceItem(at: destination, with: source))
+        XCTAssertTrue(fileService.isSymlink(at: destination))
+        XCTAssertEqual(try fileService.symlinkTarget(at: destination), target)
+        XCTAssertEqual(try fileService.readFile(at: source), "replacement bytes")
+        XCTAssertFalse(fileService.fileExists(at: target))
+    }
+
     func testCopyFileFailurePreservesDestinationAndCleansTemporaryFile() throws {
         let source = tempDir + "/source"
         let destination = tempDir + "/destination"

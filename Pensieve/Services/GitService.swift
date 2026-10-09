@@ -123,7 +123,7 @@ extension GitServiceProtocol {
     }
 
     func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
-        throw CocoaError(.featureUnsupported)
+        throw GitError.repositoryUnreadable(path: root, detail: "Conflict index removal is unavailable.")
     }
 
     func retireConflictPath(_ path: String, at root: String) throws {

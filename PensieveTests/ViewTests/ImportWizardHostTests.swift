@@ -40,7 +40,7 @@ final class ImportWizardHostTests: XCTestCase {
         XCTAssertTrue(busyPressed)
         guard busyPressed else { return }
         await TestWait.until(failureMessage: "The busy lock must report its refusal") {
-            model.error?.localizedCaseInsensitiveContains("sync is running") == true
+            model.error == "Pensieve is busy syncing or finishing another task. Try importing again in a moment."
         }
         XCTAssertEqual(model.selectedSkills, selection)
         XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<Skill>()).isEmpty)
@@ -177,11 +177,8 @@ final class ImportWizardHostTests: XCTestCase {
     }
 
     private func assertLockAccessAdvice(_ error: String?) {
-        XCTAssertFalse(error?.localizedCaseInsensitiveContains("sync is running") == true)
-        XCTAssertTrue(error?.localizedCaseInsensitiveContains("lock file") == true)
-        XCTAssertTrue(error?.contains("App Support") == true)
-        XCTAssertTrue(error?.contains("permissions") == true)
-        XCTAssertTrue(error?.contains("sync.lock is a file") == true)
+        XCTAssertEqual(error, "Pensieve couldn't open its lock file, so nothing was imported. "
+            + "Check that you can write to Pensieve's Application Support folder, then try again.")
         XCTAssertFalse(error?.contains(POSIXError(.EISDIR).localizedDescription) == true,
                        "The advice uses plain sentences; the native cause belongs in the log")
     }
