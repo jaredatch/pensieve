@@ -70,4 +70,50 @@ extension SyncConflictResolutionTests {
                                                in: nil).stdout.isEmpty)
     }
 
+    @MainActor
+    func assertGitlinkRetirement(both: Bool, side: ConflictSide, skillRoot: Bool) throws {
+        let fixture = try SyncConflictByteFixture.gitlinkConflict(both: both, skillRoot: skillRoot)
+        if skillRoot { XCTAssertEqual(fixture.path, "skills/legacy-link") }
+        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+        let nested = fixture.storeB + "/" + fixture.path
+        try fixture.git.initRepository(at: nested)
+        try fixture.files.writeFile(at: nested + "/committed", content: "nested checkout")
+        try fixture.git.stageAllAndCommit(at: nested, message: "nested base")
+        try fixture.files.writeFile(at: nested + "/committed", content: "uncommitted work")
+        let downstream = fixture.root + "/downstream"
+        try fixture.git.clone(remote: "file://" + fixture.remote, into: downstream, credential: nil)
+        let downstreamNested = downstream + "/" + fixture.path
+        try fixture.files.createDirectory(at: downstreamNested)
+        let downstreamHasRepository = side == .thisMachine
+        if downstreamHasRepository { try fixture.git.initRepository(at: downstreamNested) }
+        try fixture.files.writeFile(at: downstreamNested + "/keep", content: "downstream work")
+        let item = try fixture.inspect()
+        let stale = UnavailableConflictSide(mode: "160000", objectID: String(repeating: "0", count: 40))
+        XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB,
+            picks: [item.path: ResolutionPick(side: side, expectedThis: item.thisMachine,
+                expectedOther: item.otherMachine, expectedThisUnavailable: stale,
+                expectedOtherUnavailable: item.otherUnavailable)], credential: nil, context: fixture.contextB)) {
+            XCTAssertEqual($0 as? SyncError, .conflictsChanged)
+        }
+        _ = try fixture.engine.resolveConflicts(root: fixture.storeB,
+            picks: [item.path: ResolutionPick(side: side, expectedThis: item.thisMachine,
+                expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
+                expectedOtherUnavailable: item.otherUnavailable)], credential: nil, context: fixture.contextB)
+        XCTAssertEqual(try fixture.files.readFile(at: nested + "/committed"), "uncommitted work")
+        XCTAssertTrue(fixture.files.directoryExists(at: nested + "/.git"))
+        let tree = try fixture.git.runData(["--git-dir", fixture.remote, "ls-tree", "main", "--", item.path], in: nil)
+        XCTAssertTrue(tree.stdout.isEmpty, "Either pick retires the gitlink from sync")
+        _ = try fixture.git.fastForwardOnly(at: downstream, credential: nil)
+        XCTAssertEqual(try fixture.files.readFile(at: downstreamNested + "/keep"), "downstream work")
+        if downstreamHasRepository {
+            XCTAssertTrue(fixture.files.directoryExists(at: downstreamNested + "/.git"))
+        }
+        _ = try fixture.engine.sync(root: downstream, message: "sync after gitlink retirement", credential: nil,
+                                    context: fixture.contextB)
+        XCTAssertEqual(try fixture.files.readFile(at: downstreamNested + "/keep"), "downstream work")
+        let afterSync = try fixture.git.runData(
+            ["--git-dir", fixture.remote, "ls-tree", "-r", "main", "--", item.path], in: nil)
+        XCTAssertTrue(afterSync.stdout.isEmpty, "A later sync must keep ordinary retired-folder children local")
+    }
+
 }

@@ -65,22 +65,20 @@ enum StoreIgnoreRules {
         paths = Array(Set(paths)).sorted()
         if !paths.isEmpty {
             let receipts = paths.map { marker + Data($0.utf8).base64EncodedString() + "\n" }.joined()
-            try publish(receipts, to: root + "/" + receiptFile, root: root, files: files)
+            try files.writeFile(at: root + "/" + receiptFile, content: receipts)
         }
-        try publish(attributes, to: root + "/.gitattributes", root: root, files: files)
+        try files.writeFile(at: root + "/.gitattributes", content: attributes)
+        // A folder is user data. Keep it in place; staging uses generated rules in metadata.
         let ignore = root + "/.gitignore"
-        if try files.entryTypeWithoutFollowingLinks(at: ignore) != .directory {
-            try publish(".DS_Store\n", to: ignore, root: root, files: files)
+        let type = try? files.entryTypeWithoutFollowingLinks(at: ignore)
+        if type == .regular {
+            // A fresh file restores readable permissions even if the remote file had mode 000.
+            let temporary = root + "/.pensieve-ignore-" + UUID().uuidString
+            defer { try? files.deleteFile(at: temporary) }
+            try files.writeFile(at: temporary, content: ".DS_Store\n")
+            try files.replaceItem(at: ignore, with: temporary)
+        } else if type != .directory {
+            try files.writeFile(at: ignore, content: ".DS_Store\n")
         }
-    }
-
-    private static func publish(_ text: String, to path: String, root: String, files: FileServiceProtocol) throws {
-        // Foundation's own atomic-write intermediates also stay outside the Git worktree. A crash
-        // at any write or swap can leave only an unstaged sibling, never a syncable temporary file.
-        let parent = (root as NSString).deletingLastPathComponent
-        let temporary = parent + "/.pensieve-ignore-" + UUID().uuidString
-        defer { try? files.deleteFile(at: temporary) }
-        try files.writeFile(at: temporary, content: text)
-        try files.replaceItem(at: path, with: temporary)
     }
 }

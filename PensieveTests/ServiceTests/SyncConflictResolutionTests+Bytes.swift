@@ -5,52 +5,52 @@ extension SyncConflictResolutionTests {
     @MainActor
     func testUnreadableGitlinkPickCannotDeleteThePathAndOtherPickStillResolves() throws {
         try assertInvalidRootIgnoreCannotBlockRetirement()
+        try assertThisMachineFileAgainstGitlinkRefuses()
         try assertGitlinkFilePicksRemainTracked()
-        for both in [false, true] {
-            for side in [ConflictSide.thisMachine, .otherMachine] {
-                let fixture = try SyncConflictByteFixture.gitlinkConflict(both: both)
-                defer { try? fixture.files.deleteDirectory(at: fixture.root) }
-                let nested = fixture.storeB + "/" + fixture.path
-                try fixture.git.initRepository(at: nested)
-                try fixture.files.writeFile(at: nested + "/committed", content: "nested checkout")
-                try fixture.git.stageAllAndCommit(at: nested, message: "nested base")
-                try fixture.files.writeFile(at: nested + "/committed", content: "uncommitted work")
-                let downstream = fixture.root + "/downstream"
-                try fixture.git.clone(remote: "file://" + fixture.remote, into: downstream, credential: nil)
-                let downstreamNested = downstream + "/" + fixture.path
-                try fixture.files.createDirectory(at: downstreamNested)
-                let downstreamHasRepository = side == .thisMachine
-                if downstreamHasRepository { try fixture.git.initRepository(at: downstreamNested) }
-                try fixture.files.writeFile(at: downstreamNested + "/keep", content: "downstream work")
-                let item = try fixture.inspect()
-                let stale = UnavailableConflictSide(mode: "160000", objectID: String(repeating: "0", count: 40))
-                XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB,
-                    picks: [item.path: ResolutionPick(side: side, expectedThis: item.thisMachine,
-                        expectedOther: item.otherMachine, expectedThisUnavailable: stale,
-                        expectedOtherUnavailable: item.otherUnavailable)], credential: nil, context: fixture.contextB)) {
-                    XCTAssertEqual($0 as? SyncError, .conflictsChanged)
+        for skillRoot in [false, true] {
+            for both in [false, true] {
+                for side in [ConflictSide.thisMachine, .otherMachine] {
+                    try assertGitlinkRetirement(both: both, side: side, skillRoot: skillRoot)
                 }
-                _ = try fixture.engine.resolveConflicts(root: fixture.storeB,
-                    picks: [item.path: ResolutionPick(side: side, expectedThis: item.thisMachine,
-                        expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
-                        expectedOtherUnavailable: item.otherUnavailable)], credential: nil, context: fixture.contextB)
-                XCTAssertEqual(try fixture.files.readFile(at: nested + "/committed"), "uncommitted work")
-                XCTAssertTrue(fixture.files.directoryExists(at: nested + "/.git"))
-                let tree = try fixture.git.runData(["--git-dir", fixture.remote, "ls-tree", "main", "--", item.path], in: nil)
-                XCTAssertTrue(tree.stdout.isEmpty, "Either pick retires the gitlink from sync")
-                _ = try fixture.git.fastForwardOnly(at: downstream, credential: nil)
-                XCTAssertEqual(try fixture.files.readFile(at: downstreamNested + "/keep"), "downstream work")
-                if downstreamHasRepository {
-                    XCTAssertTrue(fixture.files.directoryExists(at: downstreamNested + "/.git"))
-                }
-                _ = try fixture.engine.sync(root: downstream, message: "sync after gitlink retirement", credential: nil,
-                                            context: fixture.contextB)
-                XCTAssertEqual(try fixture.files.readFile(at: downstreamNested + "/keep"), "downstream work")
-                let afterSync = try fixture.git.runData(
-                    ["--git-dir", fixture.remote, "ls-tree", "-r", "main", "--", item.path], in: nil)
-                XCTAssertTrue(afterSync.stdout.isEmpty, "A later sync must keep ordinary retired-folder children local")
             }
         }
+    }
+
+    @MainActor
+    private func assertThisMachineFileAgainstGitlinkRefuses() throws {
+        let fixture = try SyncConflictByteFixture.gitlinkConflict(
+            otherEntry: .file(Data("this Mac file".utf8)), fileOnThisMachine: true)
+        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+        let item = try fixture.inspect()
+        XCTAssertEqual(item.thisMachine, Data("this Mac file".utf8))
+        XCTAssertEqual(item.otherUnavailable?.mode, "160000")
+        let remoteBefore = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout
+        let pick = ResolutionPick(side: .thisMachine, expectedThis: item.thisMachine,
+            expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
+            expectedOtherUnavailable: item.otherUnavailable, expectedThisMode: item.thisMode,
+            expectedOtherMode: item.otherMode)
+        XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB,
+            picks: [item.path: pick], credential: nil, context: fixture.contextB)) { error in
+            XCTAssertEqual(error as? SyncError, .conflictFolderMustMove(path: item.path))
+            XCTAssertEqual(error.localizedDescription,
+                "Move the folder at \(item.path), then choose this version again. You can also choose the other version.")
+        }
+        XCTAssertEqual(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout,
+                       remoteBefore)
+        XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
+        _ = try fixture.engine.resolveConflicts(root: fixture.storeB,
+            picks: [item.path: ResolutionPick(side: .otherMachine, expectedThis: item.thisMachine,
+                expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
+                expectedOtherUnavailable: item.otherUnavailable, expectedThisMode: item.thisMode,
+                expectedOtherMode: item.otherMode)], credential: nil, context: fixture.contextB)
+        XCTAssertTrue(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "ls-tree", "-r", "main", "--", item.path],
+                                               in: nil).stdout.isEmpty)
+        try fixture.files.writeFile(at: fixture.storeB + "/" + item.path + "/keep", content: "retired child")
+        _ = try fixture.engine.sync(root: fixture.storeB, message: "retirement persists", credential: nil,
+                                    context: fixture.contextB)
+        XCTAssertEqual(try fixture.files.readFile(at: fixture.storeB + "/" + item.path + "/keep"), "retired child")
+        XCTAssertTrue(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "ls-tree", "-r", "main", "--", item.path],
+                                               in: nil).stdout.isEmpty)
     }
 
     @MainActor
@@ -247,6 +247,20 @@ extension SyncConflictResolutionTests {
         let items = try fixture.inspectAll()
         let item = try XCTUnwrap(items.first)
         XCTAssertNil(item.otherMachine, "The folder side deletes the former file entry")
+        let remoteBefore = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout
+        let refused = items.reduce(into: [String: ResolutionPick]()) { result, item in
+            result[item.path] = ResolutionPick(side: .thisMachine, expectedThis: item.thisMachine,
+                expectedOther: item.otherMachine, expectedThisMode: item.thisMode, expectedOtherMode: item.otherMode)
+        }
+        XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB, picks: refused,
+            credential: nil, context: fixture.contextB)) { error in
+            XCTAssertEqual(error as? SyncError, .conflictFolderMustMove(path: item.path))
+            XCTAssertEqual(error.localizedDescription,
+                "Move the folder at \(item.path), then choose this version again. You can also choose the other version.")
+        }
+        XCTAssertEqual(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout,
+                       remoteBefore)
+        XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
         let picks = items.reduce(into: [String: ResolutionPick]()) { result, item in
             result[item.path] = ResolutionPick(side: .otherMachine, expectedThis: item.thisMachine,
                 expectedOther: item.otherMachine, expectedThisMode: item.thisMode, expectedOtherMode: item.otherMode)

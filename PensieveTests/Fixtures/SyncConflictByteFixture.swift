@@ -45,12 +45,12 @@ struct SyncConflictByteFixture {
                       this: this.map(Entry.file) ?? .deleted, other: other.map(Entry.file) ?? .deleted)
     }
 
-    init(name: String, initial: Entry, this: Entry, other: Entry, indexMerge: Bool = false) throws {
+    init(name: String, initial: Entry, this: Entry, other: Entry, indexMerge: Bool = false, skillRoot: Bool = false) throws {
         root = TestTemporaryDirectory.path + "ConflictBytes-" + UUID().uuidString
         remote = root + "/remote.git"
         storeA = root + "/A"
         storeB = root + "/B"
-        path = "skills/conflict/assets/" + name
+        path = skillRoot ? "skills/" + name : "skills/conflict/assets/" + name
         if case .folder = other { expectedPaths = [path, path + "/keep"] } else { expectedPaths = [path] }
         git = indexMerge ? GitService(askpassHelperPath: root + "/askpass", executablePath: root + "/index-merge-git")
             : TestPaths.git
@@ -167,7 +167,8 @@ struct SyncConflictByteFixture {
         } else if try files.entryExistsWithoutFollowingLinks(at: path) { try files.deleteFile(at: path) }
     }
 
-    static func gitlinkConflict(both: Bool = false, otherEntry: Entry? = nil) throws -> Self {
+    static func gitlinkConflict(both: Bool = false, otherEntry: Entry? = nil,
+                                fileOnThisMachine: Bool = false, skillRoot: Bool = false) throws -> Self {
         let root = TestTemporaryDirectory.path + "GitlinkSource-" + UUID().uuidString
         let files = FileService()
         let git = TestPaths.git
@@ -183,8 +184,11 @@ struct SyncConflictByteFixture {
         try files.writeFile(at: root + "/source.txt", content: "third nested commit\n")
         try git.stageAllAndCommit(at: root, message: "third nested commit")
         let third = try git.commitSHA(at: root)
-        return try Self(name: "legacy-link", initial: .gitlink(first), this: .gitlink(second),
-                        other: otherEntry ?? (both ? .gitlink(third) : .deleted), indexMerge: otherEntry != nil)
+        let changed = otherEntry ?? (both ? .gitlink(third) : .deleted)
+        return try Self(name: "legacy-link", initial: .gitlink(first),
+                        this: fileOnThisMachine ? changed : .gitlink(second),
+                        other: fileOnThisMachine ? .gitlink(second) : changed,
+                        indexMerge: otherEntry != nil, skillRoot: skillRoot)
     }
 
     func ignoreFaultEngine(_ kind: String) throws -> SyncEngine {
