@@ -34,30 +34,6 @@ extension EnvironmentValues {
     }
 }
 
-@MainActor
-@Observable
-final class SkillHistoryTabPresentation {
-    struct Diff: Identifiable {
-        let version: SkillHistoryVersion
-        let body: String
-        var id: String { version.sha }
-    }
-
-    var snapshot = SkillHistorySnapshot()
-    var showAll = false
-    var diff: Diff?
-    var restoring: SkillHistoryVersion?
-    var errorMessage: String?
-
-    func reset() {
-        snapshot = SkillHistorySnapshot()
-        showAll = false
-        diff = nil
-        restoring = nil
-        errorMessage = nil
-    }
-}
-
 /// The sync repo's versions of SKILL.md as a timeline (the master `Commit row`): a 12 pt dot column with
 /// a 10 pt dot and the 1 pt connector, the body at 28 on 6 pt gaps, 24 pt between rows. View Diff opens
 /// PLAN-09's line diff against the current file; Restore This Version… confirms, then writes the version
@@ -120,19 +96,24 @@ struct SkillHistoryTab: View {
             }
         }
         .onChange(of: skill.id) { _, _ in presentation.reset() }
+        .onDisappear { presentation.close() }
     }
 
     private var authoredHistory: some View {
         @Bindable var presentation = presentation
         let rows = SkillHistoryTimeline.rows(presentation.snapshot.versions, showAll: presentation.showAll)
         return VStack(alignment: .leading, spacing: 0) {
-            if rows.isEmpty {
+            if presentation.isLoading {
+                ProgressView("Loading history…")
+            } else if rows.isEmpty {
                 Text("No versions saved yet.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
             ForEach(rows) { row in
-                SkillHistoryRowView(row: row, onViewDiff: { presentDiff(row.version) },
+                SkillHistoryRowView(row: row, reading: presentation.readingVersion == row.id,
+                                    restoring: presentation.restoringVersion == row.id,
+                                    onViewDiff: { presentDiff(row.version) },
                                     onRestore: { presentation.restoring = row.version })
             }
             if let older = SkillHistoryTimeline.olderLabel(
@@ -157,7 +138,7 @@ struct SkillHistoryTab: View {
             skillID: skill.id, reloadToken: library.reloadToken,
             appWriteRevision: library.appWriteRevision, syncSignal: syncSignal
         )) {
-            presentation.snapshot = SkillHistorySnapshot.load(skill: skill, git: git, workingDir: workingDir)
+            await presentation.load(skill: skill, git: git, workingDir: workingDir)
         }
         .sheet(item: $presentation.diff) { diff in
             SkillHistoryDiffSheet(version: diff.version, versionBody: diff.body,
@@ -182,34 +163,19 @@ struct SkillHistoryTab: View {
     }
 
     private func presentDiff(_ version: SkillHistoryVersion) {
-        guard let document = git.show(sha: version.sha, path: SkillHistorySnapshot.path(for: skill), at: workingDir) else {
-            presentation.errorMessage = "Couldn't load that version."
-            return
-        }
-        presentation.errorMessage = nil
-        presentation.diff = SkillHistoryTabPresentation.Diff(
-            version: version,
-            body: SkillHistoryPresentation.previewBody(from: document)
-        )
+        Task { await presentation.read(version, skill: skill, git: git, workingDir: workingDir, asDiff: true) }
     }
 
     private func restore(_ version: SkillHistoryVersion) {
-        guard let document = git.show(sha: version.sha, path: SkillHistorySnapshot.path(for: skill), at: workingDir) else {
-            presentation.errorMessage = "Couldn't load that version."
-            return
-        }
-        do {
-            try restoreSkillHistoryVersion(skill: skill, body: document, store: store, library: library,
-                                           notifier: SyncStateNotifier.suppressed)
-            presentation.errorMessage = nil
-        } catch {
-            presentation.errorMessage = "Couldn't restore that version."
-        }
+        presentation.restore(version, skill: skill, git: git, workingDir: workingDir,
+            store: store, library: library, notifier: SyncStateNotifier.suppressed)
     }
 }
 
 private struct SkillHistoryRowView: View {
     let row: SkillHistoryTimeline.Row
+    let reading: Bool
+    let restoring: Bool
     let onViewDiff: () -> Void
     let onRestore: () -> Void
 
@@ -234,10 +200,18 @@ private struct SkillHistoryRowView: View {
                     .font(.body)
                 if !row.isCurrent {
                     HStack(spacing: Spacing.sm) {
-                        Button("View Diff", action: onViewDiff)
-                            .controlSize(.large)
-                        Button("Restore This Version…", action: onRestore)
-                            .controlSize(.large)
+                        Button(action: onViewDiff) {
+                            HStack { if reading { ProgressView().controlSize(.small) }; Text("View Diff") }
+                        }
+                        .accessibilityLabel("View Diff")
+                        .disabled(reading || restoring)
+                        .controlSize(.large)
+                        Button(action: onRestore) {
+                            HStack { if restoring { ProgressView().controlSize(.small) }; Text("Restore This Version…") }
+                        }
+                        .accessibilityLabel("Restore This Version…")
+                        .disabled(reading || restoring)
+                        .controlSize(.large)
                     }
                     .padding(.top, 6)
                 }

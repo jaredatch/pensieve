@@ -37,6 +37,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Launch and skill history keep the window responsive while Git runs. History shows progress while loading, comparing, or restoring a version, and a delayed Restore leaves newer edits alone.
+
 - Path checks now recognize filesystem separators beside combining marks, joiners, emoji modifiers, tag characters and names ending in Prepend characters. Sync refuses escaping links while existing accented skill names and decomposed link targets keep working.
 - A connected store with no branch now says why it can't sync, instead of showing an old sync time. When git starts working again, sync catches up promptly; with background sync off, it retries your failed Sync Now once.
 - Sync now keeps every file in a skill exactly as it is. Line endings, executable bits and files a skill's own `.gitignore` hides all come through unchanged. It still leaves out `.env` files (except `.env.example`, `.env.sample` and `.env.template`), `node_modules`, `.env` and `.venv` folders, and `.DS_Store`.

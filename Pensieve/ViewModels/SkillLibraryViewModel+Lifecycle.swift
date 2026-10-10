@@ -28,6 +28,7 @@ extension SkillLibraryViewModel {
 
     /// Treat watcher events produced by the resident coordinator's pull/rebuild as self-authored.
     func beginCoordinatorChanges() {
+        coordinatorCompletionGeneration &+= 1
         isApplyingCoordinatorChanges = true
         coordinatorObservedSlugs.removeAll()
         coordinatorBaselineBodies = Dictionary(uniqueKeysWithValues:
@@ -38,29 +39,27 @@ extension SkillLibraryViewModel {
         watcherEventSequence
     }
 
+    @MainActor
     func finishCoordinatorChanges(
         hasUnsyncedChanges: Bool,
         sampledWatcherEventSequence: UInt64? = nil,
-        recheckHasUnsyncedChanges: () -> Bool = { false }
-    ) {
-        let currentSlugs = Set((try? skillStore.listSkills()) ?? [])
-        let candidateSlugs = currentSlugs.union(coordinatorBaselineBodies.keys)
+        recheckHasUnsyncedChanges: @escaping () -> Bool = { false }
+    ) async {
+        coordinatorCompletionGeneration &+= 1
+        let generation = coordinatorCompletionGeneration
         var acceptedSlugs = coordinatorObservedSlugs
-        var foundUnsampledChange = false
-        for directoryName in candidateSlugs where !acceptedSlugs.contains(directoryName) {
-            let currentBody = currentOnDiskBody(directoryName: directoryName)
-            guard coordinatorBaselineBodies[directoryName] != currentBody,
-                  !wasLastWrittenByApp(directoryName: directoryName, currentBody: currentBody) else { continue }
-            acceptExternalChange(directoryName: directoryName, currentBody: currentBody, shouldNotify: false)
-            acceptedSlugs.insert(directoryName)
-            foundUnsampledChange = true
-        }
-        let effectiveHasUnsyncedChanges: Bool
+        let foundUnsampledChange = acceptFinalCoordinatorChanges(into: &acceptedSlugs)
+        var effectiveHasUnsyncedChanges = hasUnsyncedChanges
         if let sampledWatcherEventSequence,
            sampledWatcherEventSequence != watcherEventSequence || foundUnsampledChange {
-            effectiveHasUnsyncedChanges = recheckHasUnsyncedChanges()
-        } else {
-            effectiveHasUnsyncedChanges = hasUnsyncedChanges
+            while true {
+                let sequence = watcherEventSequence
+                effectiveHasUnsyncedChanges = await BlockingWork.run { recheckHasUnsyncedChanges() }
+                guard generation == coordinatorCompletionGeneration else { return }
+                acceptedSlugs.formUnion(coordinatorObservedSlugs)
+                let foundLaterChange = acceptFinalCoordinatorChanges(into: &acceptedSlugs)
+                if sequence == watcherEventSequence, !foundLaterChange { break }
+            }
         }
         for directoryName in coordinatorObservedSlugs {
             setLastWrittenBody(
@@ -81,6 +80,21 @@ extension SkillLibraryViewModel {
         coordinatorObservedSlugs.removeAll()
         isApplyingCoordinatorChanges = false
         if effectiveHasUnsyncedChanges, !acceptedSlugs.isEmpty { notifier() }
+    }
+
+    private func acceptFinalCoordinatorChanges(into acceptedSlugs: inout Set<String>) -> Bool {
+        let currentSlugs = Set((try? skillStore.listSkills()) ?? [])
+        let candidateSlugs = currentSlugs.union(coordinatorBaselineBodies.keys)
+        var foundChange = false
+        for directoryName in candidateSlugs where !acceptedSlugs.contains(directoryName) {
+            let currentBody = currentOnDiskBody(directoryName: directoryName)
+            guard coordinatorBaselineBodies[directoryName] != currentBody,
+                  !wasLastWrittenByApp(directoryName: directoryName, currentBody: currentBody) else { continue }
+            acceptExternalChange(directoryName: directoryName, currentBody: currentBody, shouldNotify: false)
+            acceptedSlugs.insert(directoryName)
+            foundChange = true
+        }
+        return foundChange
     }
 
     /// The cycle's one question, against its final body: a draft still dirty on a file the cycle moved (its

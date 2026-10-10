@@ -157,9 +157,7 @@ final class AppRuntime {
         self.defaults = resolvedDefaults
         self.paths = paths
         self.launchReconcile = launchReconcile ?? paths.makeLaunchReconcile()
-        self.launchBackfill = Self.backfillRefreshingIndex(
-            launchBackfill ?? paths.makeLaunchBackfill(), platformVM: resolvedPlatformVM
-        )
+        self.launchBackfill = launchBackfill ?? paths.makeLaunchBackfill()
         self.hasRemoteConfigured = hasRemoteConfigured ?? { paths.hasRemoteConfigured() }
         self.convergence = resolvedConvergence
         self.launchIngestRetryNanoseconds = launchIngestRetryNanoseconds
@@ -221,35 +219,28 @@ final class AppRuntime {
     func performLaunchWorkIfNeeded(
         context: ModelContext,
         beforeStartingWatcher: () -> Void = {}
-    ) -> Bool {
+    ) async -> Bool {
         guard !didPerformLaunchWork else { return false }
         didPerformLaunchWork = true
         launchWorkInvocationCount += 1
-
-        let alreadyMigrated = defaults.bool(forKey: Self.migrationDefaultsKey)
-        guard let lock = SyncLock.tryAcquire(at: launchIngestLockPath) else {
-            acceptLaunchIngest(Self.deferredLaunchOutcome(), context: context)
-            beforeStartingWatcher()
-            library.startWatching()
-            scheduleLaunchIngestRetry(context: context)
-            didFinishInitialLaunchCallbacks = true
-            completeLaunchWorkIfPossible()
-            return true
-        }
-        let launchOutcome = launchReconcile(context, alreadyMigrated)
-        if launchOutcome.migrationRan {
-            defaults.set(true, forKey: Self.migrationDefaultsKey)
-        }
-        acceptLaunchIngest(launchOutcome, context: context)
-        lock.release()
+        let result = await runLaunchJob()
+        acceptLaunchIngest(result, context: context)
         beforeStartingWatcher()
         library.startWatching()
-        if launchOutcome.ingestionNeedsRetry {
-            scheduleLaunchIngestRetry(context: context)
-        }
+        if result.outcome.ingestionNeedsRetry { scheduleLaunchIngestRetry(context: context) }
         didFinishInitialLaunchCallbacks = true
         completeLaunchWorkIfPossible()
         return true
+    }
+
+    private func runLaunchJob() async -> LaunchJobResult {
+        let container = container, reconcile = launchReconcile, backfill = launchBackfill
+        let remote = hasRemoteConfigured, lockPath = launchIngestLockPath
+        let alreadyMigrated = defaults.bool(forKey: Self.migrationDefaultsKey)
+        return await BlockingWork.run {
+            Self.reconcileLaunch(container: container, reconcile: reconcile, backfill: backfill,
+                hasRemote: remote, lockPath: lockPath, alreadyMigrated: alreadyMigrated)
+        }
     }
 }
 
@@ -276,16 +267,14 @@ private extension AppRuntime {
         }
     }
 
-    private func acceptLaunchIngest(_ outcome: LaunchReconcileOutcome, context: ModelContext) {
+    private func acceptLaunchIngest(_ result: LaunchJobResult, context: ModelContext) {
+        let outcome = result.outcome
+        if outcome.migrationRan { defaults.set(true, forKey: Self.migrationDefaultsKey) }
         storeQuarantined = outcome.quarantined
         library.setStoreUnreadable(outcome.rebuild.storeUnreadable)
         if !outcome.rebuild.storeUnreadable, !outcome.ingestionNeedsRetry {
-            // Quarantine and an unknown remote both defer backfill until a successful sync ingests the store.
-            if outcome.quarantined {
-                needsLaunchBackfillAfterCoordinator = true
-                forceLaunchPreflight = true
-            } else if outcome.ingestedHeadStamp != nil || !hasRemoteConfigured() {
-                launchBackfill(context)
+            if result.backfilled {
+                platformVM.refreshDeployIndex()
                 convergence.runAfterLaunchIngest()
             } else {
                 needsLaunchBackfillAfterCoordinator = true
@@ -306,19 +295,12 @@ private extension AppRuntime {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: self?.launchIngestRetryNanoseconds ?? 0)
                 guard let self else { return }
-                guard let lock = SyncLock.tryAcquire(at: self.launchIngestLockPath) else { continue }
-                let alreadyMigrated = self.defaults.bool(forKey: Self.migrationDefaultsKey)
-                let outcome = self.launchReconcile(context, alreadyMigrated)
-                if outcome.migrationRan {
-                    self.defaults.set(true, forKey: Self.migrationDefaultsKey)
-                }
-                if outcome.rebuild.storeUnreadable || !outcome.ingestionNeedsRetry {
+                let result = await self.runLaunchJob()
+                if result.outcome.rebuild.storeUnreadable || !result.outcome.ingestionNeedsRetry {
                     self.launchIngestRetryTask = nil
-                    self.acceptLaunchIngest(outcome, context: context)
-                    lock.release()
+                    self.acceptLaunchIngest(result, context: context)
                     return
                 }
-                lock.release()
             }
         }
     }
@@ -328,6 +310,7 @@ extension AppRuntime {
     private func performDeferredLaunchBackfillIfNeeded() {
         guard needsLaunchBackfillAfterCoordinator else { return }
         launchBackfill(ModelContext(container))
+        platformVM.refreshDeployIndex()
         needsLaunchBackfillAfterCoordinator = false
     }
 

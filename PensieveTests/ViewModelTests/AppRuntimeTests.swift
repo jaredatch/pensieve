@@ -98,20 +98,14 @@ final class AppRuntimeTests: XCTestCase {
         )
         let defaults = try isolatedDefaults(defaultsLabel)
         let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir,
-                storeRoot: TestPaths.storeRoot), fileWatchService: watcher,
-            manifestRoot: TestPaths.storeRoot
-        )
+            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
+            fileWatchService: watcher, manifestRoot: TestPaths.storeRoot)
         let platformVM = neutralPlatformVM()
         var returnedInitialLaunchOutcome = false
         let convergence = PostSyncConvergence(
-            root: "/tmp/AppRuntimeTests",
-            deployReconciler: deployReconciler,
-            contextFactory: { ModelContext(container) },
-            categoryReconciler: categoryReconciler,
-            intentReconciler: NoopLedgerReconciler(),
-            auditLog: { _, _ in }
-        )
+            root: "/tmp/AppRuntimeTests", deployReconciler: deployReconciler,
+            contextFactory: { ModelContext(container) }, categoryReconciler: categoryReconciler,
+            intentReconciler: NoopLedgerReconciler(), auditLog: { _, _ in })
         let runtime = try AppRuntime(
             container: container,
             platformVM: platformVM,
@@ -135,11 +129,8 @@ final class AppRuntimeTests: XCTestCase {
         )
         return RuntimeHarness(
             runtime: runtime,
-            context: ModelContext(container),
-            watcher: watcher,
-            launchIngestLockPath: launchIngestLockPath ?? paths.syncLockPath,
-            paths: paths
-        )
+            context: ModelContext(container), watcher: watcher,
+            launchIngestLockPath: launchIngestLockPath ?? paths.syncLockPath, paths: paths)
     }
 
     private func neutralPlatformVM() -> PlatformViewModel {
@@ -151,33 +142,46 @@ final class AppRuntimeTests: XCTestCase {
         )
     }
 
-    func testLaunchWorkRunsOnce() throws {
+    func testLaunchWorkRunsOnce() async throws {
         var launchCallCount = 0
         let harness = try makeRuntime {
             launchCallCount += 1
         }
-        XCTAssertTrue(harness.runtime.performLaunchWorkIfNeeded(context: harness.context))
-        XCTAssertFalse(harness.runtime.performLaunchWorkIfNeeded(context: harness.context))
+        let launchStartedOnce = await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        XCTAssertTrue(launchStartedOnce)
+        let launchStartedAgain = await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        XCTAssertFalse(launchStartedAgain)
         XCTAssertEqual(harness.runtime.launchWorkInvocationCount, 1)
         XCTAssertEqual(launchCallCount, 1)
         XCTAssertEqual(harness.watcher.startCount, 1)
     }
 
-    func testQuarantineSuppressesImportWizardAutoPop() throws {
+    func testQuarantineSuppressesImportWizardAutoPop() async throws {
         XCTAssertTrue(AppRuntime.shouldAutoShowImportWizard(skillCount: 0, storeQuarantined: false, storeUnreadable: false))
         XCTAssertFalse(AppRuntime.shouldAutoShowImportWizard(skillCount: 0, storeQuarantined: true, storeUnreadable: false))
         XCTAssertFalse(AppRuntime.shouldAutoShowImportWizard(skillCount: 1, storeQuarantined: false, storeUnreadable: false))
         let lockPath = TestTemporaryDirectory.path + "/AppRuntimeQuarantine-\(UUID().uuidString)/sync.lock"
         let launchLock = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
-        let harness = try makeRuntime(launchIngestLockPath: lockPath)
-        XCTAssertTrue(harness.runtime.performLaunchWorkIfNeeded(context: harness.context))
+        var busyLaunchCalls = 0
+        let harness = try makeRuntime(launchCalls: {
+            XCTAssertFalse(Thread.isMainThread)
+            XCTAssertNil(SyncLock.tryAcquire(at: lockPath))
+            busyLaunchCalls += 1
+        }, launchIngestLockPath: lockPath)
+        let launchStartedOnce = await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        XCTAssertTrue(launchStartedOnce)
         XCTAssertTrue(harness.runtime.storeQuarantined)
+        XCTAssertEqual(busyLaunchCalls, 0, "a held sync.lock must defer launch reconciliation")
         XCTAssertFalse(AppRuntime.shouldAutoShowImportWizard(
             skillCount: 0,
             storeQuarantined: harness.runtime.storeQuarantined,
             storeUnreadable: false
         ))
         launchLock.release()
+        await TestWait.until(failureMessage: "deferred launch never retried after sync.lock was released") {
+            harness.runtime.launchWorkCompleted
+        }
+        XCTAssertEqual(busyLaunchCalls, 1)
         // Layer-2 P1 regression (PLAN-24 / 24.2): a quarantined outcome must take the deferral arm
         // UNCONDITIONALLY — never launchBackfill or post-ingest convergence, even though the same
         // origin-probe failure makes hasRemoteConfigured read nil (the no-remote arm's condition).
@@ -195,29 +199,76 @@ final class AppRuntimeTests: XCTestCase {
             hasRemoteConfigured: { false },
             deployReconciler: deploy
         )
-        quarantinedHarness.runtime.performLaunchWorkIfNeeded(context: quarantinedHarness.context)
+        await quarantinedHarness.runtime.performLaunchWorkIfNeeded(context: quarantinedHarness.context)
         XCTAssertTrue(quarantinedHarness.runtime.storeQuarantined)
         XCTAssertEqual(backfillCalls, 0)
         XCTAssertEqual(deploy.calls, 0)
     }
 
-    func testSecondWindowAppearanceDoesNotRerunLaunchWork() throws {
+    func testSecondWindowAppearanceDoesNotRerunLaunchWork() async throws {
         var launchCallCount = 0
         let harness = try makeRuntime {
             launchCallCount += 1
         }
         var firstWindow: WindowModels? = WindowModels(runtime: harness.runtime)
         XCTAssertNotNil(firstWindow)
-        harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
         firstWindow = nil
         let secondWindow = WindowModels(runtime: harness.runtime)
         XCTAssertNotNil(secondWindow)
-        harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
 
         XCTAssertEqual(harness.runtime.launchWorkInvocationCount, 1)
         XCTAssertEqual(launchCallCount, 1)
     }
 
+    func testWatcherKeepsRunningAfterViewTeardown() async throws {
+        let harness = try makeRuntime()
+        await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+
+        var window: WindowModels? = WindowModels(runtime: harness.runtime)
+        XCTAssertNotNil(window)
+        window = nil
+
+        XCTAssertEqual(harness.watcher.startCount, 1)
+        XCTAssertEqual(harness.watcher.stopCount, 0)
+    }
+
+    func testUnreadableLaunchIngestSkipsConvergence() async throws {
+        let deploy = RecordingDeployReconciler()
+        let harness = try makeRuntime(
+            launchOutcome: LaunchReconcileOutcome(
+                rebuild: RebuildResult(storeUnreadable: true),
+                migrationRan: false
+            ),
+            deployReconciler: deploy
+        )
+
+        await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+
+        XCTAssertEqual(deploy.calls, 0)
+    }
+
+    func testUnstableLaunchIngestSkipsConvergence() async throws {
+        let deploy = RecordingDeployReconciler()
+        let harness = try makeRuntime(
+            launchOutcome: LaunchReconcileOutcome(
+                rebuild: RebuildResult(),
+                migrationRan: false,
+                ingestedHeadStamp: nil,
+                ingestionNeedsRetry: true
+            ),
+            deployReconciler: deploy
+        )
+
+        await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+
+        XCTAssertEqual(deploy.calls, 0)
+    }
+
+}
+
+extension AppRuntimeTests {
     func testRuntimeModelsSurviveWindowTeardown() throws {
         let harness = try makeRuntime()
         weak var library = harness.runtime.library
@@ -233,53 +284,6 @@ final class AppRuntimeTests: XCTestCase {
         XCTAssertTrue(syncModel === harness.runtime.syncModel)
     }
 
-    func testWatcherKeepsRunningAfterViewTeardown() throws {
-        let harness = try makeRuntime()
-        harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
-
-        var window: WindowModels? = WindowModels(runtime: harness.runtime)
-        XCTAssertNotNil(window)
-        window = nil
-
-        XCTAssertEqual(harness.watcher.startCount, 1)
-        XCTAssertEqual(harness.watcher.stopCount, 0)
-    }
-
-    func testUnreadableLaunchIngestSkipsConvergence() throws {
-        let deploy = RecordingDeployReconciler()
-        let harness = try makeRuntime(
-            launchOutcome: LaunchReconcileOutcome(
-                rebuild: RebuildResult(storeUnreadable: true),
-                migrationRan: false
-            ),
-            deployReconciler: deploy
-        )
-
-        harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
-
-        XCTAssertEqual(deploy.calls, 0)
-    }
-
-    func testUnstableLaunchIngestSkipsConvergence() throws {
-        let deploy = RecordingDeployReconciler()
-        let harness = try makeRuntime(
-            launchOutcome: LaunchReconcileOutcome(
-                rebuild: RebuildResult(),
-                migrationRan: false,
-                ingestedHeadStamp: nil,
-                ingestionNeedsRetry: true
-            ),
-            deployReconciler: deploy
-        )
-
-        harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
-
-        XCTAssertEqual(deploy.calls, 0)
-    }
-
-}
-
-extension AppRuntimeTests {
     func testUnstableLaunchIngestRetriesOutsideSchedulerGate() async throws {
         let deploy = RecordingDeployReconciler()
         var backfillCalls = 0
@@ -299,7 +303,7 @@ extension AppRuntimeTests {
             deployReconciler: deploy
         )
 
-        harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
         XCTAssertEqual(backfillCalls, 0)
         await TestWait.until(failureMessage: "Launch ingest retry never made the scheduler ready") {
             harness.runtime.scheduler.isLaunchIngestReady
@@ -317,6 +321,7 @@ extension AppRuntimeTests {
         let lockPath = TestTemporaryDirectory.path + "/AppRuntimeRetryLock-\(UUID().uuidString)/sync.lock"
         let harness = try makeRuntime(
             launchCalls: {
+                XCTAssertFalse(Thread.isMainThread)
                 launchCalls += 1
                 XCTAssertNil(
                     SyncLock.tryAcquire(at: lockPath),
@@ -339,7 +344,7 @@ extension AppRuntimeTests {
             launchIngestLockPath: lockPath
         )
 
-        harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
         XCTAssertTrue(harness.runtime.storeQuarantined)
         let installLock = try XCTUnwrap(SyncLock.tryAcquire(at: harness.launchIngestLockPath))
         try await Task.sleep(nanoseconds: 80_000_000)

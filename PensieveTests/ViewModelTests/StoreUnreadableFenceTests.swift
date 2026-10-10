@@ -95,13 +95,14 @@ final class StoreUnreadableFenceTests: XCTestCase {
         }
     }
 
-    func testUnreadableLaunchOutcomeFencesAddsAndSuppressesTheWizard() throws {
+    func testUnreadableLaunchOutcomeFencesAddsAndSuppressesTheWizard() async throws {
         var rebuild = RebuildResult()
         rebuild.storeUnreadable = true
         let runtime = try makeRuntime(label: "unreadable",
             outcome: LaunchReconcileOutcome(rebuild: rebuild, migrationRan: false)
         )
-        XCTAssertTrue(runtime.performLaunchWorkIfNeeded(context: ModelContext(runtime.container)))
+        let launchStartedOnce = await runtime.performLaunchWorkIfNeeded(context: ModelContext(runtime.container))
+        XCTAssertTrue(launchStartedOnce)
         XCTAssertTrue(runtime.library.storeUnreadable)
         XCTAssertTrue(runtime.library.addsFenced)
         XCTAssertFalse(runtime.storeQuarantined)
@@ -117,7 +118,9 @@ final class StoreUnreadableFenceTests: XCTestCase {
         let readableRuntime = try makeRuntime(label: "readable",
             outcome: LaunchReconcileOutcome(rebuild: RebuildResult(), migrationRan: false)
         )
-        XCTAssertTrue(readableRuntime.performLaunchWorkIfNeeded(context: ModelContext(readableRuntime.container)))
+        let readableLaunchStarted = await readableRuntime.performLaunchWorkIfNeeded(
+            context: ModelContext(readableRuntime.container))
+        XCTAssertTrue(readableLaunchStarted)
         XCTAssertFalse(runtime.backgroundSyncEnabled, "another runtime must not clear the first runtime defaults")
         XCTAssertFalse(readableRuntime.library.storeUnreadable)
         XCTAssertTrue(readableRuntime.shouldAutoShowImportWizard(skillCount: 0))

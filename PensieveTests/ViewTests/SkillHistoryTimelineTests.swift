@@ -127,14 +127,27 @@ final class SkillHistoryRecordingGit: GitServiceProtocol {
 
     var commits: [GitCommit] = []
     var documents: [String: String] = [:]
-    private(set) var logCalls: [LogCall] = []
-
-    func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] {
-        logCalls.append(LogCall(path: path, workingDir: workingDir, limit: limit))
-        return commits
+    private var recordedLogCalls: [LogCall] = []
+    private let callLock = NSLock()
+    var logOperation: ((String) -> [GitCommit])?
+    var showOperation: ((String) -> String?)?
+    var logCalls: [LogCall] {
+        callLock.lock()
+        defer { callLock.unlock() }
+        return recordedLogCalls
     }
 
-    func show(sha: String, path: String, at workingDir: String) -> String? { documents[sha] }
+    func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] {
+        callLock.lock()
+        recordedLogCalls.append(LogCall(path: path, workingDir: workingDir, limit: limit))
+        callLock.unlock()
+        return logOperation?(path) ?? commits
+    }
+
+    func show(sha: String, path: String, at workingDir: String) -> String? {
+        if let showOperation { return showOperation(sha) }
+        return documents[sha]
+    }
     func remoteURL(at path: String) -> String? { nil }
     func initRepository(at path: String) throws {}
     func setRemote(_ url: String, at path: String) throws {}

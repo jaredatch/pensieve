@@ -37,7 +37,8 @@ final class GitReviewRegressionTests: XCTestCase {
                 postSyncConvergence: convergence, paths: fixture.paths, gitUsabilityProbe: git.probeUsability
             )
             await runtime.bootstrapTask.value
-            XCTAssertTrue(runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext))
+            let launchStartedOnce = await runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext)
+            XCTAssertTrue(launchStartedOnce)
             runtime.library.stopWatching()
             XCTAssertEqual(runtime.gitUsability, state)
             XCTAssertEqual(backfills, 1, "local backfill must not wait for a sync that has no remote")
@@ -108,7 +109,8 @@ final class GitReviewRegressionTests: XCTestCase {
                           "the configuration refresh must actually read the missing root")
         XCTAssertNotNil(model.configurationError)
         XCTAssertNotEqual(model.state, .unconfigured)
-        XCTAssertTrue(runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext))
+        let launchStartedOnce = await runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext)
+        XCTAssertTrue(launchStartedOnce)
         runtime.library.stopWatching()
         XCTAssertEqual(runtime.gitUsability, state, "launch assertions retain the unusable host")
         XCTAssertEqual(backfills, 0)

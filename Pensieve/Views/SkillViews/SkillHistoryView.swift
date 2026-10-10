@@ -17,9 +17,7 @@ struct SkillHistoryView: View {
     private let library: SkillLibraryViewModel?
     private let notifier: SyncStateNotifying
 
-    @State private var commits: [GitCommit] = []
-    @State private var selection: SkillHistorySelection?
-    @State private var errorMessage: String?
+    @State private var presentation = SkillHistoryTabPresentation()
 
     init(skill: Skill,
          git: GitServiceProtocol,
@@ -55,7 +53,7 @@ struct SkillHistoryView: View {
             }
             .frame(minHeight: 420)
 
-            if let errorMessage {
+            if let errorMessage = presentation.errorMessage {
                 Label(errorMessage, systemImage: "exclamationmark.triangle")
                     .font(.callout)
                     .foregroundStyle(.red)
@@ -63,31 +61,41 @@ struct SkillHistoryView: View {
             }
 
             HStack(spacing: Spacing.sm) {
-                Button("Cancel") { onDismiss() }
+                Button("Cancel") { presentation.close(); onDismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Restore this version") {
-                    restoreSelectedVersion()
+                Button(action: restoreSelectedVersion) {
+                    HStack {
+                        if presentation.restoringVersion != nil { ProgressView().controlSize(.small) }
+                        Text("Restore this version")
+                    }
                 }
+                .accessibilityLabel("Restore this version")
                 .buttonStyle(.borderedProminent)
-                .disabled(selection == nil)
+                .disabled(presentation.selection == nil || presentation.restoringVersion != nil)
             }
         }
         .padding(Spacing.xl)
         .frame(width: 760)
-        .task { loadHistory() }
+        .task(id: skill.id) {
+            await presentation.load(skill: skill, git: git, workingDir: workingDir, selectFirst: true)
+        }
+        .onChange(of: skill.id) { _, _ in presentation.reset() }
+        .onDisappear { presentation.close() }
     }
 
     private var historyList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.xs) {
-                if commits.isEmpty {
+                if presentation.isLoading {
+                    ProgressView("Loading history…")
+                } else if presentation.snapshot.versions.isEmpty {
                     Text("No history")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    ForEach(commits, id: \.sha) { commit in
+                    ForEach(presentation.snapshot.versions) { commit in
                         commitRow(commit)
                     }
                 }
@@ -96,7 +104,9 @@ struct SkillHistoryView: View {
     }
 
     @ViewBuilder private var previewPane: some View {
-        if let selection {
+        if presentation.readingVersion != nil {
+            ProgressView("Loading version…")
+        } else if let selection = presentation.selection {
             preview(for: selection)
         } else {
             ContentUnavailableView {
@@ -110,16 +120,16 @@ struct SkillHistoryView: View {
                          imageLoader: PreviewImageLoader(fileService: fileService))
     }
 
-    private func commitRow(_ commit: GitCommit) -> some View {
+    private func commitRow(_ commit: SkillHistoryVersion) -> some View {
         Button {
-            select(commit)
+            Task { await presentation.read(commit, skill: skill, git: git, workingDir: workingDir, asDiff: false) }
         } label: {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(SkillHistoryPresentation.rowTitle(for: commit))
+                Text(commit.date.formatted(date: .abbreviated, time: .shortened))
                     .font(.callout)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                Text(SkillHistoryPresentation.rowSubtitle(for: commit))
+                Text(commit.subject + " · " + commit.author)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -127,28 +137,10 @@ struct SkillHistoryView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(Spacing.sm)
-            .background(selection?.sha == commit.sha ? Color.accentColor.opacity(0.16) : Color.clear,
+            .background(presentation.selection?.sha == commit.sha ? Color.accentColor.opacity(0.16) : Color.clear,
                         in: RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
         }
         .buttonStyle(.plain)
-    }
-
-    private func loadHistory() {
-        let path = historyPath
-        commits = git.log(forPath: path, at: workingDir, limit: 50)
-        guard let first = commits.first else { return }
-        select(first)
-    }
-
-    private func select(_ commit: GitCommit) {
-        selection = git.show(sha: commit.sha, path: historyPath, at: workingDir).map {
-            SkillHistorySelection(sha: commit.sha, document: $0)
-        }
-        if selection == nil {
-            errorMessage = "Couldn't load that version."
-        } else {
-            errorMessage = nil
-        }
     }
 
     private func restoreSelectedVersion() {
@@ -157,23 +149,16 @@ struct SkillHistoryView: View {
     }
 
     private func restore() {
-        guard let selection else { return }
-        do {
-            try restoreSkillHistoryVersion(
-                skill: skill,
-                body: selection.document,
-                store: store,
-                library: library,
-                notifier: notifier
-            )
-            onDismiss()
-        } catch {
-            errorMessage = "Couldn't restore that version."
+        guard let selection = presentation.selection,
+              let version = presentation.snapshot.versions.first(where: { $0.sha == selection.sha }) else { return }
+        let restore = presentation.restore(version, skill: skill, git: git, workingDir: workingDir,
+            store: store, library: library, notifier: notifier)
+        Task {
+            if await restore.value {
+                presentation.close()
+                onDismiss()
+            }
         }
-    }
-
-    private var historyPath: String {
-        "skills/\(skill.directoryName)/SKILL.md"
     }
 }
 

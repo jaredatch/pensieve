@@ -180,13 +180,15 @@ struct ContentView: View {
             runtime.registerOpenMainWindowAction {
                 openMainWindow(id: "main")
             }
-            runtime.performLaunchWorkIfNeeded(
-                context: modelContext,
-                beforeStartingWatcher: runtime.checkForSkillUpdatesIfDue
-            )
-            let skillCount = (try? modelContext.fetchCount(FetchDescriptor<Skill>())) ?? skills.count
-            if !library.addsFenced, runtime.shouldAutoShowImportWizard(skillCount: skillCount) {
-                showImportWizard = true
+            Task {
+                guard await runtime.performLaunchWorkIfNeeded(
+                    context: modelContext,
+                    beforeStartingWatcher: runtime.checkForSkillUpdatesIfDue
+                ) else { return }
+                let skillCount = (try? modelContext.fetchCount(FetchDescriptor<Skill>())) ?? skills.count
+                if !library.addsFenced, runtime.shouldAutoShowImportWizard(skillCount: skillCount) {
+                    showImportWizard = true
+                }
             }
             reloadMachineStates()
         }

@@ -166,7 +166,7 @@ extension AppRuntimePathsTests {
         try fixture.files.deleteFile(at: paths.storeRoot + "/.git/refs/heads/main")
         XCTAssertTrue(runtime.syncModel.canSyncNow, "branchlessness has not been observed yet")
         let before = try fixture.snapshot()
-        runtime.performLaunchWorkIfNeeded(context: ModelContext(container))
+        await runtime.performLaunchWorkIfNeeded(context: ModelContext(container))
 
         let auditPath = paths.appSupportDir + "/daemon.log"
         let audit = try await waitForRetryCycle(runtime, auditPath: auditPath, detail: "branchless")

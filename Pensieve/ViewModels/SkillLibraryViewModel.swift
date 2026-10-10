@@ -60,6 +60,7 @@ final class SkillLibraryViewModel {
     var coordinatorBaselineBodies: [String: String] = [:]
     var coordinatorObservedSlugs: Set<String> = []
     var watcherEventSequence: UInt64 = 0
+    var coordinatorCompletionGeneration: UInt64 = 0
     /// Asset invalidation belongs to the folder reported by the watcher, even for a body echo.
     var folderChangeRevisions: [String: UInt64] = [:]
     var error: String?
@@ -70,6 +71,8 @@ final class SkillLibraryViewModel {
     /// known body and leaves on Save, Revert, deletion, or typing back to it; whether it is dirty now is measured
     /// against the fingerprint (edits reach disk only on Save). `SkillLibraryViewModel+Draft.swift`.
     var drafts: [String: EditorDraft] = [:]
+    /// A delayed Restore also retires after an edit that the user subsequently undid.
+    var textEditRevisions: [String: UInt64] = [:]
     /// The one unsaved-changes question open, if any, and what a leaving question does with the answer.
     var pendingUnsavedChanges: UnsavedChangesPrompt?
     @ObservationIgnored var pendingLeaveContinuation: ((Bool) -> Void)?
