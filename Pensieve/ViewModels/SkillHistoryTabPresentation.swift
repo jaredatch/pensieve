@@ -86,27 +86,34 @@ final class SkillHistoryTabPresentation {
     func restore(_ version: SkillHistoryVersion, skill: Skill, git: GitServiceProtocol,
                  workingDir: String, store: SkillStoreProtocol, library: SkillLibraryViewModel?,
                  notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed) -> Task<Bool, Never> {
-        guard restoringVersion == nil, skillID == skill.id, let context = skill.modelContext, !skill.isDeleted,
-              let body = try? store.readBody(directoryName: skill.directoryName) else { return Task { false } }
+        guard restoringVersion == nil, skillID == skill.id else { return Task { false } }
+        guard let context = skill.modelContext, !skill.isDeleted,
+              let rawDocument = try? store.readData(directoryName: skill.directoryName) else {
+            errorMessage = "Nothing was restored. The skill changed while Pensieve was reading that version."
+            return Task { false }
+        }
         actionGeneration &+= 1
         let generation = actionGeneration
         let path = SkillHistorySnapshot.path(for: skill), slug = skill.directoryName
         let draft = library?.drafts[slug]?.body
         let editRevision = library?.textEditRevisions[slug]
         let folderRevision = library?.folderChangeRevisions[slug]
-        let rawDocument = library.flatMap { try? $0.fileService.readData(at: store.baseDir + "/" + slug + "/SKILL.md") }
         readingVersion = nil
         restoringVersion = version.sha
         return Task {
             let document = await BlockingWork.run { git.show(sha: version.sha, path: path, at: workingDir) }
             guard !Task.isCancelled, skillID == skill.id, actionGeneration == generation else { return false }
             restoringVersion = nil
+            let id = skill.id
+            let descriptor = FetchDescriptor<Skill>(predicate: #Predicate { $0.id == id })
             guard !skill.isDeleted, skill.modelContext === context,
-                  (try? context.fetch(FetchDescriptor<Skill>()))?.contains(where: { $0.id == skill.id }) == true,
+                  (try? context.fetchCount(descriptor)) == 1,
                   library?.textEditRevisions[slug] == editRevision, library?.drafts[slug]?.body == draft,
                   library?.folderChangeRevisions[slug] == folderRevision,
-                  library.flatMap({ try? $0.fileService.readData(at: store.baseDir + "/" + slug + "/SKILL.md") }) == rawDocument,
-                  (try? store.readBody(directoryName: slug)) == body else { return false }
+                  (try? store.readData(directoryName: slug)) == rawDocument else {
+                errorMessage = "Nothing was restored. The skill changed while Pensieve was reading that version."
+                return false
+            }
             guard let document else { errorMessage = "Couldn't load that version."; return false }
             do {
                 try restoreSkillHistoryVersion(skill: skill, body: document, store: store, library: library, notifier: notifier)

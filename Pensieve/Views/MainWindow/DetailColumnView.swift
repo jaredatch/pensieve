@@ -32,6 +32,13 @@ struct DetailColumnView: View {
 
     var body: some View {
         content
+            .safeAreaInset(edge: .top) {
+                if library.launchIngestPending, section != .skills || !skillsEmpty {
+                    Text(SkillLibraryViewModel.launchIngestMessage)
+                        .font(.callout).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(Spacing.md)
+                }
+            }
             .toolbar {
                 ToolbarItem { addControl }
                 ToolbarItem { Spacer() }
@@ -77,7 +84,8 @@ struct DetailColumnView: View {
                         + "Update Pensieve, then relaunch to see your skills and add new ones.")
                 )
             } else {
-                EmptyStateView("No Skills Yet", description: "Import existing skills or create your first one.") {
+                EmptyStateView("No Skills Yet", description: library.launchIngestPending
+                    ? SkillLibraryViewModel.launchIngestMessage : "Import existing skills or create your first one.") {
                     VStack(spacing: Spacing.sm) {
                         Button("Find Skills on This Mac", action: onImport)
                             .buttonStyle(.borderedProminent).disabled(library.addsFenced)

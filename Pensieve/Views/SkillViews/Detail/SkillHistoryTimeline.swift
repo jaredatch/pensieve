@@ -26,10 +26,6 @@ struct SkillHistorySnapshot: Equatable {
 
     static func path(for skill: Skill) -> String { "skills/\(skill.directoryName)/SKILL.md" }
 
-    static func load(skill: Skill, git: GitServiceProtocol, workingDir: String) -> SkillHistorySnapshot {
-        load(path: path(for: skill), git: git, workingDir: workingDir)
-    }
-
     static func load(path: String, git: GitServiceProtocol, workingDir: String) -> SkillHistorySnapshot {
         let commits = git.log(forPath: path, at: workingDir, limit: limit)
         return SkillHistorySnapshot(versions: commits.map {

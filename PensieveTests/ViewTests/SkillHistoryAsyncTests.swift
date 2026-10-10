@@ -128,7 +128,9 @@ final class SkillHistoryAsyncTests: XCTestCase {
     }
 
     func testHeldRestoreWritesNothingAfterDeletionEditSelectionOrClose() async throws {
-        for invalidation in ["delete", "file edit", "draft edit", "edit then undo", "immediate edit", "selection", "close"] {
+        let invalidations = ["delete", "file edit", "draft edit", "edit then undo",
+                             "immediate edit", "raw bytes", "selection", "close"]
+        for invalidation in invalidations {
             let fixture = try fixture()
             let model = SkillHistoryTabPresentation()
             fixture.git.commits = [Self.commit("version")]
@@ -146,23 +148,15 @@ final class SkillHistoryAsyncTests: XCTestCase {
                 store: fixture.store, library: fixture.library, notifier: {})
             if invalidation == "immediate edit" { fixture.library.noteEditorChanged(fixture.skill, body: "New edit") }
             await fulfillment(of: [entered], timeout: TestWait.timeoutSeconds)
-            switch invalidation {
-            case "delete": fixture.context.delete(fixture.skill); try fixture.context.save()
-            case "file edit": fixture.store.bodies["example"] = "Edited"
-            case "draft edit": fixture.library.noteEditorChanged(fixture.skill, body: "Draft")
-            case "edit then undo":
-                fixture.library.noteEditorChanged(fixture.skill, body: "Draft")
-                fixture.library.noteEditorChanged(fixture.skill, body: "Current")
-                fixture.library.discardDraft(fixture.skill)
-            case "immediate edit": break
-            case "selection":
-                await model.load(skill: Skill(name: "Other", directoryName: "other"), git: fixture.git, workingDir: "/repo")
-            default: model.close()
-            }
+            try await invalidateRestore(invalidation, fixture: fixture, model: model)
             let bodyBeforeRelease = fixture.store.bodies["example"]
             gate.open()
             let restored = await restore.value
             XCTAssertFalse(restored, invalidation)
+            if invalidation != "selection", invalidation != "close" {
+                XCTAssertEqual(model.errorMessage,
+                    "Nothing was restored. The skill changed while Pensieve was reading that version.", invalidation)
+            }
             XCTAssertEqual(fixture.store.bodies["example"], bodyBeforeRelease, invalidation)
             XCTAssertEqual(fixture.counter.value, 0, invalidation)
         }
@@ -223,6 +217,24 @@ final class SkillHistoryAsyncTests: XCTestCase {
 }
 
 extension SkillHistoryAsyncTests {
+    private func invalidateRestore(_ invalidation: String, fixture: LibraryFixtureWithGit,
+                                   model: SkillHistoryTabPresentation) async throws {
+        switch invalidation {
+        case "delete": fixture.context.delete(fixture.skill); try fixture.context.save()
+        case "file edit": fixture.store.bodies["example"] = "Edited"
+        case "draft edit": fixture.library.noteEditorChanged(fixture.skill, body: "Draft")
+        case "edit then undo":
+            fixture.library.noteEditorChanged(fixture.skill, body: "Draft")
+            fixture.library.noteEditorChanged(fixture.skill, body: "Current")
+            fixture.library.discardDraft(fixture.skill)
+        case "raw bytes": fixture.store.savedData["example"] = Data("\u{FEFF}Current".utf8)
+        case "immediate edit": break
+        case "selection":
+            await model.load(skill: Skill(name: "Other", directoryName: "other"), git: fixture.git, workingDir: "/repo")
+        default: model.close()
+        }
+    }
+
     private func fixture() throws -> LibraryFixtureWithGit {
         let context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
         let skill = Skill(name: "Example", directoryName: "example")

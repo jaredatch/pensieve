@@ -181,16 +181,17 @@ struct ContentView: View {
                 openMainWindow(id: "main")
             }
             Task {
-                guard await runtime.performLaunchWorkIfNeeded(
+                await runtime.performLaunchWorkIfNeeded(
                     context: modelContext,
                     beforeStartingWatcher: runtime.checkForSkillUpdatesIfDue
-                ) else { return }
-                let skillCount = (try? modelContext.fetchCount(FetchDescriptor<Skill>())) ?? skills.count
-                if !library.addsFenced, runtime.shouldAutoShowImportWizard(skillCount: skillCount) {
-                    showImportWizard = true
-                }
+                )
             }
             reloadMachineStates()
+        }
+        .onChange(of: runtime.launchWorkCompleted, initial: true) { _, completed in
+            guard completed else { return }
+            let skillCount = (try? modelContext.fetchCount(FetchDescriptor<Skill>())) ?? skills.count
+            if runtime.shouldAutoShowImportWizard(skillCount: skillCount) { showImportWizard = true }
         }
         let selectionView = appearedView
             .onChange(of: scenePhase) { _, newPhase in

@@ -31,6 +31,7 @@ extension SkillLibraryViewModel {
         coordinatorCompletionGeneration &+= 1
         isApplyingCoordinatorChanges = true
         coordinatorObservedSlugs.removeAll()
+        coordinatorChangeSequences.removeAll()
         coordinatorBaselineBodies = Dictionary(uniqueKeysWithValues:
             ((try? skillStore.listSkills()) ?? []).map { ($0, currentOnDiskBody(directoryName: $0)) })
     }
@@ -51,16 +52,18 @@ extension SkillLibraryViewModel {
         let foundUnsampledChange = acceptFinalCoordinatorChanges(into: &acceptedSlugs)
         var effectiveHasUnsyncedChanges = hasUnsyncedChanges
         var needsLaterSync = false
+        var laterSlugs: Set<String> = []
         if let sampledWatcherEventSequence,
            sampledWatcherEventSequence != watcherEventSequence || foundUnsampledChange {
-            let sequence = watcherEventSequence
+            let sequence = acceptedChangeSequence
             effectiveHasUnsyncedChanges = await BlockingWork.run { recheckHasUnsyncedChanges() }
             guard generation == coordinatorCompletionGeneration else { return }
             acceptedSlugs.formUnion(coordinatorObservedSlugs)
-            let foundLaterChange = acceptFinalCoordinatorChanges(into: &acceptedSlugs)
+            _ = acceptFinalCoordinatorChanges(into: &acceptedSlugs)
+            laterSlugs = Set(coordinatorChangeSequences.compactMap { $0.value > sequence ? $0.key : nil })
             // Finish after one recheck even under steady folder writes. Its answer cannot settle
             // events that arrived while it ran; let the scheduler coalesce those into a later cycle.
-            needsLaterSync = sequence != watcherEventSequence || foundLaterChange
+            needsLaterSync = !laterSlugs.isEmpty
         }
         for directoryName in coordinatorObservedSlugs {
             setLastWrittenBody(
@@ -72,13 +75,14 @@ extension SkillLibraryViewModel {
         // re-evaluates dirtiness — File › Save, the editor's clean reload — so a draft that matched a transient
         // body reads dirty again where it is shown (batch Layer-2, round 4).
         if !coordinatorObservedSlugs.isEmpty { noteEditorBodyInvalidated() }
-        if !effectiveHasUnsyncedChanges, !needsLaterSync {
+        if !effectiveHasUnsyncedChanges {
             // A clean pull settles the mark — except on a file whose retained draft is still dirty, where
             // "Modified externally — Save overwrites it" is exactly the warning the draft needs.
-            externallyModified.subtract(acceptedSlugs.filter { !hasUnsavedChanges(forDirectory: $0) })
+            externallyModified.subtract(acceptedSlugs.subtracting(laterSlugs).filter { !hasUnsavedChanges(forDirectory: $0) })
         }
         coordinatorBaselineBodies.removeAll()
         coordinatorObservedSlugs.removeAll()
+        coordinatorChangeSequences.removeAll()
         isApplyingCoordinatorChanges = false
         if needsLaterSync || (effectiveHasUnsyncedChanges && !acceptedSlugs.isEmpty) { notifier() }
     }
@@ -159,6 +163,7 @@ extension SkillLibraryViewModel {
     var addsFenced: Bool { libraryUnavailable || storeUnreadable || launchIngestPending }
 
     /// One sentence for a refused add; the sidebar's sync card carries the longer explanation.
+    static let launchIngestMessage = "Pensieve is still reading this library."
     static let storeUnreadableMessage =
         "Pensieve can't add to this library until it can read it. Update Pensieve, then relaunch."
 }

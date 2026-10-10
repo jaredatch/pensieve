@@ -109,13 +109,6 @@ final class StoreUnreadableFenceTests: XCTestCase {
         XCTAssertTrue(runtime.library.addsFenced)
         XCTAssertFalse(runtime.storeQuarantined)
         XCTAssertFalse(runtime.shouldAutoShowImportWizard(skillCount: 0))
-        XCTAssertFalse(AppRuntime.shouldAutoShowImportWizard(
-            skillCount: 0, storeQuarantined: false, storeUnreadable: true
-        ))
-        XCTAssertTrue(AppRuntime.shouldAutoShowImportWizard(
-            skillCount: 0, storeQuarantined: false, storeUnreadable: false
-        ))
-
         runtime.backgroundSyncEnabled = false
         let readableRuntime = try await assertHeldLaunchFencesAdds(label: "readable",
             outcome: LaunchReconcileOutcome(rebuild: RebuildResult(), migrationRan: false))

@@ -52,7 +52,7 @@ final class SkillHistoryTimelineTests: XCTestCase {
         git.commits = [GitCommit(sha: "abc", author: "A", date: Date(), subject: "Update")]
         let skill = Skill(name: "Example", directoryName: "example-skill")
 
-        let snapshot = SkillHistorySnapshot.load(skill: skill, git: git, workingDir: "/repo")
+        let snapshot = SkillHistorySnapshot.load(path: SkillHistorySnapshot.path(for: skill), git: git, workingDir: "/repo")
 
         XCTAssertEqual(snapshot.versions.map(\.sha), ["abc"])
         XCTAssertEqual(git.logCalls, [.init(path: "skills/example-skill/SKILL.md", workingDir: "/repo", limit: 50)])
@@ -75,7 +75,7 @@ final class SkillHistoryTimelineTests: XCTestCase {
 
     func testAnEmptyLogIsAnEmptySnapshot() {
         let snapshot = SkillHistorySnapshot.load(
-            skill: Skill(name: "Example", directoryName: "example"),
+            path: "skills/example/SKILL.md",
             git: SkillHistoryRecordingGit(),
             workingDir: "/repo"
         )

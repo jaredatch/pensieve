@@ -59,6 +59,8 @@ final class SkillLibraryViewModel {
     var isApplyingCoordinatorChanges = false
     var coordinatorBaselineBodies: [String: String] = [:]
     var coordinatorObservedSlugs: Set<String> = []
+    var coordinatorChangeSequences: [String: UInt64] = [:]
+    var acceptedChangeSequence: UInt64 = 0
     var watcherEventSequence: UInt64 = 0
     var coordinatorCompletionGeneration: UInt64 = 0
     /// Asset invalidation belongs to the folder reported by the watcher, even for a body echo.
@@ -142,7 +144,7 @@ final class SkillLibraryViewModel {
             if libraryUnavailable {
                 self.error = "Failed to create skill: the library couldn't be read"
             } else if launchIngestPending {
-                self.error = "Pensieve is still reading this library. Try again when launch finishes."
+                self.error = Self.launchIngestMessage + " Try again when launch finishes."
             } else {
                 self.error = Self.storeUnreadableMessage
             }
@@ -305,6 +307,8 @@ extension SkillLibraryViewModel {
     }
 
     func acceptExternalChange(directoryName: String, currentBody: String, shouldNotify: Bool) {
+        acceptedChangeSequence &+= 1
+        if isApplyingCoordinatorChanges { coordinatorChangeSequences[directoryName] = acceptedChangeSequence }
         // The fingerprint moves to what the file holds now, so a repeat event is an echo. A clean editor
         // reloads on the token; a dirty one keeps its draft and the view model asks what to do with it —
         // here, not in a view, because in the default Preview mode no editor is mounted (PLAN-02 / 02.3).

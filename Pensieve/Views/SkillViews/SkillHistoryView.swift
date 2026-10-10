@@ -125,11 +125,11 @@ struct SkillHistoryView: View {
             Task { await presentation.read(commit, skill: skill, git: git, workingDir: workingDir, asDiff: false) }
         } label: {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(commit.date.formatted(date: .abbreviated, time: .shortened))
+                Text(SkillHistoryPresentation.rowTitle(for: commit))
                     .font(.callout)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                Text(commit.subject + " · " + commit.author)
+                Text(SkillHistoryPresentation.rowSubtitle(for: commit))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

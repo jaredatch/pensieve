@@ -296,9 +296,6 @@ extension SyncNudgeTests {
 
 extension SyncNudgeTests {
     func testHeldRecheckLeavesMainActorFreeAndNewerResultWins() async throws {
-        for changesBody in [false, true] {
-            try await assertEventDuringRecheckFinishes(changesBody: changesBody)
-        }
         let fixture = try libraryFixture()
         let skill = try insertSkill(slug: "held-recheck", store: fixture.store, context: fixture.context)
         _ = fixture.library.editorBody(for: skill)
@@ -321,22 +318,44 @@ extension SyncNudgeTests {
         }
         await fulfillment(of: [entered], timeout: TestWait.timeoutSeconds)
         XCTAssertTrue(fixture.library.isApplyingCoordinatorChanges, "main actor runs while git waits")
-        await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false,
-            sampledWatcherEventSequence: sample, recheckHasUnsyncedChanges: { true })
+        let newerGate = TestWait.Gate(owner: self)
+        defer { newerGate.open() }
+        let newerEntered = expectation(description: "newer recheck held")
+        let newer = Task {
+            await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false,
+                sampledWatcherEventSequence: sample, recheckHasUnsyncedChanges: {
+                    newerEntered.fulfill()
+                    if !Thread.isMainThread { try? newerGate.wait() }
+                    return false
+                })
+        }
+        await fulfillment(of: [newerEntered], timeout: TestWait.timeoutSeconds)
+        fixture.store.bodies[skill.directoryName] = "Latest external edit"
+        fixture.watcher.emit(skill.directoryName)
+        newerGate.open()
+        await newer.value
         XCTAssertTrue(fixture.library.externallyModified.contains(skill.directoryName))
         gate.open()
         await first.value
         XCTAssertTrue(fixture.library.externallyModified.contains(skill.directoryName), "old clean result must be ignored")
-        XCTAssertEqual(fixture.counter.value, 1, "only the newest dirty result nudges sync")
+        XCTAssertEqual(fixture.counter.value, 1, "only the newest completion requests the later sync")
     }
 }
 
 extension SyncNudgeTests {
-    private func assertEventDuringRecheckFinishes(changesBody: Bool) async throws {
+    func testLateRecheckEventsFinishAndSettleOnlyEarlierChanges() async throws {
+        for change in ["echo", "same skill", "other skill", "app echo"] {
+            try await assertEventDuringRecheckFinishes(change: change)
+        }
+    }
+
+    private func assertEventDuringRecheckFinishes(change: String) async throws {
         let fixture = try libraryFixture()
         let skill = try insertSkill(slug: "late-event", store: fixture.store, context: fixture.context)
         _ = fixture.library.editorBody(for: skill)
         fixture.library.startWatching()
+        let other = try insertSkill(slug: "other", store: fixture.store, context: fixture.context)
+        _ = fixture.library.editorBody(for: other)
         fixture.library.beginCoordinatorChanges()
         let sample = fixture.library.coordinatorWatcherEventSequence
         fixture.store.bodies[skill.directoryName] = "Before git status"
@@ -344,12 +363,11 @@ extension SyncNudgeTests {
         let gate = TestWait.Gate(owner: self)
         defer { gate.open() }
         let entered = expectation(description: "recheck held before a later watcher event")
-        var checks = 0
+        let checks = Counter()
         let finish = Task {
             await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false,
                 sampledWatcherEventSequence: sample, recheckHasUnsyncedChanges: {
-                    checks += 1
-                    if checks == 1 {
+                    if checks.increment() == 1 {
                         entered.fulfill()
                         if !Thread.isMainThread { try? gate.wait() }
                     }
@@ -357,16 +375,21 @@ extension SyncNudgeTests {
                 })
         }
         await fulfillment(of: [entered], timeout: TestWait.timeoutSeconds)
-        if changesBody { fixture.store.bodies[skill.directoryName] = "During git status" }
-        fixture.watcher.emit(skill.directoryName) // Unchanged body models an asset/log event.
+        let lateSlug = change == "other skill" ? other.directoryName : skill.directoryName
+        if change != "echo" { fixture.store.bodies[lateSlug] = "During git status" }
+        if change == "app echo" { fixture.library.noteAppAuthoredBody(skill, body: "During git status") }
+        fixture.watcher.emit(lateSlug)
         gate.open()
         await finish.value
-        XCTAssertEqual(checks, 1, "watcher traffic must not extend a cycle's git recheck")
+        XCTAssertEqual(checks.value, 1, "watcher traffic must not extend a cycle's git recheck")
         XCTAssertFalse(fixture.library.isApplyingCoordinatorChanges)
-        XCTAssertEqual(fixture.counter.value, 1, "the late event must request a later sync even after a clean sample")
-        if changesBody { XCTAssertTrue(fixture.library.externallyModified.contains(skill.directoryName)) }
+        let realChange = change == "same skill" || change == "other skill"
+        XCTAssertEqual(fixture.counter.value, realChange ? 1 : 0, "only a non-echo event requests a later sync")
+        XCTAssertEqual(fixture.library.externallyModified.contains(skill.directoryName), change == "same skill",
+            "a clean check settles the earlier pull unless that skill changed during the check")
+        XCTAssertEqual(fixture.library.externallyModified.contains(other.directoryName), change == "other skill")
         fixture.store.bodies[skill.directoryName] = "After the cycle"
         fixture.watcher.emit(skill.directoryName)
-        XCTAssertEqual(fixture.counter.value, 2, "watcher changes must resume normal delivery after finishing")
+        XCTAssertEqual(fixture.counter.value, realChange ? 2 : 1, "watcher changes must resume normal delivery after finishing")
     }
 }

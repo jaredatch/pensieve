@@ -50,6 +50,7 @@ final class AppRuntime {
     private let launchIngestLockPath: String
     /// Where the store and App Support live; every collaborator built here is pointed at them (`AppRuntime+Paths.swift`).
     let paths: AppRuntimePaths
+    private var didAskLaunchImportWizard = false
     private var didPerformLaunchWork = false
     private var didCompleteLaunchIngest = false
     private var didFinishInitialLaunchCallbacks = false
@@ -171,6 +172,13 @@ final class AppRuntime {
         resolvedSyncModel.observeGitState(gitState)
         installRuntimeCallbacks()
         _ = bootstrapTask
+    }
+
+    /// Ask once, after the terminal launch verdict, including one delivered by a retry.
+    func shouldAutoShowImportWizard(skillCount: Int) -> Bool {
+        guard launchWorkCompleted, !didAskLaunchImportWizard else { return false }
+        didAskLaunchImportWizard = true
+        return skillCount == 0 && !storeQuarantined && !library.addsFenced
     }
 
     var gitUsability: GitUsability? { gitState.usability }
@@ -298,6 +306,7 @@ private extension AppRuntime {
                 try? await Task.sleep(nanoseconds: self?.launchIngestRetryNanoseconds ?? 0)
                 guard let self else { return }
                 let result = await self.runLaunchJob()
+                if result.outcome.migrationRan { self.defaults.set(true, forKey: Self.migrationDefaultsKey) }
                 if result.outcome.rebuild.storeUnreadable || !result.outcome.ingestionNeedsRetry {
                     self.launchIngestRetryTask = nil
                     self.acceptLaunchIngest(result, context: context)
