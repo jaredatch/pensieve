@@ -257,6 +257,28 @@ extension GitServiceTests {
         }
     }
 
+    func testRemoteBranchNamesPreserveCombiningMarks() throws {
+        try NativeTestWork.run { [self] in
+            let remote = try seededRemote()
+            let barePath = tempDir + "/remote.git"
+            let defaultBranch = "\u{301}main"
+            let featureBranch = "\u{301}feature"
+            for branch in [defaultBranch, featureBranch] {
+                let result = try rawGit(["-C", barePath, "update-ref", "refs/heads/" + branch, "refs/heads/main"])
+                XCTAssertEqual(result.code, 0, result.err)
+            }
+            let head = try rawGit(["-C", barePath, "symbolic-ref", "HEAD", "refs/heads/" + defaultBranch])
+            XCTAssertEqual(head.code, 0, head.err)
+
+            let reportedDefault = try XCTUnwrap(git.remoteDefaultBranch(remote: remote, credential: nil))
+            XCTAssertEqual(Data(reportedDefault.utf8), Data(defaultBranch.utf8))
+            let reportedBranches = try git.remoteBranches(remote: remote, credential: nil)
+            XCTAssertEqual(reportedBranches.count, 3)
+            XCTAssertEqual(Set(reportedBranches.map { Data($0.utf8) }),
+                           Set(["main", defaultBranch, featureBranch].map { Data($0.utf8) }))
+        }
+    }
+
     func testNothingToCommitReturnsFalse() throws {
         try NativeTestWork.run { [self] in
             let remote = try seededRemote()
