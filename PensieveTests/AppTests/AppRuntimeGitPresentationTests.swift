@@ -169,7 +169,7 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
             let git = try fixture.broken(state)
             let model = SyncSetupModel(context: container.mainContext, git: git,
                                        credentials: InMemoryCredentialStore(), root: fixture.root,
-                                       lockPath: fixture.support + "/sync.lock")
+                                       lockPath: fixture.support + "/sync.lock", steps: SyncStepModel())
             await model.connectAndReport(url: "git@example.com:skills.git", username: "", token: "")
             guard case let .failed(message) = model.state else { return XCTFail("expected connect error") }
             XCTAssertEqual(message, state.message)
@@ -185,6 +185,7 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
         let git = try fixture.executable("""
         simulate_failure() {
             \(FakeGitScript.skipGlobalOptions)
+            if [ "$1" = ls-remote ]; then exit 0; fi
             if [ "$1" = clone ]; then touch '\(fixture.failureSwitch)'; fi
         }
         simulate_failure "$@"
@@ -196,7 +197,8 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
         """)
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         let model = SyncSetupModel(context: container.mainContext, git: git,
-            credentials: InMemoryCredentialStore(), root: fixture.root, lockPath: fixture.support + "/sync.lock")
+            credentials: InMemoryCredentialStore(), root: fixture.root,
+            lockPath: fixture.support + "/sync.lock", steps: SyncStepModel())
         await model.connectAndReport(url: "git@example.com:skills.git", username: "", token: "")
         XCTAssertEqual(model.state, .failed(GitUsability.licenseNotAccepted.message ?? ""))
         let calls = try fixture.files.readFile(at: fixture.trace).split(separator: "\n").map { line in

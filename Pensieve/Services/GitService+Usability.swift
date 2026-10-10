@@ -56,6 +56,7 @@ extension GitService {
             return GitUsability.environmentFailure(exit: result.exit, output: detail)
                 ?? .failed(GitFailureDetail(detail.isEmpty ? "git --version exited \(result.exit)." : detail))
         } catch {
+            if error is CancellationError { throw error }
             if case GitError.outputReadFailed = error { throw error }
             return .failed(GitFailureDetail(error.localizedDescription))
         }
@@ -87,6 +88,7 @@ extension GitService {
                                                  confirmingProbe: result.confirmingProbe)
             }
         } catch {
+            if error is CancellationError { throw error }
             if case GitError.unusable = error { throw error }
             if case GitError.outputReadFailed = error { throw error }
             try probeUsability().requireUsable()

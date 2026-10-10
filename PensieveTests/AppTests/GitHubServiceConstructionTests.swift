@@ -44,7 +44,7 @@ final class GitHubServiceConstructionTests: XCTestCase {
             ("LaunchReconciler", [("migrationService", "StoreMigrationService(skillStore: store)"),
                                   ("root", "root"), ("lockPath", "root"), ("git", "git")]),
             ("SyncSetupModel", [("context", "context"), ("git", "git"), ("credentials", "credentials"),
-                                ("root", "root"), ("lockPath", "root")]),
+                                ("root", "root"), ("lockPath", "root"), ("steps", "SyncStepModel()")]),
             ("ConflictResolutionModel", [("engine", "engine"), ("git", "git"), ("credentials", "credentials"),
                                          ("root", "root")]),
             ("GitHubCredentialSettingsModel", [("credentialStore", "credentials")]),

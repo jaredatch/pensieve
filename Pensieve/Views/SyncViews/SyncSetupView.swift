@@ -40,6 +40,7 @@ struct SyncSetupView: View {
                         .textFieldStyle(.roundedBorder)
                 }
             }
+            .disabled(model.state == .working)
 
             if case let .failed(message) = model.state {
                 Label(message, systemImage: "exclamationmark.triangle")
@@ -47,18 +48,26 @@ struct SyncSetupView: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if model.state == .cancelled {
+                Text("Connect was cancelled.").font(.callout).foregroundStyle(.secondary)
+            }
 
             Spacer(minLength: Spacing.sm)
 
             HStack(spacing: Spacing.sm) {
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                if model.state == .working {
-                    ProgressView().controlSize(.small)
+                Button("Cancel") {
+                    if model.state == .working { model.cancel() } else { dismiss() }
                 }
-                Button("Connect") {
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(!model.canCancel)
+                Spacer()
+                Button {
                     model.connect(url: url, username: username, token: token)
+                } label: {
+                    HStack {
+                        if model.state == .working { ProgressView().controlSize(.small) }
+                        Text("Connect")
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
@@ -67,6 +76,8 @@ struct SyncSetupView: View {
         }
         .padding(Spacing.xl)
         .frame(width: 460)
+        .interactiveDismissDisabled(model.state == .working)
+        .onDisappear { model.cancel() }
         .onChange(of: model.state) { _, newState in
             if newState == .done { dismiss() }
         }

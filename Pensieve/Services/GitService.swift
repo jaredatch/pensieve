@@ -42,7 +42,7 @@ extension GitError {
             default: break
             }
             return nil
-        } catch { return nil }
+        } catch is CancellationError { throw CancellationError() } catch { return nil }
     }
 }
 
@@ -299,9 +299,13 @@ struct GitService: GitServiceProtocol {
         _ args: [String], in workingDir: String?, credential: GitCredential? = nil, storeRules: Bool = false
     ) throws
         -> GitDataOutput {
+        try GitCancellation.check()
         var environment = try childEnvironment(credential: credential)
         if storeRules { environment["GIT_ATTR_NOSYSTEM"] = "1" }
-        let arguments = storeRules ? Self.storeConfigurationArgs + args : args
+        let configuredArguments = storeRules ? Self.storeConfigurationArgs + args : args
+        // A remote check must not ask a configured helper to save the form's token in a Keychain.
+        let arguments = GitCancellation.isReadOnly
+            ? ["-c", "credential.helper="] + configuredArguments : configuredArguments
         let child = try GitProcess(executable: gitPath, arguments: arguments, workingDirectory: workingDir,
                                    environment: environment)
         #if GIT_PROCESS_PROBE

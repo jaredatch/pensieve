@@ -102,7 +102,7 @@ final class GitFailureSyncTests: XCTestCase {
         XCTAssertEqual(try fixture.snapshot(), before)
     }
 
-    func testDamagedRepositoryDaemonAndConnectRefuseMutation() throws {
+    func testDamagedRepositoryDaemonAndConnectRefuseMutation() async throws {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         try fixture.seedRepository()
@@ -123,15 +123,15 @@ final class GitFailureSyncTests: XCTestCase {
             credentials: InMemoryCredentialStore(),
             root: fixture.root,
             lockPath: fixture.support + "/sync.lock"
-        )
+        , steps: SyncStepModel())
         let spec = try XCTUnwrap(SyncSetupModel.parseRemote("git@example.com:other.git"))
-        XCTAssertThrowsError(try model.perform(spec: spec, credential: .sshAgent)) {
+        await XCTAssertThrowsErrorAsync(try await model.perform(spec: spec, credential: .sshAgent)) {
             assertRepositoryFailure($0, fixture: fixture)
         }
         XCTAssertEqual(try fixture.snapshot(), before)
     }
 
-    func testConnectUnknownRemoteNeverRunsMutationCommand() throws {
+    func testConnectUnknownRemoteNeverRunsMutationCommand() async throws {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         try fixture.seedRepository()
@@ -150,9 +150,9 @@ final class GitFailureSyncTests: XCTestCase {
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         let model = SyncSetupModel(context: container.mainContext, git: git,
                                    credentials: InMemoryCredentialStore(), root: fixture.root,
-                                   lockPath: fixture.support + "/sync.lock")
+                                   lockPath: fixture.support + "/sync.lock", steps: SyncStepModel())
         let spec = try XCTUnwrap(SyncSetupModel.parseRemote("git@example.com:other.git"))
-        XCTAssertThrowsError(try model.perform(spec: spec, credential: .sshAgent)) {
+        await XCTAssertThrowsErrorAsync(try await model.perform(spec: spec, credential: .sshAgent)) {
             assertRepositoryFailure($0, fixture: fixture)
         }
         let calls = try fixture.files.readFile(at: fixture.trace)

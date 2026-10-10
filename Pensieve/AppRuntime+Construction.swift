@@ -72,7 +72,7 @@ extension AppRuntimePaths {
     @MainActor
     func makeSyncSetupModel(context: ModelContext) -> SyncSetupModel {
         SyncSetupModel(context: context, git: makeGitService(), credentials: makeCredentialStore(),
-            root: storeRoot, lockPath: syncLockPath)
+            root: storeRoot, lockPath: syncLockPath, steps: syncSteps)
     }
 
     @MainActor

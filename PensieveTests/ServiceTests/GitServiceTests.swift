@@ -120,6 +120,20 @@ final class GitServiceTests: XCTestCase {
 
     // MARK: Tests
 
+    func testReadChecksDisableCredentialHelpersWithoutChangingConfig() throws {
+        try git.initRepository(at: tempDir)
+        try git.runOrThrow(["config", "credential.helper", "fixture-helper"], in: tempDir)
+        let config = try FileService().readData(at: tempDir + "/.git/config")
+        let configured = try rawGit(["config", "--get-all", "credential.helper"], in: tempDir).out
+        let helpers = try GitCancellation.$isReadOnly.withValue(true) {
+            try git.runOrThrow(["config", "--get-all", "credential.helper"], in: tempDir).stdout
+        }
+        XCTAssertEqual(helpers, configured + "\n", "An empty final helper resets the helper chain during checks")
+        XCTAssertEqual(try git.runOrThrow(["config", "--get-all", "credential.helper"], in: tempDir).stdout,
+                       configured, "Writing calls retain their configured credential helpers")
+        XCTAssertEqual(try FileService().readData(at: tempDir + "/.git/config"), config)
+    }
+
     func testInitRepositoryYieldsMainBranch() throws {
         let work = tempDir + "/w"
         try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)

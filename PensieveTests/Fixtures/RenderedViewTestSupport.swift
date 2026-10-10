@@ -35,6 +35,20 @@ enum RenderedViewTestSupport {
         return hostValues(host)
     }
 
+    static func hasButtonProgress(in host: NSHostingView<AnyView>) -> Bool {
+        func containsProgress(_ nodes: [_ViewDebug.Data], insideButton: Bool) -> Bool {
+            nodes.contains { node in
+                let mirror = Mirror(reflecting: node)
+                let properties = mirror.descendant("data") as? [_ViewDebug.Property: Any] ?? [:]
+                let valueType = properties[.value].map { String(reflecting: type(of: $0)) } ?? ""
+                let button = insideButton || valueType.hasPrefix("SwiftUI.Button<")
+                if button && valueType.hasPrefix("SwiftUI.ProgressView<") { return true }
+                return containsProgress(mirror.descendant("childData") as? [_ViewDebug.Data] ?? [], insideButton: button)
+            }
+        }
+        host.layoutSubtreeIfNeeded()
+        return containsProgress(host._viewDebugData(), insideButton: false)
+    }
 }
 
 // List cells host their own SwiftUI graphs with different generic root types. Inspect each

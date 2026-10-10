@@ -3,6 +3,17 @@ import XCTest
 @testable import Pensieve
 
 final class GitServiceConcurrencyTests: XCTestCase {
+    func testReadCancellationStopsGroupAndWriteCancellationFinishes() throws {
+        for mode in ["cancel-read", "cancel-write"] {
+            let result = try GitProcessProbeRunner.run(mode)
+            XCTAssertFalse(result.timedOut, mode)
+            XCTAssertEqual(result.status, 0, result.report)
+            XCTAssertEqual(result.report, mode == "cancel-read"
+                ? "OK cancelled read; group stopped; child reaped"
+                : "OK finished write; group stopped; child reaped")
+        }
+    }
+
     func testGitExitReturnsItsOutputWhileDetachedPipeHoldersRemainAlive() throws {
         for pipe in ["stdout", "stderr"] {
             for behavior in ["sleeping", "writing"] {

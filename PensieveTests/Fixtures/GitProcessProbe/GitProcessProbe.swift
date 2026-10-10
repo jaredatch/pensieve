@@ -59,6 +59,7 @@ enum GitProcessProbe {
     }
 
     static func run(_ mode: String, executable: String) -> String {
+        if mode.hasPrefix("cancel-") { return cancellation(mode) }
         if mode.hasPrefix("spawn-") { return spawn(mode, executable: executable) }
         if mode.hasPrefix("exit-wake") { return exitWake(mode) }
         if mode.hasPrefix("reap-") { return reapFailure(mode) }

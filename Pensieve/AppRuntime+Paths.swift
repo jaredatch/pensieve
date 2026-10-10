@@ -57,6 +57,7 @@ struct AppRuntimePaths {
     }
 
     let runtimePaths: RuntimePaths
+    let syncSteps = SyncStepModel()
     var storeRoot: String { runtimePaths.storeRoot }
     var appSupportDir: String { runtimePaths.appSupportDir }
     var homeDirectory: String { runtimePaths.homeDirectory }

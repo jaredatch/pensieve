@@ -37,7 +37,8 @@ final class PensieveAppDelegate: NSObject, NSApplicationDelegate {
             questionOpen: runtime?.library.pendingUnsavedChanges != nil,
             confirm: { then in self.runtime?.library.confirmLeavingAnyDraft(then: then) },
             reply: { sender.reply(toApplicationShouldTerminate: $0) },
-            saves: runtime?.library.manifestSaves, saveTermination: pendingSaveTermination
+            saves: runtime?.library.manifestSaves, saveTermination: pendingSaveTermination,
+            steps: runtime?.paths.syncSteps
         )
     }
 
@@ -53,18 +54,21 @@ final class PensieveAppDelegate: NSObject, NSApplicationDelegate {
         confirm: @escaping (@escaping (Bool) -> Void) -> Void,
         reply: @escaping (Bool) -> Void,
         saves: ManifestSaveModel? = nil,
-        saveTermination: PendingSaveTermination? = nil
+        saveTermination: PendingSaveTermination? = nil,
+        steps: SyncStepModel? = nil
     ) -> NSApplication.TerminateReply {
         if saveTermination?.isWaiting == true {
             saveTermination?.requestQuestion()
             return .terminateCancel
         }
         guard !questionOpen else { return .terminateCancel }
-        let hasPendingSave = (saves?.pendingCount ?? 0) > 0
-        guard hasUnsavedChanges || hasPendingSave else { return .terminateNow }
+        let hasPendingWork = (saves?.pendingCount ?? 0) > 0 || (steps?.pendingCount ?? 0) > 0
+        guard hasUnsavedChanges || hasPendingWork else { return .terminateNow }
         let finish: (Bool) -> Void = { allowed in
-            guard allowed, let saves, saves.pendingCount > 0 else { reply(allowed); return }
-            (saveTermination ?? PendingSaveTermination()).wait(for: saves, reply: reply)
+            guard allowed, (saves?.pendingCount ?? 0) > 0 || (steps?.pendingCount ?? 0) > 0 else {
+                reply(allowed); return
+            }
+            (saveTermination ?? PendingSaveTermination()).wait(for: saves, steps: steps, reply: reply)
         }
         DispatchQueue.main.async {
             if hasUnsavedChanges { confirm(finish) } else { finish(true) }

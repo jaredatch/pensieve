@@ -132,21 +132,30 @@ final class PendingSaveTerminationTests: XCTestCase {
     }
 
     func testNativeQuitQuestionButtonsAndHostClosureResolve() async throws {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
-                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        defer { window.close() }
         func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
-        for choice in ["Wait", "Quit Anyway", "Close host"] {
+        for (step, choice) in [false, true].flatMap({ step in
+            ["Wait", "Quit Anyway", "Close host"].map { (step, $0) }
+        }) {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            defer { window.close() }
             window.makeKeyAndOrderFront(nil)
             var answers: [Bool] = []
-            let dismiss = PendingSaveTermination.present { answers.append($0) }
+            let present = step ? PendingSaveTermination.presentSyncStep : PendingSaveTermination.present
+            let dismiss = present { answers.append($0) }
             let parent = try XCTUnwrap(NSApp.windows.first { $0.attachedSheet != nil })
             let sheet = try XCTUnwrap(parent.attachedSheet)
+            await TestWait.until(failureMessage: "The native quit question never rendered its controls") {
+                sheet.contentView?.layoutSubtreeIfNeeded()
+                return sheet.contentView.map { views($0).compactMap { $0 as? NSButton }.count == 2 } ?? false
+            }
             let rendered = views(try XCTUnwrap(sheet.contentView))
             let strings = rendered.compactMap { ($0 as? NSTextField)?.stringValue }
-            XCTAssertTrue(strings.contains("Pensieve is still saving a change."))
-            XCTAssertTrue(strings.contains("It's waiting for sync to finish. If you quit now, the change won't be saved."))
+            XCTAssertTrue(strings.contains(step ? "Pensieve is still finishing a sync step."
+                : "Pensieve is still saving a change."))
+            XCTAssertTrue(strings.contains(step ? "If you quit now, it stops partway."
+                : "It's waiting for sync to finish. If you quit now, the change won't be saved."))
             let buttons = rendered.compactMap { $0 as? NSButton }
             XCTAssertEqual(Set(buttons.map(\.title)), ["Wait", "Quit Anyway"])
             if choice == "Close host" { parent.close() } else {
