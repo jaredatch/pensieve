@@ -42,11 +42,12 @@ final class PensieveAppInstallPathsTests: XCTestCase {
         changes.animationBehavior = .none
         changes.identifier = NSUserInterfaceItemIdentifier("view-changes-AppWindow-dock")
         changes.orderFront(nil)
+        let changesFrame = changes.frame
         var opened = 0
         var main: NSWindow?
         runtime.registerOpenMainWindowAction {
             opened += 1
-            let window = NSWindow(contentRect: changes.frame, styleMask: [.titled, .closable],
+            let window = NSWindow(contentRect: changesFrame, styleMask: [.titled, .closable],
                                   backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.animationBehavior = .none
@@ -54,7 +55,11 @@ final class PensieveAppInstallPathsTests: XCTestCase {
             window.orderFront(nil)
             main = window
         }
-        defer { main?.close(); changes.close() }
+        defer {
+            runtime.registerOpenMainWindowAction {}
+            main?.close()
+            changes.close()
+        }
         XCTAssertNil(WindowPolicy.mainWindow(among: NSApp.windows))
         XCTAssertTrue(delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: true))
         XCTAssertEqual(opened, 1, "Dock reopen must restore main even when the review window is visible")

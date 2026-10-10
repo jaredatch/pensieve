@@ -7,10 +7,9 @@ final class GitBlockingFixtureTests: XCTestCase {
     func testAbandonedFakeGitExpiresWithinTwoMinutesWithoutCleanup() async throws {
         var fixture: GitBlockingFixture? = try GitBlockingFixture(lifetime: 2)
         let root = try XCTUnwrap(fixture).root
+        let started = ContinuousClock.now
         let process = try start(try XCTUnwrap(fixture))
         defer { stop(process); try? FileService().deleteDirectory(at: root) }
-        await TestWait.until(failureMessage: "Fake git never announced readiness") { fixture?.isBlocked == true }
-        let started = ContinuousClock.now
         fixture = nil
         await TestWait.until(timeout: .seconds(5), // upper-bound: The injected two-second lifetime must stop the child promptly.
                              failureMessage: "Abandoned fake git ignored its short lifetime") {
@@ -18,6 +17,8 @@ final class GitBlockingFixtureTests: XCTestCase {
         }
         XCTAssertLessThan(ContinuousClock.now - started, .seconds(5))
         XCTAssertEqual(process.isRunning ? nil : process.terminationStatus, 124)
+        XCTAssertEqual(try FileService().readFile(at: root + "/ready"), String(process.processIdentifier),
+                       "Readiness remains observable after the child has expired")
         XCTAssertTrue(FileService().directoryExists(at: root), "Expiry must work without deleting the fixture or releasing it")
     }
 
