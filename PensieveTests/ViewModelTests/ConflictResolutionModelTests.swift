@@ -208,23 +208,32 @@ final class ConflictResolutionModelTests: XCTestCase {
     }
 
     func testConflictsChangedReinspects() async throws {
-        let context = try makeContext()
-        let engine = StubResolutionEngine()
-        engine.inspections = [
-            .conflicts(ConflictSet(items: [bodyItem(slug: "alpha")])),
-            .conflicts(ConflictSet(items: [overlayItem(slug: "alpha")]))
-        ]
-        engine.resolveError = SyncError.conflictsChanged
-        let model = makeModel(engine: engine)
+        for throwsChanged in [true, false] {
+            let context = try makeContext()
+            let engine = StubResolutionEngine()
+            engine.inspections = [
+                .conflicts(ConflictSet(items: [bodyItem(slug: "alpha")])),
+                .conflicts(ConflictSet(items: [overlayItem(slug: "alpha")]))
+            ]
+            let model = makeModel(engine: engine)
+            await model.loadAndReport(container: context.container)
+            model.choose("skill:alpha", .otherMachine)
+            engine.resolveError = SyncError.conflictFolderMustMove(path: "skills/alpha")
+            await model.applyAndReport(container: context.container)
+            XCTAssertEqual(model.selectionError,
+                           SyncError.conflictFolderMustMove(path: "skills/alpha").errorDescription)
+            XCTAssertTrue(model.canApply, "A refused pick remains available for retry")
 
-        await model.loadAndReport(container: context.container)
-        model.choose("skill:alpha", .otherMachine)
-        await model.applyAndReport(container: context.container)
+            engine.resolveError = throwsChanged ? SyncError.conflictsChanged : nil
+            engine.resolveOutcome = .conflicted(["skills/alpha/SKILL.md"])
+            await model.applyAndReport(container: context.container)
 
-        XCTAssertEqual(engine.inspectCallCount, 2)
-        let groups = try readyGroups(from: model.phase)
-        XCTAssertEqual(groups.count, 1)
-        XCTAssertEqual(groups[0].subtitle, "Settings differ")
+            XCTAssertEqual(engine.inspectCallCount, 2)
+            let groups = try readyGroups(from: model.phase)
+            XCTAssertEqual(groups.count, 1)
+            XCTAssertEqual(groups[0].subtitle, "Settings differ")
+            XCTAssertNil(model.selectionError, "Fresh conflicts must clear the previous selection warning")
+        }
     }
 
     func overlayItem(slug: String) -> ConflictItem {

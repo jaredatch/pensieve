@@ -157,6 +157,7 @@ final class ConflictResolutionModel {
 
     private func reinspect(container: ModelContainer) async {
         phase = .loading
+        selectionError = nil
         await inspect(container: container, presentation: presentation)
     }
 
