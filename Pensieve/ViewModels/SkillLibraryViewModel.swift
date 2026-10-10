@@ -91,6 +91,7 @@ final class SkillLibraryViewModel {
     private(set) var libraryUnavailable = false
     /// The last rebuild could not read the manifest (newer schema or corrupt): adds are fenced.
     private(set) var storeUnreadable = false
+    private(set) var launchIngestPending = false
     var deletionNotice: DeletionNotice?
     init(
         skillStore: SkillStoreProtocol,
@@ -137,9 +138,14 @@ final class SkillLibraryViewModel {
         context: ModelContext,
         takenSlugs: (ModelContext) throws -> Set<String> = { Set(try $0.fetch(FetchDescriptor<Skill>()).map(\.directoryName)) }
     ) -> Skill? {
-        guard !libraryUnavailable, !storeUnreadable else {
-            self.error = libraryUnavailable
-                ? "Failed to create skill: the library couldn't be read" : Self.storeUnreadableMessage
+        guard !addsFenced else {
+            if libraryUnavailable {
+                self.error = "Failed to create skill: the library couldn't be read"
+            } else if launchIngestPending {
+                self.error = "Pensieve is still reading this library. Try again when launch finishes."
+            } else {
+                self.error = Self.storeUnreadableMessage
+            }
             return nil
         }
         do {
@@ -257,6 +263,12 @@ extension SkillLibraryViewModel {
     func isWriteFenced(_ skill: Skill) -> Bool { libraryUnavailable || pendingRowCleanup.contains(skill.id) }
     /// Launch ingestion's verdict (`AppRuntime.acceptLaunchIngest`), on every accepted outcome.
     func setStoreUnreadable(_ unreadable: Bool) { applyFence(unreadable) }
+
+    /// The runtime fences adds before presenting a window, until launch delivers its verdict.
+    func setLaunchIngestPending(_ pending: Bool) {
+        launchIngestPending = pending
+        if pending { showCreateSheet = false }
+    }
 
     /// `.synced` and `.conflicted` both passed the engine's pre-write read (an aborted rebase restores the
     /// pre-pull tree), so either lifts the fence; a refused store drops it; the rest never prove a read.

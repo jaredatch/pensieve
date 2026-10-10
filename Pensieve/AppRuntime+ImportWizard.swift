@@ -9,7 +9,7 @@ extension AppRuntime {
 
     /// The pure rule over this runtime's own state; `ContentView.onAppear` reads this form.
     func shouldAutoShowImportWizard(skillCount: Int) -> Bool {
-        Self.shouldAutoShowImportWizard(
+        !library.addsFenced && Self.shouldAutoShowImportWizard(
             skillCount: skillCount, storeQuarantined: storeQuarantined, storeUnreadable: library.storeUnreadable
         )
     }

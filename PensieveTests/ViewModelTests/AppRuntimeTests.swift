@@ -172,16 +172,16 @@ final class AppRuntimeTests: XCTestCase {
         XCTAssertTrue(launchStartedOnce)
         XCTAssertTrue(harness.runtime.storeQuarantined)
         XCTAssertEqual(busyLaunchCalls, 0, "a held sync.lock must defer launch reconciliation")
+        XCTAssertTrue(harness.runtime.library.addsFenced, "lock deferral has not delivered a readable verdict")
         XCTAssertFalse(AppRuntime.shouldAutoShowImportWizard(
-            skillCount: 0,
-            storeQuarantined: harness.runtime.storeQuarantined,
-            storeUnreadable: false
+            skillCount: 0, storeQuarantined: harness.runtime.storeQuarantined, storeUnreadable: false
         ))
         launchLock.release()
         await TestWait.until(failureMessage: "deferred launch never retried after sync.lock was released") {
             harness.runtime.launchWorkCompleted
         }
         XCTAssertEqual(busyLaunchCalls, 1)
+        XCTAssertFalse(harness.runtime.library.addsFenced, "a readable retry releases the launch fence")
         // Layer-2 P1 regression (PLAN-24 / 24.2): a quarantined outcome must take the deferral arm
         // UNCONDITIONALLY — never launchBackfill or post-ingest convergence, even though the same
         // origin-probe failure makes hasRemoteConfigured read nil (the no-remote arm's condition).

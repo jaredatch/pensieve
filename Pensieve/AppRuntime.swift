@@ -145,6 +145,7 @@ final class AppRuntime {
         self.container = resolvedContainer
         self.platformVM = resolvedPlatformVM
         self.library = library ?? paths.makeLibrary(notifier: notifier)
+        self.library.setLaunchIngestPending(true)
         self.syncModel = resolvedSyncModel
         self.scheduler = resolvedScheduler
         self.provenanceVM = resolvedProvenanceVM
@@ -284,6 +285,7 @@ private extension AppRuntime {
         launchIngestHeadStamp = outcome.ingestedHeadStamp
         didCompleteLaunchIngest = outcome.rebuild.storeUnreadable
             || !outcome.ingestionNeedsRetry
+        if didCompleteLaunchIngest { library.setLaunchIngestPending(false) }
         signalLaunchIngestIfPossible()
         library.refreshQuarantine(context: context)
         completeLaunchWorkIfPossible()
