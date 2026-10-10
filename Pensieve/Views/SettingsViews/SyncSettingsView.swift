@@ -9,8 +9,7 @@ struct SyncSettingsView: View {
     @State private var showSetup = false
     @State private var confirmDisconnect = false
     @State private var disconnectError: String?
-    @State private var model: SyncSetupModel
-    init(model: SyncSetupModel) { _model = State(initialValue: model) }
+    private var model: SyncSetupModel { runtime.syncSetup }
     private var remoteURL: String? { runtime.syncModel.remoteURL }
     private var remoteError: String? { runtime.syncModel.configurationError }
 
@@ -25,12 +24,18 @@ struct SyncSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .truncationMode(.middle)
                 }
-                if remoteError != nil {
+                if remoteError != nil && model.state != .working && !model.isDisconnecting {
                     EmptyView()
-                } else if runtime.syncModel.canConnect {
-                    Button("Connect…") { showSetup = true }
+                } else if model.state == .working || (runtime.syncModel.canConnect && !model.isDisconnecting) {
+                    Button { showSetup = true } label: {
+                        HStack {
+                            if model.state == .working { ProgressView().controlSize(.small) }
+                            Text("Connect…")
+                        }
+                    }
                         .controlSize(.small)
-                } else if remoteURL != nil {
+                        .disabled(model.state == .working || model.isDisconnecting)
+                } else if remoteURL != nil || model.isDisconnecting {
                     Button { confirmDisconnect = true } label: {
                         HStack {
                             if model.isDisconnecting { ProgressView().controlSize(.small) }
@@ -90,7 +95,7 @@ struct SyncSettingsView: View {
     /// Reads observable state only (no subprocess): the lock check itself is inside `performDisconnect`.
     private var disconnectUnavailable: Bool {
         runtime.syncModel.state == .syncing || runtime.syncModel.isConflicted
-            || model.isDisconnecting
+            || model.isDisconnecting || model.state == .working
     }
 
     private func refresh() {

@@ -215,6 +215,21 @@ final class SyncSetupModelTests: XCTestCase {
 
     private let root = TestTemporaryDirectory.path + "pensieve-sync-setup-test-\(UUID().uuidString)"
 
+    private final class HostedWindow {
+        weak var window: NSWindow?
+        init(_ window: NSWindow) { self.window = window }
+    }
+    private var hostedWindows: [HostedWindow] = []
+
+    override func tearDown() async throws {
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                             failureMessage: "A setup test left a hosted window alive after its test body ended",
+                             diagnostics: { "live windows: \(self.hostedWindows.filter { $0.window != nil }.count)" }, {
+            self.hostedWindows.allSatisfy { $0.window == nil }
+        })
+        try await super.tearDown()
+    }
+
     override func tearDownWithError() throws {
         for path in [root, root + "-fixtures"] where FileManager.default.fileExists(atPath: path) {
             try FileManager.default.removeItem(atPath: path)
@@ -1262,10 +1277,9 @@ extension SyncSetupModelTests {
             await TestWait.until(failureMessage: "Connect's button did not render progress at \(step)") {
                 RenderedViewTestSupport.hasButtonProgress(in: host.view)
             }
-            if !checking.contains(step) {
-                XCTAssertFalse(pressCancel(in: host.view), "The writing phase must disable Cancel's native shortcut")
-                model.cancel()
-            }
+            let reopened = await reopenHeldSetup(model: model, previous: host, step: step,
+                checking: checking.contains(step))
+            defer { reopened.window.close() }
             gate.open()
             await TestWait.until(failureMessage: "Connect did not finish at \(step)") { model.state != .working }
             if step == "abort" {
@@ -1303,6 +1317,8 @@ extension SyncSetupModelTests {
             }
             let model = try makeModel(git: git, credentials: credentials,
                 rebuilder: RecordingRebuilder(), fileService: file)
+            let firstSheet = setupHost(AnyView(SyncSetupView(model: model)))
+            await assertSetupTitle(in: firstSheet.view)
             if cancelling {
                 model.connect(url: remoteURL, username: "new", token: "replacement")
                 await fulfillment(of: [try XCTUnwrap(entered)], timeout: TestWait.timeoutSeconds)
@@ -1319,11 +1335,15 @@ extension SyncSetupModelTests {
             XCTAssertEqual(file.contents, before)
             XCTAssertEqual(git.calls, ["lsremote-symref:\(remoteURL)", "lsremote-heads:\(remoteURL)"],
                            "No store/config write after a failed check")
+            await assertReopenedSetupIsFresh(model: model, previous: firstSheet, failure: failure)
         }
     }
 
     func testHeldDisconnectRendersProgressAndQuitWaitsForBothOperations() async throws {
-        for disconnect in [false, true] {
+        try FileService().createDirectory(at: root)
+        try TestPaths.git.initRepository(at: root)
+        try TestPaths.git.setRemote("https://github.com/octocat/x.git", at: root)
+        for disconnect in [true, false] {
             for quitAnyway in [false, true] {
                 let git = RecordingGitService()
                 git.configuredRemoteURLFixture = .success("https://github.com/octocat/x.git")
@@ -1337,11 +1357,16 @@ extension SyncSetupModelTests {
                         if !Thread.isMainThread { try? gate.wait() }
                     }
                 }
-                let steps = SyncStepModel()
+                let paths = AppRuntimePaths(storeRoot: root, appSupportDir: root + "-support")
+                let steps = paths.syncSteps
                 let model = try makeModel(git: git, credentials: InMemoryCredentialStore(),
                     rebuilder: RecordingRebuilder(), fileService: existingUserFiles(), steps: steps)
-                let runtime = try await makeSettingsRuntime()
-                let host = setupHost(AnyView(SyncSettingsView(model: model).environment(runtime)))
+                let runtime = try await makeSettingsRuntime(setup: model, paths: paths)
+                if !disconnect {
+                    runtime.syncModel.applyConfiguration(.success(.init(remoteURL: nil, hasLocalBranches: false)),
+                        order: runtime.syncModel.beginConfiguration())
+                }
+                let host = setupHost(settingsRoot(runtime))
                 defer { host.window.close() }
                 let operation = Task {
                     if disconnect { try await model.performDisconnect() } else {
@@ -1354,23 +1379,13 @@ extension SyncSetupModelTests {
                     await assertDisconnectProgress(in: host.view)
                     operation.cancel()
                 }
-                var choices: [(Bool) -> Void] = []
-                let quit = PendingSaveTermination(delay: 0.05, presentStep: { choices.append($0); return {} })
-                var replies: [Bool] = []
-                let answer = PensieveAppDelegate.terminationReply(hasUnsavedChanges: false, questionOpen: false,
-                    confirm: { _ in XCTFail("No draft") }, reply: { replies.append($0) },
-                    saveTermination: quit, steps: steps)
-                XCTAssertEqual(answer, .terminateLater)
-                await TestWait.until(failureMessage: "Quit never asked about the held sync step") { !choices.isEmpty }
-                XCTAssertTrue(replies.isEmpty)
-                choices[0](quitAnyway)
-                XCTAssertEqual(replies, quitAnyway ? [true] : [])
-                gate.open()
-                try await operation.value
-                await TestWait.until(failureMessage: "Quit did not finish after the sync step") { replies == [true] }
-                XCTAssertEqual(steps.pendingCount, 0)
-                XCTAssertFalse(model.isDisconnecting)
-                if !disconnect { XCTAssertEqual(model.state, .done) }
+                host.window.close()
+                let reopened = setupHost(settingsRoot(runtime))
+                defer { reopened.window.close() }
+                try await assertSettingsRebuilds(in: reopened.view, runtime: runtime, disconnect: disconnect)
+                try await assertQuitWaitsForHeldStep(steps: runtime.paths.syncSteps, quitAnyway: quitAnyway,
+                    gate: gate, operation: operation)
+                await assertSettingsFinished(in: reopened.view, runtime: runtime, disconnect: disconnect)
             }
         }
     }
@@ -1429,15 +1444,143 @@ extension SyncSetupModelTests {
         """)
     }
 
+    private func assertReopenedSetupIsFresh(
+        model: SyncSetupModel,
+        previous firstSheet: (view: NSHostingView<AnyView>, window: NSWindow),
+        failure: String
+    ) async {
+        let previousMessage: String
+        if case let .failed(message) = model.state { previousMessage = message } else {
+            previousMessage = "Connect was cancelled."
+        }
+        await TestWait.until(failureMessage: "The first sheet must show its result: \(failure)") {
+            self.renderedTexts(in: firstSheet.view).contains(previousMessage)
+        }
+        firstSheet.window.close()
+        let reopened = setupHost(AnyView(SyncSetupView(model: model)))
+        defer { reopened.window.close() }
+        await assertSetupTitle(in: reopened.view)
+        XCTAssertEqual(model.state, .idle, "Reopening after \(failure) must start fresh")
+        let texts = renderedTexts(in: reopened.view)
+        XCTAssertFalse(texts.contains(previousMessage), "A new sheet retained the old \(failure) message")
+        XCTAssertFalse(texts.contains("Connect was cancelled."))
+    }
+
+    private func assertSettingsFinished(in host: NSHostingView<AnyView>, runtime: AppRuntime,
+                                        disconnect: Bool) async {
+        XCTAssertEqual(runtime.paths.syncSteps.pendingCount, 0)
+        XCTAssertFalse(runtime.syncSetup.isDisconnecting)
+        if !disconnect { XCTAssertEqual(runtime.syncSetup.state, .done) }
+        await TestWait.until(failureMessage: "Completed sync settings still show progress") {
+            !RenderedViewTestSupport.hasButtonProgress(in: host)
+        }
+        await assertButtonAvailability(in: host, runtime: runtime, expected: true)
+    }
+
+    private func assertSettingsRebuilds(
+        in host: NSHostingView<AnyView>, runtime: AppRuntime, disconnect: Bool
+    ) async throws {
+        try await assertOperationProgress(in: host, runtime: runtime, disconnect: disconnect)
+        host.rootView = settingsRoot(runtime)
+        await Task.yield()
+        try await assertOperationProgress(in: host, runtime: runtime, disconnect: disconnect,
+            context: "tab rebuild")
+        runtime.syncModel.applyConfiguration(.success(.init(
+            remoteURL: disconnect ? nil : "https://github.com/octocat/x.git", hasLocalBranches: !disconnect)),
+            order: runtime.syncModel.beginConfiguration())
+        try await assertOperationProgress(in: host, runtime: runtime, disconnect: disconnect,
+            context: "configuration refresh")
+    }
+
+    private func assertQuitWaitsForHeldStep(
+        steps: SyncStepModel, quitAnyway: Bool, gate: TestWait.Gate, operation: Task<Void, Error>
+    ) async throws {
+        var choices: [(Bool) -> Void] = []
+        let quit = PendingSaveTermination(delay: 0.05, presentStep: { choices.append($0); return {} })
+        var replies: [Bool] = []
+        let answer = PensieveAppDelegate.terminationReply(hasUnsavedChanges: false, questionOpen: false,
+            confirm: { _ in XCTFail("No draft") }, reply: { replies.append($0) },
+            saveTermination: quit, steps: steps)
+        XCTAssertEqual(answer, .terminateLater)
+        await TestWait.until(failureMessage: "Quit never asked about the held sync step") { !choices.isEmpty }
+        XCTAssertTrue(replies.isEmpty)
+        let choose = try XCTUnwrap(choices.first)
+        choose(quitAnyway)
+        XCTAssertEqual(replies, quitAnyway ? [true] : [])
+        gate.open()
+        try await operation.value
+        await TestWait.until(failureMessage: "Quit did not finish after the sync step") { replies == [true] }
+    }
+
+    private func reopenHeldSetup(
+        model: SyncSetupModel,
+        previous: (view: NSHostingView<AnyView>, window: NSWindow),
+        step: String, checking: Bool
+    ) async -> (view: NSHostingView<AnyView>, window: NSWindow) {
+        previous.view.rootView = AnyView(EmptyView())
+        previous.window.close()
+        let reopened = setupHost(AnyView(SyncSetupView(model: model)))
+        await assertSetupTitle(in: reopened.view)
+        await TestWait.until(failureMessage: "Reopened Connect lost progress at \(step)") {
+            RenderedViewTestSupport.hasButtonProgress(in: reopened.view)
+        }
+        if !checking {
+            XCTAssertFalse(pressCancel(in: reopened.view), "The writing phase must disable Cancel's native shortcut")
+            model.cancel()
+        }
+        return reopened
+    }
+
     private func assertDisconnectProgress(in host: NSHostingView<AnyView>) async {
         await TestWait.until(failureMessage: "Disconnect button did not render its spinner") {
             RenderedViewTestSupport.hasButtonProgress(in: host)
         }
     }
 
-    private func makeSettingsRuntime() async throws -> AppRuntime {
-        let runtime = try AppRuntime(scheduler: SyncScheduler(startAutomatically: false), defaults: isolatedDefaults(),
-            paths: AppRuntimePaths(storeRoot: root, appSupportDir: root + "-support"))
+    private func renderedTexts(in host: NSHostingView<AnyView>) -> [String] {
+        RenderedViewTestSupport.values(in: host).compactMap { $0 as? Text }
+            .flatMap(RenderedViewTestSupport.strings)
+    }
+
+    private func assertSetupTitle(in host: NSHostingView<AnyView>) async {
+        await TestWait.until(failureMessage: "The Connect sheet did not render") {
+            self.renderedTexts(in: host).contains("Connect a sync remote")
+        }
+    }
+
+    private func assertOperationProgress(
+        in host: NSHostingView<AnyView>, runtime: AppRuntime,
+        disconnect: Bool, context: String = "window reopen"
+    ) async throws {
+        let title = disconnect ? "Disconnect…" : "Connect…"
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                             failureMessage: "Settings lost \(title) progress after \(context)") {
+            RenderedViewTestSupport.hasButtonProgress(in: host)
+        }
+        guard RenderedViewTestSupport.hasButtonProgress(in: host) else { throw StubBoom() }
+        XCTAssertTrue(renderedTexts(in: host).contains(title))
+        await assertButtonAvailability(in: host, runtime: runtime, expected: false)
+    }
+
+    private func assertButtonAvailability(in host: NSHostingView<AnyView>, runtime: AppRuntime, expected: Bool) async {
+        var enabled: Bool?
+        host.rootView = AnyView(SyncSettingsView().environment(runtime)
+            .buttonStyle(RenderedViewTestSupport.AvailabilityStyle { enabled = $0 }))
+        await TestWait.until(failureMessage: "The rendered Sync settings button did not report availability \(expected)") {
+            enabled != nil
+        }
+        XCTAssertEqual(enabled, expected, "Sync settings must disable the button until its job finishes")
+        host.rootView = settingsRoot(runtime)
+    }
+
+    private func settingsRoot(_ runtime: AppRuntime) -> AnyView {
+        AnyView(SyncSettingsView().id(UUID()).environment(runtime))
+    }
+
+    private func makeSettingsRuntime(setup: SyncSetupModel, paths: AppRuntimePaths) async throws -> AppRuntime {
+        let runtime = try AppRuntime(syncSetup: setup,
+            scheduler: SyncScheduler(startAutomatically: false), defaults: isolatedDefaults(),
+            paths: paths)
         await runtime.bootstrapTask.value
         runtime.syncModel.applyConfiguration(.success(.init(remoteURL: "https://github.com/octocat/x.git",
             hasLocalBranches: true)), order: runtime.syncModel.beginConfiguration())
@@ -1449,6 +1592,9 @@ extension SyncSetupModelTests {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 400),
             styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        // Native window transitions can retain closed test hosts and occupy dispatch workers.
+        window.animationBehavior = .none
+        hostedWindows.append(HostedWindow(window))
         window.contentView = host
         window.makeKeyAndOrderFront(nil)
         return (host, window)

@@ -29,7 +29,7 @@ enum SyncSetupError: LocalizedError, Equatable {
     }
 }
 
-/// Sheet-owned orchestration. Native jobs own their contexts and the whole-cycle sync lock.
+/// Process-owned orchestration. Native jobs own their contexts and the whole-cycle sync lock.
 @MainActor
 @Observable
 final class SyncSetupModel {
@@ -105,6 +105,12 @@ final class SyncSetupModel {
         if heads.contains("main") { return "main" }
         if heads.contains("master") { return "master" }
         return nil
+    }
+
+    func prepareForPresentation() {
+        guard state != .working, !isDisconnecting else { return }
+        state = .idle
+        phase = .checking
     }
 
     func connect(url: String, username: String, token: String) {

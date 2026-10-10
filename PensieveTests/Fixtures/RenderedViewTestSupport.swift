@@ -3,6 +3,17 @@ import SwiftUI
 
 @MainActor
 enum RenderedViewTestSupport {
+    /// Observe the enabled environment delivered to a real button in a test host.
+    struct AvailabilityStyle: PrimitiveButtonStyle {
+        let report: (Bool) -> Void
+        @Environment(\.isEnabled) private var isEnabled
+        func makeBody(configuration: Configuration) -> some View {
+            DefaultButtonStyle().makeBody(configuration: configuration)
+                .onAppear { report(isEnabled) }
+                .onChange(of: isEnabled) { _, enabled in report(enabled) }
+        }
+    }
+
     static func strings(in text: Text) -> [String] {
         func strings(_ value: Any, depth: Int) -> [String] {
             if let string = value as? String {
@@ -47,7 +58,11 @@ enum RenderedViewTestSupport {
             }
         }
         host.layoutSubtreeIfNeeded()
-        return containsProgress(host._viewDebugData(), insideButton: false)
+        func hasProgress(in view: NSView) -> Bool {
+            let nodes = (view as? RenderedTestHost)?.renderedTestData ?? []
+            return containsProgress(nodes, insideButton: false) || view.subviews.contains { hasProgress(in: $0) }
+        }
+        return hasProgress(in: host)
     }
 }
 

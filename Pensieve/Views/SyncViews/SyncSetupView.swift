@@ -5,15 +5,11 @@ import SwiftUI
 /// State (idle/working/done/failed) comes from `SyncSetupModel`; a `.done` dismisses the sheet.
 struct SyncSetupView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var model: SyncSetupModel
+    let model: SyncSetupModel
 
     @State private var url: String = ""
     @State private var username: String = ""
     @State private var token: String = ""
-
-    init(model: SyncSetupModel) {
-        _model = State(initialValue: model)
-    }
 
     private var isHTTPS: Bool {
         SyncSetupModel.parseRemote(url)?.transport == .https
@@ -77,7 +73,7 @@ struct SyncSetupView: View {
         .padding(Spacing.xl)
         .frame(width: 460)
         .interactiveDismissDisabled(model.state == .working)
-        .onDisappear { model.cancel() }
+        .onAppear { model.prepareForPresentation() }
         .onChange(of: model.state) { _, newState in
             if newState == .done { dismiss() }
         }

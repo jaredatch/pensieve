@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppRuntime.self) private var runtime
-    @Environment(\.modelContext) private var modelContext
     var body: some View {
         TabView {
             GeneralSettingsView()
@@ -10,7 +9,7 @@ struct SettingsView: View {
                     Label("General", systemImage: "gear")
                 }
 
-            SyncSettingsView(model: runtime.paths.makeSyncSetupModel(context: modelContext))
+            SyncSettingsView()
                 .tabItem {
                     Label("Sync", systemImage: "arrow.triangle.2.circlepath")
                 }

@@ -17,6 +17,7 @@ final class AppRuntime {
     let platformVM: PlatformViewModel
     let library: SkillLibraryViewModel
     let syncModel: SyncModel
+    let syncSetup: SyncSetupModel
     let scheduler: SyncScheduler
     let provenanceVM: SkillProvenanceViewModel
     let updatesViewModelOperations: UpdatesViewModel.DefaultOperations
@@ -108,6 +109,7 @@ final class AppRuntime {
         platformVM: PlatformViewModel? = nil,
         library: SkillLibraryViewModel? = nil,
         syncModel: SyncModel? = nil,
+        syncSetup: SyncSetupModel? = nil,
         scheduler: SyncScheduler? = nil,
         defaults: UserDefaults? = nil,
         hostName: () -> String? = MachineDisplayName.currentHostName,
@@ -148,6 +150,7 @@ final class AppRuntime {
         self.library = library ?? paths.makeLibrary(notifier: notifier)
         self.library.setLaunchIngestPending(true)
         self.syncModel = resolvedSyncModel
+        self.syncSetup = syncSetup ?? paths.makeSyncSetupModel(context: resolvedContainer.mainContext)
         self.scheduler = resolvedScheduler
         self.provenanceVM = resolvedProvenanceVM
         self.updatesViewModelOperations = paths.makeUpdatesViewModelOperations()
