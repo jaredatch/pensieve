@@ -27,12 +27,8 @@ enum GitProcessProbe {
             } catch { exit(74) }
             exit(1)
         }
-        if mode == "main-thread-guard" {
-            _ = try? git(executable).runData(["--version"], in: nil)
-            exit(0)
-        }
-        if mode == "main-thread-public-guard" {
-            callPublicGitAPI(git(executable))
+        if mode.hasPrefix("main-thread-") {
+            mainThreadGuard(mode, executable: executable, report: report)
             exit(0)
         }
         let finished = DispatchSemaphore(value: 0)
@@ -44,11 +40,6 @@ enum GitProcessProbe {
         finished.wait()
         do { try FileService().writeFile(at: report, content: text) } catch { exit(74) }
         exit(text.hasPrefix("OK") ? 0 : 1)
-    }
-
-    @inline(never)
-    static func callPublicGitAPI(_ service: GitServiceProtocol) {
-        _ = try? service.probeUsability()
     }
 
     static func record(_ pid: pid_t) {

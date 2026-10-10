@@ -142,8 +142,8 @@ struct UpstreamHistoryGitRequest {
 }
 
 protocol UpstreamHistoryGitServing {
-    func upstreamHistory(_ request: UpstreamHistoryGitRequest) throws -> UpstreamHistoryGitSnapshot
-    func remoteHead(remote: String, ref: String, credential: GitCredential?) throws -> String?
+    func performUpstreamHistory(_ request: UpstreamHistoryGitRequest) throws -> UpstreamHistoryGitSnapshot
+    func performRemoteHead(remote: String, ref: String, credential: GitCredential?) throws -> String?
 }
 
 extension GitService: UpstreamHistoryGitServing {}
@@ -181,7 +181,7 @@ struct UpstreamHistoryService: ScratchRootCleaning {
         baselineFileLimit: Int = Self.baselineFileLimit,
         baselineByteLimit: Int = Self.baselineByteLimit,
         remoteValidator: @escaping InstallRemotePolicy.Validator =
-            InstallRemotePolicy.validateGitHubRepository
+        InstallRemotePolicy.validateGitHubRepository
     ) {
         self.gitService = gitService
         self.credentialStore = credentialStore

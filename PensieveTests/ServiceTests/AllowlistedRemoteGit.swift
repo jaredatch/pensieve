@@ -15,67 +15,67 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
         self.acceptedRemote = acceptedRemote
     }
 
-    func probeUsability() throws -> GitUsability { try wrapped.probeUsability() }
+    func performProbeUsability() throws -> GitUsability { try wrapped.probeUsability() }
 
     /// The ONLY override: report an accepted URL when the wrapped service has an origin (preserving the
     /// `.noRemote` path when it does not).
-    func remoteURL(at path: String) throws -> String? {
+    func performRemoteURL(at path: String) throws -> String? {
         try wrapped.remoteURL(at: path) == nil ? nil : acceptedRemote
     }
 
-    func initRepository(at path: String) throws { try wrapped.initRepository(at: path) }
-    func setRemote(_ url: String, at path: String) throws { try wrapped.setRemote(url, at: path) }
-    func removeRemote(at path: String) throws {}
-    func configuredRemoteURL(at path: String) throws -> String? { nil }
-    func clone(remote: String, into path: String, credential: GitCredential?) throws {
+    func performInitRepository(at path: String) throws { try wrapped.initRepository(at: path) }
+    func performSetRemote(_ url: String, at path: String) throws { try wrapped.setRemote(url, at: path) }
+    func performRemoveRemote(at path: String) throws {}
+    func performConfiguredRemoteURL(at path: String) throws -> String? { nil }
+    func performClone(remote: String, into path: String, credential: GitCredential?) throws {
         try wrapped.clone(remote: remote, into: path, credential: credential)
     }
-    func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool {
+    func performRemoteHasCommits(remote: String, credential: GitCredential?) -> Bool {
         wrapped.remoteHasCommits(remote: remote, credential: credential)
     }
     @discardableResult
-    func stageAllAndCommit(at path: String, message: String) throws -> Bool {
+    func performStageAllAndCommit(at path: String, message: String) throws -> Bool {
         try wrapped.stageAllAndCommit(at: path, message: message)
     }
-    func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
+    func performPullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
         try wrapped.pullRebase(at: path, credential: credential)
     }
-    func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision? {
+    func performPreflightStoreUpdate(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision? {
         try wrapped.preflightStoreUpdate(at: path, credential: credential)
     }
-    func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+    func performPullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
         try wrapped.pullRebase(at: path, fetchedRevision: fetchedRevision)
     }
-    func push(at path: String, credential: GitCredential?) throws {
+    func performPush(at path: String, credential: GitCredential?) throws {
         try wrapped.push(at: path, credential: credential)
     }
-    func abortRebase(at path: String) throws { try wrapped.abortRebase(at: path) }
-    func conflictedFiles(at path: String) throws -> [String] { try wrapped.conflictedFiles(at: path) }
-    func blob(atStage stage: Int, path: String, in workingDir: String) throws -> Data? {
+    func performAbortRebase(at path: String) throws { try wrapped.abortRebase(at: path) }
+    func performConflictedFiles(at path: String) throws -> [String] { try wrapped.conflictedFiles(at: path) }
+    func performBlob(atStage stage: Int, path: String, in workingDir: String) throws -> Data? {
         try wrapped.blob(atStage: stage, path: path, in: workingDir)
     }
-    func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
+    func performConflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
         try wrapped.conflictEntry(atStage: stage, path: path, in: workingDir)
     }
-    func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+    func performRestoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
         try wrapped.restoreConflictEntry(entry, stage: stage, path: path, at: root)
     }
-    func retireConflictPath(_ path: String, at root: String) throws { try wrapped.retireConflictPath(path, at: root) }
-    func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
+    func performRetireConflictPath(_ path: String, at root: String) throws { try wrapped.retireConflictPath(path, at: root) }
+    func performRemoveConflictEntryFromIndex(_ path: String, at root: String) throws {
         try wrapped.removeConflictEntryFromIndex(path, at: root)
     }
-    func continueRebase(at path: String) throws -> PullResult { try wrapped.continueRebase(at: path) }
-    func skipRebase(at path: String) throws -> PullResult { try wrapped.skipRebase(at: path) }
-    func stagePath(_ path: String, at root: String) throws { try wrapped.stagePath(path, at: root) }
-    func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
-                                fetchedRevision: FetchedStoreRevision?) throws -> Bool {
+    func performContinueRebase(at path: String) throws -> PullResult { try wrapped.continueRebase(at: path) }
+    func performSkipRebase(at path: String) throws -> PullResult { try wrapped.skipRebase(at: path) }
+    func performStagePath(_ path: String, at root: String) throws { try wrapped.stagePath(path, at: root) }
+    func performCollapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                       fetchedRevision: FetchedStoreRevision?) throws -> Bool {
         try wrapped.collapseToSingleCommit(at: root, message: message, credential: credential, fetchedRevision: fetchedRevision)
     }
-    func hasCommitsToPush(at path: String) throws -> Bool { try wrapped.hasCommitsToPush(at: path) }
-    func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] {
+    func performHasCommitsToPush(at path: String) throws -> Bool { try wrapped.hasCommitsToPush(at: path) }
+    func performLog(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] {
         wrapped.log(forPath: path, at: workingDir, limit: limit)
     }
-    func show(sha: String, path: String, at workingDir: String) -> String? {
+    func performShow(sha: String, path: String, at workingDir: String) -> String? {
         wrapped.show(sha: sha, path: path, at: workingDir)
     }
 }

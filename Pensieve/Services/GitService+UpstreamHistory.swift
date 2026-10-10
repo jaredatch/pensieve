@@ -24,7 +24,7 @@ extension GitService {
         ]
     }
 
-    func upstreamHistory(_ request: UpstreamHistoryGitRequest) throws -> UpstreamHistoryGitSnapshot {
+    func performUpstreamHistory(_ request: UpstreamHistoryGitRequest) throws -> UpstreamHistoryGitSnapshot {
         try runOrThrow(["init", "--quiet", request.repositoryPath], in: nil)
         try fetchTrackedRef(request)
         try runOrThrow(
@@ -63,7 +63,7 @@ extension GitService {
 }
 
 extension GitService {
-    func historyRows(_ commits: [String], request: UpstreamHistoryGitRequest) throws
+    func performHistoryRows(_ commits: [String], request: UpstreamHistoryGitRequest) throws
         -> [UpstreamHistoryGitRow] {
         try historyLogRecords(
             commits: commits,
@@ -88,7 +88,7 @@ extension GitService {
         }
     }
 
-    func baseline(
+    func performBaseline(
         for position: UpstreamHistoryGitInstalledPosition,
         request: UpstreamHistoryGitRequest
     ) throws -> UpstreamHistoryBaseline? {
@@ -125,7 +125,7 @@ extension GitService {
             stderr: output.stderr.isEmpty ? output.stdout : output.stderr, confirmingProbe: output.confirmingProbe)
     }
 
-    func fetchTrackedRef(_ request: UpstreamHistoryGitRequest) throws {
+    func performFetchTrackedRef(_ request: UpstreamHistoryGitRequest) throws {
         let branch = "refs/heads/\(request.ref)"
         let branchArgs = Self.upstreamHistoryFetchArguments(
             repositoryPath: request.repositoryPath,
@@ -167,7 +167,7 @@ extension GitService {
             || message.contains("remote ref does not exist")
     }
 
-    func historyCommitSHAs(at repositoryPath: String, limit: Int) throws -> [String] {
+    func performHistoryCommitSHAs(at repositoryPath: String, limit: Int) throws -> [String] {
         let output = try runOrThrow([
             "-C", repositoryPath, "rev-list", "--max-count", "\(limit)",
             "refs/pensieve/upstream"
@@ -175,7 +175,7 @@ extension GitService {
         return output.stdout.split(whereSeparator: \Character.isNewline).map(String.init)
     }
 
-    func skillMarkdown(
+    func performSkillMarkdown(
         sha: String,
         path: String,
         repositoryPath: String,
@@ -191,7 +191,7 @@ extension GitService {
         return .text(text)
     }
 
-    func resolveInstalledPosition(
+    func performResolveInstalledPosition(
         installedCommit: String,
         scanned: [String],
         hasMoreCommits: Bool,
@@ -226,7 +226,7 @@ extension GitService {
         return .olderThanScan
     }
 
-    func fetchInstalledCommitIfAvailable(
+    func performFetchInstalledCommitIfAvailable(
         _ commit: String,
         remote: String,
         repositoryPath: String,
@@ -243,8 +243,8 @@ extension GitService {
         return false
     }
 
-    func firstPathCommit(atOrBefore commit: String, path: String,
-                         repositoryPath: String) throws -> String? {
+    func performFirstPathCommit(atOrBefore commit: String, path: String,
+                                repositoryPath: String) throws -> String? {
         let pathspec = Self.literalPathspec(path)
         let output = try runOrThrow([
             "-C", repositoryPath, "log", "--first-parent"
@@ -255,7 +255,7 @@ extension GitService {
         return value.isEmpty ? nil : value
     }
 
-    func isAncestor(_ ancestor: String, of descendant: String, at repositoryPath: String) throws -> Bool {
+    func performIsAncestor(_ ancestor: String, of descendant: String, at repositoryPath: String) throws -> Bool {
         let output = try run([
             "-C", repositoryPath, "merge-base", "--is-ancestor", ancestor, descendant
         ], in: nil)
@@ -265,7 +265,7 @@ extension GitService {
             confirmingProbe: output.confirmingProbe)
     }
 
-    func isShallowRepository(at repositoryPath: String) throws -> Bool {
+    func performIsShallowRepository(at repositoryPath: String) throws -> Bool {
         let output = try runOrThrow([
             "-C", repositoryPath, "rev-parse", "--is-shallow-repository"
         ], in: nil)
@@ -280,4 +280,108 @@ extension GitService {
         "--diff-merges=first-parent"
     ]
 
+}
+
+// Capture the source before entering implementation helpers or closures.
+extension GitService {
+    func upstreamHistory(_ request: UpstreamHistoryGitRequest,
+                         file: StaticString = #fileID, line: UInt = #line) throws -> UpstreamHistoryGitSnapshot {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performUpstreamHistory(request)
+        }
+    }
+
+    func historyRows(_ commits: [String], request: UpstreamHistoryGitRequest,
+                     file: StaticString = #fileID, line: UInt = #line) throws
+        -> [UpstreamHistoryGitRow] {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performHistoryRows(commits, request: request)
+        }
+    }
+
+    func baseline(
+        for position: UpstreamHistoryGitInstalledPosition,
+        request: UpstreamHistoryGitRequest,
+        file: StaticString = #fileID, line: UInt = #line) throws -> UpstreamHistoryBaseline? {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performBaseline(for: position, request: request)
+        }
+    }
+
+    func fetchTrackedRef(_ request: UpstreamHistoryGitRequest,
+                         file: StaticString = #fileID, line: UInt = #line) throws {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performFetchTrackedRef(request)
+        }
+    }
+
+    func historyCommitSHAs(at repositoryPath: String, limit: Int,
+                           file: StaticString = #fileID, line: UInt = #line) throws -> [String] {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performHistoryCommitSHAs(at: repositoryPath, limit: limit)
+        }
+    }
+
+    func skillMarkdown(
+        sha: String,
+        path: String,
+        repositoryPath: String,
+        textByteLimit: Int,
+        file: StaticString = #fileID, line: UInt = #line) throws -> UpstreamHistoryText? {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performSkillMarkdown(sha: sha, path: path, repositoryPath: repositoryPath, textByteLimit: textByteLimit)
+        }
+    }
+
+    func resolveInstalledPosition(
+        installedCommit: String,
+        scanned: [String],
+        hasMoreCommits: Bool,
+        request: UpstreamHistoryGitRequest,
+        file: StaticString = #fileID, line: UInt = #line) throws -> UpstreamHistoryGitInstalledPosition {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performResolveInstalledPosition(
+                installedCommit: installedCommit,
+                scanned: scanned,
+                hasMoreCommits: hasMoreCommits,
+                request: request)
+        }
+    }
+
+    func fetchInstalledCommitIfAvailable(
+        _ commit: String,
+        remote: String,
+        repositoryPath: String,
+        credential: GitCredential?,
+        file: StaticString = #fileID, line: UInt = #line) throws -> Bool {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performFetchInstalledCommitIfAvailable(
+                commit,
+                remote: remote,
+                repositoryPath: repositoryPath,
+                credential: credential)
+        }
+    }
+
+    func firstPathCommit(atOrBefore commit: String, path: String,
+                         repositoryPath: String,
+                         file: StaticString = #fileID, line: UInt = #line) throws -> String? {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performFirstPathCommit(atOrBefore: commit, path: path, repositoryPath: repositoryPath)
+        }
+    }
+
+    func isAncestor(_ ancestor: String, of descendant: String, at repositoryPath: String,
+                    file: StaticString = #fileID, line: UInt = #line) throws -> Bool {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performIsAncestor(ancestor, of: descendant, at: repositoryPath)
+        }
+    }
+
+    func isShallowRepository(at repositoryPath: String,
+                             file: StaticString = #fileID, line: UInt = #line) throws -> Bool {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performIsShallowRepository(at: repositoryPath)
+        }
+    }
 }

@@ -103,6 +103,8 @@ targets:
       - path: PensieveTests/Fixtures/FakeGitScript.swift
       - path: PensieveTests/Fixtures/ImportPublicationFileService.swift
       - path: PensieveTests/Fixtures/GitProcessProbe
+      - path: Pensieve/Services/FastForwardGitService.swift
+      - path: Pensieve/Services/GitService+FastForward.swift
       - path: Pensieve/Services/SkillStore.swift
       - path: Pensieve/Services/SkillParser.swift
       - path: Pensieve/Services/SkillParser+Preservation.swift
@@ -115,6 +117,9 @@ targets:
       - path: Pensieve/Services/GitService.swift
       - path: Pensieve/Services/GitCancellation.swift
       - path: Pensieve/Services/GitService+ThreadGuard.swift
+      - path: Pensieve/Services/GitServiceProtocol+CallSite.swift
+      - path: Pensieve/Services/FastForwardGitService+CallSite.swift
+      - path: Pensieve/Services/StoreGitOperation+CallSite.swift
       - path: Pensieve/Services/GitService+StoreRules.swift
       - path: Pensieve/Services/StoreIgnoreRules.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift
@@ -172,6 +177,9 @@ targets:
       - path: Pensieve/Services/GitService.swift
       - path: Pensieve/Services/GitCancellation.swift
       - path: Pensieve/Services/GitService+ThreadGuard.swift
+      - path: Pensieve/Services/GitServiceProtocol+CallSite.swift
+      - path: Pensieve/Services/FastForwardGitService+CallSite.swift
+      - path: Pensieve/Services/StoreGitOperation+CallSite.swift
       - path: Pensieve/Services/GitService+StoreRules.swift
       - path: Pensieve/Services/StoreIgnoreRules.swift
       - path: Pensieve/Services/GitService+ProcessOutput.swift

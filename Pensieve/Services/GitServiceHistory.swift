@@ -1,12 +1,12 @@
 import Foundation
 
 extension GitService {
-    func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] {
+    func performLog(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] {
         (try? logResult(forPath: path, at: workingDir, limit: limit)) ?? []
     }
 
     /// Throwing seam for tests: command failure is distinct from genuinely empty history.
-    func logResult(forPath path: String, at workingDir: String, limit: Int) throws -> [GitCommit] {
+    func performLogResult(forPath path: String, at workingDir: String, limit: Int) throws -> [GitCommit] {
         let format = "%H%x1f%an%x1f%aI%x1f%s"
         let args = ["-C", workingDir, "log", "-n", "\(limit)", "--format=\(format)", "--", path]
         let result = try run(args, in: nil)
@@ -23,7 +23,7 @@ extension GitService {
         }
     }
 
-    func show(sha: String, path: String, at workingDir: String) -> String? {
+    func performShow(sha: String, path: String, at workingDir: String) -> String? {
         guard let result = try? run(["-C", workingDir, "show", "\(sha):\(path)"], in: nil),
               result.exit == 0 else {
             return nil
@@ -35,5 +35,15 @@ extension GitService {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: string)
+    }
+}
+
+// Capture the source before entering implementation helpers or closures.
+extension GitService {
+    func logResult(forPath path: String, at workingDir: String, limit: Int,
+                   file: StaticString = #fileID, line: UInt = #line) throws -> [GitCommit] {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performLogResult(forPath: path, at: workingDir, limit: limit)
+        }
     }
 }

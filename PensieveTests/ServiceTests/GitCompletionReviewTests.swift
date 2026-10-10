@@ -47,7 +47,7 @@ final class GitCompletionReviewTests: XCTestCase {
                 echo 'checkout failed for xcrun: error: invalid active developer path' >&2
                 exit 128
                 """)
-            let diagnostics = UpdateBatchDiagnostics(probe: git.probeUsability)
+            let diagnostics = UpdateBatchDiagnostics(probe: { try git.probeUsability() })
             _ = diagnostics.classify(GitError.unusable(.licenseNotAccepted))
             do {
                 try NativeTestWork.run { [self] in

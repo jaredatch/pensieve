@@ -184,7 +184,7 @@ final class RecordingUpstreamHistoryGit: UpstreamHistoryGitServing {
         self.result = result
     }
 
-    func upstreamHistory(_ request: UpstreamHistoryGitRequest) throws -> UpstreamHistoryGitSnapshot {
+    func performUpstreamHistory(_ request: UpstreamHistoryGitRequest) throws -> UpstreamHistoryGitSnapshot {
         requests.append(request)
         if createScratchArtifact {
             try FileService().writeFile(at: request.repositoryPath + "/FETCH_HEAD", content: "partial")
@@ -192,7 +192,7 @@ final class RecordingUpstreamHistoryGit: UpstreamHistoryGitServing {
         return try result.get()
     }
 
-    func remoteHead(remote: String, ref: String, credential: GitCredential?) throws -> String? {
+    func performRemoteHead(remote: String, ref: String, credential: GitCredential?) throws -> String? {
         headRequests.append(HeadRequest(remote: remote, ref: ref, credential: credential))
         return try remoteHeadResult.get()
     }

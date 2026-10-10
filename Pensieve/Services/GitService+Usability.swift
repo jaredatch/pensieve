@@ -44,11 +44,11 @@ enum GitUsability: Equatable, Sendable {
 
 extension GitService {
     /// This is only an error label. An unknown label must not replace an established auth failure.
-    func authenticationRemoteLabel(at path: String) -> String {
+    func performAuthenticationRemoteLabel(at path: String) -> String {
         (try? remoteURL(at: path)) ?? "origin"
     }
 
-    func probeUsability() throws -> GitUsability {
+    func performProbeUsability() throws -> GitUsability {
         do {
             let result = try run(["--version"], in: nil)
             guard result.exit != 0 else { return .usable }
@@ -64,7 +64,7 @@ extension GitService {
 
     /// Filesystem absence is known only below a root that resolves to an existing directory.
     /// The `.git` lookup observes the entry itself, including dangling links; lookup failures throw.
-    func remoteURL(at path: String) throws -> String? {
+    func performRemoteURL(at path: String) throws -> String? {
         do {
             guard try fileService.entryExistsWithoutFollowingLinks(at: path + "/.git") else {
                 guard fileService.directoryExists(at: path) else {
@@ -94,6 +94,29 @@ extension GitService {
             try probeUsability().requireUsable()
             if case GitError.repositoryUnreadable = error { throw error }
             throw GitError.repositoryUnreadable(path: path, detail: error.localizedDescription)
+        }
+    }
+}
+
+// Capture the source before entering implementation helpers or closures.
+extension GitService {
+    func authenticationRemoteLabel(at path: String,
+                                   file: StaticString = #fileID, line: UInt = #line) -> String {
+        GitThreadGuard.withCallSite(file: file, line: line) {
+            performAuthenticationRemoteLabel(at: path)
+        }
+    }
+
+    func probeUsability(file: StaticString = #fileID, line: UInt = #line) throws -> GitUsability {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performProbeUsability()
+        }
+    }
+
+    func remoteURL(at path: String,
+                   file: StaticString = #fileID, line: UInt = #line) throws -> String? {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performRemoteURL(at: path)
         }
     }
 }

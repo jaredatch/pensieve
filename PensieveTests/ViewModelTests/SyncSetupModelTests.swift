@@ -54,54 +54,54 @@ final class SyncSetupModelTests: XCTestCase {
             if throwAuthOn == tag { throw GitError.authenticationFailed(remote: remote, detail: "stub") }
         }
 
-        func initRepository(at path: String) throws { try record("init:\(path)") }
-        func setRemote(_ url: String, at path: String) throws { try record("remote:\(url)") }
-        func removeRemote(at path: String) throws {
+        func performInitRepository(at path: String) throws { try record("init:\(path)") }
+        func performSetRemote(_ url: String, at path: String) throws { try record("remote:\(url)") }
+        func performRemoveRemote(at path: String) throws {
             try record("remove-remote:\(path)")
             remoteURLFixture = nil
             configuredRemoteURLFixture = .success(nil)
         }
-        func configuredRemoteURL(at path: String) throws -> String? {
+        func performConfiguredRemoteURL(at path: String) throws -> String? {
             try record("config-remote:\(path)")
             return try configuredRemoteURLFixture.get()
         }
-        func probeUsability() -> GitUsability { beforeCall?("probe"); return .usable }
-        func remoteURL(at path: String) -> String? { beforeCall?("read-remote"); return remoteURLFixture }
+        func performProbeUsability() -> GitUsability { beforeCall?("probe"); return .usable }
+        func performRemoteURL(at path: String) -> String? { beforeCall?("read-remote"); return remoteURLFixture }
 
-        func remoteDefaultBranch(remote: String, credential: GitCredential?) throws -> String? {
+        func performRemoteDefaultBranch(remote: String, credential: GitCredential?) throws -> String? {
             let tag = "lsremote-symref:\(remote)"
             try record(tag)
             try maybeThrowAuth(tag, remote: remote)
             return defaultBranchFixture
         }
 
-        func remoteBranches(remote: String, credential: GitCredential?) throws -> [String] {
+        func performRemoteBranches(remote: String, credential: GitCredential?) throws -> [String] {
             let tag = "lsremote-heads:\(remote)"
             try record(tag)
             try maybeThrowAuth(tag, remote: remote)
             return branchesFixture
         }
 
-        func checkoutUnbornBranch(_ branch: String, at path: String) throws {
+        func performCheckoutUnbornBranch(_ branch: String, at path: String) throws {
             try record("checkout-B:\(branch)")
         }
-        func fetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {
+        func performFetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {
             try record("fetch:\(branch)")
         }
-        func materializeFromFetchHead(at path: String) throws { try record("restore-fetch-head") }
-        func bornBranch(_ branch: String, at path: String) throws { try record("born:\(branch)") }
-        func setUpstream(branch: String, at path: String) throws { try record("upstream:\(branch)") }
-        func hasLocalBranches(at path: String) throws -> Bool {
+        func performMaterializeFromFetchHead(at path: String) throws { try record("restore-fetch-head") }
+        func performBornBranch(_ branch: String, at path: String) throws { try record("born:\(branch)") }
+        func performSetUpstream(branch: String, at path: String) throws { try record("upstream:\(branch)") }
+        func performHasLocalBranches(at path: String) throws -> Bool {
             beforeCall?("read-branches"); return try hasLocalBranchesFixture.get()
         }
-        func hasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool {
+        func performHasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool {
             beforeCall?("read-tracking"); return hasRemoteTrackingBranchFixture
         }
-        func hasRemoteOriginConfigured(at path: String) throws -> Bool {
+        func performHasRemoteOriginConfigured(at path: String) throws -> Bool {
             try hasRemoteOriginConfiguredFixture.get()
         }
 
-        func clone(remote: String, into path: String, credential: GitCredential?) throws {
+        func performClone(remote: String, into path: String, credential: GitCredential?) throws {
             beforeCall?("clone")
             lastCredential = credential
             let event = "clone:\(remote)→\(path)"
@@ -110,45 +110,45 @@ final class SyncSetupModelTests: XCTestCase {
             try maybeThrowAuth("clone", remote: remote)
         }
 
-        func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool {
+        func performRemoteHasCommits(remote: String, credential: GitCredential?) -> Bool {
             beforeCall?("remoteHasCommits")
             calls.append("remoteHasCommits")
             return remoteHasCommitsResult
         }
 
         @discardableResult
-        func stageAllAndCommit(at path: String, message: String) throws -> Bool {
+        func performStageAllAndCommit(at path: String, message: String) throws -> Bool {
             beforeCall?("commit")
             calls.append("commit")
             return true
         }
 
-        func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
-        func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+        func performPreflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+        func performPullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
             try pullRebase(at: path, credential: nil)
         }
-        func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
+        func performPullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
             beforeCall?("pull")
             calls.append("pull")
             return pullResult
         }
 
-        func push(at path: String, credential: GitCredential?) throws {
+        func performPush(at path: String, credential: GitCredential?) throws {
             beforeCall?("push")
             lastCredential = credential
             calls.append("push")
             try maybeThrowAuth("push", remote: "origin")
         }
 
-        func abortRebase(at path: String) throws { beforeCall?("abort"); calls.append("abort") }
-        func conflictedFiles(at path: String) -> [String] { [] }
-        func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
-        func continueRebase(at path: String) throws -> PullResult { .upToDate }
-        func skipRebase(at path: String) throws -> PullResult { .upToDate }
-        func stagePath(_ path: String, at root: String) throws {}
-        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
-                                    fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
-        func hasCommitsToPush(at path: String) -> Bool { false }
+        func performAbortRebase(at path: String) throws { beforeCall?("abort"); calls.append("abort") }
+        func performConflictedFiles(at path: String) -> [String] { [] }
+        func performBlob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
+        func performContinueRebase(at path: String) throws -> PullResult { .upToDate }
+        func performSkipRebase(at path: String) throws -> PullResult { .upToDate }
+        func performStagePath(_ path: String, at root: String) throws {}
+        func performCollapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                           fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
+        func performHasCommitsToPush(at path: String) -> Bool { false }
     }
 
     private final class ThrowingCredentialStore: CredentialStoreProtocol {

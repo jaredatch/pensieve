@@ -308,38 +308,38 @@ extension SyncConflictResolutionTests {
             self.pullError = pullError
         }
 
-        func remoteURL(at path: String) -> String? { "https://fixture.test/x.git" }
-        func initRepository(at path: String) throws {}
-        func setRemote(_ url: String, at path: String) throws {}
-        func removeRemote(at path: String) throws {}
-        func configuredRemoteURL(at path: String) throws -> String? { nil }
-        func clone(remote: String, into path: String, credential: GitCredential?) throws {}
-        func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool { true }
+        func performRemoteURL(at path: String) -> String? { "https://fixture.test/x.git" }
+        func performInitRepository(at path: String) throws {}
+        func performSetRemote(_ url: String, at path: String) throws {}
+        func performRemoveRemote(at path: String) throws {}
+        func performConfiguredRemoteURL(at path: String) throws -> String? { nil }
+        func performClone(remote: String, into path: String, credential: GitCredential?) throws {}
+        func performRemoteHasCommits(remote: String, credential: GitCredential?) -> Bool { true }
         @discardableResult
-        func stageAllAndCommit(at path: String, message: String) throws -> Bool { true }
-        func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
-        func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+        func performStageAllAndCommit(at path: String, message: String) throws -> Bool { true }
+        func performPreflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+        func performPullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
             try pullRebase(at: path, credential: nil)
         }
-        func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
+        func performPullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
             pullAttempted = true
             if let pullError { throw pullError }
             return .conflicted([conflictPath])
         }
-        func push(at path: String, credential: GitCredential?) throws {}
-        func abortRebase(at path: String) throws { if pullAttempted { abortsAfterPull += 1 } }
-        func conflictedFiles(at path: String) -> [String] { [conflictPath] }
-        func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? {
+        func performPush(at path: String, credential: GitCredential?) throws {}
+        func performAbortRebase(at path: String) throws { if pullAttempted { abortsAfterPull += 1 } }
+        func performConflictedFiles(at path: String) -> [String] { [conflictPath] }
+        func performBlob(atStage stage: Int, path: String, in workingDir: String) -> Data? {
             Data((stage == 3 ? "this" : "other").utf8)
         }
-        func continueRebase(at path: String) throws -> PullResult { .merged }
-        func skipRebase(at path: String) throws -> PullResult { .merged }
-        func stagePath(_ path: String, at root: String) throws { stagedPaths.append(path) }
-        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
-                                    fetchedRevision: FetchedStoreRevision?) throws -> Bool {
+        func performContinueRebase(at path: String) throws -> PullResult { .merged }
+        func performSkipRebase(at path: String) throws -> PullResult { .merged }
+        func performStagePath(_ path: String, at root: String) throws { stagedPaths.append(path) }
+        func performCollapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                           fetchedRevision: FetchedStoreRevision?) throws -> Bool {
             true
         }
-        func hasCommitsToPush(at path: String) -> Bool { false }
+        func performHasCommitsToPush(at path: String) -> Bool { false }
     }
 
     func assertUnsafePath(_ path: String, root: String, escapedPath: String?,

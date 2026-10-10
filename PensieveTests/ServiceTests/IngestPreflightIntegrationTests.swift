@@ -93,7 +93,7 @@ extension IngestPreflightTests {
             root: app,
             appSupport: tempDir + "/daemon-support",
             git: IngestAllowlistedFastForwardGit(git: harness.git),
-            hasLocalBranches: harness.git.hasLocalBranches,
+            hasLocalBranches: { try harness.git.hasLocalBranches(at: $0) },
             credentials: IngestEmptyCredentials(),
             reconciler: IngestNoopDeploy(),
             now: Date.init

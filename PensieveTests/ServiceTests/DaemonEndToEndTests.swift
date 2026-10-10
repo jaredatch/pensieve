@@ -63,7 +63,7 @@ final class DaemonEndToEndTests: XCTestCase {
                 root: cloneB,
                 appSupport: appSupport,
                 git: AllowlistedFastForwardGit(wrapping: git),
-                hasLocalBranches: self.git.hasLocalBranches,
+                hasLocalBranches: { try self.git.hasLocalBranches(at: $0) },
                 credentials: NilCredentialStore(),
                 reconciler: DeployReconciler(
                     fileService: fileService,
@@ -283,19 +283,19 @@ final class AllowlistedFastForwardGit: FastForwardGitService {
         self.wrapped = wrapped
     }
 
-    func remoteURL(at path: String) throws -> String? {
+    func performRemoteURL(at path: String) throws -> String? {
         try wrapped.remoteURL(at: path) == nil ? nil : "https://fixture.test/pensieve-skills.git"
     }
 
-    func isWorktreeClean(at path: String) -> Bool {
+    func performIsWorktreeClean(at path: String) -> Bool {
         wrapped.isWorktreeClean(at: path)
     }
 
-    func fetch(at path: String, credential: GitCredential?) throws {
+    func performFetch(at path: String, credential: GitCredential?) throws {
         try wrapped.fetch(at: path, credential: credential)
     }
 
-    func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
+    func performFastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
         try wrapped.fastForwardOnly(at: path, credential: credential)
     }
 }

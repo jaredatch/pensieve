@@ -12,7 +12,7 @@ extension DaemonEndToEndTests {
                     let reconciler = CollisionReconciler()
                     let daemon = SyncDaemon(root: fixture.storeB, appSupport: support,
                         git: AllowlistedFastForwardGit(wrapping: fixture.git),
-                        hasLocalBranches: fixture.git.hasLocalBranches, credentials: InMemoryCredentialStore(),
+                        hasLocalBranches: { try fixture.git.hasLocalBranches(at: $0) }, credentials: InMemoryCredentialStore(),
                         reconciler: reconciler, now: Date.init)
                     XCTAssertTrue(fixture.git.isWorktreeClean(at: fixture.storeB), "Excluded additions alone remain clean")
                     XCTAssertEqual(daemon.runOnce(), .failed(.preflight(fixture.message)))

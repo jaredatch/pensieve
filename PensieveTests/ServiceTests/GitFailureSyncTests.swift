@@ -268,7 +268,7 @@ extension GitFailureSyncTests {
 
     private func runDaemon(_ fixture: GitFailureFixture, git: GitService) throws -> CLIOutcome {
         let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: git,
-                                hasLocalBranches: git.hasLocalBranches,
+                                hasLocalBranches: { try git.hasLocalBranches(at: $0) },
                                 credentials: InMemoryCredentialStore(), reconciler: GitFailureReconciler(), now: Date.init)
         return try NativeTestWork.run { DaemonCLI.execute(["run"], appSupport: fixture.support,
                                  readFile: { try? fixture.files.readData(at: $0) }, runCycle: daemon.runOnce, now: Date.init) }

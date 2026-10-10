@@ -34,7 +34,7 @@ final class GitReviewRegressionTests: XCTestCase {
                 launchReconcile: { _, _ in LaunchReconcileOutcome(rebuild: RebuildResult(), migrationRan: false) },
                 launchBackfill: { _ in backfills += 1 },
                 hasRemoteConfigured: { fixture.paths.hasRemoteConfigured(git: git) },
-                postSyncConvergence: convergence, paths: fixture.paths, gitUsabilityProbe: git.probeUsability
+                postSyncConvergence: convergence, paths: fixture.paths, gitUsabilityProbe: { try git.probeUsability() }
             )
             await runtime.bootstrapTask.value
             let launchStartedOnce = await runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext)
@@ -91,7 +91,7 @@ final class GitReviewRegressionTests: XCTestCase {
             launchBackfill: { _ in backfills += 1 },
             hasRemoteConfigured: { fixture.paths.hasRemoteConfigured(git: git) },
             postSyncConvergence: convergence, paths: fixture.paths,
-            gitUsabilityProbe: git.probeUsability
+            gitUsabilityProbe: { try git.probeUsability() }
         )
         await runtime.bootstrapTask.value
         try fixture.files.deleteDirectory(at: fixture.root)
@@ -120,7 +120,7 @@ final class GitReviewRegressionTests: XCTestCase {
         XCTAssertEqual(backfills, 0)
         XCTAssertEqual(convergence.launches, 0)
         let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: git,
-                                hasLocalBranches: git.hasLocalBranches,
+                                hasLocalBranches: { try git.hasLocalBranches(at: $0) },
                                 credentials: InMemoryCredentialStore(), reconciler: ReviewReconciler(), now: Date.init)
         XCTAssertEqual(try NativeTestWork.run { daemon.runOnce() }.category, "failed")
     }
@@ -176,7 +176,7 @@ final class GitReviewRegressionTests: XCTestCase {
         try fixture.seedRepository()
         let git = try fixture.broken(.failed(GitFailureDetail("first line\nsecond line\r\nthird line\u{2028}last line")))
         let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: git,
-                                hasLocalBranches: git.hasLocalBranches,
+                                hasLocalBranches: { try git.hasLocalBranches(at: $0) },
                                 credentials: InMemoryCredentialStore(), reconciler: ReviewReconciler(), now: Date.init)
         let output = try NativeTestWork.run { DaemonCLI.execute(["run"], appSupport: fixture.support,
                                        readFile: { try? fixture.files.readData(at: $0) },

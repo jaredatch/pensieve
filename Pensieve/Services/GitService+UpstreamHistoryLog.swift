@@ -11,7 +11,7 @@ extension GitService {
         let linesRemoved: Int?
     }
 
-    func historyLogRecords(
+    func performHistoryLogRecords(
         commits: [String],
         path: String,
         repositoryPath: String
@@ -101,5 +101,18 @@ extension GitService {
             exitCode: 0,
             stderr: "git returned malformed upstream history"
         )
+    }
+}
+
+// Capture the source before entering implementation helpers or closures.
+extension GitService {
+    func historyLogRecords(
+        commits: [String],
+        path: String,
+        repositoryPath: String,
+        file: StaticString = #fileID, line: UInt = #line) throws -> [UpstreamHistoryLogRecord] {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            try performHistoryLogRecords(commits: commits, path: path, repositoryPath: repositoryPath)
+        }
     }
 }

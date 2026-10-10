@@ -28,13 +28,13 @@ extension GitService {
         "-c", "core.autocrlf=false", "-c", "core.eol=lf"
     ]
 
-    func storeOperation(at root: String) throws -> StoreGitOperation {
+    func performStoreOperation(at root: String) throws -> StoreGitOperation {
         try StoreGitOperation(git: self, root: root)
     }
 
     /// Only a store with protected local additions needs the app's pre-snapshot fetch. Return the
     /// checked commit so the later pull cannot fetch a different tree after the snapshot is written.
-    func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision? {
+    func performPreflightStoreUpdate(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision? {
         let store = try storeOperation(at: path)
         let excluded = try store.excludedUntrackedPaths()
         guard !excluded.isEmpty else { return nil }
@@ -43,7 +43,7 @@ extension GitService {
         return revision
     }
 
-    func fetchStoreRevision(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision {
+    func performFetchStoreRevision(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision {
         try fetch(at: path, credential: credential)
         let commit = try runOrThrow(["-C", path, "rev-parse", "--verify", "FETCH_HEAD^{commit}"], in: nil)
             .stdout.trimmingCharacters(in: .newlines)
@@ -53,7 +53,7 @@ extension GitService {
     /// `git -C <path> fetch origin main`. Advances FETCH_HEAD and (opportunistically) the `origin/main`
     /// remote-tracking ref without touching HEAD or the worktree. Throws `.authenticationFailed` on an
     /// auth error, `.commandFailed` on any other non-zero exit.
-    func fetch(at path: String, credential: GitCredential?) throws {
+    func performFetch(at path: String, credential: GitCredential?) throws {
         let args = ["-C", path, "fetch", "origin", "main"]
         let r = try run(args, in: nil, credential: credential)
         guard r.exit != 0 else { return }
@@ -104,15 +104,17 @@ struct StoreGitOperation {
     private let infoDirectory: String
     let repairFailure: Error?
 
-    init(git: GitService, root: String, aborting: Bool = false) throws {
+    init(git: GitService, root: String, aborting: Bool = false,
+         file: StaticString = #fileID, line: UInt = #line) throws {
         self.git = git
         self.root = root
         let retired = aborting ? [] : try StoreIgnoreRules.retiredPaths(at: root, files: git.fileService)
         var resolved = ""
         var failure: Error?
         do {
-            let result = try git.runOrThrow(
-                ["-C", root, "rev-parse", "--path-format=absolute", "--git-path", "info"], in: nil)
+            let result = try GitThreadGuard.withCallSite(file: file, line: line) {
+                try git.runOrThrow(["-C", root, "rev-parse", "--path-format=absolute", "--git-path", "info"], in: nil)
+            }
             let info = result.stdout.trimmingCharacters(in: .newlines)
             guard info.utf8.first == 0x2F else {
                 throw GitError.repositoryUnreadable(path: root, detail: "git returned no metadata path.")
@@ -137,20 +139,20 @@ struct StoreGitOperation {
     }
 
     @discardableResult
-    func run(_ args: [String], credential: GitCredential? = nil) throws -> GitService.GitOutput {
+    func performRun(_ args: [String], credential: GitCredential? = nil) throws -> GitService.GitOutput {
         try git.run(["-C", root] + args, in: nil, credential: credential, storeRules: true)
     }
 
     @discardableResult
-    func runOrThrow(_ args: [String]) throws -> GitService.GitOutput {
+    func performRunOrThrow(_ args: [String]) throws -> GitService.GitOutput {
         try git.runOrThrow(["-C", root] + args, in: nil, storeRules: true)
     }
 
-    func runData(_ args: [String]) throws -> GitService.GitDataOutput {
+    func performRunData(_ args: [String]) throws -> GitService.GitDataOutput {
         try git.runData(["-C", root] + args, in: nil, storeRules: true)
     }
 
-    func commitStagedChanges(message: String) throws -> Bool {
+    func performCommitStagedChanges(message: String) throws -> Bool {
         let args = ["diff", "--cached", "--quiet"]
         let staged = try run(args)
         if staged.exit == 0 { return false }
@@ -163,7 +165,7 @@ struct StoreGitOperation {
 
     /// Git owns fork-point selection from origin/main's reflog. Explicit rebase ignores pull policy,
     /// while --onto keeps the update pinned to the tree checked before app preparation.
-    func pullArguments(for revision: FetchedStoreRevision) throws -> [String] {
+    func performPullArguments(for revision: FetchedStoreRevision) throws -> [String] {
         let upstream = "refs/remotes/origin/main"
         let args = ["rev-parse", "--verify", upstream + "^{commit}"]
         let head = try runOrThrow(args).stdout.trimmingCharacters(in: .newlines)
@@ -175,7 +177,7 @@ struct StoreGitOperation {
         return ["rebase", "--fork-point", "--onto", revision.commit, upstream]
     }
 
-    func unstagedSkillPaths() throws -> Data {
+    func performUnstagedSkillPaths() throws -> Data {
         try untrackedPaths("skills")
     }
 
@@ -189,7 +191,7 @@ struct StoreGitOperation {
         return try untrackedFiles(args)
     }
 
-    func ordinaryUntrackedPaths() throws -> Data {
+    func performOrdinaryUntrackedPaths() throws -> Data {
         try untrackedPaths(".")
     }
 
@@ -212,7 +214,7 @@ struct StoreGitOperation {
 
     /// Native receipts collapse wholly untracked subtrees, including those within partly tracked
     /// excluded folders. Indexed-file replacements retain their exact individual new paths.
-    func excludedUntrackedPaths() throws -> [Data] {
+    func performExcludedUntrackedPaths() throws -> [Data] {
         let fileArgs = ["ls-files", "--others", "-z"] + StoreExclusions.directoryArguments
         let files = try runData(fileArgs)
         guard files.exit == 0 else { throw git.dataCommandError(files, args: ["-C", root] + fileArgs) }
@@ -273,7 +275,7 @@ struct StoreGitOperation {
 
     /// Refuse both exact paths and file/directory replacements that would remove protected children.
     /// Native inventories avoid following links or opening secret bytes; no extra filesystem walk.
-    func requireNoExcludedCollision(with revision: String, localPaths: [Data]? = nil) throws {
+    func performRequireNoExcludedCollision(with revision: String, localPaths: [Data]? = nil) throws {
         let inventory = try localPaths ?? excludedUntrackedPaths()
         guard !inventory.isEmpty else { return }
         let folders = Set(inventory.filter { $0.last == 0x2F }.map { Data($0.dropLast()) })
@@ -331,13 +333,13 @@ struct StoreGitOperation {
     /// Update tracked paths natively before enumerating new files, so stale children beneath a
     /// replacement symlink are removed. Git's enumeration omits new nested repositories; no extra
     /// filesystem walk or index removal is needed. Force-stage skill files hidden by skill ignores.
-    func stage() throws {
+    func performStage() throws {
         try runOrThrow(["--literal-pathspecs", "add", "--update"])
         try stage(ordinaryUntrackedPaths())
         try stage(unstagedSkillPaths())
     }
 
-    func stagePath(_ path: String) throws {
+    func performStagePath(_ path: String) throws {
         let args = ["--literal-pathspecs", "ls-files", "--cached", "-z", "--", path]
         let cached = try runData(args)
         guard cached.exit == 0 else { throw git.dataCommandError(cached, args: ["-C", root] + args) }

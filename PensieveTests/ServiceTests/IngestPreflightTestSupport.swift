@@ -12,38 +12,39 @@ final class IngestRecordingGit: GitServiceProtocol {
     var remoteRead: (() throws -> String?)?
     var calls: [String] = []
 
-    func remoteURL(at path: String) throws -> String? {
+    func performRemoteURL(at path: String) throws -> String? {
         if let remoteRead { return try remoteRead() }
         return remote
     }
-    func initRepository(at path: String) throws {}
-    func setRemote(_ url: String, at path: String) throws {}
-    func removeRemote(at path: String) throws {}
-    func configuredRemoteURL(at path: String) throws -> String? { nil }
-    func clone(remote: String, into path: String, credential: GitCredential?) throws {}
-    func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool { true }
-    func stageAllAndCommit(at path: String, message: String) throws -> Bool {
+    func performInitRepository(at path: String) throws {}
+    func performSetRemote(_ url: String, at path: String) throws {}
+    func performRemoveRemote(at path: String) throws {}
+    func performConfiguredRemoteURL(at path: String) throws -> String? { nil }
+    func performClone(remote: String, into path: String, credential: GitCredential?) throws {}
+    func performRemoteHasCommits(remote: String, credential: GitCredential?) -> Bool { true }
+    func performStageAllAndCommit(at path: String, message: String) throws -> Bool {
         calls.append("commit")
         return false
     }
-    func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
-    func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+    func performPreflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+    func performPullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
         try pullRebase(at: path, credential: nil)
     }
-    func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
+    func performPullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
         calls.append("pull")
         return .upToDate
     }
-    func push(at path: String, credential: GitCredential?) throws { calls.append("push") }
-    func abortRebase(at path: String) throws { calls.append("abort") }
-    func conflictedFiles(at path: String) -> [String] { [] }
-    func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
-    func continueRebase(at path: String) throws -> PullResult { .upToDate }
-    func skipRebase(at path: String) throws -> PullResult { .upToDate }
-    func stagePath(_ path: String, at root: String) throws {}
-    func collapseToSingleCommit(at root: String, message: String,
-                                credential: GitCredential?, fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
-    func hasCommitsToPush(at path: String) -> Bool { false }
+    func performPush(at path: String, credential: GitCredential?) throws { calls.append("push") }
+    func performAbortRebase(at path: String) throws { calls.append("abort") }
+    func performConflictedFiles(at path: String) -> [String] { [] }
+    func performBlob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
+    func performContinueRebase(at path: String) throws -> PullResult { .upToDate }
+    func performSkipRebase(at path: String) throws -> PullResult { .upToDate }
+    func performStagePath(_ path: String, at root: String) throws {}
+    func performCollapseToSingleCommit(at root: String, message: String,
+                                       credential: GitCredential?,
+                                       fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
+    func performHasCommitsToPush(at path: String) -> Bool { false }
 }
 
 final class IngestRecordingManifest: ManifestSnapshotting {
@@ -106,14 +107,14 @@ final class IngestAllowlistedFastForwardGit: FastForwardGitService {
         self.git = git
     }
 
-    func remoteURL(at path: String) throws -> String? {
+    func performRemoteURL(at path: String) throws -> String? {
         try git.remoteURL(at: path) == nil ? nil : "https://fixture.test/repo.git"
     }
-    func isWorktreeClean(at path: String) -> Bool { git.isWorktreeClean(at: path) }
-    func fetch(at path: String, credential: GitCredential?) throws {
+    func performIsWorktreeClean(at path: String) -> Bool { git.isWorktreeClean(at: path) }
+    func performFetch(at path: String, credential: GitCredential?) throws {
         try git.fetch(at: path, credential: credential)
     }
-    func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
+    func performFastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
         try git.fastForwardOnly(at: path, credential: credential)
     }
 }

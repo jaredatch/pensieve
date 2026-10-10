@@ -155,7 +155,7 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
         XCTAssertNotEqual(runtime.syncModel.state, .unconfigured)
         let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support,
             git: TestPaths.git,
-                                hasLocalBranches: TestPaths.git.hasLocalBranches,
+                                hasLocalBranches: { try TestPaths.git.hasLocalBranches(at: $0) },
                                 credentials: InMemoryCredentialStore(), reconciler: NoPresentationReconciler(), now: Date.init)
         XCTAssertTrue(try NativeTestWork.run { daemon.runOnce() }.detail.contains("store folder can't be found"))
     }

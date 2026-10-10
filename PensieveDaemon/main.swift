@@ -20,7 +20,7 @@ Thread {
                 root: paths.storeRoot,
                 appSupport: paths.appSupportDir,
                 git: git,
-                hasLocalBranches: git.hasLocalBranches,
+                hasLocalBranches: { try git.hasLocalBranches(at: $0) },
                 credentials: paths.credentialStore,
                 reconciler: paths.makeDeployReconciler(fileService: fileService),
                 now: Date.init
