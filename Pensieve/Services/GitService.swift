@@ -517,8 +517,8 @@ extension GitService {
             let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
             guard fields.count == 2, fields[1] == "HEAD" else { continue }
             let prefix = "ref: refs/heads/"
-            guard fields[0].utf8.starts(with: prefix.utf8) else { continue }
-            return String(bytes: fields[0].utf8.dropFirst(prefix.utf8.count), encoding: .utf8)
+            guard fields[0].hasPrefix(prefix) else { continue }
+            return String(fields[0].dropFirst(prefix.count))
         }
         return nil
     }
@@ -539,8 +539,8 @@ extension GitService {
         let prefix = "refs/heads/"
         return result.stdout.split(separator: "\n").compactMap { line in
             guard let ref = line.split(separator: "\t", omittingEmptySubsequences: false).last,
-                  ref.utf8.starts(with: prefix.utf8) else { return nil }
-            return String(bytes: ref.utf8.dropFirst(prefix.utf8.count), encoding: .utf8)
+                  ref.hasPrefix(prefix) else { return nil }
+            return String(ref.dropFirst(prefix.count))
         }
     }
 
