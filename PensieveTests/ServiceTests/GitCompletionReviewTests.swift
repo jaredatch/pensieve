@@ -27,9 +27,7 @@ final class GitCompletionReviewTests: XCTestCase {
             let fixture = try GitFailureFixture()
             defer { try? fixture.remove() }
             let git = try fixture.executable("echo 'Xcode license not accepted'; exit 69")
-            XCTAssertThrowsError(try NativeTestWork.run { [self] in
-                try git.clone(remote: "https://fixture.test/store.git", into: fixture.root, credential: nil)
-            }) {
+            XCTAssertThrowsError(try git.clone(remote: "https://fixture.test/store.git", into: fixture.root, credential: nil)) {
                 XCTAssertEqual($0 as? GitError, .unusable(.licenseNotAccepted))
             }
             let calls = try fixture.files.readFile(at: fixture.trace)
@@ -50,9 +48,7 @@ final class GitCompletionReviewTests: XCTestCase {
             let diagnostics = UpdateBatchDiagnostics(probe: { try git.probeUsability() })
             _ = diagnostics.classify(GitError.unusable(.licenseNotAccepted))
             do {
-                try NativeTestWork.run { [self] in
-                    try git.clone(remote: "https://fixture.test/store.git", into: fixture.root, credential: nil)
-                }
+                try git.clone(remote: "https://fixture.test/store.git", into: fixture.root, credential: nil)
                 XCTFail("clone should fail")
             } catch {
                 guard case let GitError.commandFailed(_, _, _, answer) = error else { return XCTFail("expected command error") }
@@ -73,12 +69,10 @@ final class GitCompletionReviewTests: XCTestCase {
             defer { try? fixture.remove() }
             let git = try fixture.broken(.licenseNotAccepted)
             let reads: [() throws -> Void] = [
-                { _ = try NativeTestWork.run { [self] in
-                    try git.blob(atStage: 2, path: "skills/example/SKILL.md", in: fixture.root)
-                } },
-                { _ = try NativeTestWork.run { [self] in try git.conflictedFiles(at: fixture.root) } },
-                { _ = try NativeTestWork.run { [self] in try git.hasCommitsToPush(at: fixture.root) } },
-                { _ = try NativeTestWork.run { [self] in try git.headSHA(at: fixture.root) } },
+                { _ = try git.blob(atStage: 2, path: "skills/example/SKILL.md", in: fixture.root) },
+                { _ = try git.conflictedFiles(at: fixture.root) },
+                { _ = try git.hasCommitsToPush(at: fixture.root) },
+                { _ = try git.headSHA(at: fixture.root) },
                 { try git.ensureCommitIdentity(at: fixture.root) }
             ]
             for (index, read) in reads.enumerated() {
@@ -102,10 +96,10 @@ final class GitCompletionReviewTests: XCTestCase {
             let fixture = try GitFailureFixture()
             defer { try? fixture.remove() }
             let git = try fixture.executable("echo 'ordinary missing revision' >&2; exit 128")
-            XCTAssertThrowsError(try NativeTestWork.run { [self] in try git.blob(atStage: 2, path: "missing", in: fixture.root) })
-            XCTAssertTrue(try NativeTestWork.run { [self] in try git.conflictedFiles(at: fixture.root) }.isEmpty)
-            XCTAssertFalse(try NativeTestWork.run { [self] in try git.hasCommitsToPush(at: fixture.root) })
-            XCTAssertNil(try NativeTestWork.run { [self] in try git.headSHA(at: fixture.root) })
+            XCTAssertThrowsError(try git.blob(atStage: 2, path: "missing", in: fixture.root))
+            XCTAssertTrue(try git.conflictedFiles(at: fixture.root).isEmpty)
+            XCTAssertFalse(try git.hasCommitsToPush(at: fixture.root))
+            XCTAssertNil(try git.headSHA(at: fixture.root))
             XCTAssertNoThrow(try git.ensureCommitIdentity(at: fixture.root))
         }
     }
@@ -117,12 +111,8 @@ final class GitCompletionReviewTests: XCTestCase {
             defer { try? fixture.remove() }
             try fixture.seedRepository()
             // The successful fake fetch below leaves a real fetched commit for the guarded rebase.
-            try NativeTestWork.run { [self] in
-                try TestPaths.git.runOrThrow(["-C", fixture.root, "fetch", ".", "HEAD:refs/remotes/origin/main"], in: nil)
-            }
-            let blob = try NativeTestWork.run { [self] in
-                try TestPaths.git.runOrThrow(["-C", fixture.root, "rev-parse", "HEAD:skills/example/SKILL.md"], in: nil)
-            }
+            try TestPaths.git.runOrThrow(["-C", fixture.root, "fetch", ".", "HEAD:refs/remotes/origin/main"], in: nil)
+            let blob = try TestPaths.git.runOrThrow(["-C", fixture.root, "rev-parse", "HEAD:skills/example/SKILL.md"], in: nil)
                 .stdout.trimmingCharacters(in: .newlines)
             let git = try fixture.executable("""
                 simulate_failure() {

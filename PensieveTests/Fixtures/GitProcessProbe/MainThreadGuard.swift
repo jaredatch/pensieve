@@ -37,8 +37,22 @@ extension GitProcessProbe {
             expectedCaller(report, line: #line + 1)
             _ = try? service.fastForwardOnly(at: "/unused", credential: nil)
         default:
+            let ready = DispatchSemaphore(value: 0)
+            let root = (report as NSString).deletingLastPathComponent + "/repository"
+            var preparation: Result<Void, Error>?
+            Thread {
+                preparation = Result {
+                    let setup = GitService(askpassHelperPath: root + "/askpass")
+                    try FileService().createDirectory(at: root)
+                    try setup.initRepository(at: root)
+                    try setup.setRemote("https://fixture.test/store.git", at: root)
+                }
+                ready.signal()
+            }.start()
+            ready.wait()
+            guard case .success? = preparation else { exit(74) }
             expectedCaller(report, line: #line + 1)
-            _ = try? service.remoteURL(at: "/unused")
+            _ = try? service.remoteURL(at: root)
         }
     }
 

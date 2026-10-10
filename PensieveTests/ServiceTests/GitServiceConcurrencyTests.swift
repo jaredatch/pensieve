@@ -14,7 +14,6 @@ final class GitServiceConcurrencyTests: XCTestCase {
                 $0.contains("Git called on the main thread at ")
             }
             let attribution = try XCTUnwrap(diagnostic).components(separatedBy: "Git called on the main thread at ")[1]
-                .components(separatedBy: " (git boundary:")[0]
             XCTAssertEqual(attribution, result.report, "\(mode): \(result.diagnostic)")
         }
         let worker = try GitProcessProbeRunner.run("concurrency")

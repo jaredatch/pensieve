@@ -33,16 +33,31 @@ final class DaemonBundleTests: XCTestCase {
         process.standardOutput = output
         process.standardError = diagnostic
         try process.run()
-        defer { if process.isRunning { process.terminate() } }
+        let drained = DispatchGroup()
+        var stdoutData = Data()
+        var stderrData = Data()
+        let reads: [() -> Void] = [
+            { stdoutData = output.fileHandleForReading.readDataToEndOfFile() },
+            { stderrData = diagnostic.fileHandleForReading.readDataToEndOfFile() }
+        ]
+        for read in reads {
+            drained.enter()
+            Thread { read(); drained.leave() }.start()
+        }
+        defer {
+            if process.isRunning { process.terminate() }
+            drained.wait()
+        }
         let deadline = ProcessInfo.processInfo.systemUptime + 10
         while process.isRunning && ProcessInfo.processInfo.systemUptime < deadline {
             Thread.sleep(forTimeInterval: 0.01)
         }
         guard !process.isRunning else { return XCTFail("Daemon run did not finish") }
-        let stderr = try XCTUnwrap(String(data: diagnostic.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8))
+        drained.wait()
+        let stderr = try XCTUnwrap(String(data: stderrData, encoding: .utf8))
         XCTAssertEqual(process.terminationStatus, 0, stderr)
         XCTAssertFalse(stderr.contains("Git called on the main thread"), stderr)
-        XCTAssertEqual(try XCTUnwrap(String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)),
+        XCTAssertEqual(try XCTUnwrap(String(data: stdoutData, encoding: .utf8)),
                        "pensieve-daemon skipped noRemote\n")
         XCTAssertTrue(files.fileExists(at: home + "/Library/Application Support/Pensieve/daemon-status.json"))
     }
