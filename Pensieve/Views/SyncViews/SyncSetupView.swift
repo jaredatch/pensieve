@@ -74,6 +74,7 @@ struct SyncSetupView: View {
         .frame(width: 460)
         .interactiveDismissDisabled(model.state == .working)
         .onAppear { model.prepareForPresentation() }
+        .onDisappear { model.cancel() }
         .onChange(of: model.state) { _, newState in
             if newState == .done { dismiss() }
         }

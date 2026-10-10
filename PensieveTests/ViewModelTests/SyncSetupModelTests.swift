@@ -1245,14 +1245,7 @@ extension SyncSetupModelTests {
                        "restore-fetch-head", "born:trunk", "upstream:trunk"]
         let otherWrites = ["clone", "commit", "remoteHasCommits", "pull", "push", "abort"]
         for step in checking + writing + otherWrites {
-            let git = RecordingGitService()
-            git.hasLocalBranchesFixture = .success(false)
-            git.defaultBranchFixture = "trunk"
-            git.branchesFixture = ["trunk"]
-            git.remoteHasCommitsResult = true
-            git.remoteURLFixture = remote
-            git.hasRemoteTrackingBranchFixture = true
-            git.pullResult = step == "abort" ? .conflicted(["skills/conflict/SKILL.md"]) : .merged
+            let git = heldConnectGit(step: step, remote: remote)
             let gate = TestWait.Gate(owner: self)
             defer { gate.open() }
             let entered = expectation(description: step)
@@ -1266,7 +1259,10 @@ extension SyncSetupModelTests {
             let file = otherWrites.contains(step) ? (step == "clone" ? StubFileService() : existingUserFiles())
                 : virginScaffold(gitDir: true)
             if step == "read-tracking" { file.listing[root]?.append("partial.txt") }
-            let model = try makeModel(git: git, credentials: InMemoryCredentialStore(),
+            let credentials = InMemoryCredentialStore()
+            try credentials.store(token: "original", username: "old", forHost: "github.com")
+            let before = file.contents
+            let model = try makeModel(git: git, credentials: credentials,
                 rebuilder: RecordingRebuilder(), fileService: file)
             let host = setupHost(AnyView(SyncSetupView(model: model)))
             defer { host.window.close() }
@@ -1277,8 +1273,14 @@ extension SyncSetupModelTests {
             await TestWait.until(failureMessage: "Connect's button did not render progress at \(step)") {
                 RenderedViewTestSupport.hasButtonProgress(in: host.view)
             }
-            let reopened = await reopenHeldSetup(model: model, previous: host, step: step,
-                checking: checking.contains(step))
+            if checking.contains(step) {
+                await assertCheckingSheetDisappears(model: model, previous: host, gate: gate, step: step)
+                XCTAssertEqual(file.contents, before, step)
+                XCTAssertEqual(credentials.credential(forHost: "github.com"),
+                    .httpsToken(username: "old", token: "original"), step)
+                continue
+            }
+            let reopened = await reopenHeldSetup(model: model, previous: host, step: step)
             defer { reopened.window.close() }
             gate.open()
             await TestWait.until(failureMessage: "Connect did not finish at \(step)") { model.state != .working }
@@ -1429,11 +1431,48 @@ extension SyncSetupModelTests {
         XCTAssertEqual(try skillCount(context), 1, "The remote skill must also survive")
     }
 
-    private func writeHeldRemoteGit(at path: String, parentPath: String, helperPath: String) throws {
+    private func heldConnectGit(step: String, remote: String) -> RecordingGitService {
+        let git = RecordingGitService()
+        git.hasLocalBranchesFixture = .success(false)
+        git.defaultBranchFixture = "trunk"
+        git.branchesFixture = ["trunk"]
+        git.remoteHasCommitsResult = true
+        git.remoteURLFixture = remote
+        git.hasRemoteTrackingBranchFixture = true
+        git.pullResult = step == "abort" ? .conflicted(["skills/conflict/SKILL.md"]) : .merged
+        return git
+    }
+
+    private func assertCheckingSheetDisappears(
+        model: SyncSetupModel, previous: (view: NSHostingView<AnyView>, window: NSWindow),
+        gate: TestWait.Gate, step: String
+    ) async {
+        removeSetup(previous)
+        await Task.yield()
+        gate.open()
+        await TestWait.until(failureMessage: "Disappeared check did not finish at \(step)") { model.state != .working }
+        XCTAssertEqual(model.state, .cancelled, "Sheet disappearance must cancel \(step)")
+        await assertFreshSetup(model: model)
+    }
+
+    private func writeHeldRemoteGit(at path: String, parentPath: String, helperPath: String,
+                                    checkingPoint: String) throws {
         try FileService().writeExecutableFile(at: path, content: """
         #!/usr/bin/python3
         import os, sys, time
-        if 'ls-remote' not in sys.argv:
+        args = sys.argv[1:]
+        point = '\(checkingPoint)'
+        held = (point == 'probe' and '--version' in args
+            or point == 'read-remote' and 'get-url' in args
+            or point == 'read-branches' and 'for-each-ref' in args
+            or point == 'symref' and '--symref' in args
+            or point == 'heads' and '--heads' in args
+            or point == 'read-tracking' and '--verify' in args)
+        if not held:
+            if 'ls-remote' in args:
+                if '--symref' in args: print('ref: refs/heads/trunk\\tHEAD')
+                else: print('0' * 40 + '\\trefs/heads/trunk')
+                sys.exit(0)
             os.execv('/usr/bin/git', ['/usr/bin/git'] + sys.argv[1:])
         child = os.fork()
         if child == 0:
@@ -1515,20 +1554,33 @@ extension SyncSetupModelTests {
     private func reopenHeldSetup(
         model: SyncSetupModel,
         previous: (view: NSHostingView<AnyView>, window: NSWindow),
-        step: String, checking: Bool
+        step: String
     ) async -> (view: NSHostingView<AnyView>, window: NSWindow) {
-        previous.view.rootView = AnyView(EmptyView())
-        previous.window.close()
+        removeSetup(previous)
         let reopened = setupHost(AnyView(SyncSetupView(model: model)))
         await assertSetupTitle(in: reopened.view)
         await TestWait.until(failureMessage: "Reopened Connect lost progress at \(step)") {
             RenderedViewTestSupport.hasButtonProgress(in: reopened.view)
         }
-        if !checking {
-            XCTAssertFalse(pressCancel(in: reopened.view), "The writing phase must disable Cancel's native shortcut")
-            model.cancel()
-        }
+        XCTAssertFalse(pressCancel(in: reopened.view), "The writing phase must disable Cancel's native shortcut")
+        model.cancel()
         return reopened
+    }
+
+    private func removeSetup(_ host: (view: NSHostingView<AnyView>, window: NSWindow)) {
+        // Destroy the presentation graph, as closing Settings or rebuilding its pane does.
+        host.view.rootView = AnyView(EmptyView())
+        host.view.layoutSubtreeIfNeeded()
+        host.window.close()
+    }
+
+    private func assertFreshSetup(model: SyncSetupModel) async {
+        let reopened = setupHost(AnyView(SyncSetupView(model: model)))
+        defer { reopened.window.close() }
+        await assertSetupTitle(in: reopened.view)
+        XCTAssertEqual(model.state, .idle)
+        XCTAssertFalse(renderedTexts(in: reopened.view).contains("Connect was cancelled."))
+        XCTAssertFalse(RenderedViewTestSupport.hasButtonProgress(in: reopened.view))
     }
 
     private func assertDisconnectProgress(in host: NSHostingView<AnyView>) async {
@@ -1613,17 +1665,32 @@ extension SyncSetupModelTests {
 
 extension SyncSetupModelTests {
     func testCancelRemoteReadJoinsRealGitGroupWithoutChangingStoreOrCredential() async throws {
+        for point in ["escape", "probe", "read-remote", "read-branches", "symref", "heads", "read-tracking"] {
+            try await assertReadCancellation(checkingPoint: point)
+        }
+    }
+
+    private func assertReadCancellation(checkingPoint: String) async throws {
+        let files = FileService()
+        defer { try? files.deleteDirectory(at: root) }
         try writeRealScaffold()
         try TestPaths.git.initRepository(at: root)
-        let files = FileService()
+        if checkingPoint == "read-tracking" {
+            try files.writeFile(at: root + "/partial.txt", content: "interrupted adoption")
+            try TestPaths.git.setRemote("https://github.com/octocat/x.git", at: root)
+        }
         let credentials = InMemoryCredentialStore()
         try credentials.store(token: "original", username: "old", forHost: "github.com")
         let config = try files.readData(at: root + "/.git/config")
         let manifest = try ManifestSaveFixture.manifestBytes(root: root, files: files)
-        let executable = root + "-cancel-git"
-        let parentPath = root + "-parent", helperPath = root + "-helper"
-        defer { for path in [executable, parentPath, helperPath, root + "-askpass"] { try? files.deleteFile(at: path) } }
-        try writeHeldRemoteGit(at: executable, parentPath: parentPath, helperPath: helperPath)
+        let executable = root + "-cancel-git", parentPath = root + "-parent", helperPath = root + "-helper"
+        defer {
+            for path in [executable, parentPath, helperPath, root + "-askpass"] where files.fileExists(at: path) {
+                try? files.deleteFile(at: path)
+            }
+        }
+        try writeHeldRemoteGit(at: executable, parentPath: parentPath, helperPath: helperPath,
+            checkingPoint: checkingPoint == "escape" ? "symref" : checkingPoint)
         let model = SyncSetupModel(context: try makeContext(),
             git: GitService(askpassHelperPath: root + "-askpass", executablePath: executable),
             credentials: credentials, root: root, lockPath: root + "-sync.lock", steps: SyncStepModel())
@@ -1638,11 +1705,7 @@ extension SyncSetupModelTests {
         XCTAssertEqual(getpgid(helper), parent)
         let host = setupHost(AnyView(SyncSetupView(model: model)))
         defer { host.window.close() }
-        await TestWait.until(failureMessage: "Remote check did not render its progress") {
-            RenderedViewTestSupport.hasButtonProgress(in: host.view)
-        }
-        XCTAssertTrue(pressCancel(in: host.view), "The rendered Cancel shortcut must be enabled while checking")
-        await TestWait.until(failureMessage: "Cancel never joined its git job") { model.state == .cancelled }
+        try await cancelHeldRead(model: model, host: host, checkingPoint: checkingPoint)
         await TestWait.until(failureMessage: "Git's helper survived Cancel") { kill(helper, 0) == -1 }
         XCTAssertEqual(kill(parent, 0), -1)
         var status: Int32 = 0
@@ -1651,8 +1714,30 @@ extension SyncSetupModelTests {
         XCTAssertEqual(try files.readData(at: root + "/.git/config"), config)
         XCTAssertEqual(try ManifestSaveFixture.manifestBytes(root: root, files: files), manifest)
         XCTAssertFalse(files.directoryExists(at: root + "/skills"))
+        if checkingPoint == "read-tracking" {
+            XCTAssertEqual(try files.readFile(at: root + "/partial.txt"), "interrupted adoption")
+        }
         XCTAssertEqual(credentials.credential(forHost: "github.com"), .httpsToken(username: "old", token: "original"))
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: root + "-sync.lock"), "Cancel must release the whole-cycle lock")
         lock.release()
+        if checkingPoint != "escape" { await assertFreshSetup(model: model) }
+    }
+
+    private func cancelHeldRead(
+        model: SyncSetupModel, host: (view: NSHostingView<AnyView>, window: NSWindow), checkingPoint: String
+    ) async throws {
+        await TestWait.until(failureMessage: "Remote check did not render its progress") {
+            RenderedViewTestSupport.hasButtonProgress(in: host.view)
+        }
+        if checkingPoint == "escape" {
+            XCTAssertTrue(pressCancel(in: host.view), "The rendered Cancel shortcut must be enabled while checking")
+        } else { removeSetup(host) }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+            failureMessage: "Sheet disappearance/Cancel never joined git at \(checkingPoint)") { model.state == .cancelled }
+        guard model.state == .cancelled else {
+            model.cancel()
+            await TestWait.until(failureMessage: "Failed-case cleanup did not cancel git") { model.state == .cancelled }
+            throw StubBoom()
+        }
     }
 }
