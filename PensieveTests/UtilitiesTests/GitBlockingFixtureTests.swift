@@ -7,15 +7,22 @@ final class GitBlockingFixtureTests: XCTestCase {
     func testAbandonedFakeGitExpiresWithinTwoMinutesWithoutCleanup() async throws {
         var fixture: GitBlockingFixture? = try GitBlockingFixture(lifetime: 2)
         let root = try XCTUnwrap(fixture).root
+        let process = makeProcess(try XCTUnwrap(fixture))
+        let exits = UpdateReviewRecorder<ContinuousClock.Instant>()
+        process.terminationHandler = { _ in exits.append(.now) }
         let started = ContinuousClock.now
-        let process = try start(try XCTUnwrap(fixture))
+        try process.run()
         defer { stop(process); try? FileService().deleteDirectory(at: root) }
         fixture = nil
-        await TestWait.until(timeout: .seconds(5), // upper-bound: The injected two-second lifetime must stop the child promptly.
+        let remaining = max(Duration.zero, started.advanced(by: .seconds(5)) - .now)
+        await TestWait.until(timeout: remaining, // upper-bound: Launch and expiry share one five-second deadline.
                              failureMessage: "Abandoned fake git ignored its short lifetime") {
-            !process.isRunning
+            !process.isRunning && !exits.values.isEmpty
         }
-        XCTAssertLessThan(ContinuousClock.now - started, .seconds(5))
+        let elapsed = try XCTUnwrap(exits.values.first) - started
+        // Bash's whole-second SECONDS allows a two-second lifetime to end after about one second.
+        XCTAssertGreaterThanOrEqual(elapsed, .seconds(1), "Fake git must wait out its lifetime before expiring")
+        XCTAssertLessThan(elapsed, .seconds(5))
         XCTAssertEqual(process.isRunning ? nil : process.terminationStatus, 124)
         XCTAssertEqual(try FileService().readFile(at: root + "/ready"), String(process.processIdentifier),
                        "Readiness remains observable after the child has expired")
@@ -24,7 +31,8 @@ final class GitBlockingFixtureTests: XCTestCase {
 
     func testFakeGitExitsAfterFixtureCleanupWithoutARelease() async throws {
         let fixture = try GitBlockingFixture()
-        let process = try start(fixture)
+        let process = makeProcess(fixture)
+        try process.run()
         defer { stop(process); try? fixture.cleanup() }
         await TestWait.until(failureMessage: "Fake git never announced readiness") { fixture.isBlocked }
         try fixture.cleanup()
@@ -35,12 +43,11 @@ final class GitBlockingFixtureTests: XCTestCase {
         XCTAssertEqual(process.isRunning ? nil : process.terminationStatus, 124)
     }
 
-    private func start(_ fixture: GitBlockingFixture) throws -> Process {
+    private func makeProcess(_ fixture: GitBlockingFixture) -> Process {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: fixture.root + "/git")
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
         return process
     }
 

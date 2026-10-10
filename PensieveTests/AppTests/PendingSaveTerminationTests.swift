@@ -180,11 +180,11 @@ final class PendingSaveTerminationTests: XCTestCase {
         for choice in ["Wait", "Quit Anyway", "Close host"] {
             unrelated.orderFront(nil)
             XCTAssertTrue(unrelated.isVisible)
-            try await assertBothPendingQuestion(choice: choice)
+            try await assertBothPendingQuestion(choice: choice, stray: unrelated)
         }
     }
 
-    private func assertBothPendingQuestion(choice: String) async throws {
+    private func assertBothPendingQuestion(choice: String, stray: NSWindow) async throws {
         func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
@@ -194,12 +194,13 @@ final class PendingSaveTerminationTests: XCTestCase {
         let steps = SyncStepModel()
         let step = steps.begin()
         defer { steps.finish(step) }
+        let restoreWindows = isolateQuestionHost(stray)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.animationBehavior = .none
-        defer { window.close() }
-        window.makeKeyAndOrderFront(nil)
+        defer { window.close(); restoreWindows() }
+        XCTAssertEqual(NSApp.windows.filter(\.isVisible), [stray])
         let quit = PendingSaveTermination(delay: 0)
         var answers: [Bool] = []
         quit.wait(for: h.saves, steps: steps) { answers.append($0) }
@@ -207,6 +208,7 @@ final class PendingSaveTerminationTests: XCTestCase {
             NSApp.windows.contains { $0.attachedSheet != nil }
         }
         let parent = try XCTUnwrap(NSApp.windows.first { $0.attachedSheet != nil })
+        XCTAssertTrue(parent === stray, "The combined question must exercise the stray window on every host")
         let sheet = try XCTUnwrap(parent.attachedSheet)
         sheet.animationBehavior = .none
         await TestWait.until(failureMessage: "The combined quit question never rendered its controls") {
@@ -232,5 +234,17 @@ final class PendingSaveTerminationTests: XCTestCase {
         steps.finish(step)
         await h.saves.waitUntilIdle()
         await TestWait.until(failureMessage: "The combined deferred quit did not finish") { answers == [true] }
+    }
+
+    private func isolateQuestionHost(_ stray: NSWindow) -> () -> Void {
+        let previousWindows = NSApp.windows.filter { $0.isVisible && $0 !== stray }
+        let previousAnimations = previousWindows.map(\.animationBehavior)
+        previousWindows.forEach { $0.animationBehavior = .none; $0.orderOut(nil) }
+        return {
+            for (window, behavior) in zip(previousWindows, previousAnimations) {
+                window.orderFront(nil)
+                window.animationBehavior = behavior
+            }
+        }
     }
 }
