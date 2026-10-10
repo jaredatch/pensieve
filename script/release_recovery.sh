@@ -1,5 +1,6 @@
 # Sourced by release.sh. Remote reads are checked before build or publication.
 RELEASE_STATE="absent"
+SYMBOLS_STATE="absent"
 APPCAST_ITEM="absent"
 APPCAST_NEWER="absent"
 APPCAST_BASE=""
@@ -26,7 +27,7 @@ dmg_mount_is_attached() {
 }
 
 mounted_dmg_minimum() (
-  local dmg="$1" context="$2" version="${3:-}" check_tickets="${4:-0}"
+  local dmg="$1" context="$2" version="${3:-}" check_tickets="${4:-0}" symbols="${5:-}"
   local minimum_args
   # A signal trap's exit unwinds function locals before EXIT on Bash 3.2.
   # This subshell owns cleanup state that must survive that unwind.
@@ -62,6 +63,9 @@ mounted_dmg_minimum() (
   minimum_args=(--app "$dmg_mount_point/Pensieve.app" --context "$context")
   [ -z "$version" ] || minimum_args+=(--version "$version")
   python3 -B "$REPO/script/minimum_system.py" "${minimum_args[@]}" || return 1
+  if [ -n "$symbols" ]; then
+    python3 -B "$REPO/script/package_artifacts.py" --app "$dmg_mount_point/Pensieve.app" --check-symbols "$symbols" || return $?
+  fi
 )
 
 verify_published_dmg() (
@@ -96,10 +100,12 @@ read_release_state() {
   [ "$APPCAST_ITEM" = absent ] || mode=live
   if run_gh api --include "repos/$PUBLIC_REPO/releases/tags/v$VERSION" > "$response"; then
     RELEASE_STATE="$(state_tool release "$response" "$VERSION" "$mode")" || return 1
+    SYMBOLS_STATE="$(state_tool release-symbols "$RELEASE_STATE")" || return 1
   else
     status="$(http_status "$response")"
     [ "$status" = 404 ] || { echo "release: release read failed (HTTP $(log_text "${status:-unknown}"))" >&2; return 1; }
     RELEASE_STATE="absent"
+    SYMBOLS_STATE="absent"
   fi
 }
 
@@ -167,7 +173,7 @@ publication_preflight() {
 }
 
 recover_live_release() (
-  local download_dir length signature
+  local download_dir length signature symbol_check=2 expected="$RELEASE_STATE"
   download_dir="$(mktemp -d "$DIST_DIR/recovery.XXXXXX")" || return 1
   trap 'rm -rf "$download_dir"' EXIT
   # Downloaded bytes stay outside appcast-input and never reach generate_appcast.
@@ -178,6 +184,27 @@ recover_live_release() (
   read -r length signature <<< "$APPCAST_ITEM"
   verify_published_dmg "$download_dir/Pensieve-$VERSION.dmg" "$length" "$signature" "published DMG" "appcast" || return 1
   ditto "$download_dir/Pensieve-$VERSION.dmg" "$DMG_PATH" || return 1
+  if [ "$SYMBOLS_STATE" = uploaded ]; then
+    run_gh release download "v$VERSION" --repo "$PUBLIC_REPO" \
+      --pattern "Pensieve-$VERSION-dSYMs.zip" --dir "$download_dir" || return 1
+    mounted_dmg_minimum "$DMG_PATH" "published dSYMs" "$VERSION" 0 \
+      "$download_dir/Pensieve-$VERSION-dSYMs.zip" >/dev/null || return 1
+  else
+    if [ -f "$DSYM_PATH" ]; then
+      symbol_check=0
+      mounted_dmg_minimum "$DMG_PATH" "recovery dSYMs" "$VERSION" 0 "$DSYM_PATH" >/dev/null || symbol_check=$?
+    fi
+    case "$symbol_check" in
+      0)
+        verify_tag_target || return 1
+        read_release_state || return 1
+        [ "$RELEASE_STATE" = "$expected" ] || { echo "release: release changed since preflight; stopping" >&2; return 1; }
+        run_gh release upload "v$VERSION" "$DSYM_PATH" --repo "$PUBLIC_REPO" --clobber || return 1
+        ;;
+      2) echo "release: dSYMs are missing; no local dSYMs match the published DMG" >&2 ;;
+      *) return 1 ;;
+    esac
+  fi
   # The cask step uses this verified artifact with its separate tap credential.
   echo "release: GitHub release and appcast done; verified published DMG"
   report_cask_publication
@@ -193,7 +220,7 @@ publish_release_asset() {
     run_gh "${RELEASE_ARGS[@]+"${RELEASE_ARGS[@]}"}"
     rm -f "$RELEASE_NOTES_FILE"
   else
-    echo "release: replacing unpublished DMG asset in existing release"
-    run_gh release upload "v$VERSION" "$DMG_PATH" --repo "$PUBLIC_REPO" --clobber
+    echo "release: replacing unpublished DMG and dSYMs assets in existing release"
+    run_gh release upload "v$VERSION" "$DMG_PATH" "$DSYM_PATH" --repo "$PUBLIC_REPO" --clobber
   fi
 }

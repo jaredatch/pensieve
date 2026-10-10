@@ -19,6 +19,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- The app is about half its old size, with crash symbols saved separately for troubleshooting.
 - The Projects list now shows projects from your other Macs too.
 - A GitHub link to a folder of skills now lists the skills in it, the same as a link to the whole repository.
 - Local import now brings scripts, references, assets and nested folders along with each skill, preserving executable bits. It keeps `.env.example`, `.env.sample` and `.env.template` files, and skips secret environment files, virtualenvs, `node_modules`, other dot-entries, links and special files with notices grouped by reason. Files changed during import are left out; names that differ only by case fail that skill. A lone `Skill.md` or `skill.md` imports as prepared `SKILL.md`. Contents of skipped folders do not count toward the 1,000-entry or 64 MiB limits; skills over 64 folder levels deep also fail, while other selections continue.

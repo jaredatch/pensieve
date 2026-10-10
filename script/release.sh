@@ -8,6 +8,7 @@ export -n CASK_TAP_TOKEN
 unset TAP_GH_TOKEN
 
 DMG_PATH=""
+DSYM_PATH=""
 DMG_MINIMUM=""
 SIGN_IDENTITY="-"
 DRY_RUN=1
@@ -265,6 +266,7 @@ build_release_args() {
     release create "v$VERSION"
     --repo "$PUBLIC_REPO"
     "$DIST_DIR/Pensieve-$VERSION.dmg"
+    "$DIST_DIR/Pensieve-$VERSION-dSYMs.zip"
     --title "Pensieve $VERSION"
     --notes-file "$notes_file"
   )
@@ -383,7 +385,7 @@ sign_dmg() {
 # the container's ticket alone does not travel with the extracted app.
 verify_dmg_app() {
   echo "release: phase iv.c: validate the app inside the dmg"
-  DMG_MINIMUM="$(mounted_dmg_minimum "$DMG_PATH" "built DMG" "$VERSION" "$PUBLISH")" || return 1
+  DMG_MINIMUM="$(mounted_dmg_minimum "$DMG_PATH" "built DMG" "$VERSION" "$PUBLISH" "$DSYM_PATH")" || return 1
 }
 
 find_generate_appcast() {
@@ -723,6 +725,7 @@ if [ "$INSPECT_MODE" != functions ] && [ "$INSPECT_MODE" != verify-appcast ]; th
   [ -n "$VERSION" ] || { echo "release: $VERSION_SOURCE must not be empty" >&2; exit 3; }
   VERSION_CHANNEL="$(state_tool channel "$VERSION")"
   DMG_PATH="$DIST_DIR/Pensieve-$VERSION.dmg"
+  DSYM_PATH="$DIST_DIR/Pensieve-$VERSION-dSYMs.zip"
   if [ "$CHECK_TAG" -eq 1 ] && [ "$EXPECTED_TAG" != "v$VERSION" ]; then
     echo "release: tag $(log_text "$EXPECTED_TAG") does not match VERSION v$VERSION" >&2
     exit 1
