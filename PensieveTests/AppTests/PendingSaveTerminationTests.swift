@@ -166,5 +166,51 @@ final class PendingSaveTerminationTests: XCTestCase {
             XCTAssertNil(parent.attachedSheet)
             dismiss()
         }
+        for choice in ["Wait", "Quit Anyway", "Close host"] {
+            try await assertBothPendingQuestion(choice: choice)
+        }
+    }
+
+    private func assertBothPendingQuestion(choice: String) async throws {
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+        defer { lock.release() }
+        h.categories.rename(h.local, to: "Waiting", context: h.context)
+        let steps = SyncStepModel()
+        let step = steps.begin()
+        defer { steps.finish(step) }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.makeKeyAndOrderFront(nil)
+        let quit = PendingSaveTermination(delay: 0)
+        var answers: [Bool] = []
+        quit.wait(for: h.saves, steps: steps) { answers.append($0) }
+        await TestWait.until(failureMessage: "The combined quit question did not appear") {
+            window.attachedSheet != nil
+        }
+        let sheet = try XCTUnwrap(window.attachedSheet)
+        let rendered = views(try XCTUnwrap(sheet.contentView))
+        let strings = rendered.compactMap { ($0 as? NSTextField)?.stringValue }
+        XCTAssertTrue(strings.contains("Pensieve is still finishing a sync step and saving a change."))
+        XCTAssertTrue(strings.contains("If you quit now, the sync step stops partway and the change won't be saved."))
+        let buttons = rendered.compactMap { $0 as? NSButton }
+        XCTAssertEqual(Set(buttons.map(\.title)), ["Wait", "Quit Anyway"])
+        if choice == "Close host" { window.close() } else {
+            try XCTUnwrap(buttons.first { $0.title == choice }).performClick(nil)
+        }
+        await TestWait.until(failureMessage: "The combined quit question did not close") {
+            window.attachedSheet == nil && (choice != "Quit Anyway" || !quit.isWaiting)
+        }
+        XCTAssertEqual(answers, choice == "Quit Anyway" ? [true] : [])
+        XCTAssertEqual(quit.isWaiting, choice != "Quit Anyway")
+        try assertSavePending(h)
+        lock.release()
+        steps.finish(step)
+        await h.saves.waitUntilIdle()
+        await TestWait.until(failureMessage: "The combined deferred quit did not finish") { answers == [true] }
     }
 }

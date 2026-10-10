@@ -1249,13 +1249,8 @@ extension SyncSetupModelTests {
             let gate = TestWait.Gate(owner: self)
             defer { gate.open() }
             let entered = expectation(description: step)
-            git.beforeCall = { call in
-                XCTAssertFalse(Thread.isMainThread, call)
-                if call == step {
-                    entered.fulfill()
-                    if !Thread.isMainThread { try? gate.wait() }
-                }
-            }
+            let cancelled = checking.contains(step) ? expectation(description: "Cancellation requested at \(step)") : nil
+            holdConnectStep(git: git, step: step, gate: gate, entered: entered, cancelled: cancelled)
             let file = otherWrites.contains(step) ? (step == "clone" ? StubFileService() : existingUserFiles())
                 : virginScaffold(gitDir: true)
             if step == "read-tracking" { file.listing[root]?.append("partial.txt") }
@@ -1274,7 +1269,8 @@ extension SyncSetupModelTests {
                 RenderedViewTestSupport.hasButtonProgress(in: host.view)
             }
             if checking.contains(step) {
-                await assertCheckingSheetDisappears(model: model, previous: host, gate: gate, step: step)
+                await assertCheckingSheetDisappears(model: model, previous: host, gate: gate,
+                    cancelled: try XCTUnwrap(cancelled), step: step)
                 XCTAssertEqual(file.contents, before, step)
                 XCTAssertEqual(credentials.credential(forHost: "github.com"),
                     .httpsToken(username: "old", token: "original"), step)
@@ -1337,7 +1333,7 @@ extension SyncSetupModelTests {
             XCTAssertEqual(file.contents, before)
             XCTAssertEqual(git.calls, ["lsremote-symref:\(remoteURL)", "lsremote-heads:\(remoteURL)"],
                            "No store/config write after a failed check")
-            await assertReopenedSetupIsFresh(model: model, previous: firstSheet, failure: failure)
+            await assertFreshSetup(model: model, previous: firstSheet, context: failure)
         }
     }
 
@@ -1443,12 +1439,29 @@ extension SyncSetupModelTests {
         return git
     }
 
+    private func holdConnectStep(git: RecordingGitService, step: String, gate: TestWait.Gate,
+                                 entered: XCTestExpectation, cancelled: XCTestExpectation?) {
+        git.beforeCall = { call in
+            XCTAssertFalse(Thread.isMainThread, call)
+            guard call == step else { return }
+            entered.fulfill()
+            guard !Thread.isMainThread else { return }
+            if let cancelled {
+                // Keep the worker held across rendering and disappearance until cancellation reaches its task.
+                let deadline = Date().addingTimeInterval(2 * TestWait.timeoutSeconds)
+                while !Task.isCancelled && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+                if Task.isCancelled { cancelled.fulfill() }
+            }
+            try? gate.wait()
+        }
+    }
+
     private func assertCheckingSheetDisappears(
         model: SyncSetupModel, previous: (view: NSHostingView<AnyView>, window: NSWindow),
-        gate: TestWait.Gate, step: String
+        gate: TestWait.Gate, cancelled: XCTestExpectation, step: String
     ) async {
         removeSetup(previous)
-        await Task.yield()
+        await fulfillment(of: [cancelled], timeout: TestWait.timeoutSeconds)
         gate.open()
         await TestWait.until(failureMessage: "Disappeared check did not finish at \(step)") { model.state != .working }
         XCTAssertEqual(model.state, .cancelled, "Sheet disappearance must cancel \(step)")
@@ -1483,26 +1496,29 @@ extension SyncSetupModelTests {
         """)
     }
 
-    private func assertReopenedSetupIsFresh(
+    private func assertFreshSetup(
         model: SyncSetupModel,
-        previous firstSheet: (view: NSHostingView<AnyView>, window: NSWindow),
-        failure: String
+        previous firstSheet: (view: NSHostingView<AnyView>, window: NSWindow)? = nil,
+        context: String = "cancelled check"
     ) async {
         let previousMessage: String
         if case let .failed(message) = model.state { previousMessage = message } else {
             previousMessage = "Connect was cancelled."
         }
-        await TestWait.until(failureMessage: "The first sheet must show its result: \(failure)") {
-            self.renderedTexts(in: firstSheet.view).contains(previousMessage)
+        if let firstSheet {
+            await TestWait.until(failureMessage: "The first sheet must show its result: \(context)") {
+                self.renderedTexts(in: firstSheet.view).contains(previousMessage)
+            }
+            firstSheet.window.close()
         }
-        firstSheet.window.close()
         let reopened = setupHost(AnyView(SyncSetupView(model: model)))
         defer { reopened.window.close() }
         await assertSetupTitle(in: reopened.view)
-        XCTAssertEqual(model.state, .idle, "Reopening after \(failure) must start fresh")
+        XCTAssertEqual(model.state, .idle, "Reopening after \(context) must start fresh")
         let texts = renderedTexts(in: reopened.view)
-        XCTAssertFalse(texts.contains(previousMessage), "A new sheet retained the old \(failure) message")
+        XCTAssertFalse(texts.contains(previousMessage), "A new sheet retained the old \(context) message")
         XCTAssertFalse(texts.contains("Connect was cancelled."))
+        XCTAssertFalse(RenderedViewTestSupport.hasButtonProgress(in: reopened.view))
     }
 
     private func assertSettingsFinished(in host: NSHostingView<AnyView>, runtime: AppRuntime,
@@ -1572,15 +1588,6 @@ extension SyncSetupModelTests {
         host.view.rootView = AnyView(EmptyView())
         host.view.layoutSubtreeIfNeeded()
         host.window.close()
-    }
-
-    private func assertFreshSetup(model: SyncSetupModel) async {
-        let reopened = setupHost(AnyView(SyncSetupView(model: model)))
-        defer { reopened.window.close() }
-        await assertSetupTitle(in: reopened.view)
-        XCTAssertEqual(model.state, .idle)
-        XCTAssertFalse(renderedTexts(in: reopened.view).contains("Connect was cancelled."))
-        XCTAssertFalse(RenderedViewTestSupport.hasButtonProgress(in: reopened.view))
     }
 
     private func assertDisconnectProgress(in host: NSHostingView<AnyView>) async {

@@ -53,7 +53,12 @@ final class PendingSaveTermination {
         guard generation == request, Self.hasPending(saves, steps), dismiss == nil else { return }
         questionScheduled = false
         var answered = false
-        let present = (steps?.pendingCount ?? 0) > 0 ? stepPresenter : presenter
+        let present: (@escaping (Bool) -> Void) -> (() -> Void)
+        if (saves?.pendingCount ?? 0) > 0 && (steps?.pendingCount ?? 0) > 0 {
+            present = Self.presentSaveAndSyncStep
+        } else {
+            present = (steps?.pendingCount ?? 0) > 0 ? stepPresenter : presenter
+        }
         dismiss = present { [weak self] quitAnyway in
             guard let self, self.generation == request, !answered else { return }
             answered = true
@@ -84,6 +89,11 @@ final class PendingSaveTermination {
     static func presentSyncStep(_ resolve: @escaping (Bool) -> Void) -> (() -> Void) {
         present(message: "Pensieve is still finishing a sync step.",
                 detail: "If you quit now, it stops partway.", resolve: resolve)
+    }
+
+    private static func presentSaveAndSyncStep(_ resolve: @escaping (Bool) -> Void) -> (() -> Void) {
+        present(message: "Pensieve is still finishing a sync step and saving a change.",
+                detail: "If you quit now, the sync step stops partway and the change won't be saved.", resolve: resolve)
     }
 
     private static func present(message: String, detail: String,
