@@ -239,6 +239,9 @@ private extension SidebarOutlineControllerTests {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
+        addTeardownBlock { @MainActor [weak window] in window?.close() }
         window.contentView = controller.scrollView
         return window
     }

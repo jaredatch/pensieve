@@ -256,6 +256,7 @@ extension SkillPreviewImageTests {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 480),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = view
         window.orderFront(nil)
         view.layoutSubtreeIfNeeded()

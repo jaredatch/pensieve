@@ -28,11 +28,18 @@ final class PensieveAppInstallPathsTests: XCTestCase {
         delegate.runtime = runtime
         defer { delegate.runtime = previousRuntime }
         let previousMains = NSApp.windows.filter { $0.isVisible && $0.identifier?.rawValue.hasPrefix("main-") == true }
-        previousMains.forEach { $0.orderOut(nil) }
-        defer { previousMains.forEach { $0.orderFront(nil) } }
+        let previousAnimations = previousMains.map(\.animationBehavior)
+        previousMains.forEach { $0.animationBehavior = .none; $0.orderOut(nil) }
+        defer {
+            for (window, behavior) in zip(previousMains, previousAnimations) {
+                window.orderFront(nil)
+                window.animationBehavior = behavior
+            }
+        }
         let changes = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200),
                                styleMask: [.titled, .closable], backing: .buffered, defer: false)
         changes.isReleasedWhenClosed = false
+        changes.animationBehavior = .none
         changes.identifier = NSUserInterfaceItemIdentifier("view-changes-AppWindow-dock")
         changes.orderFront(nil)
         var opened = 0
@@ -42,6 +49,7 @@ final class PensieveAppInstallPathsTests: XCTestCase {
             let window = NSWindow(contentRect: changes.frame, styleMask: [.titled, .closable],
                                   backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
+            window.animationBehavior = .none
             window.identifier = NSUserInterfaceItemIdentifier("main-AppWindow-dock")
             window.orderFront(nil)
             main = window

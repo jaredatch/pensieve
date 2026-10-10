@@ -20,6 +20,7 @@ final class PlatformSettingsPresentationTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 420),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         window.orderFront(nil)
         defer { window.close() }

@@ -25,6 +25,7 @@ final class WindowPolicyTests: XCTestCase {
         )
         window.identifier = identifier.map { NSUserInterfaceItemIdentifier(rawValue: $0) }
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         return window
     }
 

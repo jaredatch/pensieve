@@ -107,6 +107,7 @@ final class HistoryManualCheckHostTests: XCTestCase {
             defer: false
         )
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         window.makeKeyAndOrderFront(nil)
         return window

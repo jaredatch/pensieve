@@ -33,6 +33,7 @@ final class WindowCloseGuardTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false   // a programmatic window frees itself on close; the harness owns this one
+        window.animationBehavior = .none
         let original = RecordingDelegate()
         window.delegate = original
         let proxy = WindowDelegateProxy()

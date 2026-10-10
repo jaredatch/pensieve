@@ -159,6 +159,7 @@ final class AddProjectSheetHostTests: XCTestCase {
                 window.attachedSheet?.contentView != nil
             }
             let sheet = try XCTUnwrap(window.attachedSheet)
+            sheet.animationBehavior = .none
             let content = try XCTUnwrap(sheet.contentView)
             let value = inPath ? model.path : model.name
             let field = try XCTUnwrap(textFields(in: content).first { $0.stringValue == value })
@@ -190,6 +191,7 @@ final class AddProjectSheetHostTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 450, height: 350),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         let container = NSView(frame: window.contentLayoutRect)
         window.contentView = container
         host.frame = container.bounds

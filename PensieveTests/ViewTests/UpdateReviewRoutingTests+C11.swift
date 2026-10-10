@@ -36,6 +36,7 @@ extension UpdateReviewRoutingTests {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.identifier = NSUserInterfaceItemIdentifier(id)
         return window
     }

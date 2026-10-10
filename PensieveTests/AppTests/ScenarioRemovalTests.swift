@@ -62,6 +62,7 @@ final class ScenarioRemovalTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1_000, height: 700),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         window.makeKeyAndOrderFront(nil)
         defer { window.close() }

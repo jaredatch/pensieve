@@ -19,6 +19,7 @@ struct HistoryLifetimeFixture {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = NSHostingView(rootView: HistoryLifetimeHost(skill: skill, history: model, host: host))
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)

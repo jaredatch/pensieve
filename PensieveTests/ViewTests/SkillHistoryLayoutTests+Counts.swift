@@ -130,6 +130,7 @@ private extension SkillHistoryLayoutTests {
         root.addSubview(button)
         let window = NSWindow(contentRect: root.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = root
         window.orderFront(nil)
         return CaptionButtonHost(root: root, button: button, window: window)

@@ -5,6 +5,22 @@ import XCTest
 @testable import Pensieve
 
 extension AppRuntimeTests {
+    func dismissLaunchWizard(in window: NSWindow) async throws {
+        let sheet = try XCTUnwrap(window.attachedSheet)
+        sheet.animationBehavior = .none
+        let root = try XCTUnwrap(sheet.contentView)
+        let escape = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+            modifierFlags: [], timestamp: 0, windowNumber: sheet.windowNumber, context: nil,
+            characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+        await TestWait.until(failureMessage: "The launch wizard did not render its Skip action") {
+            root.layoutSubtreeIfNeeded()
+            return root.performKeyEquivalent(with: escape) || sheet.performKeyEquivalent(with: escape)
+        }
+        await TestWait.until(failureMessage: "The skipped launch wizard did not detach") {
+            window.attachedSheet == nil
+        }
+    }
+
     final class StubWatcher: FileWatchServiceProtocol {
         var onChange: (String) -> Void = { _ in }
         private(set) var startCount = 0
@@ -146,6 +162,7 @@ extension AppRuntimeTests {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 850),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         window.makeKeyAndOrderFront(nil)
         return window

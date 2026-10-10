@@ -209,9 +209,7 @@ final class SkillHistoryAsyncTests: XCTestCase {
                 XCTAssertEqual(fixture.store.bodies["example"], "Historical body")
                 XCTAssertEqual(fixture.counter.value, 1)
             } else {
-                await TestWait.until(failureMessage: "Diff did not open after its read") {
-                    host.window.attachedSheet != nil
-                }
+                try await dismissDiff(in: host.window, presentation: state.presentation)
             }
         }
     }
@@ -219,6 +217,17 @@ final class SkillHistoryAsyncTests: XCTestCase {
 }
 
 extension SkillHistoryAsyncTests {
+    private func dismissDiff(in window: NSWindow, presentation: SkillHistoryTabPresentation) async throws {
+        await TestWait.until(failureMessage: "Diff did not open after its read") {
+            window.attachedSheet != nil
+        }
+        try XCTUnwrap(window.attachedSheet).animationBehavior = .none
+        presentation.diff = nil
+        await TestWait.until(failureMessage: "Diff did not detach during host cleanup") {
+            window.attachedSheet == nil
+        }
+    }
+
     private func assertMissingSkillRefusesRestoreBeforeReading() async throws {
         let fixture = try fixture()
         let model = SkillHistoryTabPresentation()
@@ -284,6 +293,7 @@ extension SkillHistoryAsyncTests {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
             styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
@@ -342,6 +352,7 @@ struct LibraryFixtureWithGit {
 private final class HistoryAsyncHostState {
     var skill: Skill
     var showsHistory = true
+    let presentation = SkillHistoryTabPresentation()
     init(skill: Skill) { self.skill = skill }
 }
 
@@ -360,7 +371,8 @@ private struct HistoryAsyncHarness: View {
             } else {
                 SkillHistoryTab(skill: state.skill, currentBody: "Current", library: fixture.library,
                     upstreamHistory: historyOwner(read: { _, _, _ in historyResult() }), localRevision: .initial,
-                    onOpenUpdates: {}, onUpdateCheck: { _ in }, git: fixture.git, store: fixture.store, workingDir: "/repo")
+                    onOpenUpdates: {}, onUpdateCheck: { _ in }, git: fixture.git, store: fixture.store,
+                    workingDir: "/repo", hostedPresentation: state.presentation)
             }
         }
     }

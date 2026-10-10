@@ -179,6 +179,7 @@ extension SkillInstallServiceTests {
         host.frame = NSRect(x: 0, y: 0, width: 680, height: 520)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         defer { window.close() }
         await TestWait.until(failureMessage: "The cancelled window must still render its current state") {

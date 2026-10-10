@@ -98,6 +98,7 @@ final class SkillHistoryLayoutTests: XCTestCase {
         let window = NSWindow(contentRect: CGRect(origin: .zero, size: size),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.appearance = NSAppearance(named: .aqua)
         window.contentView = view
         window.orderFront(nil)
@@ -122,6 +123,7 @@ final class SkillHistoryLayoutTests: XCTestCase {
         )
         window.title = "History layout " + UUID().uuidString
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.appearance = NSAppearance(named: .aqua)
         window.contentView = view
         window.orderFront(nil)

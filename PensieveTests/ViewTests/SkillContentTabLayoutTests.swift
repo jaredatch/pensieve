@@ -27,6 +27,9 @@ final class SkillContentTabLayoutTests: XCTestCase {
         let host = NSHostingView(rootView: tab.frame(width: width, height: 300))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 300),
                               styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
+        defer { window.close() }
         window.contentView = host
         host.layoutSubtreeIfNeeded()
 
@@ -63,15 +66,19 @@ final class SkillContentTabLayoutTests: XCTestCase {
             let host = NSHostingView(rootView: view)
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 300),
                                   styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.animationBehavior = .none
             window.contentView = host
             host.layoutSubtreeIfNeeded()
             return (host, window)
         }
         let full = ["SKILL.md", "references/examples-for-the-audience.md"]
         let (grown, grownWindow) = hosted(tab(["SKILL.md"]))
+        defer { grownWindow.close() }
         grown.rootView = tab(full)
         grown.layoutSubtreeIfNeeded()
         let (fresh, freshWindow) = hosted(tab(full))
+        defer { freshWindow.close() }
         let grownWidth = try XCTUnwrap(Self.controls(in: grown).compactMap { $0 as? NSPopUpButton }.first).frame.width
         let freshWidth = try XCTUnwrap(Self.controls(in: fresh).compactMap { $0 as? NSPopUpButton }.first).frame.width
         XCTAssertEqual(grownWidth, freshWidth, accuracy: 0.5, "the pop-up keeps the width of the list it was built with")
@@ -172,6 +179,7 @@ final class SkillContentTabLayoutTests: XCTestCase {
             defer: false
         )
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         host.layoutSubtreeIfNeeded()
         return (host, window)

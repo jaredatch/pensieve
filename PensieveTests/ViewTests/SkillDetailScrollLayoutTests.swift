@@ -252,6 +252,7 @@ extension SkillDetailScrollLayoutTests {
             defer: false
         )
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         host.layoutSubtreeIfNeeded()
         return (host, window)

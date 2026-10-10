@@ -191,6 +191,7 @@ extension AppRuntimeTests {
         XCTAssertEqual(deploy.calls, 1)
         XCTAssertEqual(backfillCalls, 1)
         XCTAssertTrue(harness.runtime.scheduler.isLaunchIngestReady)
+        try await dismissLaunchWizard(in: window)
     }
 
     func testLaunchIngestRetryWaitsForInterleavedLockHolder() async throws {

@@ -17,6 +17,7 @@ final class PendingSaveTerminationTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 80),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         window.orderFront(nil)
         defer { window.close() }
@@ -133,19 +134,30 @@ final class PendingSaveTerminationTests: XCTestCase {
 
     func testNativeQuitQuestionButtonsAndHostClosureResolve() async throws {
         func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        let unrelated = NSWindow(contentRect: NSRect(x: 20, y: 20, width: 300, height: 150),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        unrelated.isReleasedWhenClosed = false
+        unrelated.animationBehavior = .none
+        unrelated.title = "Unrelated visible test host"
+        defer { unrelated.close() }
         for (step, choice) in [false, true].flatMap({ step in
             ["Wait", "Quit Anyway", "Close host"].map { (step, $0) }
         }) {
+            unrelated.orderFront(nil)
+            XCTAssertTrue(unrelated.isVisible)
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
+            window.animationBehavior = .none
             defer { window.close() }
             window.makeKeyAndOrderFront(nil)
             var answers: [Bool] = []
             let present = step ? PendingSaveTermination.presentSyncStep : PendingSaveTermination.present
             let dismiss = present { answers.append($0) }
+            defer { dismiss() }
             let parent = try XCTUnwrap(NSApp.windows.first { $0.attachedSheet != nil })
             let sheet = try XCTUnwrap(parent.attachedSheet)
+            sheet.animationBehavior = .none
             await TestWait.until(failureMessage: "The native quit question never rendered its controls") {
                 sheet.contentView?.layoutSubtreeIfNeeded()
                 return sheet.contentView.map { views($0).compactMap { $0 as? NSButton }.count == 2 } ?? false
@@ -167,6 +179,8 @@ final class PendingSaveTerminationTests: XCTestCase {
             dismiss()
         }
         for choice in ["Wait", "Quit Anyway", "Close host"] {
+            unrelated.orderFront(nil)
+            XCTAssertTrue(unrelated.isVisible)
             try await assertBothPendingQuestion(choice: choice)
         }
     }
@@ -184,26 +198,33 @@ final class PendingSaveTerminationTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         defer { window.close() }
         window.makeKeyAndOrderFront(nil)
         let quit = PendingSaveTermination(delay: 0)
         var answers: [Bool] = []
         quit.wait(for: h.saves, steps: steps) { answers.append($0) }
         await TestWait.until(failureMessage: "The combined quit question did not appear") {
-            window.attachedSheet != nil
+            NSApp.windows.contains { $0.attachedSheet != nil }
         }
-        let sheet = try XCTUnwrap(window.attachedSheet)
+        let parent = try XCTUnwrap(NSApp.windows.first { $0.attachedSheet != nil })
+        let sheet = try XCTUnwrap(parent.attachedSheet)
+        sheet.animationBehavior = .none
+        await TestWait.until(failureMessage: "The combined quit question never rendered its controls") {
+            sheet.contentView?.layoutSubtreeIfNeeded()
+            return sheet.contentView.map { views($0).compactMap { $0 as? NSButton }.count == 2 } ?? false
+        }
         let rendered = views(try XCTUnwrap(sheet.contentView))
         let strings = rendered.compactMap { ($0 as? NSTextField)?.stringValue }
         XCTAssertTrue(strings.contains("Pensieve is still finishing a sync step and saving a change."))
         XCTAssertTrue(strings.contains("If you quit now, the sync step stops partway and the change won't be saved."))
         let buttons = rendered.compactMap { $0 as? NSButton }
         XCTAssertEqual(Set(buttons.map(\.title)), ["Wait", "Quit Anyway"])
-        if choice == "Close host" { window.close() } else {
+        if choice == "Close host" { parent.close() } else {
             try XCTUnwrap(buttons.first { $0.title == choice }).performClick(nil)
         }
         await TestWait.until(failureMessage: "The combined quit question did not close") {
-            window.attachedSheet == nil && (choice != "Quit Anyway" || !quit.isWaiting)
+            parent.attachedSheet == nil && (choice != "Quit Anyway" || !quit.isWaiting)
         }
         XCTAssertEqual(answers, choice == "Quit Anyway" ? [true] : [])
         XCTAssertEqual(quit.isWaiting, choice != "Quit Anyway")

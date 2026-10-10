@@ -47,6 +47,7 @@ final class ImportFolderTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 500),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         defer { window.close() }
         await TestWait.until(failureMessage: "Done must render the skill's skipped paths and reasons") {

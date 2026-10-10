@@ -12,6 +12,9 @@ final class MarkdownEditorHostTests: XCTestCase {
         let webView = coordinator.makeWebView()
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
                               styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
+        addTeardownBlock { @MainActor [weak window] in window?.close() }
         window.contentView = webView
         wait(for: [ready], timeout: TestWait.hostedActionTimeoutSeconds)
         return (coordinator, window)
@@ -35,6 +38,9 @@ final class MarkdownEditorHostTests: XCTestCase {
         let webView = coordinator.makeWebView()
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
                               styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
+        defer { window.close() }
         window.contentView = webView
         wait(for: [navigated], timeout: TestWait.hostedActionTimeoutSeconds)
 
