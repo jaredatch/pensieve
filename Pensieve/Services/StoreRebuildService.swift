@@ -42,9 +42,9 @@ protocol StoreRebuildServiceProtocol {
 /// clone-bootstrap (a fresh machine has files but an empty DB) and the post-pull refresh (PLAN-08
 /// consumes both). Reads through `FileServiceProtocol` + `ManifestReadWriting` only; NO git here.
 struct StoreRebuildService: StoreRebuildServiceProtocol {
-    private let fileService: FileServiceProtocol
+    let fileService: FileServiceProtocol
     private let manifestService: ManifestReadWriting
-    private let save: (ModelContext) throws -> Void
+    let save: (ModelContext) throws -> Void
 
     init(fileService: FileServiceProtocol = FileService(),
          manifestService: ManifestReadWriting = ManifestService(),
@@ -228,8 +228,8 @@ extension StoreRebuildService {
         return false
     }
 
-    private func upsertSkill(slug: String, parsed: ParsedSkill, overlay: SkillOverlay?,
-                             existing: Skill?, context: ModelContext, result: inout RebuildResult) {
+    func upsertSkill(slug: String, parsed: ParsedSkill, overlay: SkillOverlay?,
+                     existing: Skill?, context: ModelContext, result: inout RebuildResult) {
         let name = parsed.name ?? slug
         let description = parsed.description ?? name   // hasRequiredFrontmatter guarantees non-empty; defensive
         // The overlay-backed fields (scope/tags/cursor/origin/createdAt) resolve three ways:
@@ -328,9 +328,9 @@ extension StoreRebuildService {
 // MARK: - Categories reconcile
 
 extension StoreRebuildService {
-    private func rebuildCategories(snapshot: ManifestSnapshot,
-                                   context: ModelContext,
-                                   result: inout RebuildResult) {
+    func rebuildCategories(snapshot: ManifestSnapshot,
+                           context: ModelContext,
+                           result: inout RebuildResult) {
         let existingCategories = (try? context.fetch(FetchDescriptor<Category>())) ?? []
         var existingByName = Dictionary(existingCategories.map { ($0.name, $0) },
                                         uniquingKeysWith: { first, _ in first })

@@ -95,6 +95,11 @@ final class SkillLibraryViewModel {
     private(set) var storeUnreadable = false
     private(set) var launchIngestPending = false
     var deletionNotice: DeletionNotice?
+
+    /// Filled when the synchronous deletion flow settles, before queued save callbacks can run.
+    final class DeletionPresentation {
+        var notice: DeletionNotice?
+    }
     init(
         skillStore: SkillStoreProtocol,
         fileService: FileServiceProtocol? = nil,
@@ -120,7 +125,10 @@ final class SkillLibraryViewModel {
         manifestSaves?.submit(change, context: context) { [weak self] failure in
             guard let self else { return }
             if let failure {
-                let message = "Saved, but updating the sync manifest failed: \(failure.localizedDescription)"
+                let message: String
+                if case ManifestSaveError.rebuildFailed = failure {
+                    message = failure.localizedDescription
+                } else { message = "Saved, but updating the sync manifest failed: \(failure.localizedDescription)" }
                 self.error = message
                 self.lastManifestError = message
             } else {
@@ -187,6 +195,7 @@ extension SkillLibraryViewModel {
     @discardableResult
     // Frozen 26.2-a keeps the pre-delete probe and both existing re-probes in this one primitive.
     func deleteSkillEntry(_ skill: Skill, context: ModelContext,
+                          presentation: DeletionPresentation = DeletionPresentation(),
                           persist: (ModelContext) throws -> Void = { try $0.save() }) -> SkillDeletionResult {
         let quarantined = pendingRowCleanup.contains(skill.id), deletedSlug = skill.directoryName
         let deletedName = skill.name
@@ -247,14 +256,19 @@ extension SkillLibraryViewModel {
         }
         pendingRowCleanup.remove(skill.id)
         self.error = nil
-        return queueDeletedSkill(slug: deletedSlug, name: deletedName, context: context)
+        return queueDeletedSkill(slug: deletedSlug, name: deletedName, context: context, presentation: presentation)
     }
 
-    private func queueDeletedSkill(slug: String, name: String, context: ModelContext) -> SkillDeletionResult {
+    private func queueDeletedSkill(slug: String, name: String, context: ModelContext,
+                                   presentation: DeletionPresentation) -> SkillDeletionResult {
         regenerateManifest(.deleteSkill(slug), context: context) { [weak self] failure in
             guard let self, let failure else { return }
-            let notice = self.deletionNotice?.message ?? "Deleted “\(name)”."
-            self.deletionNotice = .warning(notice + " The sync manifest couldn't be updated: " + failure.localizedDescription)
+            let detail: String
+            if case ManifestSaveError.rebuildFailed = failure {
+                detail = failure.localizedDescription
+            } else { detail = "The sync manifest couldn't be updated: " + failure.localizedDescription }
+            let notice = presentation.notice?.message ?? "Deleted “\(name)”."
+            self.deletionNotice = .failed(notice + " " + detail)
         }
         return .deleted
     }

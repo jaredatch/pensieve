@@ -21,9 +21,11 @@ enum SkillDeletionFlow {
         })
         var retirementSaved = false
         var deletionOutcome: SkillLibraryViewModel.SkillDeletionResult?
+        let presentation = SkillLibraryViewModel.DeletionPresentation()
         defer {
             settleWaitingCleanup(cleanupResult, retirementSaved: retirementSaved,
                 outcome: deletionOutcome, skill: skill, library: library, platformVM: platformVM)
+            presentation.notice = library.deletionNotice
         }
         let cleanup = cleanupResult.batch
         if cleanup.hasFailures {
@@ -55,7 +57,7 @@ enum SkillDeletionFlow {
             return false
         }
 
-        let outcome = library.deleteSkillEntry(skill, context: context, persist: persist)
+        let outcome = library.deleteSkillEntry(skill, context: context, presentation: presentation, persist: persist)
         deletionOutcome = outcome
         let manifestNote = waitingCleanupNote(library: library, waitingProjects: cleanupResult.waitingProjects)
         return present(outcome, skill: skill, manifestNote: manifestNote, library: library)

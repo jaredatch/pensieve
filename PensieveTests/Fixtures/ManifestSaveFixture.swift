@@ -22,14 +22,14 @@ final class ManifestSaveFixture {
     let beta = Skill(name: "Beta", directoryName: "beta")
     let project: Project
 
-    init(unopenableLock: Bool = false, waitSeconds: TimeInterval = 0.01) throws {
+    init(unopenableLock: Bool = false, waitSeconds: TimeInterval = 0.01, rebuildFiles: FileServiceProtocol? = nil) throws {
         root = TestTemporaryDirectory.path + "manifest-save-" + UUID().uuidString
         lockPath = root + "/support/sync.lock"
         context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
         recording = RecordingSaveManifest()
         let messages = messages
         saves = ManifestSaveModel(manifest: recording, root: root, lockPath: lockPath,
-        waitSeconds: waitSeconds, log: { messages.lines.append($0) })
+        waitSeconds: waitSeconds, files: rebuildFiles ?? files, log: { messages.lines.append($0) })
         library = SkillLibraryViewModel(skillStore: SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root),
             fileWatchService: FileWatchService(rootDir: root + "/skills"),
             manifestRoot: root, manifestSaves: saves)
@@ -89,7 +89,9 @@ final class RecordingSaveManifest: ManifestSnapshotting {
     private var snapshots: [ManifestSnapshot] = []
     var failingWrites = 0
     var failingSnapshots = 0
+    var failingRebuildSnapshots = 0
     var afterWrite: (() -> Void)?
+    var afterRebuildSnapshot: (() throws -> Void)?
     struct Refused: Error {}
     var writes: [ManifestSnapshot] {
         lock.lock()
@@ -97,8 +99,15 @@ final class RecordingSaveManifest: ManifestSnapshotting {
         return snapshots
     }
     func snapshot(from context: ModelContext) throws -> ManifestSnapshot {
-        if failingSnapshots > 0 { failingSnapshots -= 1; throw Refused() }
-        return try base.snapshot(from: context)
+        if !Thread.isMainThread, failingRebuildSnapshots > 0 {
+            failingRebuildSnapshots -= 1
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        // These faults belong to the window fallback/projection read, not the worker result read.
+        if Thread.isMainThread, failingSnapshots > 0 { failingSnapshots -= 1; throw Refused() }
+        let value = try base.snapshot(from: context)
+        if !Thread.isMainThread { try afterRebuildSnapshot?() }
+        return value
     }
     func read(fromRoot root: String) throws -> ManifestSnapshot { try base.read(fromRoot: root) }
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {

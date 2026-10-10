@@ -26,7 +26,7 @@ final class ManifestSaveModel {
         let change: ManifestChange
         let presentation: ManifestRefusedEdit
         let fallback: () throws -> ManifestSnapshot
-        let accept: (ManifestSnapshot) throws -> Void
+        let accept: (PreparedStoreRebuild, ManifestSnapshot) throws -> Void
         let report: (Error?) -> Void
     }
 
@@ -41,15 +41,15 @@ final class ManifestSaveModel {
         self.log = log
     }
 
-    func submit(_ change: ManifestChange, context: ModelContext, report: @escaping (Error?) -> Void) {
+    func submit(_ change: ManifestChange, context: ModelContext, categoryID: UUID? = nil,
+                report: @escaping (Error?) -> Void) {
         precondition(Thread.isMainThread)
         for edit in refused where edit.context === context { edit.observe(change) }
-        items.append(Item(change: change, presentation: ManifestRefusedEdit(change, context: context),
+        items.append(Item(change: change, presentation: ManifestRefusedEdit(change, context: context, categoryID: categoryID),
             fallback: { try self.manifest.snapshot(from: context) },
-            accept: { snapshot in
-                let result = StoreRebuildService(fileService: self.files, manifestService: self.manifest)
-                    .rebuild(snapshot: snapshot, fromRoot: self.root, context: context)
-                if result.saveFailed { throw ManifestSaveError.mergeFailed(result.warnings.joined(separator: " ")) }
+            accept: { prepared, snapshot in
+                try StoreRebuildService(fileService: self.files, manifestService: self.manifest)
+                    .accept(prepared, snapshot: snapshot, context: context)
             }, report: report))
         pendingCount = items.count
         guard worker == nil else { return }
@@ -65,48 +65,80 @@ final class ManifestSaveModel {
     private func drain() async {
         var savedAny = false
         while !items.isEmpty {
-            let item = items[0]
-            var readDisk = false
-            do {
-                let lock = try await takeLock()
-                defer { lock.release() }
-                let disk = try await readCurrentManifest()
-                let manifest = manifest, root = root
-                let usingFallback = disk == nil
-                var saved: ManifestSnapshot
-                if let disk, !usingFallback { saved = disk } else { saved = try item.fallback() }
-                if let disk { item.presentation.remember(durable: disk); readDisk = true }
-                let applied = usingFallback || item.change.apply(to: &saved)
-                if applied {
-                    let snapshot = saved
-                    try await BlockingWork.run { try manifest.write(snapshot, toRoot: root) }
-                    savedAny = true
-                }
-                var displayed = saved
-                projectRefused(durable: saved, onto: &displayed)
-                if !applied {
-                    if refused.contains(where: { $0.suppliesTarget(for: item.presentation) }) {
-                        throw ManifestSaveError.unsavedTarget
-                    }
-                    log("Skipped queued manifest change: its target was removed by sync.")
-                }
-                for pending in items.dropFirst() { pending.change.apply(to: &displayed) }
-                try item.accept(displayed)
-                item.report(nil)
-            } catch {
-                if readDisk {
-                    item.presentation.cache(local: try? manifest.snapshot(from: item.presentation.context),
-                        categories: try? item.presentation.context.fetch(FetchDescriptor<Category>()))
-                }
-                refused.append(item.presentation)
-                item.report(error)
-            }
+            savedAny = await save(items[0]) || savedAny
             items.removeFirst()
             pendingCount = items.count
             isWaiting = false
         }
         worker = nil
         if savedAny { didSave() }
+    }
+
+    @MainActor
+    private func save(_ item: Item) async -> Bool {
+        var disk: ManifestSnapshot?
+        do {
+            let lock = try await takeLock()
+            defer { lock.release() }
+            disk = try await readCurrentManifest()
+            if let disk { item.presentation.remember(durable: disk) }
+            let result = try await publish(item, disk: disk)
+            await rebuild(item, durable: result.snapshot)
+            return result.published
+        } catch {
+            if disk != nil {
+                item.presentation.cache(local: try? manifest.snapshot(from: item.presentation.context),
+                    categories: try? item.presentation.context.fetch(FetchDescriptor<Category>()))
+            }
+            refused.append(item.presentation)
+            item.report(error)
+            return false
+        }
+    }
+
+    @MainActor
+    private func publish(_ item: Item, disk: ManifestSnapshot?) async throws
+        -> (snapshot: ManifestSnapshot, published: Bool) {
+        var saved = try disk ?? item.fallback()
+        if disk != nil, case .deleteCategory(let name) = item.change,
+           !saved.categories.contains(where: { $0.name == name }),
+           refused.contains(where: { $0.suppliesTarget(for: item.presentation) }) {
+            throw ManifestSaveError.unsavedTarget
+        }
+        let applied = disk == nil || item.change.apply(to: &saved)
+        if applied {
+            let snapshot = saved, manifest = manifest, root = root
+            try await BlockingWork.run { try manifest.write(snapshot, toRoot: root) }
+            if let disk { for edit in refused { edit.rememberLocalWrite(before: disk, after: saved) } }
+        } else {
+            var probe = saved
+            projectRefused(durable: saved, onto: &probe)
+            if refused.contains(where: { $0.suppliesTarget(for: item.presentation) }) {
+                throw ManifestSaveError.unsavedTarget
+            }
+            log("Skipped queued manifest change: its target was removed by sync.")
+        }
+        return (saved, applied)
+    }
+
+    @MainActor
+    private func rebuild(_ item: Item, durable: ManifestSnapshot) async {
+        // FIFO retains sync.lock until this result is accepted. The scan's context never commits;
+        // a later UI save must not be overwritten while this job reads disk.
+        do {
+            let container = item.presentation.context.container, files = files, manifest = manifest, root = root
+            let prepared = try await BlockingWork.run {
+                try StoreRebuildService(fileService: files, manifestService: manifest)
+                    .prepare(snapshot: durable, fromRoot: root, container: container, manifest: manifest)
+            }
+            var displayed = prepared.snapshot
+            projectRefused(durable: durable, onto: &displayed)
+            for pending in items.dropFirst() { pending.change.apply(to: &displayed) }
+            try item.accept(prepared, displayed)
+            item.report(nil)
+        } catch {
+            item.report(ManifestSaveError.rebuildFailed(error.localizedDescription))
+        }
     }
 
     @MainActor
@@ -146,26 +178,22 @@ final class ManifestSaveModel {
     @MainActor
     private func takeLock() async throws -> SyncLock {
         let path = lockPath
-        if let lock = try await BlockingWork.run(operation: { try SyncLock.tryAcquireReportingErrors(at: path) }) {
-            return lock
-        }
+        // Start the clock before the first attempt, including native-worker admission time.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(waitSeconds))
         let notice = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(waitSeconds))
+            try? await Task.sleep(until: deadline, clock: .continuous)
             if !Task.isCancelled { isWaiting = true }
         }
         defer { notice.cancel() }
-        // One native job owns the retry loop; sleeping between attempts creates no new worker.
-        return try await BlockingWork.run {
-            while true {
-                try Task.checkCancellation()
-                if let lock = try SyncLock.tryAcquireReportingErrors(at: path) { return lock }
-                Thread.sleep(forTimeInterval: 0.05)
-            }
-        }
+        return try await BlockingWork.run { try SyncLock.waitForSave(at: path) }
     }
 
     func reportCategoryFailure(_ error: Error?) {
-        if let error { log("Category mutation saved, but manifest regeneration failed: " + error.localizedDescription) }
+        if let error {
+            if case ManifestSaveError.rebuildFailed = error {
+                log("Category manifest saved, but the local store rebuild failed: " + error.localizedDescription)
+            } else { log("Category mutation saved, but manifest regeneration failed: " + error.localizedDescription) }
+        }
     }
 
     static func logMessage(_ message: String) {
@@ -174,12 +202,12 @@ final class ManifestSaveModel {
     }
 }
 
-private enum ManifestSaveError: LocalizedError {
-    case mergeFailed(String)
+enum ManifestSaveError: LocalizedError {
+    case rebuildFailed(String)
     case unsavedTarget
     var errorDescription: String? {
         switch self {
-        case .mergeFailed(let message): message
+        case .rebuildFailed(let message): "The sync manifest was saved, but rebuilding the local store failed: " + message
         case .unsavedTarget: "This change depends on an earlier change that could not be saved."
         }
     }

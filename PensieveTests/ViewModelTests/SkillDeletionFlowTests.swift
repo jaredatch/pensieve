@@ -129,15 +129,44 @@ final class SkillDeletionFlowTests: XCTestCase {
     }
 
     func testDeleteWarnsWhenFinalManifestWriteFails() async throws {
-        let f = try fixture(); f.manifest.failingWrites = [1, 2]
-        let deleted = await delete(f); XCTAssertTrue(deleted); XCTAssertEqual(f.counter.value, 1)
-        XCTAssertTrue(f.library.error?.contains("manifest") == true)
-        XCTAssertTrue(f.library.deletionNotice?.message.contains("sync manifest couldn't be updated") == true)
-        f.manifest.failingWrites = []
-        f.library.regenerateManifest(.deleteSkill("other"), context: f.context)
-        await f.library.manifestSaves?.waitUntilIdle()
-        XCTAssertTrue(f.library.deletionNotice?.message.contains("sync manifest couldn't be updated") == true,
-            "An unrelated successful save cannot erase the deletion warning")
+        for laterFails in [false, true] {
+            let f = try fixture(); f.manifest.failingWrites = [1, 2]
+            let lock = try XCTUnwrap(SyncLock.tryAcquire(at: f.library.manifestSaves!.lockPath))
+            defer { lock.release() }
+            XCTAssertTrue(SkillDeletionFlow.delete(skill: f.skill, library: f.library,
+                platformVM: f.platform, projects: [f.project], context: f.context))
+            let later = Skill(name: "Beta", directoryName: "beta")
+            f.context.insert(later)
+            try f.context.save()
+            f.store.entries.insert("beta")
+            f.store.bodies["beta"] = "body"
+            if laterFails {
+                let path = f.links.path(later, .claudeCode, nil)
+                f.links.linkedPaths.insert(path)
+                f.links.failingUnlinkPaths.insert(path)
+            }
+            XCTAssertEqual(SkillDeletionFlow.delete(skill: later, library: f.library,
+                platformVM: f.platform, projects: [f.project], context: f.context), !laterFails)
+            XCTAssertEqual(f.library.manifestSaves?.pendingCount, laterFails ? 2 : 4)
+            lock.release()
+            await f.library.manifestSaves?.waitUntilIdle()
+            if laterFails { XCTAssertTrue(f.library.error?.contains("manifest") == true) }
+            XCTAssertEqual(f.counter.value, laterFails ? 1 : 2)
+            assertManifestDeletionWarning(f.library, laterFails: laterFails)
+            f.manifest.failingWrites = []
+            f.library.regenerateManifest(.deleteSkill("other"), context: f.context)
+            await f.library.manifestSaves?.waitUntilIdle()
+            assertManifestDeletionWarning(f.library, laterFails: laterFails)
+        }
+    }
+
+    private func assertManifestDeletionWarning(_ library: SkillLibraryViewModel, laterFails: Bool,
+                                               file: StaticString = #filePath, line: UInt = #line) {
+        let message = library.deletionNotice?.message ?? ""
+        XCTAssertTrue(message.contains("sync manifest couldn't be updated"), "later fails: \(laterFails)", file: file, line: line)
+        XCTAssertEqual(library.deletionNotice?.title, "Couldn't delete skill", file: file, line: line)
+        XCTAssertTrue(message.contains("Alpha"), message, file: file, line: line)
+        XCTAssertFalse(message.contains("Beta"), message, file: file, line: line)
     }
 
     func testDeleteIsQuietWhenFinalManifestWriteSucceedsAfterEarlierFailure() async throws {

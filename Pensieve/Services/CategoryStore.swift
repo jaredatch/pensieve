@@ -98,10 +98,10 @@ struct CategoryStore: CategoryStoreProtocol {
     }
 
     func delete(_ category: Category, context: ModelContext, notifier: SyncStateNotifying) {
-        let name = category.name
+        let name = category.name, id = category.id
         context.delete(category)
         try? context.save()
-        regenerateManifest(.deleteCategory(name), context: context)
+        regenerateManifest(.deleteCategory(name), context: context, categoryID: id)
         notifier()
     }
 
@@ -182,7 +182,7 @@ struct CategoryStore: CategoryStoreProtocol {
         return categories.filter { $0.skillSlugs.contains(slug) }
     }
 
-    private func regenerateManifest(_ change: ManifestChange, context: ModelContext) {
-        manifestSaves?.submit(change, context: context) { manifestSaves?.reportCategoryFailure($0) }
+    private func regenerateManifest(_ change: ManifestChange, context: ModelContext, categoryID: UUID? = nil) {
+        manifestSaves?.submit(change, context: context, categoryID: categoryID) { manifestSaves?.reportCategoryFailure($0) }
     }
 }

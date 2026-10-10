@@ -16,13 +16,13 @@ final class ManifestRefusedEdit {
     private var cachedName: String?
     private var initialCategory: CategoryRecord?
 
-    init(_ change: ManifestChange, context: ModelContext) {
+    init(_ change: ManifestChange, context: ModelContext, categoryID: UUID? = nil) {
         self.context = context
         self.original = change
         if let name = Self.categoryName(change) {
-            categoryID = (try? context.fetch(FetchDescriptor<Category>()))?.first { $0.name == name }?.id
+            self.categoryID = categoryID ?? (try? context.fetch(FetchDescriptor<Category>()))?.first { $0.name == name }?.id
             cachedName = name
-        } else { categoryID = nil }
+        } else { self.categoryID = nil }
         switch change {
         case .skillMetadata(let slug, let tags, let scope):
             fields = []
@@ -37,6 +37,15 @@ final class ManifestRefusedEdit {
         if case .deleteCategory(let name) = original {
             initialCategory = durable.categories.first { $0.name == name }
         }
+    }
+
+    /// A local save can rewrite a refused deletion's source record (for example, retiring a
+    /// skill membership). Only a change already present before our write can retire the refusal.
+    func rememberLocalWrite(before: ManifestSnapshot, after: ManifestSnapshot) {
+        guard case .deleteCategory(let name) = original,
+              let initialCategory,
+              before.categories.first(where: { $0.name == name }) == initialCategory else { return }
+        self.initialCategory = after.categories.first { $0.name == name }
     }
 
     func cache(local: ManifestSnapshot?, categories: [Category]?) {

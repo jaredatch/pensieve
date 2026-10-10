@@ -59,6 +59,28 @@ final class SyncLock {
         return SyncLock(fd: fd)
     }
 
+    /// A queued GUI save waits on one descriptor on its native worker. The initial attempt and
+    /// contended wait share that job; flock sleeps in the kernel rather than reopening and polling.
+    /// This whole-cycle wait is distinct from acquire's leaf-only contract. Pending saves finish
+    /// even if their awaiting task is cancelled; Quit Anyway remains the user's escape from a holder.
+    static func waitForSave(at path: String) throws -> SyncLock {
+        precondition(!Thread.isMainThread)
+        let fd = try openLockFile(at: path)
+        if flock(fd, LOCK_EX | LOCK_NB) == 0 { return SyncLock(fd: fd) }
+        let code = errno
+        guard code == EWOULDBLOCK else {
+            close(fd)
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        }
+        while flock(fd, LOCK_EX) != 0 {
+            let code = errno
+            if code == EINTR { continue }
+            close(fd)
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        }
+        return SyncLock(fd: fd)
+    }
+
     /// A fresh install has no parent. The askpass helper there is written lazily, so it cannot
     /// create the folder for us. Creation is best effort: an existing parent can still be opened
     /// when Foundation refuses mkdir. Both lock modes let open/flock decide access.
