@@ -7,6 +7,10 @@ import SwiftData
 @MainActor
 @Observable
 final class SkillHistoryTabPresentation {
+    static let unreadableRestoreMessage = "Nothing was restored. Pensieve couldn't read this skill."
+    static let changedRestoreMessage =
+        "Nothing was restored. The skill changed while Pensieve was reading that version."
+
     struct Diff: Identifiable {
         let version: SkillHistoryVersion
         let body: String
@@ -89,7 +93,7 @@ final class SkillHistoryTabPresentation {
         guard restoringVersion == nil, skillID == skill.id else { return Task { false } }
         guard let context = skill.modelContext, !skill.isDeleted,
               let rawDocument = try? store.readData(directoryName: skill.directoryName) else {
-            errorMessage = "Nothing was restored. The skill changed while Pensieve was reading that version."
+            errorMessage = Self.unreadableRestoreMessage
             return Task { false }
         }
         actionGeneration &+= 1
@@ -111,7 +115,7 @@ final class SkillHistoryTabPresentation {
                   library?.textEditRevisions[slug] == editRevision, library?.drafts[slug]?.body == draft,
                   library?.folderChangeRevisions[slug] == folderRevision,
                   (try? store.readData(directoryName: slug)) == rawDocument else {
-                errorMessage = "Nothing was restored. The skill changed while Pensieve was reading that version."
+                errorMessage = Self.changedRestoreMessage
                 return false
             }
             guard let document else { errorMessage = "Couldn't load that version."; return false }

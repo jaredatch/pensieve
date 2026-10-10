@@ -104,7 +104,7 @@ extension AppRuntimeTests {
             skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir, storeRoot: TestPaths.storeRoot),
             fileWatchService: watcher, manifestRoot: TestPaths.storeRoot)
         let platformVM = neutralPlatformVM()
-        var launchAttemptCount = 0
+        let launchAttempts = Counter()
         let convergence = PostSyncConvergence(
             root: "/tmp/AppRuntimeTests", deployReconciler: deployReconciler,
             contextFactory: { ModelContext(container) }, categoryReconciler: categoryReconciler,
@@ -115,9 +115,9 @@ extension AppRuntimeTests {
             library: library,
             defaults: defaults,
             launchReconcile: { _, migrated in
+                let launchAttemptCount = launchAttempts.increment() - 1
                 launchCalls?()
                 launchAttempt?(migrated)
-                defer { launchAttemptCount += 1 }
                 if launchAttemptCount > 0 {
                     if let launchRetryOutcomes {
                         return launchRetryOutcomes[min(launchAttemptCount - 1, launchRetryOutcomes.count - 1)]

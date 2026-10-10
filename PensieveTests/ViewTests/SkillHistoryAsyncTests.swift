@@ -155,11 +155,12 @@ final class SkillHistoryAsyncTests: XCTestCase {
             XCTAssertFalse(restored, invalidation)
             if invalidation != "selection", invalidation != "close" {
                 XCTAssertEqual(model.errorMessage,
-                    "Nothing was restored. The skill changed while Pensieve was reading that version.", invalidation)
+                    SkillHistoryTabPresentation.changedRestoreMessage, invalidation)
             }
             XCTAssertEqual(fixture.store.bodies["example"], bodyBeforeRelease, invalidation)
             XCTAssertEqual(fixture.counter.value, 0, invalidation)
         }
+        try await assertMissingSkillRefusesRestoreBeforeReading()
     }
 
     func testRenderedDiffAndSheetRestoreShowSpinnersAndComplete() async throws {
@@ -217,6 +218,27 @@ final class SkillHistoryAsyncTests: XCTestCase {
 }
 
 extension SkillHistoryAsyncTests {
+    private func assertMissingSkillRefusesRestoreBeforeReading() async throws {
+        let fixture = try fixture()
+        let model = SkillHistoryTabPresentation()
+        fixture.git.commits = [Self.commit("version")]
+        await model.load(skill: fixture.skill, git: fixture.git, workingDir: "/repo")
+        let version = try XCTUnwrap(model.snapshot.versions.first)
+        let root = TestTemporaryDirectory.path + "MissingHistorySkill-\(UUID().uuidString)"
+        let store = SkillStore(fileService: FileService(), baseDir: root + "/skills", storeRoot: root)
+        let reads = Counter()
+        fixture.git.showOperation = { _ in
+            reads.increment()
+            return "Restored"
+        }
+        let restored = await model.restore(version, skill: fixture.skill, git: fixture.git, workingDir: "/repo",
+            store: store, library: fixture.library, notifier: fixture.counter.notify).value
+        XCTAssertFalse(restored)
+        XCTAssertEqual(model.errorMessage, SkillHistoryTabPresentation.unreadableRestoreMessage)
+        XCTAssertEqual(reads.value, 0)
+        XCTAssertEqual(fixture.counter.value, 0)
+    }
+
     private func invalidateRestore(_ invalidation: String, fixture: LibraryFixtureWithGit,
                                    model: SkillHistoryTabPresentation) async throws {
         switch invalidation {

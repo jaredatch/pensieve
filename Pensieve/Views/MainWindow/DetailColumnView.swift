@@ -32,13 +32,6 @@ struct DetailColumnView: View {
 
     var body: some View {
         content
-            .safeAreaInset(edge: .top) {
-                if library.launchIngestPending, section != .skills || !skillsEmpty {
-                    Text(SkillLibraryViewModel.launchIngestMessage)
-                        .font(.callout).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(Spacing.md)
-                }
-            }
             .toolbar {
                 ToolbarItem { addControl }
                 ToolbarItem { Spacer() }
@@ -123,15 +116,15 @@ struct DetailColumnView: View {
                 Label("Add Skill", systemImage: "plus")
             }
             .disabled(library.addsFenced)
-            .help("Add Skill")
+            .help(library.launchIngestPending ? SkillLibraryViewModel.launchIngestMessage : "Add Skill")
         case .projects:
             Button { onAdd(.projects) } label: { Label("Add Project", systemImage: "plus") }
                 .disabled(library.addsFenced)
-                .help("Add Project")
+                .help(library.launchIngestPending ? SkillLibraryViewModel.launchIngestMessage : "Add Project")
         case .categories:
             Button { onAdd(.categories) } label: { Label("Add Category", systemImage: "plus") }
                 .disabled(library.addsFenced)
-                .help("Add Category")
+                .help(library.launchIngestPending ? SkillLibraryViewModel.launchIngestMessage : "Add Category")
         case .tags, .machines:
             EmptyView()
         }
