@@ -1,7 +1,7 @@
 import Foundation
 
 extension GitService {
-    func performInstalledBaseline(
+    func installedBaseline(
         commit: String,
         path: String,
         repositoryPath: String,
@@ -49,8 +49,8 @@ extension GitService {
         })
     }
 
-    func performHistoricalContent(object: String, size: Int, repositoryPath: String,
-                                  textByteLimit: Int) throws -> UpstreamHistoryFileContent {
+    func historicalContent(object: String, size: Int, repositoryPath: String,
+                           textByteLimit: Int) throws -> UpstreamHistoryFileContent {
         guard size <= textByteLimit else { return .tooLarge }
         let data = try blob(object, at: repositoryPath)
         guard !data.contains(0), let text = UpstreamHistoryFileContent.utf8PreservingBOM(data) else { return .binary }
@@ -63,74 +63,19 @@ extension GitService {
         return relative
     }
 
-    func performObjectExists(_ revision: String, at repositoryPath: String) throws -> Bool {
+    func objectExists(_ revision: String, at repositoryPath: String) throws -> Bool {
         try run(["-C", repositoryPath, "cat-file", "-e", revision], in: nil).exit == 0
     }
 
-    func performObjectSize(_ revision: String, at repositoryPath: String) throws -> Int {
+    func objectSize(_ revision: String, at repositoryPath: String) throws -> Int {
         let output = try runOrThrow(["-C", repositoryPath, "cat-file", "-s", revision], in: nil)
         return Int(output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? Int.max
     }
 
-    func performBlob(_ revision: String, at repositoryPath: String) throws -> Data {
+    func blob(_ revision: String, at repositoryPath: String) throws -> Data {
         let args = ["-C", repositoryPath, "cat-file", "blob", revision]
         let output = try runData(args, in: nil)
         guard output.exit == 0 else { throw dataCommandError(output, args: args) }
         return output.stdout
-    }
-}
-
-// Capture the source before entering implementation helpers or closures.
-extension GitService {
-    func blob(_ revision: String, at repositoryPath: String,
-              file: StaticString = #fileID, line: UInt = #line) throws -> Data {
-        try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performBlob(revision, at: repositoryPath)
-        }
-    }
-
-    func installedBaseline(
-        commit: String,
-        path: String,
-        repositoryPath: String,
-        textByteLimit: Int,
-        fileLimit: Int,
-        byteLimit: Int,
-        file: StaticString = #fileID, line: UInt = #line) throws -> UpstreamHistoryBaseline? {
-        try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performInstalledBaseline(
-                commit: commit,
-                path: path,
-                repositoryPath: repositoryPath,
-                textByteLimit: textByteLimit,
-                fileLimit: fileLimit,
-                byteLimit: byteLimit)
-        }
-    }
-
-    func historicalContent(object: String, size: Int, repositoryPath: String,
-                           textByteLimit: Int,
-                           file: StaticString = #fileID, line: UInt = #line) throws -> UpstreamHistoryFileContent {
-        try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performHistoricalContent(
-                object: object,
-                size: size,
-                repositoryPath: repositoryPath,
-                textByteLimit: textByteLimit)
-        }
-    }
-
-    func objectExists(_ revision: String, at repositoryPath: String,
-                      file: StaticString = #fileID, line: UInt = #line) throws -> Bool {
-        try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performObjectExists(revision, at: repositoryPath)
-        }
-    }
-
-    func objectSize(_ revision: String, at repositoryPath: String,
-                    file: StaticString = #fileID, line: UInt = #line) throws -> Int {
-        try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performObjectSize(revision, at: repositoryPath)
-        }
     }
 }

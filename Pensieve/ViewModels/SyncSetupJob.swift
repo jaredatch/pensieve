@@ -35,7 +35,7 @@ struct SyncSetupJob {
         } catch { return nil }
     }
 
-    func perform(spec: RemoteSpec, credential: GitCredential, beginWriting: () throws -> Void) throws {
+    func perform(spec: RemoteSpec, credential: GitCredential, beginWriting: () throws -> Void) throws -> String? {
         guard let lock = SyncLock.tryAcquire(at: lockPath) else { throw SyncError.syncInProgress }
         defer { lock.release() }
         // Checking never writes to the store, remote or Keychain. Only these git calls opt in.
@@ -51,18 +51,24 @@ struct SyncSetupJob {
             if case let .httpsToken(username, token) = credential {
                 try credentials.store(token: token, username: username, forHost: spec.host)
             }
-            try action()
+            try action.run()
         }
+        return action.notice
     }
 
-    private func checkedAction(spec: RemoteSpec, credential: GitCredential) throws -> () throws -> Void {
+    private struct CheckedAction {
+        let notice: String?
+        let run: () throws -> Void
+    }
+
+    private func checkedAction(spec: RemoteSpec, credential: GitCredential) throws -> CheckedAction {
         let hasGitDir = fileService.directoryExists(at: root + "/.git")
         switch SyncSetupModel.firstSyncPlan(hasGitDir: hasGitDir, hasLocalSkills: localSkillsExist()) {
         case .alreadyConfigured:
             let hasLocalBranches = try git.hasLocalBranches(at: root)
             if hasLocalBranches {
                 let rebuild = syncedFamiliesEmpty() == true
-                return {
+                return CheckedAction(notice: nil) {
                     try self.git.setRemote(spec.url, at: self.root)
                     if rebuild { try self.rebuildAndRequireReadable() }
                 }
@@ -70,7 +76,9 @@ struct SyncSetupJob {
 
             if isVirginScaffoldStore(toleratingGitDir: true) {
                 let branch = try resolvedDefaultBranch(spec: spec, credential: credential)
-                return { try self.adoptInPlace(spec: spec, credential: credential, defaultBranch: branch) }
+                return CheckedAction(notice: branch.notice) {
+                    try self.adoptInPlace(spec: spec, credential: credential, defaultBranch: branch.name)
+                }
             }
 
             guard syncedFamiliesEmpty() == true,
@@ -78,25 +86,27 @@ struct SyncSetupJob {
                 throw SyncSetupError.midAdoptionStoreUnrecognized
             }
             let branch = try resolvedDefaultBranch(spec: spec, credential: credential)
-            let hasTrackingBranch = git.hasRemoteTrackingBranch(branch, at: root)
+            let hasTrackingBranch = git.hasRemoteTrackingBranch(branch.name, at: root)
             // This legacy Boolean query maps git failures to false. Preserve cancellation first.
             try Task.checkCancellation()
             guard hasTrackingBranch else {
                 throw SyncSetupError.midAdoptionStoreUnrecognized
             }
-            return { try self.adoptInPlace(spec: spec, credential: credential, defaultBranch: branch) }
+            return CheckedAction(notice: branch.notice) {
+                try self.adoptInPlace(spec: spec, credential: credential, defaultBranch: branch.name)
+            }
         case .initAndPush:
-            _ = try git.remoteDefaultBranch(remote: spec.url, credential: credential)
-            _ = try git.remoteBranches(remote: spec.url, credential: credential)
-            return { try self.initAndPush(spec: spec, credential: credential) }
+            _ = try git.remoteReferences(remote: spec.url, credential: credential)
+            return CheckedAction(notice: nil) { try self.initAndPush(spec: spec, credential: credential) }
         case .cloneAndRebuild:
             if isVirginScaffoldStore(toleratingGitDir: false) {
                 let branch = try resolvedDefaultBranch(spec: spec, credential: credential)
-                return { try self.adoptInPlace(spec: spec, credential: credential, defaultBranch: branch) }
+                return CheckedAction(notice: branch.notice) {
+                    try self.adoptInPlace(spec: spec, credential: credential, defaultBranch: branch.name)
+                }
             } else {
-                _ = try git.remoteDefaultBranch(remote: spec.url, credential: credential)
-                _ = try git.remoteBranches(remote: spec.url, credential: credential)
-                return {
+                _ = try git.remoteReferences(remote: spec.url, credential: credential)
+                return CheckedAction(notice: nil) {
                     try self.git.clone(remote: spec.url, into: self.root, credential: credential)
                     try self.rebuildAndRequireReadable()
                 }
@@ -129,13 +139,23 @@ struct SyncSetupJob {
         try git.removeRemote(at: root)
     }
 
-    func resolvedDefaultBranch(spec: RemoteSpec, credential: GitCredential) throws -> String {
-        let symref = try git.remoteDefaultBranch(remote: spec.url, credential: credential)
-        let heads = try git.remoteBranches(remote: spec.url, credential: credential)
-        guard let branch = SyncSetupModel.defaultBranch(symref: symref, heads: heads) else {
+    private struct ResolvedBranch {
+        let name: String
+        let notice: String?
+    }
+
+    private func resolvedDefaultBranch(spec: RemoteSpec, credential: GitCredential) throws -> ResolvedBranch {
+        let refs = try git.remoteReferences(remote: spec.url, credential: credential)
+        guard let branch = SyncSetupModel.defaultBranch(symref: refs.defaultBranch, heads: refs.heads) else {
             throw SyncSetupError.remoteDefaultBranchUndetermined
         }
-        return branch
+        let notice: String?
+        if refs.defaultBranch != branch {
+            notice = "Connected using branch ‘\(branch)’ because Pensieve couldn't use the remote's default branch."
+        } else {
+            notice = nil
+        }
+        return ResolvedBranch(name: branch, notice: notice)
     }
 
     func adoptInPlace(spec: RemoteSpec, credential: GitCredential, defaultBranch: String) throws {

@@ -41,33 +41,89 @@ final class ConflictResolutionModelTests: XCTestCase {
     }
 
     private final class StubGit: GitServiceProtocol {
-        func performRemoteURL(at path: String) -> String? { nil }
-        func performInitRepository(at path: String) throws {}
-        func performSetRemote(_ url: String, at path: String) throws {}
-        func performRemoveRemote(at path: String) throws {}
-        func performConfiguredRemoteURL(at path: String) throws -> String? { nil }
-        func performClone(remote: String, into path: String, credential: GitCredential?) throws {}
-        func performRemoteHasCommits(remote: String, credential: GitCredential?) -> Bool { false }
+        func remoteURL(at path: String) -> String? { nil }
+        func initRepository(at path: String) throws {}
+        func setRemote(_ url: String, at path: String) throws {}
+        func removeRemote(at path: String) throws {}
+        func configuredRemoteURL(at path: String) throws -> String? { nil }
+        func clone(remote: String, into path: String, credential: GitCredential?) throws {}
+        func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool { false }
         @discardableResult
-        func performStageAllAndCommit(at path: String, message: String) throws -> Bool { false }
-        func performPreflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
-        func performPullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+        func stageAllAndCommit(at path: String, message: String) throws -> Bool { false }
+        func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+        func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
             try pullRebase(at: path, credential: nil)
         }
-        func performPullRebase(at path: String, credential: GitCredential?) throws -> PullResult { .upToDate }
-        func performPush(at path: String, credential: GitCredential?) throws {}
-        func performAbortRebase(at path: String) throws {}
-        func performConflictedFiles(at path: String) -> [String] { [] }
-        func performBlob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
-        func performContinueRebase(at path: String) throws -> PullResult { .upToDate }
-        func performSkipRebase(at path: String) throws -> PullResult { .upToDate }
-        func performStagePath(_ path: String, at root: String) throws {}
-        func performCollapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
-                                           fetchedRevision: FetchedStoreRevision?) throws -> Bool {
+        func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult { .upToDate }
+        func push(at path: String, credential: GitCredential?) throws {}
+        func abortRebase(at path: String) throws {}
+        func conflictedFiles(at path: String) -> [String] { [] }
+        func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
+        func continueRebase(at path: String) throws -> PullResult { .upToDate }
+        func skipRebase(at path: String) throws -> PullResult { .upToDate }
+        func stagePath(_ path: String, at root: String) throws {}
+        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                    fetchedRevision: FetchedStoreRevision?) throws -> Bool {
             false
         }
-        func performHasCommitsToPush(at path: String) -> Bool { false }
-    }
+        func hasCommitsToPush(at path: String) -> Bool { false }
+
+        func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
+
+            try blob(atStage: stage, path: path, in: workingDir).map {
+
+                ConflictEntry(mode: "100644", objectID: "", bytes: $0)
+
+            }
+
+        }
+
+        func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+
+            throw GitError.repositoryUnreadable(path: root, detail: "Conflict entry restoration is unavailable.")
+
+        }
+
+        func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
+
+            throw GitError.repositoryUnreadable(path: root, detail: "Conflict index removal is unavailable.")
+
+        }
+
+        func retireConflictPath(_ path: String, at root: String) throws {
+
+            throw GitError.repositoryUnreadable(path: root, detail: "Legacy gitlink resolution is unavailable.")
+
+        }
+
+        func probeUsability() -> GitUsability { .usable }
+
+        func checkoutUnbornBranch(_ branch: String, at path: String) throws {}
+
+        func fetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {}
+
+        func materializeFromFetchHead(at path: String) throws {}
+
+        func bornBranch(_ branch: String, at path: String) throws {}
+
+        func setUpstream(branch: String, at path: String) throws {}
+
+        func hasLocalBranches(at path: String) throws -> Bool { true }
+
+        func hasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool { false }
+
+        func hasRemoteOriginConfigured(at path: String) throws -> Bool { true }
+
+        func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] { [] }
+
+        func show(sha: String, path: String, at workingDir: String) -> String? { nil }
+
+        func remoteReferences(remote: String, credential: GitCredential?) throws -> GitRemoteReferences {
+
+            GitRemoteReferences(defaultBranch: nil, heads: [])
+
+        }
+}
 
     func makeContext() throws -> ModelContext {
         let container = try ModelContainer(

@@ -42,6 +42,7 @@ final class SyncSetupModel {
     }
     enum Phase { case checking, writing }
     private(set) var state: State = .idle
+    private(set) var connectionNotice: String?
     private(set) var phase: Phase = .checking
     private(set) var isDisconnecting = false
     var canCancel: Bool { state != .working || phase == .checking }
@@ -110,12 +111,14 @@ final class SyncSetupModel {
     func prepareForPresentation() {
         guard state != .working, !isDisconnecting else { return }
         state = .idle
+        connectionNotice = nil
         phase = .checking
     }
 
     func connect(url: String, username: String, token: String) {
         guard state != .working, !isDisconnecting else { return }
         state = .working
+        connectionNotice = nil
         phase = .checking
         task = Task { await runConnect(url: url, username: username, token: token) }
     }
@@ -157,11 +160,11 @@ final class SyncSetupModel {
         let files = fileService, root = root, lockPath = lockPath, families = syncedFamiliesEmpty
         var step: UUID?
         defer { if let step { steps.finish(step) } }
-        try await BlockingWork.run {
+        connectionNotice = try await BlockingWork.run {
             let job = SyncSetupJob(context: ModelContext(container), git: git, credentials: credentials,
                 rebuilder: rebuilder, fileService: files, root: root, lockPath: lockPath,
                 syncedFamiliesEmpty: families)
-            try job.perform(spec: spec, credential: credential) {
+            return try job.perform(spec: spec, credential: credential) {
                 // Acknowledge on the main actor before the first write. Cancel and Quit see the
                 // same boundary; the native job keeps its context and lock throughout the handoff.
                 try DispatchQueue.main.sync {

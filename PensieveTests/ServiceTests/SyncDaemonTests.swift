@@ -156,14 +156,16 @@ private final class RecordingFFGit: FastForwardGitService {
     var ffResult: FastForwardResult = .upToDate
     var throwAuth = false
     var throwOther = false
-    func performRemoteURL(at path: String) -> String? { remote }
-    func performIsWorktreeClean(at path: String) -> Bool { clean }
-    func performFetch(at path: String, credential: GitCredential?) throws {}
-    func performFastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
+    func remoteURL(at path: String) -> String? { remote }
+    func isWorktreeClean(at path: String) -> Bool { clean }
+    func fetch(at path: String, credential: GitCredential?) throws {}
+    func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
         if throwAuth { throw GitError.authenticationFailed(remote: remote ?? "origin", detail: "auth") }
         if throwOther { throw GitError.commandFailed(args: ["merge"], exitCode: 1, stderr: "boom") }
         return ffResult
     }
+
+    func probeUsability() -> GitUsability { .usable }
 }
 
 private final class RecordingReconciler: DeployReconciling {

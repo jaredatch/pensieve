@@ -3,8 +3,9 @@ import Foundation
 extension GitService {
     /// Resolves a tracked branch or tag without fetching objects. Branch precedence matches
     /// `clone --branch`; annotated tags use their peeled commit rather than the tag object.
-    func performRemoteHead(remote: String, ref: String,
-                           credential: GitCredential?) throws -> String? {
+    @_disfavoredOverload
+    func remoteHead(remote: String, ref: String,
+                    credential: GitCredential?) throws -> String? {
         let branch = "refs/heads/\(ref)"
         let tag = "refs/tags/\(ref)"
         let peeledTag = tag + "^{}"
@@ -32,7 +33,8 @@ extension GitService {
         return revisions[branch] ?? revisions[peeledTag] ?? revisions[tag]
     }
 
-    func performCommitDate(at repositoryPath: String) throws -> Date {
+    @_disfavoredOverload
+    func commitDate(at repositoryPath: String) throws -> Date {
         let args = ["-C", repositoryPath, "show", "-s", "--format=%cI", "HEAD"]
         let output = try runOrThrow(args, in: nil)
         let value = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -43,23 +45,5 @@ extension GitService {
                 stderr: "git returned an invalid commit date", confirmingProbe: output.confirmingProbe)
         }
         return date
-    }
-}
-
-// Capture the source before entering implementation helpers or closures.
-extension GitService {
-    func remoteHead(remote: String, ref: String,
-                    credential: GitCredential?,
-                    file: StaticString = #fileID, line: UInt = #line) throws -> String? {
-        try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performRemoteHead(remote: remote, ref: ref, credential: credential)
-        }
-    }
-
-    func commitDate(at repositoryPath: String,
-                    file: StaticString = #fileID, line: UInt = #line) throws -> Date {
-        try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performCommitDate(at: repositoryPath)
-        }
     }
 }

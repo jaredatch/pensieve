@@ -116,7 +116,7 @@ final class PathSyntaxGuardTests: XCTestCase {
         let git = root.appendingPathComponent("Pensieve/Services/GitService.swift")
         let closure = """
             struct GitService {
-                func performRemoteDefaultBranch(
+                func remoteReferences(
                     remote value: String = { (factory: () -> String) -> String in factory() }({ "origin" }),
                     credential token: GitCredential?) {
                     if value.hasPrefix("/") { return }

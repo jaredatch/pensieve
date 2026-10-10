@@ -92,8 +92,10 @@ final class WaitingRemovalIsolationTests: XCTestCase {
 }
 
 private struct WaitingDaemonGit: FastForwardGitService {
-    func performRemoteURL(at path: String) throws -> String? { "https://example.com/store.git" }
-    func performIsWorktreeClean(at path: String) -> Bool { true }
-    func performFetch(at path: String, credential: GitCredential?) throws {}
-    func performFastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult { .upToDate }
+    func remoteURL(at path: String) throws -> String? { "https://example.com/store.git" }
+    func isWorktreeClean(at path: String) -> Bool { true }
+    func fetch(at path: String, credential: GitCredential?) throws {}
+    func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult { .upToDate }
+
+    func probeUsability() -> GitUsability { .usable }
 }

@@ -64,86 +64,88 @@ struct GitCommit: Equatable {
     let subject: String
 }
 
-protocol GitServiceProtocol {
-    func performProbeUsability() throws -> GitUsability
-    func performInitRepository(at path: String) throws
-    func performSetRemote(_ url: String, at path: String) throws
+struct GitRemoteReferences: Equatable {
+    let defaultBranch: String?
+    let heads: [String]
+}
+
+protocol GitServiceProtocol: GitUsabilityProbing, GitRemoteReading {
+
+    @_disfavoredOverload
+    func initRepository(at path: String) throws
+    @_disfavoredOverload
+    func setRemote(_ url: String, at path: String) throws
     /// Remove `origin`. Throws when there is none (git exits 2); callers guard with the configured URL.
-    func performRemoveRemote(at path: String) throws
+    @_disfavoredOverload
+    func removeRemote(at path: String) throws
     /// The literal `remote.origin.url` as configured — never rewritten by `url.<base>.insteadOf`,
     /// which `remote get-url` applies. `nil` when no origin is configured; throws on any other git
     /// failure (a broken repository is never mistaken for "no remote").
-    func performConfiguredRemoteURL(at path: String) throws -> String?
-    func performRemoteURL(at path: String) throws -> String?
-    func performClone(remote: String, into path: String, credential: GitCredential?) throws
-    func performRemoteHasCommits(remote: String, credential: GitCredential?) -> Bool
-    func performRemoteDefaultBranch(remote: String, credential: GitCredential?) throws -> String?
-    func performRemoteBranches(remote: String, credential: GitCredential?) throws -> [String]
-    func performCheckoutUnbornBranch(_ branch: String, at path: String) throws
-    func performFetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws
-    func performMaterializeFromFetchHead(at path: String) throws
-    func performBornBranch(_ branch: String, at path: String) throws
-    func performSetUpstream(branch: String, at path: String) throws
-    func performHasLocalBranches(at path: String) throws -> Bool
-    func performHasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool
-    func performHasRemoteOriginConfigured(at path: String) throws -> Bool
+    @_disfavoredOverload
+    func configuredRemoteURL(at path: String) throws -> String?
+
+    @_disfavoredOverload
+    func clone(remote: String, into path: String, credential: GitCredential?) throws
+    @_disfavoredOverload
+    func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool
+    @_disfavoredOverload
+    func remoteReferences(remote: String, credential: GitCredential?) throws -> GitRemoteReferences
+    @_disfavoredOverload
+    func checkoutUnbornBranch(_ branch: String, at path: String) throws
+    @_disfavoredOverload
+    func fetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws
+    @_disfavoredOverload
+    func materializeFromFetchHead(at path: String) throws
+    @_disfavoredOverload
+    func bornBranch(_ branch: String, at path: String) throws
+    @_disfavoredOverload
+    func setUpstream(branch: String, at path: String) throws
+    @_disfavoredOverload
+    func hasLocalBranches(at path: String) throws -> Bool
+    @_disfavoredOverload
+    func hasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool
+    @_disfavoredOverload
+    func hasRemoteOriginConfigured(at path: String) throws -> Bool
     @discardableResult
-    func performStageAllAndCommit(at path: String, message: String) throws -> Bool
-    func performPreflightStoreUpdate(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision?
-    func performPullRebase(at path: String, credential: GitCredential?) throws -> PullResult
-    func performPullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult
-    func performPush(at path: String, credential: GitCredential?) throws
-    func performAbortRebase(at path: String) throws
-    func performConflictedFiles(at path: String) throws -> [String]
-    func performBlob(atStage stage: Int, path: String, in workingDir: String) throws -> Data?
-    func performConflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry?
-    func performRestoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws
-    func performRetireConflictPath(_ path: String, at root: String) throws
-    func performRemoveConflictEntryFromIndex(_ path: String, at root: String) throws
-    func performContinueRebase(at path: String) throws -> PullResult
-    func performSkipRebase(at path: String) throws -> PullResult
-    func performStagePath(_ path: String, at root: String) throws
-    func performCollapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
-                                       fetchedRevision: FetchedStoreRevision?) throws -> Bool
-    func performHasCommitsToPush(at path: String) throws -> Bool
-    func performLog(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit]
-    func performShow(sha: String, path: String, at workingDir: String) -> String?
-}
-
-extension GitServiceProtocol {
-    /// Compatibility for scripted file-only collaborators; it performs no host filesystem access.
-    func performConflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
-        try blob(atStage: stage, path: path, in: workingDir).map {
-            ConflictEntry(mode: "100644", objectID: "", bytes: $0)
-        }
-    }
-
-    func performRestoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
-        throw GitError.repositoryUnreadable(path: root, detail: "Conflict entry restoration is unavailable.")
-    }
-
-    func performRemoveConflictEntryFromIndex(_ path: String, at root: String) throws {
-        throw GitError.repositoryUnreadable(path: root, detail: "Conflict index removal is unavailable.")
-    }
-
-    func performRetireConflictPath(_ path: String, at root: String) throws {
-        throw GitError.repositoryUnreadable(path: root, detail: "Legacy gitlink resolution is unavailable.")
-    }
-
-    /// Inert default for doubles that do not model the host environment.
-    func performProbeUsability() -> GitUsability { .usable }
-    func performRemoteDefaultBranch(remote: String, credential: GitCredential?) throws -> String? { nil }
-    func performRemoteBranches(remote: String, credential: GitCredential?) throws -> [String] { [] }
-    func performCheckoutUnbornBranch(_ branch: String, at path: String) throws {}
-    func performFetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {}
-    func performMaterializeFromFetchHead(at path: String) throws {}
-    func performBornBranch(_ branch: String, at path: String) throws {}
-    func performSetUpstream(branch: String, at path: String) throws {}
-    func performHasLocalBranches(at path: String) throws -> Bool { true }
-    func performHasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool { false }
-    func performHasRemoteOriginConfigured(at path: String) throws -> Bool { true }
-    func performLog(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] { [] }
-    func performShow(sha: String, path: String, at workingDir: String) -> String? { nil }
+    @_disfavoredOverload
+    func stageAllAndCommit(at path: String, message: String) throws -> Bool
+    @_disfavoredOverload
+    func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision?
+    @_disfavoredOverload
+    func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult
+    @_disfavoredOverload
+    func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult
+    @_disfavoredOverload
+    func push(at path: String, credential: GitCredential?) throws
+    @_disfavoredOverload
+    func abortRebase(at path: String) throws
+    @_disfavoredOverload
+    func conflictedFiles(at path: String) throws -> [String]
+    @_disfavoredOverload
+    func blob(atStage stage: Int, path: String, in workingDir: String) throws -> Data?
+    @_disfavoredOverload
+    func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry?
+    @_disfavoredOverload
+    func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws
+    @_disfavoredOverload
+    func retireConflictPath(_ path: String, at root: String) throws
+    @_disfavoredOverload
+    func removeConflictEntryFromIndex(_ path: String, at root: String) throws
+    @_disfavoredOverload
+    func continueRebase(at path: String) throws -> PullResult
+    @_disfavoredOverload
+    func skipRebase(at path: String) throws -> PullResult
+    @_disfavoredOverload
+    func stagePath(_ path: String, at root: String) throws
+    @_disfavoredOverload
+    func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                fetchedRevision: FetchedStoreRevision?) throws -> Bool
+    @_disfavoredOverload
+    func hasCommitsToPush(at path: String) throws -> Bool
+    @_disfavoredOverload
+    func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit]
+    @_disfavoredOverload
+    func show(sha: String, path: String, at workingDir: String) -> String?
 }
 
 /// The app's first subprocess. A synchronous, throwing wrapper over `/usr/bin/git`.
@@ -272,7 +274,7 @@ struct GitService: GitServiceProtocol {
 
     // MARK: Process runner (§B — verbatim)
 
-    func performRunUpstreamHistoryNetwork(
+    func runUpstreamHistoryNetwork(
         _ args: [String],
         credential: GitCredential?
     ) throws -> GitOutput {
@@ -332,8 +334,8 @@ struct GitService: GitServiceProtocol {
 
     /// Run and throw `.commandFailed` on a non-zero exit. For fixture-style ops with no auth surface.
     @discardableResult
-    func performRunOrThrow(_ args: [String], in workingDir: String?, credential: GitCredential? = nil,
-                           storeRules: Bool = false) throws
+    func performRunOrThrow(_ args: [String], in workingDir: String?, credential: GitCredential?,
+                           storeRules: Bool) throws
         -> GitOutput {
         let r = try run(args, in: workingDir, credential: credential, storeRules: storeRules)
         guard r.exit == 0 else {
@@ -363,7 +365,7 @@ struct GitService: GitServiceProtocol {
         Self.authSignatures.contains { text.contains($0) }
     }
 
-    func performHeadSHA(at path: String) throws -> String? {
+    func headSHA(at path: String) throws -> String? {
         guard let r = try runBestEffort(["-C", path, "rev-parse", "HEAD"], in: nil), r.exit == 0 else { return nil }
         let sha = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return sha.isEmpty ? nil : sha
@@ -371,7 +373,7 @@ struct GitService: GitServiceProtocol {
 
     /// Set a LOCAL commit identity fallback when none is configured, so `commit` never fails on a
     /// machine (or a hermetic test HOME) with no global git identity. Only writes when unset.
-    func performEnsureCommitIdentity(at path: String) throws {
+    func ensureCommitIdentity(at path: String) throws {
         if (try runBestEffort(["-C", path, "config", "user.email"], in: nil))?.exit != 0 {
             _ = try runBestEffort(["-C", path, "config", "user.email", "sync@pensieve.local"], in: nil)
         }
@@ -380,18 +382,23 @@ struct GitService: GitServiceProtocol {
         }
     }
 
+}
+
+extension GitService {
     // MARK: GitServiceProtocol
 
     /// `git init` + force the default branch to `main` deterministically (regardless of the host's
     /// `init.defaultBranch`), + a local identity fallback. `path` must already exist.
-    func performInitRepository(at path: String) throws {
+    @_disfavoredOverload
+    func initRepository(at path: String) throws {
         try runOrThrow(["-C", path, "init"], in: nil, storeRules: true)
         try runOrThrow(["-C", path, "symbolic-ref", "HEAD", "refs/heads/main"], in: nil)
         try ensureCommitIdentity(at: path)
         _ = try storeOperation(at: path)
     }
 
-    func performSetRemote(_ url: String, at path: String) throws {
+    @_disfavoredOverload
+    func setRemote(_ url: String, at path: String) throws {
         if try remoteURL(at: path) == nil {
             try runOrThrow(["-C", path, "remote", "add", "origin", url], in: nil)
         } else {
@@ -399,11 +406,13 @@ struct GitService: GitServiceProtocol {
         }
     }
 
-    func performRemoveRemote(at path: String) throws {
+    @_disfavoredOverload
+    func removeRemote(at path: String) throws {
         try runOrThrow(["-C", path, "remote", "remove", "origin"], in: nil)
     }
 
-    func performConfiguredRemoteURL(at path: String) throws -> String? {
+    @_disfavoredOverload
+    func configuredRemoteURL(at path: String) throws -> String? {
         // `--local` refuses to run outside a discoverable repository (exit 128) — without it a corrupt or
         // missing `.git/HEAD` makes `git config --get` read the global config and report the key absent
         // (exit 1), and a disconnect would report success while `.git/config` still held origin.
@@ -422,7 +431,8 @@ struct GitService: GitServiceProtocol {
         }
     }
 
-    func performClone(remote: String, into path: String, credential: GitCredential?) throws {
+    @_disfavoredOverload
+    func clone(remote: String, into path: String, credential: GitCredential?) throws {
         // `--` terminates options: without it git parses a `--upload-pack=<cmd>`-style remote as an
         // OPTION and executes it (git-option injection — distinct from shell injection). See type doc.
         // Keep an incomplete repository away from the live store, including across process death.
@@ -458,8 +468,9 @@ struct GitService: GitServiceProtocol {
     /// machine-level credential the install namespace never granted.
     static let installCredentialIsolationArgs = ["-c", "credential.helper="]
 
-    func performCloneShallow(remote: String, branch: String?, into path: String,
-                             credential: GitCredential?) throws {
+    @_disfavoredOverload
+    func cloneShallow(remote: String, branch: String?, into path: String,
+                      credential: GitCredential?) throws {
         var args = Self.installCredentialIsolationArgs + ["clone", "--quiet", "--depth", "1"]
         if let branch {
             args += ["--branch", branch]
@@ -476,22 +487,26 @@ struct GitService: GitServiceProtocol {
             confirmingProbe: r.confirmingProbe)
     }
 
-    func performCommitSHA(at path: String) throws -> String {
+    @_disfavoredOverload
+    func commitSHA(at path: String) throws -> String {
         try revision("HEAD", at: path)
     }
 
-    func performCurrentBranch(at path: String) throws -> String {
+    @_disfavoredOverload
+    func currentBranch(at path: String) throws -> String {
         try revision("--abbrev-ref", "HEAD", at: path)
     }
 
-    func performTreeHash(at repositoryPath: String, path: String) throws -> String {
+    @_disfavoredOverload
+    func treeHash(at repositoryPath: String, path: String) throws -> String {
         let revision = path.isEmpty ? "HEAD^{tree}" : "HEAD:\(path)"
         return try self.revision(revision, at: repositoryPath)
     }
 
     /// True if the remote already has at least one branch (a fresh `init --bare` remote has none).
     /// Best-effort probe: any error (including auth) yields false.
-    func performRemoteHasCommits(remote: String, credential: GitCredential?) -> Bool {
+    @_disfavoredOverload
+    func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool {
         // `--` terminates options — see clone(): `git ls-remote` also honors `--upload-pack`, so a
         // leading-dash remote must never be parsed as an option.
         guard let r = try? run(["ls-remote", "--heads", "--", remote], in: nil, credential: credential),
@@ -503,72 +518,73 @@ struct GitService: GitServiceProtocol {
 }
 
 extension GitService {
-    func performRemoteDefaultBranch(remote: String, credential: GitCredential?) throws -> String? {
-        let args = ["ls-remote", "--symref", "--", remote, "HEAD"]
-        let result = try run(args, in: nil, credential: credential)
+    @_disfavoredOverload
+    func remoteReferences(remote: String, credential: GitCredential?) throws -> GitRemoteReferences {
+        let args = ["ls-remote", "--symref", "--", remote, "HEAD", "refs/heads/*"]
+        let result = try runData(args, in: nil, credential: credential)
         guard result.exit == 0 else {
-            let combined = result.stdout + result.stderr
+            let combined = String(data: result.stdout + result.stderr, encoding: .utf8) ?? ""
             if Self.classifyLsRemoteFailure(exitCode: result.exit, combinedOutput: combined) == .auth {
                 throw GitError.authenticationFailed(remote: remote, detail: combined)
             }
-            return nil
+            throw dataCommandError(result, args: args)
         }
-        for line in result.stdout.split(separator: "\n", omittingEmptySubsequences: true) {
-            let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
-            guard fields.count == 2, fields[1] == "HEAD" else { continue }
-            let prefix = "ref: refs/heads/"
-            guard fields[0].hasPrefix(prefix) else { continue }
-            return String(fields[0].dropFirst(prefix.count))
-        }
-        return nil
-    }
-
-    func performRemoteBranches(remote: String, credential: GitCredential?) throws -> [String] {
-        let args = ["ls-remote", "--heads", "--", remote]
-        let result = try run(args, in: nil, credential: credential)
-        guard result.exit == 0 else {
-            let combined = result.stdout + result.stderr
-            if Self.classifyLsRemoteFailure(exitCode: result.exit, combinedOutput: combined) == .auth {
-                throw GitError.authenticationFailed(remote: remote, detail: combined)
+        let defaultPrefix = Array("ref: refs/heads/".utf8)
+        let headPrefix = Array("refs/heads/".utf8)
+        var defaultBranch: String?
+        var heads: [String] = []
+        for line in result.stdout.split(separator: 0x0A) {
+            let fields = line.split(separator: 0x09, omittingEmptySubsequences: false)
+            guard fields.count == 2 else { continue }
+            if fields[1].elementsEqual("HEAD".utf8), fields[0].starts(with: defaultPrefix) {
+                defaultBranch = Self.exactRefName(fields[0].dropFirst(defaultPrefix.count))
+            } else if fields[1].starts(with: headPrefix),
+                      let name = Self.exactRefName(fields[1].dropFirst(headPrefix.count)) {
+                heads.append(name)
             }
-            throw GitError.commandFailed(
-                args: args,
-                exitCode: result.exit,
-                stderr: result.stderr.isEmpty ? result.stdout : result.stderr, confirmingProbe: result.confirmingProbe)
         }
-        let prefix = "refs/heads/"
-        return result.stdout.split(separator: "\n").compactMap { line in
-            guard let ref = line.split(separator: "\t", omittingEmptySubsequences: false).last,
-                  ref.hasPrefix(prefix) else { return nil }
-            return String(ref.dropFirst(prefix.count))
-        }
+        return GitRemoteReferences(defaultBranch: defaultBranch, heads: heads)
     }
 
-    func performCheckoutUnbornBranch(_ branch: String, at path: String) throws {
+    private static func exactRefName(_ bytes: Data.SubSequence) -> String? {
+        guard !bytes.isEmpty else { return nil }
+        // String(bytes:encoding:) consumes an initial BOM. The validating initializer
+        // retains it and rejects malformed UTF-8 without consuming any name bytes.
+        guard let name = String(validating: bytes, as: UTF8.self), name.utf8.elementsEqual(bytes) else { return nil }
+        return name
+    }
+
+    @_disfavoredOverload
+    func checkoutUnbornBranch(_ branch: String, at path: String) throws {
         try storeOperation(at: path).runOrThrow(["checkout", "-B", branch])
     }
 
-    func performFetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {
+    @_disfavoredOverload
+    func fetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {
         try runOrThrow(["-C", path, "fetch", "--quiet", "origin", branch], in: nil, credential: credential)
     }
 
-    func performMaterializeFromFetchHead(at path: String) throws {
+    @_disfavoredOverload
+    func materializeFromFetchHead(at path: String) throws {
         try storeOperation(at: path).runOrThrow(
             ["restore", "--source=FETCH_HEAD", "--staged", "--worktree", "--", ":/"])
     }
 
-    func performBornBranch(_ branch: String, at path: String) throws {
+    @_disfavoredOverload
+    func bornBranch(_ branch: String, at path: String) throws {
         try runOrThrow(["-C", path, "update-ref", "refs/heads/\(branch)", "FETCH_HEAD", ""], in: nil)
     }
 
-    func performSetUpstream(branch: String, at path: String) throws {
+    @_disfavoredOverload
+    func setUpstream(branch: String, at path: String) throws {
         try runOrThrow(
             ["-C", path, "branch", "--set-upstream-to=origin/\(branch)", branch],
             in: nil
         )
     }
 
-    func performHasLocalBranches(at path: String) throws -> Bool {
+    @_disfavoredOverload
+    func hasLocalBranches(at path: String) throws -> Bool {
         let result = try runOrThrow(
             ["-C", path, "for-each-ref", "--format=%(refname)", "refs/heads"],
             in: nil
@@ -576,7 +592,8 @@ extension GitService {
         return !result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    func performHasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool {
+    @_disfavoredOverload
+    func hasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool {
         guard let result = try? run(
             ["-C", path, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/\(branch)"],
             in: nil
@@ -584,7 +601,8 @@ extension GitService {
         return result.exit == 0
     }
 
-    func performHasRemoteOriginConfigured(at path: String) throws -> Bool {
+    @_disfavoredOverload
+    func hasRemoteOriginConfigured(at path: String) throws -> Bool {
         let args = ["-C", path, "config", "--get", "remote.origin.url"]
         let result = try run(args, in: nil)
         switch result.exit {
@@ -616,7 +634,8 @@ extension GitService {
 
     /// Stage everything and commit. Returns false when there is nothing to commit.
     @discardableResult
-    func performStageAllAndCommit(at path: String, message: String) throws -> Bool {
+    @_disfavoredOverload
+    func stageAllAndCommit(at path: String, message: String) throws -> Bool {
         try ensureCommitIdentity(at: path)
         let store = try storeOperation(at: path)
         try store.stage()
@@ -627,14 +646,16 @@ extension GitService {
     /// Distinguishes up-to-date / merged / conflicted STRUCTURALLY
     /// (no locale-sensitive string matching): conflict = non-zero exit AND `--diff-filter=U` non-empty;
     /// up-to-date vs merged = HEAD unchanged vs changed.
-    func performPullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
+    @_disfavoredOverload
+    func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
         let revision = try fetchStoreRevision(at: path, credential: credential)
         return try pullRebase(at: path, fetchedRevision: revision)
     }
 
     /// Pull the already fetched and checked commit from this repository. A second remote fetch could
     /// introduce a colliding path after the app's pre-write guard, so it must not happen here.
-    func performPullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+    @_disfavoredOverload
+    func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
         let store = try storeOperation(at: path)
         try store.requireNoExcludedCollision(with: fetchedRevision.commit)
         let before = try headSHA(at: path)
@@ -651,7 +672,8 @@ extension GitService {
         throw commandError(r, args: args)
     }
 
-    func performPush(at path: String, credential: GitCredential?) throws {
+    @_disfavoredOverload
+    func push(at path: String, credential: GitCredential?) throws {
         let args = ["-C", path, "push", "-u", "origin", "main"]
         let r = try run(args, in: nil, credential: credential)
         guard r.exit != 0 else { return }
@@ -663,13 +685,15 @@ extension GitService {
             confirmingProbe: r.confirmingProbe)
     }
 
-    func performAbortRebase(at path: String) throws {
+    @_disfavoredOverload
+    func abortRebase(at path: String) throws {
         let store = try StoreGitOperation(git: self, root: path, aborting: true)
         try store.runOrThrow(["rebase", "--abort"])
         if let repairFailure = store.repairFailure { throw repairFailure }
     }
 
-    func performConflictedFiles(at path: String) throws -> [String] {
+    @_disfavoredOverload
+    func conflictedFiles(at path: String) throws -> [String] {
         guard let r = try runBestEffort(["-C", path, "diff", "--name-only", "--diff-filter=U", "-z"], in: nil),
               r.exit == 0 else {
             return []
@@ -680,14 +704,6 @@ extension GitService {
 
 // Capture the source before entering implementation helpers or closures.
 extension GitService {
-    func runUpstreamHistoryNetwork(
-        _ args: [String],
-        credential: GitCredential?,
-        file: StaticString = #fileID, line: UInt = #line) throws -> GitOutput {
-        try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performRunUpstreamHistoryNetwork(args, credential: credential)
-        }
-    }
 
     func runBestEffort(_ args: [String], in workingDir: String?,
                        file: StaticString = #fileID, line: UInt = #line) throws -> GitOutput? {
@@ -706,46 +722,4 @@ extension GitService {
         }
     }
 
-    func headSHA(at path: String,
-                 file: StaticString = #fileID, line: UInt = #line) throws -> String? {
-        try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performHeadSHA(at: path)
-        }
-    }
-
-    func ensureCommitIdentity(at path: String,
-                              file: StaticString = #fileID, line: UInt = #line) throws {
-        try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performEnsureCommitIdentity(at: path)
-        }
-    }
-
-    func cloneShallow(remote: String, branch: String?, into path: String,
-                      credential: GitCredential?,
-                      file: StaticString = #fileID, line: UInt = #line) throws {
-        try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performCloneShallow(remote: remote, branch: branch, into: path, credential: credential)
-        }
-    }
-
-    func commitSHA(at path: String,
-                   file: StaticString = #fileID, line: UInt = #line) throws -> String {
-        try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performCommitSHA(at: path)
-        }
-    }
-
-    func currentBranch(at path: String,
-                       file: StaticString = #fileID, line: UInt = #line) throws -> String {
-        try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performCurrentBranch(at: path)
-        }
-    }
-
-    func treeHash(at repositoryPath: String, path: String,
-                  file: StaticString = #fileID, line: UInt = #line) throws -> String {
-        try GitThreadGuard.withCallSite(file: file, line: line) {
-            try performTreeHash(at: repositoryPath, path: path)
-        }
-    }
 }

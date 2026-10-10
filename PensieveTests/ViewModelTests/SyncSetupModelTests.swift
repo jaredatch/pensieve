@@ -20,6 +20,14 @@ final class SyncSetupModelTests: XCTestCase {
 
     private struct StubBoom: Error {}
 
+    func testProtocolCallsPublicGitOperation() throws {
+        let double = RecordingGitService()
+        double.publicProbeResult = .developerToolsMissing
+        let service: GitServiceProtocol = double
+        XCTAssertEqual(try service.probeUsability(), .developerToolsMissing)
+        XCTAssertEqual(double.publicProbeCalls, 1)
+    }
+
     // MARK: - Stubs
 
     /// Records call order + scriptable results. Every op appends a tag to `calls`; `throwAuthOn` names
@@ -28,6 +36,8 @@ final class SyncSetupModelTests: XCTestCase {
         var beforeCall: ((String) -> Void)?
         private(set) var calls: [String] = []
         let trace: EventTrace
+        var publicProbeCalls = 0
+        var publicProbeResult: GitUsability = .usable
         var remoteHasCommitsResult = false
         var pullResult: PullResult = .upToDate
         var throwAuthOn: String?
@@ -54,54 +64,50 @@ final class SyncSetupModelTests: XCTestCase {
             if throwAuthOn == tag { throw GitError.authenticationFailed(remote: remote, detail: "stub") }
         }
 
-        func performInitRepository(at path: String) throws { try record("init:\(path)") }
-        func performSetRemote(_ url: String, at path: String) throws { try record("remote:\(url)") }
-        func performRemoveRemote(at path: String) throws {
+        func initRepository(at path: String) throws { try record("init:\(path)") }
+        func setRemote(_ url: String, at path: String) throws { try record("remote:\(url)") }
+        func removeRemote(at path: String) throws {
             try record("remove-remote:\(path)")
             remoteURLFixture = nil
             configuredRemoteURLFixture = .success(nil)
         }
-        func performConfiguredRemoteURL(at path: String) throws -> String? {
+        func configuredRemoteURL(at path: String) throws -> String? {
             try record("config-remote:\(path)")
             return try configuredRemoteURLFixture.get()
         }
-        func performProbeUsability() -> GitUsability { beforeCall?("probe"); return .usable }
-        func performRemoteURL(at path: String) -> String? { beforeCall?("read-remote"); return remoteURLFixture }
-
-        func performRemoteDefaultBranch(remote: String, credential: GitCredential?) throws -> String? {
-            let tag = "lsremote-symref:\(remote)"
+        func probeUsability() -> GitUsability {
+            beforeCall?("probe")
+            publicProbeCalls += 1
+            return publicProbeResult
+        }
+        func remoteURL(at path: String) -> String? { beforeCall?("read-remote"); return remoteURLFixture }
+        func remoteReferences(remote: String, credential: GitCredential?) throws -> GitRemoteReferences {
+            let tag = "lsremote-refs:\(remote)"
             try record(tag)
             try maybeThrowAuth(tag, remote: remote)
-            return defaultBranchFixture
+            return GitRemoteReferences(defaultBranch: defaultBranchFixture, heads: branchesFixture)
         }
 
-        func performRemoteBranches(remote: String, credential: GitCredential?) throws -> [String] {
-            let tag = "lsremote-heads:\(remote)"
-            try record(tag)
-            try maybeThrowAuth(tag, remote: remote)
-            return branchesFixture
-        }
-
-        func performCheckoutUnbornBranch(_ branch: String, at path: String) throws {
+        func checkoutUnbornBranch(_ branch: String, at path: String) throws {
             try record("checkout-B:\(branch)")
         }
-        func performFetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {
+        func fetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {
             try record("fetch:\(branch)")
         }
-        func performMaterializeFromFetchHead(at path: String) throws { try record("restore-fetch-head") }
-        func performBornBranch(_ branch: String, at path: String) throws { try record("born:\(branch)") }
-        func performSetUpstream(branch: String, at path: String) throws { try record("upstream:\(branch)") }
-        func performHasLocalBranches(at path: String) throws -> Bool {
+        func materializeFromFetchHead(at path: String) throws { try record("restore-fetch-head") }
+        func bornBranch(_ branch: String, at path: String) throws { try record("born:\(branch)") }
+        func setUpstream(branch: String, at path: String) throws { try record("upstream:\(branch)") }
+        func hasLocalBranches(at path: String) throws -> Bool {
             beforeCall?("read-branches"); return try hasLocalBranchesFixture.get()
         }
-        func performHasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool {
+        func hasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool {
             beforeCall?("read-tracking"); return hasRemoteTrackingBranchFixture
         }
-        func performHasRemoteOriginConfigured(at path: String) throws -> Bool {
+        func hasRemoteOriginConfigured(at path: String) throws -> Bool {
             try hasRemoteOriginConfiguredFixture.get()
         }
 
-        func performClone(remote: String, into path: String, credential: GitCredential?) throws {
+        func clone(remote: String, into path: String, credential: GitCredential?) throws {
             beforeCall?("clone")
             lastCredential = credential
             let event = "clone:\(remote)→\(path)"
@@ -110,45 +116,66 @@ final class SyncSetupModelTests: XCTestCase {
             try maybeThrowAuth("clone", remote: remote)
         }
 
-        func performRemoteHasCommits(remote: String, credential: GitCredential?) -> Bool {
+        func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool {
             beforeCall?("remoteHasCommits")
             calls.append("remoteHasCommits")
             return remoteHasCommitsResult
         }
 
         @discardableResult
-        func performStageAllAndCommit(at path: String, message: String) throws -> Bool {
+        func stageAllAndCommit(at path: String, message: String) throws -> Bool {
             beforeCall?("commit")
             calls.append("commit")
             return true
         }
 
-        func performPreflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
-        func performPullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+        func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+        func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
             try pullRebase(at: path, credential: nil)
         }
-        func performPullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
+        func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
             beforeCall?("pull")
             calls.append("pull")
             return pullResult
         }
 
-        func performPush(at path: String, credential: GitCredential?) throws {
+        func push(at path: String, credential: GitCredential?) throws {
             beforeCall?("push")
             lastCredential = credential
             calls.append("push")
             try maybeThrowAuth("push", remote: "origin")
         }
 
-        func performAbortRebase(at path: String) throws { beforeCall?("abort"); calls.append("abort") }
-        func performConflictedFiles(at path: String) -> [String] { [] }
-        func performBlob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
-        func performContinueRebase(at path: String) throws -> PullResult { .upToDate }
-        func performSkipRebase(at path: String) throws -> PullResult { .upToDate }
-        func performStagePath(_ path: String, at root: String) throws {}
-        func performCollapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
-                                           fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
-        func performHasCommitsToPush(at path: String) -> Bool { false }
+        func abortRebase(at path: String) throws { beforeCall?("abort"); calls.append("abort") }
+        func conflictedFiles(at path: String) -> [String] { [] }
+        func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? { nil }
+        func continueRebase(at path: String) throws -> PullResult { .upToDate }
+        func skipRebase(at path: String) throws -> PullResult { .upToDate }
+        func stagePath(_ path: String, at root: String) throws {}
+        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                    fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
+        func hasCommitsToPush(at path: String) -> Bool { false }
+        func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
+            try blob(atStage: stage, path: path, in: workingDir).map {
+                ConflictEntry(mode: "100644", objectID: "", bytes: $0)
+            }
+        }
+
+        func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+            throw GitError.repositoryUnreadable(path: root, detail: "Conflict entry restoration is unavailable.")
+        }
+
+        func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
+            throw GitError.repositoryUnreadable(path: root, detail: "Conflict index removal is unavailable.")
+        }
+
+        func retireConflictPath(_ path: String, at root: String) throws {
+            throw GitError.repositoryUnreadable(path: root, detail: "Legacy gitlink resolution is unavailable.")
+        }
+
+        func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] { [] }
+        func show(sha: String, path: String, at workingDir: String) -> String? { nil }
+
     }
 
     private final class ThrowingCredentialStore: CredentialStoreProtocol {
@@ -236,6 +263,9 @@ final class SyncSetupModelTests: XCTestCase {
         }
     }
 
+}
+
+extension SyncSetupModelTests {
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
             for: Skill.self, Project.self, SkillProjectAssignment.self,
@@ -308,8 +338,7 @@ extension SyncSetupModelTests {
         let model = try makeModel(git: git, credentials: InMemoryCredentialStore(),
                                   rebuilder: RecordingRebuilder(), fileService: existingUserFiles())
         await model.connectAndReport(url: "https://github.com/octocat/x.git", username: "octocat", token: "tok")
-        XCTAssertEqual(git.calls, ["lsremote-symref:https://github.com/octocat/x.git",
-                                   "lsremote-heads:https://github.com/octocat/x.git", "init:\(root)",
+        XCTAssertEqual(git.calls, ["lsremote-refs:https://github.com/octocat/x.git", "init:\(root)",
                                    "remote:https://github.com/octocat/x.git",
                                    "commit", "remoteHasCommits", "push"])
         XCTAssertEqual(model.state, .done)
@@ -415,8 +444,7 @@ extension SyncSetupModelTests {
         let model = try makeModel(git: git, credentials: InMemoryCredentialStore(),
                                   rebuilder: rebuilder, fileService: StubFileService())   // no .git, no skills
         await model.connectAndReport(url: "git@github.com:octocat/x.git", username: "", token: "")
-        XCTAssertEqual(git.calls, ["lsremote-symref:git@github.com:octocat/x.git",
-                                   "lsremote-heads:git@github.com:octocat/x.git", "clone:git@github.com:octocat/x.git→\(root)"])
+        XCTAssertEqual(git.calls, ["lsremote-refs:git@github.com:octocat/x.git", "clone:git@github.com:octocat/x.git→\(root)"])
         XCTAssertEqual(rebuilder.rebuildCount, 1)
         XCTAssertEqual(model.state, .done)
     }
@@ -428,8 +456,7 @@ extension SyncSetupModelTests {
         let model = try makeModel(git: git, credentials: InMemoryCredentialStore(),
                                   rebuilder: rebuilder, fileService: StubFileService())
         await model.connectAndReport(url: "git@github.com:octocat/x.git", username: "", token: "")
-        XCTAssertEqual(git.calls, ["lsremote-symref:git@github.com:octocat/x.git",
-                                   "lsremote-heads:git@github.com:octocat/x.git", "clone:git@github.com:octocat/x.git→\(root)"])
+        XCTAssertEqual(git.calls, ["lsremote-refs:git@github.com:octocat/x.git", "clone:git@github.com:octocat/x.git→\(root)"])
         guard case .failed = model.state else { return XCTFail("expected .failed, got \(model.state)") }
     }
 
@@ -476,8 +503,7 @@ extension SyncSetupModelTests {
         let model = try makeModel(git: git, credentials: InMemoryCredentialStore(),
                                   rebuilder: RecordingRebuilder(), fileService: existingUserFiles())
         await model.connectAndReport(url: "https://github.com/octocat/x.git", username: "octocat", token: "tok")
-        XCTAssertEqual(git.calls, ["lsremote-symref:https://github.com/octocat/x.git",
-                                   "lsremote-heads:https://github.com/octocat/x.git", "init:\(root)",
+        XCTAssertEqual(git.calls, ["lsremote-refs:https://github.com/octocat/x.git", "init:\(root)",
                                    "remote:https://github.com/octocat/x.git", "commit",
                                    "remoteHasCommits", "pull", "abort"])
         XCTAssertFalse(git.calls.contains("push"), "must NOT push a diverged remote")
@@ -516,7 +542,7 @@ extension SyncSetupModelTests {
         let rebuild = RecordingRebuilder(trace: trace)
         let model = try await runConnect(file: file, git: git, rebuilder: rebuild)
         XCTAssertEqual(model.state, .done)
-        XCTAssertEqual(trace.events, ["lsremote-symref:\(remoteURL)", "lsremote-heads:\(remoteURL)",
+        XCTAssertEqual(trace.events, ["lsremote-refs:\(remoteURL)",
                                      "clone:\(remoteURL)→\(root)", "rebuild:\(root)"])
         XCTAssertFalse(trace.events.contains(where: { $0.hasPrefix("delete:") }))
     }
@@ -528,7 +554,7 @@ extension SyncSetupModelTests {
         let model = try await runConnect(file: virginScaffold(trace: trace), git: git, rebuilder: rebuild)
         XCTAssertEqual(model.state, .done)
         XCTAssertEqual(trace.events, [
-            "lsremote-symref:\(remoteURL)", "lsremote-heads:\(remoteURL)", "init:\(root)",
+            "lsremote-refs:\(remoteURL)", "init:\(root)",
             "remote:\(remoteURL)", "fetch:main", "restore-fetch-head", "born:main",
             "rebuild:\(root)", "upstream:main"
         ])
@@ -699,25 +725,26 @@ extension SyncSetupModelTests {
             file: virginScaffold(trace: trace), git: git, rebuilder: RecordingRebuilder(trace: trace)
         )
         guard case .failed = model.state else { return XCTFail("expected failure") }
-        XCTAssertEqual(trace.events, ["lsremote-symref:\(remoteURL)", "lsremote-heads:\(remoteURL)"])
+        XCTAssertEqual(trace.events, ["lsremote-refs:\(remoteURL)"])
     }
 
     func testRemoteDefaultBranchAuthFailureSurfacesAuth() async throws {
         let trace = EventTrace(); let git = RecordingGitService(trace: trace)
-        git.throwAuthOn = "lsremote-symref:\(remoteURL)"
+        git.throwAuthOn = "lsremote-refs:\(remoteURL)"
         let model = try await runConnect(file: virginScaffold(trace: trace), git: git,
                                          rebuilder: RecordingRebuilder(trace: trace))
         guard case let .failed(message) = model.state else { return XCTFail("expected failure") }
         XCTAssertTrue(message.contains("access token"))
     }
 
-    func testRemoteBranchesAuthFailureSurfacesAuth() async throws {
+    func testRemoteRefReadFailureSurfacesBeforeWriting() async throws {
         let trace = EventTrace(); let git = RecordingGitService(trace: trace)
-        git.throwAuthOn = "lsremote-heads:\(remoteURL)"
+        git.throwOn = "lsremote-refs:\(remoteURL)"
         let model = try await runConnect(file: virginScaffold(trace: trace), git: git,
                                          rebuilder: RecordingRebuilder(trace: trace))
         guard case let .failed(message) = model.state else { return XCTFail("expected failure") }
-        XCTAssertTrue(message.contains("access token"))
+        XCTAssertFalse(message.contains("access token"))
+        XCTAssertFalse(trace.events.contains(where: { $0.hasPrefix("init:") }))
     }
 
     func testNonMainDefaultInsertsBranchMove() async throws {
@@ -803,7 +830,7 @@ extension SyncSetupModelTests {
             remote: remoteURL, tracking: false, familiesEmpty: true
         )
         guard case .failed = model.state else { return XCTFail("expected failure") }
-        XCTAssertEqual(trace.events, ["lsremote-symref:\(remoteURL)", "lsremote-heads:\(remoteURL)"])
+        XCTAssertEqual(trace.events, ["lsremote-refs:\(remoteURL)"])
     }
 
     func testBranchlessDifferentOriginThrowsZeroEvents() async throws {
@@ -861,7 +888,7 @@ extension SyncSetupModelTests {
         )
         guard case .failed = first.state else { return XCTFail("expected first failure") }
         XCTAssertEqual(trace.events, [
-            "lsremote-symref:\(remoteURL)", "lsremote-heads:\(remoteURL)", "init:\(root)",
+            "lsremote-refs:\(remoteURL)", "init:\(root)",
             "remote:\(remoteURL)", "fetch:main", "restore-fetch-head", "born:main",
             "rebuild:\(root)", "upstream:main"
         ])
@@ -1260,7 +1287,7 @@ extension SyncSetupModelTests {
 extension SyncSetupModelTests {
     func testHeldConnectStepsKeepMainActorFreeAndRenderButtonProgress() async throws {
         let remote = "https://github.com/octocat/x.git"
-        let checking = ["probe", "read-remote", "read-branches", "lsremote-symref:\(remote)", "lsremote-heads:\(remote)",
+        let checking = ["probe", "read-remote", "read-branches", "lsremote-refs:\(remote)",
                         "read-tracking"]
         let writing = ["init:\(root)", "remote:\(remote)", "checkout-B:trunk", "fetch:trunk",
                        "restore-fetch-head", "born:trunk", "upstream:trunk"]
@@ -1321,7 +1348,7 @@ extension SyncSetupModelTests {
             let credentials = InMemoryCredentialStore()
             try credentials.store(token: "original", username: "old", forHost: "github.com")
             let before = file.contents
-            let step = tracking ? "read-tracking" : "lsremote-heads:\(remoteURL)"
+            let step = tracking ? "read-tracking" : "lsremote-refs:\(remoteURL)"
             let gate = TestWait.Gate(owner: self)
             defer { gate.open() }
             let entered = cancelling ? expectation(description: "remote check") : nil
@@ -1352,7 +1379,7 @@ extension SyncSetupModelTests {
             }
             XCTAssertEqual(credentials.credential(forHost: "github.com"), .httpsToken(username: "old", token: "original"))
             XCTAssertEqual(file.contents, before)
-            XCTAssertEqual(git.calls, ["lsremote-symref:\(remoteURL)", "lsremote-heads:\(remoteURL)"],
+            XCTAssertEqual(git.calls, ["lsremote-refs:\(remoteURL)"],
                            "No store/config write after a failed check")
             await assertFreshSetup(model: model, previous: firstSheet, context: failure)
         }
@@ -1499,13 +1526,12 @@ extension SyncSetupModelTests {
         held = (point == 'probe' and '--version' in args
             or point == 'read-remote' and 'get-url' in args
             or point == 'read-branches' and 'for-each-ref' in args
-            or point == 'symref' and '--symref' in args
-            or point == 'heads' and '--heads' in args
+            or point == 'refs' and '--symref' in args
             or point == 'read-tracking' and '--verify' in args)
         if not held:
             if 'ls-remote' in args:
-                if '--symref' in args: print('ref: refs/heads/trunk\\tHEAD')
-                else: print('0' * 40 + '\\trefs/heads/trunk')
+                print('ref: refs/heads/trunk\\tHEAD')
+                print('0' * 40 + '\\trefs/heads/trunk')
                 sys.exit(0)
             os.execv('/usr/bin/git', ['/usr/bin/git'] + sys.argv[1:])
         child = os.fork()
@@ -1693,7 +1719,7 @@ extension SyncSetupModelTests {
 
 extension SyncSetupModelTests {
     func testCancelRemoteReadJoinsRealGitGroupWithoutChangingStoreOrCredential() async throws {
-        for point in ["escape", "probe", "read-remote", "read-branches", "symref", "heads", "read-tracking"] {
+        for point in ["escape", "probe", "read-remote", "read-branches", "refs", "read-tracking"] {
             try await assertReadCancellation(checkingPoint: point)
         }
     }
@@ -1718,7 +1744,7 @@ extension SyncSetupModelTests {
             }
         }
         try writeHeldRemoteGit(at: executable, parentPath: parentPath, helperPath: helperPath,
-            checkingPoint: checkingPoint == "escape" ? "symref" : checkingPoint)
+            checkingPoint: checkingPoint == "escape" ? "refs" : checkingPoint)
         let model = SyncSetupModel(context: try makeContext(),
             git: GitService(askpassHelperPath: root + "-askpass", executablePath: executable),
             credentials: credentials, root: root, lockPath: root + "-sync.lock", steps: SyncStepModel())
@@ -1767,5 +1793,62 @@ extension SyncSetupModelTests {
             await TestWait.until(failureMessage: "Failed-case cleanup did not cancel git") { model.state == .cancelled }
             throw StubBoom()
         }
+    }
+}
+
+extension SyncSetupModelTests {
+    @Observable fileprivate final class NoticePresentation {
+        var shown = true
+    }
+
+    private struct NoticeHost: View {
+        @Bindable var presentation: NoticePresentation
+        let model: SyncSetupModel
+        var body: some View {
+            Text("Connect host")
+                .sheet(isPresented: $presentation.shown) { SyncSetupView(model: model) }
+        }
+    }
+
+    func testFallbackBranchIsReportedAndRenderedAfterAdoption() async throws {
+        for (reported, heads, selected) in [
+            (Optional("\u{0301}topic"), ["main"], "main"),
+            (Optional("\u{FEFF}topic"), ["master"], "master"),
+            (nil, ["main"], "main")
+        ] {
+            let trace = EventTrace()
+            let git = RecordingGitService(trace: trace)
+            git.defaultBranchFixture = reported
+            git.branchesFixture = heads
+            let model = try makeModel(git: git, credentials: InMemoryCredentialStore(),
+                rebuilder: RecordingRebuilder(trace: trace), fileService: virginScaffold(trace: trace),
+                syncedFamiliesEmpty: { true })
+            let presentation = NoticePresentation()
+            let host = setupHost(AnyView(NoticeHost(presentation: presentation, model: model)))
+            defer { removeSetup(host) }
+            await TestWait.until(failureMessage: "Connect sheet didn't open") { host.window.attachedSheet != nil }
+            await model.connectAndReport(url: remoteURL, username: "octocat", token: "tok")
+            XCTAssertEqual(model.state, .done)
+            XCTAssertTrue(git.calls.contains("fetch:\(selected)"))
+            XCTAssertEqual(git.calls.filter { $0.hasPrefix("lsremote-") }, ["lsremote-refs:\(remoteURL)"])
+            let expected = "Connected using branch ‘\(selected)’ because Pensieve couldn't use the remote's default branch."
+            await TestWait.until(failureMessage: "Fallback notice didn't render in the completed sheet") {
+                guard let content = host.window.attachedSheet?.contentView else { return false }
+                return RenderedViewTestSupport.values(in: content).compactMap { $0 as? Text }
+                    .flatMap(RenderedViewTestSupport.strings).contains(expected)
+            }
+            XCTAssertEqual(model.connectionNotice, expected)
+            XCTAssertTrue(presentation.shown, "Completion must leave the explanation open for acknowledgement")
+            presentation.shown = false
+            await TestWait.until(failureMessage: "Fallback sheet didn't detach") { host.window.attachedSheet == nil }
+            model.prepareForPresentation()
+            XCTAssertNil(model.connectionNotice, "The next Connect sheet must not keep the old explanation")
+        }
+        let trace = EventTrace()
+        let git = RecordingGitService(trace: trace)
+        let ordinary = try await runConnect(file: virginScaffold(trace: trace), git: git,
+            rebuilder: RecordingRebuilder(trace: trace))
+        XCTAssertEqual(ordinary.state, .done)
+        XCTAssertNil(ordinary.connectionNotice, "Using the remote's default needs no fallback explanation")
     }
 }

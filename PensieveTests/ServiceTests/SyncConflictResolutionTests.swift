@@ -308,39 +308,71 @@ extension SyncConflictResolutionTests {
             self.pullError = pullError
         }
 
-        func performRemoteURL(at path: String) -> String? { "https://fixture.test/x.git" }
-        func performInitRepository(at path: String) throws {}
-        func performSetRemote(_ url: String, at path: String) throws {}
-        func performRemoveRemote(at path: String) throws {}
-        func performConfiguredRemoteURL(at path: String) throws -> String? { nil }
-        func performClone(remote: String, into path: String, credential: GitCredential?) throws {}
-        func performRemoteHasCommits(remote: String, credential: GitCredential?) -> Bool { true }
+        func remoteURL(at path: String) -> String? { "https://fixture.test/x.git" }
+        func initRepository(at path: String) throws {}
+        func setRemote(_ url: String, at path: String) throws {}
+        func removeRemote(at path: String) throws {}
+        func configuredRemoteURL(at path: String) throws -> String? { nil }
+        func clone(remote: String, into path: String, credential: GitCredential?) throws {}
+        func remoteHasCommits(remote: String, credential: GitCredential?) -> Bool { true }
         @discardableResult
-        func performStageAllAndCommit(at path: String, message: String) throws -> Bool { true }
-        func performPreflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
-        func performPullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
+        func stageAllAndCommit(at path: String, message: String) throws -> Bool { true }
+        func preflightStoreUpdate(at path: String, credential: GitCredential?) -> FetchedStoreRevision? { nil }
+        func pullRebase(at path: String, fetchedRevision: FetchedStoreRevision) throws -> PullResult {
             try pullRebase(at: path, credential: nil)
         }
-        func performPullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
+        func pullRebase(at path: String, credential: GitCredential?) throws -> PullResult {
             pullAttempted = true
             if let pullError { throw pullError }
             return .conflicted([conflictPath])
         }
-        func performPush(at path: String, credential: GitCredential?) throws {}
-        func performAbortRebase(at path: String) throws { if pullAttempted { abortsAfterPull += 1 } }
-        func performConflictedFiles(at path: String) -> [String] { [conflictPath] }
-        func performBlob(atStage stage: Int, path: String, in workingDir: String) -> Data? {
+        func push(at path: String, credential: GitCredential?) throws {}
+        func abortRebase(at path: String) throws { if pullAttempted { abortsAfterPull += 1 } }
+        func conflictedFiles(at path: String) -> [String] { [conflictPath] }
+        func blob(atStage stage: Int, path: String, in workingDir: String) -> Data? {
             Data((stage == 3 ? "this" : "other").utf8)
         }
-        func performContinueRebase(at path: String) throws -> PullResult { .merged }
-        func performSkipRebase(at path: String) throws -> PullResult { .merged }
-        func performStagePath(_ path: String, at root: String) throws { stagedPaths.append(path) }
-        func performCollapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
-                                           fetchedRevision: FetchedStoreRevision?) throws -> Bool {
+        func continueRebase(at path: String) throws -> PullResult { .merged }
+        func skipRebase(at path: String) throws -> PullResult { .merged }
+        func stagePath(_ path: String, at root: String) throws { stagedPaths.append(path) }
+        func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
+                                    fetchedRevision: FetchedStoreRevision?) throws -> Bool {
             true
         }
-        func performHasCommitsToPush(at path: String) -> Bool { false }
-    }
+        func hasCommitsToPush(at path: String) -> Bool { false }
+        func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
+            try blob(atStage: stage, path: path, in: workingDir).map {
+                ConflictEntry(mode: "100644", objectID: "", bytes: $0)
+            }
+        }
+
+        func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+            throw GitError.repositoryUnreadable(path: root, detail: "Conflict entry restoration is unavailable.")
+        }
+
+        func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
+            throw GitError.repositoryUnreadable(path: root, detail: "Conflict index removal is unavailable.")
+        }
+
+        func retireConflictPath(_ path: String, at root: String) throws {
+            throw GitError.repositoryUnreadable(path: root, detail: "Legacy gitlink resolution is unavailable.")
+        }
+
+        func probeUsability() -> GitUsability { .usable }
+        func checkoutUnbornBranch(_ branch: String, at path: String) throws {}
+        func fetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {}
+        func materializeFromFetchHead(at path: String) throws {}
+        func bornBranch(_ branch: String, at path: String) throws {}
+        func setUpstream(branch: String, at path: String) throws {}
+        func hasLocalBranches(at path: String) throws -> Bool { true }
+        func hasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool { false }
+        func hasRemoteOriginConfigured(at path: String) throws -> Bool { true }
+        func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] { [] }
+        func show(sha: String, path: String, at workingDir: String) -> String? { nil }
+        func remoteReferences(remote: String, credential: GitCredential?) throws -> GitRemoteReferences {
+            GitRemoteReferences(defaultBranch: nil, heads: [])
+        }
+}
 
     func assertUnsafePath(_ path: String, root: String, escapedPath: String?,
                           line: UInt = #line) throws {

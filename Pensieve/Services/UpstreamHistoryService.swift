@@ -141,9 +141,10 @@ struct UpstreamHistoryGitRequest {
     let credential: GitCredential?
 }
 
-protocol UpstreamHistoryGitServing {
-    func performUpstreamHistory(_ request: UpstreamHistoryGitRequest) throws -> UpstreamHistoryGitSnapshot
-    func performRemoteHead(remote: String, ref: String, credential: GitCredential?) throws -> String?
+protocol UpstreamHistoryGitServing: GitRemoteHeadReading {
+    @_disfavoredOverload
+    func upstreamHistory(_ request: UpstreamHistoryGitRequest) throws -> UpstreamHistoryGitSnapshot
+
 }
 
 extension GitService: UpstreamHistoryGitServing {}

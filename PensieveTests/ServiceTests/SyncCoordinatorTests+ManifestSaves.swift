@@ -117,11 +117,13 @@ private struct PausedManifestRebuild: StoreRebuildServiceProtocol {
 private struct PausedManifestFastForward: FastForwardGitService {
     let wrapped: AllowlistedFastForwardGit
     let gate: TestWait.Gate
-    func performRemoteURL(at path: String) throws -> String? { try wrapped.remoteURL(at: path) }
-    func performIsWorktreeClean(at path: String) -> Bool { wrapped.isWorktreeClean(at: path) }
-    func performFetch(at path: String, credential: GitCredential?) throws { try wrapped.fetch(at: path, credential: credential) }
-    func performFastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
+    func remoteURL(at path: String) throws -> String? { try wrapped.remoteURL(at: path) }
+    func isWorktreeClean(at path: String) -> Bool { wrapped.isWorktreeClean(at: path) }
+    func fetch(at path: String, credential: GitCredential?) throws { try wrapped.fetch(at: path, credential: credential) }
+    func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
         try gate.wait()
         return try wrapped.fastForwardOnly(at: path, credential: credential)
     }
+
+    func probeUsability() -> GitUsability { .usable }
 }

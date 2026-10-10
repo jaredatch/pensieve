@@ -283,21 +283,23 @@ final class AllowlistedFastForwardGit: FastForwardGitService {
         self.wrapped = wrapped
     }
 
-    func performRemoteURL(at path: String) throws -> String? {
+    func remoteURL(at path: String) throws -> String? {
         try wrapped.remoteURL(at: path) == nil ? nil : "https://fixture.test/pensieve-skills.git"
     }
 
-    func performIsWorktreeClean(at path: String) -> Bool {
+    func isWorktreeClean(at path: String) -> Bool {
         wrapped.isWorktreeClean(at: path)
     }
 
-    func performFetch(at path: String, credential: GitCredential?) throws {
+    func fetch(at path: String, credential: GitCredential?) throws {
         try wrapped.fetch(at: path, credential: credential)
     }
 
-    func performFastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
+    func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
         try wrapped.fastForwardOnly(at: path, credential: credential)
     }
+
+    func probeUsability() -> GitUsability { .usable }
 }
 
 private final class NilCredentialStore: CredentialStoreProtocol {

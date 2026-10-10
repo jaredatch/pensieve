@@ -75,18 +75,18 @@ extension UpdatesViewModelTests {
 private struct PreviewFailingGit: SkillInstallGitServing {
     let step: String
     let git = TestPaths.git
-    func performCloneShallow(remote: String, branch: String?, into path: String, credential: GitCredential?) throws {
+    func cloneShallow(remote: String, branch: String?, into path: String, credential: GitCredential?) throws {
         if step == "unusable-clone" { throw GitError.unusable(.developerToolsMissing) }
         if step == "clone" { throw GitError.repositoryUnreadable(path: path, detail: "remote: untrusted clone text " + path) }
         try git.cloneShallow(remote: remote, branch: branch, into: path, credential: credential)
     }
-    func performCommitSHA(at path: String) throws -> String {
+    func commitSHA(at path: String) throws -> String {
         if step == "unusable-head" { throw GitError.unusable(.developerToolsMissing) }
         if step == "head" { throw GitError.repositoryUnreadable(path: path, detail: "remote: untrusted HEAD text " + path) }
         return try git.commitSHA(at: path)
     }
-    func performCurrentBranch(at path: String) throws -> String { try git.currentBranch(at: path) }
-    func performTreeHash(at repositoryPath: String, path: String) throws -> String {
+    func currentBranch(at path: String) throws -> String { try git.currentBranch(at: path) }
+    func treeHash(at repositoryPath: String, path: String) throws -> String {
         if step == "unusable-tree" { throw GitError.unusable(.developerToolsMissing) }
         if step == "tree" {
             throw GitError.commandFailed(args: ["-C", repositoryPath, "rev-parse", "HEAD:" + path],

@@ -25,8 +25,7 @@ EXEMPTIONS = {
         "ProjectIdentityService.normalizeRemoteURL(_:String)",
         "ProjectIdentityService.parseURLForm(_:String)"},  # Origin URL.
     "Pensieve/Services/GitService.swift": {
-        "GitService.performRemoteDefaultBranch(remote:String,credential:GitCredential?)",
-        "GitService.performRemoteBranches(remote:String,credential:GitCredential?)"},  # Git refs.
+        "GitService.remoteReferences(remote:String,credential:GitCredential?)"},  # Git refs.
     "Pensieve/Services/UpstreamHistoryService.swift": {"UpstreamHistoryService.isSafeRef(_:String)"},  # Git refs.
     "Pensieve/ViewModels/SyncSetupModel.swift": {"SyncSetupModel.isValidBranchName(_:String)"},  # Git refs.
     "Pensieve/Services/PreviewImageLoader.swift": {"PreviewImageLoader.embeddedData(_:URL)"},  # MIME image.

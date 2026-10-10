@@ -48,26 +48,40 @@ struct SyncSetupView: View {
                 Text("Connect was cancelled.").font(.callout).foregroundStyle(.secondary)
             }
 
+            if let notice = model.connectionNotice {
+                Text(notice)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Spacer(minLength: Spacing.sm)
 
             HStack(spacing: Spacing.sm) {
-                Button("Cancel") {
-                    if model.state == .working { model.cancel() } else { dismiss() }
-                }
-                    .keyboardShortcut(.cancelAction)
-                    .disabled(!model.canCancel)
-                Spacer()
-                Button {
-                    model.connect(url: url, username: username, token: token)
-                } label: {
-                    HStack {
-                        if model.state == .working { ProgressView().controlSize(.small) }
-                        Text("Connect")
+                if model.state != .done {
+                    Button("Cancel") {
+                        if model.state == .working { model.cancel() } else { dismiss() }
                     }
+                        .keyboardShortcut(.cancelAction)
+                        .disabled(!model.canCancel)
                 }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(url.isEmpty || model.state == .working)
+                Spacer()
+                if model.state == .done {
+                    Button("Done") { dismiss() }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button {
+                        model.connect(url: url, username: username, token: token)
+                    } label: {
+                        HStack {
+                            if model.state == .working { ProgressView().controlSize(.small) }
+                            Text("Connect")
+                        }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(url.isEmpty || model.state == .working)
+                }
             }
         }
         .padding(Spacing.xl)
@@ -76,7 +90,7 @@ struct SyncSetupView: View {
         .onAppear { model.prepareForPresentation() }
         .onDisappear { model.cancel() }
         .onChange(of: model.state) { _, newState in
-            if newState == .done { dismiss() }
+            if newState == .done, model.connectionNotice == nil { dismiss() }
         }
     }
 }

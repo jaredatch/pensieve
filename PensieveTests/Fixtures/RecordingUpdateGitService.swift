@@ -7,7 +7,7 @@ final class RecordingUpdateGitService: UpdateCheckGitServing {
     var onProbe: (() throws -> GitUsability)?
     var cloneErrors: [String: GitError] = [:]
     private(set) var probeCalls = 0
-    func performProbeUsability() throws -> GitUsability { probeCalls += 1; return try onProbe?() ?? usability }
+    func probeUsability() throws -> GitUsability { probeCalls += 1; return try onProbe?() ?? usability }
     var heads: [String: String] = [:]
     var trees: [String: String] = [:]
     var failingRemotes: Set<String> = []
@@ -19,8 +19,8 @@ final class RecordingUpdateGitService: UpdateCheckGitServing {
     private(set) var treeHashCalls: [String] = []
     var receivedCredentials: [GitCredential?] = []
     private var lastClonedRemote: String?
-    func performRemoteHead(remote: String, ref: String,
-                           credential: GitCredential?) throws -> String? {
+    func remoteHead(remote: String, ref: String,
+                    credential: GitCredential?) throws -> String? {
         remoteHeadCalls.append((remote, ref))
         receivedCredentials.append(credential)
         if let error = remoteHeadErrors[remote] { throw error }
@@ -30,24 +30,24 @@ final class RecordingUpdateGitService: UpdateCheckGitServing {
         return heads[remote]
     }
 
-    func performCloneShallow(remote: String, branch: String?, into path: String,
-                             credential: GitCredential?) throws {
+    func cloneShallow(remote: String, branch: String?, into path: String,
+                      credential: GitCredential?) throws {
         cloneCalls.append((remote, branch))
         if let error = cloneErrors[remote] { throw try confirmed(error) }
         receivedCredentials.append(credential)
         lastClonedRemote = remote
     }
 
-    func performCommitSHA(at path: String) throws -> String {
+    func commitSHA(at path: String) throws -> String {
         if let clonedHeadOverride { return clonedHeadOverride }
         return lastClonedRemote.flatMap { heads[$0] } ?? "missing-head"
     }
 
-    func performCommitDate(at repositoryPath: String) throws -> Date {
+    func commitDate(at repositoryPath: String) throws -> Date {
         Date(timeIntervalSince1970: 1_750_000_000)
     }
 
-    func performTreeHash(at repositoryPath: String, path: String) throws -> String {
+    func treeHash(at repositoryPath: String, path: String) throws -> String {
         treeHashCalls.append(path)
         do { try onTreeHash?(path) } catch let error as GitError { throw try confirmed(error) }
         guard let tree = trees[path] else {

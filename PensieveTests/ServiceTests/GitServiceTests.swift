@@ -685,10 +685,9 @@ extension GitServiceTests {
                     try service.cloneShallow(remote: remote, branch: "main", into: root, credential: credential)
                 }),
                 .init("remoteHasCommits", "ls-remote", { _ = service.remoteHasCommits(remote: remote, credential: credential) }),
-                .init("remoteDefaultBranch", "ls-remote", {
-                    _ = try service.remoteDefaultBranch(remote: remote, credential: credential)
+                .init("remoteReferences", "ls-remote", {
+                    _ = try service.remoteReferences(remote: remote, credential: credential)
                 }),
-                .init("remoteBranches", "ls-remote", { _ = try service.remoteBranches(remote: remote, credential: credential) }),
                 .init("remoteHead", "ls-remote", { _ = try service.remoteHead(remote: remote, ref: "main",
                     credential: credential) }),
                 .init("fetch", "fetch", { try service.fetch(at: root, credential: credential) }),
@@ -950,5 +949,36 @@ extension GitServiceTests {
         }
         XCTAssertEqual(try files.readFile(at: destination + "/keep"), "arrived during download")
         XCTAssertFalse(files.directoryExists(at: destination + "/.git"))
+    }
+}
+
+extension GitServiceTests {
+    func testRemoteRefListingSkipsInvalidUTF8AndPreservesNameBytes() throws {
+        try NativeTestWork.run { [self] in
+            let files = FileService()
+            let executable = tempDir + "/remote-refs"
+            let sha = String(repeating: "a", count: 40)
+            for name in ["main", "\u{0301}topic", "\u{FEFF}topic", "cafe\u{0301}", "topic\u{0600}"] {
+                let listing = Array("ref: refs/heads/\(name)\tHEAD\n\(sha)\trefs/heads/".utf8)
+                    + [0xFF] + Array("invalid\n\(sha)\trefs/heads/\(name)\n\(sha)\trefs/heads/other\n".utf8)
+                let encoded = Data(listing).base64EncodedString()
+                let receipt = tempDir + "/remote-ref-receipt"
+                try files.writeExecutableFile(at: executable, content: """
+                #!/usr/bin/python3
+                import base64, sys
+                assert sys.argv[1:] == ['ls-remote', '--symref', '--', 'https://fixture.test/refs.git', 'HEAD', 'refs/heads/*']
+                with open('\(receipt)', 'a') as stream: stream.write('call\\n')
+                sys.stdout.buffer.write(base64.b64decode('\(encoded)'))
+                """)
+                let service = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+                try files.writeFile(at: receipt, content: "")
+                let refs = try service.remoteReferences(remote: "https://fixture.test/refs.git", credential: nil)
+                XCTAssertEqual(try files.readFile(at: receipt), "call\n", "One command supplies the default and heads")
+                let defaultBranch = refs.defaultBranch
+                let branches = refs.heads
+                XCTAssertEqual(defaultBranch.map { Array($0.utf8) }, Array(name.utf8), name)
+                XCTAssertEqual(branches.map { Array($0.utf8) }, [Array(name.utf8), Array("other".utf8)], name)
+            }
+        }
     }
 }

@@ -37,19 +37,11 @@ enum UpdateCheckSchedule {
     }
 }
 
-protocol UpdateCheckGitServing {
-    func performProbeUsability() throws -> GitUsability
-    func performRemoteHead(remote: String, ref: String,
-                           credential: GitCredential?) throws -> String?
-    func performCloneShallow(remote: String, branch: String?, into path: String,
-                             credential: GitCredential?) throws
-    func performCommitSHA(at path: String) throws -> String
-    func performCommitDate(at repositoryPath: String) throws -> Date
-    func performTreeHash(at repositoryPath: String, path: String) throws -> String
-}
+protocol UpdateCheckGitServing: GitUsabilityProbing, GitShallowCloning, GitCommitReading, GitTreeReading, GitRemoteHeadReading {
 
-extension UpdateCheckGitServing {
-    func performProbeUsability() -> GitUsability { .usable }
+    @_disfavoredOverload
+    func commitDate(at repositoryPath: String) throws -> Date
+
 }
 
 extension GitService: UpdateCheckGitServing {}

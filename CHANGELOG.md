@@ -38,6 +38,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Connecting to a sync remote now tells you when Pensieve uses a fallback branch, and which branch it chose.
 - Launch and skill history keep the window responsive while Git runs. History shows progress while loading, comparing, or restoring a version, and a delayed Restore leaves newer edits alone.
 
 - Path checks now recognize filesystem separators beside combining marks, joiners, emoji modifiers, tag characters and names ending in Prepend characters. Sync refuses escaping links while existing accented skill names and decomposed link targets keep working.
