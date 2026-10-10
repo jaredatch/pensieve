@@ -29,7 +29,7 @@ enum RenderedViewTestSupport {
     /// Read NSHostingView's live render tree. SWIFTUI_VIEW_DEBUG is enabled by the suite wrapper.
     /// Inspect only rendered values/children; never evaluate a new body or substitute model state.
     /// Missing debug data or changed SDK fields fail the owning UI assertions instead of passing empty.
-    static func values(in host: NSHostingView<AnyView>) -> [Any] {
+    static func values(in host: NSView) -> [Any] {
         host.layoutSubtreeIfNeeded()
         func values(_ nodes: [_ViewDebug.Data]) -> [Any] {
             nodes.flatMap { node in

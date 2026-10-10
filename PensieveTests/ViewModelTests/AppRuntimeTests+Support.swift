@@ -12,10 +12,14 @@ extension AppRuntimeTests {
         let escape = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
             modifierFlags: [], timestamp: 0, windowNumber: sheet.windowNumber, context: nil,
             characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
-        await TestWait.until(failureMessage: "The launch wizard did not render its Skip action") {
-            root.layoutSubtreeIfNeeded()
-            return root.performKeyEquivalent(with: escape) || sheet.performKeyEquivalent(with: escape)
-        }
+        await TestWait.until(failureMessage: "The launch wizard did not render its Skip action", diagnostics: {
+            RenderedViewTestSupport.values(in: root).compactMap { $0 as? Text }
+                .flatMap(RenderedViewTestSupport.strings).description
+        }, {
+            RenderedViewTestSupport.values(in: root).compactMap { $0 as? Text }
+                .flatMap(RenderedViewTestSupport.strings).contains("Skip")
+        })
+        XCTAssertTrue(sheet.performKeyEquivalent(with: escape), "The launch wizard did not handle Escape for its Skip action")
         await TestWait.until(failureMessage: "The skipped launch wizard did not detach") {
             window.attachedSheet == nil
         }

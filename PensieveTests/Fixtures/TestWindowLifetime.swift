@@ -3,6 +3,7 @@ import XCTest
 @testable import Pensieve
 
 /// Checks windows created during a case after its body and cleanup blocks release their owners.
+/// Release hosted windows in the body or a teardown block; this check runs before tearDown().
 /// A retained shell passes only when hidden, transitions-off and contentless. Closed windows
 /// keeping content or default transitions still fail. Pre-existing and private-framework helper
 /// windows are excluded; the observer never closes windows or changes their animation policy.
@@ -34,7 +35,8 @@ final class TestWindowLifetime: NSObject, XCTestObservation {
                     "class=\(type(of: window)), visible=\(window.isVisible), " +
                     "animation=\(window.animationBehavior.rawValue), frame=\(window.frame), " +
                     "content=\(String(describing: window.contentView)), " +
-                    "bundle=\(Bundle(for: type(of: window)).bundlePath)"))
+                    "bundle=\(Bundle(for: type(of: window)).bundlePath); release hosted windows in the test body " +
+                    "or a teardown block, not tearDown()."))
             }
         }
     }

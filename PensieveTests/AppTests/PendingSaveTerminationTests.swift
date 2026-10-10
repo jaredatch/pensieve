@@ -176,7 +176,6 @@ final class PendingSaveTerminationTests: XCTestCase {
             await TestWait.until(failureMessage: "The native quit choice did not resolve") { !answers.isEmpty }
             XCTAssertEqual(answers, [choice == "Quit Anyway"])
             XCTAssertNil(parent.attachedSheet)
-            dismiss()
         }
         for choice in ["Wait", "Quit Anyway", "Close host"] {
             unrelated.orderFront(nil)
