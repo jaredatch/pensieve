@@ -112,7 +112,7 @@ extension GitService {
         remote: String,
         ref: String
     ) throws -> Never {
-        let combined = output.stdout + output.stderr
+        let combined = output.failureText
         if isAuthFailure(combined) {
             throw GitError.authenticationFailed(remote: remote, detail: combined)
         }
@@ -123,7 +123,7 @@ extension GitService {
         throw GitError.commandFailed(
             args: args,
             exitCode: output.exit,
-            stderr: output.stderr.isEmpty ? output.stdout : output.stderr, confirmingProbe: output.confirmingProbe)
+            stderr: output.failureText, confirmingProbe: output.confirmingProbe)
     }
 
     func fetchTrackedRef(_ request: UpstreamHistoryGitRequest) throws {
@@ -163,7 +163,7 @@ extension GitService {
     }
 
     func isMissingRemoteRef(_ output: GitOutput) -> Bool {
-        let message = (output.stdout + output.stderr).lowercased()
+        let message = output.failureText.lowercased()
         return message.contains("couldn't find remote ref")
             || message.contains("remote ref does not exist")
     }
@@ -262,7 +262,7 @@ extension GitService {
         ], in: nil)
         if output.exit == 0 { return true }
         if output.exit == 1 { return false }
-        throw GitError.commandFailed(args: ["merge-base"], exitCode: output.exit, stderr: output.stderr,
+        throw GitError.commandFailed(args: ["merge-base"], exitCode: output.exit, stderr: output.failureText,
             confirmingProbe: output.confirmingProbe)
     }
 

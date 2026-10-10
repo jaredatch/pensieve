@@ -1811,10 +1811,13 @@ extension SyncSetupModelTests {
     }
 
     func testFallbackBranchIsReportedAndRenderedAfterAdoption() async throws {
-        for (reported, heads, selected) in [
-            (Optional("\u{0301}topic"), ["main"], "main"),
-            (Optional("\u{FEFF}topic"), ["master"], "master"),
-            (nil, ["main"], "main")
+        for (reported, heads, selected, key) in [
+            (Optional("\u{0301}topic"), ["main"], "main", "\r"),
+            (Optional("\u{FEFF}topic"), ["master"], "master", "\r"),
+            (nil, ["main"], "main", "\r"),
+            (Optional("\u{0301}topic"), ["main"], "main", "\u{1b}"),
+            (Optional("\u{FEFF}topic"), ["master"], "master", "\u{1b}"),
+            (nil, ["main"], "main", "\u{1b}")
         ] {
             let trace = EventTrace()
             let git = RecordingGitService(trace: trace)
@@ -1838,9 +1841,11 @@ extension SyncSetupModelTests {
                 return RenderedViewTestSupport.values(in: content).compactMap { $0 as? Text }
                     .flatMap(RenderedViewTestSupport.strings).contains(expected)
             }
-            XCTAssertEqual(model.connectionNotice, expected)
+            let notice = try XCTUnwrap(model.connectionNotice)
+            XCTAssertEqual(notice, expected)
             XCTAssertTrue(presentation.shown, "Completion must leave the explanation open for acknowledgement")
-            await assertFinishedSetup(sheet: sheet, content: content, presentation: presentation, parent: host.window)
+            await assertFinishedSetup(sheet: sheet, content: content,
+                presentation: presentation, parent: host.window, key: key)
             model.prepareForPresentation()
             XCTAssertNil(model.connectionNotice, "The next Connect sheet must not keep the old explanation")
         }
@@ -1871,7 +1876,7 @@ extension SyncSetupModelTests {
     }
 
     private func assertFinishedSetup(
-        sheet: NSWindow, content: NSView, presentation: NoticePresentation, parent: NSWindow
+        sheet: NSWindow, content: NSView, presentation: NoticePresentation, parent: NSWindow, key: String
     ) async {
         let fields = setupFields(in: content)
         XCTAssertEqual(fields.count, 3, "The completed HTTPS form retains URL, username and token")
@@ -1882,14 +1887,25 @@ extension SyncSetupModelTests {
             XCTAssertNil(field.currentEditor(), "Tab must not start editing a completed field")
         }
         sheet.makeFirstResponder(content)
-        XCTAssertTrue(pressCancel(in: content), "The completed sheet must handle Escape as Done")
+        let name = key == "\r" ? "Return" : "Escape"
+        XCTAssertTrue(pressFinishedSetupKey(key, in: content), "The completed sheet must handle \(name) as Done")
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                            failureMessage: "Escape didn't close the completed Connect sheet") { parent.attachedSheet == nil }
-        XCTAssertFalse(presentation.shown, "Escape must acknowledge completion as Done does")
+                            failureMessage: "\(name) didn't close the completed Connect sheet") { parent.attachedSheet == nil }
+        XCTAssertFalse(presentation.shown, "\(name) must acknowledge completion as Done does")
         // Release a failed presentation after recording the behavioral failures above.
         if parent.attachedSheet != nil {
             presentation.shown = false
             await TestWait.until(failureMessage: "Failed-case sheet cleanup didn't detach") { parent.attachedSheet == nil }
         }
+    }
+
+    private func pressFinishedSetupKey(_ key: String, in root: NSView) -> Bool {
+        if key == "\u{1b}" { return pressCancel(in: root) }
+        guard let window = root.window,
+              let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: key,
+                charactersIgnoringModifiers: key, isARepeat: false, keyCode: 36) else { return false }
+        root.layoutSubtreeIfNeeded()
+        return root.performKeyEquivalent(with: event) || window.performKeyEquivalent(with: event)
     }
 }

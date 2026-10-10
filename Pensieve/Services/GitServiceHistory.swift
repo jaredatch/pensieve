@@ -15,7 +15,7 @@ extension GitService {
             throw GitError.commandFailed(
                 args: ["log"],
                 exitCode: result.exit,
-                stderr: result.stderr.isEmpty ? result.stdout : result.stderr, confirmingProbe: result.confirmingProbe)
+                stderr: result.failureText, confirmingProbe: result.confirmingProbe)
         }
         return result.stdout.split(separator: "\n").compactMap { line in
             let fields = line.components(separatedBy: "\u{1f}")

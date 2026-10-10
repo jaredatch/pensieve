@@ -13,14 +13,14 @@ extension GitService {
             + ["ls-remote", "--", remote, branch, tag, peeledTag]
         let output = try runUpstreamHistoryNetwork(args, credential: credential)
         guard output.exit == 0 else {
-            let combined = output.stdout + output.stderr
+            let combined = output.failureText
             if isAuthFailure(combined) {
                 throw GitError.authenticationFailed(remote: remote, detail: combined)
             }
             throw GitError.commandFailed(
                 args: args,
                 exitCode: output.exit,
-                stderr: output.stderr.isEmpty ? output.stdout : output.stderr, confirmingProbe: output.confirmingProbe)
+                stderr: output.failureText, confirmingProbe: output.confirmingProbe)
         }
 
         var revisions: [String: String] = [:]
