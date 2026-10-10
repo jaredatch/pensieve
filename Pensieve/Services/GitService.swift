@@ -523,7 +523,8 @@ extension GitService {
         let args = ["ls-remote", "--symref", "--", remote, "HEAD", "refs/heads/*"]
         let result = try runData(args, in: nil, credential: credential)
         guard result.exit == 0 else {
-            let combined = String(data: result.stdout + result.stderr, encoding: .utf8) ?? ""
+            let combined = (String(data: result.stdout, encoding: .utf8) ?? "")
+                + (String(data: result.stderr, encoding: .utf8) ?? "")
             if Self.classifyLsRemoteFailure(exitCode: result.exit, combinedOutput: combined) == .auth {
                 throw GitError.authenticationFailed(remote: remote, detail: combined)
             }

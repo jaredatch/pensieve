@@ -979,6 +979,31 @@ extension GitServiceTests {
                 XCTAssertEqual(defaultBranch.map { Array($0.utf8) }, Array(name.utf8), name)
                 XCTAssertEqual(branches.map { Array($0.utf8) }, [Array(name.utf8), Array("other".utf8)], name)
             }
+            try assertRemoteRefAuthFailureWithInvalidStream(files: files, executable: executable)
+        }
+    }
+
+    private func assertRemoteRefAuthFailureWithInvalidStream(files: FileService, executable: String) throws {
+        for (stdout, stderr, message) in [
+            (Data([0xFF]), Data("fatal: Authentication failed\n".utf8), "Authentication failed"),
+            (Data("Permission denied (publickey).\n".utf8), Data([0xFF]), "Permission denied (publickey)")
+        ] {
+            try files.writeExecutableFile(at: executable, content: """
+            #!/usr/bin/python3
+            import base64, sys
+            sys.stdout.buffer.write(base64.b64decode('\(stdout.base64EncodedString())'))
+            sys.stderr.buffer.write(base64.b64decode('\(stderr.base64EncodedString())'))
+            sys.exit(128)
+            """)
+            let service = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+            let remote = "https://fixture.test/refs.git"
+            XCTAssertThrowsError(try service.remoteReferences(remote: remote, credential: nil)) {
+                guard case let GitError.authenticationFailed(actualRemote, detail) = $0 else {
+                    return XCTFail("Expected an auth failure with \(message), got \($0)")
+                }
+                XCTAssertEqual(actualRemote, remote)
+                XCTAssertTrue(detail.contains(message), detail)
+            }
         }
     }
 }

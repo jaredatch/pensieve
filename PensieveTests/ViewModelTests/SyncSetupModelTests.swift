@@ -1827,11 +1827,12 @@ extension SyncSetupModelTests {
             let host = setupHost(AnyView(NoticeHost(presentation: presentation, model: model)))
             defer { removeSetup(host) }
             await TestWait.until(failureMessage: "Connect sheet didn't open") { host.window.attachedSheet != nil }
+            let (sheet, content) = try await prepareHTTPSSetupForm(parent: host.window)
             await model.connectAndReport(url: remoteURL, username: "octocat", token: "tok")
             XCTAssertEqual(model.state, .done)
             XCTAssertTrue(git.calls.contains("fetch:\(selected)"))
             XCTAssertEqual(git.calls.filter { $0.hasPrefix("lsremote-") }, ["lsremote-refs:\(remoteURL)"])
-            let expected = "Connected using branch ‘\(selected)’ because Pensieve couldn't use the remote's default branch."
+            let expected = "Connected using branch “\(selected)” because Pensieve couldn't use the remote's default branch."
             await TestWait.until(failureMessage: "Fallback notice didn't render in the completed sheet") {
                 guard let content = host.window.attachedSheet?.contentView else { return false }
                 return RenderedViewTestSupport.values(in: content).compactMap { $0 as? Text }
@@ -1839,8 +1840,7 @@ extension SyncSetupModelTests {
             }
             XCTAssertEqual(model.connectionNotice, expected)
             XCTAssertTrue(presentation.shown, "Completion must leave the explanation open for acknowledgement")
-            presentation.shown = false
-            await TestWait.until(failureMessage: "Fallback sheet didn't detach") { host.window.attachedSheet == nil }
+            await assertFinishedSetup(sheet: sheet, content: content, presentation: presentation, parent: host.window)
             model.prepareForPresentation()
             XCTAssertNil(model.connectionNotice, "The next Connect sheet must not keep the old explanation")
         }
@@ -1850,5 +1850,46 @@ extension SyncSetupModelTests {
             rebuilder: RecordingRebuilder(trace: trace))
         XCTAssertEqual(ordinary.state, .done)
         XCTAssertNil(ordinary.connectionNotice, "Using the remote's default needs no fallback explanation")
+    }
+
+    private func setupFields(in root: NSView) -> [NSTextField] {
+        [root].compactMap { $0 as? NSTextField }.filter { $0.placeholderString != nil }
+            + root.subviews.flatMap { setupFields(in: $0) }
+    }
+
+    private func prepareHTTPSSetupForm(parent: NSWindow) async throws -> (NSWindow, NSView) {
+        let sheet = try XCTUnwrap(parent.attachedSheet)
+        sheet.animationBehavior = .none
+        let content = try XCTUnwrap(sheet.contentView)
+        let url = try XCTUnwrap(setupFields(in: content).first)
+        url.stringValue = remoteURL
+        url.delegate?.controlTextDidChange?(Notification(name: NSTextField.textDidChangeNotification, object: url))
+        await TestWait.until(failureMessage: "HTTPS credential fields didn't appear") {
+            self.setupFields(in: content).count == 3
+        }
+        return (sheet, content)
+    }
+
+    private func assertFinishedSetup(
+        sheet: NSWindow, content: NSView, presentation: NoticePresentation, parent: NSWindow
+    ) async {
+        let fields = setupFields(in: content)
+        XCTAssertEqual(fields.count, 3, "The completed HTTPS form retains URL, username and token")
+        sheet.makeFirstResponder(content)
+        sheet.selectNextKeyView(nil)
+        for field in fields {
+            XCTAssertFalse(field.isEnabled, "A completed field must reject editing: \(field.placeholderString ?? "")")
+            XCTAssertNil(field.currentEditor(), "Tab must not start editing a completed field")
+        }
+        sheet.makeFirstResponder(content)
+        XCTAssertTrue(pressCancel(in: content), "The completed sheet must handle Escape as Done")
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                            failureMessage: "Escape didn't close the completed Connect sheet") { parent.attachedSheet == nil }
+        XCTAssertFalse(presentation.shown, "Escape must acknowledge completion as Done does")
+        // Release a failed presentation after recording the behavioral failures above.
+        if parent.attachedSheet != nil {
+            presentation.shown = false
+            await TestWait.until(failureMessage: "Failed-case sheet cleanup didn't detach") { parent.attachedSheet == nil }
+        }
     }
 }

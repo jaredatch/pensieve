@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Connect-a-remote setup sheet (PLAN-08 / 08.3). One field for the remote URL; when it parses as
 /// https a username + access-token pair appears (ssh authenticates via the agent — no token needed).
-/// State (idle/working/done/failed) comes from `SyncSetupModel`; a `.done` dismisses the sheet.
+/// State comes from `SyncSetupModel`. Completion dismisses the sheet unless a fallback notice
+/// needs acknowledgement; that completed sheet keeps its fields disabled and closes with Done or Escape.
 struct SyncSetupView: View {
     @Environment(\.dismiss) private var dismiss
     let model: SyncSetupModel
@@ -36,7 +37,7 @@ struct SyncSetupView: View {
                         .textFieldStyle(.roundedBorder)
                 }
             }
-            .disabled(model.state == .working)
+            .disabled(model.state == .working || model.state == .done)
 
             if case let .failed(message) = model.state {
                 Label(message, systemImage: "exclamationmark.triangle")
@@ -67,7 +68,7 @@ struct SyncSetupView: View {
                 Spacer()
                 if model.state == .done {
                     Button("Done") { dismiss() }
-                        .keyboardShortcut(.defaultAction)
+                        .keyboardShortcut(.cancelAction)
                         .buttonStyle(.borderedProminent)
                 } else {
                     Button {
