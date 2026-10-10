@@ -34,29 +34,33 @@ def check_binary(binary):
     architectures = command(0, "-archs", binary).split()
     require(len(architectures) == 2 and set(architectures) == ARCHITECTURES,
             f"{binary.name}: expected arm64 and x86_64")
-    for architecture in architectures:
-        label = f"{binary.name} [{architecture}]"
-        load_commands = command(1, "-arch", architecture, "-l", binary)
-        symbols = command(2, "-arch", architecture, binary)
-        require(not re.search(r"__llvm_prf_|__llvm_cov|__LLVM_COV", load_commands),
-                f"{label}: coverage sections present")
-        require("__llvm_profile" not in symbols,
-                f"{label}: profile runtime file-writing code present")
-        # Compare the actual symbol table with strip's result, not a size heuristic.
-        with tempfile.TemporaryDirectory(prefix="pensieve-strip-check-") as directory:
-            stripped = Path(directory) / binary.name
-            shutil.copy2(binary, stripped)
-            command(3, "-rSTx", stripped)
+    # One stripped copy supplies the reference symbol table for both slices.
+    with tempfile.TemporaryDirectory(prefix="pensieve-strip-check-") as directory:
+        stripped = Path(directory) / binary.name
+        shutil.copy2(binary, stripped)
+        command(3, "-rSTx", stripped)
+        for architecture in architectures:
+            label = f"{binary.name} [{architecture}]"
+            load_commands = command(1, "-arch", architecture, "-l", binary)
+            symbols = command(2, "-arch", architecture, binary)
+            require(not re.search(r"__llvm_prf_|__llvm_cov|__LLVM_COV", load_commands),
+                    f"{label}: coverage sections present")
+            require("__llvm_profile" not in symbols,
+                    f"{label}: profile runtime file-writing code present")
             remaining = command(2, "-arch", architecture, stripped)
-        require(len(symbols.splitlines()) <= len(remaining.splitlines()),
-                f"{label}: unstripped symbols present")
+            require(len(symbols.splitlines()) <= len(remaining.splitlines()),
+                    f"{label}: unstripped symbols present")
     require(b".profraw" not in binary.read_bytes(),
             f"{binary.name}: profile runtime file-writing code present")
 
 
 def check_app(app):
+    macos = app / "Contents/MacOS"
+    for path in sorted(macos.iterdir()):
+        if path.is_file() and path.stat().st_mode & 0o111:
+            require(path.name in BINARIES, f"{path.name}: unexpected executable in Contents/MacOS")
     for name in BINARIES:
-        check_binary(app / "Contents/MacOS" / name)
+        check_binary(macos / name)
 
 
 def uuids(path):
@@ -122,6 +126,6 @@ if __name__ == "__main__":
         main()
     except SymbolsMismatch as error:
         print("package: " + str(error), file=sys.stderr)
-        sys.exit(2)
+        sys.exit(65)  # Dedicated mismatch status; Python and argparse use 2 for errors.
     except (ValueError, KeyError, OSError, zipfile.BadZipFile, subprocess.SubprocessError) as error:
         sys.exit("package: " + ascii(str(error))[1:-1])

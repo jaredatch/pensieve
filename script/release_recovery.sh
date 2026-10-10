@@ -173,7 +173,7 @@ publication_preflight() {
 }
 
 recover_live_release() (
-  local download_dir length signature symbol_check=2 expected="$RELEASE_STATE"
+  local download_dir length signature symbol_check=65 expected="$RELEASE_STATE"
   download_dir="$(mktemp -d "$DIST_DIR/recovery.XXXXXX")" || return 1
   trap 'rm -rf "$download_dir"' EXIT
   # Downloaded bytes stay outside appcast-input and never reach generate_appcast.
@@ -201,7 +201,7 @@ recover_live_release() (
         [ "$RELEASE_STATE" = "$expected" ] || { echo "release: release changed since preflight; stopping" >&2; return 1; }
         run_gh release upload "v$VERSION" "$DSYM_PATH" --repo "$PUBLIC_REPO" --clobber || return 1
         ;;
-      2) echo "release: dSYMs are missing; no local dSYMs match the published DMG" >&2 ;;
+      65) echo "release: dSYMs are missing; no local dSYMs match the published DMG" >&2 ;;
       *) return 1 ;;
     esac
   fi

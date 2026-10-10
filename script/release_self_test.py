@@ -369,6 +369,18 @@ class PackageArtifactTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "pensieve-daemon: dSYMs UUIDs do not match"):
             self.tool.check_symbols(self.app, self.archive)
 
+    def test_unknown_executable_is_refused(self):
+        (self.app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleShortVersionString": VERSION}))
+        archive = self.app.parent.parent / "Pensieve-1.0.0-dSYMs.zip"
+        self.tool.zip_symbols(self.app, self.root, archive)
+        extra = self.binaries / "new-helper"
+        shutil.copy2(self.root / "Pensieve", extra)
+        result = subprocess.run(["/bin/bash", str(Path(self.temporary.name) / "script/package.sh"), "--dmg-only"],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(extra.name, result.stderr)
+        self.assertIn("unexpected executable", result.stderr)
+
 
 class MinimumParserTests(unittest.TestCase):
     def check_output(self, output):
@@ -1209,7 +1221,7 @@ sys.exit(result.returncode)
         self.run_release()
         symbols = self.root / "build/dist/Pensieve-1.0.0-dSYMs.zip"
         original = json.loads(json.dumps(self.state))
-        for candidate in ("matching", "partial", "mismatched", "missing"):
+        for candidate in ("matching", "partial", "mismatched", "missing", "checker_missing"):
             with self.subTest(candidate=candidate):
                 self.state = json.loads(json.dumps(original))
                 self.state["release"]["assets"] = self.state["release"]["assets"][:1]
@@ -1221,12 +1233,16 @@ sys.exit(result.returncode)
                         for name, bundle in (("Pensieve", "Pensieve.app.dSYM"), ("pensieve-daemon", "pensieve-daemon.dSYM")):
                             archive.writestr(f"{bundle}/Contents/Resources/DWARF/{name}", "other build")
                 elif candidate == "missing": symbols.unlink()
-                output = self.run_release()
+                elif candidate == "checker_missing": (self.root / "script/package_artifacts.py").unlink()
+                output = self.run_release(expected=1 if candidate == "checker_missing" else 0)
                 self.assertEqual(self.state["builds"], 1)
                 self.assertEqual(self.state["asset"], original["asset"])
                 self.assertEqual(len(self.state["release"]["assets"]), 2 if candidate in ("matching", "partial") else 1)
                 self.assertEqual(self.state["writes"], ["create", "appcast"] + (["symbols"] if candidate in ("matching", "partial") else []))
                 if candidate in ("mismatched", "missing"): self.assertIn("dSYMs are missing", output)
+                if candidate == "checker_missing":
+                    self.assertIn("can't open file", output)
+                    self.assertNotIn("dSYMs are missing", output)
 
     def test_interrupted_symbols_upload_recovers_both_assets(self):
         self.state["release"] = dict(self.state["expected_release"], assets=[])
