@@ -78,11 +78,6 @@ final class ConflictResolutionModel {
         }
     }
 
-    func loadAndReport(container: ModelContainer) async {
-        load(container: container)
-        await task?.value
-    }
-
     /// Inspection writes to reproduce a conflict, so closing only retires presentation.
     func dismiss() {
         guard canCancel else { return }
@@ -131,11 +126,6 @@ final class ConflictResolutionModel {
             defer { isApplying = false; steps.finish(step); task = nil }
             await resolve(groups: groups, container: container)
         }
-    }
-
-    func applyAndReport(container: ModelContainer) async {
-        apply(container: container)
-        await task?.value
     }
 
     private func resolve(groups: [ConflictGroup], container: ModelContainer) async {

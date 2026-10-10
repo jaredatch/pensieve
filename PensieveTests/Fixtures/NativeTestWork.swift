@@ -1,5 +1,6 @@
 import SwiftData
 import XCTest
+@testable import Pensieve
 
 /// Runs an explicitly synchronous test operation on a native thread and joins it.
 /// XCTest keeps ownership of invocation, activities and teardown. This helper changes no
@@ -20,5 +21,17 @@ enum NativeTestWork {
         }.start()
         completed.wait()
         return try XCTUnwrap(result).get()
+    }
+}
+
+extension ConflictResolutionModel {
+    func loadAndReport(container: ModelContainer) async {
+        load(container: container)
+        await TestWait.until(failureMessage: "Conflict inspection did not finish") { self.phase != .loading }
+    }
+
+    func applyAndReport(container: ModelContainer) async {
+        apply(container: container)
+        await TestWait.until(failureMessage: "Conflict resolution did not finish") { !self.isApplying }
     }
 }
