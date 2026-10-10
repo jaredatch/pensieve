@@ -145,13 +145,22 @@ final class ManifestSaveModel {
 
     @MainActor
     private func takeLock() async throws -> SyncLock {
-        let started = Date()
-        while true {
-            let path = lockPath
-            let lock = try await BlockingWork.run { try SyncLock.tryAcquireReportingErrors(at: path) }
-            if let lock { return lock }
-            if Date().timeIntervalSince(started) >= waitSeconds { isWaiting = true }
-            try await Task.sleep(nanoseconds: 50_000_000)
+        let path = lockPath
+        if let lock = try await BlockingWork.run(operation: { try SyncLock.tryAcquireReportingErrors(at: path) }) {
+            return lock
+        }
+        let notice = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(waitSeconds))
+            if !Task.isCancelled { isWaiting = true }
+        }
+        defer { notice.cancel() }
+        // One native job owns the retry loop; sleeping between attempts creates no new worker.
+        return try await BlockingWork.run {
+            while true {
+                try Task.checkCancellation()
+                if let lock = try SyncLock.tryAcquireReportingErrors(at: path) { return lock }
+                Thread.sleep(forTimeInterval: 0.05)
+            }
         }
     }
 

@@ -10,6 +10,8 @@ final class SkillHistoryTabPresentation {
     static let unreadableRestoreMessage = "Nothing was restored. Pensieve couldn't read this skill."
     static let changedRestoreMessage =
         "Nothing was restored. The skill changed while Pensieve was reading that version."
+    static let interruptedRestoreMessage =
+        "Nothing was restored. You opened another version before Restore finished."
 
     struct Diff: Identifiable {
         let version: SkillHistoryVersion
@@ -72,14 +74,17 @@ final class SkillHistoryTabPresentation {
         actionGeneration &+= 1
         let generation = actionGeneration
         let path = SkillHistorySnapshot.path(for: skill)
+        errorMessage = restoringVersion == nil ? nil : Self.interruptedRestoreMessage
         restoringVersion = nil
         readingVersion = version.sha
         selection = nil
         let document = await BlockingWork.run { git.show(sha: version.sha, path: path, at: workingDir) }
         guard !Task.isCancelled, skillID == skill.id, actionGeneration == generation else { return }
         readingVersion = nil
-        guard let document else { errorMessage = "Couldn't load that version."; return }
-        errorMessage = nil
+        guard let document else {
+            errorMessage = (errorMessage.map { $0 + " " } ?? "") + "Couldn't load that version."
+            return
+        }
         if asDiff {
             diff = Diff(version: version, body: SkillHistoryPresentation.previewBody(from: document))
         } else {

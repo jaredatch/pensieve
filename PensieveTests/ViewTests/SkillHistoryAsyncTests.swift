@@ -161,6 +161,7 @@ final class SkillHistoryAsyncTests: XCTestCase {
             XCTAssertEqual(fixture.counter.value, 0, invalidation)
         }
         try await assertMissingSkillRefusesRestoreBeforeReading()
+        try await assertLaterReadExplainsRetiredRestore()
     }
 
     func testRenderedDiffAndSheetRestoreShowSpinnersAndComplete() async throws {
@@ -257,7 +258,7 @@ extension SkillHistoryAsyncTests {
         }
     }
 
-    private func fixture() throws -> LibraryFixtureWithGit {
+    func fixture() throws -> LibraryFixtureWithGit {
         let context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
         let skill = Skill(name: "Example", directoryName: "example")
         context.insert(skill)
@@ -289,7 +290,7 @@ extension SkillHistoryAsyncTests {
         return (host, window)
     }
 
-    nonisolated private static func commit(_ sha: String) -> GitCommit {
+    nonisolated static func commit(_ sha: String) -> GitCommit {
         GitCommit(sha: sha, author: "Author", date: Date(timeIntervalSince1970: 1), subject: sha)
     }
 
@@ -327,7 +328,7 @@ extension SkillHistoryAsyncTests {
     }
 }
 
-private struct LibraryFixtureWithGit {
+struct LibraryFixtureWithGit {
     let context: ModelContext
     let skill: Skill
     let store: MemorySkillStore

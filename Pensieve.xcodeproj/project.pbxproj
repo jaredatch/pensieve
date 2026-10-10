@@ -203,6 +203,7 @@
 		3B251511C3016F31FD2F8A6E /* HistoryLifetimeFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AC78FB297DD93292EF4337E /* HistoryLifetimeFixture.swift */; };
 		3B79FB01433E9E122C2122EE /* ProjectRemovalPersistenceTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 247169C5E6CF2C08F5F7A15B /* ProjectRemovalPersistenceTestSupport.swift */; };
 		3BD64062AEC8383B32763516 /* CursorOwnershipTests+ReviewConvergence.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E186DFABC73E60C900CFC8 /* CursorOwnershipTests+ReviewConvergence.swift */; };
+		3BEB9311205D3311BF3CC9D9 /* SkillHistoryAsyncTests+Restore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E508735662010308B6C239C /* SkillHistoryAsyncTests+Restore.swift */; };
 		3CE1F66A2BBE5C27F07B2CEB /* FolderImportPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE775F959833A27D671F6250 /* FolderImportPresentation.swift */; };
 		3D2CF588B5EFB5CBE4BC7F0D /* ProjectFolderCallerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 599AB564841CAD341B7D6F8E /* ProjectFolderCallerTests.swift */; };
 		3D72244C1965687CD18808B8 /* UpstreamHistoryFlowHarnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BCF2A3AF70A2580C342B10F /* UpstreamHistoryFlowHarnessTests.swift */; };
@@ -1109,6 +1110,7 @@
 		0DE3737635B9E1246800081E /* DeployIntentModelRetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeployIntentModelRetryTests.swift; sourceTree = "<group>"; };
 		0E0026FC65BC65EAB6715DC4 /* SkillLibrarySaveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibrarySaveTests.swift; sourceTree = "<group>"; };
 		0E223872BAD6BDC938165DA1 /* PostSyncConvergenceTests+Intent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PostSyncConvergenceTests+Intent.swift"; sourceTree = "<group>"; };
+		0E508735662010308B6C239C /* SkillHistoryAsyncTests+Restore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillHistoryAsyncTests+Restore.swift"; sourceTree = "<group>"; };
 		0E609743E53311B48A5EC4B3 /* TagListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagListView.swift; sourceTree = "<group>"; };
 		0EE1D74CA6C03EA2D08B79E5 /* ScenarioStoreMigrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioStoreMigrationTests.swift; sourceTree = "<group>"; };
 		0F5F0823D49B1CD63FCCFCE8 /* BulkDeploySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BulkDeploySheet.swift; sourceTree = "<group>"; };
@@ -2110,6 +2112,7 @@
 				4E4A3890EA648513D5D3C460 /* SkillDetailTabResetTests.swift */,
 				113BC80B64D7FB938C7317E7 /* SkillExportPanelTests.swift */,
 				605BA91E7D4CB7B1B803BD66 /* SkillHistoryAsyncTests.swift */,
+				0E508735662010308B6C239C /* SkillHistoryAsyncTests+Restore.swift */,
 				08862F3DB9B3CD83AFD932CC /* SkillHistoryLayoutTests.swift */,
 				BD90AA3AB009A474BF3EE259 /* SkillHistoryLayoutTests+Counts.swift */,
 				3E7E298FD3885226AD4C9CC1 /* SkillHistoryPresentationTests.swift */,
@@ -3714,6 +3717,7 @@
 				48E4BA4A71E4E5A1752921BD /* SkillExportPanelTests.swift in Sources */,
 				4F794A1F8C01AA73CE2520B3 /* SkillFenceAndSaveTests.swift in Sources */,
 				5DFEB5E83CD8346689479527 /* SkillFrontmatterTests.swift in Sources */,
+				3BEB9311205D3311BF3CC9D9 /* SkillHistoryAsyncTests+Restore.swift in Sources */,
 				8CF39DA57818EA02A7FDD499 /* SkillHistoryAsyncTests.swift in Sources */,
 				69EAF249449A305CB0F61F44 /* SkillHistoryLayoutTests+Counts.swift in Sources */,
 				1A7EA9DF758E05FDF3CF148A /* SkillHistoryLayoutTests.swift in Sources */,
