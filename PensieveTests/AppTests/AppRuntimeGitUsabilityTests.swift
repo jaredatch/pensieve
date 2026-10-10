@@ -10,7 +10,7 @@ final class AppRuntimeGitUsabilityTests: XCTestCase {
             let git = try fixture.broken(state)
             let runtime = try AppRuntime(defaults: isolatedDefaults("launch-\(index)"), paths: fixture.paths, gitUsabilityProbe: {
                 XCTAssertFalse(Thread.isMainThread)
-                return try git.probeUsability()
+                return try NativeTestWork.run { [self] in try git.probeUsability() }
             })
             await runtime.bootstrapTask.value
             XCTAssertEqual(runtime.gitUsability, state)

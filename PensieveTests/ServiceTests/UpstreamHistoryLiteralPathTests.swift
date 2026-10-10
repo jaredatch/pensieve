@@ -3,19 +3,19 @@ import XCTest
 
 extension UpstreamHistoryServiceTests {
     func testGlobMagicPathIsReadLiterally() throws {
-        try assertLiteralHistory(path: ":(glob)x", decoyPath: "x")
+        try NativeTestWork.run { [self] in try assertLiteralHistory(path: ":(glob)x", decoyPath: "x") }
     }
 
     func testExclusionMagicPathIsReadLiterally() throws {
-        try assertLiteralHistory(path: ":!x", decoyPath: "other")
+        try NativeTestWork.run { [self] in try assertLiteralHistory(path: ":!x", decoyPath: "other") }
     }
 
     func testWildcardPathIsReadLiterally() throws {
-        try assertLiteralHistory(path: "skills/*", decoyPath: "skills/other")
+        try NativeTestWork.run { [self] in try assertLiteralHistory(path: "skills/*", decoyPath: "skills/other") }
     }
 
     func testBracketGlobPathIsReadLiterally() throws {
-        try assertLiteralHistory(path: "skills/[ab]", decoyPath: "skills/a")
+        try NativeTestWork.run { [self] in try assertLiteralHistory(path: "skills/[ab]", decoyPath: "skills/a") }
     }
 
     private func assertLiteralHistory(

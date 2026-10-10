@@ -79,14 +79,14 @@ extension SyncCoordinatorTests {
 
     private func publishRemoteCategory(_ h: RemoteHarness) throws {
         let peer = h.clone + "-peer"
-        try h.git.clone(remote: h.remote, into: peer, credential: nil)
+        try NativeTestWork.run { [self] in try h.git.clone(remote: h.remote, into: peer, credential: nil) }
         let manifest = ManifestService()
         var snapshot = try manifest.read(fromRoot: peer)
         snapshot.categories[0].projectKeys = ["pulled-project"]
         snapshot.categories.append(CategoryRecord(name: "Remote", projectKeys: [], skillSlugs: []))
         try manifest.write(snapshot, toRoot: peer)
-        XCTAssertTrue(try h.git.stageAllAndCommit(at: peer, message: "peer category"))
-        try h.git.push(at: peer, credential: nil)
+        XCTAssertTrue(try NativeTestWork.run { [self] in try h.git.stageAllAndCommit(at: peer, message: "peer category") })
+        try NativeTestWork.run { [self] in try h.git.push(at: peer, credential: nil) }
     }
 
     private func assertCommittedBoth(_ h: RemoteHarness, context: ModelContext,

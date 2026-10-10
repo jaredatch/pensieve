@@ -33,7 +33,8 @@ struct ConflictResolutionView: View {
         }
         .padding(Spacing.xl)
         .frame(width: 560)
-        .task { model.load(context: modelContext) }
+        .task { model.load(container: modelContext.container) }
+        .onDisappear { model.dismiss() }
         .onChange(of: model.phase) { _, newPhase in
             if newPhase == .done {
                 onDismiss()
@@ -84,7 +85,7 @@ struct ConflictResolutionView: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Try again") {
-                    model.load(context: modelContext)
+                    model.load(container: modelContext.container)
                 }
                 .controlSize(.small)
             }
@@ -100,11 +101,17 @@ struct ConflictResolutionView: View {
 
     private var footer: some View {
         HStack(spacing: Spacing.sm) {
-            Button("Cancel") { onDismiss() }
+            Button("Cancel") { model.dismiss(); onDismiss() }
+                .disabled(!model.canCancel)
                 .keyboardShortcut(.cancelAction)
             Spacer()
-            Button("Keep selected & sync") {
-                model.apply(context: modelContext)
+            Button {
+                model.apply(container: modelContext.container)
+            } label: {
+                HStack {
+                    if model.isApplying { ProgressView().controlSize(.small) }
+                    Text("Keep selected & sync")
+                }
             }
             .keyboardShortcut(.defaultAction)
             .buttonStyle(.borderedProminent)

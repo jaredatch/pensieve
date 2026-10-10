@@ -11,7 +11,9 @@ extension SyncEngineTests {
         git.pullError = failure
         let engine = makeEngine(git: git)
         let context = try makeContext()
-        XCTAssertThrowsError(try engine.sync(root: tempDir, message: "test", credential: nil, context: context)) {
+        XCTAssertThrowsError(try NativeTestWork.run(container: context.container) { [self] jobContext in
+            try engine.sync(root: tempDir, message: "test", credential: nil, context: jobContext)
+        }) {
             XCTAssertEqual($0 as? GitError, failure)
             XCTAssertEqual($0.localizedDescription, message)
         }

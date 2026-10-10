@@ -13,7 +13,7 @@ extension AppRuntimePathsTests {
         let credentials = try XCTUnwrap(paths.makeCredentialStore() as? InMemoryCredentialStore)
         try credentials.store(token: "fixture-sync-token", username: "fixture", forHost: "github.com")
         let remote = fixture.base + "/sync.git"
-        _ = try git.runOrThrow(["init", "--bare", remote], in: nil)
+        _ = try NativeTestWork.run { try git.runOrThrow(["init", "--bare", remote], in: nil) }
         let url = "https://github.com/fixture/sync-\(UUID().uuidString).git"
         let helperRoot = try localSyncTransport(files: files, fixture: fixture, remote: remote)
         let oldExecPath = ProcessInfo.processInfo.environment["GIT_EXEC_PATH"]
@@ -21,12 +21,13 @@ extension AppRuntimePathsTests {
         defer {
             if let oldExecPath { setenv("GIT_EXEC_PATH", oldExecPath, 1) } else { unsetenv("GIT_EXEC_PATH") }
         }
-        XCTAssertEqual(try git.runOrThrow(["--exec-path"], in: nil).stdout.trimmingCharacters(in: .whitespacesAndNewlines),
+        XCTAssertEqual(try NativeTestWork.run { try git.runOrThrow(["--exec-path"], in: nil) }
+            .stdout.trimmingCharacters(in: .whitespacesAndNewlines),
                        helperRoot)
-        try git.initRepository(at: paths.storeRoot)
-        try git.stageAllAndCommit(at: paths.storeRoot, message: "fixture")
-        try git.setRemote(url, at: paths.storeRoot)
-        _ = try git.runOrThrow(["-C", paths.storeRoot, "push", "-u", "origin", "main"], in: nil)
+        try NativeTestWork.run { try git.initRepository(at: paths.storeRoot) }
+        try NativeTestWork.run { try git.stageAllAndCommit(at: paths.storeRoot, message: "fixture") }
+        try NativeTestWork.run { try git.setRemote(url, at: paths.storeRoot) }
+        _ = try NativeTestWork.run { try git.runOrThrow(["-C", paths.storeRoot, "push", "-u", "origin", "main"], in: nil) }
         let skillStore = SkillStore(fileService: files, baseDir: paths.skillsDir, storeRoot: paths.skillsDir)
         let slug = try skillStore.createSkill(name: "Runtime", description: "Sync fixture", body: "local sync body")
         context.insert(Skill(name: "Runtime", skillDescription: "Sync fixture", directoryName: slug))
@@ -44,7 +45,9 @@ extension AppRuntimePathsTests {
             .readAll(fromRoot: paths.storeRoot)
         XCTAssertEqual(states.count, 1)
         XCTAssertEqual(states.first?.agents, [])
-        XCTAssertTrue(try git.runOrThrow(["--git-dir", remote, "show", "HEAD:skills/runtime/SKILL.md"], in: nil)
+        XCTAssertTrue(try NativeTestWork.run {
+            try git.runOrThrow(["--git-dir", remote, "show", "HEAD:skills/runtime/SKILL.md"], in: nil)
+        }
             .stdout.contains("local sync body"))
         XCTAssertTrue(files.isExecutableFile(at: paths.gitAskpassHelperPath))
         XCTAssertTrue(try files.readFile(at: paths.appSupportDir + "/daemon.log").contains("synced"))

@@ -2,50 +2,62 @@ import XCTest
 @testable import Pensieve
 
 final class GitStageTwoRegressionTests: XCTestCase {
-    func testSingleLinePreservesJoiners() {
-        let text = "👩‍💻 می\u{200C}روم क्\u{200D}ष"
-        XCTAssertEqual(DisplayTextSanitizer.singleLine(text), text)
+    func testSingleLinePreservesJoiners() throws {
+        try NativeTestWork.run { [self] in
+            let text = "👩‍💻 می\u{200C}روم क्\u{200D}ष"
+            XCTAssertEqual(DisplayTextSanitizer.singleLine(text), text)
+        }
     }
 
-    func testSingleLineParsesEscapesBeforeJoiningLines() {
-        for newline in ["\n", "\r\n", "\u{2028}", "\u{2029}"] {
-            XCTAssertEqual(DisplayTextSanitizer.singleLine("bad\u{1B}" + newline + "repo"), "bad repo")
+    func testSingleLineParsesEscapesBeforeJoiningLines() throws {
+        try NativeTestWork.run { [self] in
+            for newline in ["\n", "\r\n", "\u{2028}", "\u{2029}"] {
+                XCTAssertEqual(DisplayTextSanitizer.singleLine("bad\u{1B}" + newline + "repo"), "bad repo")
+            }
+            XCTAssertEqual(DisplayTextSanitizer.singleLine("one\n\ntwo"), "one two")
         }
-        XCTAssertEqual(DisplayTextSanitizer.singleLine("one\n\ntwo"), "one two")
     }
 
     func testRootDisappearingDuringEntryLookupIsUnknown() throws {
-        let fixture = try GitFailureFixture()
-        defer { try? fixture.remove() }
-        let files = VanishingRootFiles(root: fixture.root)
-        let git = GitService(fileService: files, askpassHelperPath: TestPaths.gitAskpassHelperPath)
-        XCTAssertThrowsError(try git.remoteURL(at: fixture.root)) { error in
-            guard case GitError.repositoryUnreadable = error else { return XCTFail("\(error)") }
+        try NativeTestWork.run { [self] in
+            let fixture = try GitFailureFixture()
+            defer { try? fixture.remove() }
+            let files = VanishingRootFiles(root: fixture.root)
+            let git = GitService(fileService: files, askpassHelperPath: TestPaths.gitAskpassHelperPath)
+            XCTAssertThrowsError(try NativeTestWork.run { [self] in try git.remoteURL(at: fixture.root) }) { error in
+                guard case GitError.repositoryUnreadable = error else { return XCTFail("\(error)") }
+            }
+            XCTAssertEqual(files.reads, ["entry", "directory"])
         }
-        XCTAssertEqual(files.reads, ["entry", "directory"])
     }
 
-    func testLogPreservesWhitespaceAndRemovesTerminalCommands() {
-        let result = DaemonCLI.renderLog(
-            current: "  \tbefore\u{1B}]0;window title\u{7}after  \n",
-            rotated: "\t\u{1B}[31mred\u{1B}[0m\u{7}\u{0}\u{7F}\t\n", lines: 20
-        )
-        XCTAssertEqual(result.output, "\tred\t\n  \tbeforeafter  \n")
+    func testLogPreservesWhitespaceAndRemovesTerminalCommands() throws {
+        try NativeTestWork.run { [self] in
+            let result = DaemonCLI.renderLog(
+                current: "  \tbefore\u{1B}]0;window title\u{7}after  \n",
+                rotated: "\t\u{1B}[31mred\u{1B}[0m\u{7}\u{0}\u{7F}\t\n", lines: 20
+            )
+            XCTAssertEqual(result.output, "\tred\t\n  \tbeforeafter  \n")
+        }
     }
 
-    func testMalformedCSIAndInvisibleFormattingKeepPrintableLogContent() {
-        XCTAssertEqual(DisplayTextSanitizer.logLine(" \t\u{1B}[日本語 failed \t"), " \t日本語 failed \t")
-        XCTAssertEqual(DisplayTextSanitizer.logLine("a\u{202E}b\u{2028}c\u{2029}d"), "ab c d")
-        XCTAssertEqual(DisplayTextSanitizer.logLine("a\u{1B}[31\tb"), "a\tb")
+    func testMalformedCSIAndInvisibleFormattingKeepPrintableLogContent() throws {
+        try NativeTestWork.run { [self] in
+            XCTAssertEqual(DisplayTextSanitizer.logLine(" \t\u{1B}[日本語 failed \t"), " \t日本語 failed \t")
+            XCTAssertEqual(DisplayTextSanitizer.logLine("a\u{202E}b\u{2028}c\u{2029}d"), "ab c d")
+            XCTAssertEqual(DisplayTextSanitizer.logLine("a\u{1B}[31\tb"), "a\tb")
+        }
     }
 
-    func testLogPreservesJoinersAndSeparatesUnicodeLines() {
-        let text = "👩‍💻 می\u{200C}روم क्\u{200D}ष"
-        XCTAssertEqual(DisplayTextSanitizer.logLine(text), text)
-        let bidi = "\u{200E}\u{200F}\u{061C}\u{202A}\u{202B}\u{202C}\u{202D}\u{202E}"
-            + "\u{2066}\u{2067}\u{2068}\u{2069}"
-        XCTAssertEqual(DisplayTextSanitizer.logLine(" \t" + bidi + "text\u{2028}line\u{2029}end \t"),
-                       " \ttext line end \t")
+    func testLogPreservesJoinersAndSeparatesUnicodeLines() throws {
+        try NativeTestWork.run { [self] in
+            let text = "👩‍💻 می\u{200C}روم क्\u{200D}ष"
+            XCTAssertEqual(DisplayTextSanitizer.logLine(text), text)
+            let bidi = "\u{200E}\u{200F}\u{061C}\u{202A}\u{202B}\u{202C}\u{202D}\u{202E}"
+                + "\u{2066}\u{2067}\u{2068}\u{2069}"
+            XCTAssertEqual(DisplayTextSanitizer.logLine(" \t" + bidi + "text\u{2028}line\u{2029}end \t"),
+                           " \ttext line end \t")
+        }
     }
 
     @MainActor
@@ -62,10 +74,12 @@ final class GitStageTwoRegressionTests: XCTestCase {
         XCTAssertTrue(model.configurationDescription.contains("日本語 failed"))
     }
 
-    func testLogStripsInvisibleFormatsExceptJoiners() {
-        let formats = "\u{200B}\u{2060}\u{2061}\u{2062}\u{2063}\u{2064}\u{206A}\u{206F}\u{E0001}\u{E0061}\u{E007F}"
-        let printable = " \t👩‍💻 می\u{200C}روم क्\u{200D}ष  \t"
-        XCTAssertEqual(DisplayTextSanitizer.logLine(formats + printable + formats), printable)
+    func testLogStripsInvisibleFormatsExceptJoiners() throws {
+        try NativeTestWork.run { [self] in
+            let formats = "\u{200B}\u{2060}\u{2061}\u{2062}\u{2063}\u{2064}\u{206A}\u{206F}\u{E0001}\u{E0061}\u{E007F}"
+            let printable = " \t👩‍💻 می\u{200C}روم क्\u{200D}ष  \t"
+            XCTAssertEqual(DisplayTextSanitizer.logLine(formats + printable + formats), printable)
+        }
     }
 
     @MainActor
@@ -89,19 +103,23 @@ final class GitStageTwoRegressionTests: XCTestCase {
         }
     }
 
-    func testStrayEscapeDoesNotConsumeTabsOrPrintableUnicode() {
-        XCTAssertEqual(DisplayTextSanitizer.logLine("a\u{1B}\tb"), "a\tb")
-        XCTAssertEqual(DisplayTextSanitizer.logLine("a\u{1B}(\tb"), "a\tb")
-        XCTAssertEqual(DisplayTextSanitizer.logLine("a\u{1B}é"), "aé")
+    func testStrayEscapeDoesNotConsumeTabsOrPrintableUnicode() throws {
+        try NativeTestWork.run { [self] in
+            XCTAssertEqual(DisplayTextSanitizer.logLine("a\u{1B}\tb"), "a\tb")
+            XCTAssertEqual(DisplayTextSanitizer.logLine("a\u{1B}(\tb"), "a\tb")
+            XCTAssertEqual(DisplayTextSanitizer.logLine("a\u{1B}é"), "aé")
+        }
     }
 
-    func testStoredLogLinesAreSanitizedFromBothFiles() {
-        let result = DaemonCLI.renderLog(
-            current: "now failed \u{1B}[31mred\u{1B}[0m\u{7}\n",
-            rotated: "old failed \u{1B}[32mgreen\u{1B}[0m\u{0}\n", lines: 20
-        )
-        XCTAssertEqual(result.output, "old failed green\nnow failed red\n")
-        XCTAssertEqual(result.exitCode, 0)
+    func testStoredLogLinesAreSanitizedFromBothFiles() throws {
+        try NativeTestWork.run { [self] in
+            let result = DaemonCLI.renderLog(
+                current: "now failed \u{1B}[31mred\u{1B}[0m\u{7}\n",
+                rotated: "old failed \u{1B}[32mgreen\u{1B}[0m\u{0}\n", lines: 20
+            )
+            XCTAssertEqual(result.output, "old failed green\nnow failed red\n")
+            XCTAssertEqual(result.exitCode, 0)
+        }
     }
 }
 

@@ -126,7 +126,9 @@ final class ManifestDeployIntentTests: XCTestCase {
     func testUnknownPlatformRawRoundTrips() throws {
         let unknown = "agent.future-2"
         try service.write(snapshot([record(platform: unknown)]), toRoot: tempDir)
-        XCTAssertEqual(try service.read(fromRoot: tempDir).deployIntents.map(\.platformRaw), [unknown])
+        XCTAssertEqual(try NativeTestWork.run { [self] in
+            try service.read(fromRoot: tempDir)
+        }.deployIntents.map(\.platformRaw), [unknown])
     }
 
     func testKeyCollisionImpossibleForAdmittedComponents() {
@@ -177,7 +179,9 @@ final class ManifestDeployIntentTests: XCTestCase {
     }
 
     func assertCorrupt(file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertThrowsError(try service.read(fromRoot: tempDir), file: file, line: line) { error in
+        XCTAssertThrowsError(try NativeTestWork.run { [self] in
+            try service.read(fromRoot: tempDir)
+        }, file: file, line: line) { error in
             guard case ManifestError.corruptManifestFile = error else {
                 return XCTFail("expected corrupt manifest, got \(error)", file: file, line: line)
             }

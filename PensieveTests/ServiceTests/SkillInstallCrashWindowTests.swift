@@ -5,52 +5,56 @@ import XCTest
 extension SkillInstallServiceTests {
     @MainActor
     func testCrashWindowsConvergeThroughRebuild() throws {
-        let repository = try makeVendorFixture(named: "Crash Fixture")
-        let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
-        let candidate = try XCTUnwrap(fetched.candidates.first)
+        try NativeTestWork.run { [self] in
+            let repository = try makeVendorFixture(named: "Crash Fixture")
+            let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
+            let candidate = try XCTUnwrap(fetched.candidates.first)
 
-        try assertInstallCrashAfterFilesConverges(candidate: candidate, source: fetched)
-        try assertInstallCrashAfterManifestConverges(candidate: candidate, source: fetched)
-        try assertAdoptCrashAfterManifestConverges(candidate: candidate, source: fetched)
-        try assertUpdateCrashAfterFilesConverges(
-            repository: repository,
-            candidate: candidate,
-            source: fetched
-        )
+            try assertInstallCrashAfterFilesConverges(candidate: candidate, source: fetched)
+            try assertInstallCrashAfterManifestConverges(candidate: candidate, source: fetched)
+            try assertAdoptCrashAfterManifestConverges(candidate: candidate, source: fetched)
+            try assertUpdateCrashAfterFilesConverges(
+                repository: repository,
+                candidate: candidate,
+                source: fetched
+            )
+        }
     }
 
     @MainActor
     func testUpdateWithUnreadableManifestLeavesCanonicalFilesUntouched() throws {
-        let repository = try makeVendorFixture()
-        let source = try service.fetch(repo: repository, ref: nil, credential: nil)
-        let candidate = try XCTUnwrap(source.candidates.first)
-        let root = tempDir + "/unreadable-update-store"
-        let context = try makeInstallContext()
-        let installer = makeInstallService(root: root)
-        _ = try installer.install(candidate: candidate, from: source, context: context)
-        let skillPath = root + "/skills/vendor/SKILL.md"
-        let before = try fileService.readData(at: skillPath)
-        try fileService.writeFile(
-            at: root + "/manifest/skills/vendor.yaml",
-            content: "slug: [not-a-scalar]\n"
-        )
-        try fileService.writeFile(
-            at: repository + "/skills/vendor/SKILL.md",
-            content: "---\nname: Vendor\ndescription: Binary-safe fixture\n---\nnew upstream\n"
-        )
-        try commit(repository, message: "upstream changes")
-        let updatedSource = try service.fetch(repo: repository, ref: nil, credential: nil)
-        let updatedCandidate = try XCTUnwrap(updatedSource.candidates.first)
-
-        XCTAssertThrowsError(
-            try installer.update(
-                existingSlug: "vendor",
-                candidate: updatedCandidate,
-                from: updatedSource,
-                context: context
+        try NativeTestWork.run { [self] in
+            let repository = try makeVendorFixture()
+            let source = try service.fetch(repo: repository, ref: nil, credential: nil)
+            let candidate = try XCTUnwrap(source.candidates.first)
+            let root = tempDir + "/unreadable-update-store"
+            let context = try makeInstallContext()
+            let installer = makeInstallService(root: root)
+            _ = try installer.install(candidate: candidate, from: source, context: context)
+            let skillPath = root + "/skills/vendor/SKILL.md"
+            let before = try fileService.readData(at: skillPath)
+            try fileService.writeFile(
+                at: root + "/manifest/skills/vendor.yaml",
+                content: "slug: [not-a-scalar]\n"
             )
-        )
-        XCTAssertEqual(try fileService.readData(at: skillPath), before)
+            try fileService.writeFile(
+                at: repository + "/skills/vendor/SKILL.md",
+                content: "---\nname: Vendor\ndescription: Binary-safe fixture\n---\nnew upstream\n"
+            )
+            try commit(repository, message: "upstream changes")
+            let updatedSource = try service.fetch(repo: repository, ref: nil, credential: nil)
+            let updatedCandidate = try XCTUnwrap(updatedSource.candidates.first)
+
+            XCTAssertThrowsError(
+                try installer.update(
+                    existingSlug: "vendor",
+                    candidate: updatedCandidate,
+                    from: updatedSource,
+                    context: context
+                )
+            )
+            XCTAssertEqual(try fileService.readData(at: skillPath), before)
+        }
     }
 
     @MainActor
@@ -256,7 +260,7 @@ extension SkillInstallServiceTests {
             content: "---\nname: Vendor\ndescription: Binary-safe fixture\n---\nupdated body\n"
         )
         try commit(repository, message: "upstream update")
-        let source = try service.fetch(repo: repository, ref: nil, credential: nil)
+        let source = try NativeTestWork.run { [self] in try service.fetch(repo: repository, ref: nil, credential: nil) }
         return (source, try XCTUnwrap(source.candidates.first))
     }
 
@@ -308,77 +312,79 @@ extension SkillInstallServiceTests {
         ).rebuild(fromRoot: root, context: rebuiltContext)
         let stale = try XCTUnwrap(try rebuiltContext.fetch(FetchDescriptor<Skill>()).first)
         XCTAssertEqual(stale.installedOrigin?.installedCommit, previousSource.headCommit)
-        try installer.update(
-            existingSlug: "vendor",
-            candidate: updatedCandidate,
-            from: updatedSource,
-            context: rebuiltContext
-        )
+        try installer.update(existingSlug: "vendor", candidate: updatedCandidate,
+                             from: updatedSource, context: rebuiltContext)
         XCTAssertEqual(stale.installedOrigin?.installedCommit, updatedSource.headCommit)
         XCTAssertEqual(stale.installedOrigin?.installedTree, updatedCandidate.treeHash)
     }
 
     func testVendorTempLivesOutsideStoreRoot() throws {
-        let source = tempDir + "/vendor-temp-source"
-        try fileService.writeFile(at: source + "/nested/payload.txt", content: "payload")
-        let root = tempDir + "/vendor-temp-store"
-        try fileService.createDirectory(at: root + "/skills")
-        let recording = RecordingVendorFileService(wrapped: fileService)
-        let installer = makeInstallService(root: root, using: recording)
+        try NativeTestWork.run { [self] in
+            let source = tempDir + "/vendor-temp-source"
+            try fileService.writeFile(at: source + "/nested/payload.txt", content: "payload")
+            let root = tempDir + "/vendor-temp-store"
+            try fileService.createDirectory(at: root + "/skills")
+            let recording = RecordingVendorFileService(wrapped: fileService)
+            let installer = makeInstallService(root: root, using: recording)
 
-        try installer.vendor(
-            sourceDirectory: source,
-            to: root + "/skills/vendor",
-            excludingTopLevelGitMetadata: false
-        )
+            try installer.vendor(
+                sourceDirectory: source,
+                to: root + "/skills/vendor",
+                excludingTopLevelGitMetadata: false
+            )
 
-        XCTAssertFalse(recording.pathsCreatedBeforeSwap.isEmpty)
-        XCTAssertTrue(
-            recording.pathsCreatedBeforeSwap.allSatisfy {
-                $0 != root && !$0.hasPrefix(root + "/")
-            },
-            "vendor build paths must remain outside the synced store: "
-                + recording.pathsCreatedBeforeSwap.joined(separator: ", ")
-        )
-        XCTAssertTrue(fileService.fileExists(at: root + "/skills/vendor/nested/payload.txt"))
+            XCTAssertFalse(recording.pathsCreatedBeforeSwap.isEmpty)
+            XCTAssertTrue(
+                recording.pathsCreatedBeforeSwap.allSatisfy {
+                    $0 != root && !$0.hasPrefix(root + "/")
+                },
+                "vendor build paths must remain outside the synced store: "
+                    + recording.pathsCreatedBeforeSwap.joined(separator: ", ")
+            )
+            XCTAssertTrue(fileService.fileExists(at: root + "/skills/vendor/nested/payload.txt"))
+        }
     }
 
     func testCopyFileRejectsSymlinkSourceWithoutCreatingDestination() throws {
-        let target = tempDir + "/copy-link-target"
-        let source = tempDir + "/copy-link-source"
-        let destination = tempDir + "/copy-link-destination"
-        try fileService.writeFile(at: target, content: "outside")
-        try fileService.createSymlink(at: source, pointingTo: target)
+        try NativeTestWork.run { [self] in
+            let target = tempDir + "/copy-link-target"
+            let source = tempDir + "/copy-link-source"
+            let destination = tempDir + "/copy-link-destination"
+            try fileService.writeFile(at: target, content: "outside")
+            try fileService.createSymlink(at: source, pointingTo: target)
 
-        XCTAssertThrowsError(try fileService.copyFile(at: source, to: destination))
-        XCTAssertFalse(fileService.fileExists(at: destination))
-        XCTAssertFalse(fileService.isSymlink(at: destination))
+            XCTAssertThrowsError(try fileService.copyFile(at: source, to: destination))
+            XCTAssertFalse(fileService.fileExists(at: destination))
+            XCTAssertFalse(fileService.isSymlink(at: destination))
+        }
     }
 
     func testCopyFilePreservesBytesAndUserExecutableMode() throws {
-        let executableSource = tempDir + "/copy-executable-source"
-        let executableDestination = tempDir + "/copy-executable-destination"
-        let plainSource = tempDir + "/copy-plain-source"
-        let plainDestination = tempDir + "/copy-plain-destination"
-        let executableBytes = Data([0x00, 0xFF, 0x41])
-        let plainBytes = Data([0x80, 0x42, 0x0A])
-        try executableBytes.write(to: URL(fileURLWithPath: executableSource))
-        try plainBytes.write(to: URL(fileURLWithPath: plainSource))
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755],
-            ofItemAtPath: executableSource
-        )
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o644],
-            ofItemAtPath: plainSource
-        )
+        try NativeTestWork.run { [self] in
+            let executableSource = tempDir + "/copy-executable-source"
+            let executableDestination = tempDir + "/copy-executable-destination"
+            let plainSource = tempDir + "/copy-plain-source"
+            let plainDestination = tempDir + "/copy-plain-destination"
+            let executableBytes = Data([0x00, 0xFF, 0x41])
+            let plainBytes = Data([0x80, 0x42, 0x0A])
+            try executableBytes.write(to: URL(fileURLWithPath: executableSource))
+            try plainBytes.write(to: URL(fileURLWithPath: plainSource))
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: executableSource
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o644],
+                ofItemAtPath: plainSource
+            )
 
-        try fileService.copyFile(at: executableSource, to: executableDestination)
-        try fileService.copyFile(at: plainSource, to: plainDestination)
+            try fileService.copyFile(at: executableSource, to: executableDestination)
+            try fileService.copyFile(at: plainSource, to: plainDestination)
 
-        XCTAssertEqual(try fileService.readData(at: executableDestination), executableBytes)
-        XCTAssertEqual(try fileService.readData(at: plainDestination), plainBytes)
-        XCTAssertTrue(fileService.isUserExecutableFile(at: executableDestination))
-        XCTAssertFalse(fileService.isUserExecutableFile(at: plainDestination))
+            XCTAssertEqual(try fileService.readData(at: executableDestination), executableBytes)
+            XCTAssertEqual(try fileService.readData(at: plainDestination), plainBytes)
+            XCTAssertTrue(fileService.isUserExecutableFile(at: executableDestination))
+            XCTAssertFalse(fileService.isUserExecutableFile(at: plainDestination))
+        }
     }
 }

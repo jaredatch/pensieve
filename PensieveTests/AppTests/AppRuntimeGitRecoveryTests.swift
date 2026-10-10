@@ -85,7 +85,7 @@ final class AppRuntimeGitRecoveryTests: XCTestCase {
                 coordinatorConfigure: { coordinator in
                     let engine = RecoveredPresentationEngine(finish: {
                         if absent {
-                            try TestPaths.git.removeRemote(at: fixture.root)
+                            try NativeTestWork.run { [self] in try TestPaths.git.removeRemote(at: fixture.root) }
                         } else {
                             try fixture.files.deleteFile(at: fixture.root + "/.git/HEAD")
                         }

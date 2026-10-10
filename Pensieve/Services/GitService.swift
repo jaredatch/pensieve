@@ -272,18 +272,6 @@ struct GitService: GitServiceProtocol {
 
     // MARK: Process runner (§B — verbatim)
 
-    @discardableResult
-    func run(_ args: [String], in workingDir: String?, credential: GitCredential? = nil,
-             storeRules: Bool = false) throws
-        -> GitOutput {
-        let result = try runData(args, in: workingDir, credential: credential, storeRules: storeRules)
-        return GitOutput(
-            stdout: String(bytes: result.stdout, encoding: .utf8) ?? "",
-            stderr: String(bytes: result.stderr, encoding: .utf8) ?? "",
-            exit: result.exit, confirmingProbe: result.confirmingProbe
-        )
-    }
-
     func runUpstreamHistoryNetwork(
         _ args: [String],
         credential: GitCredential?
@@ -296,9 +284,11 @@ struct GitService: GitServiceProtocol {
 
     @discardableResult
     func runData(
-        _ args: [String], in workingDir: String?, credential: GitCredential? = nil, storeRules: Bool = false
+        _ args: [String], in workingDir: String?, credential: GitCredential? = nil, storeRules: Bool = false,
+        file: StaticString = #fileID, line: UInt = #line
     ) throws
         -> GitDataOutput {
+        GitThreadGuard.check(file: file, line: line)
         try GitCancellation.check()
         var environment = try childEnvironment(credential: credential)
         if storeRules { environment["GIT_ATTR_NOSYSTEM"] = "1" }

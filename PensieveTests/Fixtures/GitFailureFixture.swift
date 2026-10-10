@@ -79,15 +79,15 @@ struct GitFailureFixture {
 
     func seedRepository(remote: String? = "https://fixture.test/store.git") throws {
         let git = GitService(askpassHelperPath: support + "/askpass")
-        try git.initRepository(at: root)
+        try NativeTestWork.run { [self] in try git.initRepository(at: root) }
         try files.writeFile(at: root + "/skills/example/SKILL.md",
                             content: "---\nname: Example\ndescription: Fixture\n---\nBody\n")
         try ManifestService().write(
             ManifestSnapshot(schemaVersion: ManifestService.currentSchemaVersion,
                              categories: [], projects: [], skills: []), toRoot: root
         )
-        try git.stageAllAndCommit(at: root, message: "fixture")
-        if let remote { try git.setRemote(remote, at: root) }
+        try NativeTestWork.run { [self] in try git.stageAllAndCommit(at: root, message: "fixture") }
+        if let remote { try NativeTestWork.run { [self] in try git.setRemote(remote, at: root) } }
     }
 
     func snapshot(_ directory: String? = nil) throws -> [String: Data] {

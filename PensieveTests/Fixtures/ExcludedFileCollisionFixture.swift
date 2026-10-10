@@ -3,7 +3,6 @@ import XCTest
 @testable import Pensieve
 
 /// An older writer publishes a tracked path after the other Mac creates its own excluded file.
-@MainActor
 struct ExcludedFileCollisionFixture {
     static let paths = ["skills/x/.env", "skills/x/.env.local", "skills/x/.DS_Store",
                         "skills/x/node_modules/pkg/index.js", "skills/x/.venv/pkg/index.js", "skills/x/.env/pkg/index.js"]

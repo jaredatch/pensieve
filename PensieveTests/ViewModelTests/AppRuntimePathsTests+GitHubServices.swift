@@ -56,8 +56,8 @@ extension AppRuntimePathsTests {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         let paths = fixture.paths
-        let files = LinkServiceCanonicalDirectoryFileService(
-            wrapped: fixture.files, pathMappings: [], physicalSandbox: fixture.base,
+        let files = LinkServiceCanonicalDirectoryFileService(wrapped: fixture.files, pathMappings: [],
+            physicalSandbox: fixture.base,
             nonSymlinkAncestors: fixtureAncestorMetadata(fixture.base)
         )
         let operations = paths.makeUpdatesViewModelOperations(fileService: files)
@@ -68,9 +68,8 @@ extension AppRuntimePathsTests {
         XCTAssertEqual(installer.lockPath, paths.syncLockPath)
         XCTAssertEqual(checker.storeRoot, paths.storeRoot)
         let scratches = [installer.scratchRoot, checker.scratchRoot, history.scratchRoot]
-        let expectedScratches = ["skill-install-scratch", "update-check-scratch", "upstream-history-scratch"].map {
-            paths.appSupportDir + "/" + $0
-        }
+        let expectedScratches = ["skill-install", "update-check", "upstream-history"]
+            .map { paths.appSupportDir + "/" + $0 + "-scratch" }
         XCTAssertEqual(scratches, expectedScratches)
         guard installer.storeRoot == paths.storeRoot, checker.storeRoot == paths.storeRoot,
               installer.lockPath == paths.syncLockPath, scratches == expectedScratches else { return }
@@ -84,9 +83,11 @@ extension AppRuntimePathsTests {
         try await withLocalGitHubRemote(fixture: fixture, files: files) { remote in
             let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
             let context = ModelContext(container)
-            let fetch = try installer.fetch(repo: remote.url, ref: remote.ref, credential: nil)
+            let fetch = try NativeTestWork.run { try installer.fetch(repo: remote.url, ref: remote.ref, credential: nil) }
             let candidate = try XCTUnwrap(fetch.candidates.first)
-            let installed = try installer.install(candidate: candidate, from: fetch, context: context)
+            let installed = try NativeTestWork.run(container: context.container) {
+                try installer.install(candidate: candidate, from: fetch, context: $0)
+            }
             XCTAssertEqual(installed, .installed(slug: "example"))
             let skill = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first { $0.directoryName == "example" })
             XCTAssertEqual(try files.readFile(at: paths.skillsDir + "/example/SKILL.md"), remote.original)
@@ -122,9 +123,11 @@ extension AppRuntimePathsTests {
     ) throws {
         try remote.files.writeFile(at: remote.repository + "/skills/example/SKILL.md",
                                    content: remote.original + "second version\n")
-        try remote.git.stageAllAndCommit(at: remote.repository, message: "upstream change")
-        let second = try remote.git.commitSHA(at: remote.repository)
-        let report = try operations.updateCheckService.checkAll(context: context)
+        try NativeTestWork.run { try remote.git.stageAllAndCommit(at: remote.repository, message: "upstream change") }
+        let second = try NativeTestWork.run { try remote.git.commitSHA(at: remote.repository) }
+        let report = try NativeTestWork.run(container: context.container) { jobContext in
+            try operations.updateCheckService.checkAll(context: jobContext)
+        }
         XCTAssertTrue(report.reachedRemote)
         XCTAssertNil(report.environmentError)
         let persisted = try XCTUnwrap(try ModelContext(context.container).fetch(FetchDescriptor<Skill>()).first {
@@ -135,9 +138,8 @@ extension AppRuntimePathsTests {
         XCTAssertEqual(persisted.upstreamCommit, second)
         try assertTemporaryAskpass(paths: paths, files: remote.files)
         try remote.files.deleteFile(at: paths.gitAskpassHelperPath)
-        let result = try history.read(
-            origin: XCTUnwrap(skill.installedOrigin), localDirectory: paths.skillsDir + "/example"
-        )
+        let origin = try XCTUnwrap(skill.installedOrigin)
+        let result = try NativeTestWork.run { try history.read(origin: origin, localDirectory: paths.skillsDir + "/example") }
         XCTAssertEqual(result.headCommit, second)
         XCTAssertEqual(result.rows.map(\.sha), [second, remote.first])
         XCTAssertEqual(result.installedPosition, .at(sha: remote.first))
@@ -151,12 +153,12 @@ extension AppRuntimePathsTests {
         let repository = fixture.base + "/upstream"
         let git = GitService(fileService: files, askpassHelperPath: fixture.support + "/setup-askpass")
         try files.createDirectory(at: repository)
-        try git.initRepository(at: repository)
+        try NativeTestWork.run { try git.initRepository(at: repository) }
         let original = "---\nname: Example\ndescription: Local fixture\n---\nfirst version\n"
         try files.writeFile(at: repository + "/skills/example/SKILL.md", content: original)
-        try git.stageAllAndCommit(at: repository, message: "initial skill")
-        let ref = try git.currentBranch(at: repository)
-        let first = try git.commitSHA(at: repository)
+        try NativeTestWork.run { try git.stageAllAndCommit(at: repository, message: "initial skill") }
+        let ref = try NativeTestWork.run { try git.currentBranch(at: repository) }
+        let first = try NativeTestWork.run { try git.commitSHA(at: repository) }
         let url = "https://github.com/fixture/\(UUID().uuidString).git"
         let configuration = fixture.base + "/configuration"
         try files.writeFile(at: configuration + "/git/config", content: """

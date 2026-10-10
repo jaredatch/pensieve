@@ -72,107 +72,120 @@ extension SkillInstallServiceTests {
 
     @MainActor
     func testVendorPreservesBytesAndMode() throws {
-        let repository = try makeVendorFixture()
-        let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
-        let candidate = try XCTUnwrap(fetched.candidates.first)
-        let root = tempDir + "/store"
-        let context = try makeInstallContext()
-        let installer = makeInstallService(root: root)
-        let source = repository + "/skills/vendor"
-        let result = try installer.install(candidate: candidate, from: fetched, context: context)
-        XCTAssertEqual(result, .installed(slug: "vendor"))
-        let destination = root + "/skills/vendor"
-        XCTAssertEqual(
-            try Data(contentsOf: URL(fileURLWithPath: destination + "/SKILL.md")),
-            try Data(contentsOf: URL(fileURLWithPath: source + "/SKILL.md"))
-        )
-        XCTAssertEqual(
-            try Data(contentsOf: URL(fileURLWithPath: destination + "/assets/payload.bin")),
-            try Data(contentsOf: URL(fileURLWithPath: source + "/assets/payload.bin"))
-        )
-        XCTAssertEqual(
-            try Data(contentsOf: URL(fileURLWithPath: destination + "/scripts/run.sh")),
-            try Data(contentsOf: URL(fileURLWithPath: source + "/scripts/run.sh"))
-        )
-        XCTAssertTrue(fileService.isUserExecutableFile(at: destination + "/scripts/run.sh"))
-        XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).first?.scope, .user)
-        XCTAssertTrue(try context.fetch(FetchDescriptor<DeployRecord>()).isEmpty)
+        try NativeTestWork.run { [self] in
+            let repository = try makeVendorFixture()
+            let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
+            let candidate = try XCTUnwrap(fetched.candidates.first)
+            let root = tempDir + "/store"
+            let context = try makeInstallContext()
+            let installer = makeInstallService(root: root)
+            let source = repository + "/skills/vendor"
+            let result = try installer.install(candidate: candidate, from: fetched, context: context)
+            XCTAssertEqual(result, .installed(slug: "vendor"))
+            let destination = root + "/skills/vendor"
+            XCTAssertEqual(
+                try Data(contentsOf: URL(fileURLWithPath: destination + "/SKILL.md")),
+                try Data(contentsOf: URL(fileURLWithPath: source + "/SKILL.md"))
+            )
+            XCTAssertEqual(
+                try Data(contentsOf: URL(fileURLWithPath: destination + "/assets/payload.bin")),
+                try Data(contentsOf: URL(fileURLWithPath: source + "/assets/payload.bin"))
+            )
+            XCTAssertEqual(
+                try Data(contentsOf: URL(fileURLWithPath: destination + "/scripts/run.sh")),
+                try Data(contentsOf: URL(fileURLWithPath: source + "/scripts/run.sh"))
+            )
+            XCTAssertTrue(fileService.isUserExecutableFile(at: destination + "/scripts/run.sh"))
+            XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).first?.scope, .user)
+            XCTAssertTrue(try context.fetch(FetchDescriptor<DeployRecord>()).isEmpty)
+        }
     }
 
     func testStableHashDeterministicAcrossInstancesEnumerationOrdersAndModeSensitive() throws {
-        let repository = try makeVendorFixture()
-        let directory = repository + "/skills/vendor"
-        let normal = makeInstallService(root: tempDir + "/hash-normal")
-        let reversedFiles = ReverseListingFileService(wrapped: fileService)
-        let reversed = makeInstallService(root: tempDir + "/hash-reversed", using: reversedFiles)
-        let first = try normal.stableContentHash(at: directory)
-        let second = try reversed.stableContentHash(at: directory)
-        let third = try makeInstallService(root: tempDir + "/hash-third")
-            .stableContentHash(at: directory)
-        XCTAssertEqual(first, second)
-        XCTAssertEqual(second, third)
-        let script = directory + "/scripts/run.sh"
-        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: script)
-        XCTAssertNotEqual(try normal.stableContentHash(at: directory), first)
+        try NativeTestWork.run { [self] in
+            let repository = try makeVendorFixture()
+            let directory = repository + "/skills/vendor"
+            let normal = makeInstallService(root: tempDir + "/hash-normal")
+            let reversedFiles = ReverseListingFileService(wrapped: fileService)
+            let reversed = makeInstallService(root: tempDir + "/hash-reversed", using: reversedFiles)
+            let first = try normal.stableContentHash(at: directory)
+            let second = try reversed.stableContentHash(at: directory)
+            let third = try makeInstallService(root: tempDir + "/hash-third")
+                .stableContentHash(at: directory)
+            XCTAssertEqual(first, second)
+            XCTAssertEqual(second, third)
+            let script = directory + "/scripts/run.sh"
+            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: script)
+            XCTAssertNotEqual(try normal.stableContentHash(at: directory), first)
+        }
     }
 
     @MainActor
     func testCollisionDetectionAndRenamePath() throws {
-        let repository = try makeVendorFixture()
-        let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
-        let candidate = try XCTUnwrap(fetched.candidates.first)
-        let root = tempDir + "/collision-store"
-        let context = try makeInstallContext()
-        let installer = makeInstallService(root: root)
-        try fileService.writeFile(at: root + "/skills/vendor/keep.txt", content: "untouched")
-        let collision = try installer.install(candidate: candidate, from: fetched, context: context)
-        XCTAssertEqual(
-            collision,
-            .collision(existing: SkillCollision(slug: "vendor", hasDirectory: true, hasSwiftDataRow: false))
-        )
-        XCTAssertEqual(try fileService.readFile(at: root + "/skills/vendor/keep.txt"), "untouched")
-        XCTAssertFalse(fileService.directoryExists(at: root + "/manifest"))
-        let rowOnly = Skill(name: "Row only", directoryName: "row-only")
-        context.insert(rowOnly)
-        try context.save()
-        let rowCollision = try installer.install(candidate: candidate, renamedTo: "row-only",
-                                                 from: fetched, context: context)
-        XCTAssertEqual(
-            rowCollision,
-            .collision(existing: SkillCollision(slug: "row-only", hasDirectory: false, hasSwiftDataRow: true))
-        )
-        XCTAssertFalse(fileService.directoryExists(at: root + "/skills/row-only"))
-        let renamed = try installer.install(candidate: candidate, renamedTo: "vendor-two",
-                                            from: fetched, context: context)
-        XCTAssertEqual(renamed, .installed(slug: "vendor-two"))
-        XCTAssertTrue(fileService.fileExists(at: root + "/skills/vendor-two/SKILL.md"))
+        try NativeTestWork.run { [self] in
+            let repository = try makeVendorFixture()
+            let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
+            let candidate = try XCTUnwrap(fetched.candidates.first)
+            let root = tempDir + "/collision-store"
+            let context = try makeInstallContext()
+            let installer = makeInstallService(root: root)
+            try fileService.writeFile(at: root + "/skills/vendor/keep.txt", content: "untouched")
+            let collision = try installer.install(candidate: candidate, from: fetched, context: context)
+            XCTAssertEqual(
+                collision,
+                .collision(existing: SkillCollision(slug: "vendor", hasDirectory: true, hasSwiftDataRow: false))
+            )
+            XCTAssertEqual(try fileService.readFile(at: root + "/skills/vendor/keep.txt"), "untouched")
+            XCTAssertFalse(fileService.directoryExists(at: root + "/manifest"))
+            let rowOnly = Skill(name: "Row only", directoryName: "row-only")
+            context.insert(rowOnly)
+            try context.save()
+            let rowCollision = try installer.install(candidate: candidate, renamedTo: "row-only",
+                                                     from: fetched, context: context)
+            XCTAssertEqual(
+                rowCollision,
+                .collision(existing: SkillCollision(slug: "row-only", hasDirectory: false, hasSwiftDataRow: true))
+            )
+            XCTAssertFalse(fileService.directoryExists(at: root + "/skills/row-only"))
+            let renamed = try installer.install(candidate: candidate, renamedTo: "vendor-two",
+                                                from: fetched, context: context)
+            XCTAssertEqual(renamed, .installed(slug: "vendor-two"))
+            XCTAssertTrue(fileService.fileExists(at: root + "/skills/vendor-two/SKILL.md"))
+        }
     }
 
     @MainActor
     func testCollisionMatchesRowSlugCaseFolded() throws {
-        let repository = try makeVendorFixture()
-        let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
-        let candidate = try XCTUnwrap(fetched.candidates.first)
-        let root = tempDir + "/collision-case-store"
-        let context = try makeInstallContext()
-        let installer = makeInstallService(root: root)
-        // A quarantined row keeps its (legacy, mixed-case) slug with nothing on disk; on default APFS
-        // "row-only" and "Row-Only" are one entry, so the install must collide on the row alone.
-        let rowOnly = Skill(name: "Row only", directoryName: "Row-Only")
-        context.insert(rowOnly)
-        try context.save()
-        let collision = try installer.install(
-            candidate: candidate, renamedTo: "row-only", from: fetched, context: context
-        )
-        XCTAssertEqual(
-            collision,
-            .collision(existing: SkillCollision(slug: "row-only", hasDirectory: false, hasSwiftDataRow: true))
-        )
-        XCTAssertFalse(fileService.directoryExists(at: root + "/skills/row-only"))
-        XCTAssertFalse(fileService.directoryExists(at: root + "/skills/Row-Only"))
+        try NativeTestWork.run { [self] in
+            let repository = try makeVendorFixture()
+            let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
+            let candidate = try XCTUnwrap(fetched.candidates.first)
+            let root = tempDir + "/collision-case-store"
+            let context = try makeInstallContext()
+            let installer = makeInstallService(root: root)
+            // A quarantined row keeps its (legacy, mixed-case) slug with nothing on disk; on default APFS
+            // "row-only" and "Row-Only" are one entry, so the install must collide on the row alone.
+            let rowOnly = Skill(name: "Row only", directoryName: "Row-Only")
+            context.insert(rowOnly)
+            try context.save()
+            let collision = try installer.install(
+                candidate: candidate, renamedTo: "row-only", from: fetched, context: context
+            )
+            XCTAssertEqual(
+                collision,
+                .collision(existing: SkillCollision(slug: "row-only", hasDirectory: false, hasSwiftDataRow: true))
+            )
+            XCTAssertFalse(fileService.directoryExists(at: root + "/skills/row-only"))
+            XCTAssertFalse(fileService.directoryExists(at: root + "/skills/Row-Only"))
+        }
     }
     @MainActor
     func testAdoptCleanVsLocalDriftWithoutTouchingFiles() throws {
+        try NativeTestWork.run { [self] in try assertAdoptCleanVsLocalDriftWithoutTouchingFiles() }
+    }
+
+    @MainActor
+    private func assertAdoptCleanVsLocalDriftWithoutTouchingFiles() throws {
         let repository = try makeVendorFixture()
         let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
         let candidate = try XCTUnwrap(fetched.candidates.first)
@@ -232,12 +245,14 @@ extension SkillInstallServiceTests {
         context: ModelContext
     ) throws -> AdoptFixture {
         let installer = makeInstallService(root: root)
-        _ = try installer.install(
-            candidate: candidate,
-            renamedTo: "adopted",
-            from: source,
-            context: context
-        )
+        _ = try NativeTestWork.run(container: context.container) { [self] jobContext in
+            try installer.install(
+                candidate: candidate,
+                renamedTo: "adopted",
+                from: source,
+                context: jobContext
+                )
+        }
         let row = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
         row.installedOrigin = nil
         try ManifestService(fileService: fileService).upsertSkillOverlay(
@@ -262,131 +277,62 @@ extension SkillInstallServiceTests {
 
     @MainActor
     func testSymlinkBearingCandidateRefusedWithNothingWritten() throws {
-        let repository = try makeRepository(named: "Symlink Vendor")
-        try writeSkill("skills/hostile", name: "Hostile", description: "linked", in: repository)
-        try FileManager.default.createSymbolicLink(
-            atPath: repository + "/skills/hostile/escape",
-            withDestinationPath: tempDir + "/outside"
-        )
-        try commit(repository)
-        let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
-        let candidate = try XCTUnwrap(fetched.candidates.first)
-        let root = tempDir + "/symlink-store"
-        let context = try makeInstallContext()
+        try NativeTestWork.run { [self] in
+            let repository = try makeRepository(named: "Symlink Vendor")
+            try writeSkill("skills/hostile", name: "Hostile", description: "linked", in: repository)
+            try FileManager.default.createSymbolicLink(
+                atPath: repository + "/skills/hostile/escape",
+                withDestinationPath: tempDir + "/outside"
+            )
+            try commit(repository)
+            let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
+            let candidate = try XCTUnwrap(fetched.candidates.first)
+            let root = tempDir + "/symlink-store"
+            let context = try makeInstallContext()
 
-        XCTAssertThrowsError(
-            try makeInstallService(root: root)
-                .install(candidate: candidate, from: fetched, context: context)
-        )
-        XCTAssertFalse(fileService.directoryExists(at: root + "/skills"))
-        XCTAssertFalse(fileService.directoryExists(at: root + "/manifest"))
-        XCTAssertTrue(try context.fetch(FetchDescriptor<Skill>()).isEmpty)
+            XCTAssertThrowsError(
+                try makeInstallService(root: root)
+                    .install(candidate: candidate, from: fetched, context: context)
+            )
+            XCTAssertFalse(fileService.directoryExists(at: root + "/skills"))
+            XCTAssertFalse(fileService.directoryExists(at: root + "/manifest"))
+            XCTAssertTrue(try context.fetch(FetchDescriptor<Skill>()).isEmpty)
+        }
     }
 
     @MainActor
     func testMidCopyFailureLeavesNoPartialCanonicalDirectory() throws {
-        let repository = try makeVendorFixture()
-        let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
-        let candidate = try XCTUnwrap(fetched.candidates.first)
-        let root = tempDir + "/copy-failure-store"
-        let failingFiles = FailingCopyFileService(
-            wrapped: fileService,
-            failingName: "payload.bin"
-        )
-        let manifest = ManifestService(fileService: failingFiles)
-        let installer = makeInstallService(
-            root: root,
-            using: failingFiles,
-            manifest: manifest
-        )
-
-        XCTAssertThrowsError(
-            try installer.install(
-                candidate: candidate,
-                from: fetched,
-                context: makeInstallContext()
+        try NativeTestWork.run { [self] in
+            let repository = try makeVendorFixture()
+            let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
+            let candidate = try XCTUnwrap(fetched.candidates.first)
+            let root = tempDir + "/copy-failure-store"
+            let failingFiles = FailingCopyFileService(
+                wrapped: fileService,
+                failingName: "payload.bin"
             )
-        )
-        XCTAssertFalse(fileService.directoryExists(at: root + "/skills/vendor"))
-        XCTAssertTrue(vendorTempPaths(under: root).isEmpty)
-        let siblingPrefix = (root as NSString).lastPathComponent + ".vendor-"
-        XCTAssertTrue(try fileService.listDirectory(at: tempDir).filter {
-            $0.hasPrefix(siblingPrefix) && $0.hasSuffix(".tmp")
-        }.isEmpty)
-        XCTAssertFalse(fileService.directoryExists(at: root + "/manifest"))
-    }
-
-    func testLaunchCleanupRemovesOnlyStaleVendorTempsUnderLock() throws {
-        let root = tempDir + "/cleanup-store"
-        let stale = tempDir + "/cleanup-store.vendor-" + UUID().uuidString + ".tmp"
-        let userDecoy = tempDir + "/cleanup-store.vendor-backup.tmp"
-        let realSkill = root + "/skills/real-skill"
-        try fileService.writeFile(at: stale + "/partial", content: "partial")
-        try fileService.writeFile(at: userDecoy + "/precious", content: "user data")
-        try fileService.writeFile(at: realSkill + "/SKILL.md", content: "keep")
-
-        SkillInstallService.cleanupVendorTemps(
-            fileService: fileService,
-            storeRoot: root,
-            lockPath: tempDir + "/cleanup-sync.lock"
-        )
-
-        XCTAssertFalse(fileService.directoryExists(at: stale))
-        // Non-UUID sibling in the sweep directory is USER data, never app-owned — must survive.
-        XCTAssertTrue(fileService.fileExists(at: userDecoy + "/precious"))
-        XCTAssertTrue(fileService.fileExists(at: realSkill + "/SKILL.md"))
-    }
-
-    @MainActor
-    func testLaunchCleanupLeavesVendorTempWhenLockIsBusy() throws {
-        let root = tempDir + "/cleanup-race-store"
-        let stale = tempDir + "/cleanup-race-store.vendor-" + UUID().uuidString + ".tmp"
-        let lockPath = tempDir + "/cleanup-race-sync.lock"
-        try fileService.writeFile(
-            at: stale + "/SKILL.md",
-            content: "---\nname: Partial\ndescription: Interrupted copy\n---\npartial\n"
-        )
-        let held = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
-        defer { held.release() }
-
-        SkillInstallService.cleanupVendorTemps(
-            fileService: fileService,
-            storeRoot: root,
-            lockPath: lockPath
-        )
-        XCTAssertTrue(fileService.directoryExists(at: stale))
-    }
-
-    @MainActor
-    func testInstallMutationRefusesWhileSyncLockIsHeld() throws {
-        let repository = try makeVendorFixture()
-        let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
-        let candidate = try XCTUnwrap(fetched.candidates.first)
-        let root = tempDir + "/locked-store"
-        let lockPath = root + "-sync.lock"
-        let held = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
-        defer { held.release() }
-        let installer = SkillInstallService(
-            gitService: gitService,
-            credentialStore: InMemoryCredentialStore(),
-            fileService: fileService,
-            scratchRoot: root + "-scratch",
-            storeRoot: root,
-            lockPath: lockPath,
-            remoteValidator: fixtureRemoteValidator
-        )
-
-        XCTAssertThrowsError(
-            try installer.install(
-                candidate: candidate,
-                from: fetched,
-                context: makeInstallContext()
+            let manifest = ManifestService(fileService: failingFiles)
+            let installer = makeInstallService(
+                root: root,
+                using: failingFiles,
+                manifest: manifest
             )
-        ) { error in
-            XCTAssertEqual(error as? SkillInstallError, .syncInProgress)
+
+            XCTAssertThrowsError(
+                try installer.install(
+                    candidate: candidate,
+                    from: fetched,
+                    context: makeInstallContext()
+                )
+            )
+            XCTAssertFalse(fileService.directoryExists(at: root + "/skills/vendor"))
+            XCTAssertTrue(vendorTempPaths(under: root).isEmpty)
+            let siblingPrefix = (root as NSString).lastPathComponent + ".vendor-"
+            XCTAssertTrue(try fileService.listDirectory(at: tempDir).filter {
+                $0.hasPrefix(siblingPrefix) && $0.hasSuffix(".tmp")
+            }.isEmpty)
+            XCTAssertFalse(fileService.directoryExists(at: root + "/manifest"))
         }
-        XCTAssertFalse(fileService.directoryExists(at: root + "/skills"))
-        XCTAssertFalse(fileService.directoryExists(at: root + "/manifest"))
     }
 
     private func vendorTempPaths(under root: String) -> [String] {

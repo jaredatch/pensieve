@@ -14,7 +14,7 @@ extension ConflictResolutionModelTests {
         ]))]
         let model = makeModel(engine: engine)
 
-        await model.loadAndReport(context: context)
+        await model.loadAndReport(container: context.container)
 
         let groups = try readyGroups(from: model.phase)
         XCTAssertEqual(groups.count, 1, "body + overlay for the same slug must be one pickable group")
@@ -34,7 +34,7 @@ extension ConflictResolutionModelTests {
         engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: "new-skill")]))]
         let model = makeModel(engine: engine)
 
-        await model.loadAndReport(context: context)
+        await model.loadAndReport(container: context.container)
 
         let group = try XCTUnwrap(readyGroups(from: model.phase).first)
         XCTAssertEqual(group.title, "new-skill")
@@ -49,7 +49,7 @@ extension ConflictResolutionModelTests {
             engine.inspections = [.conflicts(ConflictSet(items: [
                 ConflictItem(path: path, kind: kind, thisMachine: nil, otherMachine: nil)
             ]))]
-            await model.loadAndReport(context: context)
+            await model.loadAndReport(container: context.container)
             let fallback = try XCTUnwrap(readyGroups(from: model.phase).first)
             XCTAssertEqual(fallback.id, (kind == .body ? "body-path:" : "overlay-path:") + path)
             XCTAssertEqual(fallback.title, path)
@@ -68,7 +68,7 @@ extension ConflictResolutionModelTests {
         let mismatch = ConflictItem(path: registry.path, kind: .body, thisMachine: nil, otherMachine: nil)
         engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: "projects"), registry, fallback, mismatch]))]
         let model = makeModel(engine: engine)
-        await model.loadAndReport(context: context)
+        await model.loadAndReport(container: context.container)
         let groups = try readyGroups(from: model.phase)
         XCTAssertEqual(groups.map(\.id), ["skill:projects", "project:registry", "body-path:projects",
                                          "body-path:manifest/projects.yaml"])
@@ -92,7 +92,7 @@ extension ConflictResolutionModelTests {
             let engine = StubResolutionEngine()
             engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: names[0]), overlayItem(slug: names[1])]))]
             let model = makeModel(engine: engine)
-            await model.loadAndReport(context: context)
+            await model.loadAndReport(container: context.container)
             let groups = try readyGroups(from: model.phase)
             XCTAssertEqual(groups.count, 1)
             XCTAssertEqual(groups.first?.title, "Alpha", "Equivalent slugs choose the lexicographically smallest title")

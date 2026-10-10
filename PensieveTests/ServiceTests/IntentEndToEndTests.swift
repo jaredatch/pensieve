@@ -93,13 +93,17 @@ final class IntentEndToEndTests: XCTestCase {
         _ = try harness.modelA.retract(
             skills: [managed], platforms: [.codex], machineIDs: [machineB], context: harness.contextA
         )
-        let pushed = try harness.engineA.sync(
-            root: harness.cloneA, message: "A retract", credential: nil, context: harness.contextA
-        )
+        let pushed = try NativeTestWork.run(container: harness.contextA.container) { [self] jobContext in
+            try harness.engineA.sync(
+                root: harness.cloneA, message: "A retract", credential: nil, context: jobContext
+                )
+        }
         guard case .synced = pushed else { return XCTFail("clone A did not sync: \(pushed)") }
-        let pulled = try harness.engineB.sync(
-            root: harness.cloneB, message: "B retract ingest", credential: nil, context: harness.contextB
-        )
+        let pulled = try NativeTestWork.run(container: harness.contextB.container) { [self] jobContext in
+            try harness.engineB.sync(
+                root: harness.cloneB, message: "B retract ingest", credential: nil, context: jobContext
+                )
+        }
         guard case .synced = pulled else { return XCTFail("clone B did not sync: \(pulled)") }
         let refreshBefore = harness.platformVMB.refreshCounter
         harness.convergenceB.run(after: .synced(
@@ -167,8 +171,8 @@ private extension IntentEndToEndTests {
         let remote = try seedRemote(git: git, manifest: manifest)
         let cloneA = tempDir + "/cloneA"
         let cloneB = tempDir + "/cloneB"
-        try git.clone(remote: remote, into: cloneA, credential: nil)
-        try git.clone(remote: remote, into: cloneB, credential: nil)
+        try NativeTestWork.run { [self] in try git.clone(remote: remote, into: cloneA, credential: nil) }
+        try NativeTestWork.run { [self] in try git.clone(remote: remote, into: cloneB, credential: nil) }
 
         let containerA = try AppRuntime.makeContainer(
             configuration: ModelConfiguration(isStoredInMemoryOnly: true)
@@ -276,13 +280,17 @@ private extension IntentEndToEndTests {
     }
 
     func syncIntentToTarget(_ harness: Harness) throws {
-        let outcomeA = try harness.engineA.sync(
-            root: harness.cloneA, message: "A intent", credential: nil, context: harness.contextA
-        )
+        let outcomeA = try NativeTestWork.run(container: harness.contextA.container) { [self] jobContext in
+            try harness.engineA.sync(
+                root: harness.cloneA, message: "A intent", credential: nil, context: jobContext
+                )
+        }
         guard case .synced = outcomeA else { return XCTFail("clone A did not sync: \(outcomeA)") }
-        let outcomeB = try harness.engineB.sync(
-            root: harness.cloneB, message: "B ingest", credential: nil, context: harness.contextB
-        )
+        let outcomeB = try NativeTestWork.run(container: harness.contextB.container) { [self] jobContext in
+            try harness.engineB.sync(
+                root: harness.cloneB, message: "B ingest", credential: nil, context: jobContext
+                )
+        }
         guard case .synced = outcomeB else { return XCTFail("clone B did not sync: \(outcomeB)") }
         let diskIntents = try ManifestService().read(fromRoot: harness.cloneB).deployIntents
         let rebuiltIntents = try harness.contextB.fetch(FetchDescriptor<MachineDeployIntent>())
@@ -309,8 +317,8 @@ private extension IntentEndToEndTests {
         let remote = "file://" + remotePath
         let seed = tempDir + "/seed"
         try FileManager.default.createDirectory(atPath: seed, withIntermediateDirectories: true)
-        try git.initRepository(at: seed)
-        try git.setRemote(remote, at: seed)
+        try NativeTestWork.run { [self] in try git.initRepository(at: seed) }
+        try NativeTestWork.run { [self] in try git.setRemote(remote, at: seed) }
         try writeSkill("managed", root: seed)
         try writeSkill("manual", root: seed)
         let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
@@ -329,8 +337,8 @@ private extension IntentEndToEndTests {
         try "manifest/categories/*.yaml merge=union\nmanifest/projects.yaml merge=union\n"
             .write(toFile: seed + "/.gitattributes", atomically: true, encoding: .utf8)
         try ".DS_Store\n".write(toFile: seed + "/.gitignore", atomically: true, encoding: .utf8)
-        XCTAssertTrue(try git.stageAllAndCommit(at: seed, message: "seed"))
-        try git.push(at: seed, credential: nil)
+        XCTAssertTrue(try NativeTestWork.run { [self] in try git.stageAllAndCommit(at: seed, message: "seed") })
+        try NativeTestWork.run { [self] in try git.push(at: seed, credential: nil) }
         return remote
     }
 

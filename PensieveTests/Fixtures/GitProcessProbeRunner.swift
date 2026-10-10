@@ -7,6 +7,7 @@ import XCTest
 /// helper. The registry survives helper crashes; no blocked job can retain the host's pool.
 enum GitProcessProbeRunner {
     struct Outcome {
+        let diagnostic: String
         let status: Int32
         let report: String
         let timedOut: Bool
@@ -36,7 +37,11 @@ enum GitProcessProbeRunner {
             process.environment = environment
         }
         process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        let diagnostic = directory + "/diagnostic.txt"
+        try files.writeFile(at: diagnostic, content: "")
+        let diagnosticHandle = try FileHandle(forWritingTo: URL(fileURLWithPath: diagnostic))
+        defer { try? diagnosticHandle.close() }
+        process.standardError = diagnosticHandle
         try process.run()
         let pid = process.processIdentifier
         var deadline = ProcessInfo.processInfo.systemUptime + (waitForReady ? 10 : timeout)
@@ -61,7 +66,8 @@ enum GitProcessProbeRunner {
         if timedOut && noteTimeout {
             TestTimeoutDiagnostics.note("Git process probe timed out: mode=\(mode); pid=\(pid); group killed; helper reaped")
         }
-        return Outcome(status: process.terminationStatus, report: (try? files.readFile(at: report)) ?? "No report",
+        return Outcome(diagnostic: (try? files.readFile(at: diagnostic)) ?? "", status: process.terminationStatus,
+            report: (try? files.readFile(at: report)) ?? "No report",
                        timedOut: timedOut, ready: ready, pid: pid, children: Array(children))
     }
 

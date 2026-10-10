@@ -3,103 +3,113 @@ import XCTest
 
 extension UpstreamHistoryServiceTests {
     func testIdenticalLocalCopyHasNoEditsAndAgreesWithStableDriftCheck() throws {
-        try write("SKILL.md", text: "one\ntwo\n", in: localDirectory)
-        try write("notes.txt", text: "note\n", in: localDirectory)
-        let installedHash = try stableHash(at: localDirectory)
-        let baseline = [
-            UpstreamHistoryBaselineFile(
-                path: "SKILL.md",
-                content: .text("one\ntwo\n"),
-                fingerprint: fingerprint("one\ntwo\n"),
-                isExecutable: false
-            ),
-            UpstreamHistoryBaselineFile(
-                path: "notes.txt",
-                content: .text("note\n"),
-                fingerprint: fingerprint("note\n"),
-                isExecutable: false
+        try NativeTestWork.run { [self] in
+            try write("SKILL.md", text: "one\ntwo\n", in: localDirectory)
+            try write("notes.txt", text: "note\n", in: localDirectory)
+            let installedHash = try stableHash(at: localDirectory)
+            let baseline = [
+                UpstreamHistoryBaselineFile(
+                    path: "SKILL.md",
+                    content: .text("one\ntwo\n"),
+                    fingerprint: fingerprint("one\ntwo\n"),
+                    isExecutable: false
+                ),
+                UpstreamHistoryBaselineFile(
+                    path: "notes.txt",
+                    content: .text("note\n"),
+                    fingerprint: fingerprint("note\n"),
+                    isExecutable: false
+                )
+            ]
+            let git = RecordingUpstreamHistoryGit(result: .success(snapshot(baseline: baseline)))
+
+            let result = try service(git: git).read(
+                origin: origin(
+                    repo: "fixture://remote",
+                    installedCommit: String(repeating: "a", count: 40),
+                    contentHash: installedHash
+                ),
+                localDirectory: localDirectory
             )
-        ]
-        let git = RecordingUpstreamHistoryGit(result: .success(snapshot(baseline: baseline)))
 
-        let result = try service(git: git).read(
-            origin: origin(
-                repo: "fixture://remote",
-                installedCommit: String(repeating: "a", count: 40),
-                contentHash: installedHash
-            ),
-            localDirectory: localDirectory
-        )
-
-        XCTAssertEqual(result.localEdits, .none)
-        XCTAssertFalse(UpdateCheckService.driftedLocally(
-            currentContentHash: try stableHash(at: localDirectory),
-            installedContentHash: installedHash
-        ))
+            XCTAssertEqual(result.localEdits, .none)
+            XCTAssertFalse(UpdateCheckService.driftedLocally(
+                currentContentHash: try stableHash(at: localDirectory),
+                installedContentHash: installedHash
+            ))
+        }
     }
 
     func testLocalEditsMeasureTextAndListBinaryAndOversizedFilesWithoutCounts() throws {
-        let fixture = try makeEditedFixture()
-        let git = RecordingUpstreamHistoryGit(result: .success(snapshot(baseline: fixture.baseline)))
+        try NativeTestWork.run { [self] in
+            let fixture = try makeEditedFixture()
+            let git = RecordingUpstreamHistoryGit(result: .success(snapshot(baseline: fixture.baseline)))
 
-        let result = try service(git: git).read(
-            origin: origin(
-                repo: "fixture://remote",
-                installedCommit: String(repeating: "a", count: 40),
-                contentHash: fixture.installedHash
-            ),
-            localDirectory: localDirectory
-        )
+            let result = try service(git: git).read(
+                origin: origin(
+                    repo: "fixture://remote",
+                    installedCommit: String(repeating: "a", count: 40),
+                    contentHash: fixture.installedHash
+                ),
+                localDirectory: localDirectory
+            )
 
-        guard case let .changed(changes) = result.localEdits else {
-            return XCTFail("expected measured local edits")
+            guard case let .changed(changes) = result.localEdits else {
+                return XCTFail("expected measured local edits")
+            }
+            let byPath = Dictionary(uniqueKeysWithValues: changes.map { ($0.path, $0) })
+            XCTAssertEqual(byPath["SKILL.md"]?.linesAdded, 1)
+            XCTAssertEqual(byPath["SKILL.md"]?.linesRemoved, 1)
+            XCTAssertEqual(byPath["edit.txt"]?.linesAdded, 1)
+            XCTAssertEqual(byPath["edit.txt"]?.linesRemoved, 1)
+            XCTAssertEqual(byPath["added.txt"]?.linesAdded, 2)
+            XCTAssertEqual(byPath["added.txt"]?.linesRemoved, 0)
+            XCTAssertEqual(byPath["delete.txt"]?.linesAdded, 0)
+            XCTAssertEqual(byPath["delete.txt"]?.linesRemoved, 1)
+            XCTAssertNotNil(byPath["binary.dat"])
+            XCTAssertNil(byPath["binary.dat"]?.linesAdded)
+            XCTAssertNotNil(byPath["large.txt"])
+            XCTAssertNil(byPath["large.txt"]?.linesAdded)
+            XCTAssertTrue(UpdateCheckService.driftedLocally(
+                currentContentHash: try stableHash(at: localDirectory),
+                installedContentHash: fixture.installedHash
+            ))
         }
-        let byPath = Dictionary(uniqueKeysWithValues: changes.map { ($0.path, $0) })
-        XCTAssertEqual(byPath["SKILL.md"]?.linesAdded, 1)
-        XCTAssertEqual(byPath["SKILL.md"]?.linesRemoved, 1)
-        XCTAssertEqual(byPath["edit.txt"]?.linesAdded, 1)
-        XCTAssertEqual(byPath["edit.txt"]?.linesRemoved, 1)
-        XCTAssertEqual(byPath["added.txt"]?.linesAdded, 2)
-        XCTAssertEqual(byPath["added.txt"]?.linesRemoved, 0)
-        XCTAssertEqual(byPath["delete.txt"]?.linesAdded, 0)
-        XCTAssertEqual(byPath["delete.txt"]?.linesRemoved, 1)
-        XCTAssertNotNil(byPath["binary.dat"])
-        XCTAssertNil(byPath["binary.dat"]?.linesAdded)
-        XCTAssertNotNil(byPath["large.txt"])
-        XCTAssertNil(byPath["large.txt"]?.linesAdded)
-        XCTAssertTrue(UpdateCheckService.driftedLocally(
-            currentContentHash: try stableHash(at: localDirectory),
-            installedContentHash: fixture.installedHash
-        ))
     }
 
     func testDriftWithoutBaselineIsExplicitlyCountsUnknown() throws {
-        try write("SKILL.md", text: "locally edited\n", in: localDirectory)
-        let git = RecordingUpstreamHistoryGit(result: .success(UpstreamHistoryGitSnapshot(
-            headCommit: String(repeating: "c", count: 40),
-            rows: [],
-            installedPosition: .notInRefHistory,
-            hasMoreCommits: false,
-            installedBaseline: nil
-        )))
+        try NativeTestWork.run { [self] in
+            try write("SKILL.md", text: "locally edited\n", in: localDirectory)
+            let git = RecordingUpstreamHistoryGit(result: .success(UpstreamHistoryGitSnapshot(
+                headCommit: String(repeating: "c", count: 40),
+                rows: [],
+                installedPosition: .notInRefHistory,
+                hasMoreCommits: false,
+                installedBaseline: nil
+            )))
 
-        let result = try service(git: git).read(
-            origin: origin(
-                repo: "fixture://remote",
-                installedCommit: String(repeating: "a", count: 40),
-                contentHash: "sha256:not-the-current-copy"
-            ),
-            localDirectory: localDirectory
-        )
+            let result = try service(git: git).read(
+                origin: origin(
+                    repo: "fixture://remote",
+                    installedCommit: String(repeating: "a", count: 40),
+                    contentHash: "sha256:not-the-current-copy"
+                ),
+                localDirectory: localDirectory
+            )
 
-        XCTAssertEqual(result.localEdits, .countsUnknown)
-        XCTAssertTrue(UpdateCheckService.driftedLocally(
-            currentContentHash: try stableHash(at: localDirectory),
-            installedContentHash: "sha256:not-the-current-copy"
-        ))
+            XCTAssertEqual(result.localEdits, .countsUnknown)
+            XCTAssertTrue(UpdateCheckService.driftedLocally(
+                currentContentHash: try stableHash(at: localDirectory),
+                installedContentHash: "sha256:not-the-current-copy"
+            ))
+        }
     }
 
     func testBodyOnlySaveReportsNoFrontmatterLinesAsLocalEdits() throws {
+        try NativeTestWork.run { [self] in try assertBodyOnlySaveReportsNoFrontmatterLinesAsLocalEdits() }
+    }
+
+    private func assertBodyOnlySaveReportsNoFrontmatterLinesAsLocalEdits() throws {
         let original = """
         ---
         name: Installed

@@ -93,17 +93,20 @@ final class ImportFolderTests: XCTestCase {
     func assertFreshCheckout(expected: [String: Data], slug: String, context: ModelContext) throws {
         let git = GitService(askpassHelperPath: root + "/askpass")
         let remote = root + "/remote.git"
-        try git.runOrThrow(["init", "--bare", "--initial-branch=main", remote], in: nil)
-        try git.initRepository(at: store)
-        try git.runOrThrow(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
-                           "commit", "--allow-empty", "-m", "initial"], in: store)
-        try git.setRemote(remote, at: store)
-        try git.push(at: store, credential: nil)
+        try NativeTestWork.run { [self] in try git.runOrThrow(["init", "--bare", "--initial-branch=main", remote], in: nil) }
+        try NativeTestWork.run { [self] in try git.initRepository(at: store) }
+        try NativeTestWork.run { [self] in
+            try git.runOrThrow(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                "commit", "--allow-empty", "-m", "initial"], in: store)
+        }
+        try NativeTestWork.run { [self] in try git.setRemote(remote, at: store) }
+        try NativeTestWork.run { [self] in try git.push(at: store, credential: nil) }
         let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: git), lockPath: root + "/sync.lock")
-        XCTAssertEqual(try engine.sync(root: store, message: "import folder", credential: nil, context: context),
-                       .synced(pushed: true, warnings: []))
+        XCTAssertEqual(try NativeTestWork.run(container: context.container) { [self] jobContext in
+            try engine.sync(root: store, message: "import folder", credential: nil, context: jobContext)
+        }, .synced(pushed: true, warnings: []))
         let fresh = root + "/fresh"
-        try git.clone(remote: remote, into: fresh, credential: nil)
+        try NativeTestWork.run { [self] in try git.clone(remote: remote, into: fresh, credential: nil) }
         for (path, bytes) in expected {
             XCTAssertEqual(try files.readData(at: fresh + "/skills/" + slug + "/" + path), bytes, path)
             XCTAssertEqual(try executableBits(at: fresh + "/skills/" + slug + "/" + path),

@@ -3,6 +3,11 @@ import XCTest
 @testable import Pensieve
 
 extension UpdatesViewModelTests {
+    func nativePreview(_ service: SkillInstallService, skill: Skill) throws -> PinnedSkillDiff {
+        let update = try PinnedSkillUpdate(skill: skill)
+        return try NativeTestWork.run { try service.previewUpdate(update) }
+    }
+
     struct RealFixture {
         let repository: String
         let storeRoot: String
@@ -182,15 +187,17 @@ extension UpdatesViewModelTests {
             now: { Date(timeIntervalSince1970: 1_850_000_000) },
             remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) }
         )
-        let installedSource = try service.fetch(repo: repository, ref: nil, credential: nil)
+        let installedSource = try NativeTestWork.run { [self] in try service.fetch(repo: repository, ref: nil, credential: nil) }
         let installedCandidate = try XCTUnwrap(installedSource.candidates.first)
-        _ = try service.install(candidate: installedCandidate, from: installedSource, context: context)
+        _ = try NativeTestWork.run(container: context.container) { [self] jobContext in
+            try service.install(candidate: installedCandidate, from: installedSource, context: jobContext)
+        }
         let skill = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
 
         try writeSkill(name: "Fresh Name", description: "Fresh Description", body: "fresh body",
                        repository: repository)
         let pinnedCommit = try commit(repository, message: "checked update")
-        let updateSource = try service.fetch(repo: repository, ref: nil, credential: nil)
+        let updateSource = try NativeTestWork.run { [self] in try service.fetch(repo: repository, ref: nil, credential: nil) }
         let updateCandidate = try XCTUnwrap(updateSource.candidates.first)
         skill.updateAvailable = true
         skill.upstreamTree = updateCandidate.treeHash

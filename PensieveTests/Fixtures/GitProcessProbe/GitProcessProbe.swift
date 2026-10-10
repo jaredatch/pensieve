@@ -27,7 +27,17 @@ enum GitProcessProbe {
             } catch { exit(74) }
             exit(1)
         }
-        let text = run(mode, executable: executable)
+        if mode == "main-thread-guard" {
+            _ = try? git(executable).runData(["--version"], in: nil)
+            exit(0)
+        }
+        let finished = DispatchSemaphore(value: 0)
+        var text = ""
+        Thread {
+            text = run(mode, executable: executable)
+            finished.signal()
+        }.start()
+        finished.wait()
         do { try FileService().writeFile(at: report, content: text) } catch { exit(74) }
         exit(text.hasPrefix("OK") ? 0 : 1)
     }

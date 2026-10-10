@@ -42,19 +42,21 @@ extension UpdatesViewModelTests {
         try fileService.deleteFile(at: skillFile)
         try fileService.createSymlink(at: skillFile, pointingTo: "/etc/passwd")
         let symlinkCommit = try commit(fixture.repository, message: "symlink update")
-        let source = try fixture.service.fetch(
-            repo: fixture.repository,
-            ref: nil,
-            path: "skills/vendor",
-            credential: nil
-        )
+        let source = try NativeTestWork.run { [self] in
+            try fixture.service.fetch(
+                repo: fixture.repository,
+                ref: nil,
+                path: "skills/vendor",
+                credential: nil
+                )
+        }
         let candidate = try XCTUnwrap(source.candidates.first)
         fixture.skill.upstreamCommit = symlinkCommit
         fixture.skill.upstreamTree = candidate.treeHash
         try context.save()
 
         XCTAssertThrowsError(
-            try fixture.service.previewUpdate(PinnedSkillUpdate(skill: fixture.skill))
+            try nativePreview(fixture.service, skill: fixture.skill)
         ) { error in
             guard case SkillInstallError.unavailableCandidate = error else {
                 return XCTFail("expected unavailable symlink candidate, got \(error)")
@@ -72,11 +74,13 @@ extension UpdatesViewModelTests {
         )
 
         XCTAssertThrowsError(
-            try fixture.service.applyUpdate(
+            try NativeTestWork.run(container: context.container) { jobContext in
+                try fixture.service.applyUpdate(
                 update,
                 allowLocalOverwrite: false,
-                context: context
+                context: jobContext
             )
+            }
         ) { error in
             XCTAssertEqual(error as? SkillUpdateFlowError, .localEditsRequireConfirmation)
         }

@@ -13,8 +13,10 @@ extension ManifestDeployIntentTests {
         try service.write(snapshot(records), toRoot: tempDir)
         let firstBytes = try fileService.readFile(at: intentPath())
 
-        XCTAssertEqual(canonical(try service.read(fromRoot: tempDir).deployIntents), canonical(records))
-        try service.write(try service.read(fromRoot: tempDir), toRoot: tempDir)
+        XCTAssertEqual(canonical(try NativeTestWork.run { [self] in
+            try service.read(fromRoot: tempDir)
+        }.deployIntents), canonical(records))
+        try service.write(try NativeTestWork.run { [self] in try service.read(fromRoot: tempDir) }, toRoot: tempDir)
         XCTAssertEqual(try fileService.readFile(at: intentPath()), firstBytes)
     }
 
@@ -34,7 +36,7 @@ extension ManifestDeployIntentTests {
         let records = [record(platform: "codex"), record(platform: "future.agent")]
         try v4.write(snapshot(records), toRoot: tempDir)
 
-        let read = try service.read(fromRoot: tempDir)
+        let read = try NativeTestWork.run { [self] in try service.read(fromRoot: tempDir) }
         XCTAssertEqual(canonical(read.deployIntents), canonical(records))
         try service.write(read, toRoot: tempDir)
         XCTAssertEqual(try fileService.readFile(at: tempDir + "/manifest/manifest.yaml"), "schema_version: 5\n")
@@ -49,10 +51,10 @@ extension ManifestDeployIntentTests {
             content: "slug: alpha\nplatforms: []\n"
         )
 
-        XCTAssertEqual(try service.read(fromRoot: tempDir).deployIntents, [])
+        XCTAssertEqual(try NativeTestWork.run { [self] in try service.read(fromRoot: tempDir) }.deployIntents, [])
 
         try fileService.writeFile(at: intentPath(), content: "slug: alpha\nplatforms:\n")
-        XCTAssertThrowsError(try service.read(fromRoot: tempDir)) { error in
+        XCTAssertThrowsError(try NativeTestWork.run { [self] in try service.read(fromRoot: tempDir) }) { error in
             XCTAssertEqual(
                 error as? ManifestError,
                 .corruptManifestFile("deploys/" + Self.machineA + "/alpha.yaml")
@@ -174,7 +176,9 @@ extension ManifestDeployIntentTests {
             let root = tempDir + "/printable-boundary-\(value)"
             let records = [record(projectKey: key)]
             try service.write(snapshot(records), toRoot: root)
-            XCTAssertEqual(canonical(try service.read(fromRoot: root).deployIntents), canonical(records))
+            XCTAssertEqual(canonical(try NativeTestWork.run { [self] in
+                try service.read(fromRoot: root)
+            }.deployIntents), canonical(records))
         }
     }
 
@@ -182,7 +186,9 @@ extension ManifestDeployIntentTests {
         let keys = ["github.com/owner/repo", "a|b", "host:path", "inner space", "café/工具", "😀", "e\u{301}"]
         let records = keys.map { record(projectKey: $0) }
         try service.write(snapshot(records), toRoot: tempDir)
-        XCTAssertEqual(canonical(try service.read(fromRoot: tempDir).deployIntents), canonical(records))
+        XCTAssertEqual(canonical(try NativeTestWork.run { [self] in
+            try service.read(fromRoot: tempDir)
+        }.deployIntents), canonical(records))
     }
 
     func testRowIdentitySeparatesScopesAndPipeKeys() throws {
@@ -238,7 +244,9 @@ extension ManifestDeployIntentTests {
         _ = StoreRebuildService(fileService: fileService, manifestService: service)
             .rebuild(fromRoot: tempDir, context: context)
         try service.write(try service.snapshot(from: context), toRoot: tempDir)
-        XCTAssertEqual(canonical(try service.read(fromRoot: tempDir).deployIntents), canonical(records))
+        XCTAssertEqual(canonical(try NativeTestWork.run { [self] in
+            try service.read(fromRoot: tempDir)
+        }.deployIntents), canonical(records))
     }
 
     func testSyncedComplexProjectKeySurvivesRebuildAndNextManifestWrite() throws {
@@ -257,7 +265,7 @@ extension ManifestDeployIntentTests {
         XCTAssertTrue(rebuilt.deployIntents.contains(expected))
         try service.write(rebuilt, toRoot: tempDir)
 
-        XCTAssertTrue(try service.read(fromRoot: tempDir).deployIntents.contains(expected))
+        XCTAssertTrue(try NativeTestWork.run { [self] in try service.read(fromRoot: tempDir) }.deployIntents.contains(expected))
     }
 
     func testGeneratedProjectIntentWriterSweep() throws {
@@ -289,14 +297,18 @@ extension ManifestDeployIntentTests {
     private func assertWriterSweepShape(_ records: [DeployIntentRecord]) throws {
         try service.write(snapshot(records), toRoot: tempDir)
         let bytes = try fileService.readFile(at: intentPath())
-        XCTAssertEqual(canonical(try service.read(fromRoot: tempDir).deployIntents), canonical(records))
-        try service.write(try service.read(fromRoot: tempDir), toRoot: tempDir)
+        XCTAssertEqual(canonical(try NativeTestWork.run { [self] in
+            try service.read(fromRoot: tempDir)
+        }.deployIntents), canonical(records))
+        try service.write(try NativeTestWork.run { [self] in try service.read(fromRoot: tempDir) }, toRoot: tempDir)
         XCTAssertEqual(try fileService.readFile(at: intentPath()), bytes)
 
         for variant in [bytes.replacingOccurrences(of: "\n", with: "\r\n"), String(bytes.dropLast())] {
             try fileService.writeFile(at: intentPath(), content: variant)
             do {
-                XCTAssertEqual(canonical(try service.read(fromRoot: tempDir).deployIntents), canonical(records))
+                XCTAssertEqual(canonical(try NativeTestWork.run { [self] in
+                    try service.read(fromRoot: tempDir)
+                }.deployIntents), canonical(records))
             } catch {
                 guard case ManifestError.corruptManifestFile = error else { throw error }
             }

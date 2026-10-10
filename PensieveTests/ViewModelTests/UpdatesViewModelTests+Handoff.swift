@@ -83,7 +83,9 @@ extension UpdatesViewModelTests {
         try fileService.writeFile(at: fixture.repository + "/skills/vendor/SKILL.md",
             content: "---\nname: Next\ndescription: Next update\n---\nnext body\n")
         fixture.skill.upstreamCommit = try commit(fixture.repository, message: "next pinned update")
-        fixture.skill.upstreamTree = try TestPaths.git.treeHash(at: fixture.repository, path: "skills/vendor")
+        fixture.skill.upstreamTree = try NativeTestWork.run { [self] in
+            try TestPaths.git.treeHash(at: fixture.repository, path: "skills/vendor")
+        }
         fixture.skill.updateAvailable = true
         fixture.skill.upstreamCommitDate = Date(timeIntervalSince1970: 1_870_000_000)
         try context.save()

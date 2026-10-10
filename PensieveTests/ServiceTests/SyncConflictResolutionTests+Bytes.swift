@@ -2,20 +2,20 @@ import XCTest
 @testable import Pensieve
 
 extension SyncConflictResolutionTests {
-    @MainActor
     func testUnreadableGitlinkPickCannotDeleteThePathAndOtherPickStillResolves() throws {
-        try assertInvalidRootIgnoreCannotBlockRetirement()
-        try assertThisMachineFileAgainstGitlinkRefuses()
-        try assertGitlinkFilePicksRemainTracked()
-        try assertGitlinkRetirement(both: true, side: .thisMachine, skillRoot: true)
-        for both in [false, true] {
-            for side in [ConflictSide.thisMachine, .otherMachine] {
-                try assertGitlinkRetirement(both: both, side: side, skillRoot: false)
+        try NativeTestWork.run { [self] in
+            try assertInvalidRootIgnoreCannotBlockRetirement()
+            try assertThisMachineFileAgainstGitlinkRefuses()
+            try assertGitlinkFilePicksRemainTracked()
+            try assertGitlinkRetirement(both: true, side: .thisMachine, skillRoot: true)
+            for both in [false, true] {
+                for side in [ConflictSide.thisMachine, .otherMachine] {
+                    try assertGitlinkRetirement(both: both, side: side, skillRoot: false)
+                }
             }
         }
     }
 
-    @MainActor
     private func assertThisMachineFileAgainstGitlinkRefuses() throws {
         let fixture = try SyncConflictByteFixture.gitlinkConflict(
             otherEntry: .file(Data("this Mac file".utf8)), changedEntryOnThisMachine: true)
@@ -52,7 +52,6 @@ extension SyncConflictResolutionTests {
                                                in: nil).stdout.isEmpty)
     }
 
-    @MainActor
     private func assertInvalidRootIgnoreCannotBlockRetirement() throws {
         for kind in ["missing", "binary", "link", "folder", "fifo", "unreadable"] {
             let fixture = try SyncConflictByteFixture.gitlinkConflict()
@@ -75,7 +74,6 @@ extension SyncConflictResolutionTests {
         }
     }
 
-    @MainActor
     private func assertGitlinkFilePicksRemainTracked() throws {
         for entry in [SyncConflictByteFixture.Entry.file(Data("chosen file".utf8)), .symlink("../kept-link")] {
             let fixture = try SyncConflictByteFixture.gitlinkConflict(otherEntry: entry)
@@ -122,25 +120,25 @@ extension SyncConflictResolutionTests {
         }
     }
 
-    @MainActor
     func testBinaryAndUTF16PicksKeepExactBytesAcrossRemoteAndFreshClone() throws {
-        try assertConflictEntryTypesAndModes()
-        for payload in SyncConflictByteFixture.payloads {
-            for side in [ConflictSide.thisMachine, .otherMachine] {
-                let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
-                defer { try? fixture.files.deleteDirectory(at: fixture.root) }
-                let item = try fixture.inspect()
-                let outcome = try fixture.engine.resolveConflicts(root: fixture.storeB,
-                    picks: [item.path: ResolutionPick(side: side, expectedThis: item.thisMachine,
-                                                      expectedOther: item.otherMachine)],
-                    credential: nil, context: fixture.contextB)
-                guard case .synced = outcome else { return XCTFail("The pick must finish sync") }
-                try fixture.assertPublished(side == .thisMachine ? payload.this : payload.other)
+        try NativeTestWork.run { [self] in
+            try assertConflictEntryTypesAndModes()
+            for payload in SyncConflictByteFixture.payloads {
+                for side in [ConflictSide.thisMachine, .otherMachine] {
+                    let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
+                    defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+                    let item = try fixture.inspect()
+                    let outcome = try fixture.engine.resolveConflicts(root: fixture.storeB,
+                        picks: [item.path: ResolutionPick(side: side, expectedThis: item.thisMachine,
+                                                          expectedOther: item.otherMachine)],
+                        credential: nil, context: fixture.contextB)
+                    guard case .synced = outcome else { return XCTFail("The pick must finish sync") }
+                    try fixture.assertPublished(side == .thisMachine ? payload.this : payload.other)
+                }
             }
         }
     }
 
-    @MainActor
     private func assertConflictPreparationUsesOneCheckedFetch() throws {
         let payload = SyncConflictByteFixture.payloads[0]
         let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
@@ -179,7 +177,6 @@ extension SyncConflictResolutionTests {
         try fixture.assertPublished(payload.this)
     }
 
-    @MainActor
     private func assertConflictEntryTypesAndModes() throws {
         for link in [false, true] {
             for side in [ConflictSide.thisMachine, .otherMachine] {
@@ -214,31 +211,31 @@ extension SyncConflictResolutionTests {
         }
     }
 
-    @MainActor
     func testBinaryAndUTF16DriftRefusesStalePicksAndLeavesRemoteUnchanged() throws {
-        try assertConflictPreparationUsesOneCheckedFetch()
-        for payload in SyncConflictByteFixture.payloads {
-            let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
-            defer { try? fixture.files.deleteDirectory(at: fixture.root) }
-            let stale = try fixture.inspect()
-            try fixture.change(payload.drift, at: fixture.storeA)
-            _ = try fixture.engine.sync(root: fixture.storeA, message: "remote drifts", credential: nil,
-                context: fixture.contextA)
-            let before = try fixture.git.headSHA(at: fixture.storeA)
-            XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB,
-                picks: [stale.path: ResolutionPick(side: .thisMachine, expectedThis: stale.thisMachine,
-                                                   expectedOther: stale.otherMachine)],
-                credential: nil, context: fixture.contextB)) { error in
-                XCTAssertEqual(error as? SyncError, .conflictsChanged)
+        try NativeTestWork.run { [self] in
+            try assertConflictPreparationUsesOneCheckedFetch()
+            for payload in SyncConflictByteFixture.payloads {
+                let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
+                defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+                let stale = try fixture.inspect()
+                try fixture.change(payload.drift, at: fixture.storeA)
+                _ = try fixture.engine.sync(root: fixture.storeA, message: "remote drifts", credential: nil,
+                    context: fixture.contextA)
+                let before = try fixture.git.headSHA(at: fixture.storeA)
+                XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB,
+                    picks: [stale.path: ResolutionPick(side: .thisMachine, expectedThis: stale.thisMachine,
+                                                       expectedOther: stale.otherMachine)],
+                    credential: nil, context: fixture.contextB)) { error in
+                    XCTAssertEqual(error as? SyncError, .conflictsChanged)
+                }
+                let remote = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil)
+                XCTAssertEqual(remote.stdout.trimmingCharacters(in: .newlines), before)
+                XCTAssertEqual(try fixture.files.readData(at: fixture.storeB + "/" + fixture.path), payload.this)
+                XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
             }
-            let remote = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil)
-            XCTAssertEqual(remote.stdout.trimmingCharacters(in: .newlines), before)
-            XCTAssertEqual(try fixture.files.readData(at: fixture.storeB + "/" + fixture.path), payload.this)
-            XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
         }
     }
 
-    @MainActor
     private func assertFileFolderPickKeepsTheFolder() throws {
         let fixture = try SyncConflictByteFixture(name: "file-folder", initial: .file(Data("base".utf8)),
             this: .file(Data("edited file".utf8)), other: .folder, indexMerge: true)
@@ -272,29 +269,29 @@ extension SyncConflictResolutionTests {
         XCTAssertEqual(try fixture.files.readFile(at: fresh + "/" + fixture.path + "/keep"), "chosen folder bytes")
     }
 
-    @MainActor
     func testAbsentAndEmptyConflictSidesRemainDistinct() throws {
-        try assertFileFolderPickKeepsTheFolder()
-        for deletedSide in [ConflictSide.thisMachine, .otherMachine] {
-            for pickSide in [ConflictSide.thisMachine, .otherMachine] {
-                let fixture = try SyncConflictByteFixture(name: "empty.bin",
-                    this: deletedSide == .thisMachine ? nil : Data(),
-                    other: deletedSide == .otherMachine ? nil : Data())
-                defer { try? fixture.files.deleteDirectory(at: fixture.root) }
-                let item = try fixture.inspect()
-                let absent = deletedSide == .thisMachine ? item.thisMachine : item.otherMachine
-                let present = deletedSide == .thisMachine ? item.otherMachine : item.thisMachine
-                XCTAssertNil(absent)
-                XCTAssertTrue(try XCTUnwrap(present).isEmpty)
-                _ = try fixture.engine.resolveConflicts(root: fixture.storeB,
-                    picks: [item.path: ResolutionPick(side: pickSide, expectedThis: item.thisMachine,
-                                                      expectedOther: item.otherMachine)],
-                    credential: nil, context: fixture.contextB)
-                try fixture.assertPublished(pickSide == deletedSide ? nil : Data())
+        try NativeTestWork.run { [self] in
+            try assertFileFolderPickKeepsTheFolder()
+            for deletedSide in [ConflictSide.thisMachine, .otherMachine] {
+                for pickSide in [ConflictSide.thisMachine, .otherMachine] {
+                    let fixture = try SyncConflictByteFixture(name: "empty.bin",
+                        this: deletedSide == .thisMachine ? nil : Data(),
+                        other: deletedSide == .otherMachine ? nil : Data())
+                    defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+                    let item = try fixture.inspect()
+                    let absent = deletedSide == .thisMachine ? item.thisMachine : item.otherMachine
+                    let present = deletedSide == .thisMachine ? item.otherMachine : item.thisMachine
+                    XCTAssertNil(absent)
+                    XCTAssertTrue(try XCTUnwrap(present).isEmpty)
+                    _ = try fixture.engine.resolveConflicts(root: fixture.storeB,
+                        picks: [item.path: ResolutionPick(side: pickSide, expectedThis: item.thisMachine,
+                                                          expectedOther: item.otherMachine)],
+                        credential: nil, context: fixture.contextB)
+                    try fixture.assertPublished(pickSide == deletedSide ? nil : Data())
+                }
             }
         }
     }
-    @MainActor
     private func assertMissingConflictObjectRefusesOnlyThatSide() throws {
         for stage in [2, 3] {
             let payload = SyncConflictByteFixture.payloads[0]
@@ -328,8 +325,11 @@ extension SyncConflictResolutionTests {
         }
     }
 
-    @MainActor
     func testFailedConflictBlobReadStopsInspectionAndResolutionWithoutDeletingFiles() throws {
+        try NativeTestWork.run { [self] in try assertFailedConflictBlobReadStopsInspectionAndResolutionWithoutDeletingFiles() }
+    }
+
+    private func assertFailedConflictBlobReadStopsInspectionAndResolutionWithoutDeletingFiles() throws {
         try assertMissingConflictObjectRefusesOnlyThatSide()
         for stage in [2, 3] {
             for resolving in [false, true] {

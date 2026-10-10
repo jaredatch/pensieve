@@ -33,9 +33,11 @@ extension DeployIntentModelTests {
             fileService: FileService(),
             lockPath: lockPath
         )
-        _ = try engine.sync(
-            root: harness.root, message: "intentless", credential: nil, context: harness.context
-        )
+        _ = try NativeTestWork.run(container: harness.context.container) { [self] jobContext in
+            try engine.sync(
+                root: harness.root, message: "intentless", credential: nil, context: jobContext
+                )
+        }
         _ = IntentReconciler(
             platformVM: harness.platformVM,
             machineIdentity: DeployIntentIdentityForSyncTest(id: localID)
@@ -61,22 +63,21 @@ extension DeployIntentModelTests {
         )
         var refused = false
 
-        _ = try engine.sync(
-            root: harness.root,
-            message: "cycle holding lock",
-            credential: nil,
-            context: harness.context,
-            prepare: { context in
+        _ = try NativeTestWork.run(container: harness.context.container) { [self] jobContext in
+            try engine.sync(
+                root: harness.root, message: "cycle holding lock", credential: nil, context: jobContext,
+                prepare: { context in
                 do {
-                    _ = try harness.model.set(
-                        true, skill: skill, platform: .codex, target: .userWide, context: context
-                    )
-                    XCTFail("the flip must be refused while SyncEngine owns its lock")
+                _ = try harness.model.set(
+                true, skill: skill, platform: .codex, target: .userWide, context: context
+                )
+                XCTFail("the flip must be refused while SyncEngine owns its lock")
                 } catch {
-                    refused = true
+                refused = true
                 }
-            }
-        )
+                }
+                )
+        }
 
         XCTAssertTrue(refused)
         XCTAssertEqual(harness.model.error, "Sync is running. Try again when it finishes.")
@@ -88,9 +89,11 @@ extension DeployIntentModelTests {
             true, skill: skill, platform: .codex, target: .userWide, context: harness.context
         )
         XCTAssertNil(harness.model.error)
-        _ = try engine.sync(
-            root: harness.root, message: "cycle preserving flip", credential: nil, context: harness.context
-        )
+        _ = try NativeTestWork.run(container: harness.context.container) { [self] jobContext in
+            try engine.sync(
+                root: harness.root, message: "cycle preserving flip", credential: nil, context: jobContext
+                )
+        }
 
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 1)
         XCTAssertTrue(harness.manifestFileService.fileExists(at: integrationIntentPath(harness, skill: skill)))

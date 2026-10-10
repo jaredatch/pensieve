@@ -136,7 +136,7 @@ final class AppRuntimeGitRulesTests: XCTestCase {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         try fixture.seedRepository()
-        let remote = try TestPaths.git.remoteURL(at: fixture.root)
+        let remote = try NativeTestWork.run { [self] in try TestPaths.git.remoteURL(at: fixture.root) }
         XCTAssertNotNil(remote)
         let runtime = try AppRuntime(
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }), defaults: isolatedDefaults(),

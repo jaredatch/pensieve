@@ -171,6 +171,19 @@ private final class GitOutputEvents {
 }
 
 extension GitService {
+    @discardableResult
+    func run(_ args: [String], in workingDir: String?, credential: GitCredential? = nil,
+             storeRules: Bool = false, file: StaticString = #fileID, line: UInt = #line) throws
+        -> GitOutput {
+        let result = try runData(args, in: workingDir, credential: credential, storeRules: storeRules,
+                                 file: file, line: line)
+        return GitOutput(
+            stdout: String(bytes: result.stdout, encoding: .utf8) ?? "",
+            stderr: String(bytes: result.stderr, encoding: .utf8) ?? "",
+            exit: result.exit, confirmingProbe: result.confirmingProbe
+        )
+    }
+
     func commandError(_ output: GitOutput, args: [String]) -> GitError {
         GitError.commandFailed(args: args, exitCode: output.exit,
             stderr: output.stderr.isEmpty ? output.stdout : output.stderr, confirmingProbe: output.confirmingProbe)

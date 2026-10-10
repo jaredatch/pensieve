@@ -84,7 +84,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         -> ConflictResolutionModel {
         ConflictResolutionModel(engine: engine, git: StubGit(),
                                 credentials: InMemoryCredentialStore(), root: "/tmp/none",
-                                headStamp: headStamp,
+                                headStamp: headStamp, steps: SyncStepModel(),
                                 onResolutionStarted: { onResolved })
     }
 
@@ -100,7 +100,7 @@ final class ConflictResolutionModelTests: XCTestCase {
             let engine = StubResolutionEngine()
             engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: name), overlayItem(slug: name)]))]
             let model = makeModel(engine: engine)
-            await model.loadAndReport(context: context)
+            await model.loadAndReport(container: context.container)
             let groups = try readyGroups(from: model.phase)
             XCTAssertEqual(groups.count, 1)
             let group = try XCTUnwrap(groups.first)
@@ -119,7 +119,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: "alpha")]))]
         let model = makeModel(engine: engine)
 
-        await model.loadAndReport(context: context)
+        await model.loadAndReport(container: context.container)
         XCTAssertFalse(model.canApply)
         model.choose("skill:alpha", .otherMachine)
 
@@ -134,9 +134,9 @@ final class ConflictResolutionModelTests: XCTestCase {
         engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: "alpha")]))]
         let model = makeModel(engine: engine)
 
-        await model.loadAndReport(context: context)
+        await model.loadAndReport(container: context.container)
         model.choose("skill:alpha", .thisMachine)
-        await model.applyAndReport(context: context)
+        await model.applyAndReport(container: context.container)
 
         XCTAssertEqual(model.phase, .done)
         XCTAssertEqual(engine.resolveCallCount, 1)
@@ -157,9 +157,9 @@ final class ConflictResolutionModelTests: XCTestCase {
         )
         let model = makeModel(engine: engine, onResolved: { spy.results.append($0) })
 
-        await model.loadAndReport(context: context)
+        await model.loadAndReport(container: context.container)
         model.choose("skill:alpha", .thisMachine)
-        await model.applyAndReport(context: context)
+        await model.applyAndReport(container: context.container)
 
         XCTAssertEqual(model.phase, .done)
         guard case let .synced(_, _, _, headAdvanced) = try XCTUnwrap(spy.results.first) else {
@@ -183,7 +183,7 @@ final class ConflictResolutionModelTests: XCTestCase {
             onResolved: { spy.results.append($0) }
         )
 
-        await model.loadAndReport(context: context)
+        await model.loadAndReport(container: context.container)
 
         XCTAssertEqual(model.phase, .empty)
         guard case let .synced(_, _, _, headAdvanced) = try XCTUnwrap(spy.results.first) else {
@@ -200,9 +200,9 @@ final class ConflictResolutionModelTests: XCTestCase {
         engine.resolveOutcome = .conflicted(["skills/alpha/SKILL.md"])
         let model = makeModel(engine: engine, onResolved: { spy.results.append($0) })
 
-        await model.loadAndReport(context: context)
+        await model.loadAndReport(container: context.container)
         model.choose("skill:alpha", .otherMachine)
-        await model.applyAndReport(context: context)
+        await model.applyAndReport(container: context.container)
 
         XCTAssertTrue(spy.results.isEmpty)
     }
@@ -217,9 +217,9 @@ final class ConflictResolutionModelTests: XCTestCase {
         engine.resolveError = SyncError.conflictsChanged
         let model = makeModel(engine: engine)
 
-        await model.loadAndReport(context: context)
+        await model.loadAndReport(container: context.container)
         model.choose("skill:alpha", .otherMachine)
-        await model.applyAndReport(context: context)
+        await model.applyAndReport(container: context.container)
 
         XCTAssertEqual(engine.inspectCallCount, 2)
         let groups = try readyGroups(from: model.phase)

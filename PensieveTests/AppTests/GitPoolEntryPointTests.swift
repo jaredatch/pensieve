@@ -46,7 +46,7 @@ final class GitPoolEntryPointTests: XCTestCase {
         switch entry {
         case .cycle, .worktree: return try await startCycle(entry, block: block, fixture: fixture)
         case .configurationProbe, .configurationRemote:
-            try TestPaths.git.initRepository(at: fixture.root)
+            try NativeTestWork.run { [self] in try TestPaths.git.initRepository(at: fixture.root) }
             let state = RuntimeGitState(probe: {
                 if entry == .configurationProbe { try? block.run() }
                 return .usable
@@ -122,8 +122,10 @@ final class GitPoolEntryPointTests: XCTestCase {
         let paths = AppRuntimePaths(storeRoot: fixture.root, appSupportDir: fixture.root + "/support")
         if entry == .worktree {
             let git = TestPaths.git
-            try git.initRepository(at: fixture.root)
-            _ = try git.runOrThrow(["config", "core.fsmonitor", block.root + "/git"], in: fixture.root)
+            try NativeTestWork.run { [self] in try git.initRepository(at: fixture.root) }
+            _ = try NativeTestWork.run { [self] in
+                try git.runOrThrow(["config", "core.fsmonitor", block.root + "/git"], in: fixture.root)
+            }
         }
         return Task { _ = await AppRuntime.runCoordinatorCycle(coordinator, library: fixture.library, paths: paths) }
     }

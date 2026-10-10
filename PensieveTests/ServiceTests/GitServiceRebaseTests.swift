@@ -7,14 +7,18 @@ final class GitServiceRebaseTests: XCTestCase {
     private var git: GitService!
 
     override func setUpWithError() throws {
-        tempDir = TestTemporaryDirectory.path + "PensieveGitServiceRebaseTests-\(UUID().uuidString)"
-        try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
-        git = TestPaths.git
+        try NativeTestWork.run { [self] in
+            tempDir = TestTemporaryDirectory.path + "PensieveGitServiceRebaseTests-\(UUID().uuidString)"
+            try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
+            git = TestPaths.git
+        }
     }
 
     override func tearDownWithError() throws {
-        if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
-            try FileManager.default.removeItem(atPath: tempDir)
+        try NativeTestWork.run { [self] in
+            if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
+                try FileManager.default.removeItem(atPath: tempDir)
+            }
         }
     }
 
@@ -108,30 +112,36 @@ final class GitServiceRebaseTests: XCTestCase {
     }
 
     func testStageMappingAndContinueRebase() throws {
-        let (cloneB, path) = try makeTwoCloneConflict(aBody: "OTHER machine line", bBody: "THIS machine line")
-        XCTAssertEqual(try git.blob(atStage: 2, path: path, in: cloneB), Data(skillMarkdown(body: "OTHER machine line").utf8))
-        XCTAssertEqual(try git.blob(atStage: 3, path: path, in: cloneB), Data(skillMarkdown(body: "THIS machine line").utf8))
+        try NativeTestWork.run { [self] in
+            let (cloneB, path) = try makeTwoCloneConflict(aBody: "OTHER machine line", bBody: "THIS machine line")
+            XCTAssertEqual(try git.blob(atStage: 2, path: path, in: cloneB), Data(skillMarkdown(body: "OTHER machine line").utf8))
+            XCTAssertEqual(try git.blob(atStage: 3, path: path, in: cloneB), Data(skillMarkdown(body: "THIS machine line").utf8))
 
-        try write(path, skillMarkdown(body: "THIS machine line"), in: cloneB)
-        try git.stagePath(path, at: cloneB)
-        XCTAssertEqual(try git.continueRebase(at: cloneB), .merged)
-        XCTAssertTrue(try git.conflictedFiles(at: cloneB).isEmpty)
+            try write(path, skillMarkdown(body: "THIS machine line"), in: cloneB)
+            try git.stagePath(path, at: cloneB)
+            XCTAssertEqual(try git.continueRebase(at: cloneB), .merged)
+            XCTAssertTrue(try git.conflictedFiles(at: cloneB).isEmpty)
+        }
     }
 
     func testKeepOtherEmptyCommitSkipsAndLeavesNothingToPush() throws {
-        let (cloneB, path) = try makeTwoCloneConflict(aBody: "Other wins", bBody: "This loses")
-        let otherSide = try XCTUnwrap(git.blob(atStage: 2, path: path, in: cloneB))
-        try FileService().writeData(at: cloneB + "/" + path, data: otherSide)
-        try git.stagePath(path, at: cloneB)
+        try NativeTestWork.run { [self] in
+            let (cloneB, path) = try makeTwoCloneConflict(aBody: "Other wins", bBody: "This loses")
+            let otherSide = try XCTUnwrap(git.blob(atStage: 2, path: path, in: cloneB))
+            try FileService().writeData(at: cloneB + "/" + path, data: otherSide)
+            try git.stagePath(path, at: cloneB)
 
-        XCTAssertEqual(try git.continueRebase(at: cloneB), .merged)
-        XCTAssertFalse(try git.hasCommitsToPush(at: cloneB))
-        XCTAssertEqual(try FileService().readData(at: cloneB + "/" + path), otherSide)
+            XCTAssertEqual(try git.continueRebase(at: cloneB), .merged)
+            XCTAssertFalse(try git.hasCommitsToPush(at: cloneB))
+            XCTAssertEqual(try FileService().readData(at: cloneB + "/" + path), otherSide)
+        }
     }
 
     func testAddAddAndDeleteModifyBlobShapes() throws {
-        try assertAddAddConflictHasBothSides()
-        try assertDeleteModifyConflictHasNilSide()
+        try NativeTestWork.run { [self] in
+            try assertAddAddConflictHasBothSides()
+            try assertDeleteModifyConflictHasNilSide()
+        }
     }
 
     private func assertAddAddConflictHasBothSides() throws {
@@ -175,96 +185,106 @@ final class GitServiceRebaseTests: XCTestCase {
     }
 
     func testCollapseToSingleCommitLeavesOneCommitAhead() throws {
-        let remote = try seedRemote { seed in
-            try write("README.md", "seed\n", in: seed)
+        try NativeTestWork.run { [self] in
+            let remote = try seedRemote { seed in
+                try write("README.md", "seed\n", in: seed)
+            }
+            let cloneB = try clone(remote, named: "collapse-\(UUID().uuidString)")
+            try write("one.txt", "one\n", in: cloneB)
+            XCTAssertTrue(try git.stageAllAndCommit(at: cloneB, message: "one"))
+            try write("two.txt", "two\n", in: cloneB)
+            XCTAssertTrue(try git.stageAllAndCommit(at: cloneB, message: "two"))
+
+            let files = FileService()
+            let assets = cloneB + "/skills/bytes/assets"
+            try files.writeFile(at: assets + "/a", content: "asset")
+            XCTAssertTrue(try git.stageAllAndCommit(at: cloneB, message: "assets"))
+            try files.deleteDirectory(at: assets)
+            try files.createSymlink(at: assets, pointingTo: "../../other")
+
+            XCTAssertTrue(try git.collapseToSingleCommit(at: cloneB, message: "collapsed", credential: nil))
+            let count = try rawGit(["rev-list", "--count", "origin/main..HEAD"], in: cloneB).out
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            XCTAssertEqual(count, "1")
+            let tree = try rawGit(["ls-tree", "HEAD", "--", "skills/bytes/assets"], in: cloneB)
+            XCTAssertTrue(tree.out.hasPrefix("120000 blob"), "Collapse must stage the replacement symlink")
+            XCTAssertEqual(try rawGit(["show", "HEAD:skills/bytes/assets"], in: cloneB).out, "../../other")
         }
-        let cloneB = try clone(remote, named: "collapse-\(UUID().uuidString)")
-        try write("one.txt", "one\n", in: cloneB)
-        XCTAssertTrue(try git.stageAllAndCommit(at: cloneB, message: "one"))
-        try write("two.txt", "two\n", in: cloneB)
-        XCTAssertTrue(try git.stageAllAndCommit(at: cloneB, message: "two"))
-
-        let files = FileService()
-        let assets = cloneB + "/skills/bytes/assets"
-        try files.writeFile(at: assets + "/a", content: "asset")
-        XCTAssertTrue(try git.stageAllAndCommit(at: cloneB, message: "assets"))
-        try files.deleteDirectory(at: assets)
-        try files.createSymlink(at: assets, pointingTo: "../../other")
-
-        XCTAssertTrue(try git.collapseToSingleCommit(at: cloneB, message: "collapsed", credential: nil))
-        let count = try rawGit(["rev-list", "--count", "origin/main..HEAD"], in: cloneB).out
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        XCTAssertEqual(count, "1")
-        let tree = try rawGit(["ls-tree", "HEAD", "--", "skills/bytes/assets"], in: cloneB)
-        XCTAssertTrue(tree.out.hasPrefix("120000 blob"), "Collapse must stage the replacement symlink")
-        XCTAssertEqual(try rawGit(["show", "HEAD:skills/bytes/assets"], in: cloneB).out, "../../other")
     }
 
     func testNonEmptyContinueFailureDoesNotSkip() throws {
-        // Force `rebase --continue` to FAIL at the COMMIT step while a NON-empty resolution is staged:
-        // require signing but point `gpg.program` at a program that always fails, configured BEFORE the
-        // rebase starts so the rebase captures it. This shape is what proves the empty-skip guard: a
-        // blind `rebase --skip` WOULD still succeed here and silently drop the resolved commit (verified:
-        // `--continue` errors "gpg failed to sign", `--skip` completes and resets to the other side). An
-        // `index.lock` cannot prove this — it blocks BOTH `--continue` and `--skip`, so the two are
-        // indistinguishable. With the real guard, `continueRebase` sees the staged tree is non-empty
-        // (not proven empty) and THROWS instead of skipping.
-        let (cloneB, path) = try makeTwoCloneConflict(aBody: "Other text", bBody: "This text") { repo in
-            try self.rawGit(["config", "commit.gpgsign", "true"], in: repo)
-            try self.rawGit(["config", "gpg.program", "/usr/bin/false"], in: repo)
-        }
-        let resolved = skillMarkdown(body: "Resolved non-empty content")
-        try write(path, resolved, in: cloneB)
-        try git.stagePath(path, at: cloneB)
+        try NativeTestWork.run { [self] in
+            // Force `rebase --continue` to FAIL at the COMMIT step while a NON-empty resolution is staged:
+            // require signing but point `gpg.program` at a program that always fails, configured BEFORE the
+            // rebase starts so the rebase captures it. This shape is what proves the empty-skip guard: a
+            // blind `rebase --skip` WOULD still succeed here and silently drop the resolved commit (verified:
+            // `--continue` errors "gpg failed to sign", `--skip` completes and resets to the other side). An
+            // `index.lock` cannot prove this — it blocks BOTH `--continue` and `--skip`, so the two are
+            // indistinguishable. With the real guard, `continueRebase` sees the staged tree is non-empty
+            // (not proven empty) and THROWS instead of skipping.
+            let (cloneB, path) = try makeTwoCloneConflict(aBody: "Other text", bBody: "This text") { repo in
+                try self.rawGit(["config", "commit.gpgsign", "true"], in: repo)
+                try self.rawGit(["config", "gpg.program", "/usr/bin/false"], in: repo)
+            }
+            let resolved = skillMarkdown(body: "Resolved non-empty content")
+            try write(path, resolved, in: cloneB)
+            try git.stagePath(path, at: cloneB)
 
-        XCTAssertThrowsError(try git.continueRebase(at: cloneB)) { error in
-            guard case GitError.commandFailed = error else { return XCTFail("expected commandFailed") }
+            XCTAssertThrowsError(try git.continueRebase(at: cloneB)) { error in
+                guard case GitError.commandFailed = error else { return XCTFail("expected commandFailed") }
+            }
+            // The resolved content survived (a blind skip would have reset it to the other side) and the
+            // rebase is still in progress — nothing was silently skipped.
+            XCTAssertEqual(try String(contentsOfFile: cloneB + "/" + path, encoding: .utf8), resolved)
+            XCTAssertTrue(git.isRebaseInProgress(at: cloneB), "a git failure must not be silently skipped")
         }
-        // The resolved content survived (a blind skip would have reset it to the other side) and the
-        // rebase is still in progress — nothing was silently skipped.
-        XCTAssertEqual(try String(contentsOfFile: cloneB + "/" + path, encoding: .utf8), resolved)
-        XCTAssertTrue(git.isRebaseInProgress(at: cloneB), "a git failure must not be silently skipped")
     }
 
     func testChildEnvironmentIsNonInteractive() throws {
-        let env = try git.childEnvironment(credential: nil)
-        XCTAssertEqual(env["GIT_TERMINAL_PROMPT"], "0")
-        XCTAssertEqual(env["GIT_EDITOR"], "true")
-        XCTAssertEqual(env["GIT_SEQUENCE_EDITOR"], "true")
+        try NativeTestWork.run { [self] in
+            let env = try git.childEnvironment(credential: nil)
+            XCTAssertEqual(env["GIT_TERMINAL_PROMPT"], "0")
+            XCTAssertEqual(env["GIT_EDITOR"], "true")
+            XCTAssertEqual(env["GIT_SEQUENCE_EDITOR"], "true")
+        }
     }
 
     func testLogAndShowSkillHistory() throws {
-        let root = tempDir + "/history-\(UUID().uuidString)"
-        let path = "skills/history/SKILL.md"
-        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
-        try git.initRepository(at: root)
+        try NativeTestWork.run { [self] in
+            let root = tempDir + "/history-\(UUID().uuidString)"
+            let path = "skills/history/SKILL.md"
+            try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+            try git.initRepository(at: root)
 
-        let original = skillMarkdown(body: "original body")
-        try write(path, original, in: root)
-        XCTAssertTrue(try git.stageAllAndCommit(at: root, message: "original skill"))
-        try write(path, skillMarkdown(body: "second body"), in: root)
-        XCTAssertTrue(try git.stageAllAndCommit(at: root, message: "second skill"))
-        try write(path, skillMarkdown(body: "third body"), in: root)
-        XCTAssertTrue(try git.stageAllAndCommit(at: root, message: "third skill"))
+            let original = skillMarkdown(body: "original body")
+            try write(path, original, in: root)
+            XCTAssertTrue(try git.stageAllAndCommit(at: root, message: "original skill"))
+            try write(path, skillMarkdown(body: "second body"), in: root)
+            XCTAssertTrue(try git.stageAllAndCommit(at: root, message: "second skill"))
+            try write(path, skillMarkdown(body: "third body"), in: root)
+            XCTAssertTrue(try git.stageAllAndCommit(at: root, message: "third skill"))
 
-        let commits = git.log(forPath: path, at: root, limit: 10)
-        XCTAssertEqual(commits.map(\.subject), ["third skill", "second skill", "original skill"])
-        XCTAssertEqual(commits.count, 3)
-        XCTAssertFalse(commits.contains { $0.sha.isEmpty || $0.author.isEmpty })
+            let commits = git.log(forPath: path, at: root, limit: 10)
+            XCTAssertEqual(commits.map(\.subject), ["third skill", "second skill", "original skill"])
+            XCTAssertEqual(commits.count, 3)
+            XCTAssertFalse(commits.contains { $0.sha.isEmpty || $0.author.isEmpty })
 
-        let oldest = try XCTUnwrap(commits.last)
-        XCTAssertEqual(git.show(sha: oldest.sha, path: path, at: root), original)
-        XCTAssertNil(git.show(sha: oldest.sha, path: "skills/missing/SKILL.md", at: root))
+            let oldest = try XCTUnwrap(commits.last)
+            XCTAssertEqual(git.show(sha: oldest.sha, path: path, at: root), original)
+            XCTAssertNil(git.show(sha: oldest.sha, path: "skills/missing/SKILL.md", at: root))
+        }
     }
 
-    func testLogResultThrowsOnCommandFailure() {
-        XCTAssertThrowsError(try git.logResult(
-            forPath: "skills/history/SKILL.md",
-            at: tempDir + "/missing-repo",
-            limit: 10
-        )) { error in
-            guard case GitError.commandFailed = error else {
-                return XCTFail("expected commandFailed, got \(error)")
+    func testLogResultThrowsOnCommandFailure() throws {
+        try NativeTestWork.run { [self] in
+            XCTAssertThrowsError(try git.logResult(
+                forPath: "skills/history/SKILL.md",
+                at: tempDir + "/missing-repo",
+                limit: 10
+            )) { error in
+                guard case GitError.commandFailed = error else {
+                    return XCTFail("expected commandFailed, got \(error)")
+                }
             }
         }
     }

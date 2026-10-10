@@ -72,7 +72,7 @@ final class WaitingRemovalIsolationTests: XCTestCase {
         let daemon = SyncDaemon(root: h.base.root + "/store", appSupport: h.base.root + "/support",
             git: WaitingDaemonGit(), hasLocalBranches: { _ in true }, credentials: InMemoryCredentialStore(),
             reconciler: reconciler, now: Date.init)
-        XCTAssertEqual(daemon.runOnce(), .synced(changed: false))
+        XCTAssertEqual(try NativeTestWork.run { daemon.runOnce() }, .synced(changed: false))
         XCTAssertFalse(h.base.files.isSymlink(at: userLink), "The daemon's real removal pass must run")
         XCTAssertTrue(h.base.files.isSymlink(at: h.base.artifact(.codex)))
         XCTAssertEqual(try h.base.files.readData(at: h.storePath), bytes)

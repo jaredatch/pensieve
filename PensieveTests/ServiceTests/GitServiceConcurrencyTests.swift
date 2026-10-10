@@ -3,6 +3,17 @@ import XCTest
 @testable import Pensieve
 
 final class GitServiceConcurrencyTests: XCTestCase {
+    func testMainThreadGitFailsAndNamesTheCallingSource() throws {
+        let result = try GitProcessProbeRunner.run("main-thread-guard")
+        XCTAssertFalse(result.timedOut, "The guard must fail before spawning git")
+        XCTAssertNotEqual(result.status, 0, "Main-thread git must fail in Debug")
+        XCTAssertTrue(result.children.isEmpty, "The guard must run before spawning a child")
+        XCTAssertTrue(result.diagnostic.contains("Git called on the main thread at GitProcessProbe/GitProcessProbe.swift:"),
+                      result.diagnostic)
+        let worker = try GitProcessProbeRunner.run("concurrency")
+        XCTAssertEqual(worker.status, 0, worker.report)
+    }
+
     func testReadCancellationStopsGroupAndWriteCancellationFinishes() throws {
         for mode in ["cancel-read", "cancel-write"] {
             let result = try GitProcessProbeRunner.run(mode)

@@ -46,7 +46,7 @@ final class GitHubServiceConstructionTests: XCTestCase {
             ("SyncSetupModel", [("context", "context"), ("git", "git"), ("credentials", "credentials"),
                                 ("root", "root"), ("lockPath", "root"), ("steps", "SyncStepModel()")]),
             ("ConflictResolutionModel", [("engine", "engine"), ("git", "git"), ("credentials", "credentials"),
-                                         ("root", "root")]),
+                                         ("root", "root"), ("steps", "SyncStepModel()")]),
             ("GitHubCredentialSettingsModel", [("credentialStore", "credentials")]),
             ("MachineStateService", [("agentDetection", "detection"),
                                      ("deployState", "{ try state.read() }"), ("homeDirectory", "root")]),

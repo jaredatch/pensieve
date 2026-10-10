@@ -8,9 +8,11 @@ final class AppRuntimeBranchlessTests: XCTestCase {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         let git = TestPaths.git
-        try git.initRepository(at: fixture.root)
-        _ = try git.runOrThrow(["-C", fixture.root, "commit", "--allow-empty", "-m", "fixture"], in: nil)
-        try git.setRemote("https://fixture.test/store.git", at: fixture.root)
+        try NativeTestWork.run { [self] in try git.initRepository(at: fixture.root) }
+        _ = try NativeTestWork.run { [self] in
+            try git.runOrThrow(["-C", fixture.root, "commit", "--allow-empty", "-m", "fixture"], in: nil)
+        }
+        try NativeTestWork.run { [self] in try git.setRemote("https://fixture.test/store.git", at: fixture.root) }
         // A local untracked skill must not hide the branchless precondition in the daemon.
         try fixture.files.writeFile(at: fixture.root + "/skills/example/SKILL.md", content: "Body\n")
         let runtime = try AppRuntime(
@@ -44,7 +46,7 @@ final class AppRuntimeBranchlessTests: XCTestCase {
         XCTAssertEqual(try fixture.snapshot(), before, "the cycle cannot prepare or write a branchless store")
         try assertDaemonUsesInjectedRootAndReportsBranchless(fixture, git: git)
         XCTAssertEqual(model.state, .branchless)
-        try git.stageAllAndCommit(at: fixture.root, message: "first branch")
+        try NativeTestWork.run { [self] in try git.stageAllAndCommit(at: fixture.root, message: "first branch") }
         await runtime.refreshGitConfiguration(probingGit: false)
         XCTAssertTrue(model.canSyncNow, "a later read of a born branch restores sync eligibility")
         XCTAssertFalse(model.canConnect)
@@ -55,7 +57,7 @@ final class AppRuntimeBranchlessTests: XCTestCase {
         let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: git,
                                 hasLocalBranches: { root in
                                     XCTAssertEqual(root, fixture.root, "branch probe must receive the cycle's injected root")
-                                    return try git.hasLocalBranches(at: root)
+                                    return try NativeTestWork.run { [self] in try git.hasLocalBranches(at: root) }
                                 },
                                 credentials: InMemoryCredentialStore(), reconciler: IngestNoopDeploy(), now: Date.init)
         // The executable's composition must not resolve the default store a second time inside
@@ -72,7 +74,7 @@ final class AppRuntimeBranchlessTests: XCTestCase {
         }
         XCTAssertFalse(try capture(probePattern).contains(capture(defaultRootPattern)),
                        "the branch probe must use the daemon's root, not resolve another default store")
-        XCTAssertEqual(daemon.runOnce().detail, "branchless")
+        XCTAssertEqual(try NativeTestWork.run { daemon.runOnce() }.detail, "branchless")
         let status = try JSONDecoder().decode(DaemonStatus.self,
                                               from: fixture.files.readData(at: fixture.support + "/daemon-status.json"))
         XCTAssertEqual(status.result, "skipped")
@@ -84,8 +86,8 @@ final class AppRuntimeBranchlessTests: XCTestCase {
             let fixture = try GitFailureFixture()
             defer { try? fixture.remove() }
             let git = TestPaths.git
-            try git.initRepository(at: fixture.root)
-            try git.setRemote("https://fixture.test/store.git", at: fixture.root)
+            try NativeTestWork.run { [self] in try git.initRepository(at: fixture.root) }
+            try NativeTestWork.run { [self] in try git.setRemote("https://fixture.test/store.git", at: fixture.root) }
             let cycles = RuleProbe()
             let runtime = try branchCheckRuntime(fixture: fixture, git: git, cycles: cycles)
             await runtime.bootstrapTask.value
@@ -103,7 +105,9 @@ final class AppRuntimeBranchlessTests: XCTestCase {
                 XCTAssertTrue(runtime.syncModel.canScheduleSync, "a failed read must retire the stale branch fence")
                 try fixture.files.writeFile(at: fixture.root + "/.git/HEAD", content: head)
             }
-            _ = try git.runOrThrow(["-C", fixture.root, "commit", "--allow-empty", "-m", "external branch"], in: nil)
+            _ = try NativeTestWork.run { [self] in
+                try git.runOrThrow(["-C", fixture.root, "commit", "--allow-empty", "-m", "external branch"], in: nil)
+            }
             switch trigger {
             case "wake": runtime.scheduler.wake()
             case "manual": await runtime.syncModel.syncNowAndReport()
@@ -127,7 +131,9 @@ final class AppRuntimeBranchlessTests: XCTestCase {
                     await coordinator.configure(
                         engine: StatusOrderEngine {
                         _ = cycles.run()
-                        return try git.hasLocalBranches(at: fixture.root) ? .synced(pushed: false, warnings: []) : .branchless
+                        return try NativeTestWork.run { [self] in
+                            try git.hasLocalBranches(at: fixture.root)
+                        } ? .synced(pushed: false, warnings: []) : .branchless
                     },
                         git: git,
                         credentials: InMemoryCredentialStore(),

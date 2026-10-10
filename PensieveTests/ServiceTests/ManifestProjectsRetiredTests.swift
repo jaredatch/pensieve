@@ -26,7 +26,7 @@ final class ManifestProjectsRetiredTests: XCTestCase {
         XCTAssertTrue(try service.snapshot(from: context).projects.isEmpty)
         try service.write(try service.snapshot(from: context), toRoot: tempRoot)
         XCTAssertEqual(try fileService.readFile(at: tempRoot + "/manifest/projects.yaml"), "projects:\n")
-        XCTAssertTrue(try service.read(fromRoot: tempRoot).projects.isEmpty)
+        XCTAssertTrue(try NativeTestWork.run { [self] in try service.read(fromRoot: tempRoot) }.projects.isEmpty)
     }
 
     func testProjectIdentityStillReachesTheMachineState() throws {

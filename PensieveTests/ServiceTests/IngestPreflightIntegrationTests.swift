@@ -8,15 +8,15 @@ private typealias IntegrationCategory = Pensieve.Category
 extension IngestPreflightTests {
     func testExternalFastForwardNotRevertedBySnapshot() async throws {
         let harness = try makeGitHarness(name: "external")
-        let appClone = tempDir + "/app"
-        let cliClone = tempDir + "/cli"
-        try harness.git.clone(remote: harness.remote, into: appClone, credential: nil)
-        try harness.git.clone(remote: harness.remote, into: cliClone, credential: nil)
+        let app = tempDir + "/app"
+        let cli = tempDir + "/cli"
+        try NativeTestWork.run { try harness.git.clone(remote: harness.remote, into: app, credential: nil) }
+        try NativeTestWork.run { try harness.git.clone(remote: harness.remote, into: cli, credential: nil) }
 
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         let appContext = ModelContext(container)
-        _ = StoreRebuildService().rebuild(fromRoot: appClone, context: appContext)
-        let initialStamp = GitHeadStamp().read(root: appClone)
+        _ = StoreRebuildService().rebuild(fromRoot: app, context: appContext)
+        let initialStamp = GitHeadStamp().read(root: app)
 
         try harness.manifest.write(
             ManifestSnapshot(
@@ -24,11 +24,11 @@ extension IngestPreflightTests {
                 categories: [CategoryRecord(name: "Pulled", projectKeys: [], skillSlugs: [])],
                 projects: [], skills: []
             ),
-            toRoot: cliClone
+            toRoot: cli
         )
-        XCTAssertTrue(try harness.git.stageAllAndCommit(at: cliClone, message: "external fast-forward"))
-        try harness.git.push(at: cliClone, credential: nil)
-        guard case .fastForwarded = try harness.git.fastForwardOnly(at: appClone, credential: nil) else {
+        XCTAssertTrue(try NativeTestWork.run { try harness.git.stageAllAndCommit(at: cli, message: "external fast-forward") })
+        try NativeTestWork.run { try harness.git.push(at: cli, credential: nil) }
+        guard case .fastForwarded = (try NativeTestWork.run { try harness.git.fastForwardOnly(at: app, credential: nil) }) else {
             return XCTFail("simulated CLI did not fast-forward")
         }
         XCTAssertTrue(try appContext.fetch(FetchDescriptor<IntegrationCategory>()).isEmpty,
@@ -47,7 +47,7 @@ extension IngestPreflightTests {
             git: harness.git,
             credentials: IngestEmptyCredentials(),
             rebuildService: StoreRebuildService(),
-            root: appClone,
+            root: app,
             audit: IngestNullAudit(),
             machine: (identity: InertMachineIdentity(), stateService: InertMachineStateService())
         )
@@ -59,14 +59,14 @@ extension IngestPreflightTests {
         let fresh = ModelContext(container)
         XCTAssertEqual(try fresh.fetch(FetchDescriptor<IntegrationCategory>()).map(\.name), ["Pulled"])
         let remoteCheck = tempDir + "/remote-check"
-        try harness.git.clone(remote: harness.remote, into: remoteCheck, credential: nil)
+        try NativeTestWork.run { try harness.git.clone(remote: harness.remote, into: remoteCheck, credential: nil) }
         XCTAssertEqual(try harness.manifest.read(fromRoot: remoteCheck).categories.map(\.name), ["Pulled"])
     }
 
     func testDirtyPrepareWriteRecoveredOnRetry() throws {
         let harness = try makeGitHarness(name: "recovery")
-        let appClone = tempDir + "/recovery-app"
-        try harness.git.clone(remote: harness.remote, into: appClone, credential: nil)
+        let app = tempDir + "/recovery-app"
+        try NativeTestWork.run { try harness.git.clone(remote: harness.remote, into: app, credential: nil) }
         let lockPath = tempDir + "/recovery-sync.lock"
         let engine = SyncEngine(
             gitService: AllowlistedRemoteGit(wrapping: harness.git),
@@ -75,20 +75,22 @@ extension IngestPreflightTests {
             fileService: FileService(),
             lockPath: lockPath
         )
-        let statePath = appClone + "/machines/recovery.yaml"
+        let statePath = app + "/machines/recovery.yaml"
         let fileService = FileService()
 
         XCTAssertThrowsError(
-            try engine.sync(root: appClone, message: "crash", credential: nil,
-                            context: try integrationContext()) { _ in
-                try fileService.createDirectory(at: appClone + "/machines")
-                try fileService.writeFile(at: statePath, content: "prepared: true\n")
-                throw IngestPreflightBoom.expected
+            try NativeTestWork.run(container: try integrationContext().container) { [self] jobContext in
+                try engine.sync(root: app, message: "crash", credential: nil,
+                    context: jobContext) { _ in
+                    try fileService.createDirectory(at: app + "/machines")
+                    try fileService.writeFile(at: statePath, content: "prepared: true\n")
+                    throw IngestPreflightBoom.expected
+                    }
             }
         )
-        XCTAssertFalse(harness.git.isWorktreeClean(at: appClone))
+        XCTAssertFalse(try NativeTestWork.run { try harness.git.isWorktreeClean(at: app) })
         let daemon = SyncDaemon(
-            root: appClone,
+            root: app,
             appSupport: tempDir + "/daemon-support",
             git: IngestAllowlistedFastForwardGit(git: harness.git),
             hasLocalBranches: harness.git.hasLocalBranches,
@@ -96,19 +98,21 @@ extension IngestPreflightTests {
             reconciler: IngestNoopDeploy(),
             now: Date.init
         )
-        XCTAssertEqual(daemon.runOnce(), .skipped(.dirtyTree))
+        XCTAssertEqual(try NativeTestWork.run { daemon.runOnce() }, .skipped(.dirtyTree))
 
-        let outcome = try engine.sync(
-            root: appClone,
-            message: "retry",
-            credential: nil,
-            context: try integrationContext()
-        )
+        let outcome = try NativeTestWork.run(container: try integrationContext().container) { [self] jobContext in
+            try engine.sync(
+                root: app,
+                message: "retry",
+                credential: nil,
+                context: jobContext
+                )
+        }
         guard case .synced = outcome else { return XCTFail("retry did not sync") }
-        XCTAssertTrue(harness.git.isWorktreeClean(at: appClone))
+        XCTAssertTrue(try NativeTestWork.run { try harness.git.isWorktreeClean(at: app) })
 
         let peer = tempDir + "/recovery-peer"
-        try harness.git.clone(remote: harness.remote, into: peer, credential: nil)
+        try NativeTestWork.run { try harness.git.clone(remote: harness.remote, into: peer, credential: nil) }
         XCTAssertEqual(try fileService.readFile(at: peer + "/machines/recovery.yaml"), "prepared: true\n")
     }
 
@@ -132,8 +136,8 @@ extension IngestPreflightTests {
         try FileManager.default.createDirectory(atPath: seed, withIntermediateDirectories: true)
         let git = TestPaths.git
         let manifest = ManifestService()
-        try git.initRepository(at: seed)
-        try git.setRemote(remote, at: seed)
+        try NativeTestWork.run { try git.initRepository(at: seed) }
+        try NativeTestWork.run { try git.setRemote(remote, at: seed) }
         try manifest.write(
             ManifestSnapshot(
                 schemaVersion: ManifestService.currentSchemaVersion,
@@ -147,8 +151,8 @@ extension IngestPreflightTests {
                 + "manifest/projects.yaml merge=union\n"
         )
         try FileService().writeFile(at: seed + "/.gitignore", content: ".DS_Store\n")
-        XCTAssertTrue(try git.stageAllAndCommit(at: seed, message: "seed"))
-        try git.push(at: seed, credential: nil)
+        XCTAssertTrue(try NativeTestWork.run { try git.stageAllAndCommit(at: seed, message: "seed") })
+        try NativeTestWork.run { try git.push(at: seed, credential: nil) }
         return GitHarness(git: git, manifest: manifest, remote: remote)
     }
 }

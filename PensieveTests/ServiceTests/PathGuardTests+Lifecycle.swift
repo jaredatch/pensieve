@@ -28,10 +28,12 @@ extension PathGuardTests {
             let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: TestPaths.git), fileService: files,
                                     lockPath: root + "/sync.lock")
             try store.writeBody(directoryName: name, body: "---\nname: Accent\ndescription: Fixture\n---\nupdated")
-            XCTAssertEqual(try engine.sync(root: storeA, message: "update", credential: nil, context: contextA),
-                           .synced(pushed: true, warnings: []))
-            XCTAssertEqual(try engine.sync(root: storeB, message: "pull", credential: nil, context: contextB),
-                           .synced(pushed: false, warnings: []))
+            XCTAssertEqual(try NativeTestWork.run(container: contextA.container) { [self] jobContext in
+                try engine.sync(root: storeA, message: "update", credential: nil, context: jobContext)
+            }, .synced(pushed: true, warnings: []))
+            XCTAssertEqual(try NativeTestWork.run(container: contextB.container) { [self] jobContext in
+                try engine.sync(root: storeB, message: "pull", credential: nil, context: jobContext)
+            }, .synced(pushed: false, warnings: []))
             XCTAssertEqual(try files.readData(at: storeA + "/skills/" + name + "/SKILL.md"),
                            try files.readData(at: storeB + "/skills/" + name + "/SKILL.md"))
             XCTAssertEqual(try contextB.fetch(FetchDescriptor<Skill>()).map(\.directoryName), [name])
@@ -42,10 +44,12 @@ extension PathGuardTests {
             try store.deleteSkill(directoryName: name)
             contextA.delete(skill)
             try contextA.save()
-            XCTAssertEqual(try engine.sync(root: storeA, message: "remove", credential: nil, context: contextA),
-                           .synced(pushed: true, warnings: []))
-            XCTAssertEqual(try engine.sync(root: storeB, message: "pull removal", credential: nil, context: contextB),
-                           .synced(pushed: false, warnings: []))
+            XCTAssertEqual(try NativeTestWork.run(container: contextA.container) { [self] jobContext in
+                try engine.sync(root: storeA, message: "remove", credential: nil, context: jobContext)
+            }, .synced(pushed: true, warnings: []))
+            XCTAssertEqual(try NativeTestWork.run(container: contextB.container) { [self] jobContext in
+                try engine.sync(root: storeB, message: "pull removal", credential: nil, context: jobContext)
+            }, .synced(pushed: false, warnings: []))
             XCTAssertFalse(files.directoryExists(at: storeB + "/skills/" + name))
             XCTAssertTrue(try contextB.fetch(FetchDescriptor<Skill>()).isEmpty)
         }
@@ -57,8 +61,8 @@ extension PathGuardTests {
         let files = FileService()
         let git = TestPaths.git
         try files.createDirectory(at: storeA)
-        try git.runOrThrow(["init", "--bare", "--initial-branch=main", remote], in: nil)
-        try git.initRepository(at: storeA)
+        try NativeTestWork.run { [self] in try git.runOrThrow(["init", "--bare", "--initial-branch=main", remote], in: nil) }
+        try NativeTestWork.run { [self] in try git.initRepository(at: storeA) }
         let store = SkillStore(fileService: files, baseDir: storeA + "/skills", storeRoot: storeA)
         try store.writeBody(directoryName: name, body: "---\nname: Accent\ndescription: Fixture\n---\noriginal")
         let skill = Skill(name: "Accent", skillDescription: "Fixture", directoryName: name)
@@ -71,10 +75,10 @@ extension PathGuardTests {
             "manifest/categories/*.yaml merge=union\n"
                 + "manifest/projects.yaml merge=union\n")
         try files.writeFile(at: storeA + "/.gitignore", content: ".DS_Store\n")
-        try git.stageAllAndCommit(at: storeA, message: "existing accented skill")
-        try git.setRemote("file://" + remote, at: storeA)
-        try git.push(at: storeA, credential: nil)
-        try git.clone(remote: "file://" + remote, into: storeB, credential: nil)
+        try NativeTestWork.run { [self] in try git.stageAllAndCommit(at: storeA, message: "existing accented skill") }
+        try NativeTestWork.run { [self] in try git.setRemote("file://" + remote, at: storeA) }
+        try NativeTestWork.run { [self] in try git.push(at: storeA, credential: nil) }
+        try NativeTestWork.run { [self] in try git.clone(remote: "file://" + remote, into: storeB, credential: nil) }
         // Both Macs already index this skill. A fresh clone can use Git's NFC directory spelling;
         // this compatibility case preserves the existing NFC or NFD metadata on both Macs.
         let existingB = Skill(name: "Accent", skillDescription: "Fixture", directoryName: name)
@@ -83,7 +87,9 @@ extension PathGuardTests {
         try contextB.save()
         XCTAssertFalse(StoreRebuildService().rebuild(fromRoot: storeB, context: contextB).storeUnreadable)
         try manifest.write(manifest.snapshot(from: contextB), toRoot: storeB)
-        XCTAssertEqual(try git.runOrThrow(["diff"], in: storeB).stdout, "", "Seed must survive a normal rebuild unchanged")
+        XCTAssertEqual(try NativeTestWork.run { [self] in
+            try git.runOrThrow(["diff"], in: storeB)
+        }.stdout, "", "Seed must survive a normal rebuild unchanged")
         return (skill, store)
     }
 

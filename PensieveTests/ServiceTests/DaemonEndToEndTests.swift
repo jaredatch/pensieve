@@ -23,61 +23,66 @@ final class DaemonEndToEndTests: XCTestCase {
     private let fixedDate = Date(timeIntervalSince1970: 1_700_000_000)
 
     override func setUpWithError() throws {
-        tempDir = TestTemporaryDirectory.path + "PensieveDaemonEndToEndTests-\(UUID().uuidString)"
-        appSupport = tempDir + "/app-support"
-        agentDir = tempDir + "/agents/claude/skills"
-        cursorRulesDir = tempDir + "/cursor/rules"
-        try fileService.createDirectory(at: appSupport)
-        try fileService.createDirectory(at: agentDir)
-        try fileService.createDirectory(at: cursorRulesDir)
+        try NativeTestWork.run { [self] in
+            tempDir = TestTemporaryDirectory.path + "PensieveDaemonEndToEndTests-\(UUID().uuidString)"
+            appSupport = tempDir + "/app-support"
+            agentDir = tempDir + "/agents/claude/skills"
+            cursorRulesDir = tempDir + "/cursor/rules"
+            try fileService.createDirectory(at: appSupport)
+            try fileService.createDirectory(at: agentDir)
+            try fileService.createDirectory(at: cursorRulesDir)
 
-        remoteURL = try seedRemote()
-        cloneA = try clone(remoteURL, named: "machine-a")
-        cloneB = try clone(remoteURL, named: "machine-b")
-    }
-
-    override func tearDownWithError() throws {
-        if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
-            try FileManager.default.removeItem(atPath: tempDir)
+            remoteURL = try seedRemote()
+            cloneA = try clone(remoteURL, named: "machine-a")
+            cloneB = try clone(remoteURL, named: "machine-b")
         }
     }
 
-    @MainActor
+    override func tearDownWithError() throws {
+        try NativeTestWork.run { [self] in
+            if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
+                try FileManager.default.removeItem(atPath: tempDir)
+            }
+        }
+    }
+
     func testRecordGatedCursorReconcileEndToEnd() throws {
-        try seedMachineBDeploys()
-        let beforeHead = try XCTUnwrap(git.headSHA(at: cloneB))
+        try NativeTestWork.run { [self] in
+            try seedMachineBDeploys()
+            let beforeHead = try XCTUnwrap(git.headSHA(at: cloneB))
 
-        let gammaCursor = CursorAdapterConfig(
-            description: "Use the synced cursor overlay",
-            globs: ["*.swift", "docs/*.md"],
-            alwaysApply: true
-        )
-        try mutateMachineA(cursor: gammaCursor)
-        let upstreamHead = try XCTUnwrap(git.headSHA(at: cloneA))
+            let gammaCursor = CursorAdapterConfig(
+                description: "Use the synced cursor overlay",
+                globs: ["*.swift", "docs/*.md"],
+                alwaysApply: true
+            )
+            try mutateMachineA(cursor: gammaCursor)
+            let upstreamHead = try XCTUnwrap(git.headSHA(at: cloneA))
 
-        let daemon = SyncDaemon(
-            root: cloneB,
-            appSupport: appSupport,
-            git: AllowlistedFastForwardGit(wrapping: git),
-            hasLocalBranches: self.git.hasLocalBranches,
-            credentials: NilCredentialStore(),
-            reconciler: DeployReconciler(
-                fileService: fileService,
-                deployState: DeployStateStore(fileService: fileService, appSupportDir: appSupport),
-                pensieveSkillsDir: cloneB + "/skills",
-                agentSkillDirs: [.init(platform: .claudeCode, path: agentDir)],
-                cursorRulesDir: cursorRulesDir,
-                manifestService: manifest
-            ),
-            now: { Date(timeIntervalSince1970: 1_700_000_100) }
-        )
+            let daemon = SyncDaemon(
+                root: cloneB,
+                appSupport: appSupport,
+                git: AllowlistedFastForwardGit(wrapping: git),
+                hasLocalBranches: self.git.hasLocalBranches,
+                credentials: NilCredentialStore(),
+                reconciler: DeployReconciler(
+                    fileService: fileService,
+                    deployState: DeployStateStore(fileService: fileService, appSupportDir: appSupport),
+                    pensieveSkillsDir: cloneB + "/skills",
+                    agentSkillDirs: [.init(platform: .claudeCode, path: agentDir)],
+                    cursorRulesDir: cursorRulesDir,
+                    manifestService: manifest
+                ),
+                now: { Date(timeIntervalSince1970: 1_700_000_100) }
+            )
 
-        XCTAssertEqual(daemon.runOnce(), .synced(changed: true))
-        XCTAssertNotEqual(beforeHead, try git.headSHA(at: cloneB))
-        XCTAssertEqual(try git.headSHA(at: cloneB), upstreamHead)
+            XCTAssertEqual(daemon.runOnce(), .synced(changed: true))
+            XCTAssertNotEqual(beforeHead, try git.headSHA(at: cloneB))
+            XCTAssertEqual(try git.headSHA(at: cloneB), upstreamHead)
 
-        try assertDaemonReconciledPull(cursor: gammaCursor)
-        try assertLaunchRebuildIngestsPulledStore(cursor: gammaCursor)
+            try assertDaemonReconciledPull(cursor: gammaCursor)
+            try assertLaunchRebuildIngestsPulledStore(cursor: gammaCursor)
+        }
     }
 
     private func assertDaemonReconciledPull(cursor gammaCursor: CursorAdapterConfig) throws {
@@ -100,7 +105,6 @@ final class DaemonEndToEndTests: XCTestCase {
         XCTAssertTrue(state.records.contains { $0.artifactPath == cursorRulesDir + "/gamma.mdc" })
     }
 
-    @MainActor
     private func assertLaunchRebuildIngestsPulledStore(cursor gammaCursor: CursorAdapterConfig) throws {
         let overlayBeforeLaunch = try fileService.readFile(at: cloneB + "/manifest/skills/gamma.yaml")
         let context = try makeContext()
@@ -242,7 +246,6 @@ final class DaemonEndToEndTests: XCTestCase {
         )
     }
 
-    @MainActor
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
             for: Skill.self, Project.self, SkillProjectAssignment.self, DeployRecord.self, PensieveCategory.self,

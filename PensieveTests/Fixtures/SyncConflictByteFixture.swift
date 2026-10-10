@@ -3,7 +3,6 @@ import XCTest
 @testable import Pensieve
 
 /// Real divergent clones and sync inspection. No network or scripted conflict receipts.
-@MainActor
 struct SyncConflictByteFixture {
     enum Entry {
         case file(Data)
@@ -125,7 +124,7 @@ struct SyncConflictByteFixture {
     func inspect() throws -> ConflictItem { try XCTUnwrap(inspectAll().first) }
 
     func inspectAll() throws -> [ConflictItem] {
-        let inspection = try engine.inspectConflicts(root: storeB, credential: nil, context: contextB)
+        let inspection = try engine.inspectConflicts(root: storeB, credential: nil, context: ModelContext(contextB.container))
         guard case let .conflicts(set) = inspection else {
             throw NSError(domain: "ConflictBytesFixture", code: 1)
         }

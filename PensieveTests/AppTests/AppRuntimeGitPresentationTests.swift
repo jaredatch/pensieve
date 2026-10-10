@@ -32,7 +32,7 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
             XCTAssertEqual(runtime.syncModel.remoteURL, "https://fixture.test/store.git")
             XCTAssertEqual(runtime.syncModel.state, .synced(at: syncedAt))
         }
-        try TestPaths.git.removeRemote(at: fixture.root)
+        try NativeTestWork.run { [self] in try TestPaths.git.removeRemote(at: fixture.root) }
         await runtime.refreshGitUsability()
         XCTAssertNil(runtime.syncModel.remoteURL)
         XCTAssertNil(runtime.syncModel.configurationError)
@@ -157,7 +157,7 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
             git: TestPaths.git,
                                 hasLocalBranches: TestPaths.git.hasLocalBranches,
                                 credentials: InMemoryCredentialStore(), reconciler: NoPresentationReconciler(), now: Date.init)
-        XCTAssertTrue(daemon.runOnce().detail.contains("store folder can't be found"))
+        XCTAssertTrue(try NativeTestWork.run { daemon.runOnce() }.detail.contains("store folder can't be found"))
     }
 
     func testConnectFailureNamesGitAndFixWithoutRawExitText() async throws {
