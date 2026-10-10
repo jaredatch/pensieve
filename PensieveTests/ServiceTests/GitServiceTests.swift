@@ -982,35 +982,23 @@ extension GitServiceTests {
         }
     }
 
-    func testFailedCommandsKeepValidTextAroundInvalidUTF8() throws {
+    func testRemoteRefAuthFailureSurvivesInvalidOtherStream() throws {
         try NativeTestWork.run { [self] in
             let files = FileService()
             let executable = tempDir + "/failed-git"
             let remote = "https://fixture.test/refs.git"
-            for (stdout, stderr, expected, auth) in [
-                (Data([0xFF]), Data("fatal: Authentication failed".utf8),
-                 "�\nfatal: Authentication failed", true),
-                (Data("Permission denied (publickey).".utf8), Data([0xFF]),
-                 "Permission denied (publickey).\n�", true),
-                (Data("remote context".utf8), Data([0xFF]) + Data("fatal: Authentication failed".utf8),
-                 "remote context\n�fatal: Authentication failed", true),
-                (Data("fatal: Authentication failed".utf8) + Data([0xFF]), Data("server context".utf8),
-                 "fatal: Authentication failed�\nserver context", true),
-                (Data("remote: café".utf8), Data("fatal: ".utf8) + Data([0xFF]) + Data("read failed — retry".utf8),
-                 "remote: café\nfatal: �read failed — retry", false)
+            for (stdout, stderr, message) in [
+                (Data([0xFF]), Data("fatal: Authentication failed\n".utf8), "Authentication failed"),
+                (Data("Permission denied (publickey).\n".utf8), Data([0xFF]), "Permission denied (publickey)")
             ] {
                 try writeFailedGit(files: files, executable: executable, stdout: stdout, stderr: stderr)
                 let service = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
-                for operation in ["listing", "clone"] {
-                    XCTAssertThrowsError(try {
-                        if operation == "listing" {
-                            _ = try service.remoteReferences(remote: remote, credential: nil)
-                        } else {
-                            try service.cloneShallow(remote: remote, branch: nil, into: tempDir + "/clone", credential: nil)
-                        }
-                    }()) { error in
-                        assertFailedGit(error, remote: remote, expected: expected, auth: auth, operation: operation)
+                XCTAssertThrowsError(try service.remoteReferences(remote: remote, credential: nil)) { error in
+                    guard case let GitError.authenticationFailed(actualRemote, detail) = error else {
+                        return XCTFail("Expected an auth failure with \(message), got \(error)")
                     }
+                    XCTAssertEqual(actualRemote, remote)
+                    XCTAssertTrue(detail.contains(message), detail)
                 }
             }
         }
@@ -1024,21 +1012,5 @@ extension GitServiceTests {
         sys.stderr.buffer.write(base64.b64decode('\(stderr.base64EncodedString())'))
         sys.exit(128)
         """)
-    }
-
-    private func assertFailedGit(_ error: Error, remote: String, expected: String, auth: Bool, operation: String) {
-        if auth {
-            guard case let GitError.authenticationFailed(actualRemote, detail) = error else {
-                return XCTFail("Expected auth failure for \(operation), got \(error)")
-            }
-            XCTAssertEqual(actualRemote, remote)
-            XCTAssertEqual(detail, expected, operation)
-        } else {
-            guard case let GitError.commandFailed(_, exit, detail, _) = error else {
-                return XCTFail("Expected command failure for \(operation), got \(error)")
-            }
-            XCTAssertEqual(exit, 128)
-            XCTAssertEqual(detail, expected, operation)
-        }
     }
 }

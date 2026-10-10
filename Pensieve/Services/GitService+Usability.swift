@@ -53,7 +53,7 @@ extension GitService {
         do {
             let result = try run(["--version"], in: nil)
             guard result.exit != 0 else { return .usable }
-            let detail = result.failureText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = (result.stderr + result.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
             return GitUsability.environmentFailure(exit: result.exit, output: detail)
                 ?? .failed(GitFailureDetail(detail.isEmpty ? "git --version exited \(result.exit)." : detail))
         } catch {
@@ -86,7 +86,7 @@ extension GitService {
                 return nil
             default:
                 throw GitError.commandFailed(args: ["remote", "get-url", "origin"],
-                                             exitCode: result.exit, stderr: result.failureText,
+                                             exitCode: result.exit, stderr: result.stderr,
                                                  confirmingProbe: result.confirmingProbe)
             }
         } catch {

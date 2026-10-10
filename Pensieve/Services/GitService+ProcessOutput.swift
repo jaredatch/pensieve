@@ -171,16 +171,6 @@ private final class GitOutputEvents {
 }
 
 extension GitService {
-    /// Diagnostics retain valid text around malformed UTF-8; parsed stdout must stay exact.
-    static func decodeCommandText(_ data: Data) -> String {
-        // swiftlint:disable:next optional_data_string_conversion
-        String(decoding: data, as: UTF8.self)
-    }
-
-    static func joinCommandText(_ stdout: String, _ stderr: String) -> String {
-        [stdout, stderr].filter { !$0.isEmpty }.joined(separator: "\n")
-    }
-
     @discardableResult
     func run(_ args: [String], in workingDir: String?, credential: GitCredential? = nil,
              storeRules: Bool = false, file: StaticString = #fileID, line: UInt = #line) throws
@@ -188,22 +178,24 @@ extension GitService {
         let result = try runData(args, in: workingDir, credential: credential, storeRules: storeRules,
                                  file: file, line: line)
         return GitOutput(
-            stdout: String(validating: result.stdout, as: UTF8.self) ?? "",
-            stderr: Self.decodeCommandText(result.stderr),
-            exit: result.exit, confirmingProbe: result.confirmingProbe,
-            diagnosticStdout: result.exit == 0 ? nil : Self.decodeCommandText(result.stdout)
+            stdout: String(bytes: result.stdout, encoding: .utf8) ?? "",
+            stderr: String(bytes: result.stderr, encoding: .utf8) ?? "",
+            exit: result.exit, confirmingProbe: result.confirmingProbe
         )
     }
 
     func commandError(_ output: GitOutput, args: [String]) -> GitError {
         GitError.commandFailed(args: args, exitCode: output.exit,
-            stderr: output.failureText, confirmingProbe: output.confirmingProbe)
+            stderr: output.stderr.isEmpty ? output.stdout : output.stderr, confirmingProbe: output.confirmingProbe)
     }
 
     func dataCommandError(_ output: GitDataOutput, args: [String]) -> GitError {
         GitError.commandFailed(
             args: args,
             exitCode: output.exit,
-            stderr: output.failureText, confirmingProbe: output.confirmingProbe)
+            stderr: String(
+                bytes: output.stderr.isEmpty ? output.stdout : output.stderr,
+                encoding: .utf8
+            ) ?? "", confirmingProbe: output.confirmingProbe)
     }
 }
