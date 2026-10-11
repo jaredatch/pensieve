@@ -87,8 +87,9 @@ final class ManifestRefusedEdit {
 
     /// Publication can acknowledge cached fields without another main-context read.
     func acknowledge(durable: ManifestSnapshot) -> Bool {
+        guard let currentFields = fields else { return true }
         var remaining: [Field] = []
-        for field in fields ?? [] {
+        for field in currentFields {
             var probe = durable
             project(field, onto: &probe)
             if probe != durable {

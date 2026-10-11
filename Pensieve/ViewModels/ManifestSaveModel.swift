@@ -81,12 +81,10 @@ final class ManifestSaveModel {
             let lock = try await takeLock()
             defer { lock.release() }
             disk = try await readCurrentManifest()
-            if let disk {
-                item.presentation.remember(durable: disk)
-                refreshRefused(durable: disk)
-            }
+            if let disk { item.presentation.remember(durable: disk) }
+            refreshRefused(durable: disk)
             let result = try await publish(item, disk: disk)
-            await rebuild(item, durable: result.snapshot)
+            await rebuild(item, durable: result.snapshot, published: result.published)
             return result.published
         } catch {
             if disk != nil {
@@ -103,14 +101,15 @@ final class ManifestSaveModel {
     private func publish(_ item: Item, disk: ManifestSnapshot?) async throws
         -> (snapshot: ManifestSnapshot, published: Bool) {
         var saved = try disk ?? item.fallback()
-        if disk != nil, !item.change.hasTarget(in: saved) {
+        if disk != nil, !item.change.apply(to: &saved) {
             if refused.contains(where: { $0.suppliesTarget(for: item.presentation) }) {
                 throw ManifestSaveError.unsavedTarget
             }
-            log("Skipped queued manifest change: its target was removed by sync.")
-            return (saved, false)
+            if !item.change.isDeletion {
+                log("Skipped queued manifest change: its target was removed by sync.")
+                return (saved, false)
+            }
         }
-        if disk != nil { item.change.apply(to: &saved) }
         let snapshot = saved, manifest = manifest, root = root
         try await BlockingWork.run { try manifest.write(snapshot, toRoot: root) }
         if let disk { for edit in refused { edit.rememberLocalWrite(before: disk, after: saved) } }
@@ -119,7 +118,7 @@ final class ManifestSaveModel {
     }
 
     @MainActor
-    private func rebuild(_ item: Item, durable: ManifestSnapshot) async {
+    private func rebuild(_ item: Item, durable: ManifestSnapshot, published: Bool) async {
         // FIFO retains sync.lock until this result is accepted. The scan's context never commits;
         // a later UI save must not be overwritten while this job reads disk.
         do {
@@ -134,7 +133,7 @@ final class ManifestSaveModel {
             try item.accept(prepared, displayed)
             item.report(nil)
         } catch {
-            item.report(ManifestSaveError.rebuildFailed(error.localizedDescription))
+            item.report(ManifestSaveError.rebuildFailed(error.localizedDescription, manifestSaved: published))
         }
     }
 
@@ -153,7 +152,7 @@ final class ManifestSaveModel {
     }
 
     @MainActor
-    private func refreshRefused(durable: ManifestSnapshot) {
+    private func refreshRefused(durable: ManifestSnapshot?) {
         var locals: [ObjectIdentifier: (ManifestSnapshot?, [Category]?)] = [:]
         for edit in refused {
             let key = ObjectIdentifier(edit.context)
@@ -168,6 +167,7 @@ final class ManifestSaveModel {
             }
             if let (local, categories) = locals[key] { edit.cache(local: local, categories: categories) }
         }
+        guard let durable else { return }
         let supplied = Set(refused.compactMap { $0.suppliesCategory(in: durable) })
         refused = refused.filter { $0.refresh(durable: durable, supplied: supplied) }
     }
@@ -200,11 +200,13 @@ final class ManifestSaveModel {
 }
 
 enum ManifestSaveError: LocalizedError {
-    case rebuildFailed(String)
+    case rebuildFailed(String, manifestSaved: Bool)
     case unsavedTarget
     var errorDescription: String? {
         switch self {
-        case .rebuildFailed(let message): "The sync manifest was saved, but rebuilding the local store failed: " + message
+        case .rebuildFailed(let message, let manifestSaved):
+            (manifestSaved ? "The sync manifest was saved, but rebuilding the local store failed: "
+                : "Rebuilding the local store failed: ") + message
         case .unsavedTarget: "This change depends on an earlier change that could not be saved."
         }
     }

@@ -12,19 +12,14 @@ enum ManifestChange {
     case deleteSkill(String)
     case retireSkill(String)
 
-    /// Creates and retirement have no required target; a deletion can be an absent-target no-op.
-    func hasTarget(in snapshot: ManifestSnapshot) -> Bool {
+    var isDeletion: Bool {
         switch self {
-        case .renameCategory(let name, _), .deleteCategory(let name),
-             .categoryProject(let name, _, _), .categorySkill(let name, _, _):
-            return snapshot.categories.contains { $0.name == name }
-        case .skillMetadata(let slug, _, _), .deleteSkill(let slug):
-            return snapshot.skills.contains { $0.slug == slug }
-        case .createCategory, .createSkill, .retireSkill: return true
+        case .deleteCategory, .deleteSkill: true
+        default: false
         }
     }
 
-    /// False means the target is absent from this snapshot. Deletions remain idempotent.
+    /// False means the target is absent. The queue still publishes idempotent deletions.
     @discardableResult
     func apply(to snapshot: inout ManifestSnapshot) -> Bool {
         switch self {
@@ -41,7 +36,10 @@ enum ManifestChange {
         case .renameCategory(let old, let new):
             guard let index = snapshot.categories.firstIndex(where: { $0.name == old }) else { return false }
             snapshot.categories[index].name = new
-        case .deleteCategory(let name): snapshot.categories.removeAll { $0.name == name }
+        case .deleteCategory(let name):
+            let count = snapshot.categories.count
+            snapshot.categories.removeAll { $0.name == name }
+            return snapshot.categories.count != count
         case .categoryProject(let name, let key, let member):
             guard let index = snapshot.categories.firstIndex(where: { $0.name == name }) else { return false }
             Self.set(key, present: member, in: &snapshot.categories[index].projectKeys)
@@ -61,7 +59,10 @@ enum ManifestChange {
             guard let index = snapshot.skills.firstIndex(where: { $0.slug == slug }) else { return false }
             if let tags { snapshot.skills[index].tags = tags }
             if let scope { snapshot.skills[index].scope = scope }
-        case .deleteSkill(let slug): snapshot.skills.removeAll { $0.slug == slug }
+        case .deleteSkill(let slug):
+            let count = snapshot.skills.count
+            snapshot.skills.removeAll { $0.slug == slug }
+            return snapshot.skills.count != count
         case .retireSkill(let slug):
             snapshot.deployIntents.removeAll { $0.skillSlug == slug }
             for index in snapshot.categories.indices { snapshot.categories[index].skillSlugs.removeAll { $0 == slug } }

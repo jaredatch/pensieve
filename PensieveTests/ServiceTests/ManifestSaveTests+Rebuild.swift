@@ -3,6 +3,59 @@ import XCTest
 @testable import Pensieve
 
 extension ManifestSaveTests {
+    func testFallbackRefreshesRefusedMetadataBeforePublication() async throws {
+        for corrupt in [false, true] {
+            let h = try ManifestSaveFixture()
+            defer { h.cleanup() }
+            if corrupt {
+                try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "not: [yaml\n")
+            } else { try h.files.deleteDirectory(at: h.root + "/manifest") }
+            h.recording.failingWrites = 1
+            h.library.updateMetadata(h.alpha, tags: ["a"], scope: .user, context: h.context)
+            await h.saves.waitUntilIdle()
+            XCTAssertNotNil(h.library.error)
+            h.library.updateMetadata(h.alpha, tags: ["b"], scope: .user, context: h.context)
+            await h.saves.waitUntilIdle()
+            XCTAssertNil(h.library.error)
+            XCTAssertEqual(h.recording.writes.count, 1)
+            XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "alpha" }?.tags, ["b"])
+            XCTAssertEqual(h.alpha.tags, ["b"], "A refused fallback edit must use the current context before publishing")
+        }
+    }
+
+    func testFallbackKeepsUncomputedRefusedRetirement() async throws {
+        for corrupt in [false, true] {
+            let h = try ManifestSaveFixture()
+            defer { h.cleanup() }
+            h.local.skillSlugs = ["alpha"]
+            let intent = MachineDeployIntent(machineID: ProjectIntentHarness.localID, skillSlug: "alpha", platformRaw: "codex")
+            h.context.insert(intent)
+            try h.context.save()
+            let pulled = try h.manifest.snapshot(from: h.context)
+            h.local.skillSlugs = []
+            h.context.delete(intent)
+            try h.context.save()
+            if corrupt {
+                try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "not: [yaml\n")
+            } else { try h.files.deleteDirectory(at: h.root + "/manifest") }
+            h.recording.failingWrites = 1
+            h.library.regenerateManifest(.retireSkill("alpha"), context: h.context)
+            await h.saves.waitUntilIdle()
+            XCTAssertNotNil(h.library.error)
+            h.library.updateMetadata(h.beta, tags: ["healed"], scope: .user, context: h.context)
+            await h.saves.waitUntilIdle()
+            XCTAssertNil(h.library.error)
+            try h.manifest.write(pulled, toRoot: h.root)
+            h.library.updateMetadata(h.beta, tags: ["after-pull"], scope: .user, context: h.context)
+            await h.saves.waitUntilIdle()
+            let durable = try h.manifest.read(fromRoot: h.root)
+            XCTAssertTrue(durable.categories.contains { $0.name == "Local" && $0.skillSlugs.contains("alpha") })
+            XCTAssertTrue(durable.deployIntents.contains { $0.skillSlug == "alpha" })
+            XCTAssertFalse(h.local.skillSlugs.contains("alpha"), "An uncomputed refusal must survive fallback acknowledgement")
+            XCTAssertFalse(try h.context.fetch(FetchDescriptor<MachineDeployIntent>()).contains { $0.skillSlug == "alpha" })
+        }
+    }
+
     func testDeletingPulledCategoryRetiresItsRefusedMembership() async throws {
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
@@ -19,7 +72,8 @@ extension ManifestSaveTests {
         XCTAssertFalse(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.name == "Local" })
         let messages = h.messages.lines.dropFirst(reports)
         XCTAssertFalse(messages.contains { $0.contains("could not be saved") || $0.contains("regeneration failed") })
-        XCTAssertTrue(messages.contains { $0.contains("removed by sync") })
+        XCTAssertFalse(messages.contains { $0.contains("removed by sync") })
+        XCTAssertEqual(h.recording.writes.count, 1, "The already-absent deletion still publishes")
     }
 
     func testHeldRebuildPreservesUnqueuedRowsAndNonAuthoritativeCategories() async throws {
@@ -179,6 +233,22 @@ extension ManifestSaveTests {
         let message = try XCTUnwrap(h.messages.lines.last)
         XCTAssertEqual(message.components(separatedBy: "rebuild").count - 1, 1, message)
         XCTAssertTrue(message.contains(CocoaError(.fileReadCorruptFile).localizedDescription))
+        try await checkSkippedRebuildFailure(h)
+    }
+
+    private func checkSkippedRebuildFailure(_ h: ManifestSaveFixture) async throws {
+        var pulled = try h.manifest.read(fromRoot: h.root)
+        pulled.skills.removeAll { $0.slug == "alpha" }
+        try h.manifest.write(pulled, toRoot: h.root)
+        let before = try h.manifestBytes(), writes = h.recording.writes.count
+        h.recording.failingRebuildSnapshots = 1
+        h.library.updateMetadata(h.alpha, tags: ["skipped"], scope: .project, context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(try h.manifestBytes(), before)
+        XCTAssertEqual(h.recording.writes.count, writes)
+        let message = try XCTUnwrap(h.library.error)
+        XCTAssertTrue(message.localizedLowercase.contains("rebuild"), message)
+        XCTAssertFalse(message.contains("manifest was saved"), "A skipped change never published: " + message)
     }
 
     func testDeletingRefusedRenamePublishesOriginalRemovalOrReportsRefusal() async throws {

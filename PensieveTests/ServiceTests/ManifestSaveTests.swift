@@ -99,6 +99,7 @@ final class ManifestSaveTests: XCTestCase {
         XCTAssertFalse(saved.categories.contains { $0.skillSlugs.contains("beta") })
         XCTAssertFalse(saved.deployIntents.contains { $0.skillSlug == "beta" })
         XCTAssertNil(h.library.error)
+        try await checkAbsentSkillDeletionCountsAsSaved(h)
     }
 
     func testPulledDeletionSkipsQueuedEditAndRefreshesWindow() async throws {
@@ -163,11 +164,12 @@ final class ManifestSaveTests: XCTestCase {
                 try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "schema_version: 99\n")
             } else if refusal == "write" { h.recording.failingWrites = 3 } else {
                 try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "not: [yaml\n")
-                h.recording.failingSnapshots = 3
+                h.recording.failingSnapshots = .max // Keep fallback and refused-edit reads unavailable until the queue drains.
             }
             let before = try h.manifestBytes()
             lock.release()
             await h.saves.waitUntilIdle()
+            h.recording.failingSnapshots = 0
             XCTAssertEqual(try h.manifestBytes(), before, refusal)
             XCTAssertEqual(created.name, "Kept")
             XCTAssertEqual(h.local.name, "Renamed Kept")
@@ -244,6 +246,18 @@ final class ManifestSaveTests: XCTestCase {
 }
 
 extension ManifestSaveTests {
+    private func checkAbsentSkillDeletionCountsAsSaved(_ h: ManifestSaveFixture) async throws {
+        var saves = 0
+        h.saves.didSave = { saves += 1 }
+        let writes = h.recording.writes.count
+        h.library.regenerateManifest(.deleteSkill("beta"), context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(h.recording.writes.count, writes + 1, "An absent-record deletion must publish its idempotent result")
+        XCTAssertEqual(saves, 1, "An idempotent deletion must still nudge sync")
+        XCTAssertFalse(h.messages.lines.contains { $0.contains("removed by sync") })
+        XCTAssertNil(h.library.error)
+    }
+
     private func checkRefusedFieldAcknowledgement(_ h: ManifestSaveFixture,
                                                   window: [Pensieve.Category]) async throws {
         // A later successful field must retire its refusal overlay without retiring another field's.
