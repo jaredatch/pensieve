@@ -40,8 +40,10 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 - Reopening sync conflicts while they load now shows the ongoing load and its result.
 - Connecting to a sync remote now tells you when Pensieve uses a fallback branch, and which branch it chose.
-- Launch and skill history keep the window responsive while Git runs. History shows progress while loading, comparing, or restoring a version, and a delayed Restore leaves newer edits alone.
-
+- Launch, Connect, resolving sync conflicts and skill history keep the window responsive while Git runs. History shows progress while loading, comparing, or restoring a version, and a delayed Restore leaves newer edits alone. A Restore that doesn't finish tells you why.
+- If you quit while Pensieve is still saving a change or in the middle of a sync step, it waits for that work. If it takes more than a few seconds, you can keep waiting or quit anyway, and the question keeps up as work finishes or starts.
+- Category and tag edits made during a sync wait for it to finish, then save, and the window stays responsive in the meantime. If the wait runs past a few seconds, the sync footer says so.
+- When a skill is deleted but the sync record can't be updated, the warning names that skill, even if you've deleted another one since.
 - Path checks now recognize filesystem separators beside combining marks, joiners, emoji modifiers, tag characters and names ending in Prepend characters. Sync refuses escaping links while existing accented skill names and decomposed link targets keep working.
 - A connected store with no branch now says why it can't sync, instead of showing an old sync time. When git starts working again, sync catches up promptly; with background sync off, it retries your failed Sync Now once.
 - Sync now keeps every file in a skill exactly as it is. Line endings, executable bits and files a skill's own `.gitignore` hides all come through unchanged. It still leaves out `.env` files (except `.env.example`, `.env.sample` and `.env.template`), `node_modules`, `.env` and `.venv` folders, and `.DS_Store`.
