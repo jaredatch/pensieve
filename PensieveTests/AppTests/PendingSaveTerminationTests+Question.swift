@@ -89,34 +89,43 @@ extension PendingSaveTerminationTests {
     }
 
     func testClosedQuitQuestionCannotAcknowledgeAnUnseenWarning() async throws {
-        let h = try ManifestSaveFixture()
-        defer { h.cleanup() }
-        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
-        defer { lock.release() }
-        h.categories.rename(h.local, to: "Waiting", context: h.context)
-        let steps = SyncStepModel(), step = steps.begin()
-        var questions: [PendingSaveTermination.Question] = []
-        var callbacks: [(Bool) -> Void] = []
-        var refusedUpdates = 0
-        let quit = PendingSaveTermination(delay: 0) { question, resolve in
-            questions.append(question)
-            callbacks.append(resolve)
-            // NSAlert has detached after the button press, before delivering its response.
-            return .init(update: { _ in refusedUpdates += 1; return false }, dismiss: {})
+        for workGrows in [false, true] {
+            let h = try ManifestSaveFixture()
+            defer { h.cleanup() }
+            let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+            defer { lock.release() }
+            h.categories.rename(h.local, to: "Waiting", context: h.context)
+            let steps = SyncStepModel()
+            var step = workGrows ? nil : steps.begin()
+            defer { if let step { steps.finish(step) } }
+            var questions: [PendingSaveTermination.Question] = []
+            var callbacks: [(Bool) -> Void] = []
+            var refusedUpdates = 0
+            let quit = PendingSaveTermination(delay: 0) { question, resolve in
+                questions.append(question)
+                callbacks.append(resolve)
+                // NSAlert has detached after the button press, before delivering its response.
+                return .init(update: { _ in refusedUpdates += 1; return false }, dismiss: {})
+            }
+            var answers: [Bool] = []
+            quit.wait(for: h.saves, steps: steps) { answers.append($0) }
+            await TestWait.until(failureMessage: "Quit question did not appear") { callbacks.count == 1 }
+            if let active = step { steps.finish(active); step = nil } else { step = steps.begin() }
+            await TestWait.until(failureMessage: "Pending work did not attempt the late native update") { refusedUpdates > 0 }
+            callbacks[0](true)
+            if workGrows {
+                XCTAssertTrue(answers.isEmpty, "A closed sheet cannot warn about work that started afterward")
+                XCTAssertEqual(questions, [.saving, .savingAndSyncing])
+                XCTAssertEqual(callbacks.count, 2)
+                try XCTUnwrap(callbacks.last)(true)
+            } else {
+                XCTAssertEqual(questions, [.savingAndSyncing], "Consent still covers the remaining save")
+                XCTAssertEqual(callbacks.count, 1, "Finishing sync must not re-ask Quit Anyway")
+            }
+            XCTAssertEqual(answers, [true])
+            lock.release()
+            await h.saves.waitUntilIdle()
         }
-        var answers: [Bool] = []
-        quit.wait(for: h.saves, steps: steps) { answers.append($0) }
-        await TestWait.until(failureMessage: "Combined question did not appear") { callbacks.count == 1 }
-        steps.finish(step)
-        await TestWait.until(failureMessage: "Pending work did not attempt the late native update") { refusedUpdates > 0 }
-        callbacks[0](true)
-        XCTAssertTrue(answers.isEmpty, "An update to a closed sheet cannot count as a warning the user saw")
-        XCTAssertEqual(questions, [.savingAndSyncing, .saving])
-        XCTAssertEqual(callbacks.count, 2)
-        try XCTUnwrap(callbacks.last)(true)
-        XCTAssertEqual(answers, [true])
-        lock.release()
-        await h.saves.waitUntilIdle()
     }
 
     func testInjectedQuitPresenterTracksCombinedWorkAndChecksCurrentConsent() async throws {

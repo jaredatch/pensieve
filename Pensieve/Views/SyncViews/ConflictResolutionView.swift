@@ -6,6 +6,7 @@ struct ConflictResolutionView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var model: ConflictResolutionModel
     @State private var historySkill: Skill?
+    @State private var presentationID = UUID()
     @Query(sort: \Skill.name) private var skills: [Skill]
 
     let onDismiss: () -> Void
@@ -33,8 +34,8 @@ struct ConflictResolutionView: View {
         }
         .padding(Spacing.xl)
         .frame(width: 560)
-        .task { model.load(container: modelContext.container) }
-        .onDisappear { model.dismiss() }
+        .task { model.load(container: modelContext.container, presentation: presentationID) }
+        .onDisappear { model.dismiss(presentation: presentationID) }
         .onChange(of: model.phase) { _, newPhase in
             if newPhase == .done {
                 onDismiss()
@@ -85,7 +86,7 @@ struct ConflictResolutionView: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Try again") {
-                    model.load(container: modelContext.container)
+                    model.load(container: modelContext.container, presentation: presentationID)
                 }
                 .controlSize(.small)
             }
@@ -101,7 +102,7 @@ struct ConflictResolutionView: View {
 
     private var footer: some View {
         HStack(spacing: Spacing.sm) {
-            Button("Cancel") { model.dismiss(); onDismiss() }
+            Button("Cancel") { model.dismiss(presentation: presentationID); onDismiss() }
                 .disabled(!model.canCancel)
                 .keyboardShortcut(.cancelAction)
             Spacer()

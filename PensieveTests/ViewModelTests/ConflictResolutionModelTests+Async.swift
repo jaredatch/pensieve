@@ -64,19 +64,7 @@ extension ConflictResolutionModelTests {
         defer { try? fixture.files.deleteDirectory(at: fixture.root) }
         let block = try GitBlockingFixture()
         defer { block.release(); try? block.cleanup() }
-        // Git's SSH transport executes a local upload-pack, so the production runtime and engine
-        // inspect the real repository without either a network connection or a model injection seam.
-        let ssh = fixture.root + "/local-ssh"
-        try fixture.files.writeExecutableFile(at: ssh, content: """
-            #!/bin/bash
-            '\(block.root)/git' >/dev/null || exit 1
-            exec /usr/bin/git-upload-pack '\(fixture.remote)'
-            """ + "\n")
-        try NativeTestWork.run {
-            try fixture.git.setRemote("ssh://fixture.invalid/library", at: fixture.storeB)
-            try fixture.git.runOrThrow(["config", "core.sshCommand", ssh], in: fixture.storeB)
-            try fixture.git.runOrThrow(["config", "ssh.variant", "ssh"], in: fixture.storeB)
-        }
+        try holdRuntimeInspection(fixture, block: block)
         let runtime = try AppRuntime(container: fixture.contextB.container,
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }),
             defaults: isolatedDefaults("reopened-conflict"),
@@ -84,17 +72,21 @@ extension ConflictResolutionModelTests {
             gitUsabilityProbe: { .usable })
         await runtime.bootstrapTask.value
         runtime.syncModel.apply(.conflicted([fixture.path]))
-        let first = conflictHost(model: runtime.conflictResolution, container: runtime.container, runtime: runtime) {}
+        var earlierDisappeared = false
+        let first = conflictHost(model: runtime.conflictResolution, container: runtime.container, runtime: runtime,
+                                 disappeared: { earlierDisappeared = true }, dismiss: {})
         defer { first.window.close(); runtime.library.stopWatching() }
         await TestWait.until(failureMessage: "Initial conflict inspection never reached SSH") { block.isBlocked }
-        runtime.conflictResolution.dismiss()
-        first.window.close()
+        XCTAssertTrue(conflictKey("\u{1b}", code: 53, in: first.view))
         let reopened = conflictHost(model: runtime.conflictResolution, container: runtime.container, runtime: runtime) {}
         defer { reopened.window.close() }
         await TestWait.until(failureMessage: "Reopened sheet did not show its held load") {
             Self.conflictHasProgress(in: reopened.view)
         }
         XCTAssertEqual(runtime.paths.syncSteps.pendingCount, 1, "Reopening joins the original inspection")
+        first.view.rootView = AnyView(EmptyView())
+        await TestWait.until(failureMessage: "Earlier presentation did not disappear after the reopen") { earlierDisappeared }
+        first.window.close()
         block.release()
         await runtime.paths.syncSteps.waitUntilIdle()
         let groups = try readyGroups(from: runtime.conflictResolution.phase)
@@ -166,7 +158,7 @@ extension ConflictResolutionModelTests {
                 let engine = HeldConflictEngine(engine: stub, block: block, holdLoad: load, windowContext: context)
                 let model = ConflictResolutionModel(engine: engine, git: TestPaths.git,
                     credentials: InMemoryCredentialStore(), root: block.root, steps: steps)
-                if load { model.load(container: context.container) } else {
+                if load { model.load(container: context.container, presentation: UUID()) } else {
                     await model.loadAndReport(container: context.container)
                     model.choose("skill:quit", .thisMachine)
                     model.apply(container: context.container)
@@ -195,6 +187,22 @@ extension ConflictResolutionModelTests {
         }
     }
 
+    private func holdRuntimeInspection(_ fixture: SyncConflictByteFixture, block: GitBlockingFixture) throws {
+        // Git's SSH transport executes a local upload-pack, so the production runtime and engine
+        // inspect the real repository without either a network connection or a model injection seam.
+        let ssh = fixture.root + "/local-ssh"
+        try fixture.files.writeExecutableFile(at: ssh, content: """
+            #!/bin/bash
+            '\(block.root)/git' >/dev/null || exit 1
+            exec /usr/bin/git-upload-pack '\(fixture.remote)'
+            """ + "\n")
+        try NativeTestWork.run {
+            try fixture.git.setRemote("ssh://fixture.invalid/library", at: fixture.storeB)
+            try fixture.git.runOrThrow(["config", "core.sshCommand", ssh], in: fixture.storeB)
+            try fixture.git.runOrThrow(["config", "ssh.variant", "ssh"], in: fixture.storeB)
+        }
+    }
+
     private func clearConflict(_ fixture: SyncConflictByteFixture) throws {
         try NativeTestWork.run {
             let items = try fixture.inspectAll()
@@ -208,9 +216,10 @@ extension ConflictResolutionModelTests {
     }
 
     private func conflictHost(model: ConflictResolutionModel, container: ModelContainer, runtime: AppRuntime,
+                              disappeared: @escaping () -> Void = {},
                               dismiss: @escaping () -> Void) -> (view: NSHostingView<AnyView>, window: NSWindow) {
         let view = NSHostingView(rootView: AnyView(ConflictResolutionView(model: model, onDismiss: dismiss)
-            .environment(runtime).modelContainer(container)))
+            .onDisappear(perform: disappeared).environment(runtime).modelContainer(container)))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 500),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

@@ -17,9 +17,4 @@ final class SyncStepModel {
 
     func finish(_ id: UUID) { active.remove(id) }
 
-    func waitUntilIdle() async {
-        while !active.isEmpty {
-            try? await Task.sleep(for: .milliseconds(20))
-        }
-    }
 }

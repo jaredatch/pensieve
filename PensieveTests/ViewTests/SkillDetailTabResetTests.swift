@@ -7,7 +7,7 @@ import XCTest
 
 @MainActor
 final class SkillDetailTabResetTests: XCTestCase {
-    func testChangingHistorySkillsThroughLinkedSkillResetsAuthoredPresentation() {
+    func testChangingHistorySkillsThroughLinkedSkillResetsAuthoredPresentation() async {
         let first = Skill(name: "First", directoryName: "first")
         let model = SkillDetailTabResetModel(skill: first)
         let presentation = SkillHistoryTabPresentation()
@@ -34,21 +34,22 @@ final class SkillDetailTabResetTests: XCTestCase {
             git: git
         ))
         host.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        await TestWait.until(failureMessage: "Initial History did not load") { !presentation.isLoading }
 
-        let version = SkillHistoryVersion(
-            sha: "old", date: Date(), author: "Author", subject: "Old version"
-        )
+        let version = SkillHistoryVersion(sha: "old", date: Date(), author: "Author", subject: "Old version")
         presentation.snapshot = SkillHistorySnapshot(versions: [version])
-        presentation.errorMessage = "Couldn't load that version."
+        await presentation.read(version, skill: first, git: git, workingDir: base, asDiff: false)
+        XCTAssertEqual(presentation.errorMessage, "Couldn't load that version.")
         presentation.showAll = true
         presentation.diff = SkillHistoryTabPresentation.Diff(version: version, body: "Old body")
         presentation.restoring = version
         model.skill = installedHistorySkill(name: "Linked")
-        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        await TestWait.until(failureMessage: "Linked skill did not reset authored History") { presentation.diff == nil }
         host.layoutSubtreeIfNeeded()
         model.skill = Skill(name: "Third", directoryName: "third")
-        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        await TestWait.until(failureMessage: "Third skill did not load authored History") {
+            presentation.snapshot.versions == [historyVersion(thirdCommit)]
+        }
         host.layoutSubtreeIfNeeded()
 
         XCTAssertEqual(git.logPaths.last, "skills/third/SKILL.md")

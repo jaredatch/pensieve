@@ -15,11 +15,16 @@ final class SkillHistoryTabPresentation {
     static let closedRestoreMessage = "Nothing was restored. History was closed before Restore finished."
     static let selectedSkillRestoreMessage = "Nothing was restored. You selected another skill before Restore finished."
 
-    private final class RestoreAttempt {
+    @Observable
+    fileprivate final class RestoreAttempt {
+        let skillID: UUID
         var retirementMessage: String?
-        weak var library: SkillLibraryViewModel?
+        @ObservationIgnored weak var library: SkillLibraryViewModel?
 
-        init(library: SkillLibraryViewModel?) { self.library = library }
+        init(skillID: UUID, library: SkillLibraryViewModel?) {
+            self.skillID = skillID
+            self.library = library
+        }
     }
 
     struct Diff: Identifiable {
@@ -33,25 +38,34 @@ final class SkillHistoryTabPresentation {
     var diff: Diff?
     var restoring: SkillHistoryVersion?
     var selection: SkillHistorySelection?
-    var errorMessage: String?
+    private var actionError: String?
+    var errorMessage: String? {
+        let retirement = latestRestore.flatMap { $0.skillID == skillID ? $0.retirementMessage : nil }
+        let messages = [retirement, actionError].compactMap { $0 }
+        return messages.isEmpty ? nil : messages.joined(separator: " ")
+    }
     private(set) var isLoading = true
     private(set) var readingVersion: String?
     private(set) var restoringVersion: String?
     private var skillID: UUID?
     private var loadGeneration = 0
     private var actionGeneration = 0
-    @ObservationIgnored private var latestRestore: RestoreAttempt?
+    private var latestRestore: RestoreAttempt?
 
     func reset() {
         retireRestore(Self.selectedSkillRestoreMessage, leavingHistory: true)
-        close()
+        clearPresentation()
         snapshot = SkillHistorySnapshot()
         showAll = false
-        errorMessage = latestRestore?.retirementMessage
+        actionError = nil
     }
 
     func close() {
         retireRestore(Self.closedRestoreMessage, leavingHistory: true)
+        clearPresentation()
+    }
+
+    private func clearPresentation() {
         loadGeneration &+= 1
         actionGeneration &+= 1
         skillID = nil
@@ -83,18 +97,18 @@ final class SkillHistoryTabPresentation {
     func read(_ version: SkillHistoryVersion, skill: Skill, git: GitServiceProtocol,
               workingDir: String, asDiff: Bool) async {
         guard skillID == skill.id else { return }
+        retireRestore(Self.interruptedRestoreMessage)
         actionGeneration &+= 1
         let generation = actionGeneration
         let path = SkillHistorySnapshot.path(for: skill)
-        retireRestore(Self.interruptedRestoreMessage)
-        errorMessage = latestRestore?.retirementMessage
+        actionError = nil
         readingVersion = version.sha
         selection = nil
         let document = await BlockingWork.run { git.show(sha: version.sha, path: path, at: workingDir) }
         guard !Task.isCancelled, skillID == skill.id, actionGeneration == generation else { return }
         readingVersion = nil
         guard let document else {
-            errorMessage = (errorMessage.map { $0 + " " } ?? "") + "Couldn't load that version."
+            actionError = "Couldn't load that version."
             return
         }
         if asDiff {
@@ -107,7 +121,6 @@ final class SkillHistoryTabPresentation {
     private func retireRestore(_ message: String, leavingHistory: Bool = false) {
         guard restoringVersion != nil, let attempt = latestRestore, attempt.retirementMessage == nil else { return }
         attempt.retirementMessage = message
-        errorMessage = message
         if leavingHistory { attempt.library?.error = message }
         restoringVersion = nil
     }
@@ -118,11 +131,11 @@ final class SkillHistoryTabPresentation {
         guard restoringVersion == nil, skillID == skill.id else { return Task { false } }
         if let message = library?.error,
            [Self.closedRestoreMessage, Self.selectedSkillRestoreMessage].contains(message) { library?.error = nil }
-        errorMessage = nil
+        actionError = nil
         latestRestore = nil
         guard let context = skill.modelContext, !skill.isDeleted,
               let rawDocument = try? store.readData(directoryName: skill.directoryName) else {
-            errorMessage = Self.unreadableRestoreMessage
+            actionError = Self.unreadableRestoreMessage
             return Task { false }
         }
         actionGeneration &+= 1
@@ -133,14 +146,10 @@ final class SkillHistoryTabPresentation {
         let folderRevision = library?.folderChangeRevisions[slug]
         readingVersion = nil
         restoringVersion = version.sha
-        let attempt = RestoreAttempt(library: library)
-        latestRestore = attempt
+        latestRestore = RestoreAttempt(skillID: skill.id, library: library)
         return Task {
             let document = await BlockingWork.run { git.show(sha: version.sha, path: path, at: workingDir) }
             guard !Task.isCancelled, skillID == skill.id, actionGeneration == generation else {
-                if latestRestore === attempt, attempt.retirementMessage == nil {
-                    retireRestore("Nothing was restored. Restore was cancelled before it finished.")
-                }
                 return false
             }
             restoringVersion = nil
@@ -151,16 +160,16 @@ final class SkillHistoryTabPresentation {
                   library?.textEditRevisions[slug] == editRevision, library?.drafts[slug]?.body == draft,
                   library?.folderChangeRevisions[slug] == folderRevision,
                   (try? store.readData(directoryName: slug)) == rawDocument else {
-                errorMessage = Self.changedRestoreMessage
+                actionError = Self.changedRestoreMessage
                 return false
             }
-            guard let document else { errorMessage = "Couldn't load that version."; return false }
+            guard let document else { actionError = "Couldn't load that version."; return false }
             do {
                 try restoreSkillHistoryVersion(skill: skill, body: document, store: store, library: library, notifier: notifier)
-                errorMessage = nil
+                actionError = nil
                 return true
             } catch {
-                errorMessage = "Couldn't restore that version."
+                actionError = "Couldn't restore that version."
                 return false
             }
         }

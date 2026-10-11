@@ -27,8 +27,8 @@ final class ConflictResolutionModel {
 
     private let steps: SyncStepModel
     @ObservationIgnored private var task: Task<Void, Never>?
-    private var presentation = UUID()
-    private var isPresented = true
+    private var inspectionID = UUID()
+    private var presentations: Set<UUID> = []
 
     private(set) var isApplying = false
     var canCancel: Bool { !isApplying }
@@ -64,27 +64,27 @@ final class ConflictResolutionModel {
         return groups.allSatisfy { $0.chosen != nil }
     }
 
-    func load(container: ModelContainer) {
-        isPresented = true
+    func load(container: ModelContainer, presentation: UUID) {
+        presentations.insert(presentation)
         guard task == nil else { return }
-        presentation = UUID()
+        inspectionID = UUID()
         phase = .loading
         selectionError = nil
         let step = steps.begin()
-        let presentation = presentation
+        let inspectionID = inspectionID
         task = Task {
             defer { steps.finish(step); task = nil }
-            await inspect(container: container, presentation: presentation)
+            await inspect(container: container, inspectionID: inspectionID)
         }
     }
 
     /// Inspection writes to reproduce a conflict, so closing only retires presentation.
-    func dismiss() {
+    func dismiss(presentation: UUID) {
         guard canCancel else { return }
-        isPresented = false
+        presentations.remove(presentation)
     }
 
-    private func inspect(container: ModelContainer, presentation: UUID) async {
+    private func inspect(container: ModelContainer, inspectionID: UUID) async {
         do {
             let onResolved = try onResolutionStarted()
             let job = makeJob(container: container)
@@ -92,10 +92,10 @@ final class ConflictResolutionModel {
             if case let .cleared(outcome) = result.inspection, case .synced = outcome {
                 onResolved(cycleResult(from: outcome, previousHeadStamp: result.previousHeadStamp))
             }
-            guard isPresented, self.presentation == presentation else { return }
+            guard !presentations.isEmpty, self.inspectionID == inspectionID else { return }
             phase = result.groups.isEmpty ? .empty : .ready(result.groups)
         } catch {
-            guard isPresented, self.presentation == presentation else { return }
+            guard !presentations.isEmpty, self.inspectionID == inspectionID else { return }
             phase = .error((error as? LocalizedError)?.errorDescription ?? "Couldn't load conflicts.")
         }
     }
@@ -157,7 +157,7 @@ final class ConflictResolutionModel {
     private func reinspect(container: ModelContainer) async {
         phase = .loading
         selectionError = nil
-        await inspect(container: container, presentation: presentation)
+        await inspect(container: container, inspectionID: inspectionID)
     }
 
     private func makeJob(container: ModelContainer) -> ConflictResolutionJob {

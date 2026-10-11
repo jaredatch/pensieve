@@ -26,12 +26,18 @@ enum NativeTestWork {
 
 extension ConflictResolutionModel {
     func loadAndReport(container: ModelContainer) async {
-        load(container: container)
+        load(container: container, presentation: UUID())
         await TestWait.until(failureMessage: "Conflict inspection did not finish") { self.phase != .loading }
     }
 
     func applyAndReport(container: ModelContainer) async {
         apply(container: container)
         await TestWait.until(failureMessage: "Conflict resolution did not finish") { !self.isApplying }
+    }
+}
+
+extension SyncStepModel {
+    func waitUntilIdle() async {
+        await TestWait.until(failureMessage: "Sync steps did not finish") { self.pendingCount == 0 }
     }
 }

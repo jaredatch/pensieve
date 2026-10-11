@@ -7,6 +7,10 @@ final class PendingSaveTermination {
     enum Question: Equatable {
         case saving, syncing, savingAndSyncing
 
+        func covers(_ current: Question) -> Bool {
+            self == .savingAndSyncing || self == current
+        }
+
         var message: String {
             switch self {
             case .saving: return "Pensieve is still saving a change."
@@ -99,8 +103,8 @@ final class PendingSaveTermination {
         let presentation = presenter(question) { [weak self] quitAnyway in
             guard let self, self.generation == request, self.questionID == id else { return }
             // A native button can be invoked before Observation's queued update. Require consent
-            // to the current warning instead of accepting an answer to stale pending work.
-            if quitAnyway, let current = Self.question(saves, steps), current != self.shownQuestion {
+            // to any pending kind of work the answered question did not name.
+            if quitAnyway, let current = Self.question(saves, steps), self.shownQuestion?.covers(current) != true {
                 self.dismissQuestion()
                 self.showQuestion(for: saves, steps: steps, request: request, reply: reply)
                 return

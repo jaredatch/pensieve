@@ -128,6 +128,7 @@ final class SkillHistoryAsyncTests: XCTestCase {
     }
 
     func testHeldRestoreWritesNothingAfterDeletionEditSelectionOrClose() async throws {
+        try await assertLaterReadExplainsRetiredRestore()
         let invalidations = ["delete", "file edit", "draft edit", "edit then undo",
                              "immediate edit", "raw bytes", "selection", "close"]
         for invalidation in invalidations {
@@ -159,10 +160,10 @@ final class SkillHistoryAsyncTests: XCTestCase {
             case "close": message = "Nothing was restored. History was closed before Restore finished."
             default: message = SkillHistoryTabPresentation.changedRestoreMessage
             }
-            XCTAssertEqual(model.errorMessage, message, invalidation)
             if invalidation == "selection" || invalidation == "close" {
+                XCTAssertNil(model.errorMessage, "A departed Restore has no message in another skill's History")
                 XCTAssertEqual(fixture.library.error, message, "Leaving History must report outside the departed view")
-            }
+            } else { XCTAssertEqual(model.errorMessage, message, invalidation) }
             XCTAssertEqual(fixture.store.bodies["example"], bodyBeforeRelease, invalidation)
             XCTAssertEqual(fixture.counter.value, 0, invalidation)
             if invalidation == "selection" || invalidation == "close" {
@@ -177,7 +178,6 @@ final class SkillHistoryAsyncTests: XCTestCase {
             }
         }
         try await assertMissingSkillRefusesRestoreBeforeReading()
-        try await assertLaterReadExplainsRetiredRestore()
     }
 
     func testRenderedDiffAndSheetRestoreShowSpinnersAndComplete() async throws {

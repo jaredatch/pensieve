@@ -3,6 +3,12 @@ import XCTest
 
 extension SkillHistoryAsyncTests {
     func assertLaterReadExplainsRetiredRestore() async throws {
+        try await assertRetirementBelongsToItsSkill()
+        try await assertReplacementReadsKeepRetirementReason()
+        try await assertSameVersionReadAndNewRestore()
+    }
+
+    private func assertReplacementReadsKeepRetirementReason() async throws {
         for asDiff in [false, true] {
             for (readFinishesFirst, readFails) in [(false, false), (false, true), (true, false), (true, true)] {
                 let fixture = try fixture(), model = SkillHistoryTabPresentation()
@@ -52,7 +58,37 @@ extension SkillHistoryAsyncTests {
                                readFails ? nil : (asDiff ? "read body" : "read"), name)
             }
         }
-        try await assertSameVersionReadAndNewRestore()
+    }
+
+    private func assertRetirementBelongsToItsSkill() async throws {
+        let fixture = try fixture(), model = SkillHistoryTabPresentation()
+        fixture.git.commits = [Self.commit("restore")]
+        await model.load(skill: fixture.skill, git: fixture.git, workingDir: "/repo")
+        let version = try XCTUnwrap(model.snapshot.versions.first)
+        let gate = TestWait.Gate(owner: self), reads = Counter()
+        defer { gate.open() }
+        fixture.git.showOperation = { _ in
+            reads.increment()
+            if reads.value == 1 { try? gate.wait() }
+            return "Historical"
+        }
+        let restore = model.restore(version, skill: fixture.skill, git: fixture.git,
+            workingDir: "/repo", store: fixture.store, library: fixture.library, notifier: {})
+        await TestWait.until(failureMessage: "Restore on A did not start") { gate.waiterCount == 1 }
+        await model.read(version, skill: fixture.skill, git: fixture.git, workingDir: "/repo", asDiff: false)
+        let message = "Nothing was restored. Another History read started before Restore finished."
+        XCTAssertEqual(model.errorMessage, message)
+        let other = Skill(name: "Other", directoryName: "other")
+        await model.load(skill: other, git: fixture.git, workingDir: "/repo")
+        XCTAssertNil(model.errorMessage, "A read retiring A's Restore must not put its message on B")
+        XCTAssertNil(fixture.library.error, "Read retirement stays in its own History tab")
+        await model.load(skill: fixture.skill, git: fixture.git, workingDir: "/repo")
+        XCTAssertEqual(model.errorMessage, message, "Returning to A retains its reason until a new Restore")
+        gate.open()
+        let restored = await restore.value
+        XCTAssertFalse(restored)
+        XCTAssertEqual(fixture.store.bodies["example"], "Current")
+        XCTAssertEqual(fixture.counter.value, 0)
     }
 
     private func assertSameVersionReadAndNewRestore() async throws {
