@@ -1,6 +1,13 @@
 import SwiftData
 
 extension AppRuntime {
+    func makeConflictResolutionModel() -> ConflictResolutionModel {
+        paths.makeConflictResolutionModel { [weak self] in
+            guard let self else { throw SyncError.syncInProgress }
+            return try self.beginConflictResolution()
+        }
+    }
+
     func makeUpdatesModel() -> UpdatesViewModel {
         UpdatesViewModel(rowLoader: updatesViewModelOperations.rowLoader,
                         applyOperation: updatesViewModelOperations.applyOperation,

@@ -31,7 +31,9 @@ final class PendingSaveTerminationTests: XCTestCase {
         XCTAssertNil(h.saves.statusMessage)
         var choices: ((Bool) -> Void)?
         var dismissed = false
-        let quit = PendingSaveTermination(present: { choices = $0; return { dismissed = true } })
+        let quit = PendingSaveTermination(present: { _, resolve in
+            choices = resolve; return .init(update: { _ in true }, dismiss: { dismissed = true })
+        })
         var replies: [Bool] = []
         let answer = PensieveAppDelegate.terminationReply(hasUnsavedChanges: false, questionOpen: false,
             confirm: { _ in XCTFail("There is no unsaved editor draft") }, reply: { replies.append($0) },
@@ -67,13 +69,14 @@ final class PendingSaveTerminationTests: XCTestCase {
             var questions: [(Bool) -> Void] = []
             var dismissals = 0
             let early = outcome == "early Wait"
-            let quit = PendingSaveTermination(delay: early ? 0.5 : 0.05) { questions.append($0); return { dismissals += 1 } }
+            let quit = PendingSaveTermination(delay: early ? 0.5 : 0.05) { _, resolve in
+                questions.append(resolve); return .init(update: { _ in true }, dismiss: { dismissals += 1 })
+            }
             var replies: [Bool] = []
             beginQuit(saves: h.saves, quit: quit, reply: { replies.append($0) })
             if early { await requestEarlyQuit(saves: h.saves, quit: quit) }
             await TestWait.until(failureMessage: "Quit did not ask about the waiting save") { !questions.isEmpty }
-            let first = try XCTUnwrap(questions.first)
-            let quitAnyway = outcome == "Quit Anyway"
+            let first = try XCTUnwrap(questions.first), quitAnyway = outcome == "Quit Anyway"
             first(quitAnyway)
             XCTAssertEqual(dismissals, 1)
             XCTAssertEqual(replies, quitAnyway ? [true] : [], "Wait must leave AppKit's quit deferred")
@@ -152,9 +155,8 @@ final class PendingSaveTerminationTests: XCTestCase {
             defer { window.close() }
             window.makeKeyAndOrderFront(nil)
             var answers: [Bool] = []
-            let present = step ? PendingSaveTermination.presentSyncStep : PendingSaveTermination.present
-            let dismiss = present { answers.append($0) }
-            defer { dismiss() }
+            let presentation = PendingSaveTermination.present(step ? .syncing : .saving) { answers.append($0) }
+            defer { presentation.dismiss() }
             let parent = try XCTUnwrap(NSApp.windows.first { $0.attachedSheet != nil })
             let sheet = try XCTUnwrap(parent.attachedSheet)
             sheet.animationBehavior = .none
@@ -176,6 +178,7 @@ final class PendingSaveTerminationTests: XCTestCase {
             await TestWait.until(failureMessage: "The native quit choice did not resolve") { !answers.isEmpty }
             XCTAssertEqual(answers, [choice == "Quit Anyway"])
             XCTAssertNil(parent.attachedSheet)
+            XCTAssertFalse(presentation.update(.savingAndSyncing), "A detached question cannot show another warning")
         }
         for choice in ["Wait", "Quit Anyway", "Close host"] {
             unrelated.orderFront(nil)

@@ -167,7 +167,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showConflictResolution, onDismiss: finishConflictResolution, content: {
             ConflictResolutionView(
-                model: runtime.paths.makeConflictResolutionModel(onResolutionStarted: runtime.beginConflictResolution),
+                model: runtime.conflictResolution,
                 library: library,
                 notifier: notifier,
                 onDismiss: { showConflictResolution = false }

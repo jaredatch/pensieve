@@ -1598,7 +1598,10 @@ extension SyncSetupModelTests {
         steps: SyncStepModel, quitAnyway: Bool, gate: TestWait.Gate, operation: Task<Void, Error>
     ) async throws {
         var choices: [(Bool) -> Void] = []
-        let quit = PendingSaveTermination(delay: 0.05, presentStep: { choices.append($0); return {} })
+        let quit = PendingSaveTermination(delay: 0.05, present: { _, resolve in
+            choices.append(resolve)
+            return .init(update: { _ in true }, dismiss: {})
+        })
         var replies: [Bool] = []
         let answer = PensieveAppDelegate.terminationReply(hasUnsavedChanges: false, questionOpen: false,
             confirm: { _ in XCTFail("No draft") }, reply: { replies.append($0) },

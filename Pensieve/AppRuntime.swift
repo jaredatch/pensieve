@@ -64,6 +64,7 @@ final class AppRuntime {
     @ObservationIgnored private var openMainWindowAction: (() -> Void)?
     @ObservationIgnored private(set) lazy var viewChanges = makeViewChangesModel()
     @ObservationIgnored private(set) lazy var updates = makeUpdatesModel()
+    @ObservationIgnored private(set) lazy var conflictResolution = makeConflictResolutionModel()
     @ObservationIgnored private(set) lazy var upstreamHistory = paths.makeUpstreamHistoryViewModel()
     @ObservationIgnored
     private(set) lazy var bootstrapTask: Task<Void, Never> = {

@@ -57,6 +57,58 @@ extension ConflictResolutionModelTests {
         }
     }
 
+    func testReopenedRuntimeConflictSheetJoinsHeldLoad() async throws {
+        let fixture = try NativeTestWork.run {
+            try SyncConflictByteFixture(name: "reopen.txt", this: Data("this\n".utf8), other: Data("other\n".utf8))
+        }
+        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+        let block = try GitBlockingFixture()
+        defer { block.release(); try? block.cleanup() }
+        // Git's SSH transport executes a local upload-pack, so the production runtime and engine
+        // inspect the real repository without either a network connection or a model injection seam.
+        let ssh = fixture.root + "/local-ssh"
+        try fixture.files.writeExecutableFile(at: ssh, content: """
+            #!/bin/bash
+            '\(block.root)/git' >/dev/null || exit 1
+            exec /usr/bin/git-upload-pack '\(fixture.remote)'
+            """ + "\n")
+        try NativeTestWork.run {
+            try fixture.git.setRemote("ssh://fixture.invalid/library", at: fixture.storeB)
+            try fixture.git.runOrThrow(["config", "core.sshCommand", ssh], in: fixture.storeB)
+            try fixture.git.runOrThrow(["config", "ssh.variant", "ssh"], in: fixture.storeB)
+        }
+        let runtime = try AppRuntime(container: fixture.contextB.container,
+            scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { false }),
+            defaults: isolatedDefaults("reopened-conflict"),
+            paths: AppRuntimePaths(storeRoot: fixture.storeB, appSupportDir: fixture.root + "/runtime-support"),
+            gitUsabilityProbe: { .usable })
+        await runtime.bootstrapTask.value
+        runtime.syncModel.apply(.conflicted([fixture.path]))
+        let first = conflictHost(model: runtime.conflictResolution, container: runtime.container, runtime: runtime) {}
+        defer { first.window.close(); runtime.library.stopWatching() }
+        await TestWait.until(failureMessage: "Initial conflict inspection never reached SSH") { block.isBlocked }
+        runtime.conflictResolution.dismiss()
+        first.window.close()
+        let reopened = conflictHost(model: runtime.conflictResolution, container: runtime.container, runtime: runtime) {}
+        defer { reopened.window.close() }
+        await TestWait.until(failureMessage: "Reopened sheet did not show its held load") {
+            Self.conflictHasProgress(in: reopened.view)
+        }
+        XCTAssertEqual(runtime.paths.syncSteps.pendingCount, 1, "Reopening joins the original inspection")
+        block.release()
+        await runtime.paths.syncSteps.waitUntilIdle()
+        let groups = try readyGroups(from: runtime.conflictResolution.phase)
+        XCTAssertEqual(groups.flatMap(\.items).map(\.path), [fixture.path])
+        await TestWait.until(failureMessage: "Reopened sheet never rendered the original load's choices") {
+            RenderedViewTestSupport.values(in: reopened.view).compactMap { $0 as? Text }
+                .flatMap(RenderedViewTestSupport.strings).contains("Keep This Mac")
+        }
+        try NativeTestWork.run {
+            XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
+            XCTAssertTrue(try fixture.git.isWorktreeClean(at: fixture.storeB))
+        }
+    }
+
     func testHeldApplyRendersButtonProgressDisablesCancelAndPreservesSelectedBytes() async throws {
         let cases: [(name: String, bytes: (this: Data?, other: Data?))] = [
             ("text.txt", (Data("this text\n".utf8), Data("other text\n".utf8))),
@@ -122,7 +174,10 @@ extension ConflictResolutionModelTests {
                 XCTAssertEqual(steps.pendingCount, 1, "Quit registration must precede task scheduling")
                 await TestWait.until(failureMessage: "Conflict work did not block") { block.isBlocked }
                 var question: ((Bool) -> Void)?
-                let quit = PendingSaveTermination(delay: 0.02, presentStep: { question = $0; return {} })
+                let quit = PendingSaveTermination(delay: 0.02, present: { _, resolve in
+                    question = resolve
+                    return .init(update: { _ in true }, dismiss: {})
+                })
                 var answers: [Bool] = []
                 let reply = PensieveAppDelegate.terminationReply(hasUnsavedChanges: false, questionOpen: false,
                     confirm: { _ in XCTFail("No draft") }, reply: { answers.append($0) },

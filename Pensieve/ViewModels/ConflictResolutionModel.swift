@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-/// Sheet state; native jobs own git, SwiftData and completion after dismissal.
+/// Process-owned conflict work; a reopened sheet joins an inspection still running after dismissal.
 @MainActor
 @Observable
 final class ConflictResolutionModel {
@@ -65,8 +65,8 @@ final class ConflictResolutionModel {
     }
 
     func load(container: ModelContainer) {
-        guard task == nil else { return }
         isPresented = true
+        guard task == nil else { return }
         presentation = UUID()
         phase = .loading
         selectionError = nil
@@ -82,7 +82,6 @@ final class ConflictResolutionModel {
     func dismiss() {
         guard canCancel else { return }
         isPresented = false
-        presentation = UUID()
     }
 
     private func inspect(container: ModelContainer, presentation: UUID) async {

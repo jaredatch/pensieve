@@ -153,12 +153,28 @@ final class SkillHistoryAsyncTests: XCTestCase {
             gate.open()
             let restored = await restore.value
             XCTAssertFalse(restored, invalidation)
-            if invalidation != "selection", invalidation != "close" {
-                XCTAssertEqual(model.errorMessage,
-                    SkillHistoryTabPresentation.changedRestoreMessage, invalidation)
+            let message: String
+            switch invalidation {
+            case "selection": message = "Nothing was restored. You selected another skill before Restore finished."
+            case "close": message = "Nothing was restored. History was closed before Restore finished."
+            default: message = SkillHistoryTabPresentation.changedRestoreMessage
+            }
+            XCTAssertEqual(model.errorMessage, message, invalidation)
+            if invalidation == "selection" || invalidation == "close" {
+                XCTAssertEqual(fixture.library.error, message, "Leaving History must report outside the departed view")
             }
             XCTAssertEqual(fixture.store.bodies["example"], bodyBeforeRelease, invalidation)
             XCTAssertEqual(fixture.counter.value, 0, invalidation)
+            if invalidation == "selection" || invalidation == "close" {
+                fixture.git.showOperation = { _ in "Historical" }
+                let reopened = SkillHistoryTabPresentation()
+                await reopened.load(skill: fixture.skill, git: fixture.git, workingDir: "/repo")
+                let fresh = reopened.restore(version, skill: fixture.skill, git: fixture.git, workingDir: "/repo",
+                    store: fixture.store, library: fixture.library, notifier: {})
+                XCTAssertNil(fixture.library.error, "A new Restore clears its earlier departure warning")
+                let restored = await fresh.value
+                XCTAssertTrue(restored, invalidation)
+            }
         }
         try await assertMissingSkillRefusesRestoreBeforeReading()
         try await assertLaterReadExplainsRetiredRestore()

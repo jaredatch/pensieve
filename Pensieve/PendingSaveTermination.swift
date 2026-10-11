@@ -1,39 +1,58 @@
 import AppKit
+import Observation
 
 /// Holds AppKit's deferred quit while manifest saves and sync writes finish.
 @MainActor
 final class PendingSaveTermination {
+    enum Question: Equatable {
+        case saving, syncing, savingAndSyncing
+
+        var message: String {
+            switch self {
+            case .saving: return "Pensieve is still saving a change."
+            case .syncing: return "Pensieve is still finishing a sync step."
+            case .savingAndSyncing: return "Pensieve is still finishing a sync step and saving a change."
+            }
+        }
+
+        var detail: String {
+            switch self {
+            case .saving: return "It's waiting for sync to finish. If you quit now, the change won't be saved."
+            case .syncing: return "If you quit now, it stops partway."
+            case .savingAndSyncing: return "If you quit now, the sync step stops partway and the change won't be saved."
+            }
+        }
+    }
+
+    struct Presentation {
+        // False means the native question has closed, so this warning was not shown.
+        let update: (Question) -> Bool
+        let dismiss: () -> Void
+    }
+
     private var generation = 0
     private(set) var isWaiting = false
     private let delay: TimeInterval
-    private let presenter: (@escaping (Bool) -> Void) -> (() -> Void)
-    private let stepPresenter: (@escaping (Bool) -> Void) -> (() -> Void)
-
-    init(delay: TimeInterval = 5,
-         presentStep: @escaping (@escaping (Bool) -> Void) -> (() -> Void) = PendingSaveTermination.presentSyncStep,
-         present: @escaping (@escaping (Bool) -> Void) -> (() -> Void) = PendingSaveTermination.present) {
-        self.delay = delay
-        self.presenter = present
-        self.stepPresenter = presentStep
-    }
-    private var dismiss: (() -> Void)?
+    private let presenter: (Question, @escaping (Bool) -> Void) -> Presentation
+    private var presented: Presentation?
+    private var shownQuestion: Question?
+    private var questionID: UUID?
     private var askAgain: (() -> Void)?
     private var questionScheduled = false
+
+    init(delay: TimeInterval = 5,
+         present: @escaping (Question, @escaping (Bool) -> Void) -> Presentation = PendingSaveTermination.present) {
+        self.delay = delay
+        self.presenter = present
+    }
 
     func wait(for saves: ManifestSaveModel?, steps: SyncStepModel? = nil, reply: @escaping (Bool) -> Void) {
         isWaiting = true
         generation += 1
         let request = generation
-        Task { @MainActor in
-            while Self.hasPending(saves, steps) {
-                await steps?.waitUntilIdle()
-                await saves?.waitUntilIdle()
-            }
-            guard generation == request else { return }
-            finish(true, reply: reply)
-        }
         questionScheduled = true
         askAgain = { [weak self] in self?.showQuestion(for: saves, steps: steps, request: request, reply: reply) }
+        observePending(saves, steps, request: request, reply: reply)
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard generation == request, questionScheduled else { return }
@@ -44,30 +63,59 @@ final class PendingSaveTermination {
     /// Another Quit reopens the question for the original deferred request, without a timer after Wait.
     func requestQuestion() { askAgain?() }
 
-    private static func hasPending(_ saves: ManifestSaveModel?, _ steps: SyncStepModel?) -> Bool {
-        (saves?.pendingCount ?? 0) > 0 || (steps?.pendingCount ?? 0) > 0
+    private static func question(_ saves: ManifestSaveModel?, _ steps: SyncStepModel?) -> Question? {
+        switch ((saves?.pendingCount ?? 0) > 0, (steps?.pendingCount ?? 0) > 0) {
+        case (true, true): return .savingAndSyncing
+        case (true, false): return .saving
+        case (false, true): return .syncing
+        case (false, false): return nil
+        }
+    }
+
+    private func observePending(_ saves: ManifestSaveModel?, _ steps: SyncStepModel?, request: Int,
+                                reply: @escaping (Bool) -> Void) {
+        guard generation == request else { return }
+        let question = withObservationTracking {
+            Self.question(saves, steps)
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.observePending(saves, steps, request: request, reply: reply) }
+        }
+        guard let question else { finish(true, reply: reply); return }
+        updateQuestion(question)
+    }
+
+    private func updateQuestion(_ question: Question) {
+        guard questionID != nil, shownQuestion != question else { return }
+        if presented?.update(question) == true { shownQuestion = question }
     }
 
     private func showQuestion(for saves: ManifestSaveModel?, steps: SyncStepModel?, request: Int,
                               reply: @escaping (Bool) -> Void) {
-        guard generation == request, Self.hasPending(saves, steps), dismiss == nil else { return }
+        guard generation == request, let question = Self.question(saves, steps), questionID == nil else { return }
         questionScheduled = false
-        var answered = false
-        let present: (@escaping (Bool) -> Void) -> (() -> Void)
-        if (saves?.pendingCount ?? 0) > 0 && (steps?.pendingCount ?? 0) > 0 {
-            present = Self.presentSaveAndSyncStep
-        } else {
-            present = (steps?.pendingCount ?? 0) > 0 ? stepPresenter : presenter
-        }
-        dismiss = present { [weak self] quitAnyway in
-            guard let self, self.generation == request, !answered else { return }
-            answered = true
-            if quitAnyway { self.finish(true, reply: reply) } else {
-                let close = self.dismiss
-                self.dismiss = nil
-                close?()
+        let id = UUID()
+        questionID = id
+        shownQuestion = question
+        let presentation = presenter(question) { [weak self] quitAnyway in
+            guard let self, self.generation == request, self.questionID == id else { return }
+            // A native button can be invoked before Observation's queued update. Require consent
+            // to the current warning instead of accepting an answer to stale pending work.
+            if quitAnyway, let current = Self.question(saves, steps), current != self.shownQuestion {
+                self.dismissQuestion()
+                self.showQuestion(for: saves, steps: steps, request: request, reply: reply)
+                return
             }
+            if quitAnyway { self.finish(true, reply: reply) } else { self.dismissQuestion() }
         }
+        if generation == request, questionID == id { presented = presentation } else { presentation.dismiss() }
+    }
+
+    private func dismissQuestion() {
+        questionID = nil
+        shownQuestion = nil
+        let close = presented?.dismiss
+        presented = nil
+        close?()
     }
 
     private func finish(_ quit: Bool, reply: (Bool) -> Void) {
@@ -75,32 +123,14 @@ final class PendingSaveTermination {
         isWaiting = false
         askAgain = nil
         questionScheduled = false
-        let close = dismiss
-        dismiss = nil
-        close?()
+        dismissQuestion()
         reply(quit)
     }
 
-    static func present(_ resolve: @escaping (Bool) -> Void) -> (() -> Void) {
-        present(message: "Pensieve is still saving a change.",
-                detail: "It's waiting for sync to finish. If you quit now, the change won't be saved.", resolve: resolve)
-    }
-
-    static func presentSyncStep(_ resolve: @escaping (Bool) -> Void) -> (() -> Void) {
-        present(message: "Pensieve is still finishing a sync step.",
-                detail: "If you quit now, it stops partway.", resolve: resolve)
-    }
-
-    private static func presentSaveAndSyncStep(_ resolve: @escaping (Bool) -> Void) -> (() -> Void) {
-        present(message: "Pensieve is still finishing a sync step and saving a change.",
-                detail: "If you quit now, the sync step stops partway and the change won't be saved.", resolve: resolve)
-    }
-
-    private static func present(message: String, detail: String,
-                                resolve: @escaping (Bool) -> Void) -> (() -> Void) {
+    static func present(_ question: Question, resolve: @escaping (Bool) -> Void) -> Presentation {
         let alert = NSAlert()
-        alert.messageText = message
-        alert.informativeText = detail
+        alert.messageText = question.message
+        alert.informativeText = question.detail
         NSApp.activate(ignoringOtherApps: true)
         alert.addButton(withTitle: "Wait")
         alert.addButton(withTitle: "Quit Anyway")
@@ -125,10 +155,16 @@ final class PendingSaveTermination {
                 resolve(response == .alertSecondButtonReturn)
             }
         }
-        return {
+        return Presentation(update: { question in
+            guard alert.window.sheetParent != nil else { return false }
+            alert.messageText = question.message
+            alert.informativeText = question.detail
+            alert.layout()
+            return true
+        }, dismiss: {
             host.endSheet(alert.window)
             alert.window.orderOut(nil)
             if temporary { host.close() }
-        }
+        })
     }
 }

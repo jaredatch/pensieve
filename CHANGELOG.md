@@ -38,6 +38,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Reopening sync conflicts while they load now shows the ongoing load and its result.
 - Connecting to a sync remote now tells you when Pensieve uses a fallback branch, and which branch it chose.
 - Launch and skill history keep the window responsive while Git runs. History shows progress while loading, comparing, or restoring a version, and a delayed Restore leaves newer edits alone.
 
