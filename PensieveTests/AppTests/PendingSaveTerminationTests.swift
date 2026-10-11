@@ -136,7 +136,6 @@ final class PendingSaveTerminationTests: XCTestCase {
     }
 
     func testNativeQuitQuestionButtonsAndHostClosureResolve() async throws {
-        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
         let unrelated = NSWindow(contentRect: NSRect(x: 20, y: 20, width: 300, height: 150),
             styleMask: [.titled], backing: .buffered, defer: false)
         unrelated.isReleasedWhenClosed = false
@@ -162,9 +161,9 @@ final class PendingSaveTerminationTests: XCTestCase {
             sheet.animationBehavior = .none
             await TestWait.until(failureMessage: "The native quit question never rendered its controls") {
                 sheet.contentView?.layoutSubtreeIfNeeded()
-                return sheet.contentView.map { views($0).compactMap { $0 as? NSButton }.count == 2 } ?? false
+                return sheet.contentView.map { Self.views($0).compactMap { $0 as? NSButton }.count == 2 } ?? false
             }
-            let rendered = views(try XCTUnwrap(sheet.contentView))
+            let rendered = Self.views(try XCTUnwrap(sheet.contentView))
             let strings = rendered.compactMap { ($0 as? NSTextField)?.stringValue }
             XCTAssertTrue(strings.contains(step ? "Pensieve is still finishing a sync step."
                 : "Pensieve is still saving a change."))
@@ -188,7 +187,6 @@ final class PendingSaveTerminationTests: XCTestCase {
     }
 
     private func assertBothPendingQuestion(choice: String, stray: NSWindow) async throws {
-        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
@@ -198,11 +196,7 @@ final class PendingSaveTerminationTests: XCTestCase {
         let step = steps.begin()
         defer { steps.finish(step) }
         let restoreWindows = isolateQuestionHost(stray)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
-                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.animationBehavior = .none
-        defer { window.close(); restoreWindows() }
+        defer { restoreWindows() }
         XCTAssertEqual(NSApp.windows.filter(\.isVisible), [stray])
         let quit = PendingSaveTermination(delay: 0)
         var answers: [Bool] = []
@@ -216,9 +210,9 @@ final class PendingSaveTerminationTests: XCTestCase {
         sheet.animationBehavior = .none
         await TestWait.until(failureMessage: "The combined quit question never rendered its controls") {
             sheet.contentView?.layoutSubtreeIfNeeded()
-            return sheet.contentView.map { views($0).compactMap { $0 as? NSButton }.count == 2 } ?? false
+            return sheet.contentView.map { Self.views($0).compactMap { $0 as? NSButton }.count == 2 } ?? false
         }
-        let rendered = views(try XCTUnwrap(sheet.contentView))
+        let rendered = Self.views(try XCTUnwrap(sheet.contentView))
         let strings = rendered.compactMap { ($0 as? NSTextField)?.stringValue }
         XCTAssertTrue(strings.contains("Pensieve is still finishing a sync step and saving a change."))
         XCTAssertTrue(strings.contains("If you quit now, the sync step stops partway and the change won't be saved."))
@@ -238,6 +232,8 @@ final class PendingSaveTerminationTests: XCTestCase {
         await h.saves.waitUntilIdle()
         await TestWait.until(failureMessage: "The combined deferred quit did not finish") { answers == [true] }
     }
+
+    static func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
 
     private func isolateQuestionHost(_ stray: NSWindow) -> () -> Void {
         let previousWindows = NSApp.windows.filter { $0.isVisible && $0 !== stray }

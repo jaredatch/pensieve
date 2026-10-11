@@ -70,6 +70,18 @@ final class ManifestRefusedEdit {
         }
     }
 
+    /// Deleting an unsaved category consumes its refused create or rename instead of retrying it.
+    func applyCategoryDeletion(for edit: ManifestRefusedEdit, to snapshot: inout ManifestSnapshot) -> Bool {
+        guard case .deleteCategory = edit.original, suppliesTarget(for: edit) else { return false }
+        switch original {
+        case .createCategory: return true
+        case .renameCategory(let old, _):
+            ManifestChange.deleteCategory(old).apply(to: &snapshot)
+            return true
+        default: return false
+        }
+    }
+
     func suppliesCategory(in durable: ManifestSnapshot) -> UUID? {
         switch original {
         case .createCategory: return categoryID

@@ -58,7 +58,6 @@ extension PendingSaveTerminationTests {
     }
 
     private static func shows(_ question: PendingSaveTermination.Question, in sheet: NSWindow) -> Bool {
-        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
         sheet.contentView?.layoutSubtreeIfNeeded()
         let strings = sheet.contentView.map { views($0).compactMap { ($0 as? NSTextField)?.stringValue } } ?? []
         switch question {

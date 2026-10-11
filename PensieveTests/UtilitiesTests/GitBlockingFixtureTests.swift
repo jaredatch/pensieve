@@ -4,22 +4,24 @@ import XCTest
 
 @MainActor
 final class GitBlockingFixtureTests: XCTestCase {
-    func testAbandonedFakeGitExpiresWithinTwoMinutesWithoutCleanup() async throws {
+    func testAbandonedFakeGitWaitsForShortLifetimeThenExpiresWithoutCleanup() async throws {
         var fixture: GitBlockingFixture? = try GitBlockingFixture(lifetime: 2)
         let root = try XCTUnwrap(fixture).root
         let process = makeProcess(try XCTUnwrap(fixture))
         let exits = UpdateReviewRecorder<ContinuousClock.Instant>()
         process.terminationHandler = { _ in exits.append(.now) }
-        let started = ContinuousClock.now
         try process.run()
         defer { stop(process); try? FileService().deleteDirectory(at: root) }
         fixture = nil
-        let remaining = max(Duration.zero, started.advanced(by: .seconds(5)) - .now)
-        await TestWait.until(timeout: remaining, // upper-bound: Launch and expiry share one five-second deadline.
+        await TestWait.until(failureMessage: "Fake git never announced readiness") {
+            FileService().fileExists(at: root + "/ready")
+        }
+        let ready = ContinuousClock.now
+        await TestWait.until(timeout: .seconds(5), // upper-bound: Bound expiry after readiness, excluding process launch.
                              failureMessage: "Abandoned fake git ignored its short lifetime") {
             !process.isRunning && !exits.values.isEmpty
         }
-        let elapsed = try XCTUnwrap(exits.values.first) - started
+        let elapsed = try XCTUnwrap(exits.values.first) - ready
         // Bash's whole-second SECONDS allows a two-second lifetime to end after about one second.
         XCTAssertGreaterThanOrEqual(elapsed, .seconds(1), "Fake git must wait out its lifetime before expiring")
         XCTAssertLessThan(elapsed, .seconds(5))
