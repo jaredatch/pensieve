@@ -12,6 +12,18 @@ enum ManifestChange {
     case deleteSkill(String)
     case retireSkill(String)
 
+    /// Creates and retirement have no required target; a deletion can be an absent-target no-op.
+    func hasTarget(in snapshot: ManifestSnapshot) -> Bool {
+        switch self {
+        case .renameCategory(let name, _), .deleteCategory(let name),
+             .categoryProject(let name, _, _), .categorySkill(let name, _, _):
+            return snapshot.categories.contains { $0.name == name }
+        case .skillMetadata(let slug, _, _), .deleteSkill(let slug):
+            return snapshot.skills.contains { $0.slug == slug }
+        case .createCategory, .createSkill, .retireSkill: return true
+        }
+    }
+
     /// False means the target is absent from this snapshot. Deletions remain idempotent.
     @discardableResult
     func apply(to snapshot: inout ManifestSnapshot) -> Bool {

@@ -81,7 +81,10 @@ final class ManifestSaveModel {
             let lock = try await takeLock()
             defer { lock.release() }
             disk = try await readCurrentManifest()
-            if let disk { item.presentation.remember(durable: disk) }
+            if let disk {
+                item.presentation.remember(durable: disk)
+                refreshRefused(durable: disk)
+            }
             let result = try await publish(item, disk: disk)
             await rebuild(item, durable: result.snapshot)
             return result.published
@@ -100,25 +103,19 @@ final class ManifestSaveModel {
     private func publish(_ item: Item, disk: ManifestSnapshot?) async throws
         -> (snapshot: ManifestSnapshot, published: Bool) {
         var saved = try disk ?? item.fallback()
-        if disk != nil, case .deleteCategory(let name) = item.change,
-           !saved.categories.contains(where: { $0.name == name }),
-           refused.contains(where: { $0.suppliesTarget(for: item.presentation) }) {
-            throw ManifestSaveError.unsavedTarget
-        }
-        let applied = disk == nil || item.change.apply(to: &saved)
-        if applied {
-            let snapshot = saved, manifest = manifest, root = root
-            try await BlockingWork.run { try manifest.write(snapshot, toRoot: root) }
-            if let disk { for edit in refused { edit.rememberLocalWrite(before: disk, after: saved) } }
-        } else {
-            var probe = saved
-            projectRefused(durable: saved, onto: &probe)
+        if disk != nil, !item.change.hasTarget(in: saved) {
             if refused.contains(where: { $0.suppliesTarget(for: item.presentation) }) {
                 throw ManifestSaveError.unsavedTarget
             }
             log("Skipped queued manifest change: its target was removed by sync.")
+            return (saved, false)
         }
-        return (saved, applied)
+        if disk != nil { item.change.apply(to: &saved) }
+        let snapshot = saved, manifest = manifest, root = root
+        try await BlockingWork.run { try manifest.write(snapshot, toRoot: root) }
+        if let disk { for edit in refused { edit.rememberLocalWrite(before: disk, after: saved) } }
+        refused = refused.filter { $0.acknowledge(durable: saved) }
+        return (saved, true)
     }
 
     @MainActor
@@ -132,7 +129,7 @@ final class ManifestSaveModel {
                     .prepare(snapshot: durable, fromRoot: root, container: container, manifest: manifest)
             }
             var displayed = prepared.snapshot
-            projectRefused(durable: durable, onto: &displayed)
+            for edit in refused { edit.project(onto: &displayed) }
             for pending in items.dropFirst() { pending.change.apply(to: &displayed) }
             try item.accept(prepared, displayed)
             item.report(nil)
@@ -156,7 +153,7 @@ final class ManifestSaveModel {
     }
 
     @MainActor
-    private func projectRefused(durable: ManifestSnapshot, onto displayed: inout ManifestSnapshot) {
+    private func refreshRefused(durable: ManifestSnapshot) {
         var locals: [ObjectIdentifier: (ManifestSnapshot?, [Category]?)] = [:]
         for edit in refused {
             let key = ObjectIdentifier(edit.context)
@@ -172,7 +169,7 @@ final class ManifestSaveModel {
             if let (local, categories) = locals[key] { edit.cache(local: local, categories: categories) }
         }
         let supplied = Set(refused.compactMap { $0.suppliesCategory(in: durable) })
-        refused = refused.filter { $0.project(durable: durable, supplied: supplied, onto: &displayed) }
+        refused = refused.filter { $0.refresh(durable: durable, supplied: supplied) }
     }
 
     @MainActor
@@ -191,7 +188,7 @@ final class ManifestSaveModel {
     func reportCategoryFailure(_ error: Error?) {
         if let error {
             if case ManifestSaveError.rebuildFailed = error {
-                log("Category manifest saved, but the local store rebuild failed: " + error.localizedDescription)
+                log(error.localizedDescription)
             } else { log("Category mutation saved, but manifest regeneration failed: " + error.localizedDescription) }
         }
     }

@@ -79,9 +79,10 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
 
     /// A lock-owning GUI writer already read and updated the manifest. Reuse its plain result,
     /// including pending local edits, rather than sampling disk again during presentation merge.
-    func rebuild(snapshot: ManifestSnapshot, fromRoot root: String, context: ModelContext) -> RebuildResult {
+    func rebuild(snapshot: ManifestSnapshot, fromRoot root: String, context: ModelContext,
+                 manifestIsAuthoritative: Bool? = nil) -> RebuildResult {
         var result = RebuildResult()
-        let manifestIsAuthoritative = manifestHasContent(root: root)
+        let manifestIsAuthoritative = manifestIsAuthoritative ?? manifestHasContent(root: root)
         let filePresentSlugs = rebuildSkills(
             root: root,
             snapshot: snapshot,
@@ -216,7 +217,7 @@ extension StoreRebuildService {
         }
     }
 
-    private func manifestHasContent(root: String) -> Bool {
+    func manifestHasContent(root: String) -> Bool {
         let manifestRoot = root + "/manifest"
         if fileService.fileExists(at: manifestRoot + "/projects.yaml") { return true }
         for directory in ["skills", "categories"] {
@@ -330,7 +331,8 @@ extension StoreRebuildService {
 extension StoreRebuildService {
     func rebuildCategories(snapshot: ManifestSnapshot,
                            context: ModelContext,
-                           result: inout RebuildResult) {
+                           result: inout RebuildResult,
+                           removingOnlyIDs: Set<UUID>? = nil) {
         let existingCategories = (try? context.fetch(FetchDescriptor<Category>())) ?? []
         var existingByName = Dictionary(existingCategories.map { ($0.name, $0) },
                                         uniquingKeysWith: { first, _ in first })
@@ -355,7 +357,7 @@ extension StoreRebuildService {
         // Delete local categories absent from the manifest. Do NOT create/delete Project rows:
         // a projectKey with no locally-registered Project simply doesn't fan out (CategoryReconciler
         // skips unresolvable keys) — no path-less phantom projects.
-        for category in existingByName.values {
+        for category in existingByName.values where removingOnlyIDs?.contains(category.id) ?? true {
             context.delete(category)
             result.categoriesRemoved += 1
         }

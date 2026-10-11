@@ -3,6 +3,64 @@ import XCTest
 @testable import Pensieve
 
 extension ManifestSaveTests {
+    func testDeletingPulledCategoryRetiresItsRefusedMembership() async throws {
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        h.recording.failingWrites = 1
+        h.categories.setSkill(h.alpha, inCategory: h.local, assigned: true, context: h.context)
+        await h.saves.waitUntilIdle()
+        let reports = h.messages.lines.count
+        var pulled = try h.manifest.read(fromRoot: h.root)
+        pulled.categories.removeAll { $0.name == "Local" }
+        try h.manifest.write(pulled, toRoot: h.root)
+        h.categories.delete(h.local, context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertFalse(try h.manifest.read(fromRoot: h.root).categories.contains { $0.name == "Local" })
+        XCTAssertFalse(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.name == "Local" })
+        let messages = h.messages.lines.dropFirst(reports)
+        XCTAssertFalse(messages.contains { $0.contains("could not be saved") || $0.contains("regeneration failed") })
+        XCTAssertTrue(messages.contains { $0.contains("removed by sync") })
+    }
+
+    func testHeldRebuildPreservesUnqueuedRowsAndNonAuthoritativeCategories() async throws {
+        for authoritative in [true, false] {
+            let h = try ManifestSaveFixture()
+            defer { h.cleanup() }
+            let completed = TestWait.Gate(owner: self)
+            defer { completed.open() }
+            h.recording.afterRebuildSnapshot = { try completed.wait() }
+            if !authoritative {
+                h.recording.afterWrite = { try? h.files.deleteDirectory(at: h.root + "/manifest") }
+            }
+            h.library.updateMetadata(h.alpha, tags: ["saved"], scope: .user, context: h.context)
+            await TestWait.until(failureMessage: "The rebuild never held its completed snapshot") { completed.waiterCount == 1 }
+            if !authoritative { XCTAssertFalse(h.files.directoryExists(at: h.root + "/manifest")) }
+            let skill = Skill(name: "Unqueued", directoryName: "unqueued")
+            let category = Pensieve.Category(name: "Unqueued")
+            let skillID = skill.id, categoryID = category.id
+            h.context.insert(skill)
+            h.context.insert(category)
+            try h.files.writeFile(at: skill.canonicalPath(skillsDirectory: h.root + "/skills"),
+                content: SkillSerializer.serialize(name: skill.name, description: "description", body: "body"))
+            try h.context.save()
+            XCTAssertEqual(h.saves.pendingCount, 1, "These inserted rows submit no manifest change")
+            if !authoritative {
+                h.local.name = "Unpublished"
+                try h.context.save()
+            }
+            completed.open()
+            await h.saves.waitUntilIdle()
+            XCTAssertTrue(try h.context.fetch(FetchDescriptor<Skill>()).contains { $0.id == skillID },
+                "Acceptance must not delete a row that the scan never fetched")
+            let categories = try h.context.fetch(FetchDescriptor<Pensieve.Category>())
+            XCTAssertTrue(categories.contains { $0.id == categoryID })
+            if !authoritative {
+                XCTAssertEqual(h.local.name, "Unpublished")
+                XCTAssertFalse(categories.contains { $0.name == "Local" }, "A non-authoritative scan cannot reconcile categories")
+            }
+        }
+    }
+
     func testHeldRebuildKeepsMainActorRunningAndNewerEditsWin() async throws {
         for firstEdit in ["category", "metadata"] {
             let files = RebuildReadFileService()
@@ -113,6 +171,14 @@ extension ManifestSaveTests {
         await h.saves.waitUntilIdle()
         XCTAssertNil(h.library.error)
         XCTAssertEqual(h.alpha.tags, ["recovered"])
+        let reports = h.messages.lines.count
+        h.recording.failingRebuildSnapshots = 1
+        h.categories.rename(h.local, to: "Saved", context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(h.messages.lines.count, reports + 1)
+        let message = try XCTUnwrap(h.messages.lines.last)
+        XCTAssertEqual(message.components(separatedBy: "rebuild").count - 1, 1, message)
+        XCTAssertTrue(message.contains(CocoaError(.fileReadCorruptFile).localizedDescription))
     }
 
     func testDeletingRefusedRenamePublishesOriginalRemovalOrReportsRefusal() async throws {

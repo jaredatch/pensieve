@@ -79,20 +79,28 @@ final class ManifestRefusedEdit {
         }
     }
 
-    func project(durable: ManifestSnapshot, supplied: Set<UUID>, onto displayed: inout ManifestSnapshot) -> Bool {
+    func refresh(durable: ManifestSnapshot, supplied: Set<UUID>) -> Bool {
         guard hasTarget(in: durable, supplied: supplied) else { return false }
         if fields == nil { fields = retirementFields(durable: durable) }
+        return acknowledge(durable: durable)
+    }
+
+    /// Publication can acknowledge cached fields without another main-context read.
+    func acknowledge(durable: ManifestSnapshot) -> Bool {
         var remaining: [Field] = []
         for field in fields ?? [] {
             var probe = durable
             project(field, onto: &probe)
             if probe != durable {
                 remaining.append(field)
-                project(field, onto: &displayed)
             }
         }
         fields = remaining
         return !remaining.isEmpty
+    }
+
+    func project(onto displayed: inout ManifestSnapshot) {
+        for field in fields ?? [] { project(field, onto: &displayed) }
     }
 
     private func hasTarget(in durable: ManifestSnapshot, supplied: Set<UUID>) -> Bool {

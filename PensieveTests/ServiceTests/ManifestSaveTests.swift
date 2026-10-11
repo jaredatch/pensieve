@@ -257,6 +257,14 @@ extension ManifestSaveTests {
         await h.saves.waitUntilIdle()
         XCTAssertEqual(h.alpha.scope, .project, "An acknowledged field must accept a later pull")
         XCTAssertEqual(h.alpha.tags, ["kept"], "The still-refused field must remain local")
+        h.library.updateMetadata(h.alpha, tags: ["acknowledged"], scope: .project, context: h.context)
+        await h.saves.waitUntilIdle()
+        laterPull = try h.manifest.read(fromRoot: h.root)
+        laterPull.skills[0].tags = ["pulled-after-ack"]
+        try h.manifest.write(laterPull, toRoot: h.root)
+        h.categories.rename(other, to: "Saved Finally", context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(h.alpha.tags, ["pulled-after-ack"], "A successful write must retire its refused field before a later pull")
     }
 
     private func checkPresentationReadFailureAfterDurableWrite() async throws {

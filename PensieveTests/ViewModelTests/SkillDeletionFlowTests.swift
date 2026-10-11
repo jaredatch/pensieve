@@ -129,8 +129,10 @@ final class SkillDeletionFlowTests: XCTestCase {
     }
 
     func testDeleteWarnsWhenFinalManifestWriteFails() async throws {
-        for laterFails in [false, true] {
-            let f = try fixture(); f.manifest.failingWrites = [1, 2]
+        for (laterFails, rebuildFails) in [(false, false), (true, false), (false, true), (true, true)] {
+            let f = try fixture()
+            f.manifest.failingWrites = rebuildFails ? [] : [1, 2]
+            f.manifest.failingRebuildSnapshots = rebuildFails ? 2 : 0
             let lock = try XCTUnwrap(SyncLock.tryAcquire(at: f.library.manifestSaves!.lockPath))
             defer { lock.release() }
             XCTAssertTrue(SkillDeletionFlow.delete(skill: f.skill, library: f.library,
@@ -152,19 +154,21 @@ final class SkillDeletionFlowTests: XCTestCase {
             await f.library.manifestSaves?.waitUntilIdle()
             if laterFails { XCTAssertTrue(f.library.error?.contains("manifest") == true) }
             XCTAssertEqual(f.counter.value, laterFails ? 1 : 2)
-            assertManifestDeletionWarning(f.library, laterFails: laterFails)
+            assertManifestDeletionWarning(f.library, laterFails: laterFails, rebuildFails: rebuildFails)
             f.manifest.failingWrites = []
             f.library.regenerateManifest(.deleteSkill("other"), context: f.context)
             await f.library.manifestSaves?.waitUntilIdle()
-            assertManifestDeletionWarning(f.library, laterFails: laterFails)
+            assertManifestDeletionWarning(f.library, laterFails: laterFails, rebuildFails: rebuildFails)
         }
     }
 
-    private func assertManifestDeletionWarning(_ library: SkillLibraryViewModel, laterFails: Bool,
+    private func assertManifestDeletionWarning(_ library: SkillLibraryViewModel, laterFails: Bool, rebuildFails: Bool,
                                                file: StaticString = #filePath, line: UInt = #line) {
         let message = library.deletionNotice?.message ?? ""
-        XCTAssertTrue(message.contains("sync manifest couldn't be updated"), "later fails: \(laterFails)", file: file, line: line)
-        XCTAssertEqual(library.deletionNotice?.title, "Couldn't delete skill", file: file, line: line)
+        let detail = rebuildFails ? "rebuilding the local store failed" : "sync manifest couldn't be updated"
+        XCTAssertTrue(message.contains(detail), "later fails: \(laterFails)", file: file, line: line)
+        let title = rebuildFails ? "Skill deleted, but the library didn't refresh" : "Skill deleted, but sync wasn't updated"
+        XCTAssertEqual(library.deletionNotice?.title, title, file: file, line: line)
         XCTAssertTrue(message.contains("Alpha"), message, file: file, line: line)
         XCTAssertFalse(message.contains("Beta"), message, file: file, line: line)
     }

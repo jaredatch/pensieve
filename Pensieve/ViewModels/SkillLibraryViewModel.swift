@@ -16,13 +16,13 @@ final class SkillLibraryViewModel {
     }
 
     enum DeletionNotice: Equatable {
-        case failed(String)
+        case failed(String, title: String = "Couldn't delete skill")
         case pending(String)
         case warning(String)
 
         var title: String {
             switch self {
-            case .failed: "Couldn't delete skill"
+            case .failed(_, let title): title
             case .pending: "Skill files removed; library cleanup pending"
             case .warning: "Skill deleted with a warning"
             }
@@ -30,7 +30,7 @@ final class SkillLibraryViewModel {
 
         var message: String {
             switch self {
-            case let .failed(message), let .pending(message), let .warning(message): message
+            case .failed(let message, _), .pending(let message), .warning(let message): message
             }
         }
     }
@@ -264,11 +264,16 @@ extension SkillLibraryViewModel {
         regenerateManifest(.deleteSkill(slug), context: context) { [weak self] failure in
             guard let self, let failure else { return }
             let detail: String
+            let title: String
             if case ManifestSaveError.rebuildFailed = failure {
                 detail = failure.localizedDescription
-            } else { detail = "The sync manifest couldn't be updated: " + failure.localizedDescription }
+                title = "Skill deleted, but the library didn't refresh"
+            } else {
+                detail = "The sync manifest couldn't be updated: " + failure.localizedDescription
+                title = "Skill deleted, but sync wasn't updated"
+            }
             let notice = presentation.notice?.message ?? "Deleted “\(name)”."
-            self.deletionNotice = .failed(notice + " " + detail)
+            self.deletionNotice = .failed(notice + " " + detail, title: title)
         }
         return .deleted
     }

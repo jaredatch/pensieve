@@ -111,7 +111,7 @@ final class WaitingRemovalSkillFailureTests: XCTestCase {
                 projects: [h.base.project, h.base.otherProject], context: h.base.context))
             await library.manifestSaves?.waitUntilIdle()
             XCTAssertTrue(library.error?.contains("manifest") == true)
-            XCTAssertEqual(library.deletionNotice?.title, "Couldn't delete skill")
+            XCTAssertEqual(library.deletionNotice?.title, "Skill deleted, but sync wasn't updated")
             let message = try XCTUnwrap(library.deletionNotice?.message)
             XCTAssertTrue(message.hasPrefix("Deleted “\(h.base.skill.name)”."), "clearNotice=\(clearNotice)")
             if !clearNotice {

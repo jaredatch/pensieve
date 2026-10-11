@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 
 /// Value-only output from a save's native rebuild. Its context never saves into the shared store:
@@ -10,6 +11,9 @@ struct PreparedStoreRebuild {
     }
     var snapshot: ManifestSnapshot
     let skills: [SkillIdentity]
+    let scannedSkillIDs: Set<UUID>
+    let scannedCategoryIDs: Set<UUID>
+    let manifestIsAuthoritative: Bool
 }
 
 extension StoreRebuildService {
@@ -17,13 +21,16 @@ extension StoreRebuildService {
                  manifest: ManifestSnapshotting) throws -> PreparedStoreRebuild {
         let context = ModelContext(container)
         context.autosaveEnabled = false
+        let skillIDs = Set(try context.fetch(FetchDescriptor<Skill>()).map(\.id))
+        let categoryIDs = Set(try context.fetch(FetchDescriptor<Category>()).map(\.id))
+        let authoritative = manifestHasContent(root: root)
         // Reuse the convergent rebuild without committing its potentially superseded projection.
         let preview = StoreRebuildService(fileService: fileService, manifestService: manifest, save: { _ in })
-        _ = preview.rebuild(snapshot: snapshot, fromRoot: root, context: context)
+        _ = preview.rebuild(snapshot: snapshot, fromRoot: root, context: context, manifestIsAuthoritative: authoritative)
         return PreparedStoreRebuild(snapshot: try manifest.snapshot(from: context),
             skills: try context.fetch(FetchDescriptor<Skill>()).map {
                 PreparedStoreRebuild.SkillIdentity(slug: $0.directoryName, name: $0.name, description: $0.skillDescription)
-            })
+            }, scannedSkillIDs: skillIDs, scannedCategoryIDs: categoryIDs, manifestIsAuthoritative: authoritative)
     }
 
     /// No filesystem work here. Preserve row identity and volatile caches while accepting resolved
@@ -40,8 +47,12 @@ extension StoreRebuildService {
             upsertSkill(slug: overlay.slug, parsed: parsed, overlay: overlay,
                 existing: bySlug[overlay.slug], context: context, result: &result)
         }
-        for row in existing where !slugs.contains(row.directoryName) { context.delete(row) }
-        rebuildCategories(snapshot: snapshot, context: context, result: &result)
+        for row in existing where prepared.scannedSkillIDs.contains(row.id) && !slugs.contains(row.directoryName) {
+            context.delete(row)
+        }
+        if prepared.manifestIsAuthoritative {
+            rebuildCategories(snapshot: snapshot, context: context, result: &result, removingOnlyIDs: prepared.scannedCategoryIDs)
+        }
         rebuildDeployIntents(snapshot: snapshot, context: context, result: &result)
         try save(context)
     }
