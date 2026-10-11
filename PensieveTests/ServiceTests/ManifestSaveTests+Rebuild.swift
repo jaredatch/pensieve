@@ -23,7 +23,7 @@ extension ManifestSaveTests {
         }
     }
 
-    func testFallbackKeepsUncomputedRefusedRetirement() async throws {
+    func testFallbackHealAcknowledgesRetirementAndShowsLaterPull() async throws {
         for corrupt in [false, true] {
             let h = try ManifestSaveFixture()
             defer { h.cleanup() }
@@ -45,14 +45,17 @@ extension ManifestSaveTests {
             h.library.updateMetadata(h.beta, tags: ["healed"], scope: .user, context: h.context)
             await h.saves.waitUntilIdle()
             XCTAssertNil(h.library.error)
+            let healed = try h.manifest.read(fromRoot: h.root)
+            XCTAssertFalse(healed.categories.contains { $0.skillSlugs.contains("alpha") })
+            XCTAssertFalse(healed.deployIntents.contains { $0.skillSlug == "alpha" })
             try h.manifest.write(pulled, toRoot: h.root)
             h.library.updateMetadata(h.beta, tags: ["after-pull"], scope: .user, context: h.context)
             await h.saves.waitUntilIdle()
             let durable = try h.manifest.read(fromRoot: h.root)
             XCTAssertTrue(durable.categories.contains { $0.name == "Local" && $0.skillSlugs.contains("alpha") })
             XCTAssertTrue(durable.deployIntents.contains { $0.skillSlug == "alpha" })
-            XCTAssertFalse(h.local.skillSlugs.contains("alpha"), "An uncomputed refusal must survive fallback acknowledgement")
-            XCTAssertFalse(try h.context.fetch(FetchDescriptor<MachineDeployIntent>()).contains { $0.skillSlug == "alpha" })
+            XCTAssertTrue(h.local.skillSlugs.contains("alpha"), "A healed retirement must not hide a later pull")
+            XCTAssertTrue(try h.context.fetch(FetchDescriptor<MachineDeployIntent>()).contains { $0.skillSlug == "alpha" })
         }
     }
 
