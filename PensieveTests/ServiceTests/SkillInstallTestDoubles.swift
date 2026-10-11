@@ -171,21 +171,23 @@ final class CrashManifest: ManifestReadWriting {
 
 extension SkillInstallServiceTests {
     func testCopyFileDoesNotUseASeparateRegularFilePathCheck() throws {
-        let source = tempDir + "/swap-source"
-        let target = tempDir + "/swap-target"
-        let destination = tempDir + "/swap-destination"
-        try fileService.writeFile(at: source, content: "source bytes")
-        try fileService.writeFile(at: target, content: "target bytes")
-        let swapping = SwapSourceOnRegularCheckFileService(
-            wrapped: fileService,
-            source: source,
-            symlinkTarget: target
-        )
+        try NativeTestWork.run { [self] in
+            let source = tempDir + "/swap-source"
+            let target = tempDir + "/swap-target"
+            let destination = tempDir + "/swap-destination"
+            try fileService.writeFile(at: source, content: "source bytes")
+            try fileService.writeFile(at: target, content: "target bytes")
+            let swapping = SwapSourceOnRegularCheckFileService(
+                wrapped: fileService,
+                source: source,
+                symlinkTarget: target
+            )
 
-        try swapping.copyFile(at: source, to: destination)
+            try swapping.copyFile(at: source, to: destination)
 
-        XCTAssertEqual(swapping.sourceRegularChecks, 0)
-        XCTAssertFalse(fileService.isSymlink(at: destination))
-        XCTAssertEqual(try fileService.readFile(at: destination), "source bytes")
+            XCTAssertEqual(swapping.sourceRegularChecks, 0)
+            XCTAssertFalse(fileService.isSymlink(at: destination))
+            XCTAssertEqual(try fileService.readFile(at: destination), "source bytes")
+        }
     }
 }

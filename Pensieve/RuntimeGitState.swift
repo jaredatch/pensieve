@@ -33,7 +33,7 @@ final class RuntimeGitState {
     func accept(_ value: GitUsability, order: Int, model: SyncModel) -> Change? {
         guard order > appliedEvidenceOrder else { return nil }
         appliedEvidenceOrder = order
-        let recovered = usability != nil && usability != .usable && value == .usable
+        let recovered = usability != .usable && value == .usable
         let wasUnavailable = model.configurationError != nil
         usability = value
         model.gitUsabilityDidChange(wasUnavailable: wasUnavailable, recovered: recovered)
@@ -41,29 +41,34 @@ final class RuntimeGitState {
     }
 
     func refresh(probingGit: Bool, model: SyncModel) async -> Change? {
-        let evidence = probingGit ? beginEvidence() : nil
         let configuration = model.beginConfiguration()
         let cached = usability
-        let probe = probe
         let read = model.configurationRead()
-        let (observed, remote) = await BlockingWork.task(priority: .utility) {
-            () -> (GitUsability?, Result<SyncModel.Configuration, Error>?) in
-            do {
-                let observed = probingGit ? try probe() : nil
-                let remote = (observed ?? cached) == .usable ? read() : nil
-                return (observed, remote)
-            } catch {
-                // A failed probe supplies no host evidence. Only known unusable git gates configuration failures.
-                return (nil, cached == nil || cached == .usable ? .failure(error) : nil)
-            }
-        }.value
+        let evidence = probingGit ? await probeGit() : nil
+        let observed = evidence.flatMap { try? $0.result.get() }
+        let remote: Result<SyncModel.Configuration, Error>?
+        if case let .failure(error)? = evidence?.result {
+            // A failed probe supplies no host evidence. Only known unusable git gates configuration failures.
+            remote = cached == nil || cached == .usable ? .failure(error) : nil
+        } else if (observed ?? cached) == .usable {
+            remote = await BlockingWork.task(priority: .utility, operation: read).value
+        } else {
+            remote = nil
+        }
         let change: Change?
         if let observed, let evidence {
-            change = accept(observed, order: evidence, model: model)
+            change = accept(observed, order: evidence.order, model: model)
         } else {
             change = nil
         }
         if let remote { model.applyConfiguration(remote, order: configuration) }
         return change
+    }
+
+    private func probeGit() async -> (order: Int, result: Result<GitUsability, Error>) {
+        let order = beginEvidence()
+        let probe = probe
+        let result = await BlockingWork.task(priority: .utility) { Result { try probe() } }.value
+        return (order, result)
     }
 }

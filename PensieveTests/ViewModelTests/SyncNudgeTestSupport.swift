@@ -10,15 +10,19 @@ struct LibraryFixture {
     let counter: Counter
 }
 
-final class Counter {
-    private(set) var value = 0
-    lazy var notify: SyncStateNotifying = { [weak self] in self?.value += 1 }
-    func reset() { value = 0 }
+final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    var notify: SyncStateNotifying { { [weak self] in _ = self?.increment() } }
+    @discardableResult func increment() -> Int { lock.withLock { count += 1; return count } }
+    func reset() { lock.withLock { count = 0 } }
 }
 
 final class MemorySkillStore: SkillStoreProtocol {
     let baseDir = TestPaths.skillsDir
     var bodies: [String: String] = [:]
+    var savedData: [String: Data] = [:]
 
     func createSkill(name: String, description: String, body: String) throws -> String {
         try createSkill(name: name, description: description, body: body, avoiding: [])
@@ -36,6 +40,9 @@ final class MemorySkillStore: SkillStoreProtocol {
     }
 
     func readBody(directoryName: String) throws -> String { bodies[directoryName] ?? "" }
+    func readData(directoryName: String) throws -> Data {
+        savedData[directoryName] ?? Data((bodies[directoryName] ?? "").utf8)
+    }
 
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
                       fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {

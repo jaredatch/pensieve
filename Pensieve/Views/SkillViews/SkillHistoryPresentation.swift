@@ -8,6 +8,8 @@ struct SkillHistorySelection: Equatable {
 
 enum SkillHistoryPresentation {
     static func previewBody(from raw: String) -> String { SkillParser.stripFrontmatter(raw) }
-    static func rowTitle(for commit: GitCommit) -> String { commit.date.formatted(date: .abbreviated, time: .shortened) }
-    static func rowSubtitle(for commit: GitCommit) -> String { commit.subject + " · " + commit.author }
+    static func rowTitle(for commit: SkillHistoryVersion) -> String {
+        commit.date.formatted(date: .abbreviated, time: .shortened)
+    }
+    static func rowSubtitle(for commit: SkillHistoryVersion) -> String { commit.subject + " · " + commit.author }
 }

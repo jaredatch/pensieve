@@ -125,8 +125,8 @@ final class ReconcilerReadFailureTests: XCTestCase {
             manifestRoot: TestPaths.storeRoot,
             platformVM: harness.platformVM,
             localMachineID: ProjectIntentHarness.localID,
-            context: harness.context
-        )
+            context: harness.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
 
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(result.failures.isEmpty)
@@ -162,8 +162,8 @@ final class ReconcilerReadFailureTests: XCTestCase {
             stateFetcher: fetcher,
             platformVM: harness.platformVM,
             localMachineID: ProjectIntentHarness.localID,
-            context: harness.context
-        )
+            context: harness.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
 
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(result.failures.isEmpty)

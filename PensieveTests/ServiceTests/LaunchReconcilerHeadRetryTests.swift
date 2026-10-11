@@ -72,8 +72,61 @@ private final class DefiniteBornHeadRetryGitService: GitServiceProtocol {
     func skipRebase(at path: String) throws -> PullResult { .upToDate }
     func stagePath(_ path: String, at root: String) throws {}
     func collapseToSingleCommit(at root: String, message: String,
-                                credential: GitCredential?, fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
+                                credential: GitCredential?,
+                                fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
     func hasCommitsToPush(at path: String) -> Bool { false }
+
+    func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
+
+        try blob(atStage: stage, path: path, in: workingDir).map {
+
+            ConflictEntry(mode: "100644", objectID: "", bytes: $0)
+
+        }
+
+    }
+
+    func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+
+        throw GitError.repositoryUnreadable(path: root, detail: "Conflict entry restoration is unavailable.")
+
+    }
+
+    func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
+
+        throw GitError.repositoryUnreadable(path: root, detail: "Conflict index removal is unavailable.")
+
+    }
+
+    func retireConflictPath(_ path: String, at root: String) throws {
+
+        throw GitError.repositoryUnreadable(path: root, detail: "Legacy gitlink resolution is unavailable.")
+
+    }
+
+    func probeUsability() -> GitUsability { .usable }
+
+    func checkoutUnbornBranch(_ branch: String, at path: String) throws {}
+
+    func fetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {}
+
+    func materializeFromFetchHead(at path: String) throws {}
+
+    func bornBranch(_ branch: String, at path: String) throws {}
+
+    func setUpstream(branch: String, at path: String) throws {}
+
+    func hasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool { false }
+
+    func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] { [] }
+
+    func show(sha: String, path: String, at workingDir: String) -> String? { nil }
+
+    func remoteReferences(remote: String, credential: GitCredential?) throws -> GitRemoteReferences {
+
+        GitRemoteReferences(defaultBranch: nil, heads: [])
+
+    }
 }
 
 final class LaunchReconcilerHeadRetryTests: XCTestCase {
@@ -83,27 +136,30 @@ final class LaunchReconcilerHeadRetryTests: XCTestCase {
     private var migrationService: StoreMigrationService!
 
     override func setUpWithError() throws {
-        tempDir = TestTemporaryDirectory.path + "PensieveLaunchHeadRetryTests-\(UUID().uuidString)"
-        try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
-        fileService = FileService()
-        manifest = ManifestService(fileService: fileService)
-        migrationService = StoreMigrationService(
-            fileService: fileService,
-            manifestService: manifest,
-            skillStore: SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
-        )
-    }
-
-    override func tearDownWithError() throws {
-        if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
-            try FileManager.default.removeItem(atPath: tempDir)
+        try NativeTestWork.run { [self] in
+            tempDir = TestTemporaryDirectory.path + "PensieveLaunchHeadRetryTests-\(UUID().uuidString)"
+            try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
+            fileService = FileService()
+            manifest = ManifestService(fileService: fileService)
+            migrationService = StoreMigrationService(
+                fileService: fileService,
+                manifestService: manifest,
+                skillStore: SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
+            )
         }
     }
 
-    @MainActor
+    override func tearDownWithError() throws {
+        try NativeTestWork.run { [self] in
+            if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
+                try FileManager.default.removeItem(atPath: tempDir)
+            }
+        }
+    }
+
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
-            for: Skill.self, Project.self, SkillProjectAssignment.self, DeployRecord.self, Category.self, Scenario.self,
+            for: Skill.self, Project.self, SkillProjectAssignment.self, DeployRecord.self, Category.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         return ModelContext(container)
@@ -112,163 +168,167 @@ final class LaunchReconcilerHeadRetryTests: XCTestCase {
     // Launch-rebuild hardening (12.10 fold-in): if the daemon fast-forwards the repo while the GUI is
     // rebuilding from disk, the first rebuild may have read a torn manifest. A single HEAD-stamp retry
     // converges on the post-pull state without taking the sync lock during app startup.
-    @MainActor
     func testLaunchRebuildRetriesOnceWhenHeadAdvancesMidRebuild() throws {
-        let ctx = try makeContext()
-        let refPath = try seedManifestAndHead()
-        var first = RebuildResult()
-        first.skillsInserted = 1
-        var second = RebuildResult()
-        second.skillsInserted = 2
-        let rebuild = RecordingHeadRetryRebuildService(
-            fileService: fileService,
-            refPath: refPath,
-            mutateOnFirstCall: true,
-            firstResult: first,
-            secondResult: second
-        )
-        let rec = LaunchReconciler(
-            rebuildService: rebuild,
-            migrationService: migrationService,
-            fileService: fileService,
-            manifestService: manifest,
-            root: tempDir,
-            lockPath: tempDir + "/sync.lock",
-            git: DefiniteBornHeadRetryGitService()
-        )
+        try NativeTestWork.run { [self] in
+            let ctx = try makeContext()
+            let refPath = try seedManifestAndHead()
+            var first = RebuildResult()
+            first.skillsInserted = 1
+            var second = RebuildResult()
+            second.skillsInserted = 2
+            let rebuild = RecordingHeadRetryRebuildService(
+                fileService: fileService,
+                refPath: refPath,
+                mutateOnFirstCall: true,
+                firstResult: first,
+                secondResult: second
+            )
+            let rec = LaunchReconciler(
+                rebuildService: rebuild,
+                migrationService: migrationService,
+                fileService: fileService,
+                manifestService: manifest,
+                root: tempDir,
+                lockPath: tempDir + "/sync.lock",
+                git: DefiniteBornHeadRetryGitService()
+            )
 
-        let outcome = rec.reconcileOnLaunch(context: ctx, alreadyMigrated: true)
+            let outcome = rec.reconcileOnLaunch(context: ctx, alreadyMigrated: true)
 
-        XCTAssertEqual(rebuild.calls, 2)
-        XCTAssertEqual(outcome.rebuild.skillsInserted, 2)
+            XCTAssertEqual(rebuild.calls, 2)
+            XCTAssertEqual(outcome.rebuild.skillsInserted, 2)
+        }
     }
 
     // The retry is bounded: when HEAD is stable across the rebuild, the launch path runs the rebuild
     // exactly once and returns that result.
-    @MainActor
     func testLaunchRebuildRunsOnceWhenHeadStable() throws {
-        let ctx = try makeContext()
-        let refPath = try seedManifestAndHead()
-        var first = RebuildResult()
-        first.skillsInserted = 1
-        var second = RebuildResult()
-        second.skillsInserted = 2
-        let rebuild = RecordingHeadRetryRebuildService(
-            fileService: fileService,
-            refPath: refPath,
-            mutateOnFirstCall: false,
-            firstResult: first,
-            secondResult: second
-        )
-        let rec = LaunchReconciler(
-            rebuildService: rebuild,
-            migrationService: migrationService,
-            fileService: fileService,
-            manifestService: manifest,
-            root: tempDir,
-            lockPath: tempDir + "/sync.lock",
-            git: DefiniteBornHeadRetryGitService()
-        )
+        try NativeTestWork.run { [self] in
+            let ctx = try makeContext()
+            let refPath = try seedManifestAndHead()
+            var first = RebuildResult()
+            first.skillsInserted = 1
+            var second = RebuildResult()
+            second.skillsInserted = 2
+            let rebuild = RecordingHeadRetryRebuildService(
+                fileService: fileService,
+                refPath: refPath,
+                mutateOnFirstCall: false,
+                firstResult: first,
+                secondResult: second
+            )
+            let rec = LaunchReconciler(
+                rebuildService: rebuild,
+                migrationService: migrationService,
+                fileService: fileService,
+                manifestService: manifest,
+                root: tempDir,
+                lockPath: tempDir + "/sync.lock",
+                git: DefiniteBornHeadRetryGitService()
+            )
 
-        let outcome = rec.reconcileOnLaunch(context: ctx, alreadyMigrated: true)
+            let outcome = rec.reconcileOnLaunch(context: ctx, alreadyMigrated: true)
 
-        XCTAssertEqual(rebuild.calls, 1)
-        XCTAssertEqual(outcome.rebuild.skillsInserted, 1)
+            XCTAssertEqual(rebuild.calls, 1)
+            XCTAssertEqual(outcome.rebuild.skillsInserted, 1)
+        }
     }
 
     // Layer-1 review hardening (12.10): the one-time migration writes the baseline manifest, so it must not
     // write after the repo advances between the launch rebuild and the migration guard. It skips instead and
     // retries on the next launch.
-    @MainActor
     func testMigrationSkipsWhenHeadAdvancesAfterRebuild() throws {
-        let ctx = try makeContext()
-        _ = try seedManifestAndHead()
-        var first = RebuildResult()
-        first.skillsInserted = 1
-        let rebuild = RecordingHeadRetryRebuildService(
-            fileService: fileService,
-            refPath: tempDir + "/.git/refs/heads/main",
-            mutateOnFirstCall: false,
-            firstResult: first,
-            secondResult: RebuildResult()
-        )
-        let migration = RecordingHeadRetryMigrationService()
-        var stamps = ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
-        let rec = LaunchReconciler(
-            rebuildService: rebuild,
-            migrationService: migration,
-            fileService: fileService,
-            manifestService: manifest,
-            root: tempDir,
-            lockPath: tempDir + "/sync.lock",
-            git: DefiniteBornHeadRetryGitService(),
-            headStampOverride: { stamps.isEmpty ? stamps.last ?? "" : stamps.removeFirst() }
-        )
+        try NativeTestWork.run { [self] in
+            let ctx = try makeContext()
+            _ = try seedManifestAndHead()
+            var first = RebuildResult()
+            first.skillsInserted = 1
+            let rebuild = RecordingHeadRetryRebuildService(
+                fileService: fileService,
+                refPath: tempDir + "/.git/refs/heads/main",
+                mutateOnFirstCall: false,
+                firstResult: first,
+                secondResult: RebuildResult()
+            )
+            let migration = RecordingHeadRetryMigrationService()
+            var stamps = ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
+            let rec = LaunchReconciler(
+                rebuildService: rebuild,
+                migrationService: migration,
+                fileService: fileService,
+                manifestService: manifest,
+                root: tempDir,
+                lockPath: tempDir + "/sync.lock",
+                git: DefiniteBornHeadRetryGitService(),
+                headStampOverride: { stamps.isEmpty ? stamps.last ?? "" : stamps.removeFirst() }
+            )
 
-        let outcome = rec.reconcileOnLaunch(context: ctx, alreadyMigrated: false)
+            let outcome = rec.reconcileOnLaunch(context: ctx, alreadyMigrated: false)
 
-        XCTAssertEqual(rebuild.calls, 1)
-        XCTAssertEqual(migration.calls, 0)
-        XCTAssertFalse(outcome.migrationRan)
-        XCTAssertNil(outcome.ingestedHeadStamp)
+            XCTAssertEqual(rebuild.calls, 1)
+            XCTAssertEqual(migration.calls, 0)
+            XCTAssertFalse(outcome.migrationRan)
+            XCTAssertNil(outcome.ingestedHeadStamp)
+        }
     }
 
     // PLAN-23 / 23.3 fix-round regression: AppRuntime now holds sync.lock across the whole launch
     // reconcile. The reconciler's final-head validation must use that externally held lock instead of
     // acquiring the non-reentrant lock itself — re-acquiring under the held lock necessarily fails and
     // would mark ingestion needs-retry on EVERY production launch, permanently blocking resident sync.
-    @MainActor
     func testHeldLockLaunchIngestionCompletes() throws {
-        let ctx = try makeContext()
-        let refPath = try seedManifestAndHead()
-        var first = RebuildResult()
-        first.skillsInserted = 1
-        let rebuild = RecordingHeadRetryRebuildService(
-            fileService: fileService,
-            refPath: refPath,
-            mutateOnFirstCall: false,
-            firstResult: first,
-            secondResult: RebuildResult()
-        )
-        let lockPath = tempDir + "/sync.lock"
-        let rec = LaunchReconciler(
-            rebuildService: rebuild,
-            migrationService: migrationService,
-            fileService: fileService,
-            manifestService: manifest,
-            root: tempDir,
-            lockPath: lockPath,
-            git: DefiniteBornHeadRetryGitService()
-        )
-        let outerLock = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
-        defer { outerLock.release() }
+        try NativeTestWork.run { [self] in
+            let ctx = try makeContext()
+            let refPath = try seedManifestAndHead()
+            var first = RebuildResult()
+            first.skillsInserted = 1
+            let rebuild = RecordingHeadRetryRebuildService(
+                fileService: fileService,
+                refPath: refPath,
+                mutateOnFirstCall: false,
+                firstResult: first,
+                secondResult: RebuildResult()
+            )
+            let lockPath = tempDir + "/sync.lock"
+            let rec = LaunchReconciler(
+                rebuildService: rebuild,
+                migrationService: migrationService,
+                fileService: fileService,
+                manifestService: manifest,
+                root: tempDir,
+                lockPath: lockPath,
+                git: DefiniteBornHeadRetryGitService()
+            )
+            let outerLock = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
+            defer { outerLock.release() }
 
-        let parent = (tempDir as NSString).deletingLastPathComponent
-        let cloneTemp = parent + "/.pensieve-clone-" + UUID().uuidString
-        let vendorTemp = tempDir + ".vendor-" + UUID().uuidString + ".tmp"
-        let sentinel = parent + "/.pensieve-clone-backup-" + UUID().uuidString
-        for path in [cloneTemp, vendorTemp, sentinel] { try fileService.writeFile(at: path + "/keep", content: "bytes") }
-        defer { for path in [cloneTemp, vendorTemp, sentinel] { try? fileService.deleteDirectory(at: path) } }
+            let parent = (tempDir as NSString).deletingLastPathComponent
+            let cloneTemp = parent + "/.pensieve-clone-" + UUID().uuidString
+            let vendorTemp = tempDir + ".vendor-" + UUID().uuidString + ".tmp"
+            let sentinel = parent + "/.pensieve-clone-backup-" + UUID().uuidString
+            for path in [cloneTemp, vendorTemp, sentinel] { try fileService.writeFile(at: path + "/keep", content: "bytes") }
+            defer { for path in [cloneTemp, vendorTemp, sentinel] { try? fileService.deleteDirectory(at: path) } }
 
-        // Without the vouch, validation self-conflicts against the outer lock: needs-retry forever.
-        let conflicted = rec.reconcileOnLaunch(context: ctx, alreadyMigrated: true)
-        XCTAssertTrue(conflicted.ingestionNeedsRetry)
-        XCTAssertNil(conflicted.ingestedHeadStamp)
-        XCTAssertTrue(fileService.directoryExists(at: cloneTemp))
-        XCTAssertTrue(fileService.directoryExists(at: vendorTemp))
+            // Without the vouch, validation self-conflicts against the outer lock: needs-retry forever.
+            let conflicted = rec.reconcileOnLaunch(context: ctx, alreadyMigrated: true)
+            XCTAssertTrue(conflicted.ingestionNeedsRetry)
+            XCTAssertNil(conflicted.ingestedHeadStamp)
+            XCTAssertTrue(fileService.directoryExists(at: cloneTemp))
+            XCTAssertTrue(fileService.directoryExists(at: vendorTemp))
 
-        // With the vouch, ingestion completes under the caller's lock.
-        let completed = rec.reconcileOnLaunch(
-            context: ctx, alreadyMigrated: true, externallyHeldLock: true
-        )
-        XCTAssertFalse(completed.ingestionNeedsRetry)
-        XCTAssertNotNil(completed.ingestedHeadStamp)
-        XCTAssertFalse(fileService.directoryExists(at: cloneTemp), "Launch must sweep under its caller's held lock")
-        XCTAssertFalse(fileService.directoryExists(at: vendorTemp), "Vendor cleanup shares the held-lock contract")
-        XCTAssertEqual(try fileService.readFile(at: sentinel + "/keep"), "bytes")
-        XCTAssertNil(SyncLock.tryAcquire(at: lockPath), "Cleanup must not release the caller's lock")
+            // With the vouch, ingestion completes under the caller's lock.
+            let completed = rec.reconcileOnLaunch(
+                context: ctx, alreadyMigrated: true, externallyHeldLock: true
+            )
+            XCTAssertFalse(completed.ingestionNeedsRetry)
+            XCTAssertNotNil(completed.ingestedHeadStamp)
+            XCTAssertFalse(fileService.directoryExists(at: cloneTemp), "Launch must sweep under its caller's held lock")
+            XCTAssertFalse(fileService.directoryExists(at: vendorTemp), "Vendor cleanup shares the held-lock contract")
+            XCTAssertEqual(try fileService.readFile(at: sentinel + "/keep"), "bytes")
+            XCTAssertNil(SyncLock.tryAcquire(at: lockPath), "Cleanup must not release the caller's lock")
+        }
     }
 
     private func seedManifestAndHead() throws -> String {

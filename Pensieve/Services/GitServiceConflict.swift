@@ -28,10 +28,12 @@ extension GitService {
     /// `git show :<stage>:<path>` — exact bytes, or nil when that stage is absent. Empty data is
     /// a present empty file. Gitlinks or missing objects throw UnavailableConflictSide; command
     /// failures propagate. Only an absent index stage is a deletion.
+    @_disfavoredOverload
     func blob(atStage stage: Int, path: String, in workingDir: String) throws -> Data? {
         try conflictEntry(atStage: stage, path: path, in: workingDir)?.bytes
     }
 
+    @_disfavoredOverload
     func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
         let indexArgs = ["--literal-pathspecs", "-C", workingDir, "ls-files", "--stage", "-z", "--", path]
         let index = try runData(indexArgs, in: nil)
@@ -62,6 +64,7 @@ extension GitService {
     }
 
     /// Git restores the selected entry's link type and executable mode without byte conversions.
+    @_disfavoredOverload
     func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
         let store = try storeOperation(at: root)
         try store.runOrThrow(["-c", "core.symlinks=true", "--literal-pathspecs", "checkout-index",
@@ -71,12 +74,14 @@ extension GitService {
     }
 
     /// Remove only the index entry, leaving the worktree path and its children in place.
+    @_disfavoredOverload
     func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
         try storeOperation(at: root).runOrThrow(["--literal-pathspecs", "update-index", "--force-remove", "--", path])
     }
 
     /// Retirement receipts travel in .pensieve-retired-paths. Current builds derive local metadata
     /// ignore rules from them; older builds preserve the receipts but do not enforce them.
+    @_disfavoredOverload
     func retireConflictPath(_ path: String, at root: String) throws {
         try StoreIgnoreRules.prepare(at: root, files: fileService, retiring: path)
         try removeConflictEntryFromIndex(path, at: root)
@@ -95,6 +100,7 @@ extension GitService {
     }
 
     /// Continue a rebase, skipping only when the replay is structurally proven empty.
+    @_disfavoredOverload
     func continueRebase(at path: String) throws -> PullResult {
         let store = try storeOperation(at: path)
         let args = ["-C", path, "rebase", "--continue"]
@@ -117,6 +123,7 @@ extension GitService {
     }
 
     /// `git rebase --skip`. Exit 0 => .merged (or .upToDate if HEAD is unchanged); else throw.
+    @_disfavoredOverload
     func skipRebase(at path: String) throws -> PullResult {
         try skipRebase(at: path, using: storeOperation(at: path))
     }
@@ -133,13 +140,15 @@ extension GitService {
     }
 
     /// `git add -- <path>` — stage a resolved path. The `--` guards a leading-dash path.
+    @_disfavoredOverload
     func stagePath(_ path: String, at root: String) throws {
         try storeOperation(at: root).stagePath(path)
     }
 
     /// Collapse unpushed divergence to one commit so the following rebase replays exactly one commit.
+    @_disfavoredOverload
     func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
-                                fetchedRevision: FetchedStoreRevision? = nil) throws -> Bool {
+                                fetchedRevision: FetchedStoreRevision?) throws -> Bool {
         try ensureCommitIdentity(at: root)
         if fetchedRevision == nil {
             let fetch = try run(["-C", root, "fetch", "origin", "main"], in: nil, credential: credential)
@@ -166,6 +175,7 @@ extension GitService {
 
     /// True iff at least one local commit is not on origin/main.
     /// Ordinary failures return false. A confirmed host failure propagates.
+    @_disfavoredOverload
     func hasCommitsToPush(at path: String) throws -> Bool {
         guard let r = try runBestEffort(["-C", path, "rev-list", "--count", "origin/main..HEAD"], in: nil),
               r.exit == 0 else {

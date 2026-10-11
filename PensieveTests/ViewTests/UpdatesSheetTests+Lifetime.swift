@@ -23,5 +23,8 @@ extension UpdatesSheetTests {
         XCTAssertNil(main.attachedSheet, "The sheet must detach before its views and fixture are cleared")
         XCTAssertNil(main.contentView)
         XCTAssertEqual(closes.values.count, 1, "Repeated teardown must close the host exactly once")
+        model.isPresented = true
+        await Self.closeSheetHost(nil, model: model)
+        XCTAssertFalse(model.isPresented, "Cleanup must reset the sheet binding even after its window is gone")
     }
 }

@@ -7,7 +7,7 @@ import XCTest
 
 @MainActor
 final class SkillDetailTabResetTests: XCTestCase {
-    func testChangingHistorySkillsThroughLinkedSkillResetsAuthoredPresentation() {
+    func testChangingHistorySkillsThroughLinkedSkillResetsAuthoredPresentation() async {
         let first = Skill(name: "First", directoryName: "first")
         let model = SkillDetailTabResetModel(skill: first)
         let presentation = SkillHistoryTabPresentation()
@@ -34,21 +34,22 @@ final class SkillDetailTabResetTests: XCTestCase {
             git: git
         ))
         host.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        await TestWait.until(failureMessage: "Initial History did not load") { !presentation.isLoading }
 
-        let version = SkillHistoryVersion(
-            sha: "old", date: Date(), author: "Author", subject: "Old version"
-        )
+        let version = SkillHistoryVersion(sha: "old", date: Date(), author: "Author", subject: "Old version")
         presentation.snapshot = SkillHistorySnapshot(versions: [version])
-        presentation.errorMessage = "Couldn't load that version."
+        await presentation.read(version, skill: first, git: git, workingDir: base, asDiff: false)
+        XCTAssertEqual(presentation.errorMessage, "Couldn't load that version.")
         presentation.showAll = true
         presentation.diff = SkillHistoryTabPresentation.Diff(version: version, body: "Old body")
         presentation.restoring = version
         model.skill = installedHistorySkill(name: "Linked")
-        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        await TestWait.until(failureMessage: "Linked skill did not reset authored History") { presentation.diff == nil }
         host.layoutSubtreeIfNeeded()
         model.skill = Skill(name: "Third", directoryName: "third")
-        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        await TestWait.until(failureMessage: "Third skill did not load authored History") {
+            presentation.snapshot.versions == [historyVersion(thirdCommit)]
+        }
         host.layoutSubtreeIfNeeded()
 
         XCTAssertEqual(git.logPaths.last, "skills/third/SKILL.md")
@@ -184,6 +185,58 @@ private final class SkillDetailTabResetGit: GitServiceProtocol {
     func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
                                 fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
     func hasCommitsToPush(at path: String) -> Bool { false }
+
+    func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
+
+        try blob(atStage: stage, path: path, in: workingDir).map {
+
+            ConflictEntry(mode: "100644", objectID: "", bytes: $0)
+
+        }
+
+    }
+
+    func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+
+        throw GitError.repositoryUnreadable(path: root, detail: "Conflict entry restoration is unavailable.")
+
+    }
+
+    func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
+
+        throw GitError.repositoryUnreadable(path: root, detail: "Conflict index removal is unavailable.")
+
+    }
+
+    func retireConflictPath(_ path: String, at root: String) throws {
+
+        throw GitError.repositoryUnreadable(path: root, detail: "Legacy gitlink resolution is unavailable.")
+
+    }
+
+    func probeUsability() -> GitUsability { .usable }
+
+    func checkoutUnbornBranch(_ branch: String, at path: String) throws {}
+
+    func fetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {}
+
+    func materializeFromFetchHead(at path: String) throws {}
+
+    func bornBranch(_ branch: String, at path: String) throws {}
+
+    func setUpstream(branch: String, at path: String) throws {}
+
+    func hasLocalBranches(at path: String) throws -> Bool { true }
+
+    func hasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool { false }
+
+    func hasRemoteOriginConfigured(at path: String) throws -> Bool { true }
+
+    func remoteReferences(remote: String, credential: GitCredential?) throws -> GitRemoteReferences {
+
+        GitRemoteReferences(defaultBranch: nil, heads: [])
+
+    }
 }
 
 @MainActor

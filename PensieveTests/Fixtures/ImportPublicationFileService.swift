@@ -17,9 +17,6 @@ final class ImportPublicationFileService: FileServiceProtocol {
     var copyCheckpoint: (String, Int) throws -> Void = { _, _ in }
     var read: (Int32, UnsafeMutableRawPointer?, Int) -> Int = Darwin.read
     func readFile(at path: String) throws -> String { try files.readFile(at: path) }
-    func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws -> RegularFileCopyReceipt {
-        try files.copyRegularFiles(fromDirectory: source, toDirectory: destination)
-    }
     func copyImportedSkillContents(fromDirectory source: String,
                                    toDirectory destination: String) throws -> [SkillFolderCopySkip] {
         try files.copyImportedSkillContents(fromDirectory: source, toDirectory: destination,

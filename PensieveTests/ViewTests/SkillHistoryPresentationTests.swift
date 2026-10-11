@@ -63,7 +63,7 @@ final class SkillHistoryPresentationTests: XCTestCase {
 
     func testRowTitleIsFormattedDate() {
         let date = Date(timeIntervalSince1970: 1_700_000_000)
-        let commit = GitCommit(sha: "abc123", author: "A. User", date: date, subject: "Update")
+        let commit = SkillHistoryVersion(sha: "abc123", date: date, author: "A. User", subject: "Update")
 
         XCTAssertEqual(
             SkillHistoryPresentation.rowTitle(for: commit),
@@ -72,10 +72,10 @@ final class SkillHistoryPresentationTests: XCTestCase {
     }
 
     func testRowSubtitleIsSubjectAndAuthor() {
-        let commit = GitCommit(
+        let commit = SkillHistoryVersion(
             sha: "abc123",
-            author: "A. User",
             date: Date(timeIntervalSince1970: 1_700_000_000),
+            author: "A. User",
             subject: "Update documentation"
         )
 

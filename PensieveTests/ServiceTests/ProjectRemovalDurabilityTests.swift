@@ -25,6 +25,40 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         try relaunchAndRetry(h, projectID: projectID)
     }
 
+    func testBusySyncRefusesBeforeWithdrawalOrArtifactCleanup() throws {
+        let h = try fixture()
+        defer { h.cleanup() }
+        let saved = try manifest(h).read(fromRoot: h.root + "/sync")
+        let state = try h.deployState.read()
+        let requests = try h.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.key)
+        var artifactEffects: [String] = []
+        h.mapped.beforeArtifactDeletion = { artifactEffects.append($0) }
+        h.mapped.beforeArtifactCreation = { artifactEffects.append($0) }
+        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.root + "/support.sync.lock"))
+        defer { lock.release() }
+        let result = remove(h, project: h.project, context: h.context)
+        XCTAssertEqual(result.operationFailures, ["Sync is running. Try again when it finishes."])
+        XCTAssertTrue(artifactEffects.isEmpty)
+        XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync"), saved)
+        XCTAssertEqual(try h.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.key), requests)
+        XCTAssertEqual(try h.deployState.read(), state)
+        XCTAssertTrue(try h.context.fetch(FetchDescriptor<Project>()).contains { $0.id == h.project.id })
+        for platform in [PlatformTarget.codex, .cursor] {
+            XCTAssertTrue(try h.platformVM.removalOperation(skill: h.skill, platform: platform,
+                target: .project(h.project)).classify().isOwned)
+        }
+        lock.release()
+        try h.files.deleteFile(at: h.root + "/support.sync.lock")
+        try h.files.createDirectory(at: h.root + "/support.sync.lock")
+        let inaccessible = remove(h, project: h.project, context: h.context)
+        XCTAssertTrue(inaccessible.hasFailures)
+        XCTAssertTrue(inaccessible.operationFailures.contains { $0.contains("lock") && !$0.contains("Sync is running") },
+            "A broken lock needs its own actionable error")
+        XCTAssertTrue(artifactEffects.isEmpty)
+        XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync"), saved)
+        XCTAssertEqual(try h.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.key), requests)
+    }
+
     func testFailedManifestWriteKeepsRegistrationAndRelaunchRetryWithdrawsIntent() throws {
         let h = try fixture()
         defer { h.cleanup() }
@@ -32,6 +66,9 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         try manifest(h).write(try manifest(h).snapshot(from: h.context), toRoot: h.root + "/sync")
         let keys = category.projectKeys
         var faulted = false
+        var artifactEffects: [String] = []
+        h.mapped.beforeArtifactDeletion = { artifactEffects.append($0) }
+        h.mapped.beforeArtifactCreation = { artifactEffects.append($0) }
         h.mapped.beforeFileWrite = { path in
             if path.contains(".manifest-build-") && path.hasSuffix("/manifest.yaml") {
                 faulted = true
@@ -41,6 +78,7 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         let projectID = h.project.id
         let result = remove(h, project: h.project, context: h.context)
         XCTAssertTrue(faulted, "The real manifest writer must reach the fault")
+        XCTAssertTrue(artifactEffects.isEmpty, "A refused publication must attempt no artifact write or deletion")
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(ProjectRemovalModel.removalFailureMessage(projectName: h.project.name, result: result)
             .contains("stays registered"))
@@ -53,6 +91,10 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         XCTAssertEqual(category.projectKeys, keys, "Withdrawal leaves shared category membership unchanged")
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 2)
         XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").categories.first?.projectKeys, keys)
+        for platform in [PlatformTarget.codex, .cursor] {
+            XCTAssertTrue(try h.platformVM.removalOperation(skill: h.skill, platform: platform,
+                target: .project(h.project)).classify().isOwned, "Publish refusal must preserve the deployed artifact")
+        }
         h.mapped.beforeFileWrite = nil
         try relaunchAndRetry(h, projectID: projectID)
         XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").categories.first?.projectKeys, keys)
@@ -71,19 +113,22 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         var logs: [String] = []
         h.mapped.beforeFileWrite = { path in
             guard path.contains(".manifest-build-"), path.hasSuffix("/manifest.yaml") else { return }
+            guard !faulted else { return }
             faulted = true
             fault.refusesRestore = true
             throw NSError(domain: NSPOSIXErrorDomain, code: 5)
         }
         let result = removeRegisteredProject(project, reconciler: h.category,
             manifestService: manifest(h), manifestRoot: h.root + "/sync", platformVM: h.platformVM,
-            localMachineID: ProjectIntentHarness.localID, context: context, logFailure: { logs.append($0) })
+            localMachineID: ProjectIntentHarness.localID, context: context, logFailure: { logs.append($0) },
+            lockPath: h.root + "/support" + ".sync.lock")
         XCTAssertTrue(faulted)
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(logs.contains { $0.contains("restore project withdrawal") }, "The restoring save must actually fail")
         XCTAssertEqual(fault.refusedSaves, 1)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
-        XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").deployIntents.count, 2)
+        XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync").deployIntents.count, 0,
+            "Repair must republish the withdrawal that remains saved")
         let message = ProjectRemovalModel.removalFailureMessage(projectName: project.name, result: result)
         XCTAssertFalse(message.contains("Nothing was changed."), "The withdrawal remains saved after restoration fails")
         XCTAssertTrue(message.contains("Pensieve withdrew this Mac's direct deploy requests for this project."))
@@ -126,7 +171,8 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         let result = removeRegisteredProject(project,
             reconciler: RemovalCheckpointReconciler { reconciled = true; return BatchResult() },
             manifestService: manifest(h), manifestRoot: h.root + "/sync", platformVM: h.platformVM,
-            localMachineID: ProjectIntentHarness.localID, context: context)
+            localMachineID: ProjectIntentHarness.localID, context: context,
+            lockPath: h.root + "/support" + ".sync.lock")
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(reconciled, "The refused save follows the withdrawal and reconcile")
         XCTAssertEqual(lateWrites, 0, "Registration and ledger rollback cannot change the manifest snapshot")
@@ -150,8 +196,8 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
             reconciler: h.category, manifestRoot: TestPaths.storeRoot,
             platformVM: h.platformVM,
             localMachineID: ProjectIntentHarness.localID,
-            context: h.context
-        )
+            context: h.context,
+            lockPath: h.root + "/support" + ".sync.lock")
         XCTAssertFalse(result.hasFailures, "A category CRUD publication dependency must not control project removal")
         XCTAssertEqual(writes, 0, "The caller provided no manifest service")
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.id), [h.otherProject.id])
@@ -173,7 +219,8 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
             reconciler: CategoryReconciler(platformVM: h.platformVM),
             manifestService: manifest(h), manifestRoot: h.root + "/sync",
             platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
-            context: context)
+            context: context,
+            lockPath: h.root + "/support" + ".sync.lock")
     }
 
 }

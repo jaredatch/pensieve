@@ -162,8 +162,9 @@ extension CursorOwnershipTests {
         SkillLibraryViewModel(
             skillStore: store,
             fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
-        )
+            manifestRoot: root + "/manifest",
+            manifestSaves: trackedManifestSaves(manifest: RecordingDeletionManifest(), root: root + "/manifest",
+                lockPath: root + "/manifest" + ".sync.lock", files: mapped))
     }
 }
 

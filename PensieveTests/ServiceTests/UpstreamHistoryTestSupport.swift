@@ -14,16 +14,20 @@ final class UpstreamHistoryServiceTests: XCTestCase {
     var fileService: FileService!
 
     override func setUpWithError() throws {
-        tempDir = TestTemporaryDirectory.path + "PensieveUpstreamHistoryTests-\(UUID().uuidString)"
-        scratchRoot = tempDir + "/scratch"
-        localDirectory = tempDir + "/local"
-        try FileManager.default.createDirectory(atPath: localDirectory, withIntermediateDirectories: true)
-        fileService = FileService()
+        try NativeTestWork.run { [self] in
+            tempDir = TestTemporaryDirectory.path + "PensieveUpstreamHistoryTests-\(UUID().uuidString)"
+            scratchRoot = tempDir + "/scratch"
+            localDirectory = tempDir + "/local"
+            try FileManager.default.createDirectory(atPath: localDirectory, withIntermediateDirectories: true)
+            fileService = FileService()
+        }
     }
 
     override func tearDownWithError() throws {
-        if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
-            try FileManager.default.removeItem(atPath: tempDir)
+        try NativeTestWork.run { [self] in
+            if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
+                try FileManager.default.removeItem(atPath: tempDir)
+            }
         }
     }
 

@@ -17,6 +17,7 @@ final class AppRuntime {
     let platformVM: PlatformViewModel
     let library: SkillLibraryViewModel
     let syncModel: SyncModel
+    let syncSetup: SyncSetupModel
     let scheduler: SyncScheduler
     let provenanceVM: SkillProvenanceViewModel
     let updatesViewModelOperations: UpdatesViewModel.DefaultOperations
@@ -50,6 +51,7 @@ final class AppRuntime {
     private let launchIngestLockPath: String
     /// Where the store and App Support live; every collaborator built here is pointed at them (`AppRuntime+Paths.swift`).
     let paths: AppRuntimePaths
+    private var didAskLaunchImportWizard = false
     private var didPerformLaunchWork = false
     private var didCompleteLaunchIngest = false
     private var didFinishInitialLaunchCallbacks = false
@@ -62,6 +64,7 @@ final class AppRuntime {
     @ObservationIgnored private var openMainWindowAction: (() -> Void)?
     @ObservationIgnored private(set) lazy var viewChanges = makeViewChangesModel()
     @ObservationIgnored private(set) lazy var updates = makeUpdatesModel()
+    @ObservationIgnored private(set) lazy var conflictResolution = makeConflictResolutionModel()
     @ObservationIgnored private(set) lazy var upstreamHistory = paths.makeUpstreamHistoryViewModel()
     @ObservationIgnored
     private(set) lazy var bootstrapTask: Task<Void, Never> = {
@@ -107,6 +110,7 @@ final class AppRuntime {
         platformVM: PlatformViewModel? = nil,
         library: SkillLibraryViewModel? = nil,
         syncModel: SyncModel? = nil,
+        syncSetup: SyncSetupModel? = nil,
         scheduler: SyncScheduler? = nil,
         defaults: UserDefaults? = nil,
         hostName: () -> String? = MachineDisplayName.currentHostName,
@@ -145,7 +149,9 @@ final class AppRuntime {
         self.container = resolvedContainer
         self.platformVM = resolvedPlatformVM
         self.library = library ?? paths.makeLibrary(notifier: notifier)
+        self.library.setLaunchIngestPending(true)
         self.syncModel = resolvedSyncModel
+        self.syncSetup = syncSetup ?? paths.makeSyncSetupModel(context: resolvedContainer.mainContext)
         self.scheduler = resolvedScheduler
         self.provenanceVM = resolvedProvenanceVM
         self.updatesViewModelOperations = paths.makeUpdatesViewModelOperations()
@@ -157,9 +163,7 @@ final class AppRuntime {
         self.defaults = resolvedDefaults
         self.paths = paths
         self.launchReconcile = launchReconcile ?? paths.makeLaunchReconcile()
-        self.launchBackfill = Self.backfillRefreshingIndex(
-            launchBackfill ?? paths.makeLaunchBackfill(), platformVM: resolvedPlatformVM
-        )
+        self.launchBackfill = launchBackfill ?? paths.makeLaunchBackfill()
         self.hasRemoteConfigured = hasRemoteConfigured ?? { paths.hasRemoteConfigured() }
         self.convergence = resolvedConvergence
         self.launchIngestRetryNanoseconds = launchIngestRetryNanoseconds
@@ -172,6 +176,13 @@ final class AppRuntime {
         resolvedSyncModel.observeGitState(gitState)
         installRuntimeCallbacks()
         _ = bootstrapTask
+    }
+
+    /// Ask once, after the terminal launch verdict, including one delivered by a retry.
+    func shouldAutoShowImportWizard(skillCount: Int) -> Bool {
+        guard launchWorkCompleted, !didAskLaunchImportWizard else { return false }
+        didAskLaunchImportWizard = true
+        return skillCount == 0 && !storeQuarantined && !library.addsFenced
     }
 
     var gitUsability: GitUsability? { gitState.usability }
@@ -221,35 +232,28 @@ final class AppRuntime {
     func performLaunchWorkIfNeeded(
         context: ModelContext,
         beforeStartingWatcher: () -> Void = {}
-    ) -> Bool {
+    ) async -> Bool {
         guard !didPerformLaunchWork else { return false }
         didPerformLaunchWork = true
         launchWorkInvocationCount += 1
-
-        let alreadyMigrated = defaults.bool(forKey: Self.migrationDefaultsKey)
-        guard let lock = SyncLock.tryAcquire(at: launchIngestLockPath) else {
-            acceptLaunchIngest(Self.deferredLaunchOutcome(), context: context)
-            beforeStartingWatcher()
-            library.startWatching()
-            scheduleLaunchIngestRetry(context: context)
-            didFinishInitialLaunchCallbacks = true
-            completeLaunchWorkIfPossible()
-            return true
-        }
-        let launchOutcome = launchReconcile(context, alreadyMigrated)
-        if launchOutcome.migrationRan {
-            defaults.set(true, forKey: Self.migrationDefaultsKey)
-        }
-        acceptLaunchIngest(launchOutcome, context: context)
-        lock.release()
+        let result = await runLaunchJob()
+        acceptLaunchIngest(result, context: context)
         beforeStartingWatcher()
         library.startWatching()
-        if launchOutcome.ingestionNeedsRetry {
-            scheduleLaunchIngestRetry(context: context)
-        }
+        if result.outcome.ingestionNeedsRetry { scheduleLaunchIngestRetry(context: context) }
         didFinishInitialLaunchCallbacks = true
         completeLaunchWorkIfPossible()
         return true
+    }
+
+    private func runLaunchJob() async -> LaunchJobResult {
+        let container = container, reconcile = launchReconcile, backfill = launchBackfill
+        let remote = hasRemoteConfigured, lockPath = launchIngestLockPath
+        let alreadyMigrated = defaults.bool(forKey: Self.migrationDefaultsKey)
+        return await BlockingWork.run {
+            Self.reconcileLaunch(container: container, reconcile: reconcile, backfill: backfill,
+                hasRemote: remote, lockPath: lockPath, alreadyMigrated: alreadyMigrated)
+        }
     }
 }
 
@@ -276,16 +280,14 @@ private extension AppRuntime {
         }
     }
 
-    private func acceptLaunchIngest(_ outcome: LaunchReconcileOutcome, context: ModelContext) {
+    private func acceptLaunchIngest(_ result: LaunchJobResult, context: ModelContext) {
+        let outcome = result.outcome
+        if outcome.migrationRan { defaults.set(true, forKey: Self.migrationDefaultsKey) }
         storeQuarantined = outcome.quarantined
         library.setStoreUnreadable(outcome.rebuild.storeUnreadable)
         if !outcome.rebuild.storeUnreadable, !outcome.ingestionNeedsRetry {
-            // Quarantine and an unknown remote both defer backfill until a successful sync ingests the store.
-            if outcome.quarantined {
-                needsLaunchBackfillAfterCoordinator = true
-                forceLaunchPreflight = true
-            } else if outcome.ingestedHeadStamp != nil || !hasRemoteConfigured() {
-                launchBackfill(context)
+            if result.backfilled {
+                platformVM.refreshDeployIndex()
                 convergence.runAfterLaunchIngest()
             } else {
                 needsLaunchBackfillAfterCoordinator = true
@@ -295,6 +297,7 @@ private extension AppRuntime {
         launchIngestHeadStamp = outcome.ingestedHeadStamp
         didCompleteLaunchIngest = outcome.rebuild.storeUnreadable
             || !outcome.ingestionNeedsRetry
+        if didCompleteLaunchIngest { library.setLaunchIngestPending(false) }
         signalLaunchIngestIfPossible()
         library.refreshQuarantine(context: context)
         completeLaunchWorkIfPossible()
@@ -306,19 +309,13 @@ private extension AppRuntime {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: self?.launchIngestRetryNanoseconds ?? 0)
                 guard let self else { return }
-                guard let lock = SyncLock.tryAcquire(at: self.launchIngestLockPath) else { continue }
-                let alreadyMigrated = self.defaults.bool(forKey: Self.migrationDefaultsKey)
-                let outcome = self.launchReconcile(context, alreadyMigrated)
-                if outcome.migrationRan {
-                    self.defaults.set(true, forKey: Self.migrationDefaultsKey)
-                }
-                if outcome.rebuild.storeUnreadable || !outcome.ingestionNeedsRetry {
+                let result = await self.runLaunchJob()
+                if result.outcome.migrationRan { self.defaults.set(true, forKey: Self.migrationDefaultsKey) }
+                if result.outcome.rebuild.storeUnreadable || !result.outcome.ingestionNeedsRetry {
                     self.launchIngestRetryTask = nil
-                    self.acceptLaunchIngest(outcome, context: context)
-                    lock.release()
+                    self.acceptLaunchIngest(result, context: context)
                     return
                 }
-                lock.release()
             }
         }
     }
@@ -328,6 +325,7 @@ extension AppRuntime {
     private func performDeferredLaunchBackfillIfNeeded() {
         guard needsLaunchBackfillAfterCoordinator else { return }
         launchBackfill(ModelContext(container))
+        platformVM.refreshDeployIndex()
         needsLaunchBackfillAfterCoordinator = false
     }
 

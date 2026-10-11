@@ -37,19 +37,11 @@ enum UpdateCheckSchedule {
     }
 }
 
-protocol UpdateCheckGitServing {
-    func probeUsability() throws -> GitUsability
-    func remoteHead(remote: String, ref: String,
-                    credential: GitCredential?) throws -> String?
-    func cloneShallow(remote: String, branch: String?, into path: String,
-                      credential: GitCredential?) throws
-    func commitSHA(at path: String) throws -> String
-    func commitDate(at repositoryPath: String) throws -> Date
-    func treeHash(at repositoryPath: String, path: String) throws -> String
-}
+protocol UpdateCheckGitServing: GitUsabilityProbing, GitShallowCloning, GitCommitReading, GitTreeReading, GitRemoteHeadReading {
 
-extension UpdateCheckGitServing {
-    func probeUsability() -> GitUsability { .usable }
+    @_disfavoredOverload
+    func commitDate(at repositoryPath: String) throws -> Date
+
 }
 
 extension GitService: UpdateCheckGitServing {}
@@ -112,7 +104,7 @@ struct UpdateCheckService: ScratchRootCleaning {
          storeRoot: String,
          now: @escaping () -> Date = Date.init,
          remoteValidator: @escaping InstallRemotePolicy.Validator =
-             InstallRemotePolicy.validateGitHubRepository) {
+         InstallRemotePolicy.validateGitHubRepository) {
         self.gitService = gitService
         self.credentialStore = credentialStore
         self.fileService = fileService
@@ -208,7 +200,7 @@ extension UpdateCheckService {
 
     private func checkBatch(key: BatchKey, snapshots: [Snapshot], context: ModelContext,
                             report: inout UpdateCheckReport) throws {
-        let diagnostics = UpdateBatchDiagnostics(probe: gitService.probeUsability)
+        let diagnostics = UpdateBatchDiagnostics(probe: { try gitService.probeUsability() })
         defer { if let evidence = diagnostics.evidence { report.gitUsability = evidence } }
         let checkedAt = now()
         let credential = credentialStore.credential(forHost: CredentialHost.githubInstall)

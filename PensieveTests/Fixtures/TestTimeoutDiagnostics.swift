@@ -6,6 +6,7 @@ import XCTest
 func installTimeoutDiagnostics() {
     ProjectDirectoryProbeDeadline.install()
     TestTimeoutDiagnostics.install()
+    TestWindowLifetime.install()
 }
 
 /// Bundle-load registration happens once on the main thread. Timeout paths save state and can

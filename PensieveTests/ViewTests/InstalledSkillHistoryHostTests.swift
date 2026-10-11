@@ -89,6 +89,7 @@ final class InstalledSkillHistoryHostTests: XCTestCase {
             defer: false
         )
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = container
         let fixture = InstalledHistoryHostFixture(window: window, container: container, host: host)
         fixture.mount()

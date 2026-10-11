@@ -42,9 +42,9 @@ protocol StoreRebuildServiceProtocol {
 /// clone-bootstrap (a fresh machine has files but an empty DB) and the post-pull refresh (PLAN-08
 /// consumes both). Reads through `FileServiceProtocol` + `ManifestReadWriting` only; NO git here.
 struct StoreRebuildService: StoreRebuildServiceProtocol {
-    private let fileService: FileServiceProtocol
+    let fileService: FileServiceProtocol
     private let manifestService: ManifestReadWriting
-    private let save: (ModelContext) throws -> Void
+    let save: (ModelContext) throws -> Void
 
     init(fileService: FileServiceProtocol = FileService(),
          manifestService: ManifestReadWriting = ManifestService(),
@@ -74,7 +74,15 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
             return result
         }
 
-        let manifestIsAuthoritative = manifestHasContent(root: root)
+        return rebuild(snapshot: snapshot, fromRoot: root, context: context)
+    }
+
+    /// A lock-owning GUI writer already read and updated the manifest. Reuse its plain result,
+    /// including pending local edits, rather than sampling disk again during presentation merge.
+    func rebuild(snapshot: ManifestSnapshot, fromRoot root: String, context: ModelContext,
+                 manifestIsAuthoritative: Bool? = nil) -> RebuildResult {
+        var result = RebuildResult()
+        let manifestIsAuthoritative = manifestIsAuthoritative ?? manifestHasContent(root: root)
         let filePresentSlugs = rebuildSkills(
             root: root,
             snapshot: snapshot,
@@ -209,7 +217,7 @@ extension StoreRebuildService {
         }
     }
 
-    private func manifestHasContent(root: String) -> Bool {
+    func manifestHasContent(root: String) -> Bool {
         let manifestRoot = root + "/manifest"
         if fileService.fileExists(at: manifestRoot + "/projects.yaml") { return true }
         for directory in ["skills", "categories"] {
@@ -221,8 +229,8 @@ extension StoreRebuildService {
         return false
     }
 
-    private func upsertSkill(slug: String, parsed: ParsedSkill, overlay: SkillOverlay?,
-                             existing: Skill?, context: ModelContext, result: inout RebuildResult) {
+    func upsertSkill(slug: String, parsed: ParsedSkill, overlay: SkillOverlay?,
+                     existing: Skill?, context: ModelContext, result: inout RebuildResult) {
         let name = parsed.name ?? slug
         let description = parsed.description ?? name   // hasRequiredFrontmatter guarantees non-empty; defensive
         // The overlay-backed fields (scope/tags/cursor/origin/createdAt) resolve three ways:
@@ -321,9 +329,10 @@ extension StoreRebuildService {
 // MARK: - Categories reconcile
 
 extension StoreRebuildService {
-    private func rebuildCategories(snapshot: ManifestSnapshot,
-                                   context: ModelContext,
-                                   result: inout RebuildResult) {
+    func rebuildCategories(snapshot: ManifestSnapshot,
+                           context: ModelContext,
+                           result: inout RebuildResult,
+                           removingOnlyIDs: Set<UUID>? = nil) {
         let existingCategories = (try? context.fetch(FetchDescriptor<Category>())) ?? []
         var existingByName = Dictionary(existingCategories.map { ($0.name, $0) },
                                         uniquingKeysWith: { first, _ in first })
@@ -348,7 +357,7 @@ extension StoreRebuildService {
         // Delete local categories absent from the manifest. Do NOT create/delete Project rows:
         // a projectKey with no locally-registered Project simply doesn't fan out (CategoryReconciler
         // skips unresolvable keys) — no path-less phantom projects.
-        for category in existingByName.values {
+        for category in existingByName.values where removingOnlyIDs?.contains(category.id) ?? true {
             context.delete(category)
             result.categoriesRemoved += 1
         }

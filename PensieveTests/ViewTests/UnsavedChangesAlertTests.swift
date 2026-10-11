@@ -29,6 +29,7 @@ final class UnsavedChangesAlertTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer { window.close() }
         let answered = expectation(description: "answered")
@@ -50,6 +51,7 @@ final class UnsavedChangesAlertTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer { if window.isVisible { window.close() } }
         let answered = expectation(description: "answered")

@@ -32,7 +32,7 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
             XCTAssertEqual(runtime.syncModel.remoteURL, "https://fixture.test/store.git")
             XCTAssertEqual(runtime.syncModel.state, .synced(at: syncedAt))
         }
-        try TestPaths.git.removeRemote(at: fixture.root)
+        try NativeTestWork.run { [self] in try TestPaths.git.removeRemote(at: fixture.root) }
         await runtime.refreshGitUsability()
         XCTAssertNil(runtime.syncModel.remoteURL)
         XCTAssertNil(runtime.syncModel.configurationError)
@@ -107,6 +107,35 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
             XCTAssertEqual(runtime.syncModel.configurationError, newer.message)
             XCTAssertEqual(runtime.syncModel.state, newer == .usable ? .idle : .error(newer.message ?? ""))
         }
+        try await assertUnknownSettingsRefreshDoesNotJoinOlderProbe()
+    }
+
+    private func assertUnknownSettingsRefreshDoesNotJoinOlderProbe() async throws {
+        let h = try await makeSyncRecoveryHarness(initialProbeError: GitError.outputReadFailed(detail: "launch EIO"))
+        h.preference.enabled = false
+        let held = TestWait.Gate(owner: self)
+        h.probe.set {
+            XCTAssertFalse(Thread.isMainThread)
+            try? held.wait()
+            return .licenseNotAccepted
+        }
+        let older = Task { await h.runtime.refreshGitUsability() }
+        await TestWait.until(failureMessage: "older unknown-state probe did not start") { held.waiterCount == 1 }
+        h.probe.set { XCTAssertFalse(Thread.isMainThread); return .usable }
+        var refreshed = false
+        let settings = Task {
+            await h.runtime.refreshGitUsability()
+            refreshed = true
+        }
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                             failureMessage: "Settings joined the held unknown-state probe") { refreshed }
+        XCTAssertEqual(h.probe.count, 3, "Settings must ask a fresh question while the older probe is held")
+        XCTAssertEqual(h.runtime.gitUsability, .usable)
+        held.open()
+        await older.value
+        await settings.value
+        XCTAssertEqual(h.runtime.gitUsability, .usable, "the older license answer must not replace Settings evidence")
+        await h.finish()
     }
 
     func testUnreadableRepositoryAndMissingStoreHavePlainSettingsErrors() async throws {
@@ -126,9 +155,9 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
         XCTAssertNotEqual(runtime.syncModel.state, .unconfigured)
         let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support,
             git: TestPaths.git,
-                                hasLocalBranches: TestPaths.git.hasLocalBranches,
+                                hasLocalBranches: { try TestPaths.git.hasLocalBranches(at: $0) },
                                 credentials: InMemoryCredentialStore(), reconciler: NoPresentationReconciler(), now: Date.init)
-        XCTAssertTrue(daemon.runOnce().detail.contains("store folder can't be found"))
+        XCTAssertTrue(try NativeTestWork.run { daemon.runOnce() }.detail.contains("store folder can't be found"))
     }
 
     func testConnectFailureNamesGitAndFixWithoutRawExitText() async throws {
@@ -140,7 +169,7 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
             let git = try fixture.broken(state)
             let model = SyncSetupModel(context: container.mainContext, git: git,
                                        credentials: InMemoryCredentialStore(), root: fixture.root,
-                                       lockPath: fixture.support + "/sync.lock")
+                                       lockPath: fixture.support + "/sync.lock", steps: SyncStepModel())
             await model.connectAndReport(url: "git@example.com:skills.git", username: "", token: "")
             guard case let .failed(message) = model.state else { return XCTFail("expected connect error") }
             XCTAssertEqual(message, state.message)
@@ -156,6 +185,7 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
         let git = try fixture.executable("""
         simulate_failure() {
             \(FakeGitScript.skipGlobalOptions)
+            if [ "$1" = ls-remote ]; then exit 0; fi
             if [ "$1" = clone ]; then touch '\(fixture.failureSwitch)'; fi
         }
         simulate_failure "$@"
@@ -167,7 +197,8 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
         """)
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         let model = SyncSetupModel(context: container.mainContext, git: git,
-            credentials: InMemoryCredentialStore(), root: fixture.root, lockPath: fixture.support + "/sync.lock")
+            credentials: InMemoryCredentialStore(), root: fixture.root,
+            lockPath: fixture.support + "/sync.lock", steps: SyncStepModel())
         await model.connectAndReport(url: "git@example.com:skills.git", username: "", token: "")
         XCTAssertEqual(model.state, .failed(GitUsability.licenseNotAccepted.message ?? ""))
         let calls = try fixture.files.readFile(at: fixture.trace).split(separator: "\n").map { line in

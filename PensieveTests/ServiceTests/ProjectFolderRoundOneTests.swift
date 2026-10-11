@@ -33,7 +33,8 @@ final class ProjectFolderRoundOneTests: XCTestCase {
                 reconciler: reconciler, manifestService: ManifestService(fileService: h.files),
                     manifestRoot: h.root + "/store", platformVM: vm, localMachineID: ProjectIntentHarness.localID,
                     confirmedPreview: plan,
-            context: h.context, logFailure: { logs.append($0) })
+            context: h.context, logFailure: { logs.append($0) },
+            lockPath: h.root + "/store" + ".sync.lock")
         }
         let alert = model.error
         XCTAssertNil(alert)

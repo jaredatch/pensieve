@@ -27,7 +27,17 @@ enum GitProcessProbe {
             } catch { exit(74) }
             exit(1)
         }
-        let text = run(mode, executable: executable)
+        if mode.hasPrefix("main-thread-") {
+            mainThreadGuard(mode, executable: executable, report: report)
+            exit(0)
+        }
+        let finished = DispatchSemaphore(value: 0)
+        var text = ""
+        Thread {
+            text = run(mode, executable: executable)
+            finished.signal()
+        }.start()
+        finished.wait()
         do { try FileService().writeFile(at: report, content: text) } catch { exit(74) }
         exit(text.hasPrefix("OK") ? 0 : 1)
     }
@@ -59,6 +69,7 @@ enum GitProcessProbe {
     }
 
     static func run(_ mode: String, executable: String) -> String {
+        if mode.hasPrefix("cancel-") { return cancellation(mode) }
         if mode.hasPrefix("spawn-") { return spawn(mode, executable: executable) }
         if mode.hasPrefix("exit-wake") { return exitWake(mode) }
         if mode.hasPrefix("reap-") { return reapFailure(mode) }

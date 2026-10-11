@@ -5,11 +5,11 @@ import SwiftUI
 /// toggle that lived under General; Disconnect removes the remote and its sync token, not local data or the install token.
 struct SyncSettingsView: View {
     @Environment(AppRuntime.self) private var runtime
-    @Environment(\.modelContext) private var modelContext
     @AppStorage("backgroundSyncEnabled") private var backgroundSyncEnabled = true
     @State private var showSetup = false
     @State private var confirmDisconnect = false
     @State private var disconnectError: String?
+    private var model: SyncSetupModel { runtime.syncSetup }
     private var remoteURL: String? { runtime.syncModel.remoteURL }
     private var remoteError: String? { runtime.syncModel.configurationError }
 
@@ -24,16 +24,27 @@ struct SyncSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .truncationMode(.middle)
                 }
-                if remoteError != nil {
+                if remoteError != nil && model.state != .working && !model.isDisconnecting {
                     EmptyView()
-                } else if runtime.syncModel.canConnect {
-                    Button("Connect…") { showSetup = true }
+                } else if model.state == .working || (runtime.syncModel.canConnect && !model.isDisconnecting) {
+                    Button { showSetup = true } label: {
+                        HStack {
+                            if model.state == .working { ProgressView().controlSize(.small) }
+                            Text("Connect…")
+                        }
+                    }
                         .controlSize(.small)
-                } else if remoteURL != nil {
-                    Button("Disconnect…") { confirmDisconnect = true }
+                        .disabled(model.state == .working || model.isDisconnecting)
+                } else if remoteURL != nil || model.isDisconnecting {
+                    Button { confirmDisconnect = true } label: {
+                        HStack {
+                            if model.isDisconnecting { ProgressView().controlSize(.small) }
+                            Text("Disconnect…")
+                        }
+                    }
                         .controlSize(.small)
                         .disabled(disconnectUnavailable)
-                    if disconnectUnavailable {
+                    if disconnectUnavailable && !model.isDisconnecting {
                         Text(runtime.syncModel.isConflicted
                              ? "Resolve the conflicts before disconnecting."
                              : "Wait for the current sync to finish.")
@@ -57,7 +68,7 @@ struct SyncSettingsView: View {
             onDismiss: {
                 refresh()
             },
-            content: { SyncSetupView(model: runtime.paths.makeSyncSetupModel(context: modelContext)) }
+            content: { SyncSetupView(model: model) }
         )
         .confirmationDialog(
             "Disconnect from \(remoteURL ?? "this repository")?",
@@ -84,6 +95,7 @@ struct SyncSettingsView: View {
     /// Reads observable state only (no subprocess): the lock check itself is inside `performDisconnect`.
     private var disconnectUnavailable: Bool {
         runtime.syncModel.state == .syncing || runtime.syncModel.isConflicted
+            || model.isDisconnecting || model.state == .working
     }
 
     private func refresh() {
@@ -91,19 +103,19 @@ struct SyncSettingsView: View {
     }
 
     private func disconnect() {
-        defer {
-            refresh()
-        }
         guard !disconnectUnavailable else {
             disconnectError = runtime.syncModel.isConflicted
                 ? "Resolve the conflicts before disconnecting."
                 : "Wait for the current sync to finish."
             return
         }
-        do {
-            try runtime.paths.makeSyncSetupModel(context: modelContext).performDisconnect()
-        } catch {
-            disconnectError = error.localizedDescription
+        Task {
+            defer { refresh() }
+            do {
+                try await model.performDisconnect()
+            } catch {
+                disconnectError = error.localizedDescription
+            }
         }
     }
 }

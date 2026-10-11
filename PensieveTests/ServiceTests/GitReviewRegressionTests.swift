@@ -9,8 +9,8 @@ final class GitReviewRegressionTests: XCTestCase {
             let fixture = try GitFailureFixture()
             defer { try? fixture.remove() }
             let git = try fixture.broken(state)
-            XCTAssertNil(try git.remoteURL(at: fixture.root))
-            XCTAssertFalse(fixture.paths.hasRemoteConfigured(git: git))
+            XCTAssertNil(try NativeTestWork.run { [self] in try git.remoteURL(at: fixture.root) })
+            XCTAssertFalse(try NativeTestWork.run { fixture.paths.hasRemoteConfigured(git: git) })
             let model = SyncModel(git: git, root: fixture.root)
             let modelConfiguration = try RuntimeConfigurationFixture(model, defaults: isolatedDefaults("configuration-\(index)"))
             defer { try? modelConfiguration.remove() }
@@ -34,10 +34,11 @@ final class GitReviewRegressionTests: XCTestCase {
                 launchReconcile: { _, _ in LaunchReconcileOutcome(rebuild: RebuildResult(), migrationRan: false) },
                 launchBackfill: { _ in backfills += 1 },
                 hasRemoteConfigured: { fixture.paths.hasRemoteConfigured(git: git) },
-                postSyncConvergence: convergence, paths: fixture.paths, gitUsabilityProbe: git.probeUsability
+                postSyncConvergence: convergence, paths: fixture.paths, gitUsabilityProbe: { try git.probeUsability() }
             )
             await runtime.bootstrapTask.value
-            XCTAssertTrue(runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext))
+            let launchStartedOnce = await runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext)
+            XCTAssertTrue(launchStartedOnce)
             runtime.library.stopWatching()
             XCTAssertEqual(runtime.gitUsability, state)
             XCTAssertEqual(backfills, 1, "local backfill must not wait for a sync that has no remote")
@@ -61,8 +62,10 @@ final class GitReviewRegressionTests: XCTestCase {
                 MESSAGE
                 exit 1
                 """)
-            XCTAssertEqual(try git.probeUsability(), .developerToolsMissing)
-            XCTAssertTrue(try git.probeUsability().message?.contains("xcode-select --install") == true)
+            XCTAssertEqual(try NativeTestWork.run { [self] in try git.probeUsability() }, .developerToolsMissing)
+            XCTAssertTrue(try NativeTestWork.run { [self] in
+                try git.probeUsability()
+            }.message?.contains("xcode-select --install") == true)
         }
     }
 
@@ -88,12 +91,12 @@ final class GitReviewRegressionTests: XCTestCase {
             launchBackfill: { _ in backfills += 1 },
             hasRemoteConfigured: { fixture.paths.hasRemoteConfigured(git: git) },
             postSyncConvergence: convergence, paths: fixture.paths,
-            gitUsabilityProbe: git.probeUsability
+            gitUsabilityProbe: { try git.probeUsability() }
         )
         await runtime.bootstrapTask.value
         try fixture.files.deleteDirectory(at: fixture.root)
         if dangling { try fixture.files.createSymlink(at: fixture.root, pointingTo: fixture.base + "/unmounted") }
-        XCTAssertThrowsError(try git.remoteURL(at: fixture.root)) { error in
+        XCTAssertThrowsError(try NativeTestWork.run { [self] in try git.remoteURL(at: fixture.root) }) { error in
             if state == .usable {
                 guard case GitError.repositoryUnreadable = error else { return XCTFail("\(error)") }
             } else {
@@ -101,22 +104,25 @@ final class GitReviewRegressionTests: XCTestCase {
                 XCTAssertEqual(actual, state)
             }
         }
-        XCTAssertTrue(fixture.paths.hasRemoteConfigured(git: git))
+        XCTAssertTrue(try NativeTestWork.run { fixture.paths.hasRemoteConfigured(git: git) })
         let callsBeforeRead = try fixture.files.readFile(at: fixture.trace)
-        model.applyConfiguration(model.configurationRead()(), order: model.beginConfiguration())
+        let readConfiguration = model.configurationRead()
+        let configuration = try NativeTestWork.run(readConfiguration)
+        model.applyConfiguration(configuration, order: model.beginConfiguration())
         XCTAssertNotEqual(try fixture.files.readFile(at: fixture.trace), callsBeforeRead,
                           "the configuration refresh must actually read the missing root")
         XCTAssertNotNil(model.configurationError)
         XCTAssertNotEqual(model.state, .unconfigured)
-        XCTAssertTrue(runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext))
+        let launchStartedOnce = await runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext)
+        XCTAssertTrue(launchStartedOnce)
         runtime.library.stopWatching()
         XCTAssertEqual(runtime.gitUsability, state, "launch assertions retain the unusable host")
         XCTAssertEqual(backfills, 0)
         XCTAssertEqual(convergence.launches, 0)
         let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: git,
-                                hasLocalBranches: git.hasLocalBranches,
+                                hasLocalBranches: { try git.hasLocalBranches(at: $0) },
                                 credentials: InMemoryCredentialStore(), reconciler: ReviewReconciler(), now: Date.init)
-        XCTAssertEqual(daemon.runOnce().category, "failed")
+        XCTAssertEqual(try NativeTestWork.run { daemon.runOnce() }.category, "failed")
     }
 
     func testRootDirectoryRequirementMaintainsLinksAndRejectsFiles() throws {
@@ -127,16 +133,16 @@ final class GitReviewRegressionTests: XCTestCase {
         try fixture.files.createDirectory(at: target)
         try fixture.files.createSymlink(at: fixture.root, pointingTo: target)
         let git = try fixture.broken(.licenseNotAccepted)
-        XCTAssertNil(try git.remoteURL(at: fixture.root))
+        XCTAssertNil(try NativeTestWork.run { [self] in try git.remoteURL(at: fixture.root) })
         XCTAssertFalse(fixture.files.fileExists(at: fixture.trace))
         try fixture.files.deleteDirectory(at: target)
         try fixture.files.writeFile(at: target, content: "not a directory")
-        XCTAssertThrowsError(try TestPaths.git.remoteURL(at: fixture.root)) { error in
+        XCTAssertThrowsError(try NativeTestWork.run { [self] in try TestPaths.git.remoteURL(at: fixture.root) }) { error in
             guard case GitError.repositoryUnreadable = error else { return XCTFail("\(error)") }
         }
         try fixture.files.deleteFile(at: fixture.root)
         try fixture.files.writeFile(at: fixture.root, content: "not a directory")
-        XCTAssertThrowsError(try TestPaths.git.remoteURL(at: fixture.root)) { error in
+        XCTAssertThrowsError(try NativeTestWork.run { [self] in try TestPaths.git.remoteURL(at: fixture.root) }) { error in
             guard case GitError.repositoryUnreadable = error else { return XCTFail("\(error)") }
         }
     }
@@ -149,7 +155,7 @@ final class GitReviewRegressionTests: XCTestCase {
         try FileManager.default.moveItem(atPath: fixture.root + "/metadata", toPath: fixture.root + "/.GIT")
         XCTAssertTrue(try fixture.files.listDirectory(at: fixture.root).contains(".GIT"))
         let expected = fixture.files.directoryExists(at: fixture.root + "/.git") ? "https://fixture.test/store.git" : nil
-        XCTAssertEqual(try TestPaths.git.remoteURL(at: fixture.root), expected)
+        XCTAssertEqual(try NativeTestWork.run { [self] in try TestPaths.git.remoteURL(at: fixture.root) }, expected)
     }
 
     func testDeniedRootLookupRemainsUnknown() throws {
@@ -157,11 +163,11 @@ final class GitReviewRegressionTests: XCTestCase {
         defer { try? fixture.remove() }
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: fixture.root)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fixture.root) }
-        XCTAssertThrowsError(try TestPaths.git.remoteURL(at: fixture.root)) { error in
+        XCTAssertThrowsError(try NativeTestWork.run { [self] in try TestPaths.git.remoteURL(at: fixture.root) }) { error in
             guard case let GitError.repositoryUnreadable(path, _) = error else { return XCTFail("\(error)") }
             XCTAssertEqual(path, fixture.root)
         }
-        XCTAssertTrue(fixture.paths.hasRemoteConfigured())
+        XCTAssertTrue(try NativeTestWork.run { fixture.paths.hasRemoteConfigured() })
     }
 
     func testMultilinePreflightFailureWritesOneStatusAndLogLine() throws {
@@ -170,11 +176,11 @@ final class GitReviewRegressionTests: XCTestCase {
         try fixture.seedRepository()
         let git = try fixture.broken(.failed(GitFailureDetail("first line\nsecond line\r\nthird line\u{2028}last line")))
         let daemon = SyncDaemon(root: fixture.root, appSupport: fixture.support, git: git,
-                                hasLocalBranches: git.hasLocalBranches,
+                                hasLocalBranches: { try git.hasLocalBranches(at: $0) },
                                 credentials: InMemoryCredentialStore(), reconciler: ReviewReconciler(), now: Date.init)
-        let output = DaemonCLI.execute(["run"], appSupport: fixture.support,
+        let output = try NativeTestWork.run { DaemonCLI.execute(["run"], appSupport: fixture.support,
                                        readFile: { try? fixture.files.readData(at: $0) },
-                                       runCycle: { daemon.runOnce() }, now: Date.init)
+                                       runCycle: { daemon.runOnce() }, now: Date.init) }
         XCTAssertEqual(output.exitCode, 1)
         let status = try JSONDecoder().decode(
             DaemonStatus.self, from: fixture.files.readData(at: fixture.support + "/daemon-status.json")
@@ -204,10 +210,12 @@ final class GitReviewRegressionTests: XCTestCase {
             exec /usr/bin/git "$@"
             """)
         let operations: [() throws -> Void] = [
-            { try git.fetch(at: fixture.root, credential: nil) },
-            { _ = try git.pullRebase(at: fixture.root, credential: nil) },
-            { try git.push(at: fixture.root, credential: nil) },
-            { _ = try git.collapseToSingleCommit(at: fixture.root, message: "test", credential: nil) }
+            { try NativeTestWork.run { [self] in try git.fetch(at: fixture.root, credential: nil) } },
+            { _ = try NativeTestWork.run { [self] in try git.pullRebase(at: fixture.root, credential: nil) } },
+            { try NativeTestWork.run { [self] in try git.push(at: fixture.root, credential: nil) } },
+            { _ = try NativeTestWork.run { [self] in
+                try git.collapseToSingleCommit(at: fixture.root, message: "test", credential: nil)
+            } }
         ]
         for operation in operations {
             XCTAssertThrowsError(try operation()) { error in

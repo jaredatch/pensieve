@@ -72,7 +72,7 @@ extension AppRuntimePaths {
     @MainActor
     func makeSyncSetupModel(context: ModelContext) -> SyncSetupModel {
         SyncSetupModel(context: context, git: makeGitService(), credentials: makeCredentialStore(),
-            root: storeRoot, lockPath: syncLockPath)
+            root: storeRoot, lockPath: syncLockPath, steps: syncSteps)
     }
 
     @MainActor
@@ -80,6 +80,6 @@ extension AppRuntimePaths {
         onResolutionStarted: @escaping () throws -> (SyncCycleResult) -> Void
     ) -> ConflictResolutionModel {
         ConflictResolutionModel(engine: makeSyncEngine(), git: makeGitService(), credentials: makeCredentialStore(),
-            root: storeRoot, onResolutionStarted: onResolutionStarted)
+            root: storeRoot, steps: syncSteps, onResolutionStarted: onResolutionStarted)
     }
 }

@@ -67,12 +67,68 @@ final class ConflictResolutionModelTests: XCTestCase {
             false
         }
         func hasCommitsToPush(at path: String) -> Bool { false }
-    }
+
+        func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
+
+            try blob(atStage: stage, path: path, in: workingDir).map {
+
+                ConflictEntry(mode: "100644", objectID: "", bytes: $0)
+
+            }
+
+        }
+
+        func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+
+            throw GitError.repositoryUnreadable(path: root, detail: "Conflict entry restoration is unavailable.")
+
+        }
+
+        func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
+
+            throw GitError.repositoryUnreadable(path: root, detail: "Conflict index removal is unavailable.")
+
+        }
+
+        func retireConflictPath(_ path: String, at root: String) throws {
+
+            throw GitError.repositoryUnreadable(path: root, detail: "Legacy gitlink resolution is unavailable.")
+
+        }
+
+        func probeUsability() -> GitUsability { .usable }
+
+        func checkoutUnbornBranch(_ branch: String, at path: String) throws {}
+
+        func fetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {}
+
+        func materializeFromFetchHead(at path: String) throws {}
+
+        func bornBranch(_ branch: String, at path: String) throws {}
+
+        func setUpstream(branch: String, at path: String) throws {}
+
+        func hasLocalBranches(at path: String) throws -> Bool { true }
+
+        func hasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool { false }
+
+        func hasRemoteOriginConfigured(at path: String) throws -> Bool { true }
+
+        func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] { [] }
+
+        func show(sha: String, path: String, at workingDir: String) -> String? { nil }
+
+        func remoteReferences(remote: String, credential: GitCredential?) throws -> GitRemoteReferences {
+
+            GitRemoteReferences(defaultBranch: nil, heads: [])
+
+        }
+}
 
     func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
             for: Skill.self, Project.self, SkillProjectAssignment.self,
-            DeployRecord.self, PensieveCategory.self, Scenario.self,
+            DeployRecord.self, PensieveCategory.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         return ModelContext(container)
@@ -84,7 +140,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         -> ConflictResolutionModel {
         ConflictResolutionModel(engine: engine, git: StubGit(),
                                 credentials: InMemoryCredentialStore(), root: "/tmp/none",
-                                headStamp: headStamp,
+                                headStamp: headStamp, steps: SyncStepModel(),
                                 onResolutionStarted: { onResolved })
     }
 
@@ -100,7 +156,7 @@ final class ConflictResolutionModelTests: XCTestCase {
             let engine = StubResolutionEngine()
             engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: name), overlayItem(slug: name)]))]
             let model = makeModel(engine: engine)
-            await model.loadAndReport(context: context)
+            await model.loadAndReport(container: context.container)
             let groups = try readyGroups(from: model.phase)
             XCTAssertEqual(groups.count, 1)
             let group = try XCTUnwrap(groups.first)
@@ -119,7 +175,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: "alpha")]))]
         let model = makeModel(engine: engine)
 
-        await model.loadAndReport(context: context)
+        await model.loadAndReport(container: context.container)
         XCTAssertFalse(model.canApply)
         model.choose("skill:alpha", .otherMachine)
 
@@ -134,9 +190,9 @@ final class ConflictResolutionModelTests: XCTestCase {
         engine.inspections = [.conflicts(ConflictSet(items: [bodyItem(slug: "alpha")]))]
         let model = makeModel(engine: engine)
 
-        await model.loadAndReport(context: context)
+        await model.loadAndReport(container: context.container)
         model.choose("skill:alpha", .thisMachine)
-        await model.applyAndReport(context: context)
+        await model.applyAndReport(container: context.container)
 
         XCTAssertEqual(model.phase, .done)
         XCTAssertEqual(engine.resolveCallCount, 1)
@@ -157,9 +213,9 @@ final class ConflictResolutionModelTests: XCTestCase {
         )
         let model = makeModel(engine: engine, onResolved: { spy.results.append($0) })
 
-        await model.loadAndReport(context: context)
+        await model.loadAndReport(container: context.container)
         model.choose("skill:alpha", .thisMachine)
-        await model.applyAndReport(context: context)
+        await model.applyAndReport(container: context.container)
 
         XCTAssertEqual(model.phase, .done)
         guard case let .synced(_, _, _, headAdvanced) = try XCTUnwrap(spy.results.first) else {
@@ -183,7 +239,7 @@ final class ConflictResolutionModelTests: XCTestCase {
             onResolved: { spy.results.append($0) }
         )
 
-        await model.loadAndReport(context: context)
+        await model.loadAndReport(container: context.container)
 
         XCTAssertEqual(model.phase, .empty)
         guard case let .synced(_, _, _, headAdvanced) = try XCTUnwrap(spy.results.first) else {
@@ -200,31 +256,40 @@ final class ConflictResolutionModelTests: XCTestCase {
         engine.resolveOutcome = .conflicted(["skills/alpha/SKILL.md"])
         let model = makeModel(engine: engine, onResolved: { spy.results.append($0) })
 
-        await model.loadAndReport(context: context)
+        await model.loadAndReport(container: context.container)
         model.choose("skill:alpha", .otherMachine)
-        await model.applyAndReport(context: context)
+        await model.applyAndReport(container: context.container)
 
         XCTAssertTrue(spy.results.isEmpty)
     }
 
     func testConflictsChangedReinspects() async throws {
-        let context = try makeContext()
-        let engine = StubResolutionEngine()
-        engine.inspections = [
-            .conflicts(ConflictSet(items: [bodyItem(slug: "alpha")])),
-            .conflicts(ConflictSet(items: [overlayItem(slug: "alpha")]))
-        ]
-        engine.resolveError = SyncError.conflictsChanged
-        let model = makeModel(engine: engine)
+        for throwsChanged in [true, false] {
+            let context = try makeContext()
+            let engine = StubResolutionEngine()
+            engine.inspections = [
+                .conflicts(ConflictSet(items: [bodyItem(slug: "alpha")])),
+                .conflicts(ConflictSet(items: [overlayItem(slug: "alpha")]))
+            ]
+            let model = makeModel(engine: engine)
+            await model.loadAndReport(container: context.container)
+            model.choose("skill:alpha", .otherMachine)
+            engine.resolveError = SyncError.conflictFolderMustMove(path: "skills/alpha")
+            await model.applyAndReport(container: context.container)
+            XCTAssertEqual(model.selectionError,
+                           SyncError.conflictFolderMustMove(path: "skills/alpha").errorDescription)
+            XCTAssertTrue(model.canApply, "A refused pick remains available for retry")
 
-        await model.loadAndReport(context: context)
-        model.choose("skill:alpha", .otherMachine)
-        await model.applyAndReport(context: context)
+            engine.resolveError = throwsChanged ? SyncError.conflictsChanged : nil
+            engine.resolveOutcome = .conflicted(["skills/alpha/SKILL.md"])
+            await model.applyAndReport(container: context.container)
 
-        XCTAssertEqual(engine.inspectCallCount, 2)
-        let groups = try readyGroups(from: model.phase)
-        XCTAssertEqual(groups.count, 1)
-        XCTAssertEqual(groups[0].subtitle, "Settings differ")
+            XCTAssertEqual(engine.inspectCallCount, 2)
+            let groups = try readyGroups(from: model.phase)
+            XCTAssertEqual(groups.count, 1)
+            XCTAssertEqual(groups[0].subtitle, "Settings differ")
+            XCTAssertNil(model.selectionError, "Fresh conflicts must clear the previous selection warning")
+        }
     }
 
     func overlayItem(slug: String) -> ConflictItem {

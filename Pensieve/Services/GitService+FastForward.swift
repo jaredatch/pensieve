@@ -20,6 +20,7 @@ extension GitService {
     /// A failed/non-zero
     /// `status` (e.g. the path is not a repo) is treated as NOT clean — the conservative default that
     /// keeps a downstream puller from fast-forwarding over a worktree it could not inspect.
+    @_disfavoredOverload
     func isWorktreeClean(at path: String) -> Bool {
         guard let store = try? storeOperation(at: path),
               let r = try? store.run(["status", "--porcelain", "--untracked-files=no"]), r.exit == 0,
@@ -35,6 +36,7 @@ extension GitService {
     /// harmless) → `.diverged`. On a successful merge, classify by HEAD before/after:
     /// `.fastForwarded(from:to:)` when it moved, `.upToDate` when it did not. Auth failures propagate
     /// from `fetch` as `.authenticationFailed`. The local `merge` takes no credential (no network).
+    @_disfavoredOverload
     func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
         let store = try storeOperation(at: path)
         let before = try headSHA(at: path)

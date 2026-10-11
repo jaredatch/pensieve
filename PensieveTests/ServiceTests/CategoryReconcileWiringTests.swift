@@ -203,7 +203,7 @@ final class CategoryReconcileWiringTests: XCTestCase {
         try context.save()
         let linkService = RecordingLinkService()
         let reconciler = makeReconciler(linkService: linkService)
-        let assignResult = CategoryStore(manifestRoot: TestPaths.storeRoot).setSkill(
+        let assignResult = CategoryStore().setSkill(
             skill,
             inCategory: category,
             assigned: true,
@@ -217,7 +217,7 @@ final class CategoryReconcileWiringTests: XCTestCase {
             RecordedLink(directoryName: skill.directoryName, platform: .codex, projectPath: project.path)
         ]))
         linkService.unlinkCalls.removeAll()
-        let unassignResult = CategoryStore(manifestRoot: TestPaths.storeRoot).setSkill(
+        let unassignResult = CategoryStore().setSkill(
             skill,
             inCategory: category,
             assigned: false,
@@ -245,8 +245,8 @@ final class CategoryReconcileWiringTests: XCTestCase {
             reconciler: reconciler, manifestRoot: TestPaths.storeRoot,
             platformVM: reconciler.platformVM,
             localMachineID: ProjectIntentHarness.localID,
-            context: context
-        )
+            context: context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(Set(linkService.unlinkCalls), Set([
             RecordedLink(directoryName: seed.skill.directoryName, platform: .claudeCode, projectPath: seed.project.path),
@@ -270,8 +270,8 @@ final class CategoryReconcileWiringTests: XCTestCase {
             reconciler: reconciler, manifestRoot: TestPaths.storeRoot,
             platformVM: reconciler.platformVM,
             localMachineID: ProjectIntentHarness.localID,
-            context: context
-        )
+            context: context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
 
         XCTAssertEqual(result.failures.count, 1)
         XCTAssertEqual(try projectCount(context: context), 1)
@@ -384,7 +384,7 @@ final class CategoryReconcileWiringTests: XCTestCase {
         _ = reconciler.reconcile(context: context)
         linkService.unlinkCalls.removeAll()
 
-        let result = CategoryStore(manifestRoot: TestPaths.storeRoot).setSkill(
+        let result = CategoryStore().setSkill(
             skill,
             inCategory: firstCategory,
             assigned: false,

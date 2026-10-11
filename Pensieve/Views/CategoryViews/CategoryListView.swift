@@ -18,12 +18,13 @@ struct CategoryListView: View {
     let addsFenced: Bool
 
     init(entitySelection: Binding<EntitySelection?>, searchText: Binding<String>,
-         platformVM: PlatformViewModel, manifestRoot: String, notifier: @escaping SyncStateNotifying, onAdd: @escaping () -> Void,
+         platformVM: PlatformViewModel, manifestSaves: ManifestSaveModel?,
+         notifier: @escaping SyncStateNotifying, onAdd: @escaping () -> Void,
          addsFenced: Bool) {
         _entitySelection = entitySelection
         _searchText = searchText
         self.platformVM = platformVM
-        self.categoryStore = CategoryStore(manifestService: ManifestService(), manifestRoot: manifestRoot, notifier: notifier)
+        self.categoryStore = CategoryStore(notifier: notifier, manifestSaves: manifestSaves)
         self.onAdd = onAdd
         self.addsFenced = addsFenced
     }

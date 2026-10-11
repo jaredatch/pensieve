@@ -1,6 +1,7 @@
 import Foundation
 
 extension GitService {
+    @_disfavoredOverload
     func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] {
         (try? logResult(forPath: path, at: workingDir, limit: limit)) ?? []
     }
@@ -23,6 +24,7 @@ extension GitService {
         }
     }
 
+    @_disfavoredOverload
     func show(sha: String, path: String, at workingDir: String) -> String? {
         guard let result = try? run(["-C", workingDir, "show", "\(sha):\(path)"], in: nil),
               result.exit == 0 else {

@@ -24,21 +24,22 @@ extension UpdatesSheetTests {
                             backing: .buffered, defer: false)
         main.toolbarStyle = .unified
         main.isReleasedWhenClosed = false
+        main.animationBehavior = .none
         let host = NSHostingView(rootView: root)
         host.sceneBridgingOptions = .all
         main.contentView = host
         main.setFrame(NSRect(x: 100, y: 100, width: 900, height: 600), display: true)
         main.orderFront(nil)
-        addTeardownBlock {
+        addTeardownBlock { [weak main] in
             await Self.closeSheetHost(main, model: model)
         }
         return main
     }
 
-    static func closeSheetHost(_ main: NSWindow, model: UpdatesViewModel) async {
-        guard main.contentView != nil else { return }
-        let sheet = main.attachedSheet
+    static func closeSheetHost(_ main: NSWindow?, model: UpdatesViewModel) async {
+        let sheet = main?.attachedSheet
         model.isPresented = false
+        guard let main, main.contentView != nil else { return }
         await TestWait.until(failureMessage: "The dismissed sheet did not detach before host cleanup",
                              diagnostics: { "main=\(main.frame), sheet=\(String(describing: main.attachedSheet?.frame))" }, {
             main.attachedSheet == nil
@@ -54,7 +55,9 @@ extension UpdatesSheetTests {
             main.attachedSheet != nil && model.loadPhase != .idle && !model.isLoading
                 && !(main.attachedSheet?.contentView?.bounds.isEmpty ?? true)
         }
-        return try XCTUnwrap(main.attachedSheet)
+        let sheet = try XCTUnwrap(main.attachedSheet)
+        sheet.animationBehavior = .none
+        return sheet
     }
 
     func completion(for skill: Skill) throws -> SkillUpdateCompletion {

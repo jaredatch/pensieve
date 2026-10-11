@@ -13,6 +13,7 @@ final class SkillPreviewLayoutTests: XCTestCase {
             let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: 300),
                                   styleMask: [.borderless], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
+            window.animationBehavior = .none
             window.contentView = host
             defer { window.close() }
             window.orderFront(nil)
@@ -198,6 +199,7 @@ final class SkillPreviewLayoutTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: width, height: 700),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         window.orderFront(nil)
         return (host, window)
@@ -238,6 +240,7 @@ final class SkillPreviewLayoutTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 600, height: 700),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         window.orderFront(nil)
         return (host, window)

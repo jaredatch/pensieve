@@ -23,7 +23,7 @@ final class SkillPreservingWriteTests: XCTestCase {
     @MainActor
     func testEditPreservesUpstreamFrontmatterAndSecondSaveIsByteIdentical() throws {
         let container = try ModelContainer(
-            for: Skill.self, Project.self, SkillProjectAssignment.self, DeployRecord.self, Category.self, Scenario.self,
+            for: Skill.self, Project.self, SkillProjectAssignment.self, DeployRecord.self, Category.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         let context = ModelContext(container)

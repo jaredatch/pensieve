@@ -15,12 +15,14 @@ extension GitProcess {
         do {
             let events = try GitOutputEvents(child: self)
             while true {
+                try GitCancellation.check()
                 let exited = try events.exitNotified || hasExited()
                 if exited {
                     let outRemaining = try queuedBytes(stdout)
                     let errRemaining = try queuedBytes(stderr)
                     try read(stdout, maximum: outRemaining, into: &out, buffer: &buffer, exited: true)
                     try read(stderr, maximum: errRemaining, into: &err, buffer: &buffer, exited: true)
+                    try GitCancellation.check()
                     return try GitService.GitDataOutput(stdout: out, stderr: err, exit: reap())
                 }
                 if outOpen {
@@ -44,6 +46,7 @@ extension GitProcess {
                 kill(-pid, SIGKILL)
                 _ = try? reap()
             }
+            if error is CancellationError { throw CancellationError() }
             throw GitError.outputReadFailed(detail: error.localizedDescription)
         }
     }
@@ -158,11 +161,29 @@ private final class GitOutputEvents {
         #if GIT_PROCESS_PROBE
         if let code = probeHooks?.waitFailure?() { errno = code; return -1 }
         #endif
+        // Only cancellable reads poll: ordinary writes retain the event-driven wait.
+        var timeout = timespec(tv_sec: 0, tv_nsec: 50_000_000)
+        if GitCancellation.isReadOnly {
+            return kevent(queue, nil, 0, &ready, Int32(ready.count), &timeout)
+        }
         return kevent(queue, nil, 0, &ready, Int32(ready.count), nil)
     }
 }
 
 extension GitService {
+    @discardableResult
+    func run(_ args: [String], in workingDir: String?, credential: GitCredential? = nil,
+             storeRules: Bool = false, file: StaticString = #fileID, line: UInt = #line) throws
+        -> GitOutput {
+        let result = try runData(args, in: workingDir, credential: credential, storeRules: storeRules,
+                                 file: file, line: line)
+        return GitOutput(
+            stdout: String(bytes: result.stdout, encoding: .utf8) ?? "",
+            stderr: String(bytes: result.stderr, encoding: .utf8) ?? "",
+            exit: result.exit, confirmingProbe: result.confirmingProbe
+        )
+    }
+
     func commandError(_ output: GitOutput, args: [String]) -> GitError {
         GitError.commandFailed(args: args, exitCode: output.exit,
             stderr: output.stderr.isEmpty ? output.stdout : output.stderr, confirmingProbe: output.confirmingProbe)

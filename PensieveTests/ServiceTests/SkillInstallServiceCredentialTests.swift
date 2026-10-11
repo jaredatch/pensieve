@@ -22,113 +22,119 @@ private final class RejectingInstallGitService: SkillInstallGitServing {
 
 extension SkillInstallServiceTests {
     func testDefaultInstallRemotePolicyRejectsStoredUnsafeRemotesBeforeGit() throws {
-        let rejectingGit = RejectingInstallGitService(
-            cloneError: GitError.commandFailed(args: ["clone"], exitCode: 128, stderr: "must not run")
-        )
-        let installer = SkillInstallService(
-            gitService: rejectingGit,
-            credentialStore: InMemoryCredentialStore(),
-            fileService: fileService,
-            scratchRoot: tempDir + "/remote-policy-scratch",
-            storeRoot: tempDir + "/store",
-            lockPath: tempDir + "/sync.lock"
-        )
+        try NativeTestWork.run { [self] in
+            let rejectingGit = RejectingInstallGitService(
+                cloneError: GitError.commandFailed(args: ["clone"], exitCode: 128, stderr: "must not run")
+            )
+            let installer = SkillInstallService(
+                gitService: rejectingGit,
+                credentialStore: InMemoryCredentialStore(),
+                fileService: fileService,
+                scratchRoot: tempDir + "/remote-policy-scratch",
+                storeRoot: tempDir + "/store",
+                lockPath: tempDir + "/sync.lock"
+            )
 
-        for remote in [
-            "ext::sh -c touch /tmp/pensieve-should-not-exist",
-            "https://attacker.example/owner/repo"
-        ] {
-            XCTAssertThrowsError(try installer.fetch(repo: remote, ref: "main", credential: nil)) {
-                XCTAssertEqual($0 as? SkillInstallError, .unsupportedRepositoryRemote)
+            for remote in [
+                "ext::sh -c touch /tmp/pensieve-should-not-exist",
+                "https://attacker.example/owner/repo"
+            ] {
+                XCTAssertThrowsError(try installer.fetch(repo: remote, ref: "main", credential: nil)) {
+                    XCTAssertEqual($0 as? SkillInstallError, .unsupportedRepositoryRemote)
+                }
             }
+            XCTAssertTrue(rejectingGit.receivedCredentials.isEmpty)
         }
-        XCTAssertTrue(rejectingGit.receivedCredentials.isEmpty)
     }
 
     func testInstallCredentialSelectionPrefersInstallSlotAndNeverSyncSlot() throws {
-        let credentials = InMemoryCredentialStore()
-        try credentials.store(
-            token: "sync-decoy",
-            username: "sync-user",
-            forHost: "github.com"
-        )
-        try credentials.store(
-            token: "install-secret",
-            username: "x-access-token",
-            forHost: CredentialHost.githubInstall
-        )
-        let rejection = GitError.commandFailed(args: ["clone"], exitCode: 128, stderr: "injected")
-        let rejectingGit = RejectingInstallGitService(cloneError: rejection)
-        let installer = SkillInstallService(
-            gitService: rejectingGit,
-            credentialStore: credentials,
-            fileService: fileService,
-            scratchRoot: tempDir + "/credential-scratch",
-            storeRoot: tempDir + "/store",
-            lockPath: tempDir + "/sync.lock"
-        )
-
-        XCTAssertThrowsError(
-            try installer.fetch(repo: "https://github.com/example/private.git", ref: nil, credential: nil)
-        )
-        XCTAssertEqual(
-            rejectingGit.receivedCredentials.last!,
-            .httpsToken(username: "x-access-token", token: "install-secret")
-        )
-
-        try credentials.delete(forHost: CredentialHost.githubInstall)
-        XCTAssertThrowsError(
-            try installer.fetch(
-                repo: "https://github.com/example/public.git",
-                ref: nil,
-                credential: .httpsToken(username: "sync-user", token: "sync-decoy")
+        try NativeTestWork.run { [self] in
+            let credentials = InMemoryCredentialStore()
+            try credentials.store(
+                token: "sync-decoy",
+                username: "sync-user",
+                forHost: "github.com"
             )
-        )
-        XCTAssertNil(
-            rejectingGit.receivedCredentials.last!,
-            "an absent install token must stay anonymous instead of using the sync-host decoy"
-        )
+            try credentials.store(
+                token: "install-secret",
+                username: "x-access-token",
+                forHost: CredentialHost.githubInstall
+            )
+            let rejection = GitError.commandFailed(args: ["clone"], exitCode: 128, stderr: "injected")
+            let rejectingGit = RejectingInstallGitService(cloneError: rejection)
+            let installer = SkillInstallService(
+                gitService: rejectingGit,
+                credentialStore: credentials,
+                fileService: fileService,
+                scratchRoot: tempDir + "/credential-scratch",
+                storeRoot: tempDir + "/store",
+                lockPath: tempDir + "/sync.lock"
+            )
+
+            XCTAssertThrowsError(
+                try installer.fetch(repo: "https://github.com/example/private.git", ref: nil, credential: nil)
+            )
+            XCTAssertEqual(
+                rejectingGit.receivedCredentials.last!,
+                .httpsToken(username: "x-access-token", token: "install-secret")
+            )
+
+            try credentials.delete(forHost: CredentialHost.githubInstall)
+            XCTAssertThrowsError(
+                try installer.fetch(
+                    repo: "https://github.com/example/public.git",
+                    ref: nil,
+                    credential: .httpsToken(username: "sync-user", token: "sync-decoy")
+                )
+            )
+            XCTAssertNil(
+                rejectingGit.receivedCredentials.last!,
+                "an absent install token must stay anonymous instead of using the sync-host decoy"
+            )
+        }
     }
 
     func testAuthFailureMappedDistinctFromNotFound() throws {
-        assertShallowCloneDisablesConfiguredCredentialHelpers()
+        try NativeTestWork.run { [self] in
+            assertShallowCloneDisablesConfiguredCredentialHelpers()
 
-        let authGit = RejectingInstallGitService(cloneError: GitError.commandFailed(
-            args: ["clone"],
-            exitCode: 128,
-            stderr: "fatal: unable to access repository: The requested URL returned error: 403"
-        ))
-        let authService = SkillInstallService(
-            gitService: authGit,
-            credentialStore: InMemoryCredentialStore(),
-            fileService: fileService,
-            scratchRoot: tempDir + "/auth-scratch",
-            storeRoot: tempDir + "/store",
-            lockPath: tempDir + "/sync.lock"
-        )
-
-        XCTAssertThrowsError(
-            try authService.fetch(repo: "https://github.com/example/private.git", ref: nil, credential: nil)
-        ) { error in
-            XCTAssertEqual(error as? SkillInstallError, .authenticationFailed)
-            XCTAssertEqual(
-                error.localizedDescription,
-                "Authentication failed — for private repositories add a GitHub token in Settings"
+            let authGit = RejectingInstallGitService(cloneError: GitError.commandFailed(
+                args: ["clone"],
+                exitCode: 128,
+                stderr: "fatal: unable to access repository: The requested URL returned error: 403"
+            ))
+            let authService = SkillInstallService(
+                gitService: authGit,
+                credentialStore: InMemoryCredentialStore(),
+                fileService: fileService,
+                scratchRoot: tempDir + "/auth-scratch",
+                storeRoot: tempDir + "/store",
+                lockPath: tempDir + "/sync.lock"
             )
-        }
 
-        XCTAssertThrowsError(
-            try service.fetch(repo: tempDir + "/missing-repository", ref: nil, credential: nil)
-        ) { error in
-            XCTAssertEqual(error as? SkillInstallError, .repositoryNotFound)
-            XCTAssertNotEqual(error as? SkillInstallError, .authenticationFailed)
-            XCTAssertTrue(
-                error.localizedDescription.contains("if it's private"),
-                "not-found must stay authentication-ambiguous (GitHub hides private repositories as 404)"
-            )
-        }
+            XCTAssertThrowsError(
+                try authService.fetch(repo: "https://github.com/example/private.git", ref: nil, credential: nil)
+            ) { error in
+                XCTAssertEqual(error as? SkillInstallError, .authenticationFailed)
+                XCTAssertEqual(
+                    error.localizedDescription,
+                    "Authentication failed — for private repositories add a GitHub token in Settings"
+                )
+            }
 
-        assertLocalPermissionFailureIsNotAuthentication()
+            XCTAssertThrowsError(
+                try service.fetch(repo: tempDir + "/missing-repository", ref: nil, credential: nil)
+            ) { error in
+                XCTAssertEqual(error as? SkillInstallError, .repositoryNotFound)
+                XCTAssertNotEqual(error as? SkillInstallError, .authenticationFailed)
+                XCTAssertTrue(
+                    error.localizedDescription.contains("if it's private"),
+                    "not-found must stay authentication-ambiguous (GitHub hides private repositories as 404)"
+                )
+            }
+
+            assertLocalPermissionFailureIsNotAuthentication()
+        }
     }
 
     private func assertShallowCloneDisablesConfiguredCredentialHelpers() {

@@ -20,7 +20,7 @@ final class ImportWholeFileTests: XCTestCase {
     @MainActor
     private func context() throws -> ModelContext {
         let container = try ModelContainer(
-            for: Skill.self, Project.self, SkillProjectAssignment.self, DeployRecord.self, Pensieve.Category.self, Scenario.self,
+            for: Skill.self, Project.self, SkillProjectAssignment.self, DeployRecord.self, Pensieve.Category.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         return ModelContext(container)

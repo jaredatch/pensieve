@@ -88,12 +88,11 @@ enum SkillAdoptResult: Equatable {
     case localDrift
 }
 
-protocol SkillInstallGitServing {
-    func cloneShallow(remote: String, branch: String?, into path: String,
-                      credential: GitCredential?) throws
-    func commitSHA(at path: String) throws -> String
+protocol SkillInstallGitServing: GitShallowCloning, GitCommitReading, GitTreeReading {
+
+    @_disfavoredOverload
     func currentBranch(at path: String) throws -> String
-    func treeHash(at repositoryPath: String, path: String) throws -> String
+
 }
 
 extension GitService: SkillInstallGitServing {}
@@ -139,7 +138,7 @@ struct SkillInstallService: SkillInstallServiceProtocol, ScratchRootCleaning {
          lockPath: String,
          now: @escaping () -> Date = Date.init,
          remoteValidator: @escaping InstallRemotePolicy.Validator =
-             InstallRemotePolicy.validateGitHubRepository) {
+         InstallRemotePolicy.validateGitHubRepository) {
         self.gitService = gitService
         self.credentialStore = credentialStore
         self.fileService = fileService

@@ -155,8 +155,8 @@ extension CursorOwnershipTests {
                 platformVM: harness.vm,
                 localMachineID: ProjectIntentHarness.localID,
                 confirmedPreview: preview,
-                context: harness.context
-            )
+                context: harness.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
         }
         XCTAssertFalse(result.hasFailures)
         XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path))
@@ -194,8 +194,8 @@ extension CursorOwnershipTests {
                 platformVM: harness.vm,
                 localMachineID: ProjectIntentHarness.localID,
                 confirmedPreview: plan.preview,
-                context: harness.context
-            )
+                context: harness.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
             XCTAssertFalse(result.hasFailures, earlierEvidence)
             XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path), earlierEvidence)
             XCTAssertTrue(try harness.state.read().records.isEmpty)
@@ -228,8 +228,8 @@ extension CursorOwnershipTests {
                 platformVM: harness.vm,
                 localMachineID: ProjectIntentHarness.localID,
                 confirmedPreview: plan.preview,
-                context: harness.context
-            )
+                context: harness.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
             XCTAssertFalse(result.hasFailures, invalidSlug)
             for path in validPaths { XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path), invalidSlug) }
             XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<Project>()), 0, invalidSlug)
@@ -268,8 +268,8 @@ extension CursorOwnershipTests {
                 platformVM: harness.vm,
                 localMachineID: ProjectIntentHarness.localID,
                 confirmedPreview: plan.preview,
-                context: harness.context
-            )
+                context: harness.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
             XCTAssertFalse(result.hasFailures)
             XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path))
             if platform == .cursor {

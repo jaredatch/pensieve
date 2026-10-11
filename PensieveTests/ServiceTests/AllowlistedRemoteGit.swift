@@ -78,4 +78,24 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
     func show(sha: String, path: String, at workingDir: String) -> String? {
         wrapped.show(sha: sha, path: path, at: workingDir)
     }
+
+    func checkoutUnbornBranch(_ branch: String, at path: String) throws {}
+
+    func fetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {}
+
+    func materializeFromFetchHead(at path: String) throws {}
+
+    func bornBranch(_ branch: String, at path: String) throws {}
+
+    func setUpstream(branch: String, at path: String) throws {}
+
+    func hasLocalBranches(at path: String) throws -> Bool { true }
+
+    func hasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool { false }
+
+    func hasRemoteOriginConfigured(at path: String) throws -> Bool { true }
+
+    func remoteReferences(remote: String, credential: GitCredential?) throws -> GitRemoteReferences {
+        GitRemoteReferences(defaultBranch: nil, heads: [])
+    }
 }

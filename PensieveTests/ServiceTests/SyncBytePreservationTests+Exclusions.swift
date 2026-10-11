@@ -4,10 +4,12 @@ import XCTest
 
 extension SyncBytePreservationTests {
     func testUntrackedSecretsAndBuildLitterStayLocalWithAndWithoutSkillIgnores() throws {
-        for hidden in [false, true] {
-            for pathStaging in [false, true] {
-                for envDirectory in [false, true] {
-                    try assertExcludedRoundTrip(hidden: hidden, pathStaging: pathStaging, envDirectory: envDirectory)
+        try NativeTestWork.run { [self] in
+            for hidden in [false, true] {
+                for pathStaging in [false, true] {
+                    for envDirectory in [false, true] {
+                        try assertExcludedRoundTrip(hidden: hidden, pathStaging: pathStaging, envDirectory: envDirectory)
+                    }
                 }
             }
         }
@@ -63,43 +65,45 @@ extension SyncBytePreservationTests {
     }
 
     func testAlreadyTrackedEnvKeepsSyncingWithoutDeletingEitherStore() throws {
-        let remote = base + "/legacy-env.git"
-        let git = try userGit("legacy-env", remote: remote, skillRules: true)
-        try seedRemote(git: git, remote: remote)
-        let store = base + "/legacy-store"
-        try git.clone(remote: remoteURL, into: store, credential: nil)
-        let context = try exclusionContext(store: store)
-        _ = try engine(git: git).sync(root: store, message: "skill", credential: nil, context: context)
-        let paths = ["skills/safe/.env", "skills/safe/.venv/bin/python"]
-        for path in paths { try files.writeFile(at: store + "/" + path, content: "older build fixture\n") }
-        // Seed an older build's tracked file through native git, independently of the new policy.
-        try git.runOrThrow(["-C", store, "add", "--force", "--"] + paths, in: nil)
-        try git.runOrThrow(["-C", store, "commit", "-m", "older build tracked env"], in: nil)
-        try git.push(at: store, credential: nil)
-        let other = base + "/legacy-other"
-        try git.clone(remote: remoteURL, into: other, credential: nil)
-        let changed = Data([0, 255, 128, 13, 10])
-        for path in paths { try files.writeData(at: store + "/" + path, data: changed) }
-        let generated = "skills/safe/.venv/new.bin"
-        try files.writeData(at: store + "/" + generated, data: Data([9, 255]))
-        XCTAssertFalse(git.isWorktreeClean(at: store), "A tracked excluded name remains a pending change")
-        for path in paths { try git.stagePath(path, at: store) }
-        try git.stagePath("skills/safe/.venv", at: store)
-        XCTAssertEqual(try engine(git: git).sync(root: store, message: "legacy env changes", credential: nil,
-            context: context), .synced(pushed: true, warnings: []))
-        _ = try git.fastForwardOnly(at: other, credential: nil)
-        let fresh = base + "/legacy-fresh"
-        try git.clone(remote: remoteURL, into: fresh, credential: nil)
-        for path in paths {
-            let blob = try git.runData(["--git-dir", remote, "show", "main:" + path], in: nil)
-            XCTAssertEqual(blob.exit, 0)
-            XCTAssertEqual(blob.stdout, changed)
-            for root in [store, other, fresh] { XCTAssertEqual(try files.readData(at: root + "/" + path), changed) }
+        try NativeTestWork.run { [self] in
+            let remote = base + "/legacy-env.git"
+            let git = try userGit("legacy-env", remote: remote, skillRules: true)
+            try seedRemote(git: git, remote: remote)
+            let store = base + "/legacy-store"
+            try git.clone(remote: remoteURL, into: store, credential: nil)
+            let context = try exclusionContext(store: store)
+            _ = try engine(git: git).sync(root: store, message: "skill", credential: nil, context: context)
+            let paths = ["skills/safe/.env", "skills/safe/.venv/bin/python"]
+            for path in paths { try files.writeFile(at: store + "/" + path, content: "older build fixture\n") }
+            // Seed an older build's tracked file through native git, independently of the new policy.
+            try git.runOrThrow(["-C", store, "add", "--force", "--"] + paths, in: nil)
+            try git.runOrThrow(["-C", store, "commit", "-m", "older build tracked env"], in: nil)
+            try git.push(at: store, credential: nil)
+            let other = base + "/legacy-other"
+            try git.clone(remote: remoteURL, into: other, credential: nil)
+            let changed = Data([0, 255, 128, 13, 10])
+            for path in paths { try files.writeData(at: store + "/" + path, data: changed) }
+            let generated = "skills/safe/.venv/new.bin"
+            try files.writeData(at: store + "/" + generated, data: Data([9, 255]))
+            XCTAssertFalse(git.isWorktreeClean(at: store), "A tracked excluded name remains a pending change")
+            for path in paths { try git.stagePath(path, at: store) }
+            try git.stagePath("skills/safe/.venv", at: store)
+            XCTAssertEqual(try engine(git: git).sync(root: store, message: "legacy env changes", credential: nil,
+                context: context), .synced(pushed: true, warnings: []))
+            _ = try git.fastForwardOnly(at: other, credential: nil)
+            let fresh = base + "/legacy-fresh"
+            try git.clone(remote: remoteURL, into: fresh, credential: nil)
+            for path in paths {
+                let blob = try git.runData(["--git-dir", remote, "show", "main:" + path], in: nil)
+                XCTAssertEqual(blob.exit, 0)
+                XCTAssertEqual(blob.stdout, changed)
+                for root in [store, other, fresh] { XCTAssertEqual(try files.readData(at: root + "/" + path), changed) }
+            }
+            XCTAssertEqual(try files.readData(at: store + "/" + generated), Data([9, 255]))
+            XCTAssertFalse(files.fileExists(at: other + "/" + generated))
+            XCTAssertFalse(files.fileExists(at: fresh + "/" + generated))
+            XCTAssertTrue(git.isWorktreeClean(at: store))
         }
-        XCTAssertEqual(try files.readData(at: store + "/" + generated), Data([9, 255]))
-        XCTAssertFalse(files.fileExists(at: other + "/" + generated))
-        XCTAssertFalse(files.fileExists(at: fresh + "/" + generated))
-        XCTAssertTrue(git.isWorktreeClean(at: store))
     }
 
     private func assertCarriedPathsStageIndividually(_ paths: [String], git: GitService, store: String) throws {

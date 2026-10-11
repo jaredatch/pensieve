@@ -15,17 +15,19 @@ extension SyncNudgeTests {
             candidates: [candidate], beforeInstallReturn: { try gate.wait(timeout: .zero) },
             onInstallWrite: { _ in wrote = true }
         )
-        let source = try service.fetch(repo: "fixture", ref: nil, credential: nil)
+        let source = try NativeTestWork.run { [self] in try service.fetch(repo: "fixture", ref: nil, credential: nil) }
         var events: [String] = []
         let registration = SyncBodyWriteRegistration(
             begin: { slug, _ in events.append("begin:\(slug)") },
             end: { slug, succeeded in events.append("end:\(slug):\(succeeded)") }
         )
 
-        XCTAssertThrowsError(try service.install(
-            candidate: candidate, from: source, credential: nil,
-            bodyWriteRegistration: registration, context: fixture.context
-        ))
+        XCTAssertThrowsError(try NativeTestWork.run(container: fixture.context.container) { [self] jobContext in
+            try service.install(
+                candidate: candidate, from: source, credential: nil,
+                bodyWriteRegistration: registration, context: jobContext
+                )
+        })
 
         XCTAssertTrue(wrote)
         XCTAssertEqual(events, ["begin:demo", "end:demo:true"])
@@ -65,17 +67,19 @@ extension SyncNudgeTests {
             candidates: [candidate], beforeInstallReturn: { XCTFail("post-write hook must not run") },
             onInstallWrite: { _ in throw NudgeFailure.beforeCanonicalWrite }
         )
-        let source = try service.fetch(repo: "fixture", ref: nil, credential: nil)
+        let source = try NativeTestWork.run { [self] in try service.fetch(repo: "fixture", ref: nil, credential: nil) }
         var events: [String] = []
         let registration = SyncBodyWriteRegistration(
             begin: { slug, _ in events.append("begin:\(slug)") },
             end: { slug, succeeded in events.append("end:\(slug):\(succeeded)") }
         )
 
-        XCTAssertThrowsError(try service.install(
-            candidate: candidate, from: source, credential: nil,
-            bodyWriteRegistration: registration, context: fixture.context
-        ))
+        XCTAssertThrowsError(try NativeTestWork.run(container: fixture.context.container) { [self] jobContext in
+            try service.install(
+                candidate: candidate, from: source, credential: nil,
+                bodyWriteRegistration: registration, context: jobContext
+                )
+        })
 
         XCTAssertEqual(events, ["begin:demo", "end:demo:false"])
     }

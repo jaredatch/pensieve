@@ -1,183 +1,47 @@
+import AppKit
 import SwiftData
 import XCTest
 @testable import Pensieve
 
 @MainActor
 final class AppRuntimeTests: XCTestCase {
-    private final class StubWatcher: FileWatchServiceProtocol {
-        var onChange: (String) -> Void = { _ in }
-        private(set) var startCount = 0
-        private(set) var stopCount = 0
-        func start() -> Bool {
-            startCount += 1
-            return true
-        }
-        func stop() {
-            stopCount += 1
-        }
-    }
-
-    private struct StubDetection: AgentDetectionServiceProtocol {
-        func isInstalled(_ platform: PlatformTarget) -> Bool { false }
-        func installedPlatforms() -> [PlatformTarget] { [] }
-    }
-
-    private struct NoopDeployReconciler: DeployReconciling {
-        func reconcile(root: String) throws -> ReconcileOutcome { ReconcileOutcome() }
-    }
-
-    private final class RecordingDeployReconciler: DeployReconciling {
-        private(set) var calls = 0
-        func reconcile(root: String) throws -> ReconcileOutcome {
-            calls += 1
-            return ReconcileOutcome()
-        }
-    }
-
-    private struct NoopLedgerReconciler: CategoryReconcilerProtocol,
-        IntentReconcilerProtocol {
-        func reconcileWaitingRemovals(context: ModelContext) -> BatchResult { BatchResult() }
-        func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
-            reconcile(context: context)
-        }
-        func reconcile(context: ModelContext) -> BatchResult { BatchResult() }
-    }
-
-    private final class RecordingLedgerReconciler: CategoryReconcilerProtocol,
-        IntentReconcilerProtocol {
-        func reconcileWaitingRemovals(context: ModelContext) -> BatchResult { BatchResult() }
-        func reconcileRemovingProject(_ projectID: UUID, preservingProjects: Set<UUID>, context: ModelContext) -> BatchResult {
-            reconcile(context: context)
-        }
-        private(set) var calls = 0
-        func reconcile(context: ModelContext) -> BatchResult {
-            calls += 1
-            return BatchResult()
-        }
-    }
-
-    @MainActor
-    private final class WindowModels {
-        let library: SkillLibraryViewModel
-        let platformVM: PlatformViewModel
-        let syncModel: SyncModel
-        init(runtime: AppRuntime) {
-            library = runtime.library
-            platformVM = runtime.platformVM
-            syncModel = runtime.syncModel
-        }
-    }
-
-    private struct RuntimeHarness {
-        let runtime: AppRuntime
-        let context: ModelContext
-        let watcher: StubWatcher
-        let launchIngestLockPath: String
-        let paths: AppRuntimePaths
-    }
-
-    private func makeRuntime(
-        defaultsLabel: String = "runtime",
-        watcher: StubWatcher = StubWatcher(),
-        launchCalls: (() -> Void)? = nil,
-        launchBackfill: ((ModelContext) -> Void)? = nil,
-        launchOutcome: LaunchReconcileOutcome = LaunchReconcileOutcome(
-            rebuild: RebuildResult(),
-            migrationRan: false,
-            ingestedHeadStamp: "launch"
-        ),
-        launchRetryOutcome: LaunchReconcileOutcome? = nil,
-        hasRemoteConfigured: (() -> Bool)? = nil,
-        deployReconciler: DeployReconciling = NoopDeployReconciler(),
-        categoryReconciler: CategoryReconcilerProtocol = NoopLedgerReconciler(),
-        launchIngestLockPath: String? = nil
-    ) throws -> RuntimeHarness {
-        let paths = try AppRuntimePaths.temporary(named: "AppRuntimeTests")
-        let container = try AppRuntime.makeContainer(
-            configuration: ModelConfiguration(isStoredInMemoryOnly: true)
-        )
-        let defaults = try isolatedDefaults(defaultsLabel)
-        let library = SkillLibraryViewModel(
-            skillStore: SkillStore(fileService: FileService(), baseDir: TestPaths.skillsDir,
-                storeRoot: TestPaths.storeRoot), fileWatchService: watcher,
-            manifestRoot: TestPaths.storeRoot
-        )
-        let platformVM = neutralPlatformVM()
-        var returnedInitialLaunchOutcome = false
-        let convergence = PostSyncConvergence(
-            root: "/tmp/AppRuntimeTests",
-            deployReconciler: deployReconciler,
-            contextFactory: { ModelContext(container) },
-            categoryReconciler: categoryReconciler,
-            intentReconciler: NoopLedgerReconciler(),
-            auditLog: { _, _ in }
-        )
-        let runtime = try AppRuntime(
-            container: container,
-            platformVM: platformVM,
-            library: library,
-            defaults: defaults,
-            launchReconcile: { _, _ in
-                launchCalls?()
-                if returnedInitialLaunchOutcome, let launchRetryOutcome {
-                    return launchRetryOutcome
-                }
-                returnedInitialLaunchOutcome = true
-                return launchOutcome
-            },
-            launchBackfill: { launchBackfill?($0) },
-            hasRemoteConfigured: hasRemoteConfigured,
-            postSyncConvergence: convergence,
-            launchIngestRetryNanoseconds: 10_000_000,
-            launchIngestLockPath: launchIngestLockPath ?? paths.syncLockPath,
-            paths: paths,
-            gitUsabilityProbe: { .usable }
-        )
-        return RuntimeHarness(
-            runtime: runtime,
-            context: ModelContext(container),
-            watcher: watcher,
-            launchIngestLockPath: launchIngestLockPath ?? paths.syncLockPath,
-            paths: paths
-        )
-    }
-
-    private func neutralPlatformVM() -> PlatformViewModel {
-        return PlatformViewModel(
-            linkService: TestPaths.linkService(fileService: FileService()),
-            cursorCompiler: TestPaths.cursorCompiler(fileService: FileService()),
-            agentDetection: StubDetection(),
-            deployStateStore: .memoryBacked, skillsDirectory: TestPaths.skillsDir
-        )
-    }
-
-    func testLaunchWorkRunsOnce() throws {
+    func testLaunchWorkRunsOnce() async throws {
         var launchCallCount = 0
         let harness = try makeRuntime {
             launchCallCount += 1
         }
-        XCTAssertTrue(harness.runtime.performLaunchWorkIfNeeded(context: harness.context))
-        XCTAssertFalse(harness.runtime.performLaunchWorkIfNeeded(context: harness.context))
+        let launchStartedOnce = await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        XCTAssertTrue(launchStartedOnce)
+        let launchStartedAgain = await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        XCTAssertFalse(launchStartedAgain)
         XCTAssertEqual(harness.runtime.launchWorkInvocationCount, 1)
         XCTAssertEqual(launchCallCount, 1)
         XCTAssertEqual(harness.watcher.startCount, 1)
+        XCTAssertFalse(harness.runtime.shouldAutoShowImportWizard(skillCount: 1))
+        XCTAssertFalse(harness.runtime.shouldAutoShowImportWizard(skillCount: 0), "the launch question was already answered")
     }
 
-    func testQuarantineSuppressesImportWizardAutoPop() throws {
-        XCTAssertTrue(AppRuntime.shouldAutoShowImportWizard(skillCount: 0, storeQuarantined: false, storeUnreadable: false))
-        XCTAssertFalse(AppRuntime.shouldAutoShowImportWizard(skillCount: 0, storeQuarantined: true, storeUnreadable: false))
-        XCTAssertFalse(AppRuntime.shouldAutoShowImportWizard(skillCount: 1, storeQuarantined: false, storeUnreadable: false))
+    func testQuarantineSuppressesImportWizardAutoPop() async throws {
         let lockPath = TestTemporaryDirectory.path + "/AppRuntimeQuarantine-\(UUID().uuidString)/sync.lock"
         let launchLock = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
-        let harness = try makeRuntime(launchIngestLockPath: lockPath)
-        XCTAssertTrue(harness.runtime.performLaunchWorkIfNeeded(context: harness.context))
+        var busyLaunchCalls = 0
+        let harness = try makeRuntime(launchCalls: {
+            XCTAssertFalse(Thread.isMainThread)
+            XCTAssertNil(SyncLock.tryAcquire(at: lockPath))
+            busyLaunchCalls += 1
+        }, launchIngestLockPath: lockPath)
+        let launchStartedOnce = await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        XCTAssertTrue(launchStartedOnce)
         XCTAssertTrue(harness.runtime.storeQuarantined)
-        XCTAssertFalse(AppRuntime.shouldAutoShowImportWizard(
-            skillCount: 0,
-            storeQuarantined: harness.runtime.storeQuarantined,
-            storeUnreadable: false
-        ))
+        XCTAssertEqual(busyLaunchCalls, 0, "a held sync.lock must defer launch reconciliation")
+        XCTAssertTrue(harness.runtime.library.addsFenced, "lock deferral has not delivered a readable verdict")
+        XCTAssertFalse(harness.runtime.shouldAutoShowImportWizard(skillCount: 0))
         launchLock.release()
+        await TestWait.until(failureMessage: "deferred launch never retried after sync.lock was released") {
+            harness.runtime.launchWorkCompleted
+        }
+        XCTAssertEqual(busyLaunchCalls, 1)
+        XCTAssertFalse(harness.runtime.library.addsFenced, "a readable retry releases the launch fence")
         // Layer-2 P1 regression (PLAN-24 / 24.2): a quarantined outcome must take the deferral arm
         // UNCONDITIONALLY — never launchBackfill or post-ingest convergence, even though the same
         // origin-probe failure makes hasRemoteConfigured read nil (the no-remote arm's condition).
@@ -195,29 +59,77 @@ final class AppRuntimeTests: XCTestCase {
             hasRemoteConfigured: { false },
             deployReconciler: deploy
         )
-        quarantinedHarness.runtime.performLaunchWorkIfNeeded(context: quarantinedHarness.context)
+        await quarantinedHarness.runtime.performLaunchWorkIfNeeded(context: quarantinedHarness.context)
         XCTAssertTrue(quarantinedHarness.runtime.storeQuarantined)
+        XCTAssertFalse(quarantinedHarness.runtime.shouldAutoShowImportWizard(skillCount: 0))
         XCTAssertEqual(backfillCalls, 0)
         XCTAssertEqual(deploy.calls, 0)
     }
 
-    func testSecondWindowAppearanceDoesNotRerunLaunchWork() throws {
+    func testSecondWindowAppearanceDoesNotRerunLaunchWork() async throws {
         var launchCallCount = 0
         let harness = try makeRuntime {
             launchCallCount += 1
         }
         var firstWindow: WindowModels? = WindowModels(runtime: harness.runtime)
         XCTAssertNotNil(firstWindow)
-        harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
         firstWindow = nil
         let secondWindow = WindowModels(runtime: harness.runtime)
         XCTAssertNotNil(secondWindow)
-        harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
 
         XCTAssertEqual(harness.runtime.launchWorkInvocationCount, 1)
         XCTAssertEqual(launchCallCount, 1)
     }
 
+    func testWatcherKeepsRunningAfterViewTeardown() async throws {
+        let harness = try makeRuntime()
+        await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+
+        var window: WindowModels? = WindowModels(runtime: harness.runtime)
+        XCTAssertNotNil(window)
+        window = nil
+
+        XCTAssertEqual(harness.watcher.startCount, 1)
+        XCTAssertEqual(harness.watcher.stopCount, 0)
+    }
+
+    func testUnreadableLaunchIngestSkipsConvergence() async throws {
+        let deploy = RecordingDeployReconciler()
+        let harness = try makeRuntime(
+            launchOutcome: LaunchReconcileOutcome(
+                rebuild: RebuildResult(storeUnreadable: true),
+                migrationRan: false
+            ),
+            deployReconciler: deploy
+        )
+
+        await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+
+        XCTAssertEqual(deploy.calls, 0)
+    }
+
+    func testUnstableLaunchIngestSkipsConvergence() async throws {
+        let deploy = RecordingDeployReconciler()
+        let harness = try makeRuntime(
+            launchOutcome: LaunchReconcileOutcome(
+                rebuild: RebuildResult(),
+                migrationRan: false,
+                ingestedHeadStamp: nil,
+                ingestionNeedsRetry: true
+            ),
+            deployReconciler: deploy
+        )
+
+        await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+
+        XCTAssertEqual(deploy.calls, 0)
+    }
+
+}
+
+extension AppRuntimeTests {
     func testRuntimeModelsSurviveWindowTeardown() throws {
         let harness = try makeRuntime()
         weak var library = harness.runtime.library
@@ -233,56 +145,14 @@ final class AppRuntimeTests: XCTestCase {
         XCTAssertTrue(syncModel === harness.runtime.syncModel)
     }
 
-    func testWatcherKeepsRunningAfterViewTeardown() throws {
-        let harness = try makeRuntime()
-        harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
-
-        var window: WindowModels? = WindowModels(runtime: harness.runtime)
-        XCTAssertNotNil(window)
-        window = nil
-
-        XCTAssertEqual(harness.watcher.startCount, 1)
-        XCTAssertEqual(harness.watcher.stopCount, 0)
-    }
-
-    func testUnreadableLaunchIngestSkipsConvergence() throws {
-        let deploy = RecordingDeployReconciler()
-        let harness = try makeRuntime(
-            launchOutcome: LaunchReconcileOutcome(
-                rebuild: RebuildResult(storeUnreadable: true),
-                migrationRan: false
-            ),
-            deployReconciler: deploy
-        )
-
-        harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
-
-        XCTAssertEqual(deploy.calls, 0)
-    }
-
-    func testUnstableLaunchIngestSkipsConvergence() throws {
-        let deploy = RecordingDeployReconciler()
-        let harness = try makeRuntime(
-            launchOutcome: LaunchReconcileOutcome(
-                rebuild: RebuildResult(),
-                migrationRan: false,
-                ingestedHeadStamp: nil,
-                ingestionNeedsRetry: true
-            ),
-            deployReconciler: deploy
-        )
-
-        harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
-
-        XCTAssertEqual(deploy.calls, 0)
-    }
-
-}
-
-extension AppRuntimeTests {
     func testUnstableLaunchIngestRetriesOutsideSchedulerGate() async throws {
         let deploy = RecordingDeployReconciler()
         var backfillCalls = 0
+        let lock = NSLock()
+        var migrationArguments: [Bool] = []
+        let gate = TestWait.Gate(owner: self)
+        defer { gate.open() }
+        let entered = expectation(description: "terminal launch retry held")
         let harness = try makeRuntime(
             launchBackfill: { _ in backfillCalls += 1 },
             launchOutcome: LaunchReconcileOutcome(
@@ -291,23 +161,37 @@ extension AppRuntimeTests {
                 ingestedHeadStamp: nil,
                 ingestionNeedsRetry: true
             ),
-            launchRetryOutcome: LaunchReconcileOutcome(
-                rebuild: RebuildResult(),
-                migrationRan: false,
-                ingestedHeadStamp: "stable"
-            ),
+            launchRetryOutcomes: [
+                LaunchReconcileOutcome(rebuild: RebuildResult(), migrationRan: true, ingestionNeedsRetry: true),
+                LaunchReconcileOutcome(rebuild: RebuildResult(), migrationRan: false, ingestedHeadStamp: "stable")
+            ],
+            launchAttempt: { migrated in
+                let attempt = lock.withLock { migrationArguments.append(migrated); return migrationArguments.count }
+                if attempt == 3 { entered.fulfill(); try? gate.wait() }
+            },
             deployReconciler: deploy
         )
 
-        harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        let window = hostMainWindow(runtime: harness.runtime)
+        defer { if let sheet = window.attachedSheet { window.endSheet(sheet) }; window.close() }
+        await fulfillment(of: [entered], timeout: TestWait.firstRenderTimeoutSeconds)
         XCTAssertEqual(backfillCalls, 0)
+        XCTAssertNil(window.attachedSheet, "wait for the launch verdict")
+        gate.open()
         await TestWait.until(failureMessage: "Launch ingest retry never made the scheduler ready") {
             harness.runtime.scheduler.isLaunchIngestReady
         }
 
+        XCTAssertEqual(lock.withLock { migrationArguments }, [false, false, true], "keep a migration from an unfinished retry")
+        await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
+                             failureMessage: "a readable retry must present the launch wizard") {
+            window.attachedSheet != nil
+        }
+        XCTAssertFalse(harness.runtime.shouldAutoShowImportWizard(skillCount: 0), "reopening the window must not auto-show again")
         XCTAssertEqual(deploy.calls, 1)
         XCTAssertEqual(backfillCalls, 1)
         XCTAssertTrue(harness.runtime.scheduler.isLaunchIngestReady)
+        try await dismissLaunchWizard(in: window)
     }
 
     func testLaunchIngestRetryWaitsForInterleavedLockHolder() async throws {
@@ -317,6 +201,7 @@ extension AppRuntimeTests {
         let lockPath = TestTemporaryDirectory.path + "/AppRuntimeRetryLock-\(UUID().uuidString)/sync.lock"
         let harness = try makeRuntime(
             launchCalls: {
+                XCTAssertFalse(Thread.isMainThread)
                 launchCalls += 1
                 XCTAssertNil(
                     SyncLock.tryAcquire(at: lockPath),
@@ -339,7 +224,7 @@ extension AppRuntimeTests {
             launchIngestLockPath: lockPath
         )
 
-        harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
+        await harness.runtime.performLaunchWorkIfNeeded(context: harness.context)
         XCTAssertTrue(harness.runtime.storeQuarantined)
         let installLock = try XCTUnwrap(SyncLock.tryAcquire(at: harness.launchIngestLockPath))
         try await Task.sleep(nanoseconds: 80_000_000)

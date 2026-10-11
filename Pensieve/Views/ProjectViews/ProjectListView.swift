@@ -90,7 +90,7 @@ struct ProjectListView: View {
                             reconciler: CategoryReconciler(platformVM: platformVM), manifestService: ManifestService(),
                             manifestRoot: runtime.paths.storeRoot,
                             platformVM: platformVM, localMachineID: localMachineID, confirmedPreview: preview,
-                            context: context, notifier: notifier)
+                            context: context, notifier: notifier, lockPath: runtime.paths.syncLockPath)
                     }
                 }
                 Button("Cancel", role: .cancel) { removal.cancel() }

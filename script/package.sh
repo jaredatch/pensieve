@@ -61,6 +61,7 @@ while IFS= read -r marketing_version; do
 done <<< "$marketing_versions"
 
 DMG_PATH="$DIST_DIR/Pensieve-$version.dmg"
+DSYM_PATH="$DIST_DIR/Pensieve-$version-dSYMs.zip"
 
 build_app() {
   cd "$REPO"
@@ -84,6 +85,8 @@ build_app() {
     CODE_SIGN_IDENTITY="-" \
     CODE_SIGNING_ALLOWED=YES \
     CODE_SIGNING_REQUIRED=YES \
+    CLANG_ENABLE_CODE_COVERAGE=NO \
+    CLANG_COVERAGE_MAPPING=NO \
     -derivedDataPath "$DERIVED_DATA"
 }
 
@@ -95,12 +98,18 @@ assemble_dmg_root() {
   mkdir -p "$DMG_ROOT"
   ditto "$built_app" "$APP_PATH"
   ln -s /Applications "$DMG_ROOT/Applications"
+  /usr/bin/strip -rSTx "$APP_PATH/Contents/MacOS/Pensieve" "$APP_PATH/Contents/MacOS/pensieve-daemon"
+  python3 -B "$REPO/script/package_artifacts.py" --app "$APP_PATH" --check
+  python3 -B "$REPO/script/package_artifacts.py" --app "$APP_PATH" \
+    --products "$DERIVED_DATA/Build/Products/Release" --zip-symbols "$DSYM_PATH"
   codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_PATH/Contents/MacOS/pensieve-daemon"
   codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_PATH"
 }
 
 create_dmg() {
   test -d "$APP_PATH"
+  python3 -B "$REPO/script/package_artifacts.py" --app "$APP_PATH" --check
+  python3 -B "$REPO/script/package_artifacts.py" --app "$APP_PATH" --check-symbols "$DSYM_PATH"
   app_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")"
   if [ "$app_version" != "$version" ]; then
     echo "package: dmg-root app version ($app_version) does not match VERSION ($version) — stale dmg-root?" >&2

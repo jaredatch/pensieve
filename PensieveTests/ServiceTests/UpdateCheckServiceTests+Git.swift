@@ -22,9 +22,15 @@ extension UpdateCheckServiceTests {
         try runGit(["-C", root, "tag", "lightweight", second])
 
         let service = TestPaths.git
-        XCTAssertEqual(try service.remoteHead(remote: root, ref: "same", credential: nil), second)
-        XCTAssertEqual(try service.remoteHead(remote: root, ref: "annotated", credential: nil), first)
-        XCTAssertEqual(try service.remoteHead(remote: root, ref: "lightweight", credential: nil), second)
+        XCTAssertEqual(try NativeTestWork.run { [self] in
+            try service.remoteHead(remote: root, ref: "same", credential: nil)
+        }, second)
+        XCTAssertEqual(try NativeTestWork.run { [self] in
+            try service.remoteHead(remote: root, ref: "annotated", credential: nil)
+        }, first)
+        XCTAssertEqual(try NativeTestWork.run { [self] in
+            try service.remoteHead(remote: root, ref: "lightweight", credential: nil)
+        }, second)
     }
 
     private func gitRevision(_ revision: String, repository: String) throws -> String {

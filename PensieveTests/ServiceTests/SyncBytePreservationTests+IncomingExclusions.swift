@@ -3,52 +3,54 @@ import XCTest
 
 extension SyncBytePreservationTests {
     func testExcludedInventoryPrunesDependencyFoldersAndGuardsChildrenAndParents() throws {
-        let root = base + "/pruned-store"
-        let native = TestPaths.git
-        try files.createDirectory(at: root)
-        try native.initRepository(at: root)
-        try files.writeFile(at: root + "/skills/x/SKILL.md", content: "tracked skill\n")
-        try native.stageAllAndCommit(at: root, message: "base")
-        let folders = ["node_modules", "skills/x/node_modules", "skills/new/node_modules",
-                       ".env", "skills/x/.env", "skills/new/.env", ".venv", "skills/x/.venv", "skills/new/.venv"]
-        for folder in folders {
-            for name in ["package/index.js", "package/deep/other.js"] {
-                try files.writeFile(at: root + "/" + folder + "/" + name, content: "local dependency\n")
+        try NativeTestWork.run { [self] in
+            let root = base + "/pruned-store"
+            let native = TestPaths.git
+            try files.createDirectory(at: root)
+            try native.initRepository(at: root)
+            try files.writeFile(at: root + "/skills/x/SKILL.md", content: "tracked skill\n")
+            try native.stageAllAndCommit(at: root, message: "base")
+            let folders = ["node_modules", "skills/x/node_modules", "skills/new/node_modules",
+                           ".env", "skills/x/.env", "skills/new/.env", ".venv", "skills/x/.venv", "skills/new/.venv"]
+            for folder in folders {
+                for name in ["package/index.js", "package/deep/other.js"] {
+                    try files.writeFile(at: root + "/" + folder + "/" + name, content: "local dependency\n")
+                }
             }
-        }
-        try files.writeFile(at: root + "/skills/x/sub/.env", content: "local env\n")
-        let trace = base + "/inventory-output"
-        let recording = try inventoryRecordingGit(trace: trace)
-        let store = try recording.storeOperation(at: root)
-        let inventory = try store.excludedUntrackedPaths()
-        XCTAssertEqual(Set(inventory), Set((folders.map { $0 + "/" } + ["skills/x/sub/.env"]).map { Data($0.utf8) }))
-        let nativeInventory = try files.readData(at: trace).split(separator: 0)
-        XCTAssertFalse(nativeInventory.isEmpty)
-        XCTAssertTrue(nativeInventory.allSatisfy { $0.last == 0x2F },
-                      "Git must report dependency directories, never walk their files")
-        try files.deleteFile(at: root + "/skills/x/sub/.env")
-        for folder in folders where !folder.contains("node_modules") { try files.deleteDirectory(at: root + "/" + folder) }
-        for (index, path) in ["skills/x/node_modules/package/incoming.js", "skills/x/node_modules", "skills/x"].enumerated() {
-            let incoming = base + "/incoming-\(index)"
-            try files.createDirectory(at: incoming)
-            try native.initRepository(at: incoming)
-            try files.writeFile(at: incoming + "/" + path, content: "incoming fixture\n")
-            try native.runOrThrow(["-C", incoming, "add", "--force", "--all"], in: nil)
-            try native.runOrThrow(["-C", incoming, "commit", "-m", "incoming"], in: nil)
-            try native.runOrThrow(["-C", root, "fetch", incoming, "HEAD"], in: nil)
-            let revision = try native.runOrThrow(["-C", root, "rev-parse", "FETCH_HEAD"], in: nil)
-                .stdout.trimmingCharacters(in: .newlines)
-            XCTAssertThrowsError(try store.requireNoExcludedCollision(with: revision)) { error in
-                XCTAssertEqual(error.localizedDescription,
-                               "Sync paused so it won't overwrite skills/x/node_modules on this Mac. "
-                               + "Another Mac already synced files there. Move or rename this folder, then sync again.")
+            try files.writeFile(at: root + "/skills/x/sub/.env", content: "local env\n")
+            let trace = base + "/inventory-output"
+            let recording = try inventoryRecordingGit(trace: trace)
+            let store = try recording.storeOperation(at: root)
+            let inventory = try store.excludedUntrackedPaths()
+            XCTAssertEqual(Set(inventory), Set((folders.map { $0 + "/" } + ["skills/x/sub/.env"]).map { Data($0.utf8) }))
+            let nativeInventory = try files.readData(at: trace).split(separator: 0)
+            XCTAssertFalse(nativeInventory.isEmpty)
+            XCTAssertTrue(nativeInventory.allSatisfy { $0.last == 0x2F },
+                          "Git must report dependency directories, never walk their files")
+            try files.deleteFile(at: root + "/skills/x/sub/.env")
+            for folder in folders where !folder.contains("node_modules") { try files.deleteDirectory(at: root + "/" + folder) }
+            for (index, path) in ["skills/x/node_modules/package/incoming.js", "skills/x/node_modules", "skills/x"].enumerated() {
+                let incoming = base + "/incoming-\(index)"
+                try files.createDirectory(at: incoming)
+                try native.initRepository(at: incoming)
+                try files.writeFile(at: incoming + "/" + path, content: "incoming fixture\n")
+                try native.runOrThrow(["-C", incoming, "add", "--force", "--all"], in: nil)
+                try native.runOrThrow(["-C", incoming, "commit", "-m", "incoming"], in: nil)
+                try native.runOrThrow(["-C", root, "fetch", incoming, "HEAD"], in: nil)
+                let revision = try native.runOrThrow(["-C", root, "rev-parse", "FETCH_HEAD"], in: nil)
+                    .stdout.trimmingCharacters(in: .newlines)
+                XCTAssertThrowsError(try store.requireNoExcludedCollision(with: revision)) { error in
+                    XCTAssertEqual(error.localizedDescription,
+                                   "Sync paused so it won't overwrite skills/x/node_modules on this Mac. "
+                                   + "Another Mac already synced files there. Move or rename this folder, then sync again.")
+                }
+                XCTAssertEqual(try files.readFile(at: root + "/skills/x/node_modules/package/index.js"), "local dependency\n")
+                XCTAssertFalse(native.isRebaseInProgress(at: root))
             }
-            XCTAssertEqual(try files.readFile(at: root + "/skills/x/node_modules/package/index.js"), "local dependency\n")
-            XCTAssertFalse(native.isRebaseInProgress(at: root))
+            try assertLegacyDependencyUpdatesRemainAdmitted(root: root, store: store, native: native)
+            XCTAssertEqual(try files.readData(at: trace + "-cached"), Data("node_modules/legacy.js\0".utf8),
+                           "The replacement inventory must exclude ordinary tracked skill files")
         }
-        try assertLegacyDependencyUpdatesRemainAdmitted(root: root, store: store, native: native)
-        XCTAssertEqual(try files.readData(at: trace + "-cached"), Data("node_modules/legacy.js\0".utf8),
-                       "The replacement inventory must exclude ordinary tracked skill files")
     }
 
     private func assertLegacyDependencyUpdatesRemainAdmitted(root: String, store: StoreGitOperation,
@@ -73,13 +75,15 @@ extension SyncBytePreservationTests {
     }
 
     func testPartlyTrackedExcludedFoldersAdmitIncomingSiblingsAndProtectLocalFiles() throws {
-        for folder in ["node_modules", ".env", ".venv"] {
-            for hidden in [false, true] {
-                for app in [false, true] {
-                    do {
-                        try assertPartlyTrackedFolder(folder: folder, hidden: hidden, app: app)
-                    } catch {
-                        XCTFail("\(folder), hidden=\(hidden), app=\(app): \(error)")
+        try NativeTestWork.run { [self] in
+            for folder in ["node_modules", ".env", ".venv"] {
+                for hidden in [false, true] {
+                    for app in [false, true] {
+                        do {
+                            try assertPartlyTrackedFolder(folder: folder, hidden: hidden, app: app)
+                        } catch {
+                            XCTFail("\(folder), hidden=\(hidden), app=\(app): \(error)")
+                        }
                     }
                 }
             }
@@ -124,38 +128,40 @@ extension SyncBytePreservationTests {
     }
 
     func testLegacyDependencyInventoryGitRunsStayBoundedAsTheIndexGrows() throws {
-        var counts: [Int] = []
-        for count in [1, 2048] {
-            let root = base + "/legacy-inventory-\(count)"
-            let native = TestPaths.git
-            try files.createDirectory(at: root)
-            try native.initRepository(at: root)
-            for index in 0..<count {
-                let path = "node_modules/package-with-a-long-legacy-name-\(index)/dist/nested/legacy-output-for-inventory.js"
-                try files.writeFile(at: root + "/" + path, content: "legacy dependency\n")
+        try NativeTestWork.run { [self] in
+            var counts: [Int] = []
+            for count in [1, 2048] {
+                let root = base + "/legacy-inventory-\(count)"
+                let native = TestPaths.git
+                try files.createDirectory(at: root)
+                try native.initRepository(at: root)
+                for index in 0..<count {
+                    let path = "node_modules/package-with-a-long-legacy-name-\(index)/dist/nested/legacy-output-for-inventory.js"
+                    try files.writeFile(at: root + "/" + path, content: "legacy dependency\n")
+                }
+                try native.runOrThrow(["-C", root, "add", "--force", "--", "node_modules"], in: nil)
+                try native.runOrThrow(["-C", root, "commit", "-m", "older build's dependency tree"], in: nil)
+                try files.writeFile(at: root + "/node_modules/new-package/output.js", content: "new local dependency\n")
+                let trace = base + "/legacy-inventory-\(count)-trace"
+                let recording = try inventoryRecordingGit(trace: trace)
+                let store = try recording.storeOperation(at: root)
+                try files.writeFile(at: trace + "-calls", content: "")
+                XCTAssertEqual(try store.excludedUntrackedPaths(), [Data("node_modules/new-package/".utf8)])
+                let calls = try files.readFile(at: trace + "-calls").split(separator: "\n").count
+                counts.append(calls)
+                XCTAssertLessThanOrEqual(calls, 4, "Unchanged indexed files must not become batches of pathspecs")
+                let replaced = "node_modules/package-with-a-long-legacy-name-0/dist/nested/legacy-output-for-inventory.js"
+                try files.deleteFile(at: root + "/" + replaced)
+                try files.writeFile(at: root + "/" + replaced + "/generated.js", content: "protected local child\n")
+                try files.writeFile(at: trace + "-calls", content: "")
+                XCTAssertTrue(try store.excludedUntrackedPaths().contains(Data((replaced + "/generated.js").utf8)))
+                XCTAssertLessThanOrEqual(try files.readFile(at: trace + "-calls").split(separator: "\n").count, 4)
+                XCTAssertThrowsError(try store.requireNoExcludedCollision(with: native.commitSHA(at: root))) { error in
+                    XCTAssertEqual(error as? StoreUpdateError, .excludedLocalFile(path: replaced + "/generated.js"))
+                }
             }
-            try native.runOrThrow(["-C", root, "add", "--force", "--", "node_modules"], in: nil)
-            try native.runOrThrow(["-C", root, "commit", "-m", "older build's dependency tree"], in: nil)
-            try files.writeFile(at: root + "/node_modules/new-package/output.js", content: "new local dependency\n")
-            let trace = base + "/legacy-inventory-\(count)-trace"
-            let recording = try inventoryRecordingGit(trace: trace)
-            let store = try recording.storeOperation(at: root)
-            try files.writeFile(at: trace + "-calls", content: "")
-            XCTAssertEqual(try store.excludedUntrackedPaths(), [Data("node_modules/new-package/".utf8)])
-            let calls = try files.readFile(at: trace + "-calls").split(separator: "\n").count
-            counts.append(calls)
-            XCTAssertLessThanOrEqual(calls, 4, "Unchanged indexed files must not become batches of pathspecs")
-            let replaced = "node_modules/package-with-a-long-legacy-name-0/dist/nested/legacy-output-for-inventory.js"
-            try files.deleteFile(at: root + "/" + replaced)
-            try files.writeFile(at: root + "/" + replaced + "/generated.js", content: "protected local child\n")
-            try files.writeFile(at: trace + "-calls", content: "")
-            XCTAssertTrue(try store.excludedUntrackedPaths().contains(Data((replaced + "/generated.js").utf8)))
-            XCTAssertLessThanOrEqual(try files.readFile(at: trace + "-calls").split(separator: "\n").count, 4)
-            XCTAssertThrowsError(try store.requireNoExcludedCollision(with: native.commitSHA(at: root))) { error in
-                XCTAssertEqual(error as? StoreUpdateError, .excludedLocalFile(path: replaced + "/generated.js"))
-            }
+            XCTAssertEqual(counts.first, counts.last, "The number of inventory git runs must not grow with the legacy index")
         }
-        XCTAssertEqual(counts.first, counts.last, "The number of inventory git runs must not grow with the legacy index")
     }
 
     private func inventoryRecordingGit(trace: String) throws -> GitService {
@@ -191,16 +197,18 @@ extension SyncBytePreservationTests {
     }
 
     func testIncomingTrackedExcludedFilesPauseBeforeAppWritesAndResumeAfterMovingThem() throws {
-        try assertFilesystemEquivalentIncomingNames()
-        try assertHardLinksRemainDistinctEntries()
-        try assertIndexedNestedRepositoryReplacementIsProtected()
-        try assertUnchangedLegacyEntryProtectsLocalFolderReplacement()
-        for hidden in [false, true] {
-            for path in ExcludedFileCollisionFixture.paths {
-                do {
-                    try assertIncomingExcludedCollision(path: path, hidden: hidden)
-                } catch {
-                    XCTFail("\(path), skill ignores=\(hidden): \(error)")
+        try NativeTestWork.run { [self] in
+            try assertFilesystemEquivalentIncomingNames()
+            try assertHardLinksRemainDistinctEntries()
+            try assertIndexedNestedRepositoryReplacementIsProtected()
+            try assertUnchangedLegacyEntryProtectsLocalFolderReplacement()
+            for hidden in [false, true] {
+                for path in ExcludedFileCollisionFixture.paths {
+                    do {
+                        try assertIncomingExcludedCollision(path: path, hidden: hidden)
+                    } catch {
+                        XCTFail("\(path), skill ignores=\(hidden): \(error)")
+                    }
                 }
             }
         }

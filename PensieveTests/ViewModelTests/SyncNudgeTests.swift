@@ -78,7 +78,7 @@ final class SyncNudgeTests: XCTestCase {
     func testCategoryRuleChangeNudges() throws {
         let context = try makeContext()
         let counter = Counter()
-        let store = CategoryStore(manifestRoot: TestPaths.storeRoot, notifier: counter.notify)
+        let store = CategoryStore( notifier: counter.notify)
         let category = try XCTUnwrap(store.create(name: "Rules", context: context))
         let skill = Skill(name: "Skill", skillDescription: "Description", directoryName: "skill")
         context.insert(skill)
@@ -91,7 +91,7 @@ final class SyncNudgeTests: XCTestCase {
         let context = try makeContext()
         let counter = Counter()
         _ = registerProject(
-            Project(name: "App", path: tempDir + "/app"), manifestRoot: TestPaths.storeRoot,
+            Project(name: "App", path: tempDir + "/app"),
             context: context,
             notifier: counter.notify
         )
@@ -101,7 +101,7 @@ final class SyncNudgeTests: XCTestCase {
     func testCategoryRenameNudges() throws {
         let context = try makeContext()
         let counter = Counter()
-        let store = CategoryStore(manifestRoot: TestPaths.storeRoot, notifier: counter.notify)
+        let store = CategoryStore( notifier: counter.notify)
         let category = try XCTUnwrap(store.create(name: "Before", context: context))
         counter.reset()
         store.rename(category, to: "After", context: context)
@@ -199,10 +199,10 @@ final class SyncNudgeTests: XCTestCase {
     func testCompoundProjectRemovalNudgesExactlyOnce() throws {
         let context = try makeContext()
         let counter = Counter()
-        let store = CategoryStore(manifestRoot: TestPaths.storeRoot, notifier: counter.notify)
+        let store = CategoryStore( notifier: counter.notify)
         let project = Project(name: "App", path: tempDir + "/app")
         project.identityKey = "github.com/example/app"
-        registerProject(project, manifestRoot: TestPaths.storeRoot, context: context, notifier: counter.notify)
+        registerProject(project, context: context, notifier: counter.notify)
         let category = try XCTUnwrap(store.create(name: "Rules", context: context))
         store.setProject(project, inCategory: category, member: true, context: context)
         counter.reset()
@@ -219,8 +219,8 @@ final class SyncNudgeTests: XCTestCase {
             ),
             localMachineID: ProjectIntentHarness.localID,
             context: context,
-            notifier: counter.notify
-        )
+            notifier: counter.notify,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
         XCTAssertEqual(counter.value, 1)
     }
 
@@ -230,7 +230,7 @@ extension SyncNudgeTests {
     func testCompoundSkillRemovalNudgesExactlyOnce() throws {
         let context = try makeContext()
         let counter = Counter()
-        let categoryStore = CategoryStore(manifestRoot: TestPaths.storeRoot, notifier: counter.notify)
+        let categoryStore = CategoryStore( notifier: counter.notify)
         let memoryStore = MemorySkillStore()
         let library = SkillLibraryViewModel(
             skillStore: memoryStore,
@@ -258,10 +258,10 @@ extension SyncNudgeTests {
     func testReconcileFailedRemovalStillNudgesOnce() throws {
         let context = try makeContext()
         let counter = Counter()
-        let store = CategoryStore(manifestRoot: TestPaths.storeRoot, notifier: counter.notify)
+        let store = CategoryStore( notifier: counter.notify)
         let project = Project(name: "App", path: tempDir + "/app")
         project.identityKey = "github.com/example/app"
-        registerProject(project, manifestRoot: TestPaths.storeRoot, context: context, notifier: counter.notify)
+        registerProject(project, context: context, notifier: counter.notify)
         let category = try XCTUnwrap(store.create(name: "Rules", context: context))
         store.setProject(project, inCategory: category, member: true, context: context)
         context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.localID,
@@ -287,8 +287,8 @@ extension SyncNudgeTests {
             ),
             localMachineID: ProjectIntentHarness.localID,
             context: context,
-            notifier: counter.notify
-        )
+            notifier: counter.notify,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
         XCTAssertTrue(result.hasFailures)
         XCTAssertTrue(reconciled)
         XCTAssertTrue(result.didWithdrawProjectRequests)

@@ -63,6 +63,7 @@ final class ConflictHistoryFixture {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 640),
                           styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
     }
 
     func remove() throws {

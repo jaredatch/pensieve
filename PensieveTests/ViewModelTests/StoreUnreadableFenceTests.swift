@@ -28,7 +28,8 @@ final class StoreUnreadableFenceTests: XCTestCase {
         ))
     }
 
-    private func makeRuntime(label: String, outcome: LaunchReconcileOutcome) throws -> AppRuntime {
+    private func makeRuntime(label: String, outcome: LaunchReconcileOutcome,
+                             gate: TestWait.Gate, entered: XCTestExpectation) throws -> AppRuntime {
         let library = SkillLibraryViewModel(
             skillStore: SkillStore(fileService: FileService(), baseDir: tempDir,
                 storeRoot: tempDir), fileWatchService: FenceStubWatcher(),
@@ -37,7 +38,11 @@ final class StoreUnreadableFenceTests: XCTestCase {
         return try AppRuntime(
             container: try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)),
             library: library, defaults: isolatedDefaults(label),
-            launchReconcile: { _, _ in outcome },
+            launchReconcile: { _, _ in
+                entered.fulfill()
+                if !Thread.isMainThread { try? gate.wait() }
+                return outcome
+            },
             launchBackfill: { _ in },
             paths: try AppRuntimePaths.temporary(named: "StoreUnreadableFenceTests"),
             gitUsabilityProbe: { .usable }
@@ -95,32 +100,43 @@ final class StoreUnreadableFenceTests: XCTestCase {
         }
     }
 
-    func testUnreadableLaunchOutcomeFencesAddsAndSuppressesTheWizard() throws {
+    func testUnreadableLaunchOutcomeFencesAddsAndSuppressesTheWizard() async throws {
         var rebuild = RebuildResult()
         rebuild.storeUnreadable = true
-        let runtime = try makeRuntime(label: "unreadable",
-            outcome: LaunchReconcileOutcome(rebuild: rebuild, migrationRan: false)
-        )
-        XCTAssertTrue(runtime.performLaunchWorkIfNeeded(context: ModelContext(runtime.container)))
+        let runtime = try await assertHeldLaunchFencesAdds(label: "unreadable",
+            outcome: LaunchReconcileOutcome(rebuild: rebuild, migrationRan: false))
         XCTAssertTrue(runtime.library.storeUnreadable)
         XCTAssertTrue(runtime.library.addsFenced)
         XCTAssertFalse(runtime.storeQuarantined)
         XCTAssertFalse(runtime.shouldAutoShowImportWizard(skillCount: 0))
-        XCTAssertFalse(AppRuntime.shouldAutoShowImportWizard(
-            skillCount: 0, storeQuarantined: false, storeUnreadable: true
-        ))
-        XCTAssertTrue(AppRuntime.shouldAutoShowImportWizard(
-            skillCount: 0, storeQuarantined: false, storeUnreadable: false
-        ))
-
         runtime.backgroundSyncEnabled = false
-        let readableRuntime = try makeRuntime(label: "readable",
-            outcome: LaunchReconcileOutcome(rebuild: RebuildResult(), migrationRan: false)
-        )
-        XCTAssertTrue(readableRuntime.performLaunchWorkIfNeeded(context: ModelContext(readableRuntime.container)))
+        let readableRuntime = try await assertHeldLaunchFencesAdds(label: "readable",
+            outcome: LaunchReconcileOutcome(rebuild: RebuildResult(), migrationRan: false))
         XCTAssertFalse(runtime.backgroundSyncEnabled, "another runtime must not clear the first runtime defaults")
         XCTAssertFalse(readableRuntime.library.storeUnreadable)
         XCTAssertTrue(readableRuntime.shouldAutoShowImportWizard(skillCount: 0))
+    }
+
+    private func assertHeldLaunchFencesAdds(label: String, outcome: LaunchReconcileOutcome) async throws -> AppRuntime {
+        let gate = TestWait.Gate(owner: self)
+        defer { gate.open() }
+        let entered = expectation(description: "launch verdict held")
+        let runtime = try makeRuntime(label: label, outcome: outcome, gate: gate, entered: entered)
+        let context = runtime.container.mainContext
+        XCTAssertTrue(runtime.library.addsFenced, "fence must precede the first window's launch task")
+        XCTAssertFalse(runtime.shouldAutoShowImportWizard(skillCount: 0))
+        let launch = Task { await runtime.performLaunchWorkIfNeeded(context: context) }
+        await fulfillment(of: [entered], timeout: TestWait.timeoutSeconds)
+        XCTAssertTrue(runtime.library.addsFenced, "add menus and import funnels must stay fenced while launch waits")
+        XCTAssertNil(runtime.library.createSkill(name: "Pending", description: "", body: "body", tags: [], context: context))
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Skill>()).isEmpty)
+        XCTAssertFalse(FileService().directoryExists(at: tempDir + "/pending"))
+        gate.open()
+        let started = await launch.value
+        XCTAssertTrue(started)
+        XCTAssertEqual(runtime.library.addsFenced, outcome.rebuild.storeUnreadable)
+        await runtime.bootstrapTask.value
+        return runtime
     }
 
     func testEngineRefusingTheStoreYieldsTheTypedOutcome() async throws {

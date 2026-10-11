@@ -82,6 +82,7 @@ extension SkillLibraryViewModel {
     /// A keystroke: the editor's whole text. Typing back to the file's text drops the draft — the user's own
     /// return to the file, so a later external change asks about nothing — and writes nothing.
     func noteEditorChanged(_ skill: Skill, body: String) {
+        textEditRevisions[skill.directoryName, default: 0] &+= 1
         let directoryName = skill.directoryName
         let baseline = withFingerprintLock { lastWrittenBody[directoryName] }
         // Compare the trimmed editor body and stored body in the same LF form as watcher echoes.

@@ -15,10 +15,11 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Removed
 
-- Scenarios are gone. Skills they deployed stay in place, and existing scenario files stay in your synced store for older builds.
+- Scenarios are gone, along with their leftover data. On the Mac you update, the skills a scenario deployed stay where they are. If you use Pensieve on more than one Mac, update every Mac. Once an updated Mac syncs, a Mac still on 0.14 removes the skills its active scenario deployed, and updating it afterward won't bring them back. Deploy those skills again on that Mac.
 
 ### Changed
 
+- The app is about half its old size, with crash symbols saved separately for troubleshooting.
 - The Projects list now shows projects from your other Macs too.
 - A GitHub link to a folder of skills now lists the skills in it, the same as a link to the whole repository.
 - Local import now brings scripts, references, assets and nested folders along with each skill, preserving executable bits. It keeps `.env.example`, `.env.sample` and `.env.template` files, and skips secret environment files, virtualenvs, `node_modules`, other dot-entries, links and special files with notices grouped by reason. Files changed during import are left out; names that differ only by case fail that skill. A lone `Skill.md` or `skill.md` imports as prepared `SKILL.md`. Contents of skipped folders do not count toward the 1,000-entry or 64 MiB limits; skills over 64 folder levels deep also fail, while other selections continue.
@@ -37,6 +38,12 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Reopening sync conflicts while they load now shows the ongoing load and its result.
+- Connecting to a sync remote now tells you when Pensieve uses a fallback branch, and which branch it chose.
+- Launch, Connect, resolving sync conflicts and skill history keep the window responsive while Git runs. History shows progress while loading, comparing, or restoring a version, and a delayed Restore leaves newer edits alone. A Restore that doesn't finish tells you why.
+- If you quit while Pensieve is still saving a change or in the middle of a sync step, it waits for that work. If it takes more than a few seconds, you can keep waiting or quit anyway, and the question keeps up as work finishes or starts.
+- Category and tag edits made during a sync wait for it to finish, then save, and the window stays responsive in the meantime. If the wait runs past a few seconds, the sync footer says so.
+- When a skill is deleted but the sync record can't be updated, the warning names that skill, even if you've deleted another one since.
 - Path checks now recognize filesystem separators beside combining marks, joiners, emoji modifiers, tag characters and names ending in Prepend characters. Sync refuses escaping links while existing accented skill names and decomposed link targets keep working.
 - A connected store with no branch now says why it can't sync, instead of showing an old sync time. When git starts working again, sync catches up promptly; with background sync off, it retries your failed Sync Now once.
 - Sync now keeps every file in a skill exactly as it is. Line endings, executable bits and files a skill's own `.gitignore` hides all come through unchanged. It still leaves out `.env` files (except `.env.example`, `.env.sample` and `.env.template`), `node_modules`, `.env` and `.venv` folders, and `.DS_Store`.

@@ -8,6 +8,11 @@ import XCTest
 extension SkillInstallServiceTests {
     @MainActor
     func testReadErrorMidCopyKeepsInstalledFolderAndReportsError() throws {
+        try NativeTestWork.run { [self] in try assertReadErrorMidCopyKeepsInstalledFolderAndReportsError() }
+    }
+
+    @MainActor
+    private func assertReadErrorMidCopyKeepsInstalledFolderAndReportsError() throws {
         let repository = try makeVendorFixture()
         let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
         let candidate = try XCTUnwrap(fetched.candidates.first)
@@ -65,7 +70,7 @@ extension SkillInstallServiceTests {
         try fileService.writeData(at: repository + "/skills/vendor/assets/fault.bin",
                                   data: Data(repeating: 42, count: 128 * 1_024))
         try commit(repository, message: "large asset")
-        let fetched = try service.fetch(repo: repository, ref: nil, credential: nil)
+        let fetched = try NativeTestWork.run { [self] in try service.fetch(repo: repository, ref: nil, credential: nil) }
         let candidate = try XCTUnwrap(fetched.candidates.first)
         for updating in [false, true] {
             let root = tempDir + (updating ? "/cancel-update" : "/cancel-install")
@@ -74,7 +79,9 @@ extension SkillInstallServiceTests {
             let installer = makeInstallService(root: root)
             var beforeHash: String?
             if updating {
-                _ = try installer.install(candidate: candidate, from: fetched, context: context)
+                _ = try NativeTestWork.run(container: context.container) { [self] jobContext in
+                    try installer.install(candidate: candidate, from: fetched, context: jobContext)
+                }
                 beforeHash = try installer.stableContentHash(at: root + "/skills/vendor")
             }
             let gate = TestWait.Gate(owner: self)
@@ -142,7 +149,9 @@ extension SkillInstallServiceTests {
             repositoryDisplay: "fixture/vendor", repositoryPath: candidate.path, driftedLocally: false, compareURL: nil)
         let model = UpdatesViewModel(rowLoader: { _ in [row] }, applyOperation: { _, _, _, _, _, container in
             let worker = ModelContext(container)
-            try service.update(existingSlug: "vendor", candidate: candidate, from: source, context: worker)
+            try NativeTestWork.run(container: worker.container) { [self] jobContext in
+                try service.update(existingSlug: "vendor", candidate: candidate, from: source, context: jobContext)
+            }
             let updated = try XCTUnwrap(try worker.fetch(FetchDescriptor<Skill>()).first)
             return SkillUpdateCompletion(skillID: updated.id, name: updated.name,
                 skillDescription: updated.skillDescription, installedOriginData: updated.installedOriginData ?? Data(),
@@ -170,6 +179,7 @@ extension SkillInstallServiceTests {
         host.frame = NSRect(x: 0, y: 0, width: 680, height: 520)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         defer { window.close() }
         await TestWait.until(failureMessage: "The cancelled window must still render its current state") {

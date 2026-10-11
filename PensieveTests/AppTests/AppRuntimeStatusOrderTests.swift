@@ -69,13 +69,13 @@ final class AppRuntimeStatusOrderTests: XCTestCase {
             resolutions += 1
             return .synced(pushed: false, warnings: [])
         }), git: TestPaths.git,
-            credentials: InMemoryCredentialStore(), root: fixture.root,
+            credentials: InMemoryCredentialStore(), root: fixture.root, steps: SyncStepModel(),
             onResolutionStarted: runtime.beginConflictResolution)
-        await resolution.loadAndReport(context: runtime.container.mainContext)
+        await resolution.loadAndReport(container: runtime.container.mainContext.container)
         XCTAssertEqual(resolutions, 0, "resolution cannot overlap the post-cycle read")
         release.signal()
         await cycle.value
-        await resolution.loadAndReport(context: runtime.container.mainContext)
+        await resolution.loadAndReport(container: runtime.container.mainContext.container)
         XCTAssertEqual(resolutions, 1, "resolution works after the entire cycle callback completes")
     }
 

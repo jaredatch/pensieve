@@ -13,24 +13,31 @@ final class GitServiceTests: XCTestCase {
     private var git: GitService!
 
     override func setUpWithError() throws {
-        tempDir = TestTemporaryDirectory.path + "PensieveGitServiceTests-\(UUID().uuidString)"
-        try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
-        git = GitService(
-            fileService: LinkServiceCanonicalDirectoryFileService(
-            wrapped: FileService(),
-            pathMappings: [((TestPaths.gitAskpassHelperPath), tempDir + "/askpass")],
-            physicalSandbox: tempDir
-        ),
-            askpassHelperPath: TestPaths.gitAskpassHelperPath
-        )
-    }
-
-    override func tearDownWithError() throws {
-        if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
-            try FileManager.default.removeItem(atPath: tempDir)
+        try NativeTestWork.run { [self] in
+            tempDir = TestTemporaryDirectory.path + "PensieveGitServiceTests-\(UUID().uuidString)"
+            try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
+            git = GitService(
+                fileService: LinkServiceCanonicalDirectoryFileService(
+                wrapped: FileService(),
+                pathMappings: [((TestPaths.gitAskpassHelperPath), tempDir + "/askpass")],
+                physicalSandbox: tempDir
+            ),
+                askpassHelperPath: TestPaths.gitAskpassHelperPath
+            )
         }
     }
 
+    override func tearDownWithError() throws {
+        try NativeTestWork.run { [self] in
+            if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
+                try FileManager.default.removeItem(atPath: tempDir)
+            }
+        }
+    }
+
+}
+
+extension GitServiceTests {
     // MARK: Fixtures
 
     /// The captured result of one raw `git` fixture invocation (struct, not a 3-tuple, for SwiftLint).
@@ -120,73 +127,101 @@ final class GitServiceTests: XCTestCase {
 
     // MARK: Tests
 
+    func testReadChecksDisableCredentialHelpersWithoutChangingConfig() throws {
+        try NativeTestWork.run { [self] in
+            try git.initRepository(at: tempDir)
+            try git.runOrThrow(["config", "credential.helper", "fixture-helper"], in: tempDir)
+            let config = try FileService().readData(at: tempDir + "/.git/config")
+            let configured = try rawGit(["config", "--get-all", "credential.helper"], in: tempDir).out
+            let helpers = try GitCancellation.$isReadOnly.withValue(true) {
+                try git.runOrThrow(["config", "--get-all", "credential.helper"], in: tempDir).stdout
+            }
+            XCTAssertEqual(helpers, configured + "\n", "An empty final helper resets the helper chain during checks")
+            XCTAssertEqual(try git.runOrThrow(["config", "--get-all", "credential.helper"], in: tempDir).stdout,
+                           configured, "Writing calls retain their configured credential helpers")
+            XCTAssertEqual(try FileService().readData(at: tempDir + "/.git/config"), config)
+        }
+    }
+
     func testInitRepositoryYieldsMainBranch() throws {
-        let work = tempDir + "/w"
-        try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
-        try git.initRepository(at: work)
-        XCTAssertEqual(try git.runOrThrow(["-C", work, "rev-parse", "--is-inside-work-tree"], in: nil).stdout, "true\n")
-        try write("a.txt", "1\n", in: work)
-        XCTAssertTrue(try git.stageAllAndCommit(at: work, message: "first"))
-        let branch = try rawGit(["-C", work, "rev-parse", "--abbrev-ref", "HEAD"]).out
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        XCTAssertEqual(branch, "main")
+        try NativeTestWork.run { [self] in
+            let work = tempDir + "/w"
+            try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
+            try git.initRepository(at: work)
+            XCTAssertEqual(try git.runOrThrow(["-C", work, "rev-parse", "--is-inside-work-tree"], in: nil).stdout, "true\n")
+            try write("a.txt", "1\n", in: work)
+            XCTAssertTrue(try git.stageAllAndCommit(at: work, message: "first"))
+            let branch = try rawGit(["-C", work, "rev-parse", "--abbrev-ref", "HEAD"]).out
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            XCTAssertEqual(branch, "main")
+        }
     }
 
     func testRemoteAbsentForPlainDirAndUnknownForMissingRoot() throws {
-        let plain = tempDir + "/plain"
-        try FileManager.default.createDirectory(atPath: plain, withIntermediateDirectories: true)
-        XCTAssertNil(try git.remoteURL(at: plain))
-        XCTAssertThrowsError(try git.remoteURL(at: tempDir + "/does-not-exist"))
+        try NativeTestWork.run { [self] in
+            let plain = tempDir + "/plain"
+            try FileManager.default.createDirectory(atPath: plain, withIntermediateDirectories: true)
+            XCTAssertNil(try git.remoteURL(at: plain))
+            XCTAssertThrowsError(try git.remoteURL(at: tempDir + "/does-not-exist"))
+        }
     }
 
     func testCloneDeliversAFile() throws {
-        let remote = try seededRemote()
-        let b = try clone(remote, "b")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: b + "/README.md"))
-        let originalHead = try git.commitSHA(at: b)
-        try assertCloneRefusesOccupiedStore(remote: remote, destination: b)
-        XCTAssertEqual(try git.commitSHA(at: b), originalHead, "Publication must preserve an occupied store")
-        XCTAssertEqual(try FileService().readFile(at: b + "/README.md"), "seed\n")
-        try assertClonePublicationRace(remote: remote)
-        let failures = ["clone", "metadata-write", "metadata-path", "head-probe", "head-read",
-                        "checkout", "terminated-checkout"]
-        for failure in failures {
-            try assertFailedCloneCanRetry(remote: remote, failure: failure)
+        try NativeTestWork.run { [self] in
+            let remote = try seededRemote()
+            let b = try clone(remote, "b")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: b + "/README.md"))
+            let originalHead = try git.commitSHA(at: b)
+            try assertCloneRefusesOccupiedStore(remote: remote, destination: b)
+            XCTAssertEqual(try git.commitSHA(at: b), originalHead, "Publication must preserve an occupied store")
+            XCTAssertEqual(try FileService().readFile(at: b + "/README.md"), "seed\n")
+            try assertClonePublicationRace(remote: remote)
+            let failures = ["clone", "metadata-write", "metadata-path", "head-probe", "head-read",
+                            "checkout", "terminated-checkout"]
+            for failure in failures {
+                try assertFailedCloneCanRetry(remote: remote, failure: failure)
+            }
         }
     }
 
     func testRemoteURLRoundTrip() throws {
-        let work = tempDir + "/w"
-        try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
-        try git.initRepository(at: work)
-        XCTAssertNil(try git.remoteURL(at: work))
-        try git.setRemote("file:///tmp/one.git", at: work)
-        XCTAssertEqual(try git.remoteURL(at: work), "file:///tmp/one.git")
-        try git.setRemote("file:///tmp/two.git", at: work)   // update, not duplicate
-        XCTAssertEqual(try git.remoteURL(at: work), "file:///tmp/two.git")
+        try NativeTestWork.run { [self] in
+            let work = tempDir + "/w"
+            try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
+            try git.initRepository(at: work)
+            XCTAssertNil(try git.remoteURL(at: work))
+            try git.setRemote("file:///tmp/one.git", at: work)
+            XCTAssertEqual(try git.remoteURL(at: work), "file:///tmp/one.git")
+            try git.setRemote("file:///tmp/two.git", at: work)   // update, not duplicate
+            XCTAssertEqual(try git.remoteURL(at: work), "file:///tmp/two.git")
+        }
     }
 
     func testConfiguredRemoteURLIsLiteralUnderInsteadOf() throws {
-        let work = tempDir + "/remove-remote"
-        try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
-        try git.initRepository(at: work)
-        let literal = "https://github.com/octocat/pensieve-skills.git"
-        try git.setRemote(literal, at: work)
-        let rewrite = try rawGit([
-            "-C", work, "config", "url.git@github.com:.insteadOf", "https://github.com/"
-        ])
-        XCTAssertEqual(rewrite.code, 0, rewrite.err)
-        XCTAssertEqual(try git.remoteURL(at: work), "git@github.com:octocat/pensieve-skills.git")
-        XCTAssertEqual(try git.configuredRemoteURL(at: work), literal)
-        try git.removeRemote(at: work)
-        XCTAssertNil(try git.configuredRemoteURL(at: work))
+        try NativeTestWork.run { [self] in
+            let work = tempDir + "/remove-remote"
+            try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
+            try git.initRepository(at: work)
+            let literal = "https://github.com/octocat/pensieve-skills.git"
+            try git.setRemote(literal, at: work)
+            let rewrite = try rawGit([
+                "-C", work, "config", "url.git@github.com:.insteadOf", "https://github.com/"
+            ])
+            XCTAssertEqual(rewrite.code, 0, rewrite.err)
+            XCTAssertEqual(try git.remoteURL(at: work), "git@github.com:octocat/pensieve-skills.git")
+            XCTAssertEqual(try git.configuredRemoteURL(at: work), literal)
+            try git.removeRemote(at: work)
+            XCTAssertNil(try git.configuredRemoteURL(at: work))
+        }
     }
 
     func testConfiguredRemoteURLThrowsOnBrokenRepository() throws {
-        let work = tempDir + "/broken-repository"
-        try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
-        try "not a gitdir\n".write(toFile: work + "/.git", atomically: true, encoding: .utf8)
-        XCTAssertThrowsError(try git.configuredRemoteURL(at: work))
+        try NativeTestWork.run { [self] in
+            let work = tempDir + "/broken-repository"
+            try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
+            try "not a gitdir\n".write(toFile: work + "/.git", atomically: true, encoding: .utf8)
+            XCTAssertThrowsError(try git.configuredRemoteURL(at: work))
+        }
     }
 
     /// A corrupt or missing `.git/HEAD` leaves `.git/config` intact but makes the directory
@@ -194,167 +229,183 @@ final class GitServiceTests: XCTestCase {
     /// reports the key absent (exit 1). `--local` turns that into an error (exit 128), so a disconnect
     /// can never report success over a damaged store. (Layer-2 finding, 2026-09-12.)
     func testConfiguredRemoteURLThrowsOnCorruptHEAD() throws {
-        let work = tempDir + "/corrupt-head"
-        try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
-        try git.initRepository(at: work)
-        try git.setRemote("https://github.com/octocat/pensieve-skills.git", at: work)
-        try "garbage\n".write(toFile: work + "/.git/HEAD", atomically: true, encoding: .utf8)
-        XCTAssertThrowsError(try git.configuredRemoteURL(at: work))
+        try NativeTestWork.run { [self] in
+            let work = tempDir + "/corrupt-head"
+            try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
+            try git.initRepository(at: work)
+            try git.setRemote("https://github.com/octocat/pensieve-skills.git", at: work)
+            try "garbage\n".write(toFile: work + "/.git/HEAD", atomically: true, encoding: .utf8)
+            XCTAssertThrowsError(try git.configuredRemoteURL(at: work))
+        }
     }
 
     func testRemoveRemoteWithoutOriginThrows() throws {
-        let work = tempDir + "/remove-missing-remote"
-        try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
-        try git.initRepository(at: work)
-        XCTAssertThrowsError(try git.removeRemote(at: work))
+        try NativeTestWork.run { [self] in
+            let work = tempDir + "/remove-missing-remote"
+            try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
+            try git.initRepository(at: work)
+            XCTAssertThrowsError(try git.removeRemote(at: work))
+        }
     }
 
     func testRemoteHasCommits() throws {
-        let empty = try makeBareRemote()
-        XCTAssertFalse(git.remoteHasCommits(remote: empty, credential: nil))
-        let seeded = try seededRemote()
-        XCTAssertTrue(git.remoteHasCommits(remote: seeded, credential: nil))
+        try NativeTestWork.run { [self] in
+            let empty = try makeBareRemote()
+            XCTAssertFalse(git.remoteHasCommits(remote: empty, credential: nil))
+            let seeded = try seededRemote()
+            XCTAssertTrue(git.remoteHasCommits(remote: seeded, credential: nil))
+        }
     }
 
     func testNothingToCommitReturnsFalse() throws {
-        let remote = try seededRemote()
-        let a = try clone(remote, "a")
-        XCTAssertFalse(try git.stageAllAndCommit(at: a, message: "noop"))
+        try NativeTestWork.run { [self] in
+            let remote = try seededRemote()
+            let a = try clone(remote, "a")
+            XCTAssertFalse(try git.stageAllAndCommit(at: a, message: "noop"))
 
-        let files = FileService()
-        let blocked = a + "/skills/bytes/cache"
-        try files.createDirectory(at: blocked)
-        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: blocked)
-        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: blocked) }
-        XCTAssertThrowsError(try files.listDirectory(at: blocked), "The fixture must actually be unreadable")
-        XCTAssertNoThrow(try git.stageAllAndCommit(at: a, message: "unreadable directory"))
-        XCTAssertNoThrow(try git.stagePath("README.md", at: a))
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: blocked)
+            let files = FileService()
+            let blocked = a + "/skills/bytes/cache"
+            try files.createDirectory(at: blocked)
+            try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: blocked)
+            defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: blocked) }
+            XCTAssertThrowsError(try files.listDirectory(at: blocked), "The fixture must actually be unreadable")
+            XCTAssertNoThrow(try git.stageAllAndCommit(at: a, message: "unreadable directory"))
+            XCTAssertNoThrow(try git.stagePath("README.md", at: a))
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: blocked)
 
-        let assets = a + "/skills/bytes/assets"
-        try files.writeFile(at: assets + "/a", content: "tracked asset")
-        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "assets"))
-        try files.deleteDirectory(at: assets)
-        try files.createSymlink(at: assets, pointingTo: "cache")
-        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "directory becomes symlink"))
-        XCTAssertFalse(try git.stageAllAndCommit(at: a, message: "symlink noop"))
-        try git.push(at: a, credential: nil)
-        let b = try clone(remote, "b")
-        XCTAssertTrue(files.isSymlink(at: b + "/skills/bytes/assets"))
-        XCTAssertEqual(try files.symlinkTarget(at: b + "/skills/bytes/assets"), "cache")
+            let assets = a + "/skills/bytes/assets"
+            try files.writeFile(at: assets + "/a", content: "tracked asset")
+            XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "assets"))
+            try files.deleteDirectory(at: assets)
+            try files.createSymlink(at: assets, pointingTo: "cache")
+            XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "directory becomes symlink"))
+            XCTAssertFalse(try git.stageAllAndCommit(at: a, message: "symlink noop"))
+            try git.push(at: a, credential: nil)
+            let b = try clone(remote, "b")
+            XCTAssertTrue(files.isSymlink(at: b + "/skills/bytes/assets"))
+            XCTAssertEqual(try files.symlinkTarget(at: b + "/skills/bytes/assets"), "cache")
+        }
     }
 
     func testPullRebaseUpToDate() throws {
-        let remote = try seededRemote()
-        let a = try clone(remote, "a")
-        XCTAssertEqual(try git.pullRebase(at: a, credential: nil), .upToDate)
+        try NativeTestWork.run { [self] in
+            let remote = try seededRemote()
+            let a = try clone(remote, "a")
+            XCTAssertEqual(try git.pullRebase(at: a, credential: nil), .upToDate)
+        }
     }
 
     func testPullRebaseMergedNonConflicting() throws {
-        let remote = try seededRemote()
-        let a = try clone(remote, "a")
-        let b = try clone(remote, "b")
-        // A adds a.txt and pushes.
-        try write("a.txt", "A\n", in: a)
-        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "A adds a"))
-        try git.push(at: a, credential: nil)
-        // B adds a DIFFERENT file, then pulls — non-conflicting → merged.
-        try write("b.txt", "B\n", in: b)
-        XCTAssertTrue(try git.stageAllAndCommit(at: b, message: "B adds b"))
-        XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .merged)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: b + "/a.txt"))   // A's change arrived
+        try NativeTestWork.run { [self] in
+            let remote = try seededRemote()
+            let a = try clone(remote, "a")
+            let b = try clone(remote, "b")
+            // A adds a.txt and pushes.
+            try write("a.txt", "A\n", in: a)
+            XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "A adds a"))
+            try git.push(at: a, credential: nil)
+            // B adds a DIFFERENT file, then pulls — non-conflicting → merged.
+            try write("b.txt", "B\n", in: b)
+            XCTAssertTrue(try git.stageAllAndCommit(at: b, message: "B adds b"))
+            XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .merged)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: b + "/a.txt"))   // A's change arrived
+        }
     }
 
 }
 
 extension GitServiceTests {
     func testPullRebaseDropsRewrittenUpstreamCommitsAndKeepsTheCheckedTree() throws {
-        let remote = try seededRemote()
-        let a = try clone(remote, "rewrite-a")
-        let base = try git.commitSHA(at: a)
-        try write("purged.txt", "removed upstream fixture\n", in: a)
-        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "upstream commit to purge"))
-        try git.push(at: a, credential: nil)
-        let b = try clone(remote, "rewrite-b")
-        let pinned = try clone(remote, "rewrite-pinned")
-        let control = try clone(remote, "rewrite-control")
-        for (root, name) in [(b, "b.txt"), (pinned, "pinned.txt"), (control, "control.txt")] {
-            try configureNativeRebaseDefaults(at: root)
-            try write(name, "local sync commit\n", in: root)
-            XCTAssertTrue(try git.stageAllAndCommit(at: root, message: "local sync commit"))
-        }
-        let reset = try rawGit(["reset", "--hard", base], in: a)
-        XCTAssertEqual(reset.code, 0, reset.err)
-        try write("rewritten.txt", "safe rewritten upstream\n", in: a)
-        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "rewritten upstream"))
-        let force = try rawGit(["push", "--force", "origin", "main"], in: a)
-        XCTAssertEqual(force.code, 0, force.err)
-        // Independent control: the original git pull drops the purged upstream commit.
-        let oldPull = try rawGit(["pull", "--rebase", "origin", "main"], in: control)
-        XCTAssertEqual(oldPull.code, 0, oldPull.err)
-        let files = FileService()
-        XCTAssertFalse(files.fileExists(at: control + "/purged.txt"))
-        XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .merged)
-        XCTAssertFalse(files.fileExists(at: b + "/purged.txt"), "A purged upstream commit must not replay")
-        XCTAssertEqual(try files.readFile(at: b + "/b.txt"), "local sync commit\n")
-        try git.push(at: b, credential: nil)
-        let bare = String(remote.dropFirst("file://".count))
-        let tree = try git.runOrThrow(["--git-dir", bare, "ls-tree", "-r", "--name-only", "main"], in: nil)
-        XCTAssertFalse(tree.stdout.split(separator: "\n").contains("purged.txt"), "Push must not restore the purge")
+        try NativeTestWork.run { [self] in
+            let remote = try seededRemote()
+            let a = try clone(remote, "rewrite-a")
+            let base = try git.commitSHA(at: a)
+            try write("purged.txt", "removed upstream fixture\n", in: a)
+            XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "upstream commit to purge"))
+            try git.push(at: a, credential: nil)
+            let b = try clone(remote, "rewrite-b")
+            let pinned = try clone(remote, "rewrite-pinned")
+            let control = try clone(remote, "rewrite-control")
+            for (root, name) in [(b, "b.txt"), (pinned, "pinned.txt"), (control, "control.txt")] {
+                try configureNativeRebaseDefaults(at: root)
+                try write(name, "local sync commit\n", in: root)
+                XCTAssertTrue(try git.stageAllAndCommit(at: root, message: "local sync commit"))
+            }
+            let reset = try rawGit(["reset", "--hard", base], in: a)
+            XCTAssertEqual(reset.code, 0, reset.err)
+            try write("rewritten.txt", "safe rewritten upstream\n", in: a)
+            XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "rewritten upstream"))
+            let force = try rawGit(["push", "--force", "origin", "main"], in: a)
+            XCTAssertEqual(force.code, 0, force.err)
+            // Independent control: the original git pull drops the purged upstream commit.
+            let oldPull = try rawGit(["pull", "--rebase", "origin", "main"], in: control)
+            XCTAssertEqual(oldPull.code, 0, oldPull.err)
+            let files = FileService()
+            XCTAssertFalse(files.fileExists(at: control + "/purged.txt"))
+            XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .merged)
+            XCTAssertFalse(files.fileExists(at: b + "/purged.txt"), "A purged upstream commit must not replay")
+            XCTAssertEqual(try files.readFile(at: b + "/b.txt"), "local sync commit\n")
+            try git.push(at: b, credential: nil)
+            let bare = String(remote.dropFirst("file://".count))
+            let tree = try git.runOrThrow(["--git-dir", bare, "ls-tree", "-r", "--name-only", "main"], in: nil)
+            XCTAssertFalse(tree.stdout.split(separator: "\n").contains("purged.txt"), "Push must not restore the purge")
 
-        try files.writeFile(at: pinned + "/.env", content: "local excluded fixture\n")
-        let checked = try XCTUnwrap(git.preflightStoreUpdate(at: pinned, credential: nil))
-        let checkedHead = try git.runOrThrow(["-C", pinned, "rev-parse", "origin/main"], in: nil).stdout
-        _ = try git.pullRebase(at: a, credential: nil)
-        try files.writeFile(at: a + "/.env", content: "later upstream fixture\n")
-        try git.runOrThrow(["-C", a, "add", "--force", ".env"], in: nil)
-        try git.runOrThrow(["-C", a, "commit", "-m", "later unchecked tree"], in: nil)
-        try git.push(at: a, credential: nil)
-        XCTAssertEqual(try git.pullRebase(at: pinned, fetchedRevision: checked), .merged)
-        XCTAssertFalse(files.fileExists(at: pinned + "/purged.txt"))
-        XCTAssertEqual(try files.readFile(at: pinned + "/pinned.txt"), "local sync commit\n")
-        XCTAssertEqual(try files.readFile(at: pinned + "/.env"), "local excluded fixture\n")
-        XCTAssertEqual(try git.runOrThrow(["-C", pinned, "rev-parse", "origin/main"], in: nil).stdout, checkedHead,
-                       "The guarded update must not fetch the later remote tree")
-        XCTAssertFalse(git.isRebaseInProgress(at: pinned))
+            try files.writeFile(at: pinned + "/.env", content: "local excluded fixture\n")
+            let checked = try XCTUnwrap(git.preflightStoreUpdate(at: pinned, credential: nil))
+            let checkedHead = try git.runOrThrow(["-C", pinned, "rev-parse", "origin/main"], in: nil).stdout
+            _ = try git.pullRebase(at: a, credential: nil)
+            try files.writeFile(at: a + "/.env", content: "later upstream fixture\n")
+            try git.runOrThrow(["-C", a, "add", "--force", ".env"], in: nil)
+            try git.runOrThrow(["-C", a, "commit", "-m", "later unchecked tree"], in: nil)
+            try git.push(at: a, credential: nil)
+            XCTAssertEqual(try git.pullRebase(at: pinned, fetchedRevision: checked), .merged)
+            XCTAssertFalse(files.fileExists(at: pinned + "/purged.txt"))
+            XCTAssertEqual(try files.readFile(at: pinned + "/pinned.txt"), "local sync commit\n")
+            XCTAssertEqual(try files.readFile(at: pinned + "/.env"), "local excluded fixture\n")
+            XCTAssertEqual(try git.runOrThrow(["-C", pinned, "rev-parse", "origin/main"], in: nil).stdout, checkedHead,
+                           "The guarded update must not fetch the later remote tree")
+            XCTAssertFalse(git.isRebaseInProgress(at: pinned))
+        }
     }
 
     func testPinnedPullRefusesMovedTrackingRefWithoutChangingTheStore() throws {
-        let remote = try seededRemote()
-        let a = try clone(remote, "pin-a")
-        let b = try clone(remote, "pin-b")
-        try write("local.txt", "local work\n", in: b)
-        XCTAssertTrue(try git.stageAllAndCommit(at: b, message: "local"))
-        try write("incoming.txt", "checked upstream\n", in: a)
-        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "checked"))
-        try git.push(at: a, credential: nil)
-        try FileService().writeFile(at: b + "/.env", content: "protected local fixture\n")
-        let checked = try XCTUnwrap(git.preflightStoreUpdate(at: b, credential: nil))
-        try write("later.txt", "unchecked upstream\n", in: a)
-        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "later"))
-        try git.push(at: a, credential: nil)
-        try git.fetch(at: b, credential: nil)
-        let files = FileService()
-        let beforeHead = try git.headSHA(at: b)
-        let beforeIndex = try files.readData(at: b + "/.git/index")
-        let beforeStatus = try git.runOrThrow(["-C", b, "status", "--porcelain"], in: nil).stdout
-        XCTAssertThrowsError(try git.pullRebase(at: b, fetchedRevision: checked)) { error in
-            guard case let GitError.commandFailed(_, _, detail, _) = error else {
-                return XCTFail("A moved tracking ref must refuse the checked rebase: \(error)")
+        try NativeTestWork.run { [self] in
+            let remote = try seededRemote()
+            let a = try clone(remote, "pin-a")
+            let b = try clone(remote, "pin-b")
+            try write("local.txt", "local work\n", in: b)
+            XCTAssertTrue(try git.stageAllAndCommit(at: b, message: "local"))
+            try write("incoming.txt", "checked upstream\n", in: a)
+            XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "checked"))
+            try git.push(at: a, credential: nil)
+            try FileService().writeFile(at: b + "/.env", content: "protected local fixture\n")
+            let checked = try XCTUnwrap(git.preflightStoreUpdate(at: b, credential: nil))
+            try write("later.txt", "unchecked upstream\n", in: a)
+            XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "later"))
+            try git.push(at: a, credential: nil)
+            try git.fetch(at: b, credential: nil)
+            let files = FileService()
+            let beforeHead = try git.headSHA(at: b)
+            let beforeIndex = try files.readData(at: b + "/.git/index")
+            let beforeStatus = try git.runOrThrow(["-C", b, "status", "--porcelain"], in: nil).stdout
+            XCTAssertThrowsError(try git.pullRebase(at: b, fetchedRevision: checked)) { error in
+                guard case let GitError.commandFailed(_, _, detail, _) = error else {
+                    return XCTFail("A moved tracking ref must refuse the checked rebase: \(error)")
+                }
+                XCTAssertEqual(detail, "The fetched branch no longer matches the checked commit. Sync again.")
             }
-            XCTAssertEqual(detail, "The fetched branch no longer matches the checked commit. Sync again.")
+            XCTAssertEqual(try git.headSHA(at: b), beforeHead)
+            XCTAssertEqual(try files.readData(at: b + "/.git/index"), beforeIndex)
+            XCTAssertEqual(try git.runOrThrow(["-C", b, "status", "--porcelain"], in: nil).stdout, beforeStatus)
+            XCTAssertEqual(try files.readFile(at: b + "/local.txt"), "local work\n")
+            XCTAssertEqual(try files.readFile(at: b + "/.env"), "protected local fixture\n")
+            XCTAssertFalse(files.fileExists(at: b + "/incoming.txt"))
+            XCTAssertFalse(files.fileExists(at: b + "/later.txt"))
+            XCTAssertFalse(git.isRebaseInProgress(at: b))
+            let current = try XCTUnwrap(git.preflightStoreUpdate(at: b, credential: nil))
+            XCTAssertEqual(try git.pullRebase(at: b, fetchedRevision: current), .merged)
+            XCTAssertEqual(try files.readFile(at: b + "/later.txt"), "unchecked upstream\n")
         }
-        XCTAssertEqual(try git.headSHA(at: b), beforeHead)
-        XCTAssertEqual(try files.readData(at: b + "/.git/index"), beforeIndex)
-        XCTAssertEqual(try git.runOrThrow(["-C", b, "status", "--porcelain"], in: nil).stdout, beforeStatus)
-        XCTAssertEqual(try files.readFile(at: b + "/local.txt"), "local work\n")
-        XCTAssertEqual(try files.readFile(at: b + "/.env"), "protected local fixture\n")
-        XCTAssertFalse(files.fileExists(at: b + "/incoming.txt"))
-        XCTAssertFalse(files.fileExists(at: b + "/later.txt"))
-        XCTAssertFalse(git.isRebaseInProgress(at: b))
-        let current = try XCTUnwrap(git.preflightStoreUpdate(at: b, credential: nil))
-        XCTAssertEqual(try git.pullRebase(at: b, fetchedRevision: current), .merged)
-        XCTAssertEqual(try files.readFile(at: b + "/later.txt"), "unchecked upstream\n")
     }
 
     private func configureNativeRebaseDefaults(at root: String) throws {
@@ -367,180 +418,198 @@ extension GitServiceTests {
 // MARK: PLAN-24 / 24.2 git-state and adoption seams
 
 extension GitServiceTests {
-    func testClassifyLsRemoteFailureAuthVsOther() {
-        XCTAssertEqual(
-            GitService.classifyLsRemoteFailure(
-                exitCode: 128,
-                combinedOutput: "Permission denied (publickey)"
-            ),
-            .auth
-        )
-        XCTAssertEqual(
-            GitService.classifyLsRemoteFailure(exitCode: 128, combinedOutput: "repository unavailable"),
-            .other
-        )
+    func testClassifyLsRemoteFailureAuthVsOther() throws {
+        try NativeTestWork.run { [self] in
+            XCTAssertEqual(
+                GitService.classifyLsRemoteFailure(
+                    exitCode: 128,
+                    combinedOutput: "Permission denied (publickey)"
+                ),
+                .auth
+            )
+            XCTAssertEqual(
+                GitService.classifyLsRemoteFailure(exitCode: 128, combinedOutput: "repository unavailable"),
+                .other
+            )
+        }
     }
 
     func testHasLocalBranchesSignalShapes() throws {
-        let work = tempDir + "/branch-signals"
-        try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
-        try git.initRepository(at: work)
-        XCTAssertFalse(try git.hasLocalBranches(at: work))
+        try NativeTestWork.run { [self] in
+            let work = tempDir + "/branch-signals"
+            try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
+            try git.initRepository(at: work)
+            XCTAssertFalse(try git.hasLocalBranches(at: work))
 
-        let remote = try seededRemote()
-        try git.setRemote(remote, at: work)
-        try git.fetchBranch("main", at: work, credential: nil)
-        XCTAssertFalse(try git.hasLocalBranches(at: work), "remote-tracking refs are not local branches")
+            let remote = try seededRemote()
+            try git.setRemote(remote, at: work)
+            try git.fetchBranch("main", at: work, credential: nil)
+            XCTAssertFalse(try git.hasLocalBranches(at: work), "remote-tracking refs are not local branches")
 
-        try git.materializeFromFetchHead(at: work)
-        try git.bornBranch("main", at: work)
-        XCTAssertTrue(try git.hasLocalBranches(at: work))
-        let current = try rawGit(["-C", work, "symbolic-ref", "HEAD", "refs/heads/weird"])
-        XCTAssertEqual(current.code, 0, current.err)
-        XCTAssertTrue(try git.hasLocalBranches(at: work), "foreign shape still has refs/heads/main")
+            try git.materializeFromFetchHead(at: work)
+            try git.bornBranch("main", at: work)
+            XCTAssertTrue(try git.hasLocalBranches(at: work))
+            let current = try rawGit(["-C", work, "symbolic-ref", "HEAD", "refs/heads/weird"])
+            XCTAssertEqual(current.code, 0, current.err)
+            XCTAssertTrue(try git.hasLocalBranches(at: work), "foreign shape still has refs/heads/main")
 
-        let plain = tempDir + "/plain-signal"
-        try FileManager.default.createDirectory(atPath: plain, withIntermediateDirectories: true)
-        XCTAssertThrowsError(try git.hasLocalBranches(at: plain))
+            let plain = tempDir + "/plain-signal"
+            try FileManager.default.createDirectory(atPath: plain, withIntermediateDirectories: true)
+            XCTAssertThrowsError(try git.hasLocalBranches(at: plain))
+        }
     }
 
     func testHasRemoteTrackingBranchBothWays() throws {
-        let work = tempDir + "/tracking"
-        try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
-        try git.initRepository(at: work)
-        XCTAssertFalse(git.hasRemoteTrackingBranch("main", at: work))
-        try git.setRemote(try seededRemote(), at: work)
-        try git.fetchBranch("main", at: work, credential: nil)
-        XCTAssertTrue(git.hasRemoteTrackingBranch("main", at: work))
+        try NativeTestWork.run { [self] in
+            let work = tempDir + "/tracking"
+            try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
+            try git.initRepository(at: work)
+            XCTAssertFalse(git.hasRemoteTrackingBranch("main", at: work))
+            try git.setRemote(try seededRemote(), at: work)
+            try git.fetchBranch("main", at: work, credential: nil)
+            XCTAssertTrue(git.hasRemoteTrackingBranch("main", at: work))
+        }
     }
 
     func testHasRemoteOriginConfiguredTriState() throws {
-        let configured = tempDir + "/origin-configured"
-        try FileManager.default.createDirectory(atPath: configured, withIntermediateDirectories: true)
-        try git.initRepository(at: configured)
-        try git.setRemote("file:///tmp/origin.git", at: configured)
-        XCTAssertTrue(try git.hasRemoteOriginConfigured(at: configured))
+        try NativeTestWork.run { [self] in
+            let configured = tempDir + "/origin-configured"
+            try FileManager.default.createDirectory(atPath: configured, withIntermediateDirectories: true)
+            try git.initRepository(at: configured)
+            try git.setRemote("file:///tmp/origin.git", at: configured)
+            XCTAssertTrue(try git.hasRemoteOriginConfigured(at: configured))
 
-        let clean = tempDir + "/origin-clean"
-        try FileManager.default.createDirectory(atPath: clean, withIntermediateDirectories: true)
-        try git.initRepository(at: clean)
-        XCTAssertFalse(try git.hasRemoteOriginConfigured(at: clean))
+            let clean = tempDir + "/origin-clean"
+            try FileManager.default.createDirectory(atPath: clean, withIntermediateDirectories: true)
+            try git.initRepository(at: clean)
+            XCTAssertFalse(try git.hasRemoteOriginConfigured(at: clean))
 
-        let corrupt = tempDir + "/origin-corrupt"
-        try FileManager.default.createDirectory(atPath: corrupt, withIntermediateDirectories: true)
-        try git.initRepository(at: corrupt)
-        try write(".git/config", "[core\n", in: corrupt)
-        XCTAssertThrowsError(try git.hasRemoteOriginConfigured(at: corrupt)) { error in
-            guard case let GitError.commandFailed(_, exitCode, _, _) = error else {
-                return XCTFail("expected GitError.commandFailed, got \(error)")
+            let corrupt = tempDir + "/origin-corrupt"
+            try FileManager.default.createDirectory(atPath: corrupt, withIntermediateDirectories: true)
+            try git.initRepository(at: corrupt)
+            try write(".git/config", "[core\n", in: corrupt)
+            XCTAssertThrowsError(try git.hasRemoteOriginConfigured(at: corrupt)) { error in
+                guard case let GitError.commandFailed(_, exitCode, _, _) = error else {
+                    return XCTFail("expected GitError.commandFailed, got \(error)")
+                }
+                XCTAssertEqual(exitCode, 128)
             }
-            XCTAssertEqual(exitCode, 128)
         }
     }
 
     func testBornBranchCreateOnlyBothWays() throws {
-        let work = tempDir + "/born"
-        try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
-        try git.initRepository(at: work)
-        try git.setRemote(try seededRemote(), at: work)
-        try git.fetchBranch("main", at: work, credential: nil)
-        try git.materializeFromFetchHead(at: work)
-        try git.bornBranch("main", at: work)
-        let original = try git.commitSHA(at: work)
-        XCTAssertThrowsError(try git.bornBranch("main", at: work))
-        XCTAssertEqual(try git.commitSHA(at: work), original)
+        try NativeTestWork.run { [self] in
+            let work = tempDir + "/born"
+            try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
+            try git.initRepository(at: work)
+            try git.setRemote(try seededRemote(), at: work)
+            try git.fetchBranch("main", at: work, credential: nil)
+            try git.materializeFromFetchHead(at: work)
+            try git.bornBranch("main", at: work)
+            let original = try git.commitSHA(at: work)
+            XCTAssertThrowsError(try git.bornBranch("main", at: work))
+            XCTAssertEqual(try git.commitSHA(at: work), original)
+        }
     }
 }
 
 extension GitServiceTests {
     func testPullRebaseConflictedThenAbortRestoresCleanState() throws {
-        let remote = try seededRemote()
-        let a = try clone(remote, "a")
-        let b = try clone(remote, "b")
-        // Both edit README.md divergently.
-        try write("README.md", "A version\n", in: a)
-        XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "A edits readme"))
-        try git.push(at: a, credential: nil)
-        try write("README.md", "B version\n", in: b)
-        XCTAssertTrue(try git.stageAllAndCommit(at: b, message: "B edits readme"))
-        // Pull on B conflicts.
-        XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .conflicted(["README.md"]))
-        XCTAssertEqual(try git.conflictedFiles(at: b), ["README.md"])
-        // Abort restores B to its pre-pull state — nothing lost, no conflicted files.
-        try git.abortRebase(at: b)
-        XCTAssertEqual(try git.runOrThrow(["-C", b, "rev-parse", "--is-inside-work-tree"], in: nil).stdout, "true\n")
-        XCTAssertTrue(try git.conflictedFiles(at: b).isEmpty)
-        let body = try String(contentsOfFile: b + "/README.md", encoding: .utf8)
-        XCTAssertEqual(body, "B version\n")   // B's edit survives the abort
-        let before = try git.commitSHA(at: b)
-        for failure in ["metadata-write", "metadata-path"] {
-            if FileService().fileExists(at: b + "-fault") { try FileService().deleteFile(at: b + "-fault") }
+        try NativeTestWork.run { [self] in
+            let remote = try seededRemote()
+            let a = try clone(remote, "a")
+            let b = try clone(remote, "b")
+            // Both edit README.md divergently.
+            try write("README.md", "A version\n", in: a)
+            XCTAssertTrue(try git.stageAllAndCommit(at: a, message: "A edits readme"))
+            try git.push(at: a, credential: nil)
+            try write("README.md", "B version\n", in: b)
+            XCTAssertTrue(try git.stageAllAndCommit(at: b, message: "B edits readme"))
+            // Pull on B conflicts.
             XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .conflicted(["README.md"]))
-            try FileService().deleteFile(at: b + "/.git/info/attributes")
-            let failing = try failingMetadataGit(failure, root: b)
-            XCTAssertThrowsError(try failing.abortRebase(at: b), "Repair failure may be reported")
-            XCTAssertTrue(FileService().fileExists(at: b + "-fault"))
-            XCTAssertFalse(git.isRebaseInProgress(at: b), "Repair failure must never skip abort")
+            XCTAssertEqual(try git.conflictedFiles(at: b), ["README.md"])
+            // Abort restores B to its pre-pull state — nothing lost, no conflicted files.
+            try git.abortRebase(at: b)
+            XCTAssertEqual(try git.runOrThrow(["-C", b, "rev-parse", "--is-inside-work-tree"], in: nil).stdout, "true\n")
             XCTAssertTrue(try git.conflictedFiles(at: b).isEmpty)
-            XCTAssertEqual(try git.commitSHA(at: b), before)
-            XCTAssertEqual(try FileService().readFile(at: b + "/README.md"), "B version\n")
-            XCTAssertEqual(try rawGit(["-C", b, "status", "--porcelain"]).out, "")
+            let body = try String(contentsOfFile: b + "/README.md", encoding: .utf8)
+            XCTAssertEqual(body, "B version\n")   // B's edit survives the abort
+            let before = try git.commitSHA(at: b)
+            for failure in ["metadata-write", "metadata-path"] {
+                if FileService().fileExists(at: b + "-fault") { try FileService().deleteFile(at: b + "-fault") }
+                XCTAssertEqual(try git.pullRebase(at: b, credential: nil), .conflicted(["README.md"]))
+                try FileService().deleteFile(at: b + "/.git/info/attributes")
+                let failing = try failingMetadataGit(failure, root: b)
+                XCTAssertThrowsError(try failing.abortRebase(at: b), "Repair failure may be reported")
+                XCTAssertTrue(FileService().fileExists(at: b + "-fault"))
+                XCTAssertFalse(git.isRebaseInProgress(at: b), "Repair failure must never skip abort")
+                XCTAssertTrue(try git.conflictedFiles(at: b).isEmpty)
+                XCTAssertEqual(try git.commitSHA(at: b), before)
+                XCTAssertEqual(try FileService().readFile(at: b + "/README.md"), "B version\n")
+                XCTAssertEqual(try rawGit(["-C", b, "status", "--porcelain"]).out, "")
+            }
         }
     }
 
     // MARK: 10.5 — conflicted-path NUL enumeration (C8): an embedded-newline path must not fragment
 
     func testConflictedFilesHandlesEmbeddedNewlinePath() throws {
-        let repo = tempDir + "/nl-conflict"
-        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
-        let name = "a\nb.txt"   // a path byte git C-quotes in non-`-z` output; `-z` returns it raw
+        try NativeTestWork.run { [self] in
+            let repo = tempDir + "/nl-conflict"
+            try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+            let name = "a\nb.txt"   // a path byte git C-quotes in non-`-z` output; `-z` returns it raw
 
-        func writeFixture(_ content: String) throws {
-            try content.write(toFile: repo + "/" + name, atomically: true, encoding: .utf8)
+            func writeFixture(_ content: String) throws {
+                try content.write(toFile: repo + "/" + name, atomically: true, encoding: .utf8)
+            }
+
+            try rawGit(["-C", repo, "init", "-q"])
+            try rawGit(["-C", repo, "symbolic-ref", "HEAD", "refs/heads/main"])
+            try writeFixture("base")
+            try rawGit(["-C", repo, "add", "-A"])
+            try rawGit(["-C", repo, "commit", "-qm", "base"])
+
+            try rawGit(["-C", repo, "checkout", "-q", "-b", "other"])
+            try writeFixture("other")
+            try rawGit(["-C", repo, "commit", "-qam", "other"])
+
+            try rawGit(["-C", repo, "checkout", "-q", "main"])
+            try writeFixture("mine")
+            try rawGit(["-C", repo, "commit", "-qam", "mine"])
+
+            // Rebase main onto other → conflict on the newline-named path. A non-zero exit is EXPECTED
+            // (rawGit returns the result; it does not throw on a non-zero git exit) — do not assert the code.
+            _ = try rawGit(["-C", repo, "rebase", "-q", "other"])
+
+            let conflicted = try git.conflictedFiles(at: repo)
+            XCTAssertEqual(conflicted.count, 1, "embedded-newline path must not fragment: \(conflicted)")
+            XCTAssertEqual(conflicted.first, name, "the single entry must be the exact raw newline-containing name")
         }
-
-        try rawGit(["-C", repo, "init", "-q"])
-        try rawGit(["-C", repo, "symbolic-ref", "HEAD", "refs/heads/main"])
-        try writeFixture("base")
-        try rawGit(["-C", repo, "add", "-A"])
-        try rawGit(["-C", repo, "commit", "-qm", "base"])
-
-        try rawGit(["-C", repo, "checkout", "-q", "-b", "other"])
-        try writeFixture("other")
-        try rawGit(["-C", repo, "commit", "-qam", "other"])
-
-        try rawGit(["-C", repo, "checkout", "-q", "main"])
-        try writeFixture("mine")
-        try rawGit(["-C", repo, "commit", "-qam", "mine"])
-
-        // Rebase main onto other → conflict on the newline-named path. A non-zero exit is EXPECTED
-        // (rawGit returns the result; it does not throw on a non-zero git exit) — do not assert the code.
-        _ = try rawGit(["-C", repo, "rebase", "-q", "other"])
-
-        let conflicted = try git.conflictedFiles(at: repo)
-        XCTAssertEqual(conflicted.count, 1, "embedded-newline path must not fragment: \(conflicted)")
-        XCTAssertEqual(conflicted.first, name, "the single entry must be the exact raw newline-containing name")
     }
 
     // MARK: 08.2 — HTTPS credential injection (env-fed askpass; secret never in argv or the helper file)
 
     func testHttpsTokenFeedsAskpassViaChildEnv() throws {
-        let secret = "ghp_\(UUID().uuidString)"
-        let env = try git.childEnvironment(credential: .httpsToken(username: "x-access-token", token: secret))
-        XCTAssertNotNil(env["GIT_ASKPASS"])
-        XCTAssertEqual(env["PENSIEVE_GIT_USERNAME"], "x-access-token")
-        XCTAssertEqual(env["PENSIEVE_GIT_PASSWORD"], secret)   // the token rides the CHILD ENV
+        try NativeTestWork.run { [self] in
+            let secret = "ghp_\(UUID().uuidString)"
+            let env = try git.childEnvironment(credential: .httpsToken(username: "x-access-token", token: secret))
+            XCTAssertNotNil(env["GIT_ASKPASS"])
+            XCTAssertEqual(env["PENSIEVE_GIT_USERNAME"], "x-access-token")
+            XCTAssertEqual(env["PENSIEVE_GIT_PASSWORD"], secret)   // the token rides the CHILD ENV
+        }
     }
 
     func testAskpassHelperExistsExecutableAndCarriesNoSecret() throws {
-        let secret = "ghp_\(UUID().uuidString)"
-        let env = try git.childEnvironment(credential: .httpsToken(username: "x-access-token", token: secret))
-        let helper = try XCTUnwrap(env["GIT_ASKPASS"])
-        XCTAssertTrue(git.fileService.isExecutableFile(at: helper))
-        let helperBody = try git.fileService.readFile(at: helper)
-        XCTAssertFalse(helperBody.contains(secret))   // the helper reads env; it holds NO secret at rest
-        XCTAssertTrue(helperBody.contains("PENSIEVE_GIT_PASSWORD"))
-        try assertHelperRemainsExecutableDuringRewrite(body: helperBody, environment: env, secret: secret)
+        try NativeTestWork.run { [self] in
+            let secret = "ghp_\(UUID().uuidString)"
+            let env = try git.childEnvironment(credential: .httpsToken(username: "x-access-token", token: secret))
+            let helper = try XCTUnwrap(env["GIT_ASKPASS"])
+            XCTAssertTrue(git.fileService.isExecutableFile(at: helper))
+            let helperBody = try git.fileService.readFile(at: helper)
+            XCTAssertFalse(helperBody.contains(secret))   // the helper reads env; it holds NO secret at rest
+            XCTAssertTrue(helperBody.contains("PENSIEVE_GIT_PASSWORD"))
+            try assertHelperRemainsExecutableDuringRewrite(body: helperBody, environment: env, secret: secret)
+        }
     }
 
     private func assertHelperRemainsExecutableDuringRewrite(
@@ -599,41 +668,43 @@ extension GitServiceTests {
     }
 
     func testTokenNeverAppearsInAnyNetworkOpArgv() throws {
-        let fixture = try GitFailureFixture()
-        defer { try? fixture.remove() }
-        let secret = "ghp_\(UUID().uuidString)"
-        let credential = GitCredential.httpsToken(username: "u", token: secret)
-        let service = try fixture.credentialRecordingExecutable(expectedToken: secret)
-        let remote = "https://fixture.test/store.git"
-        let root = fixture.root
-        let operations: [NetworkCredentialOperation] = [
-            .init("clone", "clone", { try service.clone(remote: remote, into: root, credential: credential) }),
-            .init("cloneShallow default branch", "clone", {
-                try service.cloneShallow(remote: remote, branch: nil, into: root, credential: credential)
-            }),
-            .init("cloneShallow named branch", "clone", {
-                try service.cloneShallow(remote: remote, branch: "main", into: root, credential: credential)
-            }),
-            .init("remoteHasCommits", "ls-remote", { _ = service.remoteHasCommits(remote: remote, credential: credential) }),
-            .init("remoteDefaultBranch", "ls-remote", {
-                _ = try service.remoteDefaultBranch(remote: remote, credential: credential)
-            }),
-            .init("remoteBranches", "ls-remote", { _ = try service.remoteBranches(remote: remote, credential: credential) }),
-            .init("remoteHead", "ls-remote", { _ = try service.remoteHead(remote: remote, ref: "main", credential: credential) }),
-            .init("fetch", "fetch", { try service.fetch(at: root, credential: credential) }),
-            .init("fetchBranch", "fetch", { try service.fetchBranch("main", at: root, credential: credential) }),
-            .init("pullRebase", "fetch", { _ = try service.pullRebase(at: root, credential: credential) }),
-            .init("push", "push", { try service.push(at: root, credential: credential) }),
-            .init("collapseToSingleCommit", "fetch", {
-                _ = try service.collapseToSingleCommit(at: root, message: "collapsed", credential: credential)
-            }),
-            .init("fastForwardOnly", "fetch", { _ = try service.fastForwardOnly(at: root, credential: credential) })
-        ]
-        for operation in operations {
-            try assertNetworkCredential(operation.name, command: operation.command, secret: secret, fixture: fixture,
-                                        operation: operation.run)
+        try NativeTestWork.run { [self] in
+            let fixture = try GitFailureFixture()
+            defer { try? fixture.remove() }
+            let secret = "ghp_\(UUID().uuidString)"
+            let credential = GitCredential.httpsToken(username: "u", token: secret)
+            let service = try fixture.credentialRecordingExecutable(expectedToken: secret)
+            let remote = "https://fixture.test/store.git"
+            let root = fixture.root
+            let operations: [NetworkCredentialOperation] = [
+                .init("clone", "clone", { try service.clone(remote: remote, into: root, credential: credential) }),
+                .init("cloneShallow default branch", "clone", {
+                    try service.cloneShallow(remote: remote, branch: nil, into: root, credential: credential)
+                }),
+                .init("cloneShallow named branch", "clone", {
+                    try service.cloneShallow(remote: remote, branch: "main", into: root, credential: credential)
+                }),
+                .init("remoteHasCommits", "ls-remote", { _ = service.remoteHasCommits(remote: remote, credential: credential) }),
+                .init("remoteReferences", "ls-remote", {
+                    _ = try service.remoteReferences(remote: remote, credential: credential)
+                }),
+                .init("remoteHead", "ls-remote", { _ = try service.remoteHead(remote: remote, ref: "main",
+                    credential: credential) }),
+                .init("fetch", "fetch", { try service.fetch(at: root, credential: credential) }),
+                .init("fetchBranch", "fetch", { try service.fetchBranch("main", at: root, credential: credential) }),
+                .init("pullRebase", "fetch", { _ = try service.pullRebase(at: root, credential: credential) }),
+                .init("push", "push", { try service.push(at: root, credential: credential) }),
+                .init("collapseToSingleCommit", "fetch", {
+                    _ = try service.collapseToSingleCommit(at: root, message: "collapsed", credential: credential)
+                }),
+                .init("fastForwardOnly", "fetch", { _ = try service.fastForwardOnly(at: root, credential: credential) })
+            ]
+            for operation in operations {
+                try assertNetworkCredential(operation.name, command: operation.command, secret: secret, fixture: fixture,
+                                            operation: operation.run)
+            }
+            try assertHistoryNetworkCredentials(service, secret: secret, fixture: fixture)
         }
-        try assertHistoryNetworkCredentials(service, secret: secret, fixture: fixture)
     }
 
     private func assertNetworkCredential(
@@ -674,50 +745,56 @@ extension GitServiceTests {
     }
 
     func testSshAgentSetsNoAskpass() throws {
-        // Seed STALE auth vars in the parent process env, then prove childEnvironment sanitizes them
-        // for a non-.httpsToken op — a .sshAgent/nil op must never ride an inherited askpass or secret.
-        setenv("GIT_ASKPASS", "/tmp/evil-askpass", 1)
-        setenv("PENSIEVE_GIT_USERNAME", "stale-user", 1)
-        setenv("PENSIEVE_GIT_PASSWORD", "stale-secret", 1)
-        defer {
-            unsetenv("GIT_ASKPASS"); unsetenv("PENSIEVE_GIT_USERNAME"); unsetenv("PENSIEVE_GIT_PASSWORD")
-        }
-        let env = try git.childEnvironment(credential: .sshAgent)
-        XCTAssertNil(env["GIT_ASKPASS"])           // inherited askpass stripped
-        XCTAssertNil(env["PENSIEVE_GIT_USERNAME"]) // inherited username stripped
-        XCTAssertNil(env["PENSIEVE_GIT_PASSWORD"]) // inherited secret stripped
-        if let sock = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"] {
-            XCTAssertEqual(env["SSH_AUTH_SOCK"], sock)   // agent socket passes through untouched
+        try NativeTestWork.run { [self] in
+            // Seed STALE auth vars in the parent process env, then prove childEnvironment sanitizes them
+            // for a non-.httpsToken op — a .sshAgent/nil op must never ride an inherited askpass or secret.
+            setenv("GIT_ASKPASS", "/tmp/evil-askpass", 1)
+            setenv("PENSIEVE_GIT_USERNAME", "stale-user", 1)
+            setenv("PENSIEVE_GIT_PASSWORD", "stale-secret", 1)
+            defer {
+                unsetenv("GIT_ASKPASS"); unsetenv("PENSIEVE_GIT_USERNAME"); unsetenv("PENSIEVE_GIT_PASSWORD")
+            }
+            let env = try git.childEnvironment(credential: .sshAgent)
+            XCTAssertNil(env["GIT_ASKPASS"])           // inherited askpass stripped
+            XCTAssertNil(env["PENSIEVE_GIT_USERNAME"]) // inherited username stripped
+            XCTAssertNil(env["PENSIEVE_GIT_PASSWORD"]) // inherited secret stripped
+            if let sock = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"] {
+                XCTAssertEqual(env["SSH_AUTH_SOCK"], sock)   // agent socket passes through untouched
+            }
         }
     }
 
     // MARK: 10.4 — inherited git-behavior env stripped (C5); GIT_CONFIG_NOSYSTEM preserved
 
     func testChildEnvironmentStripsInheritedGitOverridesButPreservesNoSystem() throws {
-        setenv("GIT_SSH_COMMAND", "ssh -oProxyCommand=evil", 1); setenv("GIT_CONFIG_COUNT", "1", 1)
-        setenv("GIT_CONFIG_KEY_0", "core.pager", 1); setenv("GIT_TRACE", "1", 1)
-        setenv("GIT_ALLOW_PROTOCOL", "ext:file:https", 1); setenv("GIT_PROTOCOL_FROM_USER", "1", 1)
-        setenv("GIT_CONFIG_NOSYSTEM", "1", 1)   // HARDENING var — must SURVIVE
-        defer {
-            unsetenv("GIT_SSH_COMMAND"); unsetenv("GIT_CONFIG_COUNT")
-            unsetenv("GIT_CONFIG_KEY_0"); unsetenv("GIT_TRACE")
-            unsetenv("GIT_ALLOW_PROTOCOL"); unsetenv("GIT_PROTOCOL_FROM_USER")
-            unsetenv("GIT_CONFIG_NOSYSTEM")
+        try NativeTestWork.run { [self] in
+            setenv("GIT_SSH_COMMAND", "ssh -oProxyCommand=evil", 1); setenv("GIT_CONFIG_COUNT", "1", 1)
+            setenv("GIT_CONFIG_KEY_0", "core.pager", 1); setenv("GIT_TRACE", "1", 1)
+            setenv("GIT_ALLOW_PROTOCOL", "ext:file:https", 1); setenv("GIT_PROTOCOL_FROM_USER", "1", 1)
+            setenv("GIT_CONFIG_NOSYSTEM", "1", 1)   // HARDENING var — must SURVIVE
+            defer {
+                unsetenv("GIT_SSH_COMMAND"); unsetenv("GIT_CONFIG_COUNT")
+                unsetenv("GIT_CONFIG_KEY_0"); unsetenv("GIT_TRACE")
+                unsetenv("GIT_ALLOW_PROTOCOL"); unsetenv("GIT_PROTOCOL_FROM_USER")
+                unsetenv("GIT_CONFIG_NOSYSTEM")
+            }
+            let env = try git.childEnvironment(credential: nil)
+            XCTAssertNil(env["GIT_SSH_COMMAND"]); XCTAssertNil(env["GIT_CONFIG_COUNT"])
+            XCTAssertNil(env["GIT_CONFIG_KEY_0"])    // GIT_CONFIG_KEY_ prefix, stripped
+            XCTAssertNil(env["GIT_TRACE"])           // GIT_TRACE prefix, stripped
+            XCTAssertNil(env["GIT_ALLOW_PROTOCOL"]); XCTAssertNil(env["GIT_PROTOCOL_FROM_USER"])
+            XCTAssertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")   // hardening var PRESERVED
         }
-        let env = try git.childEnvironment(credential: nil)
-        XCTAssertNil(env["GIT_SSH_COMMAND"]); XCTAssertNil(env["GIT_CONFIG_COUNT"])
-        XCTAssertNil(env["GIT_CONFIG_KEY_0"])    // GIT_CONFIG_KEY_ prefix, stripped
-        XCTAssertNil(env["GIT_TRACE"])           // GIT_TRACE prefix, stripped
-        XCTAssertNil(env["GIT_ALLOW_PROTOCOL"]); XCTAssertNil(env["GIT_PROTOCOL_FROM_USER"])
-        XCTAssertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")   // hardening var PRESERVED
     }
 
     func testAskpassHelperWriteFailurePropagates() throws {
-        let failingGit = GitService(fileService: AskpassWriteFailingFileService(),
-            askpassHelperPath: TestPaths.gitAskpassHelperPath)
-        XCTAssertThrowsError(
-            try failingGit.childEnvironment(credential: .httpsToken(username: "u", token: "ghp_x"))
-        )
+        try NativeTestWork.run { [self] in
+            let failingGit = GitService(fileService: AskpassWriteFailingFileService(),
+                askpassHelperPath: TestPaths.gitAskpassHelperPath)
+            XCTAssertThrowsError(
+                try failingGit.childEnvironment(credential: .httpsToken(username: "u", token: "ghp_x"))
+            )
+        }
     }
 }
 
@@ -872,5 +949,68 @@ extension GitServiceTests {
         }
         XCTAssertEqual(try files.readFile(at: destination + "/keep"), "arrived during download")
         XCTAssertFalse(files.directoryExists(at: destination + "/.git"))
+    }
+}
+
+extension GitServiceTests {
+    func testRemoteRefListingSkipsInvalidUTF8AndPreservesNameBytes() throws {
+        try NativeTestWork.run { [self] in
+            let files = FileService()
+            let executable = tempDir + "/remote-refs"
+            let sha = String(repeating: "a", count: 40)
+            for name in ["main", "\u{0301}topic", "\u{FEFF}topic", "cafe\u{0301}", "topic\u{0600}"] {
+                let listing = Array("ref: refs/heads/\(name)\tHEAD\n\(sha)\trefs/heads/".utf8)
+                    + [0xFF] + Array("invalid\n\(sha)\trefs/heads/\(name)\n\(sha)\trefs/heads/other\n".utf8)
+                let encoded = Data(listing).base64EncodedString()
+                let receipt = tempDir + "/remote-ref-receipt"
+                try files.writeExecutableFile(at: executable, content: """
+                #!/usr/bin/python3
+                import base64, sys
+                assert sys.argv[1:] == ['ls-remote', '--symref', '--', 'https://fixture.test/refs.git', 'HEAD', 'refs/heads/*']
+                with open('\(receipt)', 'a') as stream: stream.write('call\\n')
+                sys.stdout.buffer.write(base64.b64decode('\(encoded)'))
+                """)
+                let service = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+                try files.writeFile(at: receipt, content: "")
+                let refs = try service.remoteReferences(remote: "https://fixture.test/refs.git", credential: nil)
+                XCTAssertEqual(try files.readFile(at: receipt), "call\n", "One command supplies the default and heads")
+                let defaultBranch = refs.defaultBranch
+                let branches = refs.heads
+                XCTAssertEqual(defaultBranch.map { Array($0.utf8) }, Array(name.utf8), name)
+                XCTAssertEqual(branches.map { Array($0.utf8) }, [Array(name.utf8), Array("other".utf8)], name)
+            }
+        }
+    }
+
+    func testRemoteRefAuthFailureSurvivesInvalidOtherStream() throws {
+        try NativeTestWork.run { [self] in
+            let files = FileService()
+            let executable = tempDir + "/failed-git"
+            let remote = "https://fixture.test/refs.git"
+            for (stdout, stderr, message) in [
+                (Data([0xFF]), Data("fatal: Authentication failed\n".utf8), "Authentication failed"),
+                (Data("Permission denied (publickey).\n".utf8), Data([0xFF]), "Permission denied (publickey)")
+            ] {
+                try writeFailedGit(files: files, executable: executable, stdout: stdout, stderr: stderr)
+                let service = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+                XCTAssertThrowsError(try service.remoteReferences(remote: remote, credential: nil)) { error in
+                    guard case let GitError.authenticationFailed(actualRemote, detail) = error else {
+                        return XCTFail("Expected an auth failure with \(message), got \(error)")
+                    }
+                    XCTAssertEqual(actualRemote, remote)
+                    XCTAssertTrue(detail.contains(message), detail)
+                }
+            }
+        }
+    }
+
+    private func writeFailedGit(files: FileService, executable: String, stdout: Data, stderr: Data) throws {
+        try files.writeExecutableFile(at: executable, content: """
+        #!/usr/bin/python3
+        import base64, sys
+        sys.stdout.buffer.write(base64.b64decode('\(stdout.base64EncodedString())'))
+        sys.stderr.buffer.write(base64.b64decode('\(stderr.base64EncodedString())'))
+        sys.exit(128)
+        """)
     }
 }

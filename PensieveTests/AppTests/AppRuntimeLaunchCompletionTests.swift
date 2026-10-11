@@ -4,6 +4,44 @@ import XCTest
 
 @MainActor
 final class AppRuntimeLaunchCompletionTests: XCTestCase {
+    func testHeldLaunchKeepsMainActorRunningAndPublishesRebuiltRows() async throws {
+        let paths = try AppRuntimePaths.temporary(named: "HeldLaunch")
+        defer { try? FileService().deleteDirectory(at: (paths.storeRoot as NSString).deletingLastPathComponent) }
+        let defaults = try isolatedDefaults()
+        defaults.set(false, forKey: AppRuntime.backgroundSyncEnabledKey)
+        let container = try paths.makeContainer()
+        let windowContext = container.mainContext
+        let existing = Skill(name: "Stale", directoryName: "existing")
+        windowContext.insert(existing)
+        try windowContext.save()
+        let gate = TestWait.Gate(owner: self)
+        defer { gate.open() }
+        let entered = expectation(description: "launch entered")
+        let runtime = try AppRuntime(container: container, defaults: defaults,
+            launchReconcile: { context, _ in
+                XCTAssertFalse(Thread.isMainThread, "launch git and rebuild must leave the main thread")
+                XCTAssertFalse(context === windowContext, "the job must own its context")
+                entered.fulfill()
+                if !Thread.isMainThread { try? gate.wait() }
+                let rows = try? context.fetch(FetchDescriptor<Skill>())
+                rows?.first?.name = "Updated"
+                context.insert(Skill(name: "Rebuilt", directoryName: "rebuilt"))
+                try? context.save()
+                return LaunchReconcileOutcome(rebuild: RebuildResult(), migrationRan: true, ingestedHeadStamp: "head")
+            }, launchBackfill: { _ in XCTAssertFalse(Thread.isMainThread) },
+            hasRemoteConfigured: { false }, paths: paths, gitUsabilityProbe: { .usable })
+        let launch = Task { await runtime.performLaunchWorkIfNeeded(context: windowContext) }
+        await fulfillment(of: [entered], timeout: TestWait.timeoutSeconds)
+        XCTAssertFalse(runtime.launchWorkCompleted, "main actor must run before git is released")
+        gate.open()
+        await TestWait.until(failureMessage: "launch never published its result") { runtime.launchWorkCompleted }
+        XCTAssertEqual(try container.mainContext.fetch(FetchDescriptor<Skill>()).map(\.name).sorted(), ["Rebuilt", "Updated"])
+        XCTAssertEqual(existing.name, "Updated", "the window's registered row must reflect the native rebuild")
+        XCTAssertTrue(defaults.bool(forKey: AppRuntime.migrationDefaultsKey))
+        _ = await launch.value
+        await runtime.bootstrapTask.value
+    }
+
     func testLaunchStateRemainsPrivateAndCompletionIsReadOnly() throws {
         // Visibility and the source cap are explicit requirements; behavior cannot prove a missing setter.
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -34,7 +72,7 @@ final class AppRuntimeLaunchCompletionTests: XCTestCase {
             gitUsabilityProbe: { .usable })
         XCTAssertFalse(runtime.launchWorkCompleted)
         var callbackRan = false
-        runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext) {
+        await runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext) {
             XCTAssertTrue(backfilled)
             XCTAssertFalse(runtime.launchWorkCompleted, "launch callbacks are still running")
             callbackRan = true

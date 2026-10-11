@@ -68,8 +68,9 @@ struct ContentView: View {
             )
                 .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 260)
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if syncModel.isConfigured {
-                        SyncStatusView(model: syncModel, onResolve: { showConflictResolution = true })
+                    if syncModel.isConfigured || library.manifestSaves?.isWaiting == true {
+                        SyncStatusView(model: syncModel, saves: library.manifestSaves,
+                            onResolve: { showConflictResolution = true })
                     }
                 }
         } content: {
@@ -166,7 +167,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showConflictResolution, onDismiss: finishConflictResolution, content: {
             ConflictResolutionView(
-                model: runtime.paths.makeConflictResolutionModel(onResolutionStarted: runtime.beginConflictResolution),
+                model: runtime.conflictResolution,
                 library: library,
                 notifier: notifier,
                 onDismiss: { showConflictResolution = false }
@@ -179,15 +180,18 @@ struct ContentView: View {
             runtime.registerOpenMainWindowAction {
                 openMainWindow(id: "main")
             }
-            runtime.performLaunchWorkIfNeeded(
-                context: modelContext,
-                beforeStartingWatcher: runtime.checkForSkillUpdatesIfDue
-            )
-            let skillCount = (try? modelContext.fetchCount(FetchDescriptor<Skill>())) ?? skills.count
-            if !library.addsFenced, runtime.shouldAutoShowImportWizard(skillCount: skillCount) {
-                showImportWizard = true
+            Task {
+                await runtime.performLaunchWorkIfNeeded(
+                    context: modelContext,
+                    beforeStartingWatcher: runtime.checkForSkillUpdatesIfDue
+                )
             }
             reloadMachineStates()
+        }
+        .onChange(of: runtime.launchWorkCompleted, initial: true) { _, completed in
+            guard completed else { return }
+            let skillCount = (try? modelContext.fetchCount(FetchDescriptor<Skill>())) ?? skills.count
+            if runtime.shouldAutoShowImportWizard(skillCount: skillCount) { showImportWizard = true }
         }
         let selectionView = appearedView
             .onChange(of: scenePhase) { _, newPhase in

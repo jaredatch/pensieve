@@ -176,8 +176,8 @@ final class ProjectFolderThirdFixTests: XCTestCase {
                 platformVM: h.platformVM,
                 localMachineID: ProjectIntentHarness.localID,
                 context: h.context,
-                logFailure: { logs.append($0) }
-            )
+                logFailure: { logs.append($0) },
+            lockPath: TestPaths.storeRoot + ".sync.lock")
             XCTAssertFalse(result.hasFailures)
             XCTAssertEqual(logs, [h.project.id.uuidString + ": " + message])
         }

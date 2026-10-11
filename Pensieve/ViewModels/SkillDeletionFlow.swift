@@ -21,9 +21,11 @@ enum SkillDeletionFlow {
         })
         var retirementSaved = false
         var deletionOutcome: SkillLibraryViewModel.SkillDeletionResult?
+        let presentation = SkillLibraryViewModel.DeletionPresentation()
         defer {
             settleWaitingCleanup(cleanupResult, retirementSaved: retirementSaved,
                 outcome: deletionOutcome, skill: skill, library: library, platformVM: platformVM)
+            presentation.notice = library.deletionNotice
         }
         let cleanup = cleanupResult.batch
         if cleanup.hasFailures {
@@ -46,6 +48,7 @@ enum SkillDeletionFlow {
             try retire(skill: skill, context: context)
             try persist(context)
             retirementSaved = true
+            library.regenerateManifest(.retireSkill(skill.directoryName), context: context)
         } catch {
             context.rollback()
             library.deletionNotice = .failed(
@@ -54,22 +57,17 @@ enum SkillDeletionFlow {
             return false
         }
 
-        let outcome = library.deleteSkillEntry(skill, context: context, persist: persist)
+        let outcome = library.deleteSkillEntry(skill, context: context, presentation: presentation, persist: persist)
         deletionOutcome = outcome
-        let manifestNote = updateManifest(library: library, context: context, waitingProjects: cleanupResult.waitingProjects)
+        let manifestNote = waitingCleanupNote(library: library, waitingProjects: cleanupResult.waitingProjects)
         return present(outcome, skill: skill, manifestNote: manifestNote, library: library)
     }
 
-    private static func updateManifest(
-        library: SkillLibraryViewModel, context: ModelContext, waitingProjects: [String]
+    private static func waitingCleanupNote(
+        library: SkillLibraryViewModel, waitingProjects: [String]
     ) -> String {
         var manifestNote = ""
-        do {
-            try library.writeManifest(context: context)
-            library.notifier()
-        } catch {
-            manifestNote = " The sync manifest couldn't be updated and will regenerate on the next change."
-        }
+        library.notifier()
 
         if !waitingProjects.isEmpty {
             manifestNote += " Links and rules in \(waitingProjects.joined(separator: ", ")) "
@@ -86,7 +84,7 @@ enum SkillDeletionFlow {
                 let message = library.deletionNotice?.message ?? ""
                 let namedMessage: String
                 switch outcome {
-                case .deleted, .deletedManifestStale:
+                case .deleted:
                     namedMessage = message.isEmpty ? "Deleted “\(skill.name)”." : message
                 case .directoryDeletedRowRetained:
                     namedMessage = message.isEmpty ? "Removed “\(skill.name)”'s files; its entry stays listed." : message
@@ -136,7 +134,7 @@ enum SkillDeletionFlow {
         library: SkillLibraryViewModel
     ) -> Bool {
         switch outcome {
-        case .deleted, .deletedManifestStale:
+        case .deleted:
             if manifestNote.isEmpty {
                 library.deletionNotice = nil
             } else {

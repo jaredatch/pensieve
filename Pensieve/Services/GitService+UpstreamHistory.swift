@@ -24,6 +24,7 @@ extension GitService {
         ]
     }
 
+    @_disfavoredOverload
     func upstreamHistory(_ request: UpstreamHistoryGitRequest) throws -> UpstreamHistoryGitSnapshot {
         try runOrThrow(["init", "--quiet", request.repositoryPath], in: nil)
         try fetchTrackedRef(request)

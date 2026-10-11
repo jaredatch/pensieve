@@ -228,7 +228,7 @@ final class UpdatesViewModelTests: XCTestCase {
         _ = try commit(fixture.repository, message: "move before diff")
 
         XCTAssertThrowsError(
-            try fixture.service.previewUpdate(PinnedSkillUpdate(skill: fixture.skill))
+            try nativePreview(fixture.service, skill: fixture.skill)
         ) { error in
             XCTAssertEqual(error as? SkillUpdateFlowError, .repositoryChanged)
             XCTAssertEqual(error.localizedDescription, SkillUpdateFlowError.repositoryChangedMessage)

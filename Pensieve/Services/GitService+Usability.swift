@@ -48,6 +48,7 @@ extension GitService {
         (try? remoteURL(at: path)) ?? "origin"
     }
 
+    @_disfavoredOverload
     func probeUsability() throws -> GitUsability {
         do {
             let result = try run(["--version"], in: nil)
@@ -56,6 +57,7 @@ extension GitService {
             return GitUsability.environmentFailure(exit: result.exit, output: detail)
                 ?? .failed(GitFailureDetail(detail.isEmpty ? "git --version exited \(result.exit)." : detail))
         } catch {
+            if error is CancellationError { throw error }
             if case GitError.outputReadFailed = error { throw error }
             return .failed(GitFailureDetail(error.localizedDescription))
         }
@@ -63,6 +65,7 @@ extension GitService {
 
     /// Filesystem absence is known only below a root that resolves to an existing directory.
     /// The `.git` lookup observes the entry itself, including dangling links; lookup failures throw.
+    @_disfavoredOverload
     func remoteURL(at path: String) throws -> String? {
         do {
             guard try fileService.entryExistsWithoutFollowingLinks(at: path + "/.git") else {
@@ -87,6 +90,7 @@ extension GitService {
                                                  confirmingProbe: result.confirmingProbe)
             }
         } catch {
+            if error is CancellationError { throw error }
             if case GitError.unusable = error { throw error }
             if case GitError.outputReadFailed = error { throw error }
             try probeUsability().requireUsable()

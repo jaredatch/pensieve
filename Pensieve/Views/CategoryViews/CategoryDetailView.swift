@@ -14,12 +14,13 @@ struct CategoryDetailView: View {
     @State private var showRename = false
 
     init(categoryID: UUID, platformVM: PlatformViewModel,
-         manifestRoot: String, notifier: @escaping SyncStateNotifying, onReveal: @escaping (Skill) -> Void) {
+         manifestSaves: ManifestSaveModel?,
+         notifier: @escaping SyncStateNotifying, onReveal: @escaping (Skill) -> Void) {
         self.categoryID = categoryID
         self.onReveal = onReveal
         _categories = Query(filter: #Predicate<Category> { $0.id == categoryID })
         _model = State(initialValue: CategoryDetailModel(
-            store: CategoryStore(manifestService: ManifestService(), manifestRoot: manifestRoot, notifier: notifier),
+            store: CategoryStore(notifier: notifier, manifestSaves: manifestSaves),
             reconciler: CategoryReconciler(platformVM: platformVM)
         ))
     }

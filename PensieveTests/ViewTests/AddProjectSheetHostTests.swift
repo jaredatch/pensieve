@@ -18,7 +18,7 @@ final class AddProjectSheetHostTests: XCTestCase {
         model.path = root + "/missing/parent/project"
         var created: [Project] = []
         let host = NSHostingView(rootView: AddProjectSheet(
-            model: model, manifestService: ManifestService(fileService: files), manifestRoot: root + "/store",
+            model: model,
             onCreated: { created.append($0) }
         ).modelContainer(container).background(Color(nsColor: .windowBackgroundColor)))
         let window = mount(host)
@@ -69,7 +69,6 @@ final class AddProjectSheetHostTests: XCTestCase {
         model.path = root + "/project"
         var created: [Project] = []
         let host = NSHostingView(rootView: AddProjectSheet(model: model,
-            manifestService: ManifestService(fileService: files), manifestRoot: root + "/store",
             onCreated: { created.append($0) }).modelContainer(container)
             .background(Color(nsColor: .windowBackgroundColor)))
         let window = mount(host)
@@ -98,7 +97,6 @@ final class AddProjectSheetHostTests: XCTestCase {
         model.path = h.otherProject.path
         var created: [Project] = []
         let host = NSHostingView(rootView: AddProjectSheet(model: model,
-            manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store",
             onCreated: { created.append($0) }).modelContainer(container)
             .background(Color(nsColor: .windowBackgroundColor)))
         let window = mount(host)
@@ -153,7 +151,6 @@ final class AddProjectSheetHostTests: XCTestCase {
             var created: [Project] = []
             let host = NSHostingView(rootView: QueuedProjectSheetHost(presentation: presentation,
                 sheet: AddProjectSheet(model: model,
-                    manifestService: ManifestService(fileService: h.files), manifestRoot: h.root + "/store",
                     onCreated: { created.append($0) }).modelContainer(h.context.container)))
             let window = mount(host)
             defer { window.close() }
@@ -162,6 +159,7 @@ final class AddProjectSheetHostTests: XCTestCase {
                 window.attachedSheet?.contentView != nil
             }
             let sheet = try XCTUnwrap(window.attachedSheet)
+            sheet.animationBehavior = .none
             let content = try XCTUnwrap(sheet.contentView)
             let value = inPath ? model.path : model.name
             let field = try XCTUnwrap(textFields(in: content).first { $0.stringValue == value })
@@ -193,6 +191,7 @@ final class AddProjectSheetHostTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 450, height: 350),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         let container = NSView(frame: window.contentLayoutRect)
         window.contentView = container
         host.frame = container.bounds

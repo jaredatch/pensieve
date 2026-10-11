@@ -252,20 +252,27 @@ def release_state(value, version, require_uploaded=False):
     require(value.get("prerelease") is bool(publication_channel(version)), "release has wrong prerelease flag")
     require(type(value.get("id")) is int and value["id"] > 0, "release has invalid ID")
     assets = value.get("assets")
-    require(isinstance(assets, list) and len(assets) <= 1, "release has extra or invalid DMG assets")
-    asset = assets[0] if assets else None
-    if assets:
-        require(isinstance(asset, dict), "release DMG is not an object")
-        require(asset.get("name") == f"Pensieve-{version}.dmg", "release is missing its expected DMG")
-        require(asset.get("state") in ("uploaded", "open", "starter"), "release DMG has unknown upload state")
-        require(type(asset.get("size")) is int and asset["size"] >= (1 if asset.get("state") == "uploaded" else 0), "release DMG has invalid size")
-        require(type(asset.get("id")) is int and asset["id"] > 0, "release DMG has invalid ID")
+    require(isinstance(assets, list) and len(assets) <= 2, "release has extra or invalid assets")
+    by_name = {}
+    for asset in assets:
+        require(isinstance(asset, dict), "release asset is not an object")
+        name = asset.get("name")
+        require(name in (f"Pensieve-{version}.dmg", f"Pensieve-{version}-dSYMs.zip"), "release has unexpected asset")
+        require(name not in by_name, "release has duplicated asset")
+        by_name[name] = asset
+        role = "DMG" if name == f"Pensieve-{version}.dmg" else "dSYMs zip"
+        require(asset.get("state") in ("uploaded", "open", "starter"), f"release {role} {name} has unknown upload state")
+        require(type(asset.get("size")) is int and asset["size"] >= (1 if asset.get("state") == "uploaded" else 0), f"release {role} {name} has invalid size")
+        require(type(asset.get("id")) is int and asset["id"] > 0, f"release {role} {name} has invalid ID")
+    asset = by_name.get(f"Pensieve-{version}.dmg")
     if require_uploaded:
         require(asset is not None and asset.get("state") == "uploaded", "live appcast release DMG is missing or not uploaded")
     # The actual tag target is peeled and verified separately. Asset IDs, sizes,
     # timestamps and partial state names do not decide creation or replacement.
     action = {key: value[key] for key in ("id", "tag_name", "draft", "prerelease")}
     action["asset"] = "absent" if asset is None else "uploaded" if asset.get("state") == "uploaded" else "partial"
+    symbols = by_name.get(f"Pensieve-{version}-dSYMs.zip")
+    action["symbols"] = "absent" if symbols is None else "uploaded" if symbols.get("state") == "uploaded" else "partial"
     return json.dumps(action, sort_keys=True)
 
 
@@ -281,6 +288,8 @@ def main(args):
         print(contents_sha(args[1]))
     elif mode == "release":
         print(release_state(response_json(args[1]), args[2], args[3] == "live"))
+    elif mode == "release-symbols":
+        print(json.loads(args[1])["symbols"])
     elif mode == "tag":
         obj = response_json(args[1])["object"]
         require(obj["type"] in ("commit", "tag") and re.fullmatch(r"[a-f0-9]{40}", obj["sha"]), "invalid tag target")

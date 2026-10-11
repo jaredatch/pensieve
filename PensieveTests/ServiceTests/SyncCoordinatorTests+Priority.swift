@@ -148,7 +148,7 @@ extension SyncCoordinatorTests {
             registerPriorityCleanup(fixture: fixture, runtime: runtime, release: release)
             cleanupRegistered = true
             await runtime.bootstrapTask.value
-            runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext)
+            await runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext)
             await TestWait.until(failureMessage: "forced launch preflight did not enter the engine") {
                 engine.qosClasses.count == 1 && release.waiterCount == 1
             }

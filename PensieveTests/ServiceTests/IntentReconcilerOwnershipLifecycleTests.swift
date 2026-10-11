@@ -67,8 +67,8 @@ final class IntentReconcilerOwnershipLifecycleTests: XCTestCase {
             reconciler: NoopProjectCategoryReconciler(), manifestRoot: TestPaths.storeRoot,
             platformVM: harness.platformVM,
             localMachineID: ProjectIntentHarness.localID,
-            context: harness.context
-        )
+            context: harness.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
 
         XCTAssertFalse(result.hasFailures)
         XCTAssertEqual(harness.linkService.unlinkCalls.map(\.projectPath), [first.path])
@@ -81,7 +81,7 @@ final class IntentReconcilerOwnershipLifecycleTests: XCTestCase {
         let replacement = Project(name: "First Again", path: first.path)
         replacement.identityKey = "shared-key"
         registerProject(
-            replacement, manifestRoot: TestPaths.storeRoot,
+            replacement,
             context: harness.context,
             intentReconciler: harness.reconciler.reconcile
         )

@@ -10,7 +10,7 @@ extension StoreRebuildServiceTests {
     }
 
     @MainActor
-    func testInstalledOriginSurvivesRebuildAndSnapshot() throws {
+    func testInstalledOriginSurvivesRebuildAndSnapshot() async throws {
         let context = try makeContext()
         let installedDate = try XCTUnwrap(ManifestService.parseDate("2026-07-30T16:00:00Z"))
         let installed = InstalledOrigin(
@@ -42,10 +42,11 @@ extension StoreRebuildServiceTests {
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let viewModel = SkillLibraryViewModel(
             skillStore: store,
-            fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: manifest, manifestRoot: tempDir
-        )
+            fileService: fileService, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: tempDir,
+            manifestSaves: ManifestSaveModel(manifest: manifest, root: tempDir,
+                lockPath: tempDir + ".sync.lock", files: fileService))
         viewModel.updateMetadata(skill, tags: ["documents", "edited"], scope: .project, context: context)
+        await viewModel.manifestSaves?.waitUntilIdle()
 
         XCTAssertNil(viewModel.error)
         XCTAssertEqual(try installedOriginBlock(slug: "pdf"), originalOriginBlock)

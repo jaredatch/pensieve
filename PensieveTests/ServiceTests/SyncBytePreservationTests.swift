@@ -5,47 +5,57 @@ import XCTest
 
 /// Real sync, install and checkout under two separate user homes. The HTTPS helper accepts only
 /// the rewritten fixture URL and connects to a local bare repository; it never opens the network.
-@MainActor
 final class SyncBytePreservationTests: XCTestCase {
     var base: String!
     let files = FileService()
     let remoteURL = "https://github.com/fixture/store.git"
 
     override func setUpWithError() throws {
-        base = TestTemporaryDirectory.path + "SyncBytes-" + UUID().uuidString
-        try files.createDirectory(at: base)
-    }
-
-    override func tearDownWithError() throws {
-        if let base { try files.deleteDirectory(at: base) }
-    }
-
-    func testGlobalIgnoreAndLineEndingRulesPreserveImportedAndAuthoredBytes() throws {
-        for kind in ["rules", "link", "missing", "binary", "folder", "fifo", "dangling", "unreadable"] {
-            do {
-                try roundTrip(skillRules: false, installed: false, rootIgnore: kind)
-            } catch { XCTFail("Root ignore \(kind): \(error)") }
-            try files.deleteDirectory(at: base)
+        try NativeTestWork.run { [self] in
+            base = TestTemporaryDirectory.path + "SyncBytes-" + UUID().uuidString
             try files.createDirectory(at: base)
         }
     }
 
+    override func tearDownWithError() throws {
+        try NativeTestWork.run { [self] in if let base { try files.deleteDirectory(at: base) } }
+    }
+
+    func testGlobalIgnoreAndLineEndingRulesPreserveImportedAndAuthoredBytes() throws {
+        try NativeTestWork.run { [self] in
+            for kind in ["rules", "link", "missing", "binary", "folder", "fifo", "dangling", "unreadable"] {
+                do {
+                    try roundTrip(skillRules: false, installed: false, rootIgnore: kind)
+                } catch { XCTFail("Root ignore \(kind): \(error)") }
+                try files.deleteDirectory(at: base)
+                try files.createDirectory(at: base)
+            }
+        }
+    }
+
     func testInstalledSkillRulesAndControlFilesPreserveBytesAndHash() throws {
-        try roundTrip(skillRules: true, installed: true)
+        try NativeTestWork.run { [self] in try roundTrip(skillRules: true, installed: true) }
     }
 
     func testGlobalIdentFilterAndEncodingRulesPreserveBytes() throws {
-        try roundTrip(skillRules: false, installed: false, transformations: true)
+        try NativeTestWork.run { [self] in try roundTrip(skillRules: false, installed: false, transformations: true) }
     }
 
     func testSkillIdentFilterAndEncodingRulesPreserveBytes() throws {
-        try roundTrip(skillRules: true, installed: false, transformations: true, nestedRepositories: true)
+        try NativeTestWork.run { [self] in
+            try roundTrip(skillRules: true, installed: false, transformations: true, nestedRepositories: true)
+        }
     }
 
     func testExistingStoreStatusAndFastForwardPreserveSkillBytes() throws {
-        try roundTrip(skillRules: true, installed: false, transformations: true, fastForward: true)
+        try NativeTestWork.run { [self] in
+            try roundTrip(skillRules: true, installed: false, transformations: true, fastForward: true)
+        }
     }
 
+}
+
+extension SyncBytePreservationTests {
     private func substituteRootIgnore(_ kind: String, at store: String) throws {
         let path = store + "/.gitignore"
         if try files.entryExistsWithoutFollowingLinks(at: path) { try files.deleteFile(at: path) }
@@ -326,7 +336,7 @@ extension SyncBytePreservationTests {
 }
 
 extension SyncBytePreservationTests {
-    private var nestedRoots: [String] { ["bytes/assets/vendor", "authored/vendor"] }
+    var nestedRoots: [String] { ["bytes/assets/vendor", "authored/vendor"] }
 
     private func assertTrackedRepositoriesKeepSyncing(gitA: GitService, gitB: GitService,
                                                       context: ModelContext, expected: [String: Data]) throws {
@@ -377,17 +387,4 @@ extension SyncBytePreservationTests {
         }
     }
 
-    private func assertNestedRepositoriesStayLocal(store: String, git: GitService, remote: String) throws {
-        let tree = try git.runOrThrow(["--git-dir", remote, "ls-tree", "-r", "main"], in: nil)
-        XCTAssertFalse(tree.stdout.contains("160000"), "Sync must never publish a gitlink")
-        for relative in nestedRoots {
-            XCTAssertTrue(files.directoryExists(at: store + "/skills/" + relative + "/.git"))
-            XCTAssertFalse(tree.stdout.contains("skills/" + relative), "Nested repositories stay local")
-            try git.stagePath("skills/" + relative, at: store)
-            XCTAssertEqual(try git.runOrThrow(["-C", store, "ls-files", "--stage", "--", "skills/" + relative],
-                in: nil).stdout, "", "Resolving a path must not stage a gitlink")
-        }
-        XCTAssertFalse(try git.stageAllAndCommit(at: store, message: "nested repos remain local"),
-            "A subsequent sync must not attempt an empty commit for omitted repositories")
-    }
 }

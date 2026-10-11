@@ -19,7 +19,7 @@ final class CategoryReconcilerTests: XCTestCase {
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
             for: Skill.self, Project.self, SkillProjectAssignment.self,
-            IntentAssignment.self, DeployRecord.self, PensieveCategory.self, Scenario.self,
+            IntentAssignment.self, DeployRecord.self, PensieveCategory.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         return ModelContext(container)

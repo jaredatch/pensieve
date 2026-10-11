@@ -129,7 +129,9 @@ final class ImportPublicationTests: XCTestCase {
         let launch = LaunchReconciler(migrationService: StoreMigrationService(
             skillStore: SkillStore(fileService: files, baseDir: skills, storeRoot: storeRoot)),
             root: storeRoot, lockPath: lockPath, git: GitService(askpassHelperPath: root + "/askpass"))
-        _ = launch.reconcileOnLaunch(context: try context(), alreadyMigrated: true)
+        _ = try NativeTestWork.run(container: try context().container) { [self] jobContext in
+            try launch.reconcileOnLaunch(context: jobContext, alreadyMigrated: true)
+        }
         XCTAssertTrue(try temps().isEmpty)
         XCTAssertFalse(files.fileExists(at: stagedFile))
         XCTAssertTrue(try files.listDirectory(at: skills).isEmpty)

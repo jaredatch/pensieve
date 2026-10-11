@@ -10,6 +10,7 @@ import plistlib
 import re
 import runpy
 import select
+import shlex
 import sys
 import time
 from pathlib import Path
@@ -18,6 +19,7 @@ import subprocess
 import struct
 import tempfile
 import unittest
+import zipfile
 from unittest import mock
 import xml.etree.ElementTree as ET
 from xml.parsers.expat import ExpatError
@@ -149,7 +151,13 @@ if cmd == "gh":
         print('HTTP/2.0 200 OK\n\n' + json.dumps(value)); sys.exit(0)
     if args[:2] == ["release", "create"]:
         if s["release"] is not None: fail("second release creation")
-        s["release"] = s["expected_release"]; s["asset"] = pathlib.Path(next(a for a in args if a.endswith(".dmg"))).read_text()
+        s["release"] = dict(s["expected_release"], assets=[])
+        for argument in args:
+            if argument.endswith((".dmg", "-dSYMs.zip")):
+                asset = pathlib.Path(argument)
+                descriptor = next(a for a in s["expected_release"]["assets"] if a["name"] == asset.name)
+                s["release"]["assets"].append(descriptor)
+                s["asset" if asset.suffix == ".dmg" else "symbols_asset"] = asset.read_text() if asset.suffix == ".dmg" else base64.b64encode(asset.read_bytes()).decode()
         s["writes"].append("create"); save(); sys.exit(0)
     if args[:2] == ["release", "upload"]:
         if "--clobber" not in args: fail("no replacement requested")
@@ -157,12 +165,19 @@ if cmd == "gh":
         if interruption:
             s["release"]["assets"] = [] if interruption == "missing" else [dict(s["expected_release"]["assets"][0], state=interruption, size=0)]
             fail("upload interrupted after deleting the old DMG")
-        s["release"] = s["expected_release"]
-        s["asset"] = pathlib.Path(next(a for a in args if a.endswith(".dmg"))).read_text()
-        s["writes"].append("replace"); save(); sys.exit(0)
+        paths = [pathlib.Path(a) for a in args if a.endswith((".dmg", "-dSYMs.zip"))]
+        for asset in paths:
+            descriptor = next(a for a in s["expected_release"]["assets"] if a["name"] == asset.name)
+            s["release"]["assets"] = [a for a in s["release"]["assets"] if a["name"] != asset.name] + [descriptor]
+            s["asset" if asset.suffix == ".dmg" else "symbols_asset"] = asset.read_text() if asset.suffix == ".dmg" else base64.b64encode(asset.read_bytes()).decode()
+            if asset.suffix == ".dmg" and s.pop("interrupt_after_dmg", False):
+                save(); fail("upload interrupted after DMG")
+        s["writes"].append("replace" if any(a.suffix == ".dmg" for a in paths) else "symbols"); save(); sys.exit(0)
     if args[:2] == ["release", "download"]:
         dest = pathlib.Path(args[args.index("--dir") + 1]); dest.mkdir(parents=True, exist_ok=True)
-        (dest / args[args.index("--pattern") + 1]).write_text(s["asset"])
+        name = args[args.index("--pattern") + 1]
+        if name.endswith(".dmg"): (dest / name).write_text(s["asset"])
+        else: (dest / name).write_bytes(base64.b64decode(s["symbols_asset"]))
         sys.exit(0)
 elif cmd == "git": print("a" * 40 if args[-2:] == ["rev-parse", "HEAD"] else "1"); sys.exit(0)
 elif cmd == "xcodegen": sys.exit(0)
@@ -173,6 +188,9 @@ elif cmd == "xcodebuild":
         f = dest / "Contents" / name; f.parent.mkdir(parents=True, exist_ok=True); f.write_text("built")
     minimum = s.get("built_minimum", "26.0")
     (dest / "Contents/Info.plist").write_text('<plist version="1.0"><dict><key>CFBundleExecutable</key><string>Pensieve</string><key>CFBundleShortVersionString</key><string>' + s["version"] + '</string>' + ('<key>LSMinimumSystemVersion</key><string>' + minimum + '</string>' if minimum is not None else '') + '</dict></plist>')
+    for name, bundle in (("Pensieve", "Pensieve.app.dSYM"), ("pensieve-daemon", "pensieve-daemon.dSYM")):
+        dwarf = dest.parent / bundle / "Contents/Resources/DWARF" / name
+        dwarf.parent.mkdir(parents=True, exist_ok=True); dwarf.write_text("built")
     s["builds"] += 1; save(); sys.exit(0)
 elif cmd == "codesign": sys.exit(0)  # models a valid Developer ID signature
 elif cmd in ["notary", "stapler", "spctl"]: sys.exit(0)
@@ -192,12 +210,16 @@ elif cmd == "hdiutil":
         shutil.copytree(source / "Pensieve.app", payload)
         pathlib.Path(args[-1]).write_text("fresh built DMG"); save()
     elif args[0] == "attach":
+        s["attach_attempts"] = s.get("attach_attempts", 0) + 1; save()
+        if s.get("attach_failure_on") == s["attach_attempts"]: fail("fixture DMG attach failed")
         if s.get("attach_failure"): fail("fixture DMG attach failed")
         import plistlib, shutil
         mounted = pathlib.Path(args[args.index("-mountpoint") + 1]) / "Pensieve.app"
         source = p.parent / "dmg-payload"
         if not source.exists(): source = p.parent / "build/dist/dmg-root/Pensieve.app"
         shutil.copytree(source, mounted)
+        if s.get("dmg_binary_build"):
+            (mounted / "Contents/MacOS/pensieve-daemon").write_text(s["dmg_binary_build"])
         info_path = mounted / "Contents/Info.plist"
         info = plistlib.loads(info_path.read_bytes())
         if "dmg_version" in s: info["CFBundleShortVersionString"] = s["dmg_version"]
@@ -224,6 +246,13 @@ elif cmd == "mount":
     if not s.get("hide_mounts"):
         for mount in s.get("mounts", []): print("/dev/fixture on " + mount + " (hfs, local, read-only)")
     sys.exit(0)
+elif cmd == "strip": sys.exit(0)
+elif cmd == "nm": print("00000000 T _main"); sys.exit(0)
+elif cmd == "dwarfdump":
+    mismatched = pathlib.Path(args[-1]).read_bytes() == b"other build"
+    for index, arch in enumerate(("arm64", "x86_64")):
+        print("UUID: 11111111-2222-3333-4444-55555555555" + str(index + (2 if mismatched else 0)) + " (" + arch + ") " + args[-1])
+    sys.exit(0)
 elif cmd in ["lipo", "otool"]:
     import plistlib
     binary = pathlib.Path(args[-1])
@@ -248,6 +277,109 @@ elif cmd == "verify":
     sys.exit(0)
 fail("unexpected stub call " + cmd + " " + repr(args))
 '''
+
+
+class PackageArtifactTests(unittest.TestCase):
+    """Real Apple tools own the binary, strip, coverage and UUID contracts."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory(prefix="pensieve-artifacts-")
+        cls.addClassCleanup(cls.temporary.cleanup)
+        cls.root = Path(cls.temporary.name)
+        spec = importlib.util.spec_from_file_location("package_artifacts", ROOT / "script/package_artifacts.py")
+        cls.tool = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.tool)
+        source = cls.root / "fixture.c"
+        source.write_text('static int helper(int n) { return n + VALUE; }\nint main(int argc, char **argv) { return helper(argc); }\n')
+        for name, value, coverage in (("Pensieve", 1, False), ("pensieve-daemon", 2, False), ("coverage", 3, True)):
+            slices = []
+            for arch in ("arm64", "x86_64"):
+                obj, thin = cls.root / (name + arch + ".o"), cls.root / (name + arch)
+                flags = ["-fprofile-instr-generate", "-fcoverage-mapping"] if coverage else []
+                for args in (["/usr/bin/clang", "-target", arch + "-apple-macos26", "-g", "-O0", "-DVALUE=" + str(value),
+                              *flags, "-c", str(source), "-o", str(obj)],
+                             ["/usr/bin/clang", "-target", arch + "-apple-macos26", *flags, str(obj), "-o", str(thin)]):
+                    subprocess.run(args, capture_output=True, check=True, timeout=60)
+                slices.append(str(thin))
+            subprocess.run(["/usr/bin/lipo", "-create", *slices, "-output", str(cls.root / name)], check=True, timeout=30)
+            if not coverage:
+                bundle = "Pensieve.app.dSYM" if name == "Pensieve" else name + ".dSYM"
+                subprocess.run(["/usr/bin/dsymutil", str(cls.root / name), "-o", str(cls.root / bundle)],
+                               capture_output=True, check=True, timeout=60)
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="pensieve-artifact-case-")
+        self.addCleanup(self.temporary.cleanup)
+        checkout = Path(self.temporary.name)
+        (checkout / "script").mkdir()
+        for name in ("package.sh", "package_artifacts.py"):
+            shutil.copy2(ROOT / "script" / name, checkout / "script" / name)
+        (checkout / "VERSION").write_text(VERSION)
+        (checkout / "project.yml").write_text('MARKETING_VERSION: "1.0.0"\n')
+        self.app = checkout / "build/dist/dmg-root/Pensieve.app"
+        self.binaries = self.app / "Contents/MacOS"
+        self.binaries.mkdir(parents=True)
+        for name in ("Pensieve", "pensieve-daemon"):
+            shutil.copy2(self.root / name, self.binaries / name)
+            subprocess.run(["/usr/bin/strip", "-rSTx", str(self.binaries / name)], capture_output=True, check=True, timeout=30)
+        self.archive = Path(self.temporary.name) / "dSYMs.zip"
+
+    def test_stripped_universal_binaries_and_matching_symbols(self):
+        self.tool.check_app(self.app)
+        self.tool.zip_symbols(self.app, self.root, self.archive)
+        with zipfile.ZipFile(self.archive) as archive:
+            for name, bundle in (("Pensieve", "Pensieve.app.dSYM"), ("pensieve-daemon", "pensieve-daemon.dSYM")):
+                self.assertIn(f"{bundle}/Contents/Resources/DWARF/{name}", archive.namelist())
+                # Independent tool output confirms the actual zip's UUIDs.
+                dwarf = Path(self.temporary.name) / name
+                dwarf.write_bytes(archive.read(f"{bundle}/Contents/Resources/DWARF/{name}"))
+                outputs = [subprocess.check_output(["/usr/bin/dwarfdump", "--uuid", str(p)], text=True)
+                           for p in (dwarf, self.binaries / name)]
+                self.assertEqual([re.findall(r"UUID: (.+?) \((.+?)\)", output) for output in outputs][0],
+                                 [re.findall(r"UUID: (.+?) \((.+?)\)", output) for output in outputs][1])
+
+    def test_coverage_and_unstripped_slices_name_the_binary(self):
+        for name in ("Pensieve", "pensieve-daemon"):
+            for architecture in ("arm64", "x86_64"):
+                for regression in ("coverage", "symbols"):
+                    with self.subTest(binary=name, architecture=architecture, regression=regression):
+                        good = self.binaries / name
+                        original = good.read_bytes()
+                        bad_slice, other_slice = Path(self.temporary.name) / "bad", Path(self.temporary.name) / "good"
+                        for source, arch, output in ((self.root / ("coverage" if regression == "coverage" else name), architecture, bad_slice),
+                                                     (good, "x86_64" if architecture == "arm64" else "arm64", other_slice)):
+                            subprocess.run(["/usr/bin/lipo", str(source), "-thin", arch, "-output", str(output)], check=True, timeout=30)
+                        subprocess.run(["/usr/bin/lipo", "-create", str(bad_slice), str(other_slice), "-output", str(good)], check=True, timeout=30)
+                        result = subprocess.run(["/bin/bash", str(Path(self.temporary.name) / "script/package.sh"),
+                                                 "--dmg-only"], capture_output=True, text=True, timeout=30)
+                        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                        self.assertIn(name + " [" + architecture + "]", result.stderr)
+                        self.assertIn("coverage" if regression == "coverage" else "unstripped symbols", result.stderr)
+                        good.write_bytes(original)
+
+    def test_mismatched_daemon_symbols_are_refused(self):
+        self.tool.zip_symbols(self.app, self.root, self.archive)
+        entries = {}
+        with zipfile.ZipFile(self.archive) as archive:
+            entries = {name: archive.read(name) for name in archive.namelist()}
+        entries["pensieve-daemon.dSYM/Contents/Resources/DWARF/pensieve-daemon"] = entries["Pensieve.app.dSYM/Contents/Resources/DWARF/Pensieve"]
+        with zipfile.ZipFile(self.archive, "w") as archive:
+            for name, data in entries.items(): archive.writestr(name, data)
+        with self.assertRaisesRegex(ValueError, "pensieve-daemon: dSYMs UUIDs do not match"):
+            self.tool.check_symbols(self.app, self.archive)
+
+    def test_unknown_executable_is_refused(self):
+        (self.app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleShortVersionString": VERSION}))
+        archive = self.app.parent.parent / "Pensieve-1.0.0-dSYMs.zip"
+        self.tool.zip_symbols(self.app, self.root, archive)
+        extra = self.binaries / "new-helper"
+        shutil.copy2(self.root / "Pensieve", extra)
+        result = subprocess.run(["/bin/bash", str(Path(self.temporary.name) / "script/package.sh"), "--dmg-only"],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(extra.name, result.stderr)
+        self.assertIn("unexpected executable", result.stderr)
 
 
 class MinimumParserTests(unittest.TestCase):
@@ -753,7 +885,7 @@ sys.exit(result.returncode)
         temporary = self.root / "tmp"
         temporary.mkdir()
         (self.root / "script").mkdir()
-        for name in ("release.sh", "release_recovery.sh", "package.sh", "build-number.sh", "release_state.py", "verify_update.swift", "minimum_system.py", "minimum_system_self_test.py"):
+        for name in ("release.sh", "release_recovery.sh", "package.sh", "build-number.sh", "release_state.py", "verify_update.swift", "minimum_system.py", "minimum_system_self_test.py", "package_artifacts.py"):
             if (ROOT / "script" / name).exists(): shutil.copy2(ROOT / "script" / name, self.root / "script" / name)
         shutil.copytree(ROOT / "release/homebrew", self.root / "release/homebrew")
         shutil.copy2(ROOT / "release/minimum-macos.txt", self.root / "release/minimum-macos.txt")
@@ -764,11 +896,12 @@ sys.exit(result.returncode)
         (self.root / "CHANGELOG.md").write_text("## [1.0.0]\nRelease fixture.\n")
         (self.root / "fixture-key").write_text("not a signing key")
         bin_dir = self.root / "bin"; bin_dir.mkdir()
-        for name in ("gh", "git", "xcodegen", "xcodebuild", "codesign", "ditto", "hdiutil", "mount", "spctl", "notary", "stapler", "generate", "verify", "lipo", "otool"):
+        for name in ("gh", "git", "xcodegen", "xcodebuild", "codesign", "ditto", "hdiutil", "mount", "spctl", "notary", "stapler", "generate", "verify", "lipo", "otool", "nm", "strip", "dwarfdump"):
             f = bin_dir / name; f.write_text(STUB); f.chmod(0o755)
         self.state_path = self.root / "state.json"
         release = {"id": 1, "tag_name": "v" + VERSION, "draft": False, "prerelease": PUBLICATION_CASES[VERSION][1],
-                   "assets": [{"id": 2, "name": "Pensieve-1.0.0.dmg", "size": len(DMG), "state": "uploaded"}]}
+                   "assets": [{"id": 2, "name": "Pensieve-1.0.0.dmg", "size": len(DMG), "state": "uploaded"},
+                              {"id": 3, "name": "Pensieve-1.0.0-dSYMs.zip", "size": 100, "state": "uploaded"}]}
         self.state = dict(version=VERSION, release=None, expected_release=release, asset=DMG.decode(),
                           appcast=feed("0.9.0"), cask=cask(), appcast_sha=SHA, cask_sha=SHA,
                           calls=[], writes=[], builds=0, signing_inputs=[], new_feed=feed(), signature=SIGNATURE)
@@ -779,6 +912,10 @@ sys.exit(result.returncode)
                         GENERATE_APPCAST_CMD=str(bin_dir / "generate"), VERIFY_UPDATE_CMD="verify",
                         GH_TOKEN="fixture-public-token", TAP_GH_TOKEN="fixture-tap-token",
                         SPARKLE_PRIVATE_KEY_FILE=str(self.root / "fixture-key"))
+        self.substitute_fixture_source(self.root / "script/package.sh", '/usr/bin/strip', shlex.quote(str(bin_dir / "strip")))
+        self.substitute_fixture_source(self.root / "script/package_artifacts.py",
+            'TOOLS = ("/usr/bin/lipo", "/usr/bin/otool", "/usr/bin/nm", "/usr/bin/strip", "/usr/bin/dwarfdump")',
+            "TOOLS = " + repr(tuple(str(bin_dir / tool) for tool in ("lipo", "otool", "nm", "strip", "dwarfdump"))))
         self.fixture_verifier = "verify"
         for original, replacement in (
                 ('NOTARY_CMD="/usr/bin/xcrun notarytool"', 'NOTARY_CMD="notary"'),
@@ -799,6 +936,11 @@ sys.exit(result.returncode)
             "CFBundleShortVersionString": VERSION, "LSMinimumSystemVersion": "26.0"}))
         for name in ("Pensieve", "pensieve-daemon"):
             (payload / "MacOS" / name).write_text("fixture Mach-O")
+        symbols = self.root / "symbols.zip"
+        with zipfile.ZipFile(symbols, "w") as archive:
+            for name, bundle in (("Pensieve", "Pensieve.app.dSYM"), ("pensieve-daemon", "pensieve-daemon.dSYM")):
+                archive.writestr(f"{bundle}/Contents/Resources/DWARF/{name}", "fixture Mach-O")
+        self.state["symbols_asset"] = base64.b64encode(symbols.read_bytes()).decode()
 
     def substitute_fixture_source(self, path, original, replacement):
         source = path.read_text()
@@ -1045,7 +1187,8 @@ sys.exit(result.returncode)
         payload_info.write_bytes(plistlib.dumps(properties))
         self.state["expected_release"] = dict(self.state["expected_release"], tag_name="v" + version,
                                              prerelease=PUBLICATION_CASES[version][1],
-                                             assets=[dict(self.state["expected_release"]["assets"][0], name="Pensieve-" + version + ".dmg")])
+                                             assets=[dict(asset, name=asset["name"].replace(self.state["expected_release"]["tag_name"][1:], version))
+                                                     for asset in self.state["expected_release"]["assets"]])
         self.state["new_feed"] = feed(version, minimum="26.0")
         (self.root / "VERSION").write_text(version)
         (self.root / "project.yml").write_text('MARKETING_VERSION: "' + version + '"\n')
@@ -1055,10 +1198,77 @@ sys.exit(result.returncode)
         self.run_release(); self.run_release(cask_only=True)
         self.assertEqual(self.state["writes"], ["create", "appcast", "cask"])
         self.assertEqual(self.state["builds"], 1)
+        self.assertEqual({a["name"] for a in self.state["release"]["assets"]}, {"Pensieve-1.0.0.dmg", "Pensieve-1.0.0-dSYMs.zip"})
+        with zipfile.ZipFile(self.root / "build/dist/Pensieve-1.0.0-dSYMs.zip") as symbols:
+            self.assertEqual({n.split('/')[0] for n in symbols.namelist()}, {"Pensieve.app.dSYM", "pensieve-daemon.dSYM"})
         self.assertEqual(self.state["signing_inputs"], [["Pensieve-1.0.0.dmg"]])
+        download = f"{DOWNLOAD_PREFIX}/v{VERSION}/Pensieve-{VERSION}.dmg"
+        self.assertEqual([node.get("url") for node in ET.fromstring(self.state["appcast"]).findall("./channel/item/enclosure")
+                          if node.get("url", "").startswith(f"{DOWNLOAD_PREFIX}/v{VERSION}/")], [download])
+        # Evaluate the cask's URL with its actual version, without Homebrew or network I/O.
+        ruby = ('def cask(*); yield; end; def version(v=nil); v ? @version=v : @version; end; '
+                'def url(v); puts v; end; def livecheck; end; def method_missing(*); end; load ARGV.fetch(0)')
+        urls = subprocess.check_output(["/usr/bin/ruby", "-e", ruby, str(self.root / "build/dist/homebrew/pensieve.rb")],
+                                       text=True, timeout=30)
+        self.assertEqual(urls.splitlines(), [download])
+        remote_assets = (self.state["asset"], self.state["symbols_asset"])
         self.run_release(); self.run_release(cask_only=True)
         self.assertEqual(self.state["writes"], ["create", "appcast", "cask"])
+        self.assertEqual((self.state["asset"], self.state["symbols_asset"]), remote_assets)
         self.assertEqual(self.state["builds"], 1)
+
+    def test_live_missing_symbols_uploads_only_matching_local_archive(self):
+        self.run_release()
+        symbols = self.root / "build/dist/Pensieve-1.0.0-dSYMs.zip"
+        original = json.loads(json.dumps(self.state))
+        for candidate in ("matching", "partial", "mismatched", "missing", "checker_missing"):
+            with self.subTest(candidate=candidate):
+                self.state = json.loads(json.dumps(original))
+                self.state["release"]["assets"] = self.state["release"]["assets"][:1]
+                if candidate == "partial":
+                    self.state["release"]["assets"].append(dict(original["release"]["assets"][1], state="starter", size=0))
+                symbols.write_bytes(base64.b64decode(original["symbols_asset"]))
+                if candidate == "mismatched":
+                    with zipfile.ZipFile(symbols, "w") as archive:
+                        for name, bundle in (("Pensieve", "Pensieve.app.dSYM"), ("pensieve-daemon", "pensieve-daemon.dSYM")):
+                            archive.writestr(f"{bundle}/Contents/Resources/DWARF/{name}", "other build")
+                elif candidate == "missing": symbols.unlink()
+                elif candidate == "checker_missing": (self.root / "script/package_artifacts.py").unlink()
+                output = self.run_release(expected=1 if candidate == "checker_missing" else 0)
+                self.assertEqual(self.state["builds"], 1)
+                self.assertEqual(self.state["asset"], original["asset"])
+                self.assertEqual(len(self.state["release"]["assets"]), 2 if candidate in ("matching", "partial") else 1)
+                self.assertEqual(self.state["writes"], ["create", "appcast"] + (["symbols"] if candidate in ("matching", "partial") else []))
+                if candidate in ("mismatched", "missing"): self.assertIn("dSYMs are missing", output)
+                if candidate == "checker_missing":
+                    self.assertIn("can't open file", output)
+                    self.assertNotIn("dSYMs are missing", output)
+
+    def test_interrupted_symbols_upload_recovers_both_assets(self):
+        self.state["release"] = dict(self.state["expected_release"], assets=[])
+        self.state["interrupt_after_dmg"] = True
+        self.assertIn("upload interrupted after DMG", self.run_release(expected=1))
+        self.assertEqual([a["name"] for a in self.state["release"]["assets"]], ["Pensieve-1.0.0.dmg"])
+        self.run_release()
+        self.assertEqual([a["name"] for a in self.state["release"]["assets"]], ["Pensieve-1.0.0.dmg", "Pensieve-1.0.0-dSYMs.zip"])
+        self.assertEqual(self.state["writes"], ["replace", "appcast"])
+        self.run_release()
+        self.assertEqual(self.state["writes"], ["replace", "appcast"])
+
+    def test_dmg_binary_uuid_mismatch_stops_fresh_publication(self):
+        self.state["dmg_binary_build"] = "other build"
+        self.assertIn("pensieve-daemon: dSYMs UUIDs do not match", self.run_release(expected=1))
+        self.assertEqual(self.state["writes"], [])
+        self.assertEqual(self.state["signing_inputs"], [])
+
+    def test_live_symbols_mount_failure_is_not_a_missing_symbols_success(self):
+        self.run_release()
+        self.state["release"]["assets"] = self.state["release"]["assets"][:1]
+        self.state.update(attach_attempts=0, attach_failure_on=2)
+        output = self.run_release(expected=1)
+        self.assertIn("local DMG attach failed", output)
+        self.assertNotIn("dSYMs are missing", output)
+        self.assertEqual(self.state["writes"], ["create", "appcast"])
 
     def test_invalid_version_stops_in_every_mode_before_work(self):
         invalid = "1.0.0+build-1"
@@ -1107,6 +1317,11 @@ sys.exit(result.returncode)
                 self.state = json.loads(json.dumps(original))
                 self.state["release"] = self.state["expected_release"]
                 self.state["asset"] = "old unpublished bytes"
+                old_symbols = self.root / "old-symbols.zip"
+                with zipfile.ZipFile(old_symbols, "w") as archive:
+                    for name, bundle in (("Pensieve", "Pensieve.app.dSYM"), ("pensieve-daemon", "pensieve-daemon.dSYM")):
+                        archive.writestr(f"{bundle}/Contents/Resources/DWARF/{name}", "other build")
+                self.state["symbols_asset"] = base64.b64encode(old_symbols.read_bytes()).decode()
                 if interruption:
                     self.state["interrupt_upload"] = interruption
                     self.assertIn("upload interrupted", self.run_release(expected=1))
@@ -1117,6 +1332,15 @@ sys.exit(result.returncode)
                 self.assertEqual(self.state["builds"], 2 if interruption else 1)
                 self.assertEqual(self.state["signing_inputs"], [["Pensieve-1.0.0.dmg"]] * (2 if interruption else 1))
                 self.assertFalse(any(c[:3] == ["gh", "release", "download"] for c in self.state["calls"]))
+                self.assertEqual([a["name"] for a in self.state["release"]["assets"]],
+                                 ["Pensieve-1.0.0.dmg", "Pensieve-1.0.0-dSYMs.zip"])
+                remote_assets = (self.state["asset"], self.state["symbols_asset"])
+                # The completed rerun downloads both assets and verifies the zip's
+                # UUIDs against the shipped DMG, then leaves the pair untouched.
+                self.run_release()
+                self.assertEqual((self.state["asset"], self.state["symbols_asset"]), remote_assets)
+                self.assertEqual(self.state["writes"], ["replace", "appcast", "cask"])
+                self.assertEqual(self.state["builds"], 2 if interruption else 1)
 
     def test_live_appcast_verifies_without_rebuild_or_asset_write(self):
         self.state.update(release=self.state["expected_release"], appcast=feed())
@@ -1137,6 +1361,14 @@ sys.exit(result.returncode)
             with self.subTest(live_assets=assets):
                 self.state.update(appcast=feed(), release=dict(self.state["expected_release"], assets=assets))
                 self.assertIn("DMG", self.run_release(expected=1))
+                self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
+        for live, state in itertools.product((False, True), (None, "processing", "failed")):
+            with self.subTest(live_appcast=live, symbols_state=state):
+                assets = [self.state["expected_release"]["assets"][0],
+                          dict(self.state["expected_release"]["assets"][1], state=state)]
+                self.state.update(appcast=feed() if live else feed("0.9.0"),
+                                  release=dict(self.state["expected_release"], assets=assets))
+                self.assertIn("dSYMs zip", self.run_release(expected=1))
                 self.assertEqual(self.state["writes"], []); self.assertEqual(self.state["builds"], 0)
         self.state["release"] = self.state["expected_release"]; self.state["target"] = "b" * 40
         self.assertIn("target", self.run_release(expected=1))

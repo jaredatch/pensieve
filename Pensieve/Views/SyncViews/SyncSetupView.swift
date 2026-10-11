@@ -2,18 +2,15 @@ import SwiftUI
 
 /// Connect-a-remote setup sheet (PLAN-08 / 08.3). One field for the remote URL; when it parses as
 /// https a username + access-token pair appears (ssh authenticates via the agent — no token needed).
-/// State (idle/working/done/failed) comes from `SyncSetupModel`; a `.done` dismisses the sheet.
+/// State comes from `SyncSetupModel`. Completion dismisses the sheet unless a fallback notice
+/// needs acknowledgement; that completed sheet keeps its fields disabled and closes with Done, Return or Escape.
 struct SyncSetupView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var model: SyncSetupModel
+    let model: SyncSetupModel
 
     @State private var url: String = ""
     @State private var username: String = ""
     @State private var token: String = ""
-
-    init(model: SyncSetupModel) {
-        _model = State(initialValue: model)
-    }
 
     private var isHTTPS: Bool {
         SyncSetupModel.parseRemote(url)?.transport == .https
@@ -40,6 +37,7 @@ struct SyncSetupView: View {
                         .textFieldStyle(.roundedBorder)
                 }
             }
+            .disabled(model.state == .working || model.state == .done)
 
             if case let .failed(message) = model.state {
                 Label(message, systemImage: "exclamationmark.triangle")
@@ -47,28 +45,60 @@ struct SyncSetupView: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if model.state == .cancelled {
+                Text("Connect was cancelled.").font(.callout).foregroundStyle(.secondary)
+            }
+
+            if let notice = model.connectionNotice {
+                Text(notice)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             Spacer(minLength: Spacing.sm)
 
             HStack(spacing: Spacing.sm) {
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
+                if model.state != .done {
+                    Button("Cancel") {
+                        if model.state == .working { model.cancel() } else { dismiss() }
+                    }
+                        .keyboardShortcut(.cancelAction)
+                        .disabled(!model.canCancel)
+                }
                 Spacer()
-                if model.state == .working {
-                    ProgressView().controlSize(.small)
+                if model.state == .done {
+                    Button("Done") { dismiss() }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                        .background {
+                            // A button has one shortcut; Escape acknowledges the same completed sheet.
+                            Button("Done") { dismiss() }
+                                .keyboardShortcut(.cancelAction)
+                                .hidden()
+                                .accessibilityHidden(true)
+                        }
+                } else {
+                    Button {
+                        model.connect(url: url, username: username, token: token)
+                    } label: {
+                        HStack {
+                            if model.state == .working { ProgressView().controlSize(.small) }
+                            Text("Connect")
+                        }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(url.isEmpty || model.state == .working)
                 }
-                Button("Connect") {
-                    model.connect(url: url, username: username, token: token)
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(url.isEmpty || model.state == .working)
             }
         }
         .padding(Spacing.xl)
         .frame(width: 460)
+        .interactiveDismissDisabled(model.state == .working)
+        .onAppear { model.prepareForPresentation() }
+        .onDisappear { model.cancel() }
         .onChange(of: model.state) { _, newState in
-            if newState == .done { dismiss() }
+            if newState == .done, model.connectionNotice == nil { dismiss() }
         }
     }
 }

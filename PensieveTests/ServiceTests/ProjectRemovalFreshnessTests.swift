@@ -136,7 +136,8 @@ final class ProjectRemovalFreshnessTests: XCTestCase {
             XCTAssertTrue(model.confirm { project, preview in
                 removeRegisteredProject(project, reconciler: h.category, manifestService: manifest,
                     manifestRoot: root, platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
-                    confirmedPreview: preview, context: h.context)
+                    confirmedPreview: preview, context: h.context,
+            lockPath: root + ".sync.lock")
             }.hasFailures)
             let unchanged = failure == "preparation"
             XCTAssertEqual(h.files.isSymlink(at: h.artifact(.codex)), failure != "state write")
@@ -165,8 +166,8 @@ final class ProjectRemovalFreshnessTests: XCTestCase {
                 platformVM: h.platformVM,
                 localMachineID: ProjectIntentHarness.localID,
                 confirmedPreview: plan,
-                context: h.context
-            )
+                context: h.context,
+            lockPath: TestPaths.storeRoot + ".sync.lock")
         }
     }
 }

@@ -261,6 +261,6 @@ final class ProjectRemovalTests: XCTestCase {
         removeRegisteredProject(h.project, reconciler: h.category,
             manifestService: manifest, manifestRoot: h.root + "/sync",
             platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
-            context: h.context)
+            context: h.context, lockPath: h.root + "/sync" + ".sync.lock")
     }
 }

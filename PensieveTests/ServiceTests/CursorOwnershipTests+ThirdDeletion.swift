@@ -24,8 +24,9 @@ extension CursorOwnershipTests {
         let library = SkillLibraryViewModel(
             skillStore: store,
             fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
-        )
+            manifestRoot: root + "/manifest",
+            manifestSaves: trackedManifestSaves(manifest: RecordingDeletionManifest(), root: root + "/manifest",
+                lockPath: root + "/manifest" + ".sync.lock", files: mapped))
         let deleted = SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project], context: harness.context)
         XCTAssertGreaterThan(reads, 0, "The state read fault must fire")
@@ -65,8 +66,9 @@ extension CursorOwnershipTests {
             let library = SkillLibraryViewModel(
                 skillStore: store,
                 fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-                manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
-            )
+                manifestRoot: root + "/manifest",
+            manifestSaves: trackedManifestSaves(manifest: RecordingDeletionManifest(), root: root + "/manifest",
+                lockPath: root + "/manifest" + ".sync.lock", files: mapped))
             let deleted = SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
                 projects: [project], context: harness.context)
             mapped.beforeRuleRead = nil
@@ -96,8 +98,9 @@ extension CursorOwnershipTests {
         let library = SkillLibraryViewModel(
             skillStore: store,
             fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
-        )
+            manifestRoot: root + "/manifest",
+            manifestSaves: trackedManifestSaves(manifest: RecordingDeletionManifest(), root: root + "/manifest",
+                lockPath: root + "/manifest" + ".sync.lock", files: mapped))
         XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project], context: context))
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Skill>()), 1)
@@ -122,8 +125,9 @@ extension CursorOwnershipTests {
         let library = SkillLibraryViewModel(
             skillStore: store,
             fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
-        )
+            manifestRoot: root + "/manifest",
+            manifestSaves: trackedManifestSaves(manifest: RecordingDeletionManifest(), root: root + "/manifest",
+                lockPath: root + "/manifest" + ".sync.lock", files: mapped))
         XCTAssertTrue(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project], context: context), library.deletionNotice?.message ?? "Deletion failed")
         XCTAssertFalse(try mapped.entryExistsWithoutFollowingLinks(at: path))
@@ -147,8 +151,9 @@ extension CursorOwnershipTests {
         let library = SkillLibraryViewModel(
             skillStore: store,
             fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
-        )
+            manifestRoot: root + "/manifest",
+            manifestSaves: trackedManifestSaves(manifest: RecordingDeletionManifest(), root: root + "/manifest",
+                lockPath: root + "/manifest" + ".sync.lock", files: mapped))
         XCTAssertTrue(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project], context: harness.context))
         XCTAssertEqual(try mapped.readFile(at: path), bytes)
@@ -171,8 +176,9 @@ extension CursorOwnershipTests {
         let library = SkillLibraryViewModel(
             skillStore: store,
             fileService: mapped, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: RecordingDeletionManifest(), manifestRoot: root + "/manifest"
-        )
+            manifestRoot: root + "/manifest",
+            manifestSaves: trackedManifestSaves(manifest: RecordingDeletionManifest(), root: root + "/manifest",
+                lockPath: root + "/manifest" + ".sync.lock", files: mapped))
         XCTAssertFalse(SkillDeletionFlow.delete(skill: skill, library: library, platformVM: harness.vm,
             projects: [project], context: harness.context))
         XCTAssertFalse(historyMessage.isEmpty)

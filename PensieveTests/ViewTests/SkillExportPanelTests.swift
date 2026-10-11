@@ -71,7 +71,7 @@ final class SkillExportPanelTests: XCTestCase {
 
     func testSavePanelUsesTheGivenWindowAndCancelWritesNothing() {
         let panel = RecordingSavePanel()
-        let window = NSWindow()
+        let window = makeWindow()
         var alerted = false
         SkillExportPanel.present(model: makeModel(), on: window, panel: panel) {
             alerted = true
@@ -93,7 +93,7 @@ final class SkillExportPanelTests: XCTestCase {
     func testConfirmingTheSheetExportsAfterItDismisses() throws {
         let panel = RecordingSavePanel()
         panel.chosenURL = URL(fileURLWithPath: destination)
-        SkillExportPanel.present(model: makeModel(), on: NSWindow(), panel: panel)
+        SkillExportPanel.present(model: makeModel(), on: makeWindow(), panel: panel)
         panel.complete(.OK)
         XCTAssertFalse(fileService.fileExists(at: destination), "Let the sheet detach before exporting")
         finishDismissal()
@@ -106,7 +106,7 @@ final class SkillExportPanelTests: XCTestCase {
         let panel = RecordingSavePanel()
         panel.chosenURL = URL(fileURLWithPath: destination)
         let alert = RecordingAlert()
-        let window = NSWindow()
+        let window = makeWindow()
         SkillExportPanel.present(model: makeModel(), on: window, panel: panel, makeAlert: { alert })
         panel.complete(.OK)
         XCTAssertNil(alert.host)
@@ -129,6 +129,14 @@ final class SkillExportPanelTests: XCTestCase {
         XCTAssertEqual(alert.modalCalls, 1)
         XCTAssertNil(panel.host)
         XCTAssertNil(alert.host)
+    }
+
+    private func makeWindow() -> NSWindow {
+        let window = NSWindow()
+        window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
+        addTeardownBlock { @MainActor [weak window] in window?.close() }
+        return window
     }
 
     private func makeModel() -> SkillExportModel {

@@ -7,11 +7,13 @@ extension ConflictResolutionModelTests {
     func testBinaryAndUTF16ConflictsRenderUnavailableTextAndKeepSelections() async throws {
         try await assertMissingObjectSelectionAndCopy()
         for payload in SyncConflictByteFixture.payloads {
-            let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
+            let fixture = try NativeTestWork.run { [self] in
+                try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
+            }
             defer { try? fixture.files.deleteDirectory(at: fixture.root) }
             let model = ConflictResolutionModel(engine: fixture.engine, git: fixture.git,
-                credentials: InMemoryCredentialStore(), root: fixture.storeB)
-            await model.loadAndReport(context: fixture.contextB)
+                credentials: InMemoryCredentialStore(), root: fixture.storeB, steps: SyncStepModel())
+            await model.loadAndReport(container: fixture.contextB.container)
             guard case let .ready(groups) = model.phase else { return XCTFail("A real conflict must load the sheet") }
             let group = try XCTUnwrap(groups.first)
             let item = try XCTUnwrap(group.items.first)
@@ -20,6 +22,7 @@ extension ConflictResolutionModelTests {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 260),
                                   styleMask: [.borderless], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
             window.contentView = host
             defer { window.close() }
             await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),
@@ -51,17 +54,21 @@ extension ConflictResolutionModelTests {
             let engine = StubResolutionEngine()
             engine.inspections = [.conflicts(ConflictSet(items: [item]))]
             let model = makeModel(engine: engine)
-            await model.loadAndReport(context: try makeContext())
+            await model.loadAndReport(container: (try makeContext()).container)
             let group = try XCTUnwrap(readyGroups(from: model.phase).first)
             model.choose(group.id, .thisMachine)
             XCTAssertEqual(model.selectionError, SyncError.conflictSideUnavailable(path: item.path).errorDescription)
             XCTAssertFalse(model.canApply)
         }
-        let gitlink = try SyncConflictByteFixture.gitlinkConflict(otherEntry: .file(Data("missing file".utf8)))
+        let gitlink = try NativeTestWork.run { [self] in
+            try SyncConflictByteFixture.gitlinkConflict(otherEntry: .file(Data("missing file".utf8)))
+        }
         defer { try? gitlink.files.deleteDirectory(at: gitlink.root) }
         let missingEngine = try gitlink.missingObjectEngine(stage: 2)
-        guard case let .conflicts(set) = try missingEngine.inspectConflicts(root: gitlink.storeB, credential: nil,
-                                                                           context: gitlink.contextB) else {
+        guard case let .conflicts(set) = (try NativeTestWork.run(container: gitlink.contextB.container) { [self] jobContext in
+            try missingEngine.inspectConflicts(root: gitlink.storeB, credential: nil,
+                context: jobContext)
+        }) else {
             return XCTFail("A missing file opposite a gitlink must load")
         }
         let unavailableStrings = await renderedComparison(try XCTUnwrap(set.items.first))
@@ -75,12 +82,14 @@ extension ConflictResolutionModelTests {
         try await assertUnavailableSideChoicesAndCopy()
         for stage in [2, 3] {
             let payload = SyncConflictByteFixture.payloads[0]
-            let fixture = try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
+            let fixture = try NativeTestWork.run { [self] in
+                try SyncConflictByteFixture(name: payload.name, this: payload.this, other: payload.other)
+            }
             defer { try? fixture.files.deleteDirectory(at: fixture.root) }
             let engine = try fixture.missingObjectEngine(stage: stage)
             let model = ConflictResolutionModel(engine: engine, git: fixture.git,
-                credentials: InMemoryCredentialStore(), root: fixture.storeB)
-            await model.loadAndReport(context: fixture.contextB)
+                credentials: InMemoryCredentialStore(), root: fixture.storeB, steps: SyncStepModel())
+            await model.loadAndReport(container: fixture.contextB.container)
             guard case let .ready(groups) = model.phase else { return XCTFail("A missing blob must load as unavailable") }
             let group = try XCTUnwrap(groups.first)
             let item = try XCTUnwrap(group.items.first)
@@ -94,20 +103,22 @@ extension ConflictResolutionModelTests {
             model.choose(group.id, stage == 3 ? .otherMachine : .thisMachine)
             XCTAssertNil(model.selectionError)
             XCTAssertTrue(model.canApply)
-            await model.applyAndReport(context: fixture.contextB)
+            await model.applyAndReport(container: fixture.contextB.container)
             XCTAssertEqual(model.phase, .done)
-            try fixture.assertPublished(stage == 3 ? payload.other : payload.this)
+            try NativeTestWork.run { [self] in try fixture.assertPublished(stage == 3 ? payload.other : payload.this) }
         }
     }
 
     func testDeletedAndEmptySidesHaveDistinctLabelsInRealConflicts() async throws {
         for other in [Data(), Data("nonempty text\n".utf8), Data([0, 255])] {
             for deletedSide in [ConflictSide.thisMachine, .otherMachine] {
-                let fixture = try SyncConflictByteFixture(name: "delete.txt",
-                    this: deletedSide == .thisMachine ? nil : other,
-                    other: deletedSide == .otherMachine ? nil : other)
+                let fixture = try NativeTestWork.run { [self] in
+                    try SyncConflictByteFixture(name: "delete.txt",
+                        this: deletedSide == .thisMachine ? nil : other,
+                        other: deletedSide == .otherMachine ? nil : other)
+                }
                 defer { try? fixture.files.deleteDirectory(at: fixture.root) }
-                let strings = await renderedComparison(try fixture.inspect())
+                let strings = await renderedComparison(try NativeTestWork.run { [self] in try fixture.inspect() })
                 XCTAssertEqual(strings.filter { $0 == "Deleted" }.count, 1)
                 XCTAssertEqual(strings.filter { $0 == "Empty file" }.count, other.isEmpty ? 1 : 0)
             }
@@ -115,17 +126,21 @@ extension ConflictResolutionModelTests {
     }
 
     func testBOMDifferenceAndBoundedFallbackPreviewInRealConflicts() async throws {
-        let bom = try SyncConflictByteFixture(name: "bom.txt", this: Data([0xEF, 0xBB, 0xBF]) + Data("same".utf8),
-                                             other: Data("same".utf8))
+        let bom = try NativeTestWork.run { [self] in
+            try SyncConflictByteFixture(name: "bom.txt", this: Data([0xEF, 0xBB, 0xBF]) + Data("same".utf8),
+                other: Data("same".utf8))
+        }
         defer { try? bom.files.deleteDirectory(at: bom.root) }
-        let strings = await renderedComparison(try bom.inspect())
+        let strings = await renderedComparison(try NativeTestWork.run { [self] in try bom.inspect() })
         XCTAssertTrue(strings.contains("\u{FEFF}same"), "The comparison must preserve the leading BOM")
         XCTAssertTrue(strings.contains("same"))
         for (count, trailingNewline) in [(405, false), (400, true), (401, true), (405, true)] {
             let text = (1...count).map { "preview line \($0)" }.joined(separator: "\n") + (trailingNewline ? "\n" : "")
-            let large = try SyncConflictByteFixture(name: "large.txt", this: Data(text.utf8), other: Data([0, 255]))
+            let large = try NativeTestWork.run { [self] in
+                try SyncConflictByteFixture(name: "large.txt", this: Data(text.utf8), other: Data([0, 255]))
+            }
             defer { try? large.files.deleteDirectory(at: large.root) }
-            let preview = await renderedComparison(try large.inspect())
+            let preview = await renderedComparison(try NativeTestWork.run { [self] in try large.inspect() })
             XCTAssertTrue(preview.contains { $0.contains("preview line 400") })
             XCTAssertFalse(preview.contains { $0.contains("preview line 401") }, "Fallback must cap the rendered text")
             let notice = preview.filter { $0.hasPrefix("Showing the first") || $0.hasPrefix("... preview truncated") }
@@ -143,11 +158,11 @@ extension ConflictResolutionModelTests {
         try await assertFilePickRefusesFolderAndOtherPickResolves()
         for both in [false, true] {
             for side in [ConflictSide.thisMachine, .otherMachine] {
-                let fixture = try SyncConflictByteFixture.gitlinkConflict(both: both)
+                let fixture = try NativeTestWork.run { [self] in try SyncConflictByteFixture.gitlinkConflict(both: both) }
                 defer { try? fixture.files.deleteDirectory(at: fixture.root) }
                 let model = ConflictResolutionModel(engine: fixture.engine, git: fixture.git,
-                    credentials: InMemoryCredentialStore(), root: fixture.storeB)
-                await model.loadAndReport(context: fixture.contextB)
+                    credentials: InMemoryCredentialStore(), root: fixture.storeB, steps: SyncStepModel())
+                await model.loadAndReport(container: fixture.contextB.container)
                 guard case let .ready(groups) = model.phase else { return XCTFail("A gitlink must reach the sheet") }
                 let group = try XCTUnwrap(groups.first)
                 let item = try XCTUnwrap(group.items.first)
@@ -161,22 +176,26 @@ extension ConflictResolutionModelTests {
                 model.choose(group.id, side)
                 XCTAssertNil(model.selectionError)
                 XCTAssertTrue(model.canApply, "Either side must allow index-only retirement, including two gitlinks")
-                await model.applyAndReport(context: fixture.contextB)
+                await model.applyAndReport(container: fixture.contextB.container)
                 XCTAssertEqual(model.phase, .done)
                 XCTAssertTrue(fixture.files.directoryExists(at: fixture.storeB + "/" + fixture.path))
-                let tree = try fixture.git.runData(["--git-dir", fixture.remote, "ls-tree", "main", "--", item.path], in: nil)
+                let tree = try NativeTestWork.run { [self] in
+                    try fixture.git.runData(["--git-dir", fixture.remote, "ls-tree", "main", "--", item.path], in: nil)
+                }
                 XCTAssertTrue(tree.stdout.isEmpty)
             }
         }
     }
 
     private func assertFilePickRefusesFolderAndOtherPickResolves() async throws {
-        let fixture = try SyncConflictByteFixture.gitlinkConflict(otherEntry: .file(Data("kept file".utf8)))
+        let fixture = try NativeTestWork.run { [self] in
+            try SyncConflictByteFixture.gitlinkConflict(otherEntry: .file(Data("kept file".utf8)))
+        }
         defer { try? fixture.files.deleteDirectory(at: fixture.root) }
         let full = fixture.storeB + "/" + fixture.path
         let model = ConflictResolutionModel(engine: fixture.engine, git: fixture.git,
-            credentials: InMemoryCredentialStore(), root: fixture.storeB)
-        await model.loadAndReport(context: fixture.contextB)
+            credentials: InMemoryCredentialStore(), root: fixture.storeB, steps: SyncStepModel())
+        await model.loadAndReport(container: fixture.contextB.container)
         guard case let .ready(groups) = model.phase else { return XCTFail("A mixed-type conflict must load") }
         let group = try XCTUnwrap(groups.first)
         let strings = await renderedComparison(try XCTUnwrap(group.items.first))
@@ -186,13 +205,13 @@ extension ConflictResolutionModelTests {
         XCTAssertTrue(strings.contains("The other Mac removes its copy the next time it syncs."))
         try fixture.files.writeFile(at: fixture.root + "/resolution-marker", content: "local folder work")
         model.choose(group.id, .otherMachine)
-        await model.applyAndReport(context: fixture.contextB)
+        await model.applyAndReport(container: fixture.contextB.container)
         guard case .ready = model.phase else { return XCTFail("A refused folder replacement must keep choices available") }
         XCTAssertEqual(model.selectionError,
             "Move the folder at \(fixture.path), then choose this version again. You can also choose the other version.")
         XCTAssertEqual(try fixture.files.readFile(at: full + "/keep"), "local folder work")
         model.choose(group.id, .thisMachine)
-        await model.applyAndReport(context: fixture.contextB)
+        await model.applyAndReport(container: fixture.contextB.container)
         XCTAssertEqual(model.phase, .done)
         XCTAssertEqual(try fixture.files.readFile(at: full + "/keep"), "local folder work")
     }
@@ -202,6 +221,7 @@ extension ConflictResolutionModelTests {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 260),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         defer { window.close() }
         await TestWait.until(timeout: .seconds(TestWait.firstRenderTimeoutSeconds),

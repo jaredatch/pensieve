@@ -1,0 +1,89 @@
+{
+  "Category": [
+    [
+      "0638378F-4A4F-450B-8288-911F0138DD85",
+      "\"Category\"",
+      "1791566916.704516",
+      "[\"github.com/fixture/project\"]",
+      "[\"preserved\"]"
+    ]
+  ],
+  "DeployRecord": [
+    [
+      "2F6B60F0-19D5-4861-85E7-6D28DD9334E1",
+      "30650AC3-09FA-4135-A631-4417F3CEF481",
+      "\"cursor\"",
+      "\"/fixture/rule.mdc\"",
+      "1791566916.704669",
+      "\"hash\"",
+      "098930CC-D4E9-4A62-98DA-5201D0A229E1"
+    ]
+  ],
+  "IntentAssignment": [
+    [
+      "\"30650AC3-09FA-4135-A631-4417F3CEF481|codex|098930CC-D4E9-4A62-98DA-5201D0A229E1\"",
+      "30650AC3-09FA-4135-A631-4417F3CEF481",
+      "\"codex\"",
+      "098930CC-D4E9-4A62-98DA-5201D0A229E1"
+    ]
+  ],
+  "MachineDeployIntent": [
+    [
+      "\"AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA|preserved|codex|github.com/fixture/project\"",
+      "\"AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA\"",
+      "\"preserved\"",
+      "\"codex\"",
+      "\"github.com/fixture/project\""
+    ]
+  ],
+  "Project": [
+    [
+      "098930CC-D4E9-4A62-98DA-5201D0A229E1",
+      "\"Project\"",
+      "\"/fixture/project\"",
+      "\"github.com/fixture/project\"",
+      "\"remote\"",
+      "1791566916.704488"
+    ]
+  ],
+  "RepoUpdateCursor": [
+    [
+      "B1903529-0326-4263-8921-37ED8B1B3FF6",
+      "\"fixture/repo\"",
+      "\"main\"",
+      "\"cursor-head\"",
+      "1700000003.0"
+    ]
+  ],
+  "Skill": [
+    [
+      "30650AC3-09FA-4135-A631-4417F3CEF481",
+      "\"Preserved\"",
+      "\"Original description\"",
+      "[\"two\", \"one\"]",
+      "\"project\"",
+      "\"preserved\"",
+      "\"eyJkZXNjcmlwdGlvbiI6IkN1cnNvciIsImdsb2JzIjpbIiouc3dpZnQiXSwiYWx3YXlzQXBwbHkiOnRydWV9\"",
+      "1791566916.704369",
+      "1791566916.70437",
+      "\"claude\"",
+      "\"eyJyZWYiOiIiLCJyZXBvIjoiIiwiaW5zdGFsbGVkQ29tbWl0IjoiIiwiY29udGVudEhhc2giOiIiLCJwYXRoIjoiIiwiaW5zdGFsbGVkVHJlZSI6IiIsImluc3RhbGxlZEF0IjotOTc4MzA3MjAwLCJ1cGRhdGVkQXQiOi05NzgzMDcyMDB9\"",
+      "true",
+      "1700000001.0",
+      "\"checked-head\"",
+      "\"upstream-tree\"",
+      "\"upstream-commit\"",
+      "1700000002.0",
+      "\"preserved diagnostic\""
+    ]
+  ],
+  "SkillProjectAssignment": [
+    [
+      "6AF79BF8-A805-48BF-AA6C-D98BBD8EE917",
+      "30650AC3-09FA-4135-A631-4417F3CEF481",
+      "098930CC-D4E9-4A62-98DA-5201D0A229E1",
+      "\"codex\"",
+      "1791566916.704637"
+    ]
+  ]
+}

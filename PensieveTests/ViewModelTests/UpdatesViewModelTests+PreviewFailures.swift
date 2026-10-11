@@ -36,7 +36,7 @@ extension UpdatesViewModelTests {
             let service = SkillInstallService(gitService: git, credentialStore: InMemoryCredentialStore(),
                 fileService: spy, scratchRoot: scratch, storeRoot: fixture.storeRoot, lockPath: tempDir + "/sync.lock",
                 remoteValidator: { ValidatedInstallRemote(repo: $0, cloneRemote: $0) })
-            XCTAssertThrowsError(try service.previewUpdate(PinnedSkillUpdate(skill: fixture.skill))) { error in
+            XCTAssertThrowsError(try nativePreview(service, skill: fixture.skill)) { error in
                 assertPreviewFailure(error, step: step, scratch: scratch)
             }
         }

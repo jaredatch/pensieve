@@ -60,9 +60,6 @@ final class StoreDirectorySwapFileService: FileServiceProtocol {
     func copyFile(at sourcePath: String, to destinationPath: String) throws {
         try wrapped.copyFile(at: sourcePath, to: destinationPath)
     }
-    func copyRegularFiles(fromDirectory source: String, toDirectory destination: String) throws -> RegularFileCopyReceipt {
-        try wrapped.copyRegularFiles(fromDirectory: source, toDirectory: destination)
-    }
     func deleteFile(at path: String) throws { try wrapped.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
     func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {

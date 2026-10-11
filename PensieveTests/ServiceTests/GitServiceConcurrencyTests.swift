@@ -3,6 +3,34 @@ import XCTest
 @testable import Pensieve
 
 final class GitServiceConcurrencyTests: XCTestCase {
+    func testMainThreadGitFailsAndNamesTheCallingSource() throws {
+        for mode in ["direct", "public", "closure", "store-run", "store-throw", "store-data",
+                     "daemon-fetch", "daemon-forward", "daemon-remote"] {
+            let result = try GitProcessProbeRunner.run("main-thread-" + mode)
+            XCTAssertFalse(result.timedOut, "The guard must fail before spawning git")
+            XCTAssertNotEqual(result.status, 0, "Main-thread git must fail in Debug")
+            XCTAssertTrue(result.children.isEmpty, "The guard must run before spawning a child")
+            let diagnostic = result.diagnostic.components(separatedBy: "\n").first {
+                $0.contains("Git called on the main thread at ")
+            }
+            let attribution = try XCTUnwrap(diagnostic).components(separatedBy: "Git called on the main thread at ")[1]
+            XCTAssertEqual(attribution, result.report, "\(mode): \(result.diagnostic)")
+        }
+        let worker = try GitProcessProbeRunner.run("concurrency")
+        XCTAssertEqual(worker.status, 0, worker.report)
+    }
+
+    func testReadCancellationStopsGroupAndWriteCancellationFinishes() throws {
+        for mode in ["cancel-read", "cancel-write"] {
+            let result = try GitProcessProbeRunner.run(mode)
+            XCTAssertFalse(result.timedOut, mode)
+            XCTAssertEqual(result.status, 0, result.report)
+            XCTAssertEqual(result.report, mode == "cancel-read"
+                ? "OK cancelled read; group stopped; child reaped"
+                : "OK finished write; group stopped; child reaped")
+        }
+    }
+
     func testGitExitReturnsItsOutputWhileDetachedPipeHoldersRemainAlive() throws {
         for pipe in ["stdout", "stderr"] {
             for behavior in ["sleeping", "writing"] {

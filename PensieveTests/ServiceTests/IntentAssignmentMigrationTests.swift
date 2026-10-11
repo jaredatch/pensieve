@@ -35,8 +35,8 @@ final class IntentAssignmentMigrationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: directory) }
         let url = URL(fileURLWithPath: directory + "/default.store")
         let priorSchema = Schema([
-            Skill.self, Project.self, SkillProjectAssignment.self, ScenarioAssignment.self,
-            DeployRecord.self, Category.self, Scenario.self, RepoUpdateCursor.self,
+            Skill.self, Project.self, SkillProjectAssignment.self,
+            DeployRecord.self, Category.self, RepoUpdateCursor.self,
             MachineDeployIntent.self
         ])
         do {

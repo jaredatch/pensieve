@@ -29,7 +29,7 @@ final class UpdateMetadataTests: XCTestCase {
     @MainActor
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
-            for: Skill.self, Project.self, SkillProjectAssignment.self, DeployRecord.self, Pensieve.Category.self, Scenario.self,
+            for: Skill.self, Project.self, SkillProjectAssignment.self, DeployRecord.self, Pensieve.Category.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         return ModelContext(container)
@@ -41,23 +41,24 @@ final class UpdateMetadataTests: XCTestCase {
         let context = try makeContext()
         let store = SkillStore(fileService: fileService, baseDir: tempDir + "/skills", storeRoot: tempDir)
         let library = SkillLibraryViewModel(
-            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir),
-            manifestService: manifest, manifestRoot: tempDir,
-            notifier: notifier
-        )
+            skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: tempDir,
+            notifier: notifier,
+            manifestSaves: ManifestSaveModel(manifest: manifest, root: tempDir,
+                lockPath: tempDir + ".sync.lock"))
         library.createSkill(name: "Editable", description: "d", body: "# b", tags: [], context: context)
         let skill = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
         return Fixture(library: library, context: context, skill: skill)
     }
 
     @MainActor
-    func testUpdateMetadataWritesTagsToOverlayAndNotSkillFile() throws {
+    func testUpdateMetadataWritesTagsToOverlayAndNotSkillFile() async throws {
         let fixture = try makeLibrary()
         let skillPath = tempDir + "/skills/\(fixture.skill.directoryName)/SKILL.md"
         let bytesBefore = try fileService.readData(at: skillPath)
         let updatedAtBefore = fixture.skill.updatedAt
 
         fixture.library.updateMetadata(fixture.skill, tags: ["a", "b"], scope: .user, context: fixture.context)
+        await fixture.library.manifestSaves?.waitUntilIdle()
 
         let overlay = try XCTUnwrap(
             try manifest.read(fromRoot: tempDir).skills.first { $0.slug == fixture.skill.directoryName }

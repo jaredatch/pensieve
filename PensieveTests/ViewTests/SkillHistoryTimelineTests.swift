@@ -52,7 +52,7 @@ final class SkillHistoryTimelineTests: XCTestCase {
         git.commits = [GitCommit(sha: "abc", author: "A", date: Date(), subject: "Update")]
         let skill = Skill(name: "Example", directoryName: "example-skill")
 
-        let snapshot = SkillHistorySnapshot.load(skill: skill, git: git, workingDir: "/repo")
+        let snapshot = SkillHistorySnapshot.load(path: SkillHistorySnapshot.path(for: skill), git: git, workingDir: "/repo")
 
         XCTAssertEqual(snapshot.versions.map(\.sha), ["abc"])
         XCTAssertEqual(git.logCalls, [.init(path: "skills/example-skill/SKILL.md", workingDir: "/repo", limit: 50)])
@@ -75,7 +75,7 @@ final class SkillHistoryTimelineTests: XCTestCase {
 
     func testAnEmptyLogIsAnEmptySnapshot() {
         let snapshot = SkillHistorySnapshot.load(
-            skill: Skill(name: "Example", directoryName: "example"),
+            path: "skills/example/SKILL.md",
             git: SkillHistoryRecordingGit(),
             workingDir: "/repo"
         )
@@ -127,14 +127,27 @@ final class SkillHistoryRecordingGit: GitServiceProtocol {
 
     var commits: [GitCommit] = []
     var documents: [String: String] = [:]
-    private(set) var logCalls: [LogCall] = []
-
-    func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] {
-        logCalls.append(LogCall(path: path, workingDir: workingDir, limit: limit))
-        return commits
+    private var recordedLogCalls: [LogCall] = []
+    private let callLock = NSLock()
+    var logOperation: ((String) -> [GitCommit])?
+    var showOperation: ((String) -> String?)?
+    var logCalls: [LogCall] {
+        callLock.lock()
+        defer { callLock.unlock() }
+        return recordedLogCalls
     }
 
-    func show(sha: String, path: String, at workingDir: String) -> String? { documents[sha] }
+    func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] {
+        callLock.lock()
+        recordedLogCalls.append(LogCall(path: path, workingDir: workingDir, limit: limit))
+        callLock.unlock()
+        return logOperation?(path) ?? commits
+    }
+
+    func show(sha: String, path: String, at workingDir: String) -> String? {
+        if let showOperation { return showOperation(sha) }
+        return documents[sha]
+    }
     func remoteURL(at path: String) -> String? { nil }
     func initRepository(at path: String) throws {}
     func setRemote(_ url: String, at path: String) throws {}
@@ -158,4 +171,56 @@ final class SkillHistoryRecordingGit: GitServiceProtocol {
     func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
                                 fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
     func hasCommitsToPush(at path: String) -> Bool { false }
+
+    func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
+
+        try blob(atStage: stage, path: path, in: workingDir).map {
+
+            ConflictEntry(mode: "100644", objectID: "", bytes: $0)
+
+        }
+
+    }
+
+    func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+
+        throw GitError.repositoryUnreadable(path: root, detail: "Conflict entry restoration is unavailable.")
+
+    }
+
+    func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
+
+        throw GitError.repositoryUnreadable(path: root, detail: "Conflict index removal is unavailable.")
+
+    }
+
+    func retireConflictPath(_ path: String, at root: String) throws {
+
+        throw GitError.repositoryUnreadable(path: root, detail: "Legacy gitlink resolution is unavailable.")
+
+    }
+
+    func probeUsability() -> GitUsability { .usable }
+
+    func checkoutUnbornBranch(_ branch: String, at path: String) throws {}
+
+    func fetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {}
+
+    func materializeFromFetchHead(at path: String) throws {}
+
+    func bornBranch(_ branch: String, at path: String) throws {}
+
+    func setUpstream(branch: String, at path: String) throws {}
+
+    func hasLocalBranches(at path: String) throws -> Bool { true }
+
+    func hasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool { false }
+
+    func hasRemoteOriginConfigured(at path: String) throws -> Bool { true }
+
+    func remoteReferences(remote: String, credential: GitCredential?) throws -> GitRemoteReferences {
+
+        GitRemoteReferences(defaultBranch: nil, heads: [])
+
+    }
 }

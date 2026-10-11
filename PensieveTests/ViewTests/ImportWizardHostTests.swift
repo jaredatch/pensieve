@@ -166,6 +166,7 @@ final class ImportWizardHostTests: XCTestCase {
             styleMask: [.borderless], backing: .buffered, defer: false
         )
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         host.layoutSubtreeIfNeeded()
         RunLoop.main.run(until: Date().addingTimeInterval(0.02))

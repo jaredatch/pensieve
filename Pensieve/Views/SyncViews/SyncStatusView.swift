@@ -7,37 +7,44 @@ import SwiftUI
 struct SyncStatusView: View {
     @Environment(\.modelContext) private var modelContext
     let model: SyncModel
+    var saves: ManifestSaveModel?
     let onResolve: () -> Void
     @State private var isHovering = false
 
     var body: some View {
         // Re-evaluated each minute so "12m ago" keeps counting without a state change.
         TimelineView(.periodic(from: .now, by: 60)) { context in
-            if let line = SyncFooterPresentation.make(state: model.state, canResolve: model.canResolve,
-                hovering: isHovering, now: context.date) {
-                Button(action: { perform(line.action) }, label: {
-                    HStack(spacing: Spacing.xs) {
-                        if line.showsSpinner {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: line.symbol)
-                                .font(.body)
-                                .frame(width: 16)
-                                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 0) {
+                if let message = saves?.statusMessage {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.sm)
+                }
+                if let line = SyncFooterPresentation.make(state: model.state, canResolve: model.canResolve,
+                    hovering: isHovering, now: context.date) {
+                    Button(action: { perform(line.action) }, label: {
+                        HStack(spacing: Spacing.xs) {
+                            if line.showsSpinner {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: line.symbol)
+                                    .font(.body)
+                                    .frame(width: 16)
+                                    .accessibilityHidden(true)
+                            }
+                            Text(line.label).font(.caption).lineLimit(1)
                         }
-                        Text(line.label).font(.caption).lineLimit(1)
-                    }
-                    .foregroundStyle(line.emphasized ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                })
-                .buttonStyle(.plain)
-                .disabled(line.action == .none)
-                .onHover { isHovering = $0 }
-                .help(line.help ?? "")
-                .accessibilityLabel(line.label)
-                .padding(.horizontal, Spacing.xl)
-                .padding(.vertical, Spacing.sm)
+                        .foregroundStyle(line.emphasized ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    })
+                    .buttonStyle(.plain)
+                    .disabled(line.action == .none)
+                    .onHover { isHovering = $0 }
+                    .help(line.help ?? "")
+                    .accessibilityLabel(line.label)
+                    .padding(.horizontal, Spacing.xl)
+                    .padding(.vertical, Spacing.sm)
+                }
             }
         }
     }

@@ -27,6 +27,9 @@ final class SkillDetailHeaderLayoutTests: XCTestCase {
         let host = NSHostingView(rootView: header.frame(width: 644))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 644, height: 400),
                               styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
+        defer { window.close() }
         window.contentView = host
         host.layoutSubtreeIfNeeded()
 
@@ -92,6 +95,7 @@ final class SkillDetailHeaderLayoutTests: XCTestCase {
             defer: false
         )
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentView = host
         host.layoutSubtreeIfNeeded()
         return (host, window)
@@ -109,6 +113,7 @@ final class SkillDetailHeaderLayoutTests: XCTestCase {
             defer: false
         )
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         window.contentViewController = controller
         window.setContentSize(NSSize(width: 900, height: 600))
         window.makeKeyAndOrderFront(nil)

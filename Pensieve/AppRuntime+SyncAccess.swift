@@ -1,6 +1,13 @@
 import SwiftData
 
 extension AppRuntime {
+    func makeConflictResolutionModel() -> ConflictResolutionModel {
+        paths.makeConflictResolutionModel { [weak self] in
+            guard let self else { throw SyncError.syncInProgress }
+            return try self.beginConflictResolution()
+        }
+    }
+
     func makeUpdatesModel() -> UpdatesViewModel {
         UpdatesViewModel(rowLoader: updatesViewModelOperations.rowLoader,
                         applyOperation: updatesViewModelOperations.applyOperation,
@@ -50,6 +57,12 @@ extension AppRuntime {
     }
 
     func installRuntimeCallbacks() {
+        scheduler.installGitRecheck(isUnknown: { [weak self] in
+            guard let self else { return false }
+            return self.gitUsability == nil
+        }, action: { [weak self] in
+            await self?.refreshGitUsability()
+        })
         syncModel.installPendingSyncRequest { [weak scheduler] request in
             scheduler?.enqueue(request)
         }

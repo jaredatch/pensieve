@@ -25,15 +25,14 @@ struct AddEntitySheet: View {
         switch kind {
         case .project:
             AddProjectSheet(
-                manifestRoot: runtime.paths.storeRoot,
                 notifier: notifier,
                 intentReconciler: intentReconciler,
                 onCreated: { onCreated(.project($0.id)) }
             )
         case .category:
             EntityNameSheet(title: "Add Category", fieldLabel: "Category Name", actionTitle: "Add") { name in
-                let created = CategoryStore(manifestService: ManifestService(), manifestRoot: runtime.paths.storeRoot,
-                    notifier: notifier)
+                let created = CategoryStore(
+                    notifier: notifier, manifestSaves: runtime.library.manifestSaves)
                     .create(name: name, context: context)
                 if let created { onCreated(.category(created.id)) }
             }

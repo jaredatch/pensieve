@@ -3,6 +3,7 @@ import Foundation
 extension GitService {
     /// Resolves a tracked branch or tag without fetching objects. Branch precedence matches
     /// `clone --branch`; annotated tags use their peeled commit rather than the tag object.
+    @_disfavoredOverload
     func remoteHead(remote: String, ref: String,
                     credential: GitCredential?) throws -> String? {
         let branch = "refs/heads/\(ref)"
@@ -32,6 +33,7 @@ extension GitService {
         return revisions[branch] ?? revisions[peeledTag] ?? revisions[tag]
     }
 
+    @_disfavoredOverload
     func commitDate(at repositoryPath: String) throws -> Date {
         let args = ["-C", repositoryPath, "show", "-s", "--format=%cI", "HEAD"]
         let output = try runOrThrow(args, in: nil)

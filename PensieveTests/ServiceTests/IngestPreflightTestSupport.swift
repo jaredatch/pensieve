@@ -42,8 +42,65 @@ final class IngestRecordingGit: GitServiceProtocol {
     func skipRebase(at path: String) throws -> PullResult { .upToDate }
     func stagePath(_ path: String, at root: String) throws {}
     func collapseToSingleCommit(at root: String, message: String,
-                                credential: GitCredential?, fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
+                                credential: GitCredential?,
+                                fetchedRevision: FetchedStoreRevision?) throws -> Bool { false }
     func hasCommitsToPush(at path: String) -> Bool { false }
+
+    func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
+
+        try blob(atStage: stage, path: path, in: workingDir).map {
+
+            ConflictEntry(mode: "100644", objectID: "", bytes: $0)
+
+        }
+
+    }
+
+    func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+
+        throw GitError.repositoryUnreadable(path: root, detail: "Conflict entry restoration is unavailable.")
+
+    }
+
+    func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
+
+        throw GitError.repositoryUnreadable(path: root, detail: "Conflict index removal is unavailable.")
+
+    }
+
+    func retireConflictPath(_ path: String, at root: String) throws {
+
+        throw GitError.repositoryUnreadable(path: root, detail: "Legacy gitlink resolution is unavailable.")
+
+    }
+
+    func probeUsability() -> GitUsability { .usable }
+
+    func checkoutUnbornBranch(_ branch: String, at path: String) throws {}
+
+    func fetchBranch(_ branch: String, at path: String, credential: GitCredential?) throws {}
+
+    func materializeFromFetchHead(at path: String) throws {}
+
+    func bornBranch(_ branch: String, at path: String) throws {}
+
+    func setUpstream(branch: String, at path: String) throws {}
+
+    func hasLocalBranches(at path: String) throws -> Bool { true }
+
+    func hasRemoteTrackingBranch(_ branch: String, at path: String) -> Bool { false }
+
+    func hasRemoteOriginConfigured(at path: String) throws -> Bool { true }
+
+    func log(forPath path: String, at workingDir: String, limit: Int) -> [GitCommit] { [] }
+
+    func show(sha: String, path: String, at workingDir: String) -> String? { nil }
+
+    func remoteReferences(remote: String, credential: GitCredential?) throws -> GitRemoteReferences {
+
+        GitRemoteReferences(defaultBranch: nil, heads: [])
+
+    }
 }
 
 final class IngestRecordingManifest: ManifestSnapshotting {
@@ -116,6 +173,8 @@ final class IngestAllowlistedFastForwardGit: FastForwardGitService {
     func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
         try git.fastForwardOnly(at: path, credential: credential)
     }
+
+    func probeUsability() -> GitUsability { .usable }
 }
 
 func ingestRawGit(_ arguments: [String]) throws -> String {

@@ -4,19 +4,24 @@ import XCTest
 @testable import Pensieve
 
 /// Holds a real child at the git runner boundary. The script announces readiness without
-/// writing to its pipes and exits only when the off-pool watchdog releases it. This exercises
+/// writing to its pipes and waits for release, fixture removal, or a lifetime bound (90 seconds by default).
+/// Removal/expiry exits 124 even if the owning host crashed without running cleanup. This exercises
 /// the production Process/read/join wait, not a stubbed executor or a canned progress result.
 final class GitBlockingFixture {
     enum Finished: Error { case operation }
     let root = TestTemporaryDirectory.path + "GitBlocking-" + UUID().uuidString
     let files = FileService()
 
-    init() throws {
+    init(lifetime: Int = 90) throws {
         try files.createDirectory(at: root)
         try files.writeExecutableFile(at: root + "/git", content: """
-        #!/bin/sh
+        #!/bin/bash
         printf '%s' "$$" > '\(root)/ready'
-        while [ ! -f '\(root)/release' ]; do /bin/sleep 0.01; done
+        deadline=$((SECONDS + \(lifetime)))
+        while [ ! -f '\(root)/release' ]; do
+            [ -d '\(root)' ] && [ "$SECONDS" -lt "$deadline" ] || exit 124
+            /bin/sleep 0.01
+        done
         printf 'git version fixture\\n'
         """)
     }

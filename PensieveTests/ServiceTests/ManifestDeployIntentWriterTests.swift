@@ -31,7 +31,9 @@ extension ManifestDeployIntentTests {
         try service.write(snapshot([record(slug: "Exact.Slug")]), toRoot: tempDir)
         let path = intentPath(slug: "Exact.Slug")
         XCTAssertTrue(fileService.fileExists(at: path))
-        XCTAssertEqual(try service.read(fromRoot: tempDir).deployIntents.first?.skillSlug, "Exact.Slug")
+        XCTAssertEqual(try NativeTestWork.run { [self] in
+            try service.read(fromRoot: tempDir)
+        }.deployIntents.first?.skillSlug, "Exact.Slug")
         XCTAssertTrue(try fileService.readFile(at: path).contains("slug: Exact.Slug"))
     }
 

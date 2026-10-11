@@ -214,10 +214,15 @@ final class RecordingDeletionSkillStore: SkillStoreProtocol {
 
 final class RecordingDeletionManifest: ManifestSnapshotting {
     var failingWrites: Set<Int> = []
+    var failingRebuildSnapshots = 0
     private(set) var snapshots: [ManifestSnapshot] = []
     private var writeNumber = 0
 
     func snapshot(from context: ModelContext) throws -> ManifestSnapshot {
+        if !Thread.isMainThread, failingRebuildSnapshots > 0 {
+            failingRebuildSnapshots -= 1
+            throw DeletionTestError()
+        }
         let skills = try context.fetch(FetchDescriptor<Skill>())
         let categories = try context.fetch(FetchDescriptor<Pensieve.Category>())
         let intents = try context.fetch(FetchDescriptor<MachineDeployIntent>())

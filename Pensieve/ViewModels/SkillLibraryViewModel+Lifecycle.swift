@@ -15,7 +15,8 @@ extension SkillLibraryViewModel {
         do {
             try context.save()
             error = nil
-            regenerateManifest(context: context)
+            regenerateManifest(.skillMetadata(skill.directoryName, tags == previousTags ? nil : tags,
+                scope == previousScope ? nil : scope), context: context)
             notifier()
         } catch {
             skill.tags = previousTags
@@ -27,8 +28,10 @@ extension SkillLibraryViewModel {
 
     /// Treat watcher events produced by the resident coordinator's pull/rebuild as self-authored.
     func beginCoordinatorChanges() {
+        coordinatorCompletionGeneration &+= 1
         isApplyingCoordinatorChanges = true
         coordinatorObservedSlugs.removeAll()
+        coordinatorChangeSequences.removeAll()
         coordinatorBaselineBodies = Dictionary(uniqueKeysWithValues:
             ((try? skillStore.listSkills()) ?? []).map { ($0, currentOnDiskBody(directoryName: $0)) })
     }
@@ -37,29 +40,30 @@ extension SkillLibraryViewModel {
         watcherEventSequence
     }
 
+    @MainActor
     func finishCoordinatorChanges(
         hasUnsyncedChanges: Bool,
         sampledWatcherEventSequence: UInt64? = nil,
-        recheckHasUnsyncedChanges: () -> Bool = { false }
-    ) {
-        let currentSlugs = Set((try? skillStore.listSkills()) ?? [])
-        let candidateSlugs = currentSlugs.union(coordinatorBaselineBodies.keys)
+        recheckHasUnsyncedChanges: @escaping () -> Bool = { false }
+    ) async {
+        coordinatorCompletionGeneration &+= 1
+        let generation = coordinatorCompletionGeneration
         var acceptedSlugs = coordinatorObservedSlugs
-        var foundUnsampledChange = false
-        for directoryName in candidateSlugs where !acceptedSlugs.contains(directoryName) {
-            let currentBody = currentOnDiskBody(directoryName: directoryName)
-            guard coordinatorBaselineBodies[directoryName] != currentBody,
-                  !wasLastWrittenByApp(directoryName: directoryName, currentBody: currentBody) else { continue }
-            acceptExternalChange(directoryName: directoryName, currentBody: currentBody, shouldNotify: false)
-            acceptedSlugs.insert(directoryName)
-            foundUnsampledChange = true
-        }
-        let effectiveHasUnsyncedChanges: Bool
+        let foundUnsampledChange = acceptFinalCoordinatorChanges(into: &acceptedSlugs)
+        var effectiveHasUnsyncedChanges = hasUnsyncedChanges
+        var needsLaterSync = false
+        var laterSlugs: Set<String> = []
         if let sampledWatcherEventSequence,
            sampledWatcherEventSequence != watcherEventSequence || foundUnsampledChange {
-            effectiveHasUnsyncedChanges = recheckHasUnsyncedChanges()
-        } else {
-            effectiveHasUnsyncedChanges = hasUnsyncedChanges
+            let sequence = acceptedChangeSequence
+            effectiveHasUnsyncedChanges = await BlockingWork.run { recheckHasUnsyncedChanges() }
+            guard generation == coordinatorCompletionGeneration else { return }
+            acceptedSlugs.formUnion(coordinatorObservedSlugs)
+            _ = acceptFinalCoordinatorChanges(into: &acceptedSlugs)
+            laterSlugs = Set(coordinatorChangeSequences.compactMap { $0.value > sequence ? $0.key : nil })
+            // Finish after one recheck even under steady folder writes. Its answer cannot settle
+            // events that arrived while it ran; let the scheduler coalesce those into a later cycle.
+            needsLaterSync = !laterSlugs.isEmpty
         }
         for directoryName in coordinatorObservedSlugs {
             setLastWrittenBody(
@@ -74,12 +78,28 @@ extension SkillLibraryViewModel {
         if !effectiveHasUnsyncedChanges {
             // A clean pull settles the mark — except on a file whose retained draft is still dirty, where
             // "Modified externally — Save overwrites it" is exactly the warning the draft needs.
-            externallyModified.subtract(acceptedSlugs.filter { !hasUnsavedChanges(forDirectory: $0) })
+            externallyModified.subtract(acceptedSlugs.subtracting(laterSlugs).filter { !hasUnsavedChanges(forDirectory: $0) })
         }
         coordinatorBaselineBodies.removeAll()
         coordinatorObservedSlugs.removeAll()
+        coordinatorChangeSequences.removeAll()
         isApplyingCoordinatorChanges = false
-        if effectiveHasUnsyncedChanges, !acceptedSlugs.isEmpty { notifier() }
+        if needsLaterSync || (effectiveHasUnsyncedChanges && !acceptedSlugs.isEmpty) { notifier() }
+    }
+
+    private func acceptFinalCoordinatorChanges(into acceptedSlugs: inout Set<String>) -> Bool {
+        let currentSlugs = Set((try? skillStore.listSkills()) ?? [])
+        let candidateSlugs = currentSlugs.union(coordinatorBaselineBodies.keys)
+        var foundChange = false
+        for directoryName in candidateSlugs where !acceptedSlugs.contains(directoryName) {
+            let currentBody = currentOnDiskBody(directoryName: directoryName)
+            guard coordinatorBaselineBodies[directoryName] != currentBody,
+                  !wasLastWrittenByApp(directoryName: directoryName, currentBody: currentBody) else { continue }
+            acceptExternalChange(directoryName: directoryName, currentBody: currentBody, shouldNotify: false)
+            acceptedSlugs.insert(directoryName)
+            foundChange = true
+        }
+        return foundChange
     }
 
     /// The cycle's one question, against its final body: a draft still dirty on a file the cycle moved (its
@@ -140,9 +160,10 @@ extension SkillLibraryViewModel {
     /// Every entry point that creates a new entity — a skill by sheet, scan, folder, or GitHub; a
     /// project; a category — and the first-launch wizard read this, never
     /// `libraryUnavailable` alone. Edits read `libraryUnavailable` / `isWriteFenced` as before.
-    var addsFenced: Bool { libraryUnavailable || storeUnreadable }
+    var addsFenced: Bool { libraryUnavailable || storeUnreadable || launchIngestPending }
 
     /// One sentence for a refused add; the sidebar's sync card carries the longer explanation.
+    static let launchIngestMessage = "Pensieve is still reading this library."
     static let storeUnreadableMessage =
         "Pensieve can't add to this library until it can read it. Update Pensieve, then relaunch."
 }

@@ -68,14 +68,12 @@ extension CategoryStoreProtocol {
 // MARK: - Implementation
 
 struct CategoryStore: CategoryStoreProtocol {
-    private let manifestService: ManifestSnapshotting?
-    private let manifestRoot: String
+    private let manifestSaves: ManifestSaveModel?
     let notifier: SyncStateNotifying
 
-    init(manifestService: ManifestSnapshotting? = nil, manifestRoot: String,
-         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed) {
-        self.manifestService = manifestService
-        self.manifestRoot = manifestRoot
+    init(notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
+         manifestSaves: ManifestSaveModel? = nil) {
+        self.manifestSaves = manifestSaves
         self.notifier = notifier
     }
 
@@ -86,22 +84,24 @@ struct CategoryStore: CategoryStoreProtocol {
         let category = Category(name: trimmed)
         context.insert(category)
         try? context.save()
-        regenerateManifest(context: context)
+        regenerateManifest(.createCategory(CategoryRecord(name: trimmed, projectKeys: [], skillSlugs: [])), context: context)
         notifier()
         return category
     }
 
     func rename(_ category: Category, to name: String, context: ModelContext, notifier: SyncStateNotifying) {
+        let oldName = category.name
         category.name = name
         try? context.save()
-        regenerateManifest(context: context)
+        regenerateManifest(.renameCategory(oldName, name), context: context)
         notifier()
     }
 
     func delete(_ category: Category, context: ModelContext, notifier: SyncStateNotifying) {
+        let name = category.name, id = category.id
         context.delete(category)
         try? context.save()
-        regenerateManifest(context: context)
+        regenerateManifest(.deleteCategory(name), context: context, categoryID: id)
         notifier()
     }
 
@@ -128,7 +128,7 @@ struct CategoryStore: CategoryStoreProtocol {
             category.projectKeys.removeAll { $0 == key }
         }
         try? context.save()
-        regenerateManifest(context: context)
+        regenerateManifest(.categoryProject(category.name, key, member), context: context)
         notifier()
     }
 
@@ -156,7 +156,7 @@ struct CategoryStore: CategoryStoreProtocol {
             category.skillSlugs.removeAll { $0 == slug }
         }
         try? context.save()
-        regenerateManifest(context: context)
+        regenerateManifest(.categorySkill(category.name, slug, assigned), context: context)
         notifier()
     }
 
@@ -182,17 +182,7 @@ struct CategoryStore: CategoryStoreProtocol {
         return categories.filter { $0.skillSlugs.contains(slug) }
     }
 
-    /// Best-effort manifest regeneration after a category mutation. No-op without a wired service
-    /// (tests). A failure is logged (this struct has no error channel) — never a silent `try?`.
-    private func regenerateManifest(context: ModelContext) {
-        guard let manifestService else { return }
-        do {
-            try manifestService.write(manifestService.snapshot(from: context), toRoot: manifestRoot)
-        } catch {
-            Logger(subsystem: "com.jaredatch.pensieve", category: "manifest")
-                .warning(
-                    "Category mutation saved, but manifest regeneration failed: \(error.localizedDescription, privacy: .public)"
-                )
-        }
+    private func regenerateManifest(_ change: ManifestChange, context: ModelContext, categoryID: UUID? = nil) {
+        manifestSaves?.submit(change, context: context, categoryID: categoryID) { manifestSaves?.reportCategoryFailure($0) }
     }
 }

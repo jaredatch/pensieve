@@ -65,7 +65,8 @@ final class ViewChangesSceneTests: XCTestCase {
             let window = try XCTUnwrap(NSApp.windows.first {
                 $0.isVisible && $0.accessibilityIdentifier() == WindowPolicy.changesWindowID
             })
-            defer { window.close() }
+            window.animationBehavior = .none
+            defer { closeSceneWindow(window) }
             let main = makeWindow(id: "main-AppWindow-geometry")
             defer { main.close() }
             main.orderFront(nil)
@@ -95,11 +96,17 @@ final class ViewChangesSceneTests: XCTestCase {
         }
     }
 
+    private func closeSceneWindow(_ window: NSWindow) {
+        window.close()
+        window.contentView = nil
+    }
+
     func makeWindow(id: String) -> NSWindow {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 700),
                               styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.identifier = NSUserInterfaceItemIdentifier(id)
         window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
         return window
     }
 

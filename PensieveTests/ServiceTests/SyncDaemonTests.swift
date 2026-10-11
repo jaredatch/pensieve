@@ -11,106 +11,130 @@ final class SyncDaemonTests: XCTestCase {
     private let clock: () -> Date = { Date(timeIntervalSince1970: 1_700_000_000) }
 
     override func setUpWithError() throws {
-        tempDir = TestTemporaryDirectory.path + "PensieveSyncDaemonTests-\(UUID().uuidString)"
-        root = tempDir + "/store"
-        appSupport = tempDir + "/app-support"
-        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(atPath: appSupport, withIntermediateDirectories: true)
-        git = RecordingFFGit()
-        credentials = NilCredentialStore()
-        reconciler = RecordingReconciler()
-    }
-
-    override func tearDownWithError() throws {
-        if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
-            try FileManager.default.removeItem(atPath: tempDir)
+        try NativeTestWork.run { [self] in
+            tempDir = TestTemporaryDirectory.path + "PensieveSyncDaemonTests-\(UUID().uuidString)"
+            root = tempDir + "/store"
+            appSupport = tempDir + "/app-support"
+            try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(atPath: appSupport, withIntermediateDirectories: true)
+            git = RecordingFFGit()
+            credentials = NilCredentialStore()
+            reconciler = RecordingReconciler()
         }
     }
 
-    func testLockedSkipsWithoutWritingStatusOrReconciling() {
-        let held = SyncLock.tryAcquire(at: appSupport + "/sync.lock")
-        XCTAssertNotNil(held)
-        defer { held?.release() }
-
-        XCTAssertEqual(makeDaemon().runOnce(), .skipped(.locked))
-        XCTAssertEqual(reconciler.calls, 0)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: appSupport + "/daemon-status.json"))
+    override func tearDownWithError() throws {
+        try NativeTestWork.run { [self] in
+            if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
+                try FileManager.default.removeItem(atPath: tempDir)
+            }
+        }
     }
 
-    func testNoRemoteSkipsWithoutReconciling() {
-        git.remote = nil
+    func testLockedSkipsWithoutWritingStatusOrReconciling() throws {
+        try NativeTestWork.run { [self] in
+            let held = SyncLock.tryAcquire(at: appSupport + "/sync.lock")
+            XCTAssertNotNil(held)
+            defer { held?.release() }
 
-        XCTAssertEqual(makeDaemon().runOnce(), .skipped(.noRemote))
-        XCTAssertEqual(reconciler.calls, 0)
+            XCTAssertEqual(makeDaemon().runOnce(), .skipped(.locked))
+            XCTAssertEqual(reconciler.calls, 0)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: appSupport + "/daemon-status.json"))
+        }
     }
 
-    func testRejectedRemoteSkipsWithoutReconciling() {
-        git.remote = "ext::sh -c touch /tmp/x"
+    func testNoRemoteSkipsWithoutReconciling() throws {
+        try NativeTestWork.run { [self] in
+            git.remote = nil
 
-        XCTAssertEqual(makeDaemon().runOnce(), .skipped(.rejectedRemote))
-        XCTAssertEqual(reconciler.calls, 0)
+            XCTAssertEqual(makeDaemon().runOnce(), .skipped(.noRemote))
+            XCTAssertEqual(reconciler.calls, 0)
+        }
     }
 
-    func testDirtyTreeSkipsWithoutReconciling() {
-        git.clean = false
+    func testRejectedRemoteSkipsWithoutReconciling() throws {
+        try NativeTestWork.run { [self] in
+            git.remote = "ext::sh -c touch /tmp/x"
 
-        XCTAssertEqual(makeDaemon().runOnce(), .skipped(.dirtyTree))
-        XCTAssertEqual(reconciler.calls, 0)
+            XCTAssertEqual(makeDaemon().runOnce(), .skipped(.rejectedRemote))
+            XCTAssertEqual(reconciler.calls, 0)
+        }
     }
 
-    func testDivergedSkipsWithoutReconciling() {
-        git.ffResult = .diverged
+    func testDirtyTreeSkipsWithoutReconciling() throws {
+        try NativeTestWork.run { [self] in
+            git.clean = false
 
-        XCTAssertEqual(makeDaemon().runOnce(), .skipped(.diverged))
-        XCTAssertEqual(reconciler.calls, 0)
+            XCTAssertEqual(makeDaemon().runOnce(), .skipped(.dirtyTree))
+            XCTAssertEqual(reconciler.calls, 0)
+        }
     }
 
-    func testUpToDateSyncsAndReconciles() {
-        git.ffResult = .upToDate
+    func testDivergedSkipsWithoutReconciling() throws {
+        try NativeTestWork.run { [self] in
+            git.ffResult = .diverged
 
-        XCTAssertEqual(makeDaemon().runOnce(), .synced(changed: false))
-        XCTAssertEqual(reconciler.calls, 1)
+            XCTAssertEqual(makeDaemon().runOnce(), .skipped(.diverged))
+            XCTAssertEqual(reconciler.calls, 0)
+        }
     }
 
-    func testFastForwardedSyncsAndReconciles() {
-        git.ffResult = .fastForwarded(from: "a", to: "b")
+    func testUpToDateSyncsAndReconciles() throws {
+        try NativeTestWork.run { [self] in
+            git.ffResult = .upToDate
 
-        XCTAssertEqual(makeDaemon().runOnce(), .synced(changed: true))
-        XCTAssertEqual(reconciler.calls, 1)
+            XCTAssertEqual(makeDaemon().runOnce(), .synced(changed: false))
+            XCTAssertEqual(reconciler.calls, 1)
+        }
     }
 
-    func testAuthFailureFailsWithoutReconciling() {
-        git.throwAuth = true
+    func testFastForwardedSyncsAndReconciles() throws {
+        try NativeTestWork.run { [self] in
+            git.ffResult = .fastForwarded(from: "a", to: "b")
 
-        XCTAssertEqual(makeDaemon().runOnce(), .failed(.authentication))
-        XCTAssertEqual(reconciler.calls, 0)
+            XCTAssertEqual(makeDaemon().runOnce(), .synced(changed: true))
+            XCTAssertEqual(reconciler.calls, 1)
+        }
+    }
+
+    func testAuthFailureFailsWithoutReconciling() throws {
+        try NativeTestWork.run { [self] in
+            git.throwAuth = true
+
+            XCTAssertEqual(makeDaemon().runOnce(), .failed(.authentication))
+            XCTAssertEqual(reconciler.calls, 0)
+        }
     }
 
     func testAtomicStatusReplacesPartialFileWithValidJSON() throws {
-        try Data("partial".utf8).write(to: URL(fileURLWithPath: appSupport + "/daemon-status.json"))
-        git.ffResult = .upToDate
+        try NativeTestWork.run { [self] in
+            try Data("partial".utf8).write(to: URL(fileURLWithPath: appSupport + "/daemon-status.json"))
+            git.ffResult = .upToDate
 
-        XCTAssertEqual(makeDaemon().runOnce(), .synced(changed: false))
+            XCTAssertEqual(makeDaemon().runOnce(), .synced(changed: false))
 
-        let data = try Data(contentsOf: URL(fileURLWithPath: appSupport + "/daemon-status.json"))
-        let status = try JSONDecoder().decode(DaemonStatus.self, from: data)
-        XCTAssertEqual(status.result, "synced")
-        XCTAssertEqual(status.detail, "upToDate")
+            let data = try Data(contentsOf: URL(fileURLWithPath: appSupport + "/daemon-status.json"))
+            let status = try JSONDecoder().decode(DaemonStatus.self, from: data)
+            XCTAssertEqual(status.result, "synced")
+            XCTAssertEqual(status.detail, "upToDate")
+        }
     }
 
     func testLogRotationMovesOversizedLogAndWritesNewLine() throws {
-        let old = String(repeating: "x", count: SyncDaemon.logRotateThreshold + 10)
-        try old.write(toFile: appSupport + "/daemon.log", atomically: true, encoding: .utf8)
-        git.ffResult = .upToDate
+        try NativeTestWork.run { [self] in
+            let old = String(repeating: "x", count: SyncDaemon.logRotateThreshold + 10)
+            try old.write(toFile: appSupport + "/daemon.log", atomically: true, encoding: .utf8)
+            git.ffResult = .upToDate
 
-        XCTAssertEqual(makeDaemon().runOnce(), .synced(changed: false))
+            XCTAssertEqual(makeDaemon().runOnce(), .synced(changed: false))
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: appSupport + "/daemon.log.1"))
-        let rotated = try String(contentsOfFile: appSupport + "/daemon.log.1", encoding: .utf8)
-        XCTAssertEqual(rotated, old)
-        let newLog = try String(contentsOfFile: appSupport + "/daemon.log", encoding: .utf8)
-        XCTAssertLessThan(newLog.utf8.count, SyncDaemon.logRotateThreshold)
-        XCTAssertTrue(newLog.contains("synced upToDate"))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: appSupport + "/daemon.log.1"))
+            let rotated = try String(contentsOfFile: appSupport + "/daemon.log.1", encoding: .utf8)
+            XCTAssertEqual(rotated, old)
+            let newLog = try String(contentsOfFile: appSupport + "/daemon.log", encoding: .utf8)
+            XCTAssertLessThan(newLog.utf8.count, SyncDaemon.logRotateThreshold)
+            XCTAssertTrue(newLog.contains("synced upToDate"))
+        }
     }
 
     private func makeDaemon() -> SyncDaemon {
@@ -140,6 +164,8 @@ private final class RecordingFFGit: FastForwardGitService {
         if throwOther { throw GitError.commandFailed(args: ["merge"], exitCode: 1, stderr: "boom") }
         return ffResult
     }
+
+    func probeUsability() -> GitUsability { .usable }
 }
 
 private final class RecordingReconciler: DeployReconciling {

@@ -29,7 +29,7 @@ final class PreviewContextRevisionTests: XCTestCase {
         XCTAssertEqual(files.reads.map(\.root), [root, root, root, root])
     }
 
-    func testPreviewRevisionIgnoresOtherSkillsAndSyncButTracksItsOwnFolder() throws {
+    func testPreviewRevisionIgnoresOtherSkillsAndSyncButTracksItsOwnFolder() async throws {
         let files = FileService()
         let base = TestTemporaryDirectory.path + "ScopedImages-" + UUID().uuidString
         defer { try? files.deleteDirectory(at: base) }
@@ -46,7 +46,7 @@ final class PreviewContextRevisionTests: XCTestCase {
         XCTAssertEqual(preview(library, skill: skill, base: base).imageRevision, original,
                        "An event in another skill must keep the open preview's identity")
         library.beginCoordinatorChanges()
-        library.finishCoordinatorChanges(hasUnsyncedChanges: false)
+        await library.finishCoordinatorChanges(hasUnsyncedChanges: false)
         XCTAssertEqual(preview(library, skill: skill, base: base).imageRevision, original,
                        "A sync cycle must keep the open preview's identity")
         watcher.emit(slug)

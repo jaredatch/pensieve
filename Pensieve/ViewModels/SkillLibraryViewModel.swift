@@ -6,8 +6,6 @@ import SwiftUI
 final class SkillLibraryViewModel {
     enum SkillDeletionResult: Equatable {
         case deleted
-        /// Deleted, but the manifest rewrite failed (`error` carries the message); the manifest lags until the next mutation.
-        case deletedManifestStale
         /// `skillStore.deleteSkill` threw; the directory and the row are both still there. The pending
         /// edit was already cancelled.
         case retainedDirectoryDeleteFailed(String)
@@ -18,13 +16,13 @@ final class SkillLibraryViewModel {
     }
 
     enum DeletionNotice: Equatable {
-        case failed(String)
+        case failed(String, title: String = "Couldn't delete skill")
         case pending(String)
         case warning(String)
 
         var title: String {
             switch self {
-            case .failed: "Couldn't delete skill"
+            case .failed(_, let title): title
             case .pending: "Skill files removed; library cleanup pending"
             case .warning: "Skill deleted with a warning"
             }
@@ -32,7 +30,7 @@ final class SkillLibraryViewModel {
 
         var message: String {
             switch self {
-            case let .failed(message), let .pending(message), let .warning(message): message
+            case .failed(let message, _), .pending(let message), .warning(let message): message
             }
         }
     }
@@ -52,7 +50,7 @@ final class SkillLibraryViewModel {
     /// Monotonic invalidation for successful app-authored SKILL.md rewrites (frontmatter-only ones included).
     @MainActor private(set) var appWriteRevision: Int = 0
     let fileWatchService: FileWatchServiceProtocol
-    private let manifestService: ManifestSnapshotting?
+    let manifestSaves: ManifestSaveModel?
     let manifestRoot: String
     var skillsDirectory: String { skillStore.baseDir }
     private var lastManifestError: String?
@@ -61,7 +59,10 @@ final class SkillLibraryViewModel {
     var isApplyingCoordinatorChanges = false
     var coordinatorBaselineBodies: [String: String] = [:]
     var coordinatorObservedSlugs: Set<String> = []
+    var coordinatorChangeSequences: [String: UInt64] = [:]
+    var acceptedChangeSequence: UInt64 = 0
     var watcherEventSequence: UInt64 = 0
+    var coordinatorCompletionGeneration: UInt64 = 0
     /// Asset invalidation belongs to the folder reported by the watcher, even for a body echo.
     var folderChangeRevisions: [String: UInt64] = [:]
     var error: String?
@@ -72,6 +73,8 @@ final class SkillLibraryViewModel {
     /// known body and leaves on Save, Revert, deletion, or typing back to it; whether it is dirty now is measured
     /// against the fingerprint (edits reach disk only on Save). `SkillLibraryViewModel+Draft.swift`.
     var drafts: [String: EditorDraft] = [:]
+    /// A delayed Restore also retires after an edit that the user subsequently undid.
+    var textEditRevisions: [String: UInt64] = [:]
     /// The one unsaved-changes question open, if any, and what a leaving question does with the answer.
     var pendingUnsavedChanges: UnsavedChangesPrompt?
     @ObservationIgnored var pendingLeaveContinuation: ((Bool) -> Void)?
@@ -90,20 +93,26 @@ final class SkillLibraryViewModel {
     private(set) var libraryUnavailable = false
     /// The last rebuild could not read the manifest (newer schema or corrupt): adds are fenced.
     private(set) var storeUnreadable = false
+    private(set) var launchIngestPending = false
     var deletionNotice: DeletionNotice?
+
+    /// Filled when the synchronous deletion flow settles, before queued save callbacks can run.
+    final class DeletionPresentation {
+        var notice: DeletionNotice?
+    }
     init(
         skillStore: SkillStoreProtocol,
         fileService: FileServiceProtocol? = nil,
         fileWatchService: FileWatchServiceProtocol,
-        manifestService: ManifestSnapshotting? = nil,
         manifestRoot: String,
-        notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed
+        notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
+        manifestSaves: ManifestSaveModel? = nil
     ) {
         let fs = fileService ?? FileService()
         self.fileService = fs
         self.skillStore = skillStore
         self.fileWatchService = fileWatchService
-        self.manifestService = manifestService
+        self.manifestSaves = manifestSaves
         self.manifestRoot = manifestRoot
         self.notifier = notifier
     }
@@ -111,24 +120,23 @@ final class SkillLibraryViewModel {
         fileWatchService.stop()
     }
     // MARK: - CRUD
-    /// Best-effort: regenerate the on-disk manifest from current SwiftData state after a mutation to
-    /// synced state. No-op when no manifest service is wired (tests). A failure is SURFACED via `error`,
-    /// never silently swallowed (the mutation itself already succeeded and is not rolled back).
-    func regenerateManifest(context: ModelContext) {
-        do {
-            try writeManifest(context: context)
-        } catch {
-            let message = "Saved, but updating the sync manifest failed: \(error.localizedDescription)"
-            self.error = message
-            lastManifestError = message
+    func regenerateManifest(_ change: ManifestChange, context: ModelContext,
+                            completion: ((Error?) -> Void)? = nil) {
+        manifestSaves?.submit(change, context: context) { [weak self] failure in
+            guard let self else { return }
+            if let failure {
+                let message: String
+                if case ManifestSaveError.rebuildFailed = failure {
+                    message = failure.localizedDescription
+                } else { message = "Saved, but updating the sync manifest failed: \(failure.localizedDescription)" }
+                self.error = message
+                self.lastManifestError = message
+            } else {
+                if self.error == self.lastManifestError { self.error = nil }
+                self.lastManifestError = nil
+            }
+            completion?(failure)
         }
-    }
-
-    func writeManifest(context: ModelContext) throws {
-        guard let manifestService else { return }
-        try manifestService.write(manifestService.snapshot(from: context), toRoot: manifestRoot)
-        if error == lastManifestError { error = nil }
-        lastManifestError = nil
     }
 
     @discardableResult
@@ -140,9 +148,14 @@ final class SkillLibraryViewModel {
         context: ModelContext,
         takenSlugs: (ModelContext) throws -> Set<String> = { Set(try $0.fetch(FetchDescriptor<Skill>()).map(\.directoryName)) }
     ) -> Skill? {
-        guard !libraryUnavailable, !storeUnreadable else {
-            self.error = libraryUnavailable
-                ? "Failed to create skill: the library couldn't be read" : Self.storeUnreadableMessage
+        guard !addsFenced else {
+            if libraryUnavailable {
+                self.error = "Failed to create skill: the library couldn't be read"
+            } else if launchIngestPending {
+                self.error = Self.launchIngestMessage + " Try again when launch finishes."
+            } else {
+                self.error = Self.storeUnreadableMessage
+            }
             return nil
         }
         do {
@@ -162,7 +175,9 @@ final class SkillLibraryViewModel {
             context.insert(skill)
             try context.save()
             error = nil
-            regenerateManifest(context: context)
+            regenerateManifest(.createSkill(SkillOverlay(slug: dirName, createdAt: skill.createdAt,
+                scope: skill.scope, tags: skill.tags, cursor: skill.cursorConfig, agents: [], origin: .authored)),
+                context: context)
             setLastWrittenBody(SkillParser.canonicalBody(body), directoryName: dirName)
             notifier()
             return skill
@@ -180,8 +195,10 @@ extension SkillLibraryViewModel {
     @discardableResult
     // Frozen 26.2-a keeps the pre-delete probe and both existing re-probes in this one primitive.
     func deleteSkillEntry(_ skill: Skill, context: ModelContext,
+                          presentation: DeletionPresentation = DeletionPresentation(),
                           persist: (ModelContext) throws -> Void = { try $0.save() }) -> SkillDeletionResult {
-        let quarantined = pendingRowCleanup.contains(skill.id)
+        let quarantined = pendingRowCleanup.contains(skill.id), deletedSlug = skill.directoryName
+        let deletedName = skill.name
         if quarantined {
             // Probe BEFORE any destructive step: a retry proceeds only when the leaf is not readable and the
             // no-follow, case-folded listing proves the entry absent. Any entry retains; a readable regular
@@ -239,15 +256,40 @@ extension SkillLibraryViewModel {
         }
         pendingRowCleanup.remove(skill.id)
         self.error = nil
-        regenerateManifest(context: context)
-        return self.error == nil ? .deleted : .deletedManifestStale
+        return queueDeletedSkill(slug: deletedSlug, name: deletedName, context: context, presentation: presentation)
     }
+
+    private func queueDeletedSkill(slug: String, name: String, context: ModelContext,
+                                   presentation: DeletionPresentation) -> SkillDeletionResult {
+        regenerateManifest(.deleteSkill(slug), context: context) { [weak self] failure in
+            guard let self, let failure else { return }
+            let detail: String
+            let title: String
+            if case ManifestSaveError.rebuildFailed = failure {
+                detail = failure.localizedDescription
+                title = "Skill deleted, but the library didn't refresh"
+            } else {
+                detail = "The sync manifest couldn't be updated: " + failure.localizedDescription
+                title = "Skill deleted, but sync wasn't updated"
+            }
+            let notice = presentation.notice?.message ?? "Deleted “\(name)”."
+            self.deletionNotice = .failed(notice + " " + detail, title: title)
+        }
+        return .deleted
+    }
+
 }
 
 extension SkillLibraryViewModel {
     func isWriteFenced(_ skill: Skill) -> Bool { libraryUnavailable || pendingRowCleanup.contains(skill.id) }
     /// Launch ingestion's verdict (`AppRuntime.acceptLaunchIngest`), on every accepted outcome.
     func setStoreUnreadable(_ unreadable: Bool) { applyFence(unreadable) }
+
+    /// The runtime fences adds before presenting a window, until launch delivers its verdict.
+    func setLaunchIngestPending(_ pending: Bool) {
+        launchIngestPending = pending
+        if pending { showCreateSheet = false }
+    }
 
     /// `.synced` and `.conflicted` both passed the engine's pre-write read (an aborted rebase restores the
     /// pre-pull tree), so either lifts the fence; a refused store drops it; the rest never prove a read.
@@ -284,6 +326,8 @@ extension SkillLibraryViewModel {
     }
 
     func acceptExternalChange(directoryName: String, currentBody: String, shouldNotify: Bool) {
+        acceptedChangeSequence &+= 1
+        if isApplyingCoordinatorChanges { coordinatorChangeSequences[directoryName] = acceptedChangeSequence }
         // The fingerprint moves to what the file holds now, so a repeat event is an echo. A clean editor
         // reloads on the token; a dirty one keeps its draft and the view model asks what to do with it —
         // here, not in a view, because in the default Preview mode no editor is mounted (PLAN-02 / 02.3).

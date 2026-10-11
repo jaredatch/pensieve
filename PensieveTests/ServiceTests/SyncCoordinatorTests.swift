@@ -37,7 +37,7 @@ final class SyncCoordinatorTests: XCTestCase {
         await fulfillment(of: [startupCompleted], timeout: TestWait.hostedActionTimeoutSeconds)
 
         let peer = tempDir + "/peer"
-        try harness.git.clone(remote: harness.remote, into: peer, credential: nil)
+        try NativeTestWork.run { [self] in try harness.git.clone(remote: harness.remote, into: peer, credential: nil) }
         let manifest = ManifestService()
         try manifest.write(
             ManifestSnapshot(
@@ -47,8 +47,10 @@ final class SyncCoordinatorTests: XCTestCase {
             ),
             toRoot: peer
         )
-        XCTAssertTrue(try harness.git.stageAllAndCommit(at: peer, message: "remote category"))
-        try harness.git.push(at: peer, credential: nil)
+        XCTAssertTrue(try NativeTestWork.run { [self] in
+            try harness.git.stageAllAndCommit(at: peer, message: "remote category")
+        })
+        try NativeTestWork.run { [self] in try harness.git.push(at: peer, credential: nil) }
         scheduler.tick()
         await fulfillment(of: [tickCompleted], timeout: TestWait.hostedActionTimeoutSeconds)
 
@@ -127,19 +129,28 @@ final class SyncCoordinatorTests: XCTestCase {
     }
 
     func testPreBootstrapTriggerFiresAfterCoordinatorReady() async {
-        let fired = expectation(description: "late coordinator drains launch")
-        var cycles = 0
-        let scheduler = makeScheduler {
-            cycles += 1
-            fired.fulfill()
+        for initiallyUnknown in [false, true] {
+            let fired = expectation(description: "late coordinator drains launch; unknown=\(initiallyUnknown)")
+            var cycles = 0
+            var unknown = initiallyUnknown
+            var probes = 0
+            let scheduler = makeScheduler {
+                cycles += 1
+                fired.fulfill()
+            }
+            scheduler.installGitRecheck(isUnknown: { unknown }, action: { probes += 1; unknown = false })
+            scheduler.tick()
+            if initiallyUnknown {
+                await TestWait.until(failureMessage: "recheck must run before coordinator bootstrap") { probes == 1 }
+            }
+            scheduler.launchIngestCompleted()
+            await Task.yield()
+            XCTAssertEqual(cycles, 0)
+            scheduler.coordinatorBecameReady()
+            await fulfillment(of: [fired], timeout: TestWait.hostedActionTimeoutSeconds)
+            XCTAssertEqual(cycles, 1)
+            XCTAssertEqual(probes, initiallyUnknown ? 1 : 0)
         }
-        scheduler.tick()
-        scheduler.launchIngestCompleted()
-        await Task.yield()
-        XCTAssertEqual(cycles, 0)
-        scheduler.coordinatorBecameReady()
-        await fulfillment(of: [fired], timeout: TestWait.hostedActionTimeoutSeconds)
-        XCTAssertEqual(cycles, 1)
     }
 
     func testConflictedStateSkipsScheduledRun() async {
@@ -259,8 +270,8 @@ extension SyncCoordinatorTests {
         let seed = tempDir + "/seed"
         try FileManager.default.createDirectory(atPath: seed, withIntermediateDirectories: true)
         let git = TestPaths.git
-        try git.initRepository(at: seed)
-        try git.setRemote(remote, at: seed)
+        try NativeTestWork.run { [self] in try git.initRepository(at: seed) }
+        try NativeTestWork.run { [self] in try git.setRemote(remote, at: seed) }
         try ManifestService().write(
             ManifestSnapshot(
                 schemaVersion: ManifestService.currentSchemaVersion,
@@ -271,10 +282,10 @@ extension SyncCoordinatorTests {
         try "manifest/categories/*.yaml merge=union\nmanifest/projects.yaml merge=union\n"
             .write(toFile: seed + "/.gitattributes", atomically: true, encoding: .utf8)
         try ".DS_Store\n".write(toFile: seed + "/.gitignore", atomically: true, encoding: .utf8)
-        XCTAssertTrue(try git.stageAllAndCommit(at: seed, message: "seed"))
-        try git.push(at: seed, credential: nil)
+        XCTAssertTrue(try NativeTestWork.run { [self] in try git.stageAllAndCommit(at: seed, message: "seed") })
+        try NativeTestWork.run { [self] in try git.push(at: seed, credential: nil) }
         let clone = tempDir + "/clone"
-        try git.clone(remote: remote, into: clone, credential: nil)
+        try NativeTestWork.run { [self] in try git.clone(remote: remote, into: clone, credential: nil) }
         let container = try inMemoryContainer()
         let allowlisted = AllowlistedRemoteGit(wrapping: git)
         let engine = SyncEngine(

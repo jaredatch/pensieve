@@ -246,8 +246,8 @@ extension MachineStatePublishTests {
         let seed = tempDir + "/seed"
         try fileService.createDirectory(at: seed)
         let git = TestPaths.git
-        try git.initRepository(at: seed)
-        try git.setRemote(remote, at: seed)
+        try NativeTestWork.run { [self] in try git.initRepository(at: seed) }
+        try NativeTestWork.run { [self] in try git.setRemote(remote, at: seed) }
         try ManifestService().write(
             ManifestSnapshot(schemaVersion: ManifestService.currentSchemaVersion,
                              categories: [], projects: [], skills: []),
@@ -255,15 +255,14 @@ extension MachineStatePublishTests {
         )
         try fileService.writeFile(at: seed + "/.gitattributes",
                                   content: "manifest/categories/*.yaml merge=union\n"
-                                    + "manifest/scenarios/*.yaml merge=union\n"
                                     + "manifest/projects.yaml merge=union\n")
         try fileService.writeFile(at: seed + "/.gitignore", content: ".DS_Store\n")
-        XCTAssertTrue(try git.stageAllAndCommit(at: seed, message: "seed"))
-        try git.push(at: seed, credential: nil)
+        XCTAssertTrue(try NativeTestWork.run { [self] in try git.stageAllAndCommit(at: seed, message: "seed") })
+        try NativeTestWork.run { [self] in try git.push(at: seed, credential: nil) }
         let cloneA = tempDir + "/cloneA"
         let cloneB = tempDir + "/cloneB"
-        try git.clone(remote: remote, into: cloneA, credential: nil)
-        try git.clone(remote: remote, into: cloneB, credential: nil)
+        try NativeTestWork.run { [self] in try git.clone(remote: remote, into: cloneA, credential: nil) }
+        try NativeTestWork.run { [self] in try git.clone(remote: remote, into: cloneB, credential: nil) }
         return PublishHarness(git: git, remotePath: remotePath, cloneA: cloneA, cloneB: cloneB)
     }
 

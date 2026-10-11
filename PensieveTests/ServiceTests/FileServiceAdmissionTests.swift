@@ -103,13 +103,13 @@ final class FileServiceAdmissionTests: XCTestCase {
                        [sourceRoot.appendingPathComponent("Pensieve/Services/FileService+BoundedRead.swift").path],
                        "Regular-file descriptor admission must have one implementation: \(admissions.regular)")
         XCTAssertEqual(admissions.directories,
-                       [sourceRoot.appendingPathComponent("Pensieve/Services/FileService+DirectoryCopy.swift").path],
+                       [sourceRoot.appendingPathComponent("Pensieve/Services/FileService+DescriptorCopy.swift").path],
                        "Only the held source directory needs separate admission")
     }
 
     func testAdmissionGuardCountsNoFollowFamilyFlagsInScratchCopy() throws {
         let scratch = try copyAdmissionSources()
-        let path = scratch.appendingPathComponent("Pensieve/Services/FileService+DirectoryCopy.swift").path
+        let path = scratch.appendingPathComponent("Pensieve/Services/FileService+DescriptorCopy.swift").path
         try files.writeFile(at: path, content: files.readFile(at: path) + """
 
         func secondOpen(_ path: String) { _ = open(path, O_RDONLY | O_NOFOLLOW_ANY) } // PLAN43_C11_FLAG_MUTATION
@@ -177,7 +177,7 @@ final class FileServiceAdmissionTests: XCTestCase {
     private func copyAdmissionSources() throws -> URL {
         let scratch = URL(fileURLWithPath: root).appendingPathComponent("source-copy")
         for relative in ["Pensieve/Services/FileService+BoundedRead.swift",
-                         "Pensieve/Services/FileService+DirectoryCopy.swift", "PensieveDaemon/main.swift"] {
+                         "Pensieve/Services/FileService+DescriptorCopy.swift", "PensieveDaemon/main.swift"] {
             let destination = scratch.appendingPathComponent(relative)
             try files.createDirectory(at: destination.deletingLastPathComponent().path)
             try files.copyFile(at: sourceRoot.appendingPathComponent(relative).path, to: destination.path)

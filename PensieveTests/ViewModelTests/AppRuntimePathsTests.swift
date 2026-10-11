@@ -130,9 +130,11 @@ extension AppRuntimePathsTests {
         // Observe a born branch, then remove it before the retry-driven cycle. The real engine must
         // report branchless before preparation or network I/O, without changing the store or .git.
         let git = TestPaths.git
-        try git.initRepository(at: paths.storeRoot)
-        _ = try git.runOrThrow(["-C", paths.storeRoot, "commit", "--allow-empty", "-m", "fixture"], in: nil)
-        try git.setRemote("https://fixture.test/store.git", at: paths.storeRoot)
+        try NativeTestWork.run { [self] in try git.initRepository(at: paths.storeRoot) }
+        _ = try NativeTestWork.run { [self] in
+            try git.runOrThrow(["-C", paths.storeRoot, "commit", "--allow-empty", "-m", "fixture"], in: nil)
+        }
+        try NativeTestWork.run { [self] in try git.setRemote("https://fixture.test/store.git", at: paths.storeRoot) }
         let container = try AppRuntime.makeContainer(
             configuration: ModelConfiguration(isStoredInMemoryOnly: true)
         )
@@ -166,7 +168,7 @@ extension AppRuntimePathsTests {
         try fixture.files.deleteFile(at: paths.storeRoot + "/.git/refs/heads/main")
         XCTAssertTrue(runtime.syncModel.canSyncNow, "branchlessness has not been observed yet")
         let before = try fixture.snapshot()
-        runtime.performLaunchWorkIfNeeded(context: ModelContext(container))
+        await runtime.performLaunchWorkIfNeeded(context: ModelContext(container))
 
         let auditPath = paths.appSupportDir + "/daemon.log"
         let audit = try await waitForRetryCycle(runtime, auditPath: auditPath, detail: "branchless")
@@ -182,9 +184,11 @@ extension AppRuntimePathsTests {
         let fixture = try GitFailureFixture()
         defer { try? fixture.remove() }
         let git = TestPaths.git
-        try git.initRepository(at: fixture.root)
-        _ = try git.runOrThrow(["-C", fixture.root, "commit", "--allow-empty", "-m", "fixture"], in: nil)
-        try git.setRemote("https://fixture.test/store.git", at: fixture.root)
+        try NativeTestWork.run { [self] in try git.initRepository(at: fixture.root) }
+        _ = try NativeTestWork.run { [self] in
+            try git.runOrThrow(["-C", fixture.root, "commit", "--allow-empty", "-m", "fixture"], in: nil)
+        }
+        try NativeTestWork.run { [self] in try git.setRemote("https://fixture.test/store.git", at: fixture.root) }
         let runtime = try AppRuntime(
             scheduler: SyncScheduler(startAutomatically: false, backgroundSyncEnabled: { true }),
             defaults: isolatedDefaults(), paths: fixture.paths, gitUsabilityProbe: { .usable }

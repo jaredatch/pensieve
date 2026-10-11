@@ -27,11 +27,11 @@ struct ProjectRemovalWithdrawal {
             if context.hasChanges { try context.save() }
         } catch {
             context.rollback()
-            repairManifest(context: context)
+            repairManifest(project: project, request: request, context: context)
             throw failure("save project withdrawal", error)
         }
         do {
-            try publish(context: context)
+            try publish(context: context, project: project, request: request)
         } catch {
             let publicationError = error
             var restoration = "The saved requests were kept."
@@ -47,7 +47,7 @@ struct ProjectRemovalWithdrawal {
                 withdrawalRemainsSaved = changed
                 logFailure("Couldn't restore project withdrawal: " + error.localizedDescription)
             }
-            repairManifest(context: context)
+            repairManifest(project: project, request: request, context: context)
             throw failure("publish project withdrawal", publicationError, detail: restoration,
                           didWithdrawRequests: withdrawalRemainsSaved)
         }
@@ -67,17 +67,33 @@ struct ProjectRemovalWithdrawal {
         try context.save()
     }
 
-    func repairManifest(context: ModelContext) {
+    private func repairManifest(project: Project, request: ProjectRemovalWithdrawalRequest, context: ModelContext) {
         do {
-            try publish(context: context)
+            try publish(context: context, project: project, request: request)
         } catch {
             logFailure("Couldn't rewrite the project manifest from the saved store: " + error.localizedDescription)
         }
     }
 
-    private func publish(context: ModelContext) throws {
+    private func publish(context: ModelContext, project: Project,
+                         request: ProjectRemovalWithdrawalRequest) throws {
         guard let manifestService else { return }
-        try manifestService.write(manifestService.snapshot(from: context), toRoot: manifestRoot)
+        let local = try manifestService.snapshot(from: context)
+        var snapshot: ManifestSnapshot
+        do {
+            snapshot = FileService().fileExists(at: manifestRoot + "/manifest/manifest.yaml")
+                ? try manifestService.read(fromRoot: manifestRoot) : local
+        } catch {
+            if case ManifestError.unsupportedSchema = error { throw error }
+            snapshot = local
+        }
+        if !request.keepingSharedKey, let key = project.identityKey {
+            snapshot.deployIntents.removeAll { $0.machineID == request.localMachineID && $0.projectKey == key }
+            snapshot.deployIntents += local.deployIntents.filter {
+                $0.machineID == request.localMachineID && $0.projectKey == key
+            }
+        }
+        try manifestService.write(snapshot, toRoot: manifestRoot)
     }
 
     private func failure(_ operation: String, _ error: Error, detail: String? = nil,

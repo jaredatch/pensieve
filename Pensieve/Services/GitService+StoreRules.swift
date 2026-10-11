@@ -34,6 +34,7 @@ extension GitService {
 
     /// Only a store with protected local additions needs the app's pre-snapshot fetch. Return the
     /// checked commit so the later pull cannot fetch a different tree after the snapshot is written.
+    @_disfavoredOverload
     func preflightStoreUpdate(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision? {
         let store = try storeOperation(at: path)
         let excluded = try store.excludedUntrackedPaths()
@@ -53,6 +54,7 @@ extension GitService {
     /// `git -C <path> fetch origin main`. Advances FETCH_HEAD and (opportunistically) the `origin/main`
     /// remote-tracking ref without touching HEAD or the worktree. Throws `.authenticationFailed` on an
     /// auth error, `.commandFailed` on any other non-zero exit.
+    @_disfavoredOverload
     func fetch(at path: String, credential: GitCredential?) throws {
         let args = ["-C", path, "fetch", "origin", "main"]
         let r = try run(args, in: nil, credential: credential)
@@ -104,15 +106,17 @@ struct StoreGitOperation {
     private let infoDirectory: String
     let repairFailure: Error?
 
-    init(git: GitService, root: String, aborting: Bool = false) throws {
+    init(git: GitService, root: String, aborting: Bool = false,
+         file: StaticString = #fileID, line: UInt = #line) throws {
         self.git = git
         self.root = root
         let retired = aborting ? [] : try StoreIgnoreRules.retiredPaths(at: root, files: git.fileService)
         var resolved = ""
         var failure: Error?
         do {
-            let result = try git.runOrThrow(
-                ["-C", root, "rev-parse", "--path-format=absolute", "--git-path", "info"], in: nil)
+            let result = try GitThreadGuard.withCallSite(file: file, line: line) {
+                try git.runOrThrow(["-C", root, "rev-parse", "--path-format=absolute", "--git-path", "info"], in: nil)
+            }
             let info = result.stdout.trimmingCharacters(in: .newlines)
             guard info.utf8.first == 0x2F else {
                 throw GitError.repositoryUnreadable(path: root, detail: "git returned no metadata path.")
@@ -137,16 +141,16 @@ struct StoreGitOperation {
     }
 
     @discardableResult
-    func run(_ args: [String], credential: GitCredential? = nil) throws -> GitService.GitOutput {
+    func performRun(_ args: [String], credential: GitCredential?) throws -> GitService.GitOutput {
         try git.run(["-C", root] + args, in: nil, credential: credential, storeRules: true)
     }
 
     @discardableResult
-    func runOrThrow(_ args: [String]) throws -> GitService.GitOutput {
+    func performRunOrThrow(_ args: [String]) throws -> GitService.GitOutput {
         try git.runOrThrow(["-C", root] + args, in: nil, storeRules: true)
     }
 
-    func runData(_ args: [String]) throws -> GitService.GitDataOutput {
+    func performRunData(_ args: [String]) throws -> GitService.GitDataOutput {
         try git.runData(["-C", root] + args, in: nil, storeRules: true)
     }
 
