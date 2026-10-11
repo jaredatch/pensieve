@@ -101,16 +101,9 @@ final class ManifestSaveModel {
     private func publish(_ item: Item, disk: ManifestSnapshot?) async throws
         -> (snapshot: ManifestSnapshot, published: Bool) {
         var saved = try disk ?? item.fallback()
-        var deletedDependencies: [ManifestRefusedEdit] = []
         if disk != nil, !item.change.apply(to: &saved) {
-            let dependencies = refused.filter { $0.suppliesTarget(for: item.presentation) }
-            if !dependencies.isEmpty {
-                var deletesSuppliedCategory = false
-                for edit in dependencies where edit.applyCategoryDeletion(for: item.presentation, to: &saved) {
-                    deletesSuppliedCategory = true
-                }
-                guard deletesSuppliedCategory else { throw ManifestSaveError.unsavedTarget }
-                deletedDependencies = dependencies
+            if refused.contains(where: { $0.suppliesTarget(for: item.presentation) }) {
+                throw ManifestSaveError.unsavedTarget
             }
             if !item.change.isDeletion {
                 log("Skipped queued manifest change: its target was removed by sync.")
@@ -120,9 +113,7 @@ final class ManifestSaveModel {
         let snapshot = saved, manifest = manifest, root = root
         try await BlockingWork.run { try manifest.write(snapshot, toRoot: root) }
         if let disk { for edit in refused { edit.rememberLocalWrite(before: disk, after: saved) } }
-        refused = refused.filter { edit in
-            !deletedDependencies.contains { $0 === edit } && edit.acknowledge(durable: saved)
-        }
+        refused = refused.filter { $0.acknowledge(durable: saved) }
         return (saved, true)
     }
 

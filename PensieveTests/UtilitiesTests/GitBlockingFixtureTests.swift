@@ -10,6 +10,7 @@ final class GitBlockingFixtureTests: XCTestCase {
         let process = makeProcess(try XCTUnwrap(fixture))
         let exits = UpdateReviewRecorder<ContinuousClock.Instant>()
         process.terminationHandler = { _ in exits.append(.now) }
+        let start = ContinuousClock.now
         try process.run()
         defer { stop(process); try? FileService().deleteDirectory(at: root) }
         fixture = nil
@@ -21,10 +22,10 @@ final class GitBlockingFixtureTests: XCTestCase {
                              failureMessage: "Abandoned fake git ignored its short lifetime") {
             !process.isRunning && !exits.values.isEmpty
         }
-        let elapsed = try XCTUnwrap(exits.values.first) - ready
+        let exit = try XCTUnwrap(exits.values.first)
         // Bash's whole-second SECONDS allows a two-second lifetime to end after about one second.
-        XCTAssertGreaterThanOrEqual(elapsed, .seconds(1), "Fake git must wait out its lifetime before expiring")
-        XCTAssertLessThan(elapsed, .seconds(5))
+        XCTAssertGreaterThanOrEqual(exit - start, .seconds(1), "Fake git must wait out its lifetime before expiring")
+        XCTAssertLessThan(exit - ready, .seconds(5))
         XCTAssertEqual(process.isRunning ? nil : process.terminationStatus, 124)
         XCTAssertEqual(try FileService().readFile(at: root + "/ready"), String(process.processIdentifier),
                        "Readiness remains observable after the child has expired")
