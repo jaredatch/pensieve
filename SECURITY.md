@@ -33,9 +33,13 @@ A skill installed from GitHub is text someone else wrote. Pensieve treats it tha
 
 ## Git remotes and credentials
 
-Pensieve accepts only `https://`, `ssh://` and `user@host:path` remotes. It refuses git's `ext::` and other helper transports, `file://`, plain `http://`, and anything that could be read as a command-line option. It checks the remote when you connect and again before every sync. Git runs with a cleaned environment, so variables like `GIT_SSH_COMMAND` from your shell can't redirect it.
+Pensieve checks the remote as you enter it when you connect, and checks the literal configured remote again before each sync. These checks accept `https://`, `ssh://` and `user@host:path`, and refuse git's `ext::` and other helper transports, `file://`, plain `http://`, and anything that could be read as a command-line option. Git still applies URL rewrites from your own configuration. A rewrite can change where git connects, including to plain `http://`, where Pensieve's token could be sent without encryption.
 
-Pensieve stores the HTTPS token you enter in your macOS Keychain. Git credential helpers cannot supply, save or erase credentials during Pensieve's git commands. Other askpass programs from git config or the environment cannot answer HTTP credential requests. A missing or blank token leaves Pensieve's token helper disabled. Git can still use credentials you configure in `.netrc`, `http.extraHeader` or URL rewrites with userinfo. Connect refuses a blank token. SSH continues to use your agent keys.
+Pensieve stores the HTTPS token you enter in your macOS Keychain. Git credential helpers cannot supply, save or erase credentials during Pensieve's git commands. Other askpass programs from git config or the environment cannot answer HTTP credential requests. A missing or blank token leaves Pensieve's token helper disabled. Connect refuses a blank token.
+
+Credentials you configure yourself for git or curl remain available over HTTPS, even with a nonblank Pensieve token. Examples include `.netrc`, `http.extraHeader`, URL rewrites containing credentials, cookies and client certificates. Authorization headers and credentials in a rewritten URL can take precedence over Pensieve's token.
+
+SSH can use your agent, on-disk identity files and `~/.ssh/config`, and retains `SSH_ASKPASS` for passphrases. Pensieve strips the inherited `GIT_SSH_COMMAND` environment variable, but `core.sshCommand` in your git config can still select a different SSH command.
 
 Pensieve passes the saved token to git through a small helper that reads it from that git process's environment. Pensieve never writes the token into a URL, a command line, `.git/config` or a log.
 

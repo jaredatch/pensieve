@@ -130,10 +130,12 @@ Sync runs through a git remote you own. Setup:
 
 1. For your first Mac, create an **empty, private** repo on GitHub (or any git host). Private matters: your skills may encode how you work. Import or create your local skills, then connect the repo.
 2. On each fresh additional Mac, dismiss the import wizard and connect that same repo before adding local skills. Pensieve creates a small empty scaffold on launch; Connect recognizes it, adopts it in place, and brings down your existing library on the first try. You do not need to delete `~/.pensieve` first.
-3. For HTTPS, enter a personal access token in Pensieve. Pensieve stores it in the macOS Keychain and ignores credentials from git helpers or other askpass programs. A blank token is refused. Pensieve never writes the token into a command line or `.git/config`. For SSH, add your key to your existing `ssh-agent`.
-4. Sync. `~/.pensieve` becomes a git working tree; Pensieve commits, pulls, and pushes it for you.
+3. For HTTPS, enter a personal access token in Pensieve. Pensieve stores it in the macOS Keychain and ignores credentials from git helpers or other askpass programs. A blank token is refused. Pensieve never writes the token into a command line or `.git/config`.
 
-Git can still use credentials you configure in `.netrc`, `http.extraHeader` or URL rewrites with userinfo.
+   Credentials you configure yourself for git or curl still apply over HTTPS, even with a nonblank Pensieve token. For example, `.netrc`, `http.extraHeader` or URL rewrites containing credentials can supply authentication. Authorization headers and credentials in a rewritten URL can take precedence over the saved token. See [Git remotes and credentials](../SECURITY.md#git-remotes-and-credentials) for the transport and credential boundaries.
+
+   For SSH, add your key to your existing `ssh-agent`, or use identity files from your SSH configuration.
+4. Sync. `~/.pensieve` becomes a git working tree; Pensieve commits, pulls, and pushes it for you.
 
 To stop syncing, use Disconnect… in Settings › Sync. It removes the link to the repo and the token saved for it, and leaves your skills and their history alone.
 

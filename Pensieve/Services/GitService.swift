@@ -304,8 +304,9 @@ struct GitService: GitServiceProtocol {
         var environment = try childEnvironment(credential: credential)
         if storeRules { environment["GIT_ATTR_NOSYSTEM"] = "1" }
         let configuredArguments = storeRules ? Self.storeConfigurationArgs + args : args
-        // Reset the configured helper chain for reads and writes. Helpers must neither supply
-        // credentials nor store or erase them; only Pensieve's askpass may answer for HTTPS.
+        // Reset the configured helper chain for reads and writes: no get, store or erase.
+        // childEnvironment also disables foreign HTTP askpass programs. Credentials the user
+        // configures elsewhere in git or curl can still apply, even with a Pensieve token.
         let arguments = ["-c", "credential.helper="] + configuredArguments
         let child = try GitProcess(executable: gitPath, arguments: arguments, workingDirectory: workingDir,
                                    environment: environment)
