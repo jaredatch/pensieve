@@ -20,7 +20,8 @@ struct CategoryDetailView: View {
         self.onReveal = onReveal
         _categories = Query(filter: #Predicate<Category> { $0.id == categoryID })
         _model = State(initialValue: CategoryDetailModel(
-            store: CategoryStore(notifier: notifier, manifestSaves: manifestSaves),
+            store: CategoryStore(notifier: notifier, manifestSaves: manifestSaves,
+                                      reconciler: CategoryReconciler(platformVM: platformVM)),
             reconciler: CategoryReconciler(platformVM: platformVM)
         ))
     }

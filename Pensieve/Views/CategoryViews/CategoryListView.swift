@@ -24,7 +24,8 @@ struct CategoryListView: View {
         _entitySelection = entitySelection
         _searchText = searchText
         self.platformVM = platformVM
-        self.categoryStore = CategoryStore(notifier: notifier, manifestSaves: manifestSaves)
+        self.categoryStore = CategoryStore(notifier: notifier, manifestSaves: manifestSaves,
+                                      reconciler: CategoryReconciler(platformVM: platformVM))
         self.onAdd = onAdd
         self.addsFenced = addsFenced
     }

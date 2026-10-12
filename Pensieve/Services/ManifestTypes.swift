@@ -61,9 +61,18 @@ struct ManifestSnapshot: Equatable {
     }
 }
 
-enum ManifestError: Error, Equatable {
+enum ManifestError: LocalizedError, Equatable {
     case unsupportedSchema(found: Int, supported: Int)
     case corruptManifestFile(String)   // present-but-unparseable → read throws, rebuild bails; never silently dropped
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedSchema:
+            "Another Mac synced with a newer version of Pensieve. Update Pensieve on this Mac to change this library."
+        case .corruptManifestFile(let path):
+            "Pensieve couldn't read or save part of the library manifest: \(path)."
+        }
+    }
 }
 
 protocol ManifestReadWriting {

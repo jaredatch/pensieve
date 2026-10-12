@@ -92,7 +92,7 @@ final class RecordingSaveManifest: ManifestSnapshotting {
     var failingRebuildSnapshots = 0
     var afterWrite: (() -> Void)?
     var afterRebuildSnapshot: (() throws -> Void)?
-    struct Refused: Error {}
+    struct Refused: LocalizedError { var errorDescription: String? { "The local library could not be read." } }
     var writes: [ManifestSnapshot] {
         lock.lock()
         defer { lock.unlock() }
@@ -111,7 +111,7 @@ final class RecordingSaveManifest: ManifestSnapshotting {
     }
     func read(fromRoot root: String) throws -> ManifestSnapshot { try base.read(fromRoot: root) }
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
-        if failingWrites > 0 { failingWrites -= 1; throw Refused() }
+        if failingWrites > 0 { failingWrites -= 1; throw CocoaError(.fileWriteNoPermission) }
         try base.write(snapshot, toRoot: root)
         lock.lock()
         snapshots.append(snapshot)

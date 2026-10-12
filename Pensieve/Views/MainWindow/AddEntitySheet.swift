@@ -32,7 +32,8 @@ struct AddEntitySheet: View {
         case .category:
             EntityNameSheet(title: "Add Category", fieldLabel: "Category Name", actionTitle: "Add") { name in
                 let created = CategoryStore(
-                    notifier: notifier, manifestSaves: runtime.library.manifestSaves)
+                    notifier: notifier, manifestSaves: runtime.library.manifestSaves,
+                    reconciler: CategoryReconciler(platformVM: runtime.platformVM))
                     .create(name: name, context: context)
                 if let created { onCreated(.category(created.id)) }
             }
