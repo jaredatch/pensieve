@@ -43,12 +43,14 @@ final class SkillSaveRevisionTests: XCTestCase {
         let skill = Skill(name: "Test", directoryName: slug)
         _ = library.editorBody(for: skill)
         library.startWatching()
-        library.noteEditorChanged(skill, body: "Edited\nSecond")
+        let edited = library.editorBody(for: skill).replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "Old", with: "Edited\nSecond")
+        library.noteEditorChanged(skill, body: edited)
         XCTAssertTrue(library.saveDraft(skill))
-        library.noteEditorChanged(skill, body: "Edited\nSecond")
+        library.noteEditorChanged(skill, body: edited)
         XCTAssertFalse(library.hasUnsavedChanges(for: skill), "The LF editor echo must match the CRLF saved body")
         XCTAssertTrue(library.drafts.isEmpty)
-        XCTAssertTrue(library.wasLastWrittenByApp(directoryName: slug, currentBody: "Edited\nSecond"))
+        XCTAssertTrue(library.wasLastWrittenByApp(directoryName: slug, currentBody: edited))
         let token = library.reloadToken
         watcher.emit(slug)
         XCTAssertEqual(library.reloadToken, token)
@@ -114,7 +116,8 @@ final class SkillSaveRevisionTests: XCTestCase {
             notifier: { nudges += 1 }
         )
         _ = library.editorBody(for: skill)
-        library.noteEditorChanged(skill, body: "Edited")
+        library.noteEditorChanged(skill, body: SkillSerializer.serialize(
+            name: skill.name, description: "D", body: "Edited"))
         try files.files.writeFile(at: path, content: SkillSerializer.serialize(name: "Test", description: "D", body: "Edited"))
         let before = try XCTUnwrap(files.files.regularFileMetadata(at: path))
         let timestamp = skill.updatedAt
@@ -125,10 +128,11 @@ final class SkillSaveRevisionTests: XCTestCase {
         XCTAssertEqual(skill.updatedAt, timestamp)
         XCTAssertEqual(nudges, 0, "A byte-identical save must not nudge sync")
         XCTAssertTrue(library.drafts.isEmpty)
-        XCTAssertTrue(library.wasLastWrittenByApp(directoryName: slug, currentBody: "Edited"))
+        XCTAssertTrue(library.wasLastWrittenByApp(directoryName: slug,
+            currentBody: SkillSerializer.serialize(name: "Test", description: "D", body: "Edited")))
     }
 
-    func testNoOpSaveAppliesDescriptionFallbackWithoutWritingOrNudging() throws {
+    func testNoOpSaveRefreshesFileDescriptionWithoutWritingOrNudging() throws {
         for description in ["", " \t\n"] {
             for fromDraft in [false, true] {
                 let files = PreviewImageFileSpy()
@@ -146,7 +150,8 @@ final class SkillSaveRevisionTests: XCTestCase {
                 let path = root + "/" + slug + "/SKILL.md"
                 if fromDraft {
                     _ = library.editorBody(for: skill)
-                    library.noteEditorChanged(skill, body: "Edited")
+                    library.noteEditorChanged(skill, body: SkillSerializer.serialize(
+                        name: skill.name, description: "D", body: "Edited"))
                     try files.files.writeFile(at: path, content: SkillSerializer.serialize(
                         name: "Fallback", description: "D", body: "Edited"
                     ))
@@ -157,7 +162,7 @@ final class SkillSaveRevisionTests: XCTestCase {
                 let writes = files.writes.count
                 let succeeded = fromDraft ? library.saveDraft(skill) : library.updateBody(skill, body: "Old").succeeded
                 XCTAssertTrue(succeeded)
-                XCTAssertEqual(skill.skillDescription, "Fallback", "A successful no-op save still fills the model description")
+                XCTAssertEqual(skill.skillDescription, "D", "A successful save reflects the file description")
                 XCTAssertEqual(files.writes.count, writes)
                 XCTAssertEqual(files.files.regularFileMetadata(at: path), metadata)
                 XCTAssertEqual(try files.files.readFile(at: path), source)
@@ -187,7 +192,7 @@ final class SkillSaveRevisionTests: XCTestCase {
         }
     }
 
-    func testDraftAndSerializerShareOneLineEndingNormalizer() {
+    func testLegacyBodySerializerUsesCanonicalLineEndingComparison() {
         let cases = [("First\r\nSecond", "\nFirst\nSecond\n", true),
                      ("First\rSecond", "First\nSecond", true),
                      ("Body", "Changed", false), ("\u{85}Body", "Body", true),
@@ -197,7 +202,7 @@ final class SkillSaveRevisionTests: XCTestCase {
             let parsed = SkillParser.parse(source)
             let serialized = SkillSerializer.rewrite(body: draft, preserving: parsed,
                                                     fallbackName: "Test", fallbackDescription: "D")
-            let matches = SkillLibraryViewModel.bodiesMatch(draft, parsed.body)
+            let matches = SkillSerializer.comparableBody(draft) == SkillSerializer.comparableBody(parsed.body)
             XCTAssertEqual(matches, expected)
             XCTAssertEqual(matches, !serialized.didChange)
             if matches { XCTAssertEqual(Data(serialized.content.utf8), Data(source.utf8)) }
@@ -220,7 +225,8 @@ final class SkillSaveRevisionTests: XCTestCase {
         )
         XCTAssertEqual(library.updateBody(skill, body: "Body"), .unchanged)
         _ = library.editorBody(for: skill)
-        library.noteEditorChanged(skill, body: "Edited")
+        library.noteEditorChanged(skill, body: SkillSerializer.serialize(
+            name: skill.name, description: "D", body: "Edited"))
         XCTAssertTrue(library.saveDraft(skill))
         XCTAssertEqual(publishedDirty, [false], "The draft must be clean before a changed save notifies")
         XCTAssertEqual(library.updateBody(skill, body: "Another"), .written)

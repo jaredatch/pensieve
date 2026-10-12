@@ -4,35 +4,40 @@ import XCTest
 
 extension SyncNudgeTests {
     func testExternalRewriteBetweenWriteAndFinalizeStaysExternal() async throws {
-        var nudgeCount = 0
-        let store = InstallEchoSkillStore()
-        let watcher = InstallEchoWatcher()
-        let library = SkillLibraryViewModel(
-            skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot,
-            notifier: { nudgeCount += 1 }
-        )
-        library.startWatching()
-        let slug = "race-slug"
-        let appBody = "App-written body"
+        for frontmatterOnly in [false, true] {
+            var nudgeCount = 0
+            let store = InstallEchoSkillStore()
+            let watcher = InstallEchoWatcher()
+            let library = SkillLibraryViewModel(
+                skillStore: store, fileWatchService: watcher, manifestRoot: TestPaths.storeRoot,
+                notifier: { nudgeCount += 1 }
+            )
+            library.startWatching()
+            let slug = "race-slug"
+            let appBody = "App-written body"
 
-        library.beginAppAuthoredBodyWrite(directoryName: slug, expectedBody: appBody)
-        store.bodies[slug] = SkillSerializer.serialize(
-            name: slug, description: "Description", body: appBody
-        )
-        // An external editor rewrites the same file before the finalizer runs.
-        store.bodies[slug] = SkillSerializer.serialize(
-            name: slug, description: "Description", body: "External rewrite"
-        )
-        library.finishAppAuthoredBodyWrite(directoryName: slug)
+            library.beginAppAuthoredBodyWrite(directoryName: slug, expectedBody: SkillSerializer.serialize(
+                name: slug, description: "Description", body: appBody))
+            store.bodies[slug] = SkillSerializer.serialize(
+                name: slug, description: "Description", body: appBody
+            )
+            // An external editor rewrites the same file before the finalizer runs.
+            store.bodies[slug] = SkillSerializer.serialize(
+                name: slug, description: frontmatterOnly ? "External description" : "Description",
+                body: frontmatterOnly ? appBody : "External rewrite"
+            )
+            library.finishAppAuthoredBodyWrite(directoryName: slug)
+            library.noteAppAuthoredBodies(directoryNames: [slug])
 
-        // The delayed watcher event for the external content must classify external
-        // and nudge exactly once — not be swallowed as the app's own echo.
-        watcher.emit(slug)
-        XCTAssertTrue(library.externallyModified.contains(slug))
-        XCTAssertEqual(nudgeCount, 1)
-        // Re-delivery of the same content stays quiet.
-        watcher.emit(slug)
-        XCTAssertEqual(nudgeCount, 1)
+            // The delayed watcher event for the external content must classify external
+            // and nudge exactly once — not be swallowed as the app's own echo.
+            watcher.emit(slug)
+            XCTAssertTrue(library.externallyModified.contains(slug))
+            XCTAssertEqual(nudgeCount, 1)
+            // Re-delivery of the same content stays quiet.
+            watcher.emit(slug)
+            XCTAssertEqual(nudgeCount, 1)
+        }
     }
 
     func testFailedReplacementFinalizeAdoptsNoFingerprint() async throws {
@@ -50,7 +55,8 @@ extension SyncNudgeTests {
             name: slug, description: "Description", body: oldBody
         )
         library.noteAppAuthoredBody(
-            Skill(name: slug, skillDescription: "Description", directoryName: slug), body: oldBody
+            Skill(name: slug, skillDescription: "Description", directoryName: slug),
+            body: SkillSerializer.serialize(name: slug, description: "Description", body: oldBody)
         )
 
         // The replacement throws after begin: disk keeps the old body.

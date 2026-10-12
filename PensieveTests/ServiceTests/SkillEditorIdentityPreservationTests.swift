@@ -41,14 +41,14 @@ final class SkillEditorIdentityPreservationTests: XCTestCase {
             skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
         )
 
-        XCTAssertEqual(library.editorBody(for: skill), "Original body")
-        library.noteEditorChanged(skill, body: "Edited body")
+        XCTAssertEqual(library.editorBody(for: skill), original)
+        library.noteEditorChanged(skill, body: original.replacingOccurrences(of: "Original body", with: "Edited body"))
         XCTAssertTrue(library.saveDraft(skill))
 
         let saved = try readSkillFile(directoryName: skill.directoryName)
         XCTAssertEqual(saved, original.replacingOccurrences(of: "Original body", with: "Edited body"))
-        XCTAssertEqual(skill.name, "Different Model Name")
-        XCTAssertEqual(skill.skillDescription, "Different model description")
+        XCTAssertEqual(skill.name, "Identity From Disk")
+        XCTAssertEqual(skill.skillDescription, "Description From Disk")
     }
 
     @MainActor
@@ -69,13 +69,13 @@ final class SkillEditorIdentityPreservationTests: XCTestCase {
             skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
         )
 
-        XCTAssertEqual(library.editorBody(for: skill), "Original body")
-        library.noteEditorChanged(skill, body: "Edited body")
+        XCTAssertEqual(library.editorBody(for: skill), original)
+        library.noteEditorChanged(skill, body: original.replacingOccurrences(of: "Original body", with: "Edited body"))
         XCTAssertTrue(library.saveDraft(skill))
 
         let saved = try readSkillFile(directoryName: skill.directoryName)
         XCTAssertEqual(saved, original.replacingOccurrences(of: "Original body", with: "Edited body"))
-        XCTAssertEqual(skill.skillDescription, "Model Fallback Name")
+        XCTAssertEqual(skill.skillDescription, "Non-empty description from disk")
     }
 
     private func writeSkillFile(_ content: String, directoryName: String) throws {

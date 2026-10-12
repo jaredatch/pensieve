@@ -6,7 +6,6 @@ import XCTest
 @MainActor
 final class SyncNudgeTests: XCTestCase {
     private var tempDir = ""
-
     override func setUpWithError() throws {
         tempDir = TestTemporaryDirectory.url
             .appendingPathComponent("pensieve-sync-nudge-\(UUID().uuidString)").path
@@ -34,7 +33,8 @@ final class SyncNudgeTests: XCTestCase {
         let fixture = try libraryFixture()
         let skill = try insertSkill(slug: "body", store: fixture.store, context: fixture.context)
         _ = fixture.library.editorBody(for: skill)
-        fixture.library.noteEditorChanged(skill, body: "New")
+        fixture.library.noteEditorChanged(skill, body: SkillSerializer.serialize(
+            name: skill.name, description: skill.skillDescription, body: "New"))
         XCTAssertTrue(fixture.library.saveDraft(skill))
         XCTAssertEqual(fixture.counter.value, 1)
     }
@@ -117,7 +117,9 @@ final class SyncNudgeTests: XCTestCase {
         let lockPath = TestTemporaryDirectory.path + "import-lock-" + UUID().uuidString
         let model = ImportViewModel(scanner: FixedImportScanner(skills: [discovered]), skillStore: fixture.store,
             lockPath: lockPath, manifestRoot: TestPaths.storeRoot, notifier: fixture.counter.notify,
-            echoRegistrar: { fixture.library.noteAppAuthoredBodies(directoryNames: $0) })
+            echoRegistrar: { fixture.library.noteAppAuthoredBodies(directoryNames: $0) },
+            bodyWriteRegistration: SyncBodyWriteRegistration(begin: fixture.library.beginAppAuthoredBodyWrite,
+                end: { fixture.library.finishAppAuthoredBodyWrite(directoryName: $0, succeeded: $1) }))
         fixture.library.startWatching()
         model.scan()
         let selection = model.selectedSkills
@@ -181,19 +183,26 @@ final class SyncNudgeTests: XCTestCase {
     }
 
     func testHistoryRestoreNudgesExactlyOnce() throws {
-        let fixture = try libraryFixture()
-        let skill = try insertSkill(slug: "history", store: fixture.store, context: fixture.context)
-        _ = fixture.library.editorBody(for: skill)
-        fixture.library.startWatching()
-        let restored = SkillSerializer.serialize(
-            name: skill.name, description: skill.skillDescription, body: "Restored"
-        )
-        try restoreSkillHistoryVersion(
-            skill: skill, body: restored, store: fixture.store,
-            library: fixture.library, notifier: fixture.counter.notify
-        )
-        fixture.watcher.emit(skill.directoryName)
-        XCTAssertEqual(fixture.counter.value, 1)
+        for frontmatterOnly in [false, true] {
+            let fixture = try libraryFixture()
+            let skill = try insertSkill(slug: "history", store: fixture.store, context: fixture.context)
+            _ = fixture.library.editorBody(for: skill)
+            fixture.library.startWatching()
+            let restored = SkillSerializer.serialize(
+                name: frontmatterOnly ? "Historical name" : skill.name,
+                description: frontmatterOnly ? "Historical description" : skill.skillDescription,
+                body: frontmatterOnly ? "Old" : "Restored"
+            )
+            try restoreSkillHistoryVersion(
+                skill: skill, body: restored, store: fixture.store,
+                library: fixture.library, notifier: fixture.counter.notify
+            )
+            fixture.watcher.emit(skill.directoryName)
+            XCTAssertEqual(fixture.counter.value, 1)
+            XCTAssertEqual(skill.name, frontmatterOnly ? "Historical name" : "history")
+            XCTAssertEqual(skill.skillDescription, frontmatterOnly ? "Historical description" : "Description")
+            XCTAssertFalse(fixture.library.externallyModified.contains(skill.directoryName))
+        }
     }
 
     func testCompoundProjectRemovalNudgesExactlyOnce() throws {
@@ -302,7 +311,8 @@ extension SyncNudgeTests {
         let skill = try insertSkill(slug: "echo", store: fixture.store, context: fixture.context)
         _ = fixture.library.editorBody(for: skill)
         fixture.library.startWatching()
-        fixture.library.noteEditorChanged(skill, body: "New")
+        fixture.library.noteEditorChanged(skill, body: SkillSerializer.serialize(
+            name: skill.name, description: skill.skillDescription, body: "New"))
         XCTAssertTrue(fixture.library.saveDraft(skill))
         fixture.watcher.emit(skill.directoryName)
         XCTAssertEqual(fixture.counter.value, 1)

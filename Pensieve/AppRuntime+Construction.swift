@@ -61,12 +61,14 @@ extension AppRuntimePaths {
     }
 
     func makeImportViewModel(notifier: @escaping SyncStateNotifying,
-                             echoRegistrar: @escaping SyncWriteEchoRegistering) -> ImportViewModel {
+                             echoRegistrar: @escaping SyncWriteEchoRegistering,
+                             bodyWriteRegistration: SyncBodyWriteRegistration = .suppressed) -> ImportViewModel {
         let files = FileService()
         return ImportViewModel(scanner: makeImportScanner(fileService: files),
             skillStore: SkillStore(fileService: files, baseDir: skillsDir, storeRoot: storeRoot), lockPath: syncLockPath,
             manifestService: ManifestService(),
-            manifestRoot: storeRoot, notifier: notifier, echoRegistrar: echoRegistrar)
+            manifestRoot: storeRoot, notifier: notifier, echoRegistrar: echoRegistrar,
+            bodyWriteRegistration: bodyWriteRegistration)
     }
 
     @MainActor

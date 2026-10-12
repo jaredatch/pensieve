@@ -25,7 +25,7 @@ final class MarkdownEditorBridgeTests: XCTestCase {
     func testHostilePayloadRoundTrips() {
         let (coordinator, window) = makeReadyEditor(onContentChange: { _ in })
         withExtendedLifetime(window) {
-            let hostile = "`</script>` ${x} \"q\" ' \n# heading"
+            let hostile = "\u{feff}---\nname: Test\ndescription: Bridge\n---\n`</script>` ${x} \"q\" ' \n# heading"
             coordinator.setBody(hostile)
             let done = expectation(description: "round-trip")
             // callAsyncJavaScript(setContent) and evaluateJavaScript(getContent) execute FIFO on the

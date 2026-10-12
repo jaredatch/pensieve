@@ -26,7 +26,7 @@ extension SkillLibraryViewModel {
         }
     }
 
-    /// Treat watcher events produced by the resident coordinator's pull/rebuild as self-authored.
+    /// Observe the coordinator's whole-file changes and defer dirty-draft questions to its final state.
     func beginCoordinatorChanges() {
         coordinatorCompletionGeneration &+= 1
         isApplyingCoordinatorChanges = true
@@ -93,7 +93,7 @@ extension SkillLibraryViewModel {
         var foundChange = false
         for directoryName in candidateSlugs where !acceptedSlugs.contains(directoryName) {
             let currentBody = currentOnDiskBody(directoryName: directoryName)
-            guard coordinatorBaselineBodies[directoryName] != currentBody,
+            guard !Self.bodiesMatch(currentBody, coordinatorBaselineBodies[directoryName]),
                   !wasLastWrittenByApp(directoryName: directoryName, currentBody: currentBody) else { continue }
             acceptExternalChange(directoryName: directoryName, currentBody: currentBody, shouldNotify: false)
             acceptedSlugs.insert(directoryName)
@@ -108,7 +108,7 @@ extension SkillLibraryViewModel {
     private func askAboutCoordinatorChanges(_ slugs: Set<String>) {
         for directoryName in slugs.sorted()
         where hasUnsavedChanges(forDirectory: directoryName)
-            && coordinatorBaselineBodies[directoryName] != currentOnDiskBody(directoryName: directoryName) {
+            && !Self.bodiesMatch(currentOnDiskBody(directoryName: directoryName), coordinatorBaselineBodies[directoryName]) {
             requestUnsavedChangesPrompt(directoryName: directoryName, reason: .externalChange)
         }
     }
@@ -135,7 +135,7 @@ extension SkillLibraryViewModel {
     /// Handle an external-change notification for `directoryName`.
     /// The watcher delivers on the MAIN queue, so this runs on main — safe to mutate
     /// @Observable state directly, no extra hop. Suppress the app's OWN writes via the
-    /// last-written-content fingerprint: if the on-disk body equals what we last wrote/loaded,
+    /// last-written-content fingerprint: if the complete file equals what we last wrote/loaded,
     /// this event is our echo, not a real external edit.
     /// An unreadable file reads as an empty body: the app's own deletion records that fingerprint
     /// (`deleteSkillEntry`, PLAN-26), so its echo — and every repeat event for one disappearance — is ours;

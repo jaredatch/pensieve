@@ -94,7 +94,7 @@ final class NudgeInstallService: SkillInstallServiceProtocol {
         let raw = SkillSerializer.serialize(
             name: slug, description: "Description", body: "Installed"
         )
-        registration.begin(slug, SkillParser.stripFrontmatter(raw))
+        registration.begin(slug, raw)
         var bodyWriteSucceeded = false
         defer { registration.end(slug, bodyWriteSucceeded) }
         try onInstallWrite(slug)

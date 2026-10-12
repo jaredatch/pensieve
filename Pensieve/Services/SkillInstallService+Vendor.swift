@@ -219,9 +219,7 @@ extension SkillInstallService {
         beforeReplace: () throws -> Void = {},
         registration: SyncBodyWriteRegistration
     ) throws {
-        let expectedBody = SkillParser.stripFrontmatter(
-            try fileService.readFile(at: sourceDirectory + "/SKILL.md")
-        )
+        let expectedBody = try fileService.readFile(at: sourceDirectory + "/SKILL.md")
         var bodyWriteBegan = false
         var bodyWriteSucceeded = false
         defer { if bodyWriteBegan { registration.end(slug, bodyWriteSucceeded) } }

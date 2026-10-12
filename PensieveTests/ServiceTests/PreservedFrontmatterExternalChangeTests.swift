@@ -44,18 +44,19 @@ final class PreservedFrontmatterExternalChangeTests: XCTestCase {
         """
         try write(frontmatter: frontmatter, body: "A")
         viewModel.startWatching()
-        XCTAssertEqual(viewModel.editorBody(for: skill), "A")
-        viewModel.noteEditorChanged(skill, body: "B")
+        XCTAssertEqual(viewModel.editorBody(for: skill), "---\n\(frontmatter)\n---\n\nA\n")
+        let draft = "---\n\(frontmatter)\n---\n\nB\n"
+        viewModel.noteEditorChanged(skill, body: draft)
 
         try write(frontmatter: frontmatter, body: "C")
         watcher.fire("preserved")
 
         XCTAssertEqual(viewModel.readBody(skill), "C")
-        XCTAssertEqual(viewModel.drafts["preserved"]?.body, "B")
+        XCTAssertEqual(viewModel.drafts["preserved"]?.body, draft)
         XCTAssertTrue(viewModel.hasUnsavedChanges(for: skill))
         XCTAssertTrue(viewModel.externallyModified.contains("preserved"))
         XCTAssertEqual(prompts.map { $0.0.reason }, [.externalChange])
-        XCTAssertTrue(viewModel.wasLastWrittenByApp(directoryName: "preserved", currentBody: "C"))
+        XCTAssertTrue(viewModel.wasLastWrittenByApp(directoryName: "preserved", currentBody: "---\n\(frontmatter)\n---\n\nC\n"))
 
         prompts[0].1(.cancel)
         let reloadToken = viewModel.reloadToken
@@ -63,7 +64,7 @@ final class PreservedFrontmatterExternalChangeTests: XCTestCase {
 
         XCTAssertEqual(prompts.count, 1)
         XCTAssertEqual(viewModel.reloadToken, reloadToken)
-        XCTAssertEqual(viewModel.drafts["preserved"]?.body, "B")
+        XCTAssertEqual(viewModel.drafts["preserved"]?.body, draft)
         XCTAssertTrue(viewModel.hasUnsavedChanges(for: skill))
     }
 

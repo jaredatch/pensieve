@@ -1,13 +1,14 @@
 import Foundation
 
 /// An unsaved edit: the skill it belongs to and the editor's whole text. An entry enters
-/// `SkillLibraryViewModel.drafts` when the text differs from the file's last known body (the self-write
+/// `SkillLibraryViewModel.drafts` when the text differs from the file's last known document (the self-write
 /// fingerprint) and leaves on Save, Revert, the skill's deletion, or the user typing back to that body;
 /// whether it is dirty NOW is measured against the fingerprint (`hasUnsavedChanges(forDirectory:)`), never
 /// remembered — a file that moves under the draft and back never costs it.
 struct EditorDraft: Equatable {
     let skill: Skill
     var body: String
+    let baseline: String?
 }
 
 /// The user's answer to the stock unsaved-changes sheet.
@@ -50,7 +51,7 @@ extension SkillLibraryViewModel {
     /// reads dirty again with the text intact — a transient body during a sync cycle never costs the draft.
     func hasUnsavedChanges(forDirectory directoryName: String) -> Bool {
         guard let draft = drafts[directoryName] else { return false }
-        // Compare the trimmed editor body and stored body in the same LF form as watcher echoes.
+        // Compare the complete editor text and stored document in the same LF form as watcher echoes.
         return !Self.bodiesMatch(draft.body, withFingerprintLock { lastWrittenBody[directoryName] })
     }
 
@@ -63,7 +64,9 @@ extension SkillLibraryViewModel {
     /// echo of a body the fingerprint already holds, cannot swallow it.
     func editorBody(for skill: Skill) -> String {
         let directoryName = skill.directoryName
-        let onDisk = readBody(skill)
+        observedSkills.setObject(skill, forKey: directoryName as NSString)
+        let onDisk = readSkillDocument(skill) ?? ""
+        StoreRebuildService.refreshIdentity(of: skill, document: onDisk)
         let known = withFingerprintLock { lastWrittenBody[directoryName] }
         if let known, !Self.bodiesMatch(onDisk, known), !wasLastWrittenByApp(directoryName: directoryName, currentBody: onDisk) {
             // Accounted for as a watcher event would be: counted in the sequence a clean sample is checked
@@ -85,17 +88,17 @@ extension SkillLibraryViewModel {
         textEditRevisions[skill.directoryName, default: 0] &+= 1
         let directoryName = skill.directoryName
         let baseline = withFingerprintLock { lastWrittenBody[directoryName] }
-        // Compare the trimmed editor body and stored body in the same LF form as watcher echoes.
+        // Compare the complete editor text and stored document in the same LF form as watcher echoes.
         if Self.bodiesMatch(body, baseline) {
             drafts[directoryName] = nil
         } else {
-            drafts[directoryName] = EditorDraft(skill: skill, body: body)
+            drafts[directoryName] = EditorDraft(skill: skill, body: body, baseline: drafts[directoryName]?.baseline ?? baseline)
         }
     }
 
-    /// Write the draft through the canonical writer, once: the fingerprint moves to what was written, the
+    /// Check and write the complete draft once: the fingerprint moves to what was written, the
     /// external-change mark clears (the write is the newer version now), sync is nudged. A refused write
-    /// (`updateBody` sets `error`) keeps the draft, so Save is a real retry. True when nothing remains to
+    /// (`updateDocument` sets `error`) keeps the draft, so Save is a real retry. True when nothing remains to
     /// save — including when there was no draft, or one the file has caught up with.
     ///
     /// Save edits the file it loaded and never re-creates one that is gone: a row whose deletion was saved
@@ -106,7 +109,7 @@ extension SkillLibraryViewModel {
     /// a draft whose file is gone must not report "nothing to save" — an empty draft over a vanished file reads
     /// clean by measure and still refuses here.
     @discardableResult
-    func saveDraft(_ skill: Skill) -> Bool {
+    func saveDraft(_ skill: Skill, overwritingExternalChange: Bool = false) -> Bool {
         guard let draft = drafts[skill.directoryName] else { return true }
         guard !skill.isDeleted, hasReadableSkillFile(skill.directoryName) else {
             error = "Failed to save: this skill's file can't be read (removed, or unreadable). "
@@ -114,7 +117,13 @@ extension SkillLibraryViewModel {
             return false
         }
         guard hasUnsavedChanges(forDirectory: skill.directoryName) else { return true }
-        let outcome = updateBody(skill, body: draft.body)
+        let onDisk = currentOnDiskBody(directoryName: skill.directoryName)
+        if !overwritingExternalChange, !Self.bodiesMatch(onDisk, draft.baseline),
+           !Self.bodiesMatch(onDisk, draft.body) {
+            acceptExternalChange(directoryName: skill.directoryName, currentBody: onDisk, shouldNotify: false)
+            return false
+        }
+        let outcome = updateDocument(skill, document: draft.body, original: onDisk)
         guard outcome.succeeded else { return false }
         drafts[skill.directoryName] = nil
         externallyModified.remove(skill.directoryName)
@@ -203,7 +212,8 @@ extension SkillLibraryViewModel {
         let proceed: Bool
         switch choice {
         case .save:
-            proceed = skill.map { saveDraft($0) } ?? true   // the file caught up meanwhile: nothing left to save
+            let overwrite = prompt.reason == .externalChange || externallyModified.contains(prompt.directoryName)
+            proceed = skill.map { saveDraft($0, overwritingExternalChange: overwrite) } ?? true
         case .discard:
             if let skill { discardDraft(skill) }
             proceed = true

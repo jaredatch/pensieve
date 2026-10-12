@@ -18,6 +18,9 @@ struct PreservedFrontmatter {
 }
 
 struct PreservedSkillFile {
+    let header: String
+    let rawBody: String
+    let frontmatterSource: String
     /// Exact original file bytes, returned directly when a body-only save changes no body text.
     let source: String
     /// Exact bytes around the frontmatter source, used by migration to replace only identity entries.
@@ -147,19 +150,16 @@ enum SkillParser {
     }
 
     /// Strip YAML frontmatter (if present) and return only the markdown body.
-    /// Used by editor and preview to hide raw frontmatter from the user.
-    /// A file with no frontmatter reads in the same canonical form, so a fingerprint seeded from it compares
-    /// with a draft the way a frontmatter-backed one does (batch Layer-2, round 4).
+    /// Used by Rendered and token estimates; the editor reads the complete document.
     static func stripFrontmatter(_ content: String) -> String {
-        guard let extracted = extractFrontmatter(content) else { return canonicalBody(content) }
+        guard let extracted = extractFrontmatter(content) else {
+            let text = content.unicodeScalars.first == "\u{feff}" ? String(content.dropFirst()) : content
+            return canonicalBody(text)
+        }
         return extracted.body
     }
 
-    /// The body as the store reads it back: newlines trimmed at both ends (what `extractFrontmatter` returns).
-    /// The self-write fingerprint and a draft's dirtiness compare in this form, so a body that ends in a
-    /// newline is neither unsaved after its own save nor an external change when the file is read back
-    /// (batch Layer-2: the app's own Save read as "Modified externally — reloaded", and the editor's last
-    /// empty line vanished).
+    /// Legacy body rewrites and previews trim boundary line breaks. Complete-document drafts retain them.
     static func canonicalBody(_ body: String) -> String {
         String(body[canonicalBodyRange(in: body)])
     }
@@ -184,8 +184,10 @@ enum SkillParser {
     /// Frontmatter opens on the first LF/CRLF line and closes at the next column-zero fence.
     private static func extractFrontmatter(_ content: String) -> ExtractedFrontmatter? {
         let lines = sourceLines(in: content, yamlBreaks: false)
-        guard let first = lines.first, isFrontmatterFence(content[first.contentRange]),
-              let closeIndex = lines.indices.dropFirst().first(where: {
+        guard let first = lines.first else { return nil }
+        let opening = content[first.contentRange]
+        let fence = opening.unicodeScalars.first == "\u{feff}" ? opening.dropFirst() : opening
+        guard isFrontmatterFence(fence), let closeIndex = lines.indices.dropFirst().first(where: {
                   isFrontmatterFence(content[lines[$0].contentRange])
               }) else { return nil }
         let frontmatterStart = first.sourceRange.upperBound
@@ -205,6 +207,9 @@ enum SkillParser {
             frontmatter: frontmatter,
             body: body,
             preservedFile: PreservedSkillFile(
+                header: String(content[..<lines[closeIndex].contentRange.upperBound]),
+                rawBody: String(content[lines[closeIndex].contentRange.upperBound...]),
+                frontmatterSource: frontmatter,
                 source: content,
                 frontmatterPrefix: String(content[..<frontmatterStart]),
                 frontmatterSuffix: String(content[frontmatterEnd...]),

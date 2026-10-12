@@ -37,15 +37,18 @@ final class SkillLibraryViewModel {
 
     let skillStore: SkillStoreProtocol
     let fileService: FileServiceProtocol
-    /// The self-write fingerprint by slug: the body the app last wrote or loaded, in the store's canonical form
-    /// (`SkillParser.canonicalBody`). NOT observed: the install and update finalizers mutate it off the main thread
+    /// The self-write fingerprint by slug: the complete document the app last wrote or loaded.
+    /// NOT observed: the install and update finalizers mutate it off the main thread
     /// under `fingerprintLock`, and an observed mutation there would take SwiftUI's update lock while holding ours,
     /// against a `body` that takes ours while holding SwiftUI's (`hasUnsavedChanges`) — an ABBA deadlock the batch
     /// Layer-2 reproduced. Views that show dirtiness observe the main-thread signals instead: `drafts`, `reloadToken`,
     /// `externallyModified`, `appWriteRevision`.
+    @ObservationIgnored let observedSkills = NSMapTable<NSString, Skill>(keyOptions: .strongMemory, valueOptions: .weakMemory)
     @ObservationIgnored var lastWrittenBody: [String: String] = [:]
     @ObservationIgnored let fingerprintLock = NSLock()
     @ObservationIgnored var pendingAppWrittenBody: [String: String] = [:]
+    /// Completion callbacks must not replace a writer's expected bytes with a racing disk read.
+    @ObservationIgnored var registeredAppWriteSlugs: Set<String> = []
     @ObservationIgnored var appWritePublishQueued = false
     /// Monotonic invalidation for successful app-authored SKILL.md rewrites (frontmatter-only ones included).
     @MainActor private(set) var appWriteRevision: Int = 0
@@ -67,10 +70,10 @@ final class SkillLibraryViewModel {
     var folderChangeRevisions: [String: UInt64] = [:]
     var error: String?
     var showCreateSheet = false
-    /// Skill `directoryName`s whose on-disk body changed outside the app and have not yet been re-edited.
+    /// Skill `directoryName`s whose on-disk document changed outside the app and have not yet been re-edited.
     var externallyModified: Set<String> = []
     /// The unsaved editor drafts by slug — an entry enters when the editor's text differs from the file's last
-    /// known body and leaves on Save, Revert, deletion, or typing back to it; whether it is dirty now is measured
+    /// known document and leaves on Save, Revert, deletion, or typing back to it; whether it is dirty now is measured
     /// against the fingerprint (edits reach disk only on Save). `SkillLibraryViewModel+Draft.swift`.
     var drafts: [String: EditorDraft] = [:]
     /// A delayed Restore also retires after an edit that the user subsequently undid.
@@ -178,7 +181,9 @@ final class SkillLibraryViewModel {
             regenerateManifest(.createSkill(SkillOverlay(slug: dirName, createdAt: skill.createdAt,
                 scope: skill.scope, tags: skill.tags, cursor: skill.cursorConfig, agents: [], origin: .authored)),
                 context: context)
-            setLastWrittenBody(SkillParser.canonicalBody(body), directoryName: dirName)
+            observedSkills.setObject(skill, forKey: dirName as NSString)
+            setLastWrittenBody(SkillSerializer.serialize(name: name, description: resolvedDescription, body: body),
+                               directoryName: dirName)
             notifier()
             return skill
         } catch {
@@ -318,6 +323,7 @@ extension SkillLibraryViewModel {
                            fetch: (ModelContext) throws -> [Skill] = { try $0.fetch(FetchDescriptor<Skill>()) }) {
         do {
             let rows = try fetch(context)
+            for row in rows { observedSkills.setObject(row, forKey: row.directoryName as NSString) }
             libraryUnavailable = false
             pendingRowCleanup = Set(rows.filter { !hasReadableSkillFile($0.directoryName) }.map(\.id))
         } catch {
@@ -334,6 +340,9 @@ extension SkillLibraryViewModel {
         // Dirty is measured against the new fingerprint, so a draft the file has caught up with has nothing
         // to save and nothing is dropped; during a sync cycle the question waits for the cycle's final body
         // (`finishCoordinatorChanges`) — a transient body must not cost the draft or ask about itself.
+        if let skill = observedSkills.object(forKey: directoryName as NSString) {
+            StoreRebuildService.refreshIdentity(of: skill, document: currentBody)
+        }
         setLastWrittenBody(currentBody, directoryName: directoryName)
         externallyModified.insert(directoryName)
         reloadToken &+= 1

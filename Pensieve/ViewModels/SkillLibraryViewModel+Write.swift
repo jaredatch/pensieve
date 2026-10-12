@@ -7,6 +7,36 @@ extension SkillLibraryViewModel {
         var succeeded: Bool { self != .failed }
     }
 
+    func updateDocument(_ skill: Skill, document: String, original: String) -> BodyUpdateOutcome {
+        guard !isWriteFenced(skill) else {
+            error = "This skill's files are unavailable; restore the file and try again."
+            return .failed
+        }
+        do {
+            let description = skill.skillDescription.isEmpty ? skill.name : skill.skillDescription
+            let result = try SkillDocumentEditing.rewrite(draft: document, original: original,
+                name: skill.name, description: description, slug: skill.directoryName)
+            if result.didChange {
+                // Header-less legacy documents retain the existing store's canonical rewrite operation.
+                if SkillParser.parse(original).preservedFile == nil && SkillParser.parse(document).preservedFile == nil
+                    && original.unicodeScalars.first != "\u{feff}" {
+                    return updateBody(skill, body: document)
+                }
+                try skillStore.writeBody(directoryName: skill.directoryName, body: result.content)
+            }
+            StoreRebuildService.refreshIdentity(of: skill, document: result.content)
+            if result.didChange {
+                skill.updatedAt = Date()
+                noteAppAuthoredBody(skill, body: result.content)
+            } else { setLastWrittenBody(result.content, directoryName: skill.directoryName) }
+            error = nil
+            return result.didChange ? .written : .unchanged
+        } catch {
+            self.error = error.localizedDescription
+            return .failed
+        }
+    }
+
     func updateBody(_ skill: Skill, body: String) -> BodyUpdateOutcome {
         guard !isWriteFenced(skill) else {
             error = "This skill's files are unavailable; delete it from the list, or restore the file and relaunch Pensieve."
@@ -30,7 +60,8 @@ extension SkillLibraryViewModel {
             if skill.skillDescription != resolvedDescription {
                 skill.skillDescription = resolvedDescription
             }
-            let savedBody = SkillParser.stripFrontmatter(result.content)
+            let savedBody = result.content
+            StoreRebuildService.refreshIdentity(of: skill, document: result.content)
             if result.didChange {
                 noteAppAuthoredBody(skill, body: savedBody)
                 skill.updatedAt = Date()
