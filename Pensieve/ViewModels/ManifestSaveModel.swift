@@ -21,7 +21,6 @@ final class ManifestSaveModel {
     private let log: (String) -> Void
     @ObservationIgnored private var items: [Item] = []
     @ObservationIgnored private var refused: [ManifestRefusedEdit] = []
-    @ObservationIgnored private var lastDurable: ManifestSnapshot?
     @ObservationIgnored private var categoryMessages: [String] = []
     @ObservationIgnored private var worker: Task<Void, Never>?
 
@@ -93,14 +92,13 @@ final class ManifestSaveModel {
             let lock = try await takeLock()
             defer { lock.release() }
             disk = try await readCurrentManifest()
-            lastDurable = disk
             refreshRefused(durable: disk)
             let result = try await publish(item, disk: disk)
             await rebuild(item, durable: result.snapshot, published: result.published)
             return result.published
         } catch {
             if item.categoryEdit != nil {
-                refuseCategory(item, error: error)
+                refuseCategory(item, durable: disk, error: error)
                 return false
             }
             if disk != nil {
@@ -130,7 +128,6 @@ final class ManifestSaveModel {
         }
         let snapshot = saved, manifest = manifest, root = root
         try await BlockingWork.run { try manifest.write(snapshot, toRoot: root) }
-        lastDurable = saved
         for index in items.indices where healedItems.contains(items[index].id) {
             items[index].healingReceipt = saved
         }
@@ -218,22 +215,24 @@ final class ManifestSaveModel {
 
 extension ManifestSaveModel {
     @MainActor
-    private func categoryIsSaved(_ item: Item) -> Bool {
-        guard let edit = item.categoryEdit, let lastDurable else { return false }
+    private func categoryIsSaved(_ item: Item, durable: ManifestSnapshot?) -> Bool {
+        // A failed lock/read cannot confirm state from an earlier item. Only this item's own
+        // healing receipt can establish publication without a current read under sync.lock.
+        guard let edit = item.categoryEdit, let durable = durable ?? item.healingReceipt else { return false }
         let following: [CategorySaveEdit]
         if let receipt = item.healingReceipt {
             following = items.dropFirst().filter {
                 $0.presentation.context === item.presentation.context && $0.healingReceipt == receipt
             }.compactMap(\.categoryEdit)
         } else { following = [] }
-        return edit.isSaved(in: lastDurable, following: following, receipt: item.healingReceipt)
+        return edit.isSaved(in: durable, following: following, receipt: item.healingReceipt)
     }
 
     @MainActor
-    private func refuseCategory(_ item: Item, error: Error) {
+    private func refuseCategory(_ item: Item, durable: ManifestSnapshot?, error: Error) {
         guard let edit = item.categoryEdit else { return }
-        if categoryIsSaved(item) {
-            categoryMessages.append(CategorySaveNotice.message(edit: edit, error: error, undone: false))
+        if categoryIsSaved(item, durable: durable) {
+            categoryMessages.append(CategorySaveNotice.message(edit: edit, error: error, outcome: .saved))
             item.report(error)
             return
         }
@@ -261,9 +260,10 @@ extension ManifestSaveModel {
             guard let edit = item.categoryEdit else { continue }
             let error = index == 0 ? reason : ManifestSaveError.unsavedTarget
             do {
-                try edit.restore(in: item.presentation.context)
+                let restored = try edit.restore(in: item.presentation.context)
                 try item.presentation.context.save()
-                categoryMessages.append(CategorySaveNotice.message(edit: edit, error: error, undone: true))
+                categoryMessages.append(CategorySaveNotice.message(edit: edit, error: error,
+                    outcome: restored ? .undone : .removed))
             } catch {
                 categoryMessages.append("Couldn't restore “\(edit.name)”: " + error.localizedDescription)
                 log("Category undo failed: " + error.localizedDescription)

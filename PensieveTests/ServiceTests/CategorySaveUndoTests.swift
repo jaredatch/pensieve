@@ -22,6 +22,9 @@ final class CategorySaveUndoTests: XCTestCase {
             let category = try XCTUnwrap(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).first { $0.id == id })
             XCTAssertEqual(category.name, "Local", refusal)
         }
+        try await checkPriorSaveAfterPullDoesNotAcknowledgeRefusal()
+        try await checkUnrelatedCategoryDoesNotAcknowledgeRename()
+        try await checkRefusalAfterPulledDeletion(fields: ["name"])
     }
 
     func testRefusedCreateAndDependentRenameLeaveNoCategory() async throws {

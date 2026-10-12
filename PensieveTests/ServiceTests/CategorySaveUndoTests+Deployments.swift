@@ -35,6 +35,7 @@ extension CategorySaveUndoTests {
                 XCTAssertEqual(try h.manifestBytes(), before)
             }
         }
+        try await checkRefusalAfterPulledDeletion(fields: ["skill", "project"])
     }
 
     func testUndoRetainsCleanupWhileProjectIsMissingAndRemovesWhenItReturns() async throws {

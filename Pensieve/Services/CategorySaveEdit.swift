@@ -60,18 +60,26 @@ struct CategorySaveEdit {
             return saved.skillSlugs.contains(slug) == final.skillSlugs.contains(slug)
         case .categoryProject(_, let key, _):
             return saved.projectKeys.contains(key) == final.projectKeys.contains(key)
-        default: return true
+        case .renameCategory(let old, _):
+            // The target name can belong to a different category pulled from another Mac.
+            // A saved rename also removed the original name.
+            return old == final.name || !durable.categories.contains { $0.name == old }
+        case .createCategory:
+            return Set(saved.projectKeys) == Set(final.projectKeys) && Set(saved.skillSlugs) == Set(final.skillSlugs)
+        default: return false
         }
     }
 
-    func restore(in context: ModelContext) throws {
+    /// False means sync removed the target; only undoing our own delete can insert a missing row.
+    func restore(in context: ModelContext) throws -> Bool {
         let existing = try context.fetch(FetchDescriptor<Category>()).first { $0.id == id }
         guard let before else {
             if let existing { context.delete(existing) }
-            return
+            return true
         }
         let row: Category
         if let existing { row = existing } else {
+            guard case .deleteCategory = change else { return false }
             row = Category(name: before.name)
             row.id = id
             row.createdAt = createdAt
@@ -89,5 +97,6 @@ struct CategorySaveEdit {
             if before.projectKeys.contains(key) { row.projectKeys.append(key) }
         default: break
         }
+        return true
     }
 }
