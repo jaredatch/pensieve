@@ -18,6 +18,7 @@ struct GitCredentialFixture {
     var networkTrace: String { base + "/network-calls" }
     var argvTrace: String { base + "/argv" }
     var bare: String { base + "/remote.git" }
+    var acceptedToken: String { base + "/accepted-token" }
     var credential: GitCredential { .httpsToken(username: "pensieve", token: token) }
     var git: GitService {
         GitService(askpassHelperPath: base + "/askpass", executablePath: base + "/git")
@@ -26,6 +27,7 @@ struct GitCredentialFixture {
     init(transport: GitTransport = .https) throws {
         self.transport = transport
         try files.createDirectory(at: base)
+        try files.writeFile(at: acceptedToken, content: token)
         try files.writeExecutableFile(at: helper, content: """
             #!/bin/sh
             printf 'helper %s\\n' "$1" >> '\(foreignTrace)'
@@ -97,7 +99,8 @@ struct GitCredentialFixture {
               /usr/bin/git "${options[@]}" credential fill) || {
                 printf 'fatal: Authentication failed\\n' >&2; exit 128;
               }
-            if ! /usr/bin/grep -qx 'password=\(token)' <<< "$auth"; then
+            expected=$(cat '\(acceptedToken)')
+            if ! /usr/bin/grep -qx "password=$expected" <<< "$auth"; then
               printf '%s\\n\\n' "$auth" | /usr/bin/git "${options[@]}" credential reject
               printf 'fatal: Authentication failed\\n' >&2
               exit 128
@@ -122,6 +125,9 @@ struct GitCredentialFixture {
         done
         case "$1" in
           clone|fetch|push|ls-remote)
+            if [ "$1" = push ] && [ -f '\(base)/rotate-at-push' ]; then
+              mv '\(base)/rotate-at-push' '\(acceptedToken)'
+            fi
             \(transport == .https ? authentication : "")
             printf '%s\\n' "$1" >> '\(networkTrace)'
             \(transport == .https ? "exec /usr/bin/git -c 'url.file://\(bare).insteadOf=\(remote)' \"${original[@]}\"" : "")

@@ -1719,13 +1719,16 @@ extension SyncSetupModelTests {
     }
 
     private func assertButtonAvailability(in host: NSHostingView<AnyView>, runtime: AppRuntime, expected: Bool) async {
-        var enabled: Bool?
-        host.rootView = AnyView(SyncSettingsView().environment(runtime)
-            .buttonStyle(RenderedViewTestSupport.AvailabilityStyle { enabled = $0 }))
-        await TestWait.until(failureMessage: "The rendered Sync settings button did not report availability \(expected)") {
-            enabled != nil
-        }
-        XCTAssertEqual(enabled, expected, "Sync settings must disable the button until its job finishes")
+        let probe = RenderedButtonTestSupport()
+        host.rootView = AnyView(SyncSettingsView().environment(runtime).buttonStyle(probe.style))
+        let connecting = runtime.syncSetup.state == .working
+            || (runtime.syncModel.canConnect && !runtime.syncSetup.isDisconnecting)
+        let title = connecting ? "Connect…" : "Disconnect…"
+        do {
+            let button = try await probe.button(titled: title, in: host)
+            XCTAssertEqual(button.enabled, expected, "Sync settings must disable \(title) until its job finishes")
+        } catch { XCTFail("Couldn't inspect the rendered \(title) control: \(error)") }
+        probe.clear()
         host.rootView = settingsRoot(runtime)
     }
 
@@ -1910,6 +1913,36 @@ extension SyncSetupModelTests {
     private func setupFields(in root: NSView) -> [NSTextField] {
         [root].compactMap { $0 as? NSTextField }.filter { $0.placeholderString != nil }
             + root.subviews.flatMap { setupFields(in: $0) }
+    }
+
+    func testConnectSheetKeepsBlankHTTPSTokenDisabledAndExplainsWhy() async throws {
+        let trace = EventTrace()
+        let model = try makeModel(git: RecordingGitService(trace: trace), credentials: InMemoryCredentialStore(),
+            rebuilder: RecordingRebuilder(trace: trace), fileService: virginScaffold(trace: trace),
+            syncedFamiliesEmpty: { true })
+        let presentation = NoticePresentation()
+        let host = setupHost(AnyView(NoticeHost(presentation: presentation, model: model)))
+        defer { removeSetup(host) }
+        await TestWait.until(failureMessage: "Connect sheet didn't open") { host.window.attachedSheet != nil }
+        let (_, content) = try await prepareHTTPSSetupForm(parent: host.window)
+        await TestWait.until(failureMessage: "HTTPS token caption didn't render") {
+            RenderedViewTestSupport.values(in: content).compactMap { $0 as? Text }
+                .flatMap(RenderedViewTestSupport.strings).contains("Sync over HTTPS needs an access token.")
+        }
+        XCTAssertFalse(pressFinishedSetupKey("\r", in: content), "Return must not submit a blank HTTPS token")
+        let token = try XCTUnwrap(setupFields(in: content).last)
+        token.stringValue = " \t"
+        token.delegate?.controlTextDidChange?(Notification(name: NSTextField.textDidChangeNotification, object: token))
+        content.layoutSubtreeIfNeeded()
+        XCTAssertFalse(pressFinishedSetupKey("\r", in: content), "Whitespace must keep Connect disabled")
+        token.stringValue = "accepted"
+        token.delegate?.controlTextDidChange?(Notification(name: NSTextField.textDidChangeNotification, object: token))
+        await TestWait.until(failureMessage: "Nonblank token did not enable the Connect shortcut") {
+            self.pressFinishedSetupKey("\r", in: content)
+        }
+        await TestWait.until(failureMessage: "Connect didn't finish") { model.state == .done }
+        presentation.shown = false
+        await TestWait.until(failureMessage: "Connect sheet cleanup didn't detach") { host.window.attachedSheet == nil }
     }
 
     private func prepareHTTPSSetupForm(parent: NSWindow) async throws -> (NSWindow, NSView) {

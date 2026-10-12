@@ -27,11 +27,16 @@ final class GitCredentialIsolationTests: XCTestCase {
         XCTAssertFalse(try agent.fixture.files.readFile(at: agent.fixture.base + "/agent-calls").isEmpty)
     }
 
-    private func exerciseSyncLifecycle(_ fixture: GitCredentialFixture) async throws {
+    func testConflictPushRefusalCanBeRepairedWithoutDisconnecting() async throws {
+        let fixture = try NativeTestWork.run { try GitCredentialFixture() }
+        defer { try? fixture.remove() }
+        try fixture.clearTraces()
+        try await exerciseSyncLifecycle(fixture, repairToken: true)
+    }
+
+    private func exerciseSyncLifecycle(_ fixture: GitCredentialFixture, repairToken: Bool = false) async throws {
         let credentials = InMemoryCredentialStore()
-        let first = fixture.base + "/first"
-        let second = fixture.base + "/second"
-        let downstream = fixture.base + "/downstream"
+        let first = fixture.base + "/first", second = fixture.base + "/second", downstream = fixture.base + "/downstream"
         let firstContainer = try container()
         let secondContainer = try container()
         try writeSkill(fixture, root: first, body: "Base")
@@ -72,8 +77,36 @@ final class GitCredentialIsolationTests: XCTestCase {
             return XCTFail("Expected one loaded conflict, got \(conflicts.phase)")
         }
         conflicts.choose(groups[0].id, .thisMachine)
+        if repairToken {
+            try await repairConflictToken(fixture, conflicts: conflicts, second: second,
+                downstream: downstream, container: secondContainer, credentials: credentials)
+            return
+        }
         await conflicts.applyAndReport(container: secondContainer)
         XCTAssertEqual(conflicts.phase, .done)
+        try assertDownstreamAndReceipts(fixture, second: second, downstream: downstream, credentials: credentials)
+    }
+
+    private func repairConflictToken(_ fixture: GitCredentialFixture, conflicts: ConflictResolutionModel,
+                                     second: String, downstream: String, container: ModelContainer,
+                                     credentials: CredentialStoreProtocol) async throws {
+        let replacement = fixture.token + "-replacement"
+        try fixture.files.writeFile(at: fixture.base + "/rotate-at-push", content: replacement)
+        await conflicts.applyAndReport(container: container)
+        let failedPhase = ConflictResolutionModel.Phase.error(
+            "fixture.test didn’t accept the access token. Replace it in Settings › Sync, then try again.")
+        XCTAssertEqual(conflicts.phase, failedPhase, "The failure must leave the conflict sheet open")
+        let model = SyncTokenModel(git: fixture.git, credentials: credentials,
+            root: second, lockPath: fixture.base + "/sync.lock", steps: SyncStepModel())
+        model.refresh(remoteURL: fixture.remote)
+        model.token = replacement
+        model.save()
+        await TestWait.until(failureMessage: "Conflict token replacement did not finish") { model.state != .checking }
+        XCTAssertEqual(model.state, .saved)
+        XCTAssertEqual(conflicts.phase, failedPhase, "Replacing a token must not dismiss or reload the conflict")
+        // Retry re-inspects; the prior pick has already rebased, so inspection finishes its unpushed commit.
+        await conflicts.loadAndReport(container: container)
+        XCTAssertEqual(conflicts.phase, .empty)
         try assertDownstreamAndReceipts(fixture, second: second, downstream: downstream, credentials: credentials)
     }
 

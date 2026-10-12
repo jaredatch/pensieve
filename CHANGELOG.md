@@ -19,6 +19,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- HTTPS sync ignores git credential helpers and other askpass programs. If you relied on one, add an access token in Settings › Sync. You can replace a refused or expired token there, even while a conflict is open.
 - The app is about half its old size, with crash symbols saved separately for troubleshooting.
 - The Projects list now shows projects from your other Macs too.
 - A GitHub link to a folder of skills now lists the skills in it, the same as a link to the whole repository.

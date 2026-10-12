@@ -33,6 +33,7 @@ enum SyncSetupError: LocalizedError, Equatable {
 @MainActor
 @Observable
 final class SyncSetupModel {
+    let syncToken: SyncTokenModel
     enum State: Equatable {
         case idle
         case working
@@ -70,6 +71,7 @@ final class SyncSetupModel {
         self.lockPath = lockPath
         self.syncedFamiliesEmpty = syncedFamiliesEmpty
         self.steps = steps
+        syncToken = SyncTokenModel(git: git, credentials: credentials, root: root, lockPath: lockPath, steps: steps)
     }
 
     // MARK: - Pure logic (unit-testable without git)

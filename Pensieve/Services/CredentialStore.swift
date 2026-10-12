@@ -36,7 +36,7 @@ enum CredentialError: LocalizedError, Equatable {
 /// `.debug` to the bundle identifier. NOT the broad internet-password class keyed by `kSecAttrServer` —
 /// that class's `SecItemDelete` could wipe the user's OTHER saved passwords for the same host (e.g. a
 /// Safari-saved github.com login). Every store/read/delete is scoped to our service string, so it can
-/// never match or touch a foreign credential. Store is a delete-then-add idempotent replace. (§E)
+/// never match or touch a foreign credential. Replacement updates the existing item atomically. (§E)
 struct KeychainCredentialStore: CredentialStoreProtocol {
     /// Production items are keyed `com.jaredatch.Pensieve.git.<host>` — byte-identical to every item
     /// stored since PLAN-08, so nothing a user saved is orphaned. A Debug build's identifier carries the
@@ -57,7 +57,10 @@ struct KeychainCredentialStore: CredentialStoreProtocol {
     }
 
     func store(token: String, username: String, forHost host: String) throws {
-        SecItemDelete(query(forHost: host) as CFDictionary)   // idempotent replace, scoped to OUR service
+        let values: [String: Any] = [kSecAttrAccount as String: username, kSecValueData as String: Data(token.utf8)]
+        let updated = SecItemUpdate(query(forHost: host) as CFDictionary, values as CFDictionary)
+        if updated == errSecSuccess { return }
+        guard updated == errSecItemNotFound else { throw CredentialError.keychain(updated) }
         var add = query(forHost: host)
         add[kSecAttrAccount as String] = username
         add[kSecValueData as String] = Data(token.utf8)

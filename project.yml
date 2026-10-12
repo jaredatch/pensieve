@@ -209,6 +209,7 @@ targets:
       - path: Pensieve/Services/DaemonCLI.swift
       - path: Pensieve/Services/DaemonCLI+Deployed.swift
       - path: Pensieve/Services/SyncDaemon.swift
+      - path: Pensieve/Services/SyncAuthentication.swift
       - path: Pensieve/Services/SyncAudit.swift
       - path: Pensieve/Services/DeployReconciler.swift
       - path: Pensieve/Models/PlatformTarget.swift
