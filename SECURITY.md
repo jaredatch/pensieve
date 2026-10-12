@@ -35,9 +35,9 @@ A skill installed from GitHub is text someone else wrote. Pensieve treats it tha
 
 Pensieve accepts only `https://`, `ssh://` and `user@host:path` remotes. It refuses git's `ext::` and other helper transports, `file://`, plain `http://`, and anything that could be read as a command-line option. It checks the remote when you connect and again before every sync. Git runs with a cleaned environment, so variables like `GIT_SSH_COMMAND` from your shell can't redirect it.
 
-HTTPS authentication uses only the token you give Pensieve, stored in your macOS Keychain. Git credential helpers and other askpass programs cannot supply, save or erase credentials during Pensieve's git commands. A missing or blank token leaves HTTPS unauthenticated; Connect refuses a blank token. SSH continues to use your agent keys.
+Pensieve stores the HTTPS token you enter in your macOS Keychain. Git credential helpers cannot supply, save or erase credentials during Pensieve's git commands. Other askpass programs from git config or the environment cannot answer HTTP credential requests. A missing or blank token leaves Pensieve's token helper disabled. Git can still use credentials you configure in `.netrc`, `http.extraHeader` or URL rewrites with userinfo. Connect refuses a blank token. SSH continues to use your agent keys.
 
-The token reaches git only through a small helper that reads it from the environment of that one git process. It never lands in a URL, a command line, `.git/config` or a log.
+Pensieve passes the saved token to git through a small helper that reads it from that git process's environment. Pensieve never writes the token into a URL, a command line, `.git/config` or a log.
 
 ## Releases and updates
 
