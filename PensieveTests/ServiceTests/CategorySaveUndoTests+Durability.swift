@@ -59,6 +59,7 @@ extension CategorySaveUndoTests {
             XCTAssertTrue(notice.contains("already saved"), kind)
             XCTAssertFalse(notice.contains("undone"), kind)
         }
+        try await checkPublishedRenameWithReusedOldName()
     }
 
     func testValidationRefusalRestoresCategoryAndNamesDamagedManifestPart() async throws {

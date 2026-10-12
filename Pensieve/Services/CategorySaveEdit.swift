@@ -61,9 +61,10 @@ struct CategorySaveEdit {
         case .categoryProject(_, let key, _):
             return saved.projectKeys.contains(key) == final.projectKeys.contains(key)
         case .renameCategory(let old, _):
-            // The target name can belong to a different category pulled from another Mac.
-            // A saved rename also removed the original name.
-            return old == final.name || !durable.categories.contains { $0.name == old }
+            // This item's receipt confirms the published name even if a different category
+            // now uses the old name. Without it, an unrelated target cannot prove a rename.
+            return receipt?.categories.contains { $0.name == final.name } == true
+                || old == final.name || !durable.categories.contains { $0.name == old }
         case .createCategory:
             return Set(saved.projectKeys) == Set(final.projectKeys) && Set(saved.skillSlugs) == Set(final.skillSlugs)
         default: return false

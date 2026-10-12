@@ -147,7 +147,11 @@ final class ManifestSaveModel {
             }
             var displayed = prepared.snapshot
             for edit in refused { edit.project(onto: &displayed) }
-            for pending in items.dropFirst() { pending.change.apply(to: &displayed) }
+            // The healed snapshot already contains these edits. Replaying a rename could
+            // rename a different category that has since claimed its old name.
+            for pending in items.dropFirst() where pending.healingReceipt != durable {
+                pending.change.apply(to: &displayed)
+            }
             try item.accept(prepared, displayed)
             item.report(nil)
         } catch {
