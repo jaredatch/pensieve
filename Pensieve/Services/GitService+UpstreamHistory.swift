@@ -7,7 +7,7 @@ extension GitService {
         remoteRef: String,
         depth: Int
     ) -> [String] {
-        installCredentialIsolationArgs + [
+        [
             "-C", repositoryPath, "fetch", "--quiet", "--no-tags", "--depth", "\(depth)",
             "--", remote, remoteRef
         ]
@@ -18,7 +18,7 @@ extension GitService {
         remote: String,
         commit: String
     ) -> [String] {
-        installCredentialIsolationArgs + [
+        [
             "-C", repositoryPath, "fetch", "--quiet", "--no-tags", "--depth", "1",
             "--", remote, commit
         ]

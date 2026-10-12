@@ -462,6 +462,26 @@ extension SyncSetupModelTests {
 
     // MARK: - connect: credentials
 
+    func testHTTPSConnectRefusesBlankTokenBeforeAnyGitOrWrite() async throws {
+        for token in ["", " ", "\t\n"] {
+            let git = RecordingGitService()
+            let trace = EventTrace()
+            let credentials = InMemoryCredentialStore()
+            try credentials.store(token: "original", username: "old", forHost: "github.com")
+            let files = virginScaffold(trace: trace)
+            let model = try makeModel(git: git, credentials: credentials,
+                rebuilder: RecordingRebuilder(), fileService: files)
+            await model.connectAndReport(url: "https://github.com/octocat/x.git", username: "u", token: token)
+            guard case let .failed(message) = model.state else { return XCTFail("Blank token was accepted") }
+            XCTAssertTrue(message.lowercased().contains("token"))
+            XCTAssertEqual(git.publicProbeCalls, 0)
+            XCTAssertTrue(git.calls.isEmpty)
+            XCTAssertTrue(trace.events.isEmpty)
+            XCTAssertEqual(credentials.credential(forHost: "github.com"),
+                           .httpsToken(username: "old", token: "original"))
+        }
+    }
+
     func testHTTPSConnectStoresPAT() async throws {
         let git = RecordingGitService()
         let creds = InMemoryCredentialStore()

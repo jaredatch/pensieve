@@ -127,7 +127,7 @@ extension GitServiceTests {
 
     // MARK: Tests
 
-    func testReadChecksDisableCredentialHelpersWithoutChangingConfig() throws {
+    func testReadsAndWritesDisableCredentialHelpersWithoutChangingConfig() throws {
         try NativeTestWork.run { [self] in
             try git.initRepository(at: tempDir)
             try git.runOrThrow(["config", "credential.helper", "fixture-helper"], in: tempDir)
@@ -138,7 +138,7 @@ extension GitServiceTests {
             }
             XCTAssertEqual(helpers, configured + "\n", "An empty final helper resets the helper chain during checks")
             XCTAssertEqual(try git.runOrThrow(["config", "--get-all", "credential.helper"], in: tempDir).stdout,
-                           configured, "Writing calls retain their configured credential helpers")
+                           configured + "\n", "Writing calls also reset their configured credential helpers")
             XCTAssertEqual(try FileService().readData(at: tempDir + "/.git/config"), config)
         }
     }
@@ -748,14 +748,18 @@ extension GitServiceTests {
         try NativeTestWork.run { [self] in
             // Seed STALE auth vars in the parent process env, then prove childEnvironment sanitizes them
             // for a non-.httpsToken op — a .sshAgent/nil op must never ride an inherited askpass or secret.
+            let previousSSHAskpass = ProcessInfo.processInfo.environment["SSH_ASKPASS"]
+            setenv("SSH_ASKPASS", tempDir + "/ssh-key-askpass", 1)
             setenv("GIT_ASKPASS", "/tmp/evil-askpass", 1)
             setenv("PENSIEVE_GIT_USERNAME", "stale-user", 1)
             setenv("PENSIEVE_GIT_PASSWORD", "stale-secret", 1)
             defer {
                 unsetenv("GIT_ASKPASS"); unsetenv("PENSIEVE_GIT_USERNAME"); unsetenv("PENSIEVE_GIT_PASSWORD")
+                if let previousSSHAskpass { setenv("SSH_ASKPASS", previousSSHAskpass, 1) } else { unsetenv("SSH_ASKPASS") }
             }
             let env = try git.childEnvironment(credential: .sshAgent)
-            XCTAssertNil(env["GIT_ASKPASS"])           // inherited askpass stripped
+            XCTAssertEqual(env["SSH_ASKPASS"], tempDir + "/ssh-key-askpass", "SSH retains its key-passphrase askpass")
+            XCTAssertEqual(env["GIT_ASKPASS"], "/usr/bin/false") // inherited askpass cannot answer for Git
             XCTAssertNil(env["PENSIEVE_GIT_USERNAME"]) // inherited username stripped
             XCTAssertNil(env["PENSIEVE_GIT_PASSWORD"]) // inherited secret stripped
             if let sock = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"] {
@@ -787,13 +791,19 @@ extension GitServiceTests {
         }
     }
 
-    func testAskpassHelperWriteFailurePropagates() throws {
+    func testAskpassHelperWriteFailurePropagatesForNonblankTokenOnly() throws {
         try NativeTestWork.run { [self] in
             let failingGit = GitService(fileService: AskpassWriteFailingFileService(),
                 askpassHelperPath: TestPaths.gitAskpassHelperPath)
             XCTAssertThrowsError(
                 try failingGit.childEnvironment(credential: .httpsToken(username: "u", token: "ghp_x"))
             )
+            for token in ["", " \t\n"] {
+                let environment = try failingGit.childEnvironment(credential: .httpsToken(username: "u", token: token))
+                XCTAssertNil(environment["PENSIEVE_GIT_PASSWORD"], "A blank stored token is absent")
+                XCTAssertNil(environment["PENSIEVE_GIT_USERNAME"])
+                XCTAssertEqual(environment["GIT_ASKPASS"], "/usr/bin/false")
+            }
         }
     }
 }
@@ -966,7 +976,8 @@ extension GitServiceTests {
                 try files.writeExecutableFile(at: executable, content: """
                 #!/usr/bin/python3
                 import base64, sys
-                assert sys.argv[1:] == ['ls-remote', '--symref', '--', 'https://fixture.test/refs.git', 'HEAD', 'refs/heads/*']
+                assert sys.argv[1:3] == ['-c', 'credential.helper=']
+                assert sys.argv[3:] == ['ls-remote', '--symref', '--', 'https://fixture.test/refs.git', 'HEAD', 'refs/heads/*']
                 with open('\(receipt)', 'a') as stream: stream.write('call\\n')
                 sys.stdout.buffer.write(base64.b64decode('\(encoded)'))
                 """)

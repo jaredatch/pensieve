@@ -96,7 +96,7 @@ extension SkillInstallServiceTests {
 
     func testAuthFailureMappedDistinctFromNotFound() throws {
         try NativeTestWork.run { [self] in
-            assertShallowCloneDisablesConfiguredCredentialHelpers()
+            assertShallowClonePreservesCommandFailure()
 
             let authGit = RejectingInstallGitService(cloneError: GitError.commandFailed(
                 args: ["clone"],
@@ -137,7 +137,7 @@ extension SkillInstallServiceTests {
         }
     }
 
-    private func assertShallowCloneDisablesConfiguredCredentialHelpers() {
+    private func assertShallowClonePreservesCommandFailure() {
         let productionGit = TestPaths.git
         XCTAssertThrowsError(
             try productionGit.cloneShallow(
@@ -150,7 +150,7 @@ extension SkillInstallServiceTests {
             guard case let GitError.commandFailed(args, _, _, _) = error else {
                 return XCTFail("expected command failure, got \(error)")
             }
-            XCTAssertEqual(Array(args.prefix(3)), ["-c", "credential.helper=", "clone"])
+            XCTAssertEqual(args.first, "clone")
         }
     }
 

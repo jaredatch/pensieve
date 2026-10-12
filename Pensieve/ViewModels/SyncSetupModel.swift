@@ -141,6 +141,10 @@ final class SyncSetupModel {
                 + "ssh remote (git@host:path).")
             return
         }
+        guard spec.transport != .https || !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            state = .failed("Sync over HTTPS needs an access token.")
+            return
+        }
         do {
             try await perform(spec: spec, credential: spec.transport == .ssh ? .sshAgent
                 : .httpsToken(username: username.isEmpty ? "x-access-token" : username, token: token))

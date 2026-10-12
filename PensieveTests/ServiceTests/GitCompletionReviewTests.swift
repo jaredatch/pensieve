@@ -31,7 +31,8 @@ final class GitCompletionReviewTests: XCTestCase {
                 XCTAssertEqual($0 as? GitError, .unusable(.licenseNotAccepted))
             }
             let calls = try fixture.files.readFile(at: fixture.trace)
-            XCTAssertEqual(calls.components(separatedBy: .newlines).filter { $0 == "--version" }.count, 1)
+            let probes = calls.components(separatedBy: .newlines).filter { $0.split(separator: " ").last == "--version" }
+            XCTAssertEqual(probes.count, 1)
         }
     }
 
@@ -59,7 +60,8 @@ final class GitCompletionReviewTests: XCTestCase {
                 XCTAssertEqual(classified.error as? GitError, error as? GitError)
             }
             let calls = try fixture.files.readFile(at: fixture.trace)
-            XCTAssertEqual(calls.components(separatedBy: .newlines).filter { $0 == "--version" }.count, 1)
+            let probes = calls.components(separatedBy: .newlines).filter { $0.split(separator: " ").last == "--version" }
+            XCTAssertEqual(probes.count, 1)
         }
     }
 

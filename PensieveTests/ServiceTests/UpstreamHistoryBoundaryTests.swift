@@ -123,7 +123,7 @@ extension UpstreamHistoryServiceTests {
         )
     }
 
-    func testNetworkFetchArgumentsIsolateCredentialsAndTerminateRemoteOptions() throws {
+    func testNetworkFetchArgumentsTerminateRemoteOptions() throws {
         try NativeTestWork.run { [self] in
             let repositoryPath = "/tmp/history"
             let remote = "https://github.com/example/repository.git"
@@ -139,7 +139,6 @@ extension UpstreamHistoryServiceTests {
                 commit: String(repeating: "a", count: 40)
             )
             for invocation in [args, commitArgs] {
-                XCTAssertEqual(Array(invocation.prefix(2)), GitService.installCredentialIsolationArgs)
                 let terminator = try XCTUnwrap(invocation.lastIndex(of: "--"))
                 XCTAssertEqual(invocation[invocation.index(after: terminator)], remote)
             }

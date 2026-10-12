@@ -206,7 +206,8 @@ final class AppRuntimeGitPresentationTests: XCTestCase {
             while arguments.first == "-c", arguments.count >= 2 { arguments.removeFirst(2) }
             return arguments.joined(separator: " ")
         }
-        XCTAssertEqual(calls.filter { $0 == "--version" }.count, 2, "one preflight and one confirming probe")
+        let probes = calls.filter { $0.split(separator: " ").last == "--version" }
+        XCTAssertEqual(probes.count, 2, "one preflight and one confirming probe")
         XCTAssertTrue(calls.contains { $0.hasPrefix("clone ") })
     }
 

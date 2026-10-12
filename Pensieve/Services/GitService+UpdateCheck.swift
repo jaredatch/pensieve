@@ -9,8 +9,7 @@ extension GitService {
         let branch = "refs/heads/\(ref)"
         let tag = "refs/tags/\(ref)"
         let peeledTag = tag + "^{}"
-        let args = Self.installCredentialIsolationArgs
-            + ["ls-remote", "--", remote, branch, tag, peeledTag]
+        let args = ["ls-remote", "--", remote, branch, tag, peeledTag]
         let output = try runUpstreamHistoryNetwork(args, credential: credential)
         guard output.exit == 0 else {
             let combined = output.stdout + output.stderr

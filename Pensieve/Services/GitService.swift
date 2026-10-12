@@ -3,8 +3,7 @@ import Foundation
 // PLAN-24 keeps the ten tightly-coupled adoption subprocess members beside the existing git runner.
 // swiftlint:disable file_length
 
-/// How a network-touching git op authenticates. Introduced in 08.1 as an opaque, nil-defaulted seam;
-/// the `.httpsToken` injection body lands in 08.2 (§E). In 08.1 only `.sshAgent`/`nil` is exercised.
+/// How a network-touching git operation authenticates. Blank HTTPS tokens are treated as absent.
 enum GitCredential: Equatable {
     case sshAgent
     case httpsToken(username: String, token: String)
@@ -218,10 +217,9 @@ struct GitService: GitServiceProtocol {
     /// ssh-agent keys authenticate), augment PATH with the standard git/ssh locations, and set
     /// GIT_TERMINAL_PROMPT=0 so git FAILS FAST instead of hanging on a credential prompt in a process
     /// with no TTY. Pensieve strips inherited git-behavior overrides first, including the HTTPS-auth
-    /// variables it owns, so a `.sshAgent`/`nil` op can never ride a stale parent askpass or secret, and
-    /// `applyCredential` is the ONLY thing that (re)sets them — for `.httpsToken` alone (§E).
-    /// Internal (not private) so 08.2's GitServiceTests can assert the credential rides the child ENV
-    /// (GIT_ASKPASS + PENSIEVE_GIT_PASSWORD) and never argv, and that a non-token op is sanitized.
+    /// variables it owns, so a `.sshAgent`/`nil` op can never ride a stale parent askpass or secret.
+    /// Git's askpass defaults to a failing program, overriding core.askPass and SSH_ASKPASS for HTTP
+    /// credentials. SSH itself still receives SSH_ASKPASS and SSH_AUTH_SOCK for key authentication.
     func childEnvironment(credential: GitCredential?) throws -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         // C5: drop inherited git-behavior overrides a hostile/misconfigured parent could carry BEFORE we
@@ -234,6 +232,7 @@ struct GitService: GitServiceProtocol {
         let extra = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
         env["PATH"] = env["PATH"].map { "\($0):\(extra)" } ?? extra
         env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_ASKPASS"] = "/usr/bin/false"
         env["GIT_EDITOR"] = "true"
         env["GIT_SEQUENCE_EDITOR"] = "true"
         try applyCredential(credential, to: &env)   // sets the auth vars for `.httpsToken`; no-op otherwise
@@ -246,7 +245,8 @@ struct GitService: GitServiceProtocol {
     /// The token rides ONLY the child env (`PENSIEVE_GIT_PASSWORD`/`USERNAME`), never argv and never the
     /// on-disk askpass helper file; the helper body references only `$PENSIEVE_GIT_*`.
     private func applyCredential(_ credential: GitCredential?, to env: inout [String: String]) throws {
-        guard case let .httpsToken(username, token) = credential else { return }
+        guard case let .httpsToken(username, token) = credential,
+              !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let helper = try ensureAskpassHelper()      // propagate a write failure (was try?-swallowed)
         env["GIT_ASKPASS"] = helper
         env["PENSIEVE_GIT_USERNAME"] = username
@@ -304,9 +304,9 @@ struct GitService: GitServiceProtocol {
         var environment = try childEnvironment(credential: credential)
         if storeRules { environment["GIT_ATTR_NOSYSTEM"] = "1" }
         let configuredArguments = storeRules ? Self.storeConfigurationArgs + args : args
-        // A remote check must not ask a configured helper to save the form's token in a Keychain.
-        let arguments = GitCancellation.isReadOnly
-            ? ["-c", "credential.helper="] + configuredArguments : configuredArguments
+        // Reset the configured helper chain for reads and writes. Helpers must neither supply
+        // credentials nor store or erase them; only Pensieve's askpass may answer for HTTPS.
+        let arguments = ["-c", "credential.helper="] + configuredArguments
         let child = try GitProcess(executable: gitPath, arguments: arguments, workingDirectory: workingDir,
                                    environment: environment)
         #if GIT_PROCESS_PROBE
@@ -462,16 +462,10 @@ extension GitService {
             confirmingProbe: r.confirmingProbe)
     }
 
-    /// The empty credential.helper value resets Git's configured helper list. EVERY install-path
-    /// network invocation (cloneShallow today; remoteHead/ls-remote when 19.7 adds them) must prefix
-    /// its args with this — a helper like osxkeychain would otherwise silently authenticate with a
-    /// machine-level credential the install namespace never granted.
-    static let installCredentialIsolationArgs = ["-c", "credential.helper="]
-
     @_disfavoredOverload
     func cloneShallow(remote: String, branch: String?, into path: String,
                       credential: GitCredential?) throws {
-        var args = Self.installCredentialIsolationArgs + ["clone", "--quiet", "--depth", "1"]
+        var args = ["clone", "--quiet", "--depth", "1"]
         if let branch {
             args += ["--branch", branch]
         }
