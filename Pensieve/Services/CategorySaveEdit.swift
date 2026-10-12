@@ -36,23 +36,11 @@ struct CategorySaveEdit {
         }
     }
 
-    /// A heal can publish later queued edits too. Compare the edited field at its latest queued
-    /// value and name, rather than mistaking an intermediate rename for an unsaved edit.
-    func isSaved(in durable: ManifestSnapshot, following: [CategorySaveEdit], receipt: ManifestSnapshot?) -> Bool {
-        // A heal can delete a row and create a different local identity under the same name.
-        // The published category tree confirms both edits, even though the name still exists.
-        if let receipt, receipt.categories.count == durable.categories.count,
-           receipt.categories.allSatisfy({ published in
-               durable.categories.contains {
-                   $0.name == published.name && Set($0.projectKeys) == Set(published.projectKeys)
-                       && Set($0.skillSlugs) == Set(published.skillSlugs)
-               }
-           }) { return true }
-        let sameCategory = following.filter { $0.id == id }
-        let final = sameCategory.isEmpty ? after : sameCategory.last?.after
-        let names = [before?.name, after?.name] + sameCategory.flatMap { [$0.before?.name, $0.after?.name] }
+    /// Evidence from this item's own attempt. Healing publication is tracked by the queue.
+    func isSaved(in durable: ManifestSnapshot) -> Bool {
+        let final = after
         if final == nil {
-            return !durable.categories.contains { names.contains($0.name) }
+            return !durable.categories.contains { $0.name == before?.name }
         }
         guard let final, let saved = durable.categories.first(where: { $0.name == final.name }) else { return false }
         switch change {
@@ -61,10 +49,7 @@ struct CategorySaveEdit {
         case .categoryProject(_, let key, _):
             return saved.projectKeys.contains(key) == final.projectKeys.contains(key)
         case .renameCategory(let old, _):
-            // This item's receipt confirms the published name even if a different category
-            // now uses the old name. Without it, an unrelated target cannot prove a rename.
-            return receipt?.categories.contains { $0.name == final.name } == true
-                || old == final.name || !durable.categories.contains { $0.name == old }
+            return old == final.name || !durable.categories.contains { $0.name == old }
         case .createCategory:
             return Set(saved.projectKeys) == Set(final.projectKeys) && Set(saved.skillSlugs) == Set(final.skillSlugs)
         default: return false

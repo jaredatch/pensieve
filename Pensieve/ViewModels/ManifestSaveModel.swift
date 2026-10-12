@@ -26,7 +26,7 @@ final class ManifestSaveModel {
 
     private struct Item {
         let id = UUID()
-        var healingReceipt: ManifestSnapshot?
+        var wasHealed = false
         let change: ManifestChange
         let categoryEdit: CategorySaveEdit?
         let reconcile: (() -> BatchResult)?
@@ -51,7 +51,7 @@ final class ManifestSaveModel {
                 reconcile: (() -> BatchResult)? = nil, report: @escaping (Error?) -> Void) {
         precondition(Thread.isMainThread)
         for edit in refused where edit.context === context { edit.observe(change) }
-        items.append(Item(healingReceipt: nil, change: change, categoryEdit: categoryEdit, reconcile: reconcile,
+        items.append(Item(change: change, categoryEdit: categoryEdit, reconcile: reconcile,
             presentation: ManifestRefusedEdit(change, context: context),
             fallback: { try self.manifest.snapshot(from: context) },
             accept: { prepared, snapshot in
@@ -101,10 +101,12 @@ final class ManifestSaveModel {
                 refuseCategory(item, durable: disk, error: error)
                 return false
             }
-            if disk != nil {
-                item.presentation.cache(local: try? manifest.snapshot(from: item.presentation.context))
+            if !item.wasHealed {
+                if disk != nil {
+                    item.presentation.cache(local: try? manifest.snapshot(from: item.presentation.context))
+                }
+                refused.append(item.presentation)
             }
-            refused.append(item.presentation)
             item.report(error)
             return false
         }
@@ -114,10 +116,12 @@ final class ManifestSaveModel {
     private func publish(_ item: Item, disk: ManifestSnapshot?) async throws
         -> (snapshot: ManifestSnapshot, published: Bool) {
         var saved = try disk ?? item.fallback()
-        // Only these items were in the window snapshot. Edits submitted while write awaits its
-        // native worker have no receipt, even if they later return a field to its original value.
-        let healedItems = disk == nil ? Set(items.map(\.id)) : []
-        if disk != nil, !item.change.apply(to: &saved) {
+        // A fallback publishes this context's whole window. Capture its queue membership before
+        // awaiting the write; another context or an edit submitted during the write is not healed.
+        let healedItems = disk == nil ? Set(items.filter {
+            $0.presentation.context === item.presentation.context
+        }.map(\.id)) : []
+        if disk != nil, !item.wasHealed, !item.change.apply(to: &saved) {
             if refused.contains(where: { $0.suppliesTarget(for: item.presentation) }) {
                 throw ManifestSaveError.unsavedTarget
             }
@@ -129,7 +133,7 @@ final class ManifestSaveModel {
         let snapshot = saved, manifest = manifest, root = root
         try await BlockingWork.run { try manifest.write(snapshot, toRoot: root) }
         for index in items.indices where healedItems.contains(items[index].id) {
-            items[index].healingReceipt = saved
+            items[index].wasHealed = true
         }
         refused = refused.filter { $0.acknowledge(durable: saved) }
         return (saved, true)
@@ -146,10 +150,11 @@ final class ManifestSaveModel {
                     .prepare(snapshot: durable, fromRoot: root, container: container, manifest: manifest)
             }
             var displayed = prepared.snapshot
-            for edit in refused { edit.project(onto: &displayed) }
-            // The healed snapshot already contains these edits. Replaying a rename could
-            // rename a different category that has since claimed its old name.
-            for pending in items.dropFirst() where pending.healingReceipt != durable {
+            for edit in refused where edit.context === item.presentation.context { edit.project(onto: &displayed) }
+            // Publication is permanent, even after a peer changes the manifest. Only edits still
+            // awaiting publication in this window need an overlay over the rebuilt disk state.
+            for pending in items.dropFirst() where !pending.wasHealed
+                && pending.presentation.context === item.presentation.context {
                 pending.change.apply(to: &displayed)
             }
             try item.accept(prepared, displayed)
@@ -220,16 +225,11 @@ final class ManifestSaveModel {
 extension ManifestSaveModel {
     @MainActor
     private func categoryIsSaved(_ item: Item, durable: ManifestSnapshot?) -> Bool {
-        // A failed lock/read cannot confirm state from an earlier item. Only this item's own
-        // healing receipt can establish publication without a current read under sync.lock.
-        guard let edit = item.categoryEdit, let durable = durable ?? item.healingReceipt else { return false }
-        let following: [CategorySaveEdit]
-        if let receipt = item.healingReceipt {
-            following = items.dropFirst().filter {
-                $0.presentation.context === item.presentation.context && $0.healingReceipt == receipt
-            }.compactMap(\.categoryEdit)
-        } else { following = [] }
-        return edit.isSaved(in: durable, following: following, receipt: item.healingReceipt)
+        // A successful heal published this item already. Later disk changes cannot revoke it.
+        if item.wasHealed { return true }
+        // Otherwise only a read from this attempt can establish that the edited field is saved.
+        guard let edit = item.categoryEdit, let durable else { return false }
+        return edit.isSaved(in: durable)
     }
 
     @MainActor
@@ -246,7 +246,7 @@ extension ManifestSaveModel {
         var dependentIndices: [Int] = []
         for index in items.indices.dropFirst() {
             let candidate = items[index]
-            guard candidate.presentation.context === item.presentation.context,
+            guard !candidate.wasHealed, candidate.presentation.context === item.presentation.context,
                   let next = candidate.categoryEdit,
                   identities.contains(next.id) || next.claimedName.map(restoredNames.contains) == true else { continue }
             affected.append(candidate)

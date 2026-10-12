@@ -3,59 +3,6 @@ import XCTest
 @testable import Pensieve
 
 extension CategorySaveUndoTests {
-    func checkPublishedRenameWithReusedOldName() async throws {
-        for queuedCreate in [true, false] {
-            let h = try ManifestSaveFixture()
-            defer { h.cleanup() }
-            try h.files.deleteDirectory(at: h.root + "/manifest")
-            let written = TestWait.Gate(owner: self)
-            defer { written.open() }
-            h.recording.afterWrite = { try? written.wait() }
-            h.library.updateMetadata(h.beta, tags: ["healed"], scope: .user, context: h.context)
-            h.categories.rename(h.local, to: "Drafts", context: h.context)
-            let replacement = queuedCreate ? h.categories.create(name: "Local", context: h.context) : nil
-            await TestWait.until(failureMessage: "The heal did not publish the queued rename") { written.waiterCount == 1 }
-            var peer = try h.manifest.read(fromRoot: h.root)
-            XCTAssertTrue(peer.categories.contains { $0.name == "Drafts" })
-            if queuedCreate {
-                XCTAssertTrue(peer.categories.contains { $0.name == "Local" })
-            } else {
-                peer.categories.append(CategoryRecord(name: "Local", projectKeys: [], skillSlugs: []))
-            }
-            // Change an unrelated category too, so whole-tree receipt equality cannot confirm the rename.
-            let index = try XCTUnwrap(peer.categories.firstIndex { $0.name == "ZDelete" })
-            peer.categories[index].skillSlugs = ["alpha"]
-            try h.manifest.write(peer, toRoot: h.root)
-            let peerBytes = try h.manifestBytes()
-            h.recording.failingWrites = queuedCreate ? 2 : 1
-            written.open()
-            await h.saves.waitUntilIdle()
-            XCTAssertEqual(h.recording.writes.count, 1)
-            XCTAssertEqual(h.local.name, "Drafts", "The published rename stays when another category owns Local")
-            XCTAssertEqual(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(),
-                           queuedCreate ? ["Drafts", "Local", "ZDelete"] : ["Drafts", "ZDelete"],
-                           "The healing rebuild must not replay the rename onto the replacement category")
-            if let replacement {
-                let rows = try h.context.fetch(FetchDescriptor<Pensieve.Category>())
-                XCTAssertEqual(rows.first { $0.id == replacement.id }?.name, "Local",
-                               "The published create must not be undone as a dependent")
-                XCTAssertNotEqual(replacement.id, h.local.id)
-            }
-            XCTAssertEqual(try h.manifestBytes(), peerBytes, "Refused writes leave the peer's manifest intact")
-            let notice = try XCTUnwrap(h.saves.categoryNotice).message
-            XCTAssertTrue(notice.contains("already saved"))
-            XCTAssertFalse(notice.contains("undone"))
-            h.recording.afterWrite = nil
-            h.library.updateMetadata(h.beta, tags: ["next save"], scope: .user, context: h.context)
-            await h.saves.waitUntilIdle()
-            XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories.map(\.name).sorted(),
-                           ["Drafts", "Local", "ZDelete"], "A later save must keep both published names")
-            XCTAssertEqual(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(),
-                           ["Drafts", "Local", "ZDelete"])
-            XCTAssertEqual(h.doomed.skillSlugs, ["alpha"], "The next rebuild also accepts the peer's unrelated edit")
-        }
-    }
-
     func checkPriorSaveAfterPullDoesNotAcknowledgeRefusal() async throws {
         for field in ["name", "skill", "project"] {
             for refusal in ["schema", "lock"] {
