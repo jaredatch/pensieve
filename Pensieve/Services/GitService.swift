@@ -317,9 +317,8 @@ struct GitService: GitServiceProtocol {
         // Command output is only a hint: repository-controlled text can resemble a broken shim.
         // Confirm at the shared runner so clone, fetch, conflict and install callers agree.
         // The diagnostic command bypasses this branch, preventing recursive probes.
-        let stderr = String(bytes: output.stderr, encoding: .utf8) ?? ""
-        let detail = stderr.isEmpty ? (String(bytes: output.stdout, encoding: .utf8) ?? "") : stderr
-        if args != ["--version"], GitUsability.environmentFailure(exit: output.exit, output: detail) != nil {
+        if output.exit != 0, args != ["--version"],
+           GitUsability.environmentFailure(exit: output.exit, output: output.textOutput.failureDetail) != nil {
             let answer = try probeUsability()
             try answer.requireUsable()
             output.confirmingProbe = answer
@@ -360,10 +359,6 @@ struct GitService: GitServiceProtocol {
         "Invalid username or password",
         "terminal prompts disabled"
     ]
-
-    func isAuthFailure(_ text: String) -> Bool {
-        Self.authSignatures.contains { text.contains($0) }
-    }
 
     func headSHA(at path: String) throws -> String? {
         guard let r = try runBestEffort(["-C", path, "rev-parse", "HEAD"], in: nil), r.exit == 0 else { return nil }
@@ -424,10 +419,7 @@ extension GitService {
         case 1:
             return nil   // `git config --get`: exit 1 = key absent
         default:
-            throw GitError.commandFailed(
-                args: ["config", "--local", "--get", "remote.origin.url"],
-                exitCode: r.exit,
-                stderr: r.stderr, confirmingProbe: r.confirmingProbe)
+            throw commandError(r, args: ["config", "--local", "--get", "remote.origin.url"])
         }
     }
 
@@ -454,12 +446,7 @@ extension GitService {
             try fileService.publishDirectory(at: staging, to: path)
             return
         }
-        let combined = r.stdout + r.stderr
-        if isAuthFailure(combined) {
-            throw GitError.authenticationFailed(remote: remote, detail: combined)
-        }
-        throw GitError.commandFailed(args: args, exitCode: r.exit, stderr: r.stderr.isEmpty ? r.stdout : r.stderr,
-            confirmingProbe: r.confirmingProbe)
+        throw commandError(r, args: args, authenticationRemote: remote)
     }
 
     @_disfavoredOverload
@@ -473,12 +460,7 @@ extension GitService {
         args += ["--", remote, path]
         let r = try run(args, in: nil, credential: credential)
         guard r.exit != 0 else { return }
-        let combined = r.stdout + r.stderr
-        if isAuthFailure(combined) {
-            throw GitError.authenticationFailed(remote: remote, detail: combined)
-        }
-        throw GitError.commandFailed(args: args, exitCode: r.exit, stderr: r.stderr.isEmpty ? r.stdout : r.stderr,
-            confirmingProbe: r.confirmingProbe)
+        throw commandError(r, args: args, authenticationRemote: remote)
     }
 
     @_disfavoredOverload
@@ -517,12 +499,7 @@ extension GitService {
         let args = ["ls-remote", "--symref", "--", remote, "HEAD", "refs/heads/*"]
         let result = try runData(args, in: nil, credential: credential)
         guard result.exit == 0 else {
-            let combined = (String(data: result.stdout, encoding: .utf8) ?? "")
-                + (String(data: result.stderr, encoding: .utf8) ?? "")
-            if Self.classifyLsRemoteFailure(exitCode: result.exit, combinedOutput: combined) == .auth {
-                throw GitError.authenticationFailed(remote: remote, detail: combined)
-            }
-            throw dataCommandError(result, args: args)
+            throw dataCommandError(result, args: args, authenticationRemote: remote)
         }
         let defaultPrefix = Array("ref: refs/heads/".utf8)
         let headPrefix = Array("refs/heads/".utf8)
@@ -606,10 +583,7 @@ extension GitService {
         case 1:
             return false
         default:
-            throw GitError.commandFailed(
-                args: args,
-                exitCode: result.exit,
-                stderr: result.stderr.isEmpty ? result.stdout : result.stderr, confirmingProbe: result.confirmingProbe)
+            throw commandError(result, args: args)
         }
     }
 }
@@ -619,10 +593,8 @@ extension GitService {
         let output = try runOrThrow(["-C", path, "rev-parse"] + args, in: nil)
         let value = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else {
-            throw GitError.commandFailed(
-                args: ["-C", path, "rev-parse"] + args,
-                exitCode: output.exit,
-                stderr: "git returned an empty revision", confirmingProbe: output.confirmingProbe)
+            throw commandError(args: ["-C", path, "rev-parse"] + args, exitCode: output.exit,
+                               detail: "git returned an empty revision", confirmingProbe: output.confirmingProbe)
         }
         return value
     }
@@ -672,12 +644,7 @@ extension GitService {
         let args = ["-C", path, "push", "-u", "origin", "main"]
         let r = try run(args, in: nil, credential: credential)
         guard r.exit != 0 else { return }
-        let combined = r.stdout + r.stderr
-        if isAuthFailure(combined) {
-            throw GitError.authenticationFailed(remote: authenticationRemoteLabel(at: path), detail: combined)
-        }
-        throw GitError.commandFailed(args: args, exitCode: r.exit, stderr: r.stderr.isEmpty ? r.stdout : r.stderr,
-            confirmingProbe: r.confirmingProbe)
+        throw commandError(r, args: args, authenticationRemote: authenticationRemoteLabel(at: path))
     }
 
     @_disfavoredOverload

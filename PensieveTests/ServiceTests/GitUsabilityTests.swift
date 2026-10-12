@@ -11,6 +11,13 @@ final class GitUsabilityTests: XCTestCase {
             for state in states {
                 XCTAssertEqual(try fixture.broken(state).probeUsability(), state)
             }
+            let splitOutput = try fixture.executable("""
+                printf 'Xcode license not accepted\\n'
+                printf 'launcher diagnostic\\n' >&2
+                exit 69
+                """)
+            XCTAssertEqual(try splitOutput.probeUsability(), .licenseNotAccepted,
+                           "Display priority must not hide host-usability evidence in stdout")
             let missing = GitService(askpassHelperPath: TestPaths.gitAskpassHelperPath,
                 executablePath: fixture.base + "/missing")
             guard case let .failed(detail) = try missing.probeUsability() else {

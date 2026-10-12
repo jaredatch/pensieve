@@ -757,6 +757,33 @@ extension SyncSetupModelTests {
         XCTAssertTrue(message.contains("access token"))
     }
 
+    func testDamagedRemoteAuthOutputStillShowsConnectAdvice() async throws {
+        let fixture = try GitFailureFixture()
+        defer { try? fixture.remove() }
+        let git = try fixture.executable("""
+            simulate_auth_failure() {
+                \(FakeGitScript.skipGlobalOptions)
+                if [ "$1" = 'ls-remote' ]; then
+                    printf 'progress\\n'
+                    printf 'remote: \\377 Authentication failed\\n' >&2
+                    exit 128
+                fi
+            }
+            simulate_auth_failure "$@"
+            exec /usr/bin/git "$@"
+            """)
+        let context = try makeContext()
+        let credentials = InMemoryCredentialStore()
+        let model = SyncSetupModel(context: context, git: git, credentials: credentials,
+                                   root: fixture.root, lockPath: fixture.support + "/sync.lock", steps: SyncStepModel())
+        await model.connectAndReport(url: "https://fixture.test/store.git", username: "test", token: "token")
+        guard case let .failed(message) = model.state else { return XCTFail("Expected failed Connect") }
+        XCTAssertTrue(message.contains("authenticate"), message)
+        XCTAssertTrue(message.contains("access token"), message)
+        XCTAssertTrue(message.contains("repo access"), message)
+        XCTAssertNil(credentials.credential(forHost: "fixture.test"))
+    }
+
     func testRemoteRefReadFailureSurfacesBeforeWriting() async throws {
         let trace = EventTrace(); let git = RecordingGitService(trace: trace)
         git.throwOn = "lsremote-refs:\(remoteURL)"

@@ -112,18 +112,13 @@ extension GitService {
         remote: String,
         ref: String
     ) throws -> Never {
-        let combined = output.stdout + output.stderr
-        if isAuthFailure(combined) {
-            throw GitError.authenticationFailed(remote: remote, detail: combined)
-        }
-        let lower = combined.lowercased()
+        let failure = commandError(output, args: args, authenticationRemote: remote)
+        if case .authenticationFailed = failure { throw failure }
+        let lower = (output.stderr + output.stdout).lowercased()
         if lower.contains("couldn't find remote ref") || lower.contains("remote ref does not exist") {
             throw UpstreamHistoryError.trackedRefNotFound(ref)
         }
-        throw GitError.commandFailed(
-            args: args,
-            exitCode: output.exit,
-            stderr: output.stderr.isEmpty ? output.stdout : output.stderr, confirmingProbe: output.confirmingProbe)
+        throw failure
     }
 
     func fetchTrackedRef(_ request: UpstreamHistoryGitRequest) throws {
@@ -262,8 +257,7 @@ extension GitService {
         ], in: nil)
         if output.exit == 0 { return true }
         if output.exit == 1 { return false }
-        throw GitError.commandFailed(args: ["merge-base"], exitCode: output.exit, stderr: output.stderr,
-            confirmingProbe: output.confirmingProbe)
+        throw commandError(output, args: ["merge-base"])
     }
 
     func isShallowRepository(at repositoryPath: String) throws -> Bool {

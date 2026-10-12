@@ -118,8 +118,7 @@ extension GitService {
             _ = try skipRebase(at: path, using: store)
             return .merged
         }
-        throw GitError.commandFailed(args: args, exitCode: r.exit, stderr: r.stderr.isEmpty ? r.stdout : r.stderr,
-            confirmingProbe: r.confirmingProbe)
+        throw commandError(r, args: args)
     }
 
     /// `git rebase --skip`. Exit 0 => .merged (or .upToDate if HEAD is unchanged); else throw.
@@ -133,8 +132,7 @@ extension GitService {
         let args = ["-C", path, "rebase", "--skip"]
         let r = try store.run(Array(args.dropFirst(2)))
         guard r.exit == 0 else {
-            throw GitError.commandFailed(args: args, exitCode: r.exit, stderr: r.stderr.isEmpty ? r.stdout : r.stderr,
-                confirmingProbe: r.confirmingProbe)
+            throw commandError(r, args: args)
         }
         return before == (try headSHA(at: path)) ? .upToDate : .merged
     }
@@ -153,10 +151,9 @@ extension GitService {
         if fetchedRevision == nil {
             let fetch = try run(["-C", root, "fetch", "origin", "main"], in: nil, credential: credential)
             if fetch.exit != 0 {
-                let combined = fetch.stdout + fetch.stderr
-                if isAuthFailure(combined) {
-                    throw GitError.authenticationFailed(remote: authenticationRemoteLabel(at: root), detail: combined)
-                }
+                let failure = commandError(fetch, args: ["-C", root, "fetch", "origin", "main"],
+                                           authenticationRemote: authenticationRemoteLabel(at: root))
+                if case .authenticationFailed = failure { throw failure }
                 return try stageAllAndCommit(at: root, message: message)
             }
         }
