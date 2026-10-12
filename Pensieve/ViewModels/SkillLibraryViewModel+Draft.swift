@@ -64,7 +64,6 @@ extension SkillLibraryViewModel {
     /// echo of a body the fingerprint already holds, cannot swallow it.
     func editorBody(for skill: Skill) -> String {
         let directoryName = skill.directoryName
-        observedSkills.setObject(skill, forKey: directoryName as NSString)
         let onDisk = readSkillDocument(skill) ?? ""
         StoreRebuildService.refreshIdentity(of: skill, document: onDisk)
         let known = withFingerprintLock { lastWrittenBody[directoryName] }
@@ -73,7 +72,6 @@ extension SkillLibraryViewModel {
             // against, observed by a running cycle, and nudging sync at once outside one (the watcher's
             // later event is an echo and nudges nothing).
             watcherEventSequence &+= 1
-            if isApplyingCoordinatorChanges { coordinatorObservedSlugs.insert(directoryName) }
             acceptExternalChange(directoryName: directoryName, currentBody: onDisk,
                                  shouldNotify: !isApplyingCoordinatorChanges)
         } else {

@@ -148,7 +148,6 @@ extension SkillLibraryViewModel {
             return
         }
         if isApplyingCoordinatorChanges {
-            coordinatorObservedSlugs.insert(directoryName)
             acceptExternalChange(directoryName: directoryName, currentBody: currentBody, shouldNotify: false)
             return
         }

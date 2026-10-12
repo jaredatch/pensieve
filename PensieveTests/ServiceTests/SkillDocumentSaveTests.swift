@@ -59,24 +59,32 @@ final class SkillDocumentSaveTests: XCTestCase {
         }
     }
 
-    func testSaveBeforeWatcherAsksForFrontmatterAndBodyChangesAndSaveAnswerOverwrites() throws {
+    func testSaveBeforeWatcherAsksForFrontmatterAndBodyChangesAndSaveAnswerOverwrites() async throws {
         let fixture = try DocumentSaveFixture()
         defer { fixture.cleanup() }
         let source = "---\nname: Test\ndescription: Before\n---\nBody\n"
-        for outside in [source.replacingOccurrences(of: "Before", with: "Outside"),
-                        source.replacingOccurrences(of: "Body", with: "Outside body")] {
-            try fixture.write(source)
-            _ = fixture.library.editorBody(for: fixture.skill)
-            let draft = source.replacingOccurrences(of: "Body", with: "My draft")
-            fixture.library.noteEditorChanged(fixture.skill, body: draft)
-            try fixture.write(outside)
-            XCTAssertFalse(fixture.library.saveDraft(fixture.skill))
-            XCTAssertEqual(try fixture.read(), outside)
-            XCTAssertEqual(fixture.library.pendingUnsavedChanges?.reason, .externalChange)
-            XCTAssertEqual(fixture.library.drafts["test"]?.body, draft)
-            fixture.library.resolveUnsavedChanges(.save)
-            XCTAssertEqual(try fixture.read(), draft)
-            XCTAssertFalse(fixture.library.hasUnsavedChanges)
+        for duringCycle in [false, true] {
+            for outside in [source.replacingOccurrences(of: "Before", with: "Outside"),
+                            source.replacingOccurrences(of: "Body", with: "Outside body")] {
+                try fixture.write(source)
+                _ = fixture.library.editorBody(for: fixture.skill)
+                let draft = source.replacingOccurrences(of: "Body", with: "My draft")
+                fixture.library.noteEditorChanged(fixture.skill, body: draft)
+                if duringCycle { fixture.library.beginCoordinatorChanges() }
+                try fixture.write(outside)
+                XCTAssertFalse(fixture.library.saveDraft(fixture.skill))
+                XCTAssertEqual(try fixture.read(), outside)
+                XCTAssertEqual(fixture.library.drafts["test"]?.body, draft)
+                if duringCycle {
+                    XCTAssertNil(fixture.library.pendingUnsavedChanges, "Wait for the cycle's final text")
+                    fixture.watcher.emit("test") // The delayed watcher echo must not swallow the question.
+                    await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false)
+                }
+                XCTAssertEqual(fixture.library.pendingUnsavedChanges?.reason, .externalChange)
+                fixture.library.resolveUnsavedChanges(.save)
+                XCTAssertEqual(try fixture.read(), draft)
+                XCTAssertFalse(fixture.library.hasUnsavedChanges)
+            }
         }
     }
 }
@@ -84,6 +92,7 @@ final class SkillDocumentSaveTests: XCTestCase {
 @MainActor
 final class DocumentSaveFixture {
     let files = FileService()
+    let container: ModelContainer
     let root = TestTemporaryDirectory.path + "WholeDocument-" + UUID().uuidString
     let store: SkillStore
     let watcher = RecordingWatcher()
@@ -91,10 +100,16 @@ final class DocumentSaveFixture {
     let skill = Skill(name: "Test", skillDescription: "Before", directoryName: "test")
     let presenter = RecordingPresenter()
 
-    init() throws {
+    init(registerSkill: Bool = true) throws {
+        container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = container.mainContext
+        if registerSkill { context.insert(skill); try context.save() }
         store = SkillStore(fileService: files, baseDir: root + "/skills", storeRoot: root)
         library = SkillLibraryViewModel(skillStore: store, fileService: files, fileWatchService: watcher,
                                        manifestRoot: root)
+        library.onSkillDocumentObserved = { [weak library] directoryName, document in
+            library?.refreshSkillIdentity(directoryName: directoryName, document: document, context: context)
+        }
         library.unsavedChangesPresenter = presenter.present
         library.startWatching()
         try files.createDirectory(at: root + "/skills/test")

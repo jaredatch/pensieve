@@ -4,53 +4,95 @@ import XCTest
 
 extension SkillDocumentSaveTests {
     func testFrontmatterOnlyWatcherChangesRefreshIdentityAndPreserveDirtyDraft() throws {
-        let fixture = try DocumentSaveFixture()
+        let fixture = try DocumentSaveFixture(registerSkill: false)
         defer { fixture.cleanup() }
         let source = "---\nname: Test\ndescription: Before\n---\nBody"
         try fixture.write(source)
-        _ = fixture.library.editorBody(for: fixture.skill)
+        let container = fixture.container
+        let context = container.mainContext
+        let paths = AppRuntimePaths(storeRoot: fixture.root, appSupportDir: fixture.root + "/app-support")
+        let runtime = try AppRuntime(container: container, library: fixture.library,
+            scheduler: SyncScheduler(startAutomatically: false), paths: paths, gitUsabilityProbe: { .usable })
+        defer { withExtendedLifetime(runtime) {} }
+        XCTAssertNil(runtime.syncModel.remoteURL)
+        let live = try checkUnopenedAndReplacementRows(fixture, source: source, context: context)
+        _ = fixture.library.editorBody(for: live)
         let outside = source.replacingOccurrences(of: "Before", with: "Outside")
         try fixture.write(outside)
         let token = fixture.library.reloadToken
         fixture.watcher.emit("test")
         XCTAssertEqual(fixture.library.reloadToken, token + 1)
-        XCTAssertEqual(fixture.library.editorBody(for: fixture.skill), outside)
-        XCTAssertEqual(fixture.skill.skillDescription, "Outside")
+        XCTAssertEqual(fixture.library.editorBody(for: live), outside)
+        XCTAssertEqual(live.skillDescription, "Outside")
         XCTAssertTrue(fixture.presenter.prompts.isEmpty)
         let draft = outside + " draft"
-        fixture.library.noteEditorChanged(fixture.skill, body: draft)
+        fixture.library.noteEditorChanged(live, body: draft)
         let second = outside.replacingOccurrences(of: "Outside", with: "Second outside")
         try fixture.write(second)
         fixture.watcher.emit("test")
         XCTAssertEqual(fixture.library.drafts["test"]?.body, draft)
         XCTAssertEqual(fixture.library.pendingUnsavedChanges?.reason, .externalChange)
-        XCTAssertEqual(fixture.skill.skillDescription, "Second outside")
+        XCTAssertEqual(live.skillDescription, "Second outside")
         fixture.library.resolveUnsavedChanges(.cancel)
         XCTAssertEqual(try fixture.read(), second)
         XCTAssertEqual(fixture.library.drafts["test"]?.body, draft)
-        XCTAssertFalse(fixture.library.saveDraft(fixture.skill))
+        XCTAssertFalse(fixture.library.saveDraft(live))
         fixture.library.resolveUnsavedChanges(.discard)
-        XCTAssertEqual(fixture.library.editorBody(for: fixture.skill), second)
+        XCTAssertEqual(fixture.library.editorBody(for: live), second)
         XCTAssertFalse(fixture.library.hasUnsavedChanges)
     }
 
-    func testFrontmatterOnlySyncPullAsksAgainstFinalWholeFile() async throws {
-        let fixture = try DocumentSaveFixture()
-        defer { fixture.cleanup() }
-        let source = "---\nname: Test\ndescription: Before\n---\nBody"
-        try fixture.write(source)
-        _ = fixture.library.editorBody(for: fixture.skill)
-        fixture.library.noteEditorChanged(fixture.skill, body: source + " draft")
-        fixture.library.beginCoordinatorChanges()
-        let pulled = source.replacingOccurrences(of: "Before", with: "Pulled")
-        try fixture.write(pulled)
+    private func checkUnopenedAndReplacementRows(_ fixture: DocumentSaveFixture, source: String,
+                                                 context: ModelContext) throws -> Skill {
+        fixture.library.refreshQuarantine(context: context) // Launch snapshot predates the added row.
+        context.insert(fixture.skill)
+        try context.save()
+        let unopenedOutside = source.replacingOccurrences(of: "Before", with: "Added after launch")
+        try fixture.write(unopenedOutside)
         fixture.watcher.emit("test")
-        XCTAssertTrue(fixture.presenter.prompts.isEmpty, "Intermediate sync events do not ask")
-        await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false)
-        XCTAssertEqual(fixture.library.pendingUnsavedChanges?.reason, .externalChange)
-        XCTAssertEqual(fixture.library.drafts["test"]?.body, source + " draft")
-        XCTAssertEqual(try fixture.read(), pulled)
-        XCTAssertEqual(fixture.skill.skillDescription, "Pulled")
+        XCTAssertEqual(fixture.skill.skillDescription, "Added after launch", "An unopened new row follows the watcher")
+        _ = fixture.library.editorBody(for: fixture.skill)
+        XCTAssertEqual(fixture.library.deleteSkillEntry(fixture.skill, context: context), .deleted)
+        try fixture.write(source)
+        let live = Skill(name: "Test", skillDescription: "Before", directoryName: "test")
+        context.insert(live)
+        try context.save()
+        let replacementOutside = source.replacingOccurrences(of: "Before", with: "Replacement outside")
+        try fixture.write(replacementOutside)
+        fixture.watcher.emit("test")
+        XCTAssertEqual(live.skillDescription, "Replacement outside", "Refresh the replacement that the window displays")
+        XCTAssertEqual(fixture.skill.skillDescription, "Added after launch", "The held deleted row is retired")
+        // A different context must not redirect the refresh away from the window's row.
+        let otherContext = ModelContext(fixture.container)
+        let otherRows = try otherContext.fetch(FetchDescriptor<Skill>())
+        fixture.library.refreshQuarantine(context: otherContext)
+        try fixture.write(source)
+        fixture.watcher.emit("test")
+        XCTAssertEqual(live.skillDescription, "Before")
+        withExtendedLifetime(otherRows) {}
+        return live
+    }
+
+    func testFrontmatterOnlySyncPullAsksAgainstFinalWholeFile() async throws {
+        for saveBeforeWatcher in [false, true] {
+            let fixture = try DocumentSaveFixture()
+            defer { fixture.cleanup() }
+            let source = "---\nname: Test\ndescription: Before\n---\nBody"
+            try fixture.write(source)
+            _ = fixture.library.editorBody(for: fixture.skill)
+            fixture.library.noteEditorChanged(fixture.skill, body: source + " draft")
+            fixture.library.beginCoordinatorChanges()
+            let pulled = source.replacingOccurrences(of: "Before", with: "Pulled")
+            try fixture.write(pulled)
+            if saveBeforeWatcher { XCTAssertFalse(fixture.library.saveDraft(fixture.skill)) }
+            fixture.watcher.emit("test")
+            XCTAssertTrue(fixture.presenter.prompts.isEmpty, "Intermediate sync events do not ask")
+            await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false)
+            XCTAssertEqual(fixture.library.pendingUnsavedChanges?.reason, .externalChange)
+            XCTAssertEqual(fixture.library.drafts["test"]?.body, source + " draft")
+            XCTAssertEqual(try fixture.read(), pulled)
+            XCTAssertEqual(fixture.skill.skillDescription, "Pulled")
+        }
     }
 
     func testWriteBracketsKeepFailedAndRacingFrontmatterChangesOutside() throws {
