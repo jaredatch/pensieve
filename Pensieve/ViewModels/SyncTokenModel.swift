@@ -104,10 +104,12 @@ final class SyncTokenModel {
             state = .failed("\(remote.host) didn’t accept this token. Your saved token hasn’t changed.")
         } catch is TargetChanged {
             state = .failed("The sync repository changed. Close this sheet and try again.")
-        } catch let error as CredentialError {
-            state = .failed(error.localizedDescription)
-        } catch {
+        } catch let error as GitError where error.isRepositoryNotFound {
+            state = .failed("This token can’t open the sync repository on \(remote.host). Your saved token hasn’t changed.")
+        } catch let error as GitError where error.isNetworkFailure {
             state = .failed("Couldn’t reach \(remote.host). Your saved token hasn’t changed.")
+        } catch {
+            state = .failed(error.localizedDescription)
         }
     }
 

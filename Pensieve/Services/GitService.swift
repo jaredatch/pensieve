@@ -33,6 +33,32 @@ enum GitError: LocalizedError, Equatable {
 }
 
 extension GitError {
+    var isRepositoryNotFound: Bool {
+        guard case let .commandFailed(_, _, stderr, _) = self else { return false }
+        let detail = stderr.lowercased()
+        if detail.contains("error: 404") || detail.contains("http 404") {
+            return true
+        }
+        return detail.contains("repository")
+            && (detail.contains("not found") || detail.contains("does not exist")
+                || detail.contains("does not appear to be a git repository"))
+    }
+
+    /// curl's and ssh's words for a remote that cannot be reached at all — no DNS, no route, no answer.
+    var isNetworkFailure: Bool {
+        guard case let .commandFailed(_, _, stderr, _) = self else { return false }
+        let detail = stderr.lowercased()
+        let markers = [
+            "could not resolve host",
+            "failed to connect to",
+            "couldn't connect to server",
+            "network is unreachable",
+            "connection timed out",
+            "operation timed out"
+        ]
+        return markers.contains { detail.contains($0) }
+    }
+
     /// Best-effort reads swallow git rejections, but host and local output-read failures reach the caller.
     static func preservingUnusability<T>(_ operation: () throws -> T) throws -> T? {
         do { return try operation() } catch let error as GitError {

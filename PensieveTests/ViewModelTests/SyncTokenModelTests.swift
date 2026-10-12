@@ -90,12 +90,7 @@ final class SyncTokenModelTests: XCTestCase {
         XCTAssertEqual(credentials.credential(forHost: "fixture.test"), .httpsToken(username: "kept", token: "old"))
         try NativeTestWork.run { try git.setRemote("https://fixture.test/store.git", at: fixture.root) }
         model.refresh(remoteURL: "https://fixture.test/store.git")
-        try installNetworkFailure(fixture)
-        model.token = "new"
-        model.save()
-        await finished(model)
-        XCTAssertEqual(model.state, .failed("Couldn’t reach fixture.test. Your saved token hasn’t changed."))
-        XCTAssertEqual(credentials.credential(forHost: "fixture.test"), .httpsToken(username: "kept", token: "old"))
+        try await assertFailedChecksKeepStoredToken(fixture, git: git, model: model, credentials: credentials)
     }
 
     func testAddAfterSyncLockReleaseAndChangedRemoteRefusal() async throws {
@@ -150,11 +145,48 @@ final class SyncTokenModelTests: XCTestCase {
         await TestWait.until(failureMessage: "Token replacement did not finish") { model.state != .checking }
     }
 
-    private func installNetworkFailure(_ fixture: GitFailureFixture) throws {
+    private func assertFailedChecksKeepStoredToken(_ fixture: GitFailureFixture, git: GitService,
+                                                   model: SyncTokenModel, credentials: InMemoryCredentialStore) async throws {
+        let refused = "This token can’t open the sync repository on fixture.test. Your saved token hasn’t changed."
+        let cases: [(detail: String, advice: String?)] = [
+            ("Could not resolve host", "Couldn’t reach fixture.test. Your saved token hasn’t changed."),
+            ("remote: Repository not found.", refused),
+            ("fatal: unable to access repository: The requested URL returned error: 404", refused),
+            ("fatal: invalid ref advertisement", nil)
+        ]
+        let config = try fixture.files.readData(at: fixture.root + "/.git/config")
+        for entry in cases {
+            try installCheckFailure(fixture, detail: entry.detail)
+            model.token = "new"
+            model.save()
+            await finished(model)
+            if let advice = entry.advice {
+                XCTAssertEqual(model.state, .failed(advice), entry.detail)
+            } else if case let .failed(message) = model.state {
+                XCTAssertTrue(message.contains(entry.detail), "Unclassified git errors must retain their own detail")
+                XCTAssertFalse(message.contains("Couldn’t reach"))
+            } else { XCTFail("Expected the remote check to fail") }
+            XCTAssertEqual(credentials.credential(forHost: "fixture.test"), .httpsToken(username: "kept", token: "old"))
+            XCTAssertEqual(try fixture.files.readData(at: fixture.root + "/.git/config"), config)
+        }
+        let parent = fixture.support + "/not-a-directory"
+        try fixture.files.writeFile(at: parent, content: "blocks lock creation")
+        let local = SyncTokenModel(git: git, credentials: credentials, root: fixture.root,
+            lockPath: parent + "/sync.lock", steps: SyncStepModel())
+        local.refresh(remoteURL: "https://fixture.test/store.git")
+        local.token = "new"
+        local.save()
+        await finished(local)
+        XCTAssertEqual(local.state, .failed(POSIXError(.ENOTDIR).localizedDescription))
+        XCTAssertEqual(credentials.credential(forHost: "fixture.test"), .httpsToken(username: "kept", token: "old"))
+        XCTAssertEqual(try fixture.files.readData(at: fixture.root + "/.git/config"), config)
+    }
+
+    private func installCheckFailure(_ fixture: GitFailureFixture, detail: String) throws {
         _ = try fixture.executable("""
             check() {
                 \(FakeGitScript.skipGlobalOptions)
-                if [ "$1" = ls-remote ]; then echo 'Could not resolve host' >&2; exit 128; fi
+                if [ "$1" = ls-remote ]; then printf '%s\\n' '\(detail)' >&2; exit 128; fi
             }
             check "$@"
             exec /usr/bin/git "$@"
