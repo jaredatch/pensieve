@@ -55,9 +55,15 @@ extension CategorySaveUndoTests {
             let window = try h.manifest.snapshot(from: h.context).categories.sorted { $0.name < $1.name }
             XCTAssertEqual(window, expected, kind)
             XCTAssertEqual(Set(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.id)), identities, kind)
-            let notice = try XCTUnwrap(h.saves.categoryNotice).message
-            XCTAssertTrue(notice.contains("already saved"), kind)
-            XCTAssertFalse(notice.contains("undone"), kind)
+            let notice = try XCTUnwrap(h.saves.categoryNotice)
+            XCTAssertEqual(notice.title, "Category changes were already saved", kind)
+            XCTAssertTrue(notice.message.contains("already saved"), kind)
+            XCTAssertFalse(notice.message.contains("undone"), kind)
+            _ = h.categories.create(name: "Unsaved", context: h.context)
+            await h.saves.waitUntilIdle()
+            let combined = try XCTUnwrap(h.saves.categoryNotice)
+            XCTAssertEqual(combined.messages.count, notice.messages.count + 1)
+            XCTAssertEqual(combined.title, "Category changes couldn't be saved", "A later refusal joins the kept notice")
         }
         try await checkPublishedRenameWithReusedOldName()
         try await checkPublishedEditsNeverReplay()
@@ -161,6 +167,7 @@ extension CategorySaveUndoTests {
         XCTAssertEqual(notice.messages.count, 2)
         XCTAssertTrue(notice.messages[0].contains("already saved"))
         XCTAssertTrue(notice.messages[1].contains("undone"))
+        XCTAssertEqual(notice.title, "Category changes couldn't be saved", "A mixed notice keeps the refusal title")
     }
 
     func testCategoryUndoKeepsAssignmentsWhoseRetirementFieldWasAlreadyAcknowledged() async throws {

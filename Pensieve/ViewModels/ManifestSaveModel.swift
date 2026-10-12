@@ -5,6 +5,8 @@ import SwiftData
 
 /// Process-owned FIFO for GUI manifest edits. Only plain values cross into BlockingWork; the
 /// submitting context stays on the main thread. sync.lock precedes ManifestService's leaf lock.
+/// Only the main window's context submits today. A second context sharing its container needs
+/// the healing snapshot and rebuild overlays revisited before submitting here.
 @Observable
 final class ManifestSaveModel {
     static let waitingMessage = "Your change will save when sync finishes."
@@ -21,7 +23,7 @@ final class ManifestSaveModel {
     private let log: (String) -> Void
     @ObservationIgnored private var items: [Item] = []
     @ObservationIgnored private var refused: [ManifestRefusedEdit] = []
-    @ObservationIgnored private var categoryMessages: [String] = []
+    @ObservationIgnored private var categoryMessages: [CategorySaveNotice.Entry] = []
     @ObservationIgnored private var worker: Task<Void, Never>?
 
     private struct Item {
@@ -79,7 +81,7 @@ final class ManifestSaveModel {
         }
         worker = nil
         if !categoryMessages.isEmpty {
-            categoryNotice = CategorySaveNotice(messages: (categoryNotice?.messages ?? []) + categoryMessages)
+            categoryNotice = CategorySaveNotice(entries: (categoryNotice?.entries ?? []) + categoryMessages)
             categoryMessages = []
         }
         if savedAny { didSave() }
@@ -107,7 +109,7 @@ final class ManifestSaveModel {
                 }
                 refused.append(item.presentation)
             }
-            item.report(error)
+            item.report(item.wasHealed ? nil : error)
             return false
         }
     }
@@ -236,7 +238,7 @@ extension ManifestSaveModel {
     private func refuseCategory(_ item: Item, durable: ManifestSnapshot?, error: Error) {
         guard let edit = item.categoryEdit else { return }
         if categoryIsSaved(item, durable: durable) {
-            categoryMessages.append(CategorySaveNotice.message(edit: edit, error: error, outcome: .saved))
+            categoryMessages.append(CategorySaveNotice.entry(edit: edit, error: error, outcome: .saved))
             item.report(error)
             return
         }
@@ -244,9 +246,11 @@ extension ManifestSaveModel {
         var identities: Set<UUID> = [edit.id]
         var restoredNames = Set([edit.restoredName].compactMap { $0 })
         var dependentIndices: [Int] = []
+        // A heal marks the head and its queued context together. A healed head returns above,
+        // so only unpublished edits in this context can become dependent undos here.
         for index in items.indices.dropFirst() {
             let candidate = items[index]
-            guard !candidate.wasHealed, candidate.presentation.context === item.presentation.context,
+            guard candidate.presentation.context === item.presentation.context,
                   let next = candidate.categoryEdit,
                   identities.contains(next.id) || next.claimedName.map(restoredNames.contains) == true else { continue }
             affected.append(candidate)
@@ -266,10 +270,11 @@ extension ManifestSaveModel {
             do {
                 let restored = try edit.restore(in: item.presentation.context)
                 try item.presentation.context.save()
-                categoryMessages.append(CategorySaveNotice.message(edit: edit, error: error,
+                categoryMessages.append(CategorySaveNotice.entry(edit: edit, error: error,
                     outcome: restored ? .undone : .removed))
             } catch {
-                categoryMessages.append("Couldn't restore “\(edit.name)”: " + error.localizedDescription)
+                categoryMessages.append(CategorySaveNotice.Entry(
+                    text: "Couldn't restore “\(edit.name)”: " + error.localizedDescription, wasKept: false))
                 log("Category undo failed: " + error.localizedDescription)
             }
             item.report(error)

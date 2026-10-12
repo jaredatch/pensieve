@@ -60,7 +60,8 @@ struct CategorySaveEdit {
     func restore(in context: ModelContext) throws -> Bool {
         let existing = try context.fetch(FetchDescriptor<Category>()).first { $0.id == id }
         guard let before else {
-            if let existing { context.delete(existing) }
+            guard let existing else { return false }
+            context.delete(existing)
             return true
         }
         let row: Category

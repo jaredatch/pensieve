@@ -36,6 +36,7 @@ final class CategorySaveUndoTests: XCTestCase {
         await h.saves.waitUntilIdle()
         XCTAssertFalse(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.id == id })
         XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories.map(\.name), ["Local", "ZDelete"])
+        try await checkRefusedCreateAfterPulledRebuild()
     }
 
     func testDependentRenamesUndoInReverseOrderIncludingRestoredName() async throws {

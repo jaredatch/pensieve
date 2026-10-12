@@ -59,7 +59,7 @@ extension CategorySaveUndoTests {
         XCTAssertEqual(h.doomed.skillSlugs, ["alpha"], kind)
         XCTAssertEqual(h.alpha.tags, ["peer"], kind)
         XCTAssertNil(h.saves.categoryNotice, "Successful saves report no refusal: " + kind)
-        if intermediary == "refused" { XCTAssertNotNil(h.library.error, kind) } else { XCTAssertNil(h.library.error, kind) }
+        XCTAssertNil(h.library.error, "A healing write already published this skill edit: " + kind)
     }
 
     private func checkPublishedManifest(_ h: ManifestSaveFixture, names: [String], queuedCreate: Bool, kind: String) {

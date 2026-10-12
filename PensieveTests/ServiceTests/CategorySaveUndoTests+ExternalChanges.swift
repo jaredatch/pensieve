@@ -3,6 +3,37 @@ import XCTest
 @testable import Pensieve
 
 extension CategorySaveUndoTests {
+    func checkRefusedCreateAfterPulledRebuild() async throws {
+        for refusal in ["schema", "lock", "write"] {
+            let h = try ManifestSaveFixture()
+            defer { h.cleanup() }
+            let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+            defer { lock.release() }
+            let created = try XCTUnwrap(h.categories.create(name: "Writing", context: h.context))
+            let id = created.id
+            if refusal != "lock" {
+                await h.assertWaitingBehindHeldLock(pending: 1, before: try h.manifestBytes())
+            }
+            var pulled = try h.manifest.read(fromRoot: h.root)
+            pulled.skills[0].tags = ["peer"]
+            try h.manifest.write(pulled, toRoot: h.root)
+            try rebuildPulledState(h)
+            XCTAssertFalse(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.id == id })
+            try refuseAfterPull(refusal, h: h)
+            let before = try h.manifestBytes()
+            lock.release()
+            await h.saves.waitUntilIdle()
+            let notice = try XCTUnwrap(h.saves.categoryNotice)
+            XCTAssertTrue(notice.message.contains("Writing"), refusal)
+            XCTAssertTrue(notice.message.contains("gone"), notice.message)
+            XCTAssertTrue(notice.message.contains("dropped"), notice.message)
+            XCTAssertFalse(notice.message.contains("undone"), notice.message)
+            XCTAssertEqual(notice.title, "Category changes couldn't be saved")
+            XCTAssertEqual(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Local", "ZDelete"])
+            XCTAssertEqual(try h.manifestBytes(), before)
+        }
+    }
+
     func checkPriorSaveAfterPullDoesNotAcknowledgeRefusal() async throws {
         for field in ["name", "skill", "project"] {
             for refusal in ["schema", "lock"] {
