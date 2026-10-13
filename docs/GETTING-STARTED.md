@@ -139,7 +139,9 @@ Sync runs through a git remote you own. Setup:
    For SSH, use your agent or identity files from your SSH configuration. A key with a passphrase must be loaded in the agent, or have its passphrase saved in the macOS Keychain through `UseKeychain`. A Finder launch has no Terminal for a passphrase prompt.
 4. Sync. `~/.pensieve` becomes a git working tree; Pensieve commits, pulls, and pushes it for you.
 
-Settings › Sync shows **Token saved** or **No token saved** for a connected HTTPS repo. Use Add… or Replace… to open the access token sheet. Pensieve checks the new token with the remote before saving it. A refused token leaves your saved token unchanged. A successful save runs sync once, even with background sync off. If a conflict is open, use its Retry button after replacing the token.
+Settings › Sync shows **Token saved** or **No token saved** for a connected HTTPS repo. Use Add… or Replace… to open the access token sheet. Pensieve checks the new token with the remote before saving it. A refused token leaves your saved token unchanged. A successful save runs sync once, even with background sync off. If a conflict is open, use its Try again button after replacing the token.
+
+On a repo anyone can read, the token check succeeds without presenting the token. The next push tests whether the token can write.
 
 If sign-in fails, HTTPS advice points you to this token control. SSH advice asks you to run `ssh-add` in Terminal. If the host's key hasn't been accepted, it asks you to connect to that host once with `ssh` in Terminal to check and accept its key, then sync again.
 

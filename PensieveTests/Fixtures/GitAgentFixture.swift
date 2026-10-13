@@ -54,14 +54,14 @@ final class GitAgentFixture {
     private func startAgent() throws {
         // Bind and connect with a relative name: even a deeply nested TestRuns root fits AF_UNIX.
         // The driver owns a foreground agent without parsing ssh-agent's output. Its deadline
-        // also stops the agent if the test host crashes before fixture cleanup can run.
+        // exceeds test.sh’s 180-second test limit; it stops an orphan after a host crash.
         let driver = fixture.base + "/agent-driver"
         try fixture.files.writeExecutableFile(at: driver, content: """
             #!/bin/sh
             /usr/bin/ssh-agent -D -a s &
             child=$!
             printf '%s' "$child" > pid
-            /bin/sleep 90 &
+            /bin/sleep 3600 &
             timer=$!
             trap 'kill "$child" "$timer" 2>/dev/null; wait "$child" "$timer" 2>/dev/null' EXIT
             trap 'exit 0' HUP INT TERM

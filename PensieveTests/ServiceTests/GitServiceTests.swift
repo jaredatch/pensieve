@@ -983,8 +983,8 @@ extension GitServiceTests {
                 try files.writeExecutableFile(at: executable, content: """
                 #!/usr/bin/python3
                 import base64, sys
-                assert sys.argv[1:3] == ['-c', 'credential.helper=']
-                assert sys.argv[3:] == ['ls-remote', '--symref', '--', 'https://fixture.test/refs.git', 'HEAD', 'refs/heads/*']
+                assert sys.argv[1:5] == ['-c', 'credential.helper=', '-c', 'credential.sanitizePrompt=true']
+                assert sys.argv[5:] == ['ls-remote', '--symref', '--', 'https://fixture.test/refs.git', 'HEAD', 'refs/heads/*']
                 with open('\(receipt)', 'a') as stream: stream.write('call\\n')
                 sys.stdout.buffer.write(base64.b64decode('\(encoded)'))
                 """)

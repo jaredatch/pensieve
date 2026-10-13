@@ -10,7 +10,8 @@ extension GitFailureSyncTests {
             .init(remote: "https://fixture.test/store.git", token: " \t\n", advice:
              "Sync over HTTPS needs an access token. Add one in Settings › Sync."),
             .init(remote: "https://fixture.test/store.git", token: "expired", advice:
-             "fixture.test didn’t accept the access token. Replace it in Settings › Sync."),
+             "fixture.test didn’t accept the access token. Replace it in Settings › Sync.",
+             detail: "fatal: SAML SSO authorization required. The requested URL returned error: 403"),
             .init(remote: "git@example.com:store.git", token: nil, advice:
              "Couldn’t authenticate to example.com over SSH. Add your key to the agent "
                 + "(run ssh-add in Terminal), then sync again."),
@@ -34,6 +35,7 @@ extension GitFailureSyncTests {
                 machine: (InertMachineIdentity(), InertMachineStateService()))
             let result = await coordinator.runCycle()
             XCTAssertEqual(result, .failed(advice))
+            try assertAuthenticationAudit(fixture, detail: entry.detail)
             let sync = SyncModel(git: fixture.paths.makeGitService(), root: fixture.root)
             sync.apply(result)
             XCTAssertEqual(sync.state, .error(advice), "Chrome must retain the repair advice")
@@ -54,6 +56,13 @@ extension GitFailureSyncTests {
         }
     }
 
+    private func assertAuthenticationAudit(_ fixture: GitFailureFixture, detail: String) throws {
+        let status = try JSONDecoder().decode(DaemonStatus.self,
+            from: fixture.files.readData(at: fixture.support + "/daemon-status.json"))
+        XCTAssertEqual(status.result, "failed")
+        XCTAssertTrue(status.detail.contains(detail), "Audit must retain git’s diagnosis: \(status.detail)")
+        XCTAssertTrue(try fixture.files.readFile(at: fixture.support + "/daemon.log").contains(detail))
+    }
 }
 
 private struct AdviceCase {

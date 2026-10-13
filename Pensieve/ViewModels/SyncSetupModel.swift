@@ -78,8 +78,16 @@ final class SyncSetupModel {
 
     /// Thin delegate to the single source of truth. The full admission policy (transport allowlist,
     /// remote-helper/userinfo/dash/newline rejection) lives in `RemoteURLPolicy` so the sync-time
-    /// re-check in `SyncEngine` enforces the identical allowlist (C1). (PLAN-10 / 10.3)
-    nonisolated static func parseRemote(_ raw: String) -> RemoteSpec? { RemoteURLPolicy.parse(raw) }
+    /// re-check in `SyncEngine` enforces the identical allowlist (C1). Connect also canonicalizes
+    /// GitHub’s www host before credential storage and network calls to avoid a cross-host redirect.
+    nonisolated static func parseRemote(_ raw: String) -> RemoteSpec? {
+        guard let spec = RemoteURLPolicy.parse(raw) else { return nil }
+        guard spec.transport == .https, spec.host.lowercased() == "www.github.com",
+              var components = URLComponents(string: spec.url) else { return spec }
+        components.host = "github.com"
+        guard let url = components.string else { return nil }
+        return RemoteSpec(url: url, host: "github.com", transport: .https)
+    }
 
     nonisolated static func firstSyncPlan(hasGitDir: Bool, hasLocalSkills: Bool) -> FirstSyncPlan {
         if hasGitDir { return .alreadyConfigured }
@@ -209,11 +217,11 @@ final class SyncSetupModel {
         }
         switch transport {
         case .ssh:
-            return "Couldn't authenticate to \(host) over SSH. Add your key to the agent "
+            return "Couldn’t authenticate to \(host) over SSH. Add your key to the agent "
                 + "(run ssh-add in Terminal) and confirm it can reach the repo."
         case .https:
-            return "Couldn't authenticate to \(host). Check the access token has repo access "
-                + "and hasn't expired."
+            return "Couldn’t authenticate to \(host). Check the access token has repo access "
+                + "and hasn’t expired."
         }
     }
 }

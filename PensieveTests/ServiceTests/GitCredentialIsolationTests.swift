@@ -24,6 +24,7 @@ final class GitCredentialIsolationTests: XCTestCase {
             try? agent.remove()
             XCTAssertEqual(kill(pid, 0), -1, "The owned ssh-agent must be stopped")
         }
+        try assertAgentDeadlineOutlivesTestTimeout(pid: pid)
         XCTAssertTrue(agent.socket.hasPrefix(TestTemporaryDirectory.path), "The suite must contain its agent socket")
         let previous = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"]
         setenv("SSH_AUTH_SOCK", agent.socket, 1)
@@ -224,9 +225,12 @@ final class GitCredentialIsolationTests: XCTestCase {
             try fixture.git.setRemote(fixture.remote, at: root)
             // Git supplies the username itself, so every denied destination reaches a password prompt.
             _ = try fixture.raw(["-C", root, "config", "credential.username", "pensieve"])
+            let config = try fixture.files.readFile(at: fixture.config)
+            try fixture.files.writeFile(at: fixture.config, content: config + "\n[credential]\n    sanitizePrompt = false\n")
             let cases = [
                 ["url.http://fixture.test/.pushInsteadOf", "https://fixture.test/"],
                 ["url.https://elsewhere.test/.pushInsteadOf", "https://fixture.test/"],
+                ["url.https://fixture.test%2F@example.com/.pushInsteadOf", "https://fixture.test/"],
                 ["remote.origin.url", "https://elsewhere.test/store.git"],
                 ["http.proxy", "http://proxy.test:8080"]
             ]
@@ -258,26 +262,66 @@ extension GitCredentialIsolationTests {
         try NativeTestWork.run {
             let fixture = try GitCredentialFixture()
             defer { try? fixture.remove() }
-            for (host, authority) in [("FiXtUrE.TeSt", "fixture.test:8443"),
-                                      ("2001:DB8::1", "[2001:db8::1]:8443")] {
-                let env = try fixture.git.childEnvironment(
-                    credential: .httpsToken(username: "kept", token: fixture.token, host: host))
-                let auth = try fixture.raw(["-c", "credential.helper=", "-c", "credential.useHttpPath=true",
-                                           "credential", "fill"],
-                    input: "url=https://\(authority)/store.git\n\n", environment: env)
-                XCTAssertTrue(auth.contains("username=kept"))
-                XCTAssertTrue(auth.contains("password=" + fixture.token))
+            let cases = [("FiXtUrE.TeSt", "fixture.test:8443"),
+                         ("2001:DB8::1", "[2001:db8::1]:8443"),
+                         ("my_host.test", "my_host.test"),
+                         ("%67ithub.com", "%67ithub.com"),
+                         ("ÄXAMPLE.test", "ÄXAMPLE.test"),
+                         ("percent%25host.test", "percent%25host.test")]
+            for (host, authority) in cases {
+                let spec = try XCTUnwrap(RemoteURLPolicy.parse("https://\(authority)/store.git"))
+                XCTAssertEqual(spec.host, authority == "fixture.test:8443" ? "fixture.test"
+                    : authority.hasPrefix("[") ? "2001:db8::1" : host)
+                let credential = GitCredential.httpsToken(username: "kept", token: fixture.token, host: host)
+                try fixture.files.writeFile(at: fixture.base + "/credential-input",
+                    content: "url=https://\(authority)/store.git\n\n")
+                do {
+                    let auth = try fixture.git.runOrThrow(["-c", "credential.useHttpPath=true", "credential", "fill"],
+                        in: nil, credential: credential).stdout
+                    XCTAssertTrue(auth.contains("username=kept"), authority)
+                    XCTAssertTrue(auth.contains("password=" + fixture.token), authority)
+                } catch {
+                    XCTFail("Saved host \(host) must answer git’s prompt for \(authority): \(error)")
+                }
                 for denied in ["http://\(authority)/store.git", "https://elsewhere.test/store.git",
-                               "https://[2001:db8::2]:8443/store.git"] {
-                    XCTAssertThrowsError(try fixture.raw(["-c", "credential.helper=", "credential", "fill"],
-                        input: "url=\(denied)\n\n", environment: env), denied)
+                               "https://[2001:db8::2]:8443/store.git", "https://%65lsewhere.test/store.git",
+                               "https://fixture.test%2F@example.com/store.git",
+                               "https://fixture.test%40elsewhere.test/store.git",
+                               "https://%2567ithub.com/store.git", "https://äxample.test/store.git"] {
+                    try fixture.files.writeFile(at: fixture.base + "/credential-input", content: "url=\(denied)\n\n")
+                    XCTAssertThrowsError(try fixture.git.runOrThrow(["credential", "fill"],
+                        in: nil, credential: credential), "\(host) must refuse \(denied)")
                 }
             }
-            let env = try fixture.git.childEnvironment(
-                credential: .httpsToken(username: "kept", token: fixture.token, host: "*.test"))
-            XCTAssertThrowsError(try fixture.raw(["-c", "credential.helper=", "credential", "fill"],
-                input: "url=https://fixture.test/store.git\n\n", environment: env), "Saved hosts cannot be shell patterns")
+            try fixture.files.writeFile(at: fixture.base + "/credential-input",
+                content: "url=https://fixture.test/store.git\n\n")
+            for host in ["*.test", "fixture.test%00", "fixture.test%0A", "fixture.test%0D"] {
+                XCTAssertThrowsError(try fixture.git.runOrThrow(["credential", "fill"], in: nil,
+                    credential: .httpsToken(username: "kept", token: fixture.token, host: host)),
+                    "Saved hosts cannot be patterns or hide control bytes: \(host)")
+            }
         }
+    }
+
+    private func assertAgentDeadlineOutlivesTestTimeout(pid: Int32) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-axo", "pid=,ppid=,args="]
+        let output = Pipe()
+        process.standardOutput = output
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+        let rows = try XCTUnwrap(String(bytes: data, encoding: .utf8)).split(separator: "\n").map {
+            $0.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        }
+        let agentRow = try XCTUnwrap(rows.first { $0.first == String(pid) })
+        let driver = agentRow[1]
+        let timer = try XCTUnwrap(rows.first { $0.count == 4 && $0[1] == driver && $0[2] == "/bin/sleep" })
+        let lifetime = try XCTUnwrap(Int(timer[3]))
+        // test.sh bounds each test at 180 seconds; the crash timer must leave cleanup a margin.
+        XCTAssertGreaterThanOrEqual(lifetime, 240, "The fixture must never expire during a running test")
     }
 
     private func container() throws -> ModelContainer {

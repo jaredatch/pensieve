@@ -90,6 +90,7 @@ actor SyncCoordinator {
             return .failed("Sync coordinator has not been configured.")
         }
         let result: SyncCycleResult
+        var cycleError: Error?
         var authentication = SyncAuthentication(remote: nil, credential: nil)
         do {
             // A fresh context prevents an earlier cycle's registered objects from hiding a newer UI save.
@@ -136,11 +137,21 @@ actor SyncCoordinator {
             result = cycleResult(from: outcome, preflightWarnings: preflightWarnings,
                                  preparedHeadStamp: preparedHeadStamp, preflightAdvanced: preflightAdvanced)
         } catch {
+            cycleError = error
             result = Self.cycleFailure(authentication.reporting(error))
         }
-        let fields = result.auditFields
-        audit.record(category: fields.category, detail: fields.detail)
+        Self.recordAudit(for: result, error: cycleError, audit: audit)
         return result
+    }
+
+    /// The UI keeps its repair advice; the audit keeps git’s original authentication diagnostic.
+    private static func recordAudit(for result: SyncCycleResult, error: Error?, audit: SyncAuditWriting) {
+        let fields = result.auditFields
+        if let error, case GitError.authenticationFailed = error {
+            audit.record(category: fields.category, detail: error.localizedDescription)
+        } else {
+            audit.record(category: fields.category, detail: fields.detail)
+        }
     }
 
     private func cycleResult(

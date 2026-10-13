@@ -496,6 +496,23 @@ extension SyncSetupModelTests {
         }
     }
 
+    func testHTTPSConnectCanonicalizesWWWGitHubBeforeUsingAndStoringCredentials() async throws {
+        for url in ["https://www.github.com/octocat/x.git", "https://WWW.GITHUB.COM:443/octocat/x.git"] {
+            let git = RecordingGitService()
+            let credentials = InMemoryCredentialStore()
+            let model = try makeModel(git: git, credentials: credentials,
+                rebuilder: RecordingRebuilder(), fileService: existingUserFiles())
+            await model.connectAndReport(url: url, username: "octocat", token: "tok")
+            XCTAssertEqual(model.state, .done)
+            let remote = url.contains(":443") ? "https://github.com:443/octocat/x.git" : "https://github.com/octocat/x.git"
+            XCTAssertTrue(git.calls.contains("lsremote-refs:" + remote), "Check must use the canonical remote")
+            XCTAssertTrue(git.calls.contains("remote:" + remote), "Saved remote must avoid the redirect")
+            XCTAssertEqual(git.lastCredential, .httpsToken(username: "octocat", token: "tok", host: "github.com"))
+            XCTAssertEqual(credentials.credential(forHost: "github.com"), git.lastCredential)
+            XCTAssertNil(credentials.credential(forHost: "www.github.com"))
+        }
+    }
+
     // MARK: - connect: auth-failure messaging
 
     func testAuthFailureMessageByTransport() async throws {
@@ -505,8 +522,8 @@ extension SyncSetupModelTests {
                                        rebuilder: RecordingRebuilder(), fileService: existingUserFiles())
         await httpsModel.connectAndReport(url: "https://github.com/octocat/x.git", username: "octocat", token: "tok")
         guard case let .failed(httpsMessage) = httpsModel.state else { return XCTFail("expected .failed") }
-        XCTAssertTrue(httpsMessage.contains("authenticate"), "https message: \(httpsMessage)")
-        XCTAssertTrue(httpsMessage.contains("access token"), "https message should be https-specific")
+        XCTAssertEqual(httpsMessage, "Couldn’t authenticate to github.com. Check the access token has repo access "
+            + "and hasn’t expired.")
 
         let sshGit = RecordingGitService()
         sshGit.throwAuthOn = "clone"
@@ -514,8 +531,8 @@ extension SyncSetupModelTests {
                                      rebuilder: RecordingRebuilder(), fileService: StubFileService())
         await sshModel.connectAndReport(url: "git@github.com:octocat/x.git", username: "", token: "")
         guard case let .failed(sshMessage) = sshModel.state else { return XCTFail("expected .failed") }
-        XCTAssertTrue(sshMessage.contains("authenticate"), "ssh message: \(sshMessage)")
-        XCTAssertTrue(sshMessage.contains("SSH"), "ssh message should be ssh-specific")
+        XCTAssertEqual(sshMessage, "Couldn’t authenticate to github.com over SSH. Add your key to the agent "
+            + "(run ssh-add in Terminal) and confirm it can reach the repo.")
     }
 
     func testSSHHostKeyFailureAsksToAcceptTheRemoteKey() async throws {

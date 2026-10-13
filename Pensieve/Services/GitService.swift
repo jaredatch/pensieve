@@ -279,7 +279,7 @@ struct GitService: GitServiceProtocol {
               !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let helper = try ensureAskpassHelper()      // propagate a write failure (was try?-swallowed)
         env["GIT_ASKPASS"] = helper
-        env["PENSIEVE_GIT_HOST"] = host.lowercased()
+        env["PENSIEVE_GIT_HOST"] = host
         env["PENSIEVE_GIT_USERNAME"] = username
         env["PENSIEVE_GIT_PASSWORD"] = token   // CHILD ENV only — not argv, not disk
     }
@@ -294,21 +294,24 @@ struct GitService: GitServiceProtocol {
         let path = askpassHelperPath
         let body = """
         #!/bin/sh
+        export LC_ALL=C
+        \(Self.canonicalHostFunction)
         case "$1" in
           "Username for 'https://"*"': "|"Password for 'https://"*"': ") ;;
           *) exit 1 ;;
         esac
         address=${1#*\\'}
         address=${address%\\'*}
-        authority=${address#https://}
+        authority=${address#*://}
         authority=${authority%%/*}
         authority=${authority##*@}
         case "$authority" in
           \\[*\\]*) host=${authority#\\[}; host=${host%%\\]*} ;;
           *) host=${authority%%:*} ;;
         esac
-        host=$(printf '%s' "$host" | LC_ALL=C /usr/bin/tr '[:upper:]' '[:lower:]')
-        [ "$host" = "$PENSIEVE_GIT_HOST" ] || exit 1
+        host=$(canonical_host "$host") || exit 1
+        saved_host=$(canonical_host "$PENSIEVE_GIT_HOST") || exit 1
+        [ "$host" = "$saved_host" ] || exit 1
         case "$1" in
           Username*) printf '%s' "$PENSIEVE_GIT_USERNAME" ;;
           Password*) printf '%s' "$PENSIEVE_GIT_PASSWORD" ;;
@@ -317,6 +320,31 @@ struct GitService: GitServiceProtocol {
         try fileService.writeExecutableFile(at: path, content: body + "\n")
         return path
     }
+
+    /// One byte-level form for both saved and sanitized prompt hosts: decode once, then fold ASCII.
+    /// Parsing authority delimiters precedes decoding, so escaped userinfo cannot become a host.
+    private static let canonicalHostFunction = """
+        canonical_host() {
+          value=$1
+          decoded=
+          while [ -n "$value" ]; do
+            case "$value" in
+              %??*)
+                pair=${value#%}; pair=${pair%"${pair#??}"}
+                case "$pair" in
+                  *[!0-9a-fA-F]*|0[0-9a-fA-F]|1[0-9a-fA-F]|7[fF]) return 1 ;;
+                esac
+                decoded=$decoded$(printf '%b' "\\\\$(printf '%03o' "0x$pair")")
+                value=${value#???}
+                ;;
+              %*) return 1 ;;
+              *) decoded=$decoded${value%"${value#?}"}; value=${value#?} ;;
+            esac
+          done
+          case "$decoded" in ""|*[[:cntrl:]]*) return 1 ;; esac
+          printf '%s' "$decoded" | /usr/bin/tr 'A-Z' 'a-z'
+        }
+        """
 
     // MARK: Process runner (§B — verbatim)
 
@@ -351,9 +379,10 @@ struct GitService: GitServiceProtocol {
         if storeRules { environment["GIT_ATTR_NOSYSTEM"] = "1" }
         let configuredArguments = storeRules ? Self.storeConfigurationArgs + args : args
         // Reset the configured helper chain for reads and writes: no get, store or erase.
+        // Sanitized prompts keep userinfo delimiters escaped until after host parsing.
         // childEnvironment also disables foreign HTTP askpass programs. Credentials the user
         // configures elsewhere in git or curl can still apply, even with a Pensieve token.
-        let arguments = ["-c", "credential.helper="] + configuredArguments
+        let arguments = ["-c", "credential.helper=", "-c", "credential.sanitizePrompt=true"] + configuredArguments
         let child = try GitProcess(executable: gitPath, arguments: arguments, workingDirectory: workingDir,
                                    environment: environment)
         #if GIT_PROCESS_PROBE

@@ -320,13 +320,15 @@ Category edits and skill creation, deletion and metadata edits appear in the win
 
 After about five seconds, the sync status line says "Your change will save when sync finishes." It clears when the queue finishes. The sync line and its Resolve action remain available during the wait. Quit waits for a pending save. After a few seconds it asks "Pensieve is still saving a change. It's waiting for sync to finish. If you quit now, the change won't be saved." Wait dismisses the question; quit completes when saving finishes. Choosing Quit again reopens the question immediately. Quit Anyway ends the process without saving that pending manifest change.
 
-Settings › Sync shows a token row for a connected HTTPS remote: “Token saved” with Replace…, or “No token saved” with Add… and “Sync over HTTPS needs an access token. Add one to keep syncing.” The sheet checks the new token before saving it and keeps the saved token after refusal or cancellation. After a successful save, sync runs once even with background sync off, unless a conflict is open. The conflict sheet’s Retry uses the new token.
+Settings › Sync shows a token row for a connected HTTPS remote: “Token saved” with Replace…, or “No token saved” with Add… and “Sync over HTTPS needs an access token. Add one to keep syncing.” The sheet checks the new token before saving it and keeps the saved token after refusal or cancellation. After a successful save, sync runs once even with background sync off, unless a conflict is open. The conflict sheet’s Try again button uses the new token.
+
+On a repository that permits anonymous reads, git does not present the token during this check. The next push tests the token and its write access.
 
 HTTPS sign-in advice says the token is missing or refused and points to Settings › Sync. SSH sign-in advice asks the user to add their key with `ssh-add` in Terminal. Host-key verification failures instead say “Connect to github.com once with ssh in Terminal to check and accept its key, then sync again.” The message uses the remote’s host.
 
 Pensieve supplies HTTPS credentials through its token helper. The shared git runner disables credential helpers for reads and writes, including sync, conflict resolution, the daemon, installs and History. Helpers cannot supply, store or erase a credential. Other askpass programs from git config or the environment cannot answer HTTP credential requests. A missing, empty or whitespace-only token leaves Pensieve's token helper disabled. The Connect model refuses a blank HTTPS token before git or credential storage runs.
 
-Pensieve's token helper answers only git's prompts for the remote's own host over HTTPS. A rewrite, extra URL or proxy elsewhere never receives Pensieve's token. Credentials the user configured themselves can still go wherever git sends them.
+Pensieve's token helper answers only git's prompts for the remote's own host over HTTPS. A rewrite, extra URL or proxy elsewhere never receives Pensieve's token. A redirect to another host also gets no token, matching git's host-scoped credential helpers. Connect normalizes `www.github.com` to `github.com` to avoid that redirect. Credentials the user configured themselves can still go wherever git sends them.
 
 Credentials the user configures for git or curl remain available over HTTPS, even with a nonblank Pensieve token. Examples include `.netrc`, `http.extraHeader`, URL rewrites containing credentials, cookies and client certificates. Any of these sources can authenticate before or instead of Pensieve's token.
 

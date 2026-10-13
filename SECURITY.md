@@ -37,7 +37,7 @@ Connect checks the URL you enter, and Pensieve checks again before each sync. Th
 
 Pensieve stores the HTTPS token you enter in your macOS Keychain. Git credential helpers cannot supply, save or erase credentials during Pensieve's git commands. Other askpass programs from git config or the environment cannot answer HTTP credential requests. A missing or blank token leaves Pensieve's token helper disabled. Connect refuses a blank token.
 
-Pensieve's token helper answers only git's prompts for the remote's own host over HTTPS. A rewrite, extra URL or proxy elsewhere never receives Pensieve's token. Credentials you configured yourself can still go wherever git sends them.
+Pensieve's token helper answers only git's prompts for the remote's own host over HTTPS. A rewrite, extra URL or proxy elsewhere never receives Pensieve's token. A redirect to another host also gets no token, matching git's host-scoped credential helpers. Connect normalizes `www.github.com` to `github.com` to avoid that redirect. Credentials you configured yourself can still go wherever git sends them.
 
 Credentials you configure yourself for git or curl remain available over HTTPS, even with a nonblank Pensieve token. Examples include `.netrc`, `http.extraHeader`, URL rewrites containing credentials, cookies and client certificates. Any of these sources can authenticate before or instead of Pensieve's token.
 

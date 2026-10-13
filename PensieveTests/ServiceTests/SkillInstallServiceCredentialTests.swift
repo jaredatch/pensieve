@@ -137,6 +137,22 @@ extension SkillInstallServiceTests {
         }
     }
 
+    func testInstallMapsProxyResolutionResetAndEmptyReplyToNetworkUnavailable() throws {
+        try NativeTestWork.run { [self] in
+            for detail in ["Could not resolve proxy: proxy.example", "Connection reset by peer", "Empty reply from server"] {
+                let git = RejectingInstallGitService(cloneError:
+                    GitError.commandFailed(args: ["clone"], exitCode: 128, stderr: detail))
+                let installer = SkillInstallService(gitService: git, credentialStore: InMemoryCredentialStore(),
+                    fileService: fileService, scratchRoot: tempDir + "/network-scratch", storeRoot: tempDir + "/store",
+                    lockPath: tempDir + "/sync.lock")
+                XCTAssertThrowsError(try installer.fetch(repo: "https://github.com/example/skills.git",
+                    ref: nil, credential: nil)) { error in
+                    XCTAssertEqual(error as? SkillInstallError, .networkUnavailable, detail)
+                }
+            }
+        }
+    }
+
     private func assertShallowClonePreservesCommandFailure() {
         let productionGit = TestPaths.git
         XCTAssertThrowsError(

@@ -125,6 +125,9 @@ struct GitCredentialFixture {
           esac
         done
         case "$1" in
+          credential)
+            exec /usr/bin/git "${original[@]}" < '\(base)/credential-input'
+            ;;
           clone|fetch|push|ls-remote)
             if [ "$1" = push ] && [ -f '\(base)/rotate-at-push' ]; then
               mv '\(base)/rotate-at-push' '\(acceptedToken)'
