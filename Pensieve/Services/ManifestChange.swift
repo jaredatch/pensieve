@@ -19,6 +19,15 @@ enum ManifestChange {
         }
     }
 
+    /// Validate only the durable publication. Pending window projections may temporarily claim
+    /// a name a peer has since taken; the queue must reach that edit's turn to refuse and undo it.
+    func validate(in snapshot: ManifestSnapshot) throws {
+        guard case .renameCategory(let old, let new) = self,
+              let target = snapshot.categories.firstIndex(where: { $0.name == old }) else { return }
+        let others = snapshot.categories.indices.filter { $0 != target }.map { snapshot.categories[$0].name }
+        if let taken = CategoryName.takenName(new, among: others) { throw CategoryNameError.taken(taken) }
+    }
+
     /// False means the target is absent. The queue still publishes idempotent deletions.
     @discardableResult
     func apply(to snapshot: inout ManifestSnapshot) -> Bool {

@@ -48,27 +48,34 @@ final class CategorySaveUndoTests: XCTestCase {
     }
 
     func testDependentRenamesUndoInReverseOrderIncludingRestoredName() async throws {
-        let h = try ManifestSaveFixture()
-        defer { h.cleanup() }
-        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
-        defer { lock.release() }
-        h.local.name = "Writing"
-        h.doomed.name = "Spare"
-        try h.context.save()
-        try h.manifest.write(try h.manifest.snapshot(from: h.context), toRoot: h.root)
-        h.recording.failingWrites = 1
-        h.categories.rename(h.local, to: "Drafts", context: h.context)
-        h.categories.rename(h.doomed, to: "Writing", context: h.context)
-        h.categories.rename(h.local, to: "Final", context: h.context)
-        h.categories.setSkill(h.alpha, inCategory: h.local, assigned: true, context: h.context)
-        lock.release()
-        await h.saves.waitUntilIdle()
-        let rows = try h.context.fetch(FetchDescriptor<Pensieve.Category>())
-        XCTAssertEqual(rows.first { $0.id == h.local.id }?.name, "Writing")
-        XCTAssertEqual(rows.first { $0.id == h.doomed.id }?.name, "Spare")
-        XCTAssertTrue(rows.first { $0.id == h.local.id }?.skillSlugs.isEmpty == true)
-        XCTAssertEqual(h.recording.writes.count, 0, "Dependent saves must not publish")
-        XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories.map(\.name), ["Spare", "Writing"])
-        XCTAssertEqual(try XCTUnwrap(h.saves.categoryNotice).messages.count, 4)
+        for claimedName in ["Writing", " WRITING ", "writing"] {
+            let h = try ManifestSaveFixture()
+            defer { h.cleanup() }
+            let recorder = ConvergenceRecorder()
+            let store = CategoryStore(manifestSaves: h.saves,
+                reconciler: ConvergenceRecordingLedger(name: "category", recorder: recorder))
+            let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+            defer { lock.release() }
+            h.local.name = "Writing"
+            h.doomed.name = "Spare"
+            try h.context.save()
+            try h.manifest.write(try h.manifest.snapshot(from: h.context), toRoot: h.root)
+            h.recording.failingWrites = 1
+            store.rename(h.local, to: "Drafts", context: h.context)
+            store.rename(h.doomed, to: claimedName, context: h.context)
+            store.rename(h.local, to: "Final", context: h.context)
+            store.setSkill(h.alpha, inCategory: h.local, assigned: true, context: h.context)
+            lock.release()
+            await h.saves.waitUntilIdle()
+            XCTAssertEqual(recorder.observedCategoryNames.sorted(), ["Spare", "Writing"],
+                           "Deployment convergence must see the completed undo, with no taken name or intermediate rule")
+            let rows = try h.context.fetch(FetchDescriptor<Pensieve.Category>())
+            XCTAssertEqual(rows.first { $0.id == h.local.id }?.name, "Writing")
+            XCTAssertEqual(rows.first { $0.id == h.doomed.id }?.name, "Spare")
+            XCTAssertTrue(rows.first { $0.id == h.local.id }?.skillSlugs.isEmpty == true)
+            XCTAssertEqual(h.recording.writes.count, 0, "Dependent saves must not publish")
+            XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories.map(\.name), ["Spare", "Writing"])
+            XCTAssertEqual(try XCTUnwrap(h.saves.categoryNotice).messages.count, 4)
+        }
     }
 }

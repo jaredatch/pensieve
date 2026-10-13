@@ -125,6 +125,7 @@ final class ManifestSaveModel {
         let healedItems = disk == nil ? Set(items.filter {
             $0.presentation.context === item.presentation.context
         }.map(\.id)) : []
+        if disk != nil, !item.wasHealed { try item.change.validate(in: saved) }
         if disk != nil, !item.wasHealed, !item.change.apply(to: &saved) {
             if refused.contains(where: { $0.suppliesTarget(for: item.presentation) }) {
                 throw ManifestSaveError.unsavedTarget
@@ -158,15 +159,30 @@ final class ManifestSaveModel {
             // Publication is permanent, even after a peer changes the manifest. Only edits still
             // awaiting publication and still shown locally need an overlay. An authoritative sync
             // rebuild already replaced older category edits with saved state.
-            for pending in items.dropFirst() where !pending.wasHealed
-                && pending.categoryEdit?.wasRebuilt != true
-                && pending.presentation.context === item.presentation.context {
-                pending.change.apply(to: &displayed)
-            }
+            try projectPending(in: item.presentation.context, onto: &displayed)
             try item.accept(prepared, displayed)
             item.report(nil)
         } catch {
             item.report(ManifestSaveError.rebuildFailed(error.localizedDescription, manifestSaved: published))
+        }
+    }
+
+    @MainActor
+    private func projectPending(in context: ModelContext, onto snapshot: inout ManifestSnapshot) throws {
+        for pending in items.dropFirst() where !pending.wasHealed
+            && pending.categoryEdit?.wasRebuilt != true && pending.presentation.context === context
+            && items.contains(where: { $0.id == pending.id }) {
+            do { try pending.change.validate(in: snapshot) } catch {
+                guard pending.categoryEdit != nil else { throw error }
+                // Reject before accepting two same-named records, which would make name-based
+                // rebuild matching associate our UUID with the peer's rule. This head's snapshot
+                // is not publication evidence for the pending edit.
+                refuseCategory(pending, durable: nil, error: error)
+                items.removeAll { $0.id == pending.id }
+                pendingCount = items.count
+                continue
+            }
+            pending.change.apply(to: &snapshot)
         }
     }
 
@@ -240,7 +256,7 @@ extension ManifestSaveModel {
 
     @MainActor
     private func refuseCategory(_ item: Item, durable: ManifestSnapshot?, error: Error) {
-        guard let edit = item.categoryEdit else { return }
+        guard let edit = item.categoryEdit, let start = items.firstIndex(where: { $0.id == item.id }) else { return }
         if categoryIsSaved(item, durable: durable) {
             categoryMessages.append(CategorySaveNotice.entry(edit: edit, error: error, outcome: .saved))
             item.report(error)
@@ -252,11 +268,13 @@ extension ManifestSaveModel {
         var dependentIndices: [Int] = []
         // A heal marks the head and its queued context together. A healed head returns above,
         // so only unpublished edits in this context can become dependent undos here.
-        for index in items.indices.dropFirst() {
+        for index in items.indices.dropFirst(start + 1) {
             let candidate = items[index]
             guard candidate.presentation.context === item.presentation.context,
                   let next = candidate.categoryEdit,
-                  identities.contains(next.id) || next.claimedName.map(restoredNames.contains) == true else { continue }
+                  identities.contains(next.id) || next.claimedName.map({ claimed in
+                      restoredNames.contains { CategoryName.matches(claimed, $0) }
+                  }) == true else { continue }
             affected.append(candidate)
             dependentIndices.append(index)
             identities.insert(next.id)

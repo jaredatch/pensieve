@@ -5,13 +5,25 @@ import SwiftUI
 enum RenderedViewTestSupport {
     /// Observe the enabled environment delivered to a real button in a test host.
     struct AvailabilityStyle: PrimitiveButtonStyle {
-        let report: (Bool) -> Void
         @Environment(\.isEnabled) private var isEnabled
         func makeBody(configuration: Configuration) -> some View {
             DefaultButtonStyle().makeBody(configuration: configuration)
-                .onAppear { report(isEnabled) }
-                .onChange(of: isEnabled) { _, enabled in report(enabled) }
+                .background(HStack {
+                    configuration.label
+                    Text(isEnabled ? "__enabled_control__" : "__disabled_control__")
+                }.hidden())
         }
+    }
+
+    /// The hidden probe renders its own label followed by its enabled environment. Read that
+    /// pair across the live nested AppKit label hosts; never substitute another button's state.
+    static func buttonIsEnabled(_ title: String, in host: NSHostingView<AnyView>) -> Bool? {
+        let labels = values(in: host).compactMap { $0 as? Text }.flatMap { strings(in: $0) }
+        for (label, state) in zip(labels, labels.dropFirst()) where label == title {
+            if state == "__disabled_control__" { return false }
+            if state == "__enabled_control__" { return true }
+        }
+        return nil
     }
 
     static func strings(in text: Text) -> [String] {

@@ -3,10 +3,8 @@ import SwiftData
 
 // MARK: - Result
 
-/// The outcome of a disk + manifest -> SwiftData reconcile. `Equatable` so an idempotence test can
-/// assert an all-zero second pass. `warnings` collects non-fatal anomalies: a skill file skipped for
-/// missing required frontmatter, an overlay whose SKILL.md is absent (a corruption signal), and an
-/// unreadable manifest (a newer schema), or a failed local category fetch.
+/// Disk + manifest reconciliation effects. Warnings include missing skill frontmatter or files,
+/// unreadable manifests and failed category fetches. An idempotent second pass has zero effects.
 struct RebuildResult: Equatable {
     var skillsInserted: Int = 0
     var skillsUpdated: Int = 0
@@ -71,14 +69,9 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
     func rebuild(fromRoot root: String, context: ModelContext) -> RebuildResult {
         var result = RebuildResult()
 
-        // Read the manifest ONCE. `read` throws when the manifest is unreadable — a newer/unsupported
-        // schema OR a corrupt/malformed one, where strict list-shape validation throws
-        // `corruptManifestFile`. The overlay is the AUTHORITY for every skill's scope/tags/cursor/origin
-        // + category membership, so an
-        // unreadable manifest must NOT drive a reconcile: an empty snapshot would reset every skill's
-        // overlay-backed fields to defaults AND delete every category (data loss, PLAN-07 / 07.4
-        // review). Bail with a warning and mutate NOTHING — preserve local state until the app is
-        // upgraded to understand the newer store.
+        // Read the manifest once. A newer schema or corrupt file must stop reconciliation:
+        // an empty fallback would reset skills' scope/tags/cursor/origin and delete categories.
+        // Warn and preserve local state until Pensieve can read the store.
         guard let snapshot = try? manifestService.read(fromRoot: root) else {
             result.storeUnreadable = true
             result.warnings.append(

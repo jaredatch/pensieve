@@ -119,7 +119,11 @@ extension CategorySaveUndoTests {
         XCTAssertTrue(notice.contains(scenario.hasPrefix("create") ? "Writing" : "Local"), notice)
         XCTAssertTrue(notice.contains(scenario.contains("schema") ? "Update Pensieve"
                       : scenario.hasSuffix("-published-lock") ? "directory"
+                      : scenario.hasPrefix("rename-peer") ? "A category named “Drafts” already exists."
                       : CocoaError(.fileWriteNoPermission).localizedDescription), notice)
+        if scenario.hasPrefix("rename-peer") {
+            XCTAssertEqual(h.recording.failingWrites, 1, "Name validation must refuse before attempting the write")
+        }
     }
 
     private func enqueueCategorySyncEdit(_ scenario: String, local: Pensieve.Category,

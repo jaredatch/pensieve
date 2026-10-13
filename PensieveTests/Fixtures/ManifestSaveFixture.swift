@@ -90,6 +90,9 @@ final class RecordingSaveManifest: ManifestSnapshotting {
     var failingWrites = 0
     var failingSnapshots = 0
     var failingRebuildSnapshots = 0
+    /// Category order is not a snapshot contract. Force a valid peer-first order when testing
+    /// pending rename collisions, rather than relying on ModelContext's unsorted fetch order.
+    var sortRebuildCategories = false
     var afterWrite: (() -> Void)?
     var afterRebuildSnapshot: (() throws -> Void)?
     struct Refused: LocalizedError { var errorDescription: String? { "The local library could not be read." } }
@@ -105,7 +108,8 @@ final class RecordingSaveManifest: ManifestSnapshotting {
         }
         // These faults belong to the window fallback/projection read, not the worker result read.
         if Thread.isMainThread, failingSnapshots > 0 { failingSnapshots -= 1; throw Refused() }
-        let value = try base.snapshot(from: context)
+        var value = try base.snapshot(from: context)
+        if !Thread.isMainThread, sortRebuildCategories { value.categories.sort { $0.name < $1.name } }
         if !Thread.isMainThread { try afterRebuildSnapshot?() }
         return value
     }

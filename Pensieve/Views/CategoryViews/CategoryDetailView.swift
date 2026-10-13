@@ -8,6 +8,7 @@ struct CategoryDetailView: View {
     let onReveal: (Skill) -> Void
     @Environment(\.modelContext) private var context
     @Query private var categories: [Category]
+    @Query private var allCategories: [Category]
     @Query(sort: \Project.name) private var projects: [Project]
     @Query(sort: \Skill.name) private var skills: [Skill]
     @State private var model: CategoryDetailModel
@@ -124,10 +125,10 @@ struct CategoryDetailView: View {
             title: "Rename Category",
             fieldLabel: "Category Name",
             actionTitle: "Rename",
-            initialName: category.name
-        ) { name in
-            model.rename(category, to: name, context: context)
-        }
+            initialName: category.name,
+            validate: { CategoryName.validationMessage($0, among: allCategories, excluding: category.id) },
+            onCommit: { name in model.rename(category, to: name, context: context) }
+        )
     }
 
     @ViewBuilder

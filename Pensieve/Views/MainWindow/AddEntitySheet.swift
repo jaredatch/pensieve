@@ -20,6 +20,7 @@ struct AddEntitySheet: View {
     let intentReconciler: @MainActor (ModelContext) -> BatchResult
     let onCreated: (EntitySelection) -> Void
     @Environment(\.modelContext) private var context
+    @Query private var categories: [Category]
 
     var body: some View {
         switch kind {
@@ -30,13 +31,14 @@ struct AddEntitySheet: View {
                 onCreated: { onCreated(.project($0.id)) }
             )
         case .category:
-            EntityNameSheet(title: "Add Category", fieldLabel: "Category Name", actionTitle: "Add") { name in
-                let created = CategoryStore(
-                    notifier: notifier, manifestSaves: runtime.library.manifestSaves,
-                    reconciler: CategoryReconciler(platformVM: runtime.platformVM))
-                    .create(name: name, context: context)
-                if let created { onCreated(.category(created.id)) }
-            }
+            EntityNameSheet(title: "Add Category", fieldLabel: "Category Name", actionTitle: "Add",
+                validate: { CategoryName.validationMessage($0, among: categories) }, onCommit: { name in
+                    let created = CategoryStore(
+                        notifier: notifier, manifestSaves: runtime.library.manifestSaves,
+                        reconciler: CategoryReconciler(platformVM: runtime.platformVM))
+                        .create(name: name, context: context)
+                    if let created { onCreated(.category(created.id)) }
+                })
         }
     }
 }

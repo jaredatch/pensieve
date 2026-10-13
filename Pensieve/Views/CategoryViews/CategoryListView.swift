@@ -97,10 +97,10 @@ struct CategoryListView: View {
                 title: "Rename Category",
                 fieldLabel: "Category Name",
                 actionTitle: "Rename",
-                initialName: category.name
-            ) { name in
-                categoryStore.rename(category, to: name, context: context)
-            }
+                initialName: category.name,
+                validate: { CategoryName.validationMessage($0, among: categories, excluding: category.id) },
+                onCommit: { name in categoryStore.rename(category, to: name, context: context) }
+            )
         }
         .alert(
             "Removal incomplete",

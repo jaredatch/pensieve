@@ -81,7 +81,7 @@ struct CategoryStore: CategoryStoreProtocol {
 
     func create(name: String, context: ModelContext, notifier: SyncStateNotifying) -> Category? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
+        guard !trimmed.isEmpty, admits(trimmed, context: context) else { return nil }
 
         let category = Category(name: trimmed)
         let edit = CategorySaveEdit(category: category, context: context,
@@ -94,8 +94,11 @@ struct CategoryStore: CategoryStoreProtocol {
     }
 
     func rename(_ category: Category, to name: String, context: ModelContext, notifier: SyncStateNotifying) {
-        let edit = CategorySaveEdit(category: category, context: context, change: .renameCategory(category.name, name))
-        category.name = name
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != category.name,
+              admits(trimmed, excluding: category.id, context: context) else { return }
+        let edit = CategorySaveEdit(category: category, context: context, change: .renameCategory(category.name, trimmed))
+        category.name = trimmed
         try? edit.save(in: context)
         regenerateManifest(edit, context: context)
         notifier()
@@ -189,6 +192,17 @@ struct CategoryStore: CategoryStoreProtocol {
     func categories(containingSkillSlug slug: String, context: ModelContext) -> [Category] {
         let categories = (try? context.fetch(FetchDescriptor<Category>())) ?? []
         return categories.filter { $0.skillSlugs.contains(slug) }
+    }
+
+    private func admits(_ name: String, excluding id: UUID? = nil, context: ModelContext) -> Bool {
+        do {
+            let names = try context.fetch(FetchDescriptor<Category>()).filter { $0.id != id }.map(\.name)
+            return CategoryName.takenName(name, among: names) == nil
+        } catch {
+            Logger(subsystem: "com.jaredatch.pensieve", category: "categories")
+                .warning("Couldn't check category names: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     private func regenerateManifest(_ edit: CategorySaveEdit, context: ModelContext) {
