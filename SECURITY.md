@@ -33,7 +33,7 @@ A skill installed from GitHub is text someone else wrote. Pensieve treats it tha
 
 ## Git remotes and credentials
 
-Pensieve checks the remote as you enter it when you connect, and checks the literal configured remote again before each sync. These checks accept `https://`, `ssh://` and `user@host:path`, and refuse git's `ext::` and other helper transports, `file://`, plain `http://`, and anything that could be read as a command-line option. Git still applies URL rewrites from your own configuration. A rewrite can change where git connects, including to plain `http://`, where Pensieve's token could be sent without encryption.
+Connect checks the URL you enter, and Pensieve checks again before each sync. These checks accept `https://`, `ssh://` and `user@host:path`, and refuse git's `ext::` and other helper transports, `file://`, plain `http://`, and anything that could be read as a command-line option. Git applies rewrites from your own config, and Pensieve does not check every rewritten address. Those checks do not cover `pushInsteadOf`, `remote.origin.pushurl` or the rewritten addresses used during Connect and installs. A rewrite can therefore send git and Pensieve's token to plain `http://`.
 
 Pensieve stores the HTTPS token you enter in your macOS Keychain. Git credential helpers cannot supply, save or erase credentials during Pensieve's git commands. Other askpass programs from git config or the environment cannot answer HTTP credential requests. A missing or blank token leaves Pensieve's token helper disabled. Connect refuses a blank token.
 

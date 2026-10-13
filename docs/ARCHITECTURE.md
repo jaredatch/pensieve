@@ -61,7 +61,9 @@ Store git commands override `core.excludesFile` and `core.attributesFile` with `
 
 The shared runner resets `credential.helper` for each command, so configured helpers cannot get, store or erase credentials. Git's `GIT_ASKPASS` defaults to `/usr/bin/false`, overriding `core.askPass` and inherited askpass programs for HTTP credentials. A nonblank Pensieve token selects Pensieve's helper. A missing or whitespace-only token leaves that helper disabled.
 
-Credentials the user configures for git or curl remain available over HTTPS, even with a nonblank Pensieve token. Examples include `.netrc`, `http.extraHeader`, URL rewrites containing credentials, cookies and client certificates. Authorization headers and credentials in a rewritten URL can take precedence over Pensieve's token. The transport allowlist checks the literal remote; a user-configured rewrite can change the destination or transport, including to plain `http://`.
+Credentials the user configures for git or curl remain available over HTTPS, even with a nonblank Pensieve token. Examples include `.netrc`, `http.extraHeader`, URL rewrites containing credentials, cookies and client certificates. Authorization headers and credentials in a rewritten URL can take precedence over Pensieve's token.
+
+Connect checks the URL the user enters, and Pensieve checks again before each sync. Git applies rewrites from the user's own config, and Pensieve does not check every rewritten address. Those checks do not cover `pushInsteadOf`, `remote.origin.pushurl` or the rewritten addresses used during Connect and installs. A rewrite can therefore send git and Pensieve's token to plain `http://`.
 
 SSH retains `SSH_AUTH_SOCK` for agent access and `SSH_ASKPASS` for passphrases. On-disk identity files and `~/.ssh/config` still apply. The runner strips inherited `GIT_SSH_COMMAND`, but git config's `core.sshCommand` can still select a different SSH command.
 

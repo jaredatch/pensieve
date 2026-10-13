@@ -322,7 +322,9 @@ After about five seconds, the sync status line says "Your change will save when 
 
 Pensieve supplies HTTPS credentials through its token helper. The shared git runner disables credential helpers for reads and writes, including sync, conflict resolution, the daemon, installs and History. Helpers cannot supply, store or erase a credential. Other askpass programs from git config or the environment cannot answer HTTP credential requests. A missing, empty or whitespace-only token leaves Pensieve's token helper disabled. The Connect model refuses a blank HTTPS token before git or credential storage runs.
 
-Credentials the user configures for git or curl remain available over HTTPS, even with a nonblank Pensieve token. Examples include `.netrc`, `http.extraHeader`, URL rewrites containing credentials, cookies and client certificates. Authorization headers and credentials in a rewritten URL can take precedence over Pensieve's token. Remote validation checks the literal URL; a user-configured rewrite can change where git connects, including to plain `http://`.
+Credentials the user configures for git or curl remain available over HTTPS, even with a nonblank Pensieve token. Examples include `.netrc`, `http.extraHeader`, URL rewrites containing credentials, cookies and client certificates. Authorization headers and credentials in a rewritten URL can take precedence over Pensieve's token.
+
+Connect checks the URL the user enters, and Pensieve checks again before each sync. Git applies rewrites from the user's own config, and Pensieve does not check every rewritten address. Those checks do not cover `pushInsteadOf`, `remote.origin.pushurl` or the rewritten addresses used during Connect and installs. A rewrite can therefore send git and Pensieve's token to plain `http://`.
 
 SSH can use the agent, on-disk identity files and `~/.ssh/config`, and retains `SSH_ASKPASS` for passphrases. The runner strips inherited `GIT_SSH_COMMAND`, but git config's `core.sshCommand` can still select a different SSH command.
 
