@@ -51,7 +51,7 @@ enum CLIEntry {
             let name = command is StatusCommand ? "status" : (command is LogCommand ? "log" : "deployed")
             let result = CLIFileReads(appSupport: appSupport, fileService: files)
                 .run(command: name, lines: (command as? LogCommand)?.lines ?? 20)
-            return (result.reply, name == "deployed" ? nil : result.human)
+            return (result, nil)
         }
         return (.success(try CLICatalog.value(for: type(of: command))), type(of: command).helpMessage())
     }
@@ -95,6 +95,9 @@ enum CLIEntry {
                 return 1
             }
         } else if let error = reply.envelope.error {
+            if let data = reply.envelope.data {
+                FileHandle.standardOutput.write(Data(render(data).utf8))
+            }
             let text = DisplayTextSanitizer.singleLine(error.message) + "\n"
                 + DisplayTextSanitizer.singleLine(error.hint) + "\n"
             FileHandle.standardError.write(Data(text.utf8))
@@ -106,17 +109,37 @@ enum CLIEntry {
         return reply.exitCode
     }
 
-    private static func render(_ value: CLIValue) -> String {
+    private static func render(_ value: CLIValue, indent: String = "") -> String {
         switch value {
-        case let .string(text): DisplayTextSanitizer.logLine(text) + "\n"
-        case let .array(items): items.map(render).joined()
-        case let .object(fields): fields.keys.sorted().map { key in
-            "\(key): \(fields[key].map(render)?.trimmingCharacters(in: .newlines) ?? "")"
-        }.joined(separator: "\t") + "\n"
-        case let .number(number): "\(number)\n"
-        case let .decimal(number): "\(number)\n"
-        case let .bool(flag): "\(flag)\n"
-        case .null: "\n"
+        case let .string(text):
+            return text.components(separatedBy: "\n").map {
+                indent + DisplayTextSanitizer.logLine($0).replacingOccurrences(of: "\t", with: "")
+            }.joined(separator: "\n") + "\n"
+        case let .array(items):
+            if items.isEmpty { return indent + "[]\n" }
+            return items.map { indent + "-\n" + render($0, indent: indent + "  ") }.joined()
+        case let .object(fields):
+            return renderFields(fields, indent: indent)
+        case let .number(number): return "\(indent)\(number)\n"
+        case let .decimal(number): return "\(indent)\(number)\n"
+        case let .bool(flag): return "\(indent)\(flag)\n"
+        case .null: return indent + "null\n"
         }
+    }
+
+    private static func renderFields(_ fields: [String: CLIValue], indent: String) -> String {
+        if fields.isEmpty { return indent + "{}\n" }
+        return fields.keys.sorted().map { key in
+            let label = indent + DisplayTextSanitizer.singleLine(key).replacingOccurrences(of: "\t", with: "") + ":"
+            let value = fields[key] ?? .null
+            switch value {
+            case .array, .object:
+                return label + "\n" + render(value, indent: indent + "  ")
+            case let .string(text) where text.contains("\n"):
+                return label + "\n" + render(value, indent: indent + "  ")
+            default:
+                return label + " " + render(value)
+            }
+        }.joined()
     }
 }

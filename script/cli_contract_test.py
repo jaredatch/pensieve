@@ -9,6 +9,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import unicodedata
 import unittest
 
 BINARY = None
@@ -25,11 +26,24 @@ class CLIContractTests(unittest.TestCase):
         self.endpoint = self.root / (self.info["CFBundleIdentifier"] + ".sock")
         self.environment = dict(os.environ, CFFIXED_USER_HOME=str(self.root), HOME=str(self.root), NO_COLOR="1")
 
-    def run_cli(self, *arguments, code=0, json_output=True):
-        args = [str(BINARY), *arguments, "--app-support", str(self.root)]
+    def run_cli(self, *arguments, code=0, json_output=True, invocation="absolute"):
+        environment = self.environment.copy()
+        executable = str(BINARY)
+        if invocation != "absolute":
+            directory = BINARY.parent
+            if invocation == "symlink":
+                directory = self.root / "bin"
+                directory.mkdir(exist_ok=True)
+                link = directory / "pensieve"
+                if not link.is_symlink():
+                    link.symlink_to(BINARY)
+            environment["PATH"] = str(directory) + os.pathsep + environment.get("PATH", "")
+            executable = "pensieve"
+        args = [executable, *arguments, "--app-support", str(self.root)]
         if json_output:
             args.append("--json")
-        result = subprocess.run(args, input="", text=True, capture_output=True, env=self.environment, timeout=15)
+        result = subprocess.run(args, input="", text=True, capture_output=True,
+            env=environment, cwd=self.root, timeout=15)
         self.assertEqual(result.returncode, code, result.stdout + result.stderr)
         self.assertNotIn("\x1b", result.stdout + result.stderr)
         if not json_output:
@@ -79,10 +93,11 @@ class CLIContractTests(unittest.TestCase):
         return observed, finish
 
     def test_version_matches_containing_app_and_cli_has_no_ui_or_database_link(self):
-        for command in ("version", "--version"):
-            with self.subTest(command=command):
-                data = self.run_cli(command)["data"]
-                self.assertEqual(data["version"], self.info["CFBundleShortVersionString"])
+        for invocation in ("absolute", "path", "symlink"):
+            for command in ("version", "--version"):
+                with self.subTest(command=command, invocation=invocation):
+                    data = self.run_cli(command, invocation=invocation)["data"]
+                    self.assertEqual(data["version"], self.info["CFBundleShortVersionString"])
         output = subprocess.check_output(["/usr/bin/otool", "-L", str(BINARY)], text=True, timeout=30)
         self.assertNotIn("SwiftData", output)
         self.assertNotIn("SwiftUI", output)
@@ -91,11 +106,16 @@ class CLIContractTests(unittest.TestCase):
         cases = [("skill list", "skill list"), ("skill ls", "skill list"), ("skills", "skill list"),
                  ("skill show review", "skill show"), ("agent list", "agent list"),
                  ("machine list", "machine list"), ("project list", "project list")]
-        for invocation, expected in cases:
-            with self.subTest(command=invocation):
+        cases += [("skill list", "skill list", "path"), ("skill list", "skill list", "symlink")]
+        for case in cases:
+            command, expected = case[:2]
+            invocation = case[2] if len(case) == 3 else "absolute"
+            with self.subTest(command=command, invocation=invocation):
                 observed, finish = self.peer()
-                result = self.run_cli(*invocation.split())
-                finish()
+                try:
+                    result = self.run_cli(*command.split(), invocation=invocation)
+                finally:
+                    finish()
                 self.assertEqual(result["data"], [{"slug": "review", "name": "Review"}])
                 self.assertEqual(observed[0]["command"], expected)
                 self.assertEqual(observed[0]["protocolVersion"], 1)
@@ -107,11 +127,16 @@ class CLIContractTests(unittest.TestCase):
         self.assertTrue(observed[0]["content"])
 
     def test_wrong_copy_and_protocol_are_refused_before_sending_a_command(self):
-        for bundle, protocol, error in [(self.root / "Other.app", 1, "wrong_app"), (self.app, 999, "protocol_mismatch")]:
-            with self.subTest(error=error):
+        cases = [(self.root / "Other.app", 1, "wrong_app", invocation)
+                 for invocation in ("absolute", "path", "symlink")]
+        cases.append((self.app, 999, "protocol_mismatch", "absolute"))
+        for bundle, protocol, error, invocation in cases:
+            with self.subTest(error=error, invocation=invocation):
                 observed, finish = self.peer(bundle=bundle, protocol=protocol)
-                self.assertEqual(self.run_cli("skill", "list", code=3)["error"]["code"], error)
-                finish()
+                try:
+                    self.assertEqual(self.run_cli("skill", "list", code=3, invocation=invocation)["error"]["code"], error)
+                finally:
+                    finish()
                 self.assertEqual(observed, [], "A refused handshake must receive no command")
 
     def test_envelope_and_exit_codes_survive_transport(self):
@@ -187,13 +212,69 @@ class CLIContractTests(unittest.TestCase):
 
     def test_piped_human_output_stays_human_and_untruncated(self):
         rows = [{"slug": "skill-" + str(index), "name": "Full skill " + str(index)} for index in range(200)]
-        observed, finish = self.peer(reply={"envelope": {"schema": 1, "ok": True, "data": rows}, "exitCode": 0})
-        result = self.run_cli("skill", "list", json_output=False)
-        finish()
-        self.assertIn("skill-199", result.stdout)
-        self.assertNotIn('"schema"', result.stdout)
-        self.assertEqual(result.stderr, "")
-        self.assertEqual(len(observed), 1)
+        rows[0].update(tags=["one", "two"], installed=True, count=42, ratio=1.5, metadata={"optional": None}, empty=[])
+        for command in [("skill", "list"), ("agent", "list"), ("machine", "list"), ("project", "list")]:
+            with self.subTest(command=command):
+                observed, finish = self.peer(reply={"envelope": {"schema": 1, "ok": True, "data": rows}, "exitCode": 0})
+                try:
+                    result = self.run_cli(*command, json_output=False)
+                finally:
+                    finish()
+                self.assertIn("skill-199", result.stdout)
+                self.assertNotIn('"schema"', result.stdout)
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(len(observed), 1)
+                for field in ["tags:", "installed: true", "count: 42", "ratio: 1.5", "metadata:", "optional: null", "[]"]:
+                    self.assertIn(field, [line.strip() for line in result.stdout.splitlines()])
+
+        escapes = "\x1b[31m\x90ignored\x9c\x98ignored\x9c\x9b31m\x9dignored\x07\x9eignored\x9c\x9fignored\x9c"
+        controls = "".join(chr(code) for code in [*range(32), *range(127, 160)]
+                           if code not in (10, 27, 0x90, 0x98, 0x9b, 0x9d, 0x9e, 0x9f))
+        body = "---\nname: Review\n---\n\n# Review\nFirst line\nSecond" + controls + " line" + escapes + "\n"
+        clean_lines = ["---", "name: Review", "---", "", "# Review", "First line", "Second line"]
+        observed, finish = self.peer(reply={"envelope": {"schema": 1, "ok": True,
+            "data": {"slug": "review", "content": body, "tags": ["one", "two"]}}, "exitCode": 0})
+        try:
+            result = self.run_cli("skill", "show", "review", "--content", json_output=False)
+        finally:
+            finish()
+        with self.subTest(command="skill show --content"):
+            lines = [line.strip() for line in result.stdout.splitlines()]
+            start = lines.index("---") if "---" in lines else -1
+            self.assertGreaterEqual(start, 0, result.stdout)
+            self.assertEqual(lines[start:start + len(clean_lines)], clean_lines)
+            self.assertFalse(any(unicodedata.category(char) == "Cc" and char != "\n" for char in result.stdout))
+            self.assertTrue(observed[0]["content"])
+
+        records = [{"slug": slug, "platform": platform, "scope": "user", "artifact_path": "/fixture/" + slug,
+                    "recorded_at": "2026-10-13T10:00:00Z"}
+                   for slug, platform in [("review", "claudeCode"), ("other", "codex")]]
+        (self.root / "deploy-state.json").write_text(json.dumps({"schema_version": 1, "records": records}))
+        for command in [("deployment", "list"), ("deployed",)]:
+            with self.subTest(command=command):
+                result = self.run_cli(*command, json_output=False)
+                lines = [line.strip() for line in result.stdout.splitlines()]
+                self.assertIn("records:", lines)
+                self.assertIn("schema_version: 1", lines)
+                for record in records:
+                    for key, value in record.items():
+                        value = "claude" if value == "claudeCode" else value
+                        self.assertIn(f"{key}: {value}", lines)
+                self.assertEqual(lines.count("scope: user"), 2)
+
+        for outcome, code in [("synced", 0), ("failed", 1)]:
+            with self.subTest(command="status", outcome=outcome):
+                status = {"timestamp": "2026-10-13T10:00:00Z", "result": outcome, "detail": "Fixture result"}
+                (self.root / "daemon-status.json").write_text(json.dumps(status))
+                result = self.run_cli("status", code=code, json_output=False)
+                for key, value in status.items():
+                    self.assertIn(f"{key}: {value}", [line.strip() for line in result.stdout.splitlines()])
+        (self.root / "daemon.log").write_text("first\nsecond\x07\x1b[31m\n")
+        result = self.run_cli("log", json_output=False)
+        self.assertIn("lines:", result.stdout)
+        self.assertIn("first", result.stdout)
+        self.assertIn("second", result.stdout)
+        self.assertNotIn("\x07", result.stdout)
 
 
 if __name__ == "__main__":
