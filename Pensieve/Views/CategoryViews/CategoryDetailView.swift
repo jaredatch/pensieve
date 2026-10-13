@@ -140,13 +140,17 @@ struct CategoryDetailView: View {
     @ViewBuilder
     private func projectRow(_ project: Project, category: Category) -> some View {
         if let key = project.identityKey {
-            Toggle(isOn: Binding(
-                get: { category.projectKeys.contains(key) },
-                set: { model.setProject(project, inCategory: category, member: $0, context: context) }
-            )) {
-                Label(project.name, systemImage: "folder")
+            // In a grouped Form, the row must own help for it to reach a disabled switch.
+            HStack {
+                Toggle(isOn: Binding(
+                    get: { category.projectKeys.contains(key) },
+                    set: { model.setProject(project, inCategory: category, member: $0, context: context) }
+                )) {
+                    Label(project.name, systemImage: "folder")
+                }
+                .disabled(library.categoryEditsFenced)
             }
-            .disabled(library.categoryEditsFenced)
+            .contentShape(Rectangle())
             .help(library.persistentFenceReason ?? "")
         } else {
             // Pending identity — cannot be a durable member (§A). Shown disabled with a calm hint.
@@ -165,13 +169,16 @@ struct CategoryDetailView: View {
     }
 
     private func skillRow(_ skill: Skill, category: Category) -> some View {
-        Toggle(isOn: Binding(
-            get: { category.skillSlugs.contains(skill.directoryName) },
-            set: { model.setSkill(skill, inCategory: category, assigned: $0, context: context) }
-        )) {
-            Label(skill.name, systemImage: "doc.text")
+        HStack {
+            Toggle(isOn: Binding(
+                get: { category.skillSlugs.contains(skill.directoryName) },
+                set: { model.setSkill(skill, inCategory: category, assigned: $0, context: context) }
+            )) {
+                Label(skill.name, systemImage: "doc.text")
+            }
+            .disabled(library.categoryEditsFenced)
         }
-        .disabled(library.categoryEditsFenced)
+        .contentShape(Rectangle())
         .help(library.persistentFenceReason ?? "")
     }
 

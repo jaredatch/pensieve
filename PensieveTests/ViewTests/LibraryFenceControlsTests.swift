@@ -60,12 +60,13 @@ final class LibraryFenceControlsTests: XCTestCase {
                 fixture.apply(state)
                 let enabled = state == .launch || state == .readable
                 let titles = content ? ["Rename", "Remove"] : ["Rename", "Agent Recap", "Assigned", "Available"]
-                await TestWait.until(failureMessage: "\(state) category controls must follow the edit fence",
+                await TestWait.until(failureMessage: "\(state) category controls need the fence and switch help",
                     diagnostics: { fixture.diagnostics }, {
                     titles.allSatisfy { title in
                         fixture.controls.contains { $0.title == title
                             && $0.kind == (content || title == "Rename" ? .button : .toggle) && $0.enabled == enabled
-                            && (content ? $0.help == nil : enabled || $0.help == state.reason) }
+                            && (content ? $0.help == nil : enabled ? ($0.help ?? "").isEmpty : $0.help == state.reason)
+                            && ($0.kind != .toggle || enabled || $0.rowHelp == state.reason) }
                     }
                 })
                 guard titles.allSatisfy({ title in fixture.controls.contains { $0.title == title } }) else { return }

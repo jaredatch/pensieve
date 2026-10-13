@@ -14,13 +14,16 @@ enum RenderedControlInputs {
         let title: String
         let enabled: Bool
         let help: String?
+        var rowHelp: String?
     }
 
     static func controls(in host: NSView) -> [Control] {
         var controls: [Control] = []
         for value in RenderedViewTestSupport.values(in: host) {
+            // Toggle state comes only from the live style probe below, including ancestor fences.
             for control in read(value, enabled: true, help: nil, depth: 24)
-                where !controls.contains(where: { $0.title == control.title && $0.kind == control.kind }) {
+                where control.kind != .toggle
+                    && !controls.contains(where: { $0.title == control.title && $0.kind == control.kind }) {
                 controls.append(control)
             }
         }
@@ -50,8 +53,9 @@ enum RenderedControlInputs {
             let disabled = labels.contains("__disabled_toggle__")
             let titles = labels.subtracting(["__enabled_toggle__", "__disabled_toggle__"])
             guard enabled != disabled, titles.count == 1, let title = titles.first else { return nil }
-            return Control(kind: .toggle, title: title, enabled: enabled,
-                help: RenderedViewTestSupport.strings(in: text).first.map(unescape))
+            let reason = RenderedViewTestSupport.strings(in: text).first.map(unescape)
+            return Control(kind: .toggle, title: title, enabled: enabled, help: reason,
+                rowHelp: hasToggleContainer(node) ? reason : nil)
         }
         // Enabled switches need no tooltip. Retain the real environment probe even when
         // a view conditionally omits help, without accepting missing help for a fenced row.
@@ -69,6 +73,22 @@ enum RenderedControlInputs {
             controls.append(Control(kind: .toggle, title: title, enabled: enabled, help: nil))
         }
         return controls
+    }
+
+    /// A disabled Toggle in a grouped Form drops help over its switch. Help on a surrounding
+    /// row reaches both switch and label (macOS 26 probe). Require a rendered container holding
+    /// the Toggle itself, rather than a stack inside its style or label. Native hover stays manual.
+    private static func hasToggleContainer(_ node: _ViewDebug.Data) -> Bool {
+        let fields = Mirror(reflecting: node)
+        if let value = (fields.descendant("data") as? [_ViewDebug.Property: Any])?[.value] {
+            let type = String(reflecting: Swift.type(of: value))
+            if type.hasPrefix("SwiftUI.HStack<") || type.hasPrefix("SwiftUI.LabeledContent<") {
+                if read(value, enabled: true, help: nil, depth: 24).contains(where: { $0.kind == .toggle }) {
+                    return true
+                }
+            }
+        }
+        return (fields.descendant("childData") as? [_ViewDebug.Data] ?? []).contains(where: hasToggleContainer)
     }
 
     private static func read(_ value: Any, enabled: Bool, help: String?, depth: Int) -> [Control] {
