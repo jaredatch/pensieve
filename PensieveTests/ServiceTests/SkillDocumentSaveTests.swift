@@ -60,31 +60,58 @@ final class SkillDocumentSaveTests: XCTestCase {
     }
 
     func testSaveBeforeWatcherAsksForFrontmatterAndBodyChangesAndSaveAnswerOverwrites() async throws {
-        let fixture = try DocumentSaveFixture()
-        defer { fixture.cleanup() }
         let source = "---\nname: Test\ndescription: Before\n---\nBody\n"
-        for duringCycle in [false, true] {
+        let scenarios = ["no cycle", "change during cycle", "change before cycle", "cancel before cycle", "returns to baseline"]
+        for scenario in scenarios {
             for outside in [source.replacingOccurrences(of: "Before", with: "Outside"),
                             source.replacingOccurrences(of: "Body", with: "Outside body")] {
-                try fixture.write(source)
-                _ = fixture.library.editorBody(for: fixture.skill)
-                let draft = source.replacingOccurrences(of: "Body", with: "My draft")
-                fixture.library.noteEditorChanged(fixture.skill, body: draft)
-                if duringCycle { fixture.library.beginCoordinatorChanges() }
-                try fixture.write(outside)
-                XCTAssertFalse(fixture.library.saveDraft(fixture.skill))
-                XCTAssertEqual(try fixture.read(), outside)
-                XCTAssertEqual(fixture.library.drafts["test"]?.body, draft)
-                if duringCycle {
-                    XCTAssertNil(fixture.library.pendingUnsavedChanges, "Wait for the cycle's final text")
-                    fixture.watcher.emit("test") // The delayed watcher echo must not swallow the question.
-                    await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false)
+                // A leaving question after Cancel already authorizes overwrite; the other entries defer a new question.
+                let entries = scenario == "cancel before cycle" ? ["direct", "command"] : ["direct", "command", "leaving"]
+                for entry in entries {
+                    let fixture = try DocumentSaveFixture()
+                    defer { fixture.cleanup() }
+                    try fixture.write(source)
+                    _ = fixture.library.editorBody(for: fixture.skill)
+                    let draft = source.replacingOccurrences(of: "Body", with: "My draft")
+                    fixture.library.noteEditorChanged(fixture.skill, body: draft)
+                    let beforeCycle = scenario == "change before cycle" || scenario == "cancel before cycle"
+                    if scenario != "no cycle", !beforeCycle { fixture.library.beginCoordinatorChanges() }
+                    try fixture.write(outside)
+                    if scenario == "cancel before cycle" {
+                        fixture.watcher.emit("test")
+                        XCTAssertEqual(fixture.library.pendingUnsavedChanges?.reason, .externalChange)
+                        fixture.library.resolveUnsavedChanges(.cancel)
+                    }
+                    if beforeCycle { fixture.library.beginCoordinatorChanges() }
+                    let promptCount = fixture.presenter.prompts.count
+                    XCTAssertFalse(attemptSave(fixture, entry: entry), "\(scenario), \(entry)")
+                    XCTAssertEqual(try fixture.read(), outside)
+                    XCTAssertEqual(fixture.library.drafts["test"]?.body, draft)
+                    if scenario != "no cycle" {
+                        XCTAssertNil(fixture.library.pendingUnsavedChanges, "Wait for the cycle's final text")
+                        fixture.watcher.emit("test") // The delayed watcher echo must not swallow the question.
+                        if scenario == "returns to baseline" { try fixture.write(source) }
+                        await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false)
+                    }
+                    XCTAssertEqual(fixture.library.pendingUnsavedChanges?.reason, .externalChange, "\(scenario), \(entry)")
+                    XCTAssertEqual(fixture.presenter.prompts.count, promptCount + (entry == "leaving" ? 2 : 1))
+                    fixture.library.resolveUnsavedChanges(.save)
+                    XCTAssertEqual(try fixture.read(), draft)
+                    XCTAssertFalse(fixture.library.hasUnsavedChanges)
                 }
-                XCTAssertEqual(fixture.library.pendingUnsavedChanges?.reason, .externalChange)
-                fixture.library.resolveUnsavedChanges(.save)
-                XCTAssertEqual(try fixture.read(), draft)
-                XCTAssertFalse(fixture.library.hasUnsavedChanges)
             }
+        }
+    }
+
+    private func attemptSave(_ fixture: DocumentSaveFixture, entry: String) -> Bool {
+        switch entry {
+        case "command": return fixture.library.saveUnsavedDrafts()
+        case "leaving":
+            var proceeded = true
+            fixture.library.confirmLeaving(fixture.skill) { proceeded = $0 }
+            fixture.library.resolveUnsavedChanges(.save)
+            return proceeded
+        default: return fixture.library.saveDraft(fixture.skill)
         }
     }
 }

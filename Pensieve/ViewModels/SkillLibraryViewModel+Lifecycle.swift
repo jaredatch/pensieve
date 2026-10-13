@@ -31,6 +31,7 @@ extension SkillLibraryViewModel {
         coordinatorCompletionGeneration &+= 1
         isApplyingCoordinatorChanges = true
         coordinatorObservedSlugs.removeAll()
+        coordinatorDeferredSaveSlugs.removeAll()
         coordinatorChangeSequences.removeAll()
         coordinatorBaselineBodies = Dictionary(uniqueKeysWithValues:
             ((try? skillStore.listSkills()) ?? []).map { ($0, currentOnDiskBody(directoryName: $0)) })
@@ -82,6 +83,7 @@ extension SkillLibraryViewModel {
         }
         coordinatorBaselineBodies.removeAll()
         coordinatorObservedSlugs.removeAll()
+        coordinatorDeferredSaveSlugs.removeAll()
         coordinatorChangeSequences.removeAll()
         isApplyingCoordinatorChanges = false
         if needsLaterSync || (effectiveHasUnsyncedChanges && !acceptedSlugs.isEmpty) { notifier() }
@@ -102,13 +104,13 @@ extension SkillLibraryViewModel {
         return foundChange
     }
 
-    /// The cycle's one question, against its final body: a draft still dirty on a file the cycle moved (its
-    /// body differs from the cycle's baseline) is asked about once, here, never at an intermediate event; a
-    /// transient body that came and went asks nothing and keeps the draft.
+    /// Ask against the final body when the cycle moved the file or deferred a refused Save's question.
+    /// Without an attempted Save, a transient change that returned to the baseline asks nothing.
     private func askAboutCoordinatorChanges(_ slugs: Set<String>) {
         for directoryName in slugs.sorted()
         where hasUnsavedChanges(forDirectory: directoryName)
-            && !Self.bodiesMatch(currentOnDiskBody(directoryName: directoryName), coordinatorBaselineBodies[directoryName]) {
+            && (coordinatorDeferredSaveSlugs.contains(directoryName)
+                || !Self.bodiesMatch(currentOnDiskBody(directoryName: directoryName), coordinatorBaselineBodies[directoryName])) {
             requestUnsavedChangesPrompt(directoryName: directoryName, reason: .externalChange)
         }
     }

@@ -118,6 +118,8 @@ extension SkillLibraryViewModel {
         let onDisk = currentOnDiskBody(directoryName: skill.directoryName)
         if !overwritingExternalChange, !Self.bodiesMatch(onDisk, draft.baseline),
            !Self.bodiesMatch(onDisk, draft.body) {
+            // A refused Save needs an answer even if the outside text predates the cycle or is transient.
+            if isApplyingCoordinatorChanges { coordinatorDeferredSaveSlugs.insert(skill.directoryName) }
             acceptExternalChange(directoryName: skill.directoryName, currentBody: onDisk, shouldNotify: false)
             return false
         }

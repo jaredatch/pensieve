@@ -199,29 +199,32 @@ extension SyncNudgeTests {
         // The cycle passes through a body that differs from the draft and lands on one that equals it: the
         // question is decided against the final body — clean, the draft retained, nothing asked. A question
         // decided before the fingerprints are refreshed to the final body would ask (round 4).
-        let fixture = try libraryFixture()
-        let skill = try insertSkill(slug: "final-matches-draft", store: fixture.store, context: fixture.context)
-        var prompts: [UnsavedChangesPrompt] = []
-        fixture.library.unsavedChangesPresenter = { prompt, _ in prompts.append(prompt) }
-        _ = fixture.library.editorBody(for: skill)
-        fixture.library.startWatching()
-        fixture.library.noteEditorChanged(skill, body: SkillSerializer.serialize(
-            name: skill.name, description: skill.skillDescription, body: "Mine"))
+        for saveBeforeFinalBody in [false, true] {
+            let fixture = try libraryFixture()
+            let skill = try insertSkill(slug: "final-matches-draft", store: fixture.store, context: fixture.context)
+            var prompts: [UnsavedChangesPrompt] = []
+            fixture.library.unsavedChangesPresenter = { prompt, _ in prompts.append(prompt) }
+            _ = fixture.library.editorBody(for: skill)
+            fixture.library.startWatching()
+            fixture.library.noteEditorChanged(skill, body: SkillSerializer.serialize(
+                name: skill.name, description: skill.skillDescription, body: "Mine"))
 
-        fixture.library.beginCoordinatorChanges()
-        fixture.store.bodies[skill.directoryName] = SkillSerializer.serialize(
-            name: skill.name, description: skill.skillDescription, body: "Transient"
-        )
-        fixture.watcher.emit(skill.directoryName)
-        fixture.store.bodies[skill.directoryName] = SkillSerializer.serialize(
-            name: skill.name, description: skill.skillDescription, body: "Mine"
-        )
-        await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false)
+            fixture.library.beginCoordinatorChanges()
+            fixture.store.bodies[skill.directoryName] = SkillSerializer.serialize(
+                name: skill.name, description: skill.skillDescription, body: "Transient"
+            )
+            if saveBeforeFinalBody { XCTAssertFalse(fixture.library.saveDraft(skill)) }
+            fixture.watcher.emit(skill.directoryName)
+            fixture.store.bodies[skill.directoryName] = SkillSerializer.serialize(
+                name: skill.name, description: skill.skillDescription, body: "Mine"
+            )
+            await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false)
 
-        XCTAssertFalse(fixture.library.hasUnsavedChanges(for: skill))
-        XCTAssertEqual(fixture.library.drafts[skill.directoryName]?.body, SkillSerializer.serialize(
-            name: skill.name, description: skill.skillDescription, body: "Mine"))
-        XCTAssertTrue(prompts.isEmpty)
+            XCTAssertFalse(fixture.library.hasUnsavedChanges(for: skill))
+            XCTAssertEqual(fixture.library.drafts[skill.directoryName]?.body, SkillSerializer.serialize(
+                name: skill.name, description: skill.skillDescription, body: "Mine"))
+            XCTAssertTrue(prompts.isEmpty)
+        }
     }
     func testACleanPullKeepsTheWarningOnARetainedDraft() async throws {
         // A successful pull (no unsynced changes) settles the "modified externally" mark — except on a file whose

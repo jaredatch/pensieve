@@ -63,6 +63,7 @@ final class SkillLibraryViewModel {
     var isApplyingCoordinatorChanges = false
     var coordinatorBaselineBodies: [String: String] = [:]
     var coordinatorObservedSlugs: Set<String> = []
+    var coordinatorDeferredSaveSlugs: Set<String> = []
     var coordinatorChangeSequences: [String: UInt64] = [:]
     var acceptedChangeSequence: UInt64 = 0
     var watcherEventSequence: UInt64 = 0
