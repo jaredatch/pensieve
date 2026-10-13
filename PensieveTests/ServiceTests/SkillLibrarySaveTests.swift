@@ -310,7 +310,6 @@ final class CountingSkillStore: SkillStoreProtocol {
     private(set) var lastWrittenBody: String?
     /// The skill's files removed from under the app: every read fails, as `FileService` would.
     var filesGone = false
-    var rewriteOverride: String?
     private var bodies: [String: String] = [:]
     private let initialBody: String
 
@@ -332,7 +331,7 @@ final class CountingSkillStore: SkillStoreProtocol {
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
                       fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
         writeCount += 1
-        lastWrittenBody = rewriteOverride ?? body
+        lastWrittenBody = body
         bodies[directoryName] = lastWrittenBody
         return SkillRewriteResult(content: lastWrittenBody ?? body, didChange: true)
     }

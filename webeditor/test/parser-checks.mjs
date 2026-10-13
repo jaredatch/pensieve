@@ -8,12 +8,20 @@ import { withFrontmatter } from "../src/frontmatter.mjs";
 
 const parser = withFrontmatter(markdown(), yamlLanguage.parser, Tag.define()).language.parser;
 
-function checkedInput(text, headerEnd = 0) {
+function checkedInput(text, headerEnd = 0, headerOnly = false) {
   const input = new DocInput(Text.of(text.split("\n")));
   const read = input.read.bind(input);
   input.read = (from, to) => {
-    if (from < headerEnd && to > headerEnd) throw new Error(`read crossed closing fence: ${from}..${to} > ${headerEnd}`);
+    if ((headerOnly || from < headerEnd) && to > headerEnd) throw new Error(`read crossed closing fence: ${from}..${to} > ${headerEnd}`);
     return read(from, to);
+  };
+  const chunk = input.chunk.bind(input);
+  input.chunk = pos => {
+    const value = chunk(pos);
+    if ((headerOnly || pos < headerEnd) && pos + value.length > headerEnd) {
+      throw new Error(`chunk crossed closing fence: ${pos}..${pos + value.length} > ${headerEnd}`);
+    }
+    return value;
   };
   return input;
 }
@@ -26,6 +34,12 @@ globalThis.EditorParserChecks = {
     for (const opening of ["---", "\uFEFF--- \t"]) {
       const header = `${opening}\nname: Example\ndescription: test\n---\t \n`;
       const text = header + ("body paragraph\n\n".repeat(2000));
+      // A header-only parse range isolates lookahead from the body's legitimate parser reads.
+      for (const lineChunks of [true, false]) {
+        const input = checkedInput(text, header.length, true);
+        Object.defineProperty(input, "lineChunks", { value: lineChunks });
+        parser.parse(input, [], [{ from: 0, to: header.length - 1 }]);
+      }
       const tree = parser.parse(checkedInput(text, header.length));
       const pos = text.length - 10;
       const changed = text.slice(0, pos) + "x" + text.slice(pos);

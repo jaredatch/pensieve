@@ -18,10 +18,12 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
                 ("license", "MIT"), ("name", "Example"), ("description", description),
                 ("metadata", "version: \"3.1.0\"\nenabled: true\n# Keep this nested note."),
                 ("tools", "- Read\n- Bash(git:*)"),
-                ("flow", "{one: [1, 2], two: \"value\"}"), ("count", "42")
+                ("flow", "{one: [1, 2], two: \"value\"}"),
+                ("tagged", "!tag\nversion: 1\n# Keep the nested comment."),
+                ("flow-control", "[one, two]"), ("count", "42")
             ]
-            let previousY = try await assertRows(expected, in: fixture.host)
             XCTAssertEqual(fixture.snapshot.frontmatterRows.map(\.value), expected.map(\.1))
+            let previousY = try await assertRows(expected, in: fixture.host)
             if let paintedRows { XCTAssertEqual(fixture.snapshot.frontmatterRows, paintedRows) }
             paintedRows = fixture.snapshot.frontmatterRows
             let descriptionFrame = try await text(description, in: fixture.host).accessibilityFrame()
@@ -44,20 +46,6 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
             _ = try await text("MIT", in: fixture.host)
             _ = try await text("Body text.", in: fixture.host)
         }
-    }
-
-    func testLongKeysWrapAndLeaveTheValueReadable() async throws {
-        let key = String(repeating: "long", count: 80)
-        let value = "The value keeps a readable column."
-        let fixture = try host("---\n\(key): \(value)\nlicense: MIT\n---\n\nBody text.")
-        defer { fixture.close() }
-        let keyFrame = try await text(key, in: fixture.host).accessibilityFrame()
-        let valueFrame = try await text(value, in: fixture.host).accessibilityFrame()
-        XCTAssertLessThanOrEqual(keyFrame.width, 240)
-        XCTAssertGreaterThan(keyFrame.height, valueFrame.height, "The long key wraps")
-        XCTAssertGreaterThan(valueFrame.width, 200, "The value retains readable space")
-        XCTAssertLessThan(valueFrame.height, 100, "The value must not wrap a glyph per line")
-        XCTAssertLessThanOrEqual(valueFrame.maxX, fixture.host.accessibilityFrame().maxX)
     }
 
     func testFrontmatterMarkdownLinksAndImagesAreLiteralAndLoadNothing() async throws {
@@ -109,7 +97,15 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
         ]
         XCTAssertEqual(fixture.snapshot.frontmatterRows.dropFirst(3).map(\.value),
                        expected.map(\.0), "Only terminal LF scalars are trimmed; marked characters and internal breaks stay")
-        for (_, shown) in expected { _ = try await text(shown, in: fixture.host) }
+        for (index, entry) in expected.enumerated() {
+            let keyFrame = try await text("terminal\(index)", in: fixture.host).accessibilityFrame()
+            let ownCells = elements(in: fixture.host).filter {
+                ($0.accessibilityValue() as? String) == entry.1 && $0.accessibilityFrame().width > 0
+                    && abs($0.accessibilityFrame().maxY - keyFrame.maxY) < 0.5
+                    && $0.accessibilityFrame().minX > keyFrame.minX
+            }
+            XCTAssertEqual(ownCells.count, 1, "terminal\(index) must draw its own marked value")
+        }
         _ = try await text("before⟨U+200B⟩⟨U+202E⟩⟨U+0007⟩␍⟨U+200D⟩⟨U+FE0F⟩after␍\n⟨U+2028⟩⟨U+2029⟩", in: fixture.host)
         _ = try await text("hidden⟨U+200B⟩key", in: fixture.host)
         _ = try await text("literal ⟨U+200B⟩", in: fixture.host)
@@ -156,7 +152,16 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
           - Bash(git:*)
         # deploy notes
         flow: {one: [1, 2], two: "value"}
+          # Trailing indented flow comment.
+
         # Notes after the inline value.
+        tagged: !tag
+          version: 1
+          # Keep the nested comment.
+         # Lower-indent note after the block.
+        flow-control: [one, two]
+          # Trailing flow note.
+
         count: 42
         ---
         # Body heading
@@ -165,7 +170,7 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
         """
     }
 
-    private func host(_ document: String) throws -> FrontmatterHost {
+    func host(_ document: String) throws -> FrontmatterHost {
         try FrontmatterHost(document: document)
     }
 
@@ -229,7 +234,7 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
         return previousY
     }
 
-    private func text(_ value: String, in host: NSView) async throws -> NSAccessibilityProtocol {
+    func text(_ value: String, in host: NSView) async throws -> NSAccessibilityProtocol {
         var found: NSAccessibilityProtocol?
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                              failureMessage: "Rendered literal text must appear: \(value)") {
@@ -265,7 +270,7 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
     }
 }
 
-@MainActor private final class FrontmatterHost {
+@MainActor final class FrontmatterHost {
     let files = PreviewImageFileSpy()
     let selection = PreviewFileSelection()
     let snapshot: DetailContentSnapshot

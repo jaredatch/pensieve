@@ -77,8 +77,10 @@ struct FrontmatterTableLayout: Layout {
         let idealValueWidth = keys.map { index in
             index + 1 < subviews.count ? subviews[index + 1].sizeThatFits(.unspecified).width : 0
         }.max() ?? 0
-        let width = width.flatMap { $0.isFinite ? max(0, $0) : nil } ?? min(idealKeyWidth, 240) + idealValueWidth
-        let keyWidth = min(idealKeyWidth, 240, width * 0.4)
+        let width = width.flatMap { $0.isFinite ? max(0, $0) : nil }
+            ?? min(idealKeyWidth, DesignTokens.frontmatterKeyMaximumWidth) + idealValueWidth
+        let keyWidth = min(idealKeyWidth, DesignTokens.frontmatterKeyMaximumWidth,
+                           width * DesignTokens.frontmatterKeyMaximumShare)
         // Reserve padding and a few glyphs before wrapping; smaller probes otherwise measure a glyph per line.
         let minimumCellWidth = DesignTokens.markdownTableCellHorizontal * 2 + DesignTokens.markdownBodySize * 3
         guard keyWidth >= min(idealKeyWidth, minimumCellWidth),

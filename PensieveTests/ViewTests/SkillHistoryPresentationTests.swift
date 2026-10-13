@@ -7,6 +7,13 @@ final class SkillHistoryPresentationTests: XCTestCase {
         let document = "---\nname: Example\ndescription: Test\n---\nBody\n"
 
         XCTAssertEqual(SkillHistoryPresentation.previewBody(from: document), "Body")
+        XCTAssertEqual(SkillHistoryPresentation.previewBody(from: "\u{feff}" + document), "Body")
+        XCTAssertEqual(SkillHistoryPresentation.previewBody(from: "\u{feff}\u{feff}" + document),
+                       "\u{feff}\u{feff}" + document.trimmingCharacters(in: .newlines), "Only one leading BOM is accepted")
+        XCTAssertEqual(SkillHistoryPresentation.previewBody(from: "\u{feff}Body only\n"), "\u{feff}Body only")
+        let unreadable = document.replacingOccurrences(of: "description: Test", with: "description: [")
+        XCTAssertEqual(SkillHistoryPresentation.previewBody(from: unreadable), "Body")
+        XCTAssertEqual(SkillHistoryPresentation.previewBody(from: "\u{feff}" + unreadable), "Body")
         // A document with no frontmatter passes through in the store's canonical form — outer newlines trimmed,
         // as every read of a body is (SkillParser.canonicalBody; PLAN-33 batch Layer-2, round 4).
         XCTAssertEqual(SkillHistoryPresentation.previewBody(from: "Body only\n"), "Body only")

@@ -69,6 +69,7 @@ extension SkillLibraryViewModel {
             let document = currentOnDiskBody(directoryName: directoryName)
             refreshObservedIdentity(directoryName: directoryName, document: document)
             setLastWrittenBody(document, directoryName: directoryName)
+            advanceCaughtUpDraft(directoryName: directoryName, document: document)
         }
         askAboutCoordinatorChanges(acceptedSlugs)
         // The fingerprint is not observed (`lastWrittenBody`): one main-thread signal after the final re-seed

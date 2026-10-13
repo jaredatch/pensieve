@@ -7,7 +7,11 @@ struct SkillHistorySelection: Equatable {
 }
 
 enum SkillHistoryPresentation {
-    static func previewBody(from raw: String) -> String { SkillParser.stripFrontmatter(raw) }
+    static func previewBody(from raw: String) -> String {
+        let recognizesBOM = raw.unicodeScalars.first == "\u{feff}"
+            && SkillParser.parse(raw, retainingBOM: true).preservedFile != nil
+        return SkillParser.stripFrontmatter(raw, retainingBOM: recognizesBOM)
+    }
     static func rowTitle(for commit: SkillHistoryVersion) -> String {
         commit.date.formatted(date: .abbreviated, time: .shortened)
     }

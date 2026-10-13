@@ -57,6 +57,7 @@ final class SkillLibraryViewModel {
     let manifestSaves: ManifestSaveModel?
     let manifestRoot: String
     var skillsDirectory: String { skillStore.baseDir }
+    @ObservationIgnored var historyRestoreFailureMessage: String?
     private var lastManifestError: String?
     let notifier: SyncStateNotifying
     var isWatching = false
@@ -361,6 +362,7 @@ extension SkillLibraryViewModel {
         // (`finishCoordinatorChanges`) — a transient body must not cost the draft or ask about itself.
         refreshObservedIdentity(directoryName: directoryName, document: currentBody)
         setLastWrittenBody(currentBody, directoryName: directoryName)
+        if !isApplyingCoordinatorChanges { advanceCaughtUpDraft(directoryName: directoryName, document: currentBody) }
         externallyModified.insert(directoryName)
         reloadToken &+= 1
         if !isApplyingCoordinatorChanges, hasUnsavedChanges(forDirectory: directoryName) {

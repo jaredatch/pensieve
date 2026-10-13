@@ -41,7 +41,10 @@ struct SkillFrontmatterRow: Equatable {
             return !text.isEmpty && !text.hasPrefix("#")
         }
         let indent = contentLines.map { lines[$0].prefix(while: { $0 == " " }).count }.min() ?? 0
-        let commentIndent = first.isEmpty || first.hasPrefix("#") ? max(1, indent) : 1
+        let valueToken = first.split(whereSeparator: { $0 == " " || $0 == "\t" })
+            .drop(while: { $0.hasPrefix("!") }).first
+        let isFlow = valueToken?.first == "[" || valueToken?.first == "{"
+        let commentIndent = isFlow ? 1 : max(1, indent)
         // The trusted entry extends to the next key; lower-indent notes after its value aren't part of that value.
         if let end = lines.indices.first(where: {
             $0 > (contentLines.last ?? -1) && lines[$0].trimmingCharacters(in: .whitespaces).hasPrefix("#")
@@ -50,12 +53,18 @@ struct SkillFrontmatterRow: Equatable {
             lines.removeSubrange(end...)
         }
         // Inline flow collections already have meaningful indentation relative to their opening token.
-        if !first.isEmpty, !first.hasPrefix("#") {
-            return ([first] + lines).joined(separator: "\n").trimmingCharacters(in: .newlines)
+        if isFlow {
+            while let last = lines.last {
+                let text = last.trimmingCharacters(in: .whitespaces)
+                guard text.isEmpty || text.hasPrefix("#") else { break }
+                lines.removeLast()
+            }
+            return scalarText(([first] + lines).joined(separator: "\n"))
         }
         while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }
         while lines.first?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeFirst() }
-        return lines.map { String($0.dropFirst(min(indent, $0.prefix(while: { $0 == " " }).count))) }
-            .joined(separator: "\n")
+        let block = lines.map { String($0.dropFirst(min(indent, $0.prefix(while: { $0 == " " }).count))) }
+        let prefix = !first.isEmpty && !first.hasPrefix("#") ? [first] : []
+        return scalarText((prefix + block).joined(separator: "\n"))
     }
 }

@@ -96,6 +96,20 @@ extension SkillDocumentSaveTests {
         }
         XCTAssertEqual(count, 240)
         try checkHeaderlessBoundaryEdits(fixture)
+        try checkHeaderlessMissingDescription(fixture)
+    }
+
+    private func checkHeaderlessMissingDescription(_ fixture: DocumentSaveFixture) throws {
+        for description in ["", " \t\n"] {
+            fixture.library.discardDraft(fixture.skill)
+            fixture.skill.skillDescription = description
+            try fixture.write("Body")
+            _ = fixture.library.editorBody(for: fixture.skill)
+            fixture.library.noteEditorChanged(fixture.skill, body: "Edited")
+            XCTAssertTrue(fixture.library.saveDraft(fixture.skill))
+            XCTAssertEqual(try fixture.read(), "---\nname: Test\ndescription: Test\n---\n\nEdited")
+            XCTAssertEqual(fixture.skill.skillDescription, "Test", "The row follows the fallback header")
+        }
     }
 
     private func checkHeaderlessBoundaryEdits(_ fixture: DocumentSaveFixture) throws {

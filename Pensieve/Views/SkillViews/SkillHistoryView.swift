@@ -178,11 +178,16 @@ func restoreSkillHistoryVersion(
     do {
         try store.writeBody(directoryName: skill.directoryName, body: body)
     } catch {
-        library?.error = "Couldn't restore this version: \(error.localizedDescription)"
+        let message = "Couldn't restore this version: \(error.localizedDescription)"
+        library?.historyRestoreFailureMessage = message
+        library?.error = message
         throw error
     }
     StoreRebuildService.refreshIdentity(of: skill, document: body, retainingBOM: true)
-    library?.error = nil
+    if let library {
+        if library.error == library.historyRestoreFailureMessage { library.error = nil }
+        library.historyRestoreFailureMessage = nil
+    }
     // A draft for this skill is stale once the version is written back — and only then: a refused write keeps it
     // (the sheet was answered at the button, 33.2; batch Layer-2).
     library?.discardDraft(skill)

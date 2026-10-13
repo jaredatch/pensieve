@@ -3,6 +3,20 @@ import XCTest
 @testable import Pensieve
 
 extension SkillPreviewFrontmatterTests {
+    func testLongKeysWrapAndLeaveTheValueReadable() async throws {
+        let key = String(repeating: "long", count: 80)
+        let value = "The value keeps a readable column."
+        let fixture = try host("---\n\(key): \(value)\nlicense: MIT\n---\n\nBody text.")
+        defer { fixture.close() }
+        let keyFrame = try await text(key, in: fixture.host).accessibilityFrame()
+        let valueFrame = try await text(value, in: fixture.host).accessibilityFrame()
+        XCTAssertLessThanOrEqual(keyFrame.width, 240)
+        XCTAssertGreaterThan(keyFrame.height, valueFrame.height, "The long key wraps")
+        XCTAssertGreaterThan(valueFrame.width, 200, "The value retains readable space")
+        XCTAssertLessThan(valueFrame.height, 100, "The value must not wrap a glyph per line")
+        XCTAssertLessThanOrEqual(valueFrame.maxX, fixture.host.accessibilityFrame().maxX)
+    }
+
     func testLayoutKeepsFiniteSizesWithinEveryWidthProposal() throws {
         for width: CGFloat? in [0, 1, 43, 52, 160, 612, nil, .infinity] {
             let probe = FrontmatterLayoutProbe(width: width)

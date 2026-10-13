@@ -73,6 +73,7 @@ final class SkillDocumentSaveTests: XCTestCase {
         }
         try await checkQueuedSaves(source: source)
         try checkQuestionSnapshot(source: source)
+        try await checkRepeatedDeferredLeaves(source: source)
     }
 
     private func checkSaveQuestion(source: String, outside: String, scenario: String, entry: String) async throws {
@@ -193,6 +194,42 @@ final class SkillDocumentSaveTests: XCTestCase {
         fixture.library.resolveUnsavedChanges(.save)
         XCTAssertEqual(try fixture.read(), draft)
         XCTAssertEqual(fixture.leaveResult, true)
+    }
+
+    private func checkRepeatedDeferredLeaves(source: String) async throws {
+        for choice in [UnsavedChangesChoice.save, .discard, .cancel] {
+            for failure in [false, true] where choice == .save || !failure {
+                let fixture = try DocumentSaveFixture()
+                defer { fixture.cleanup() }
+                try fixture.write(source)
+                _ = fixture.library.editorBody(for: fixture.skill)
+                fixture.library.noteEditorChanged(fixture.skill, body: source + " draft")
+                fixture.library.beginCoordinatorChanges()
+                try fixture.write(source + " outside")
+                var first: [Bool] = [], second: [Bool] = []
+                fixture.library.confirmLeavingAnyDraft { first.append($0) }
+                fixture.library.resolveUnsavedChanges(.save)
+                fixture.library.confirmLeaving(fixture.skill) { second.append($0) }
+                fixture.library.resolveUnsavedChanges(.save)
+                XCTAssertTrue(first.isEmpty)
+                XCTAssertTrue(second.isEmpty)
+                await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false)
+                XCTAssertEqual(fixture.library.pendingUnsavedChanges?.reason, .externalChange)
+                XCTAssertEqual(fixture.presenter.prompts.count, 3, "Two leaves share one final outside question")
+                if failure {
+                    fixture.library.refreshQuarantine(context: fixture.container.mainContext,
+                        fetch: { _ in throw CocoaError(.fileReadUnknown) })
+                }
+                fixture.library.resolveUnsavedChanges(choice)
+                let expected = choice != .cancel && !failure
+                XCTAssertEqual(first, [expected], "The global leave (including Quit) must receive exactly one reply")
+                XCTAssertEqual(second, [expected], "The second leave must receive exactly one reply")
+                fixture.library.resolveUnsavedChanges(choice)
+                XCTAssertEqual(first, [expected])
+                XCTAssertEqual(second, [expected])
+                XCTAssertEqual(try fixture.read(), choice == .save && !failure ? source + " draft" : source + " outside")
+            }
+        }
     }
 
     private func attemptSave(_ fixture: DocumentSaveFixture, entry: String) -> Bool {

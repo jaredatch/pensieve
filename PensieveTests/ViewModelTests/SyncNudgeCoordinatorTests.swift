@@ -112,9 +112,7 @@ extension SyncNudgeTests {
 
         XCTAssertEqual(fixture.counter.value, 0)
         XCTAssertFalse(fixture.library.externallyModified.contains(skill.directoryName))
-        for refresh in ["window", "draft", "failure"] { try await assertFinalIdentityDuringRecheck(refresh: refresh) }
     }
-
     func testTheCyclesFinalReseedPublishesAnObservedSignal() async throws {
         // The fingerprint is not observed (an off-main mutation under the lock deadlocks against SwiftUI), so a
         // draft that matched a transient body and reads dirty again after the cycle's final re-seed needs one
@@ -167,6 +165,8 @@ extension SyncNudgeTests {
         XCTAssertTrue(fixture.library.hasUnsavedChanges(for: skill))
         XCTAssertEqual(fixture.library.drafts[skill.directoryName]?.body, SkillSerializer.serialize(
             name: skill.name, description: skill.skillDescription, body: "Transient"))
+        XCTAssertTrue(prompts.isEmpty)
+        XCTAssertTrue(fixture.library.saveDraft(skill), "A transient equal sample cannot change the final Save baseline")
         XCTAssertTrue(prompts.isEmpty)
     }
     func testCoordinatorFinalBodyUnderADraftAsksOnceAfterTheCycle() async throws {

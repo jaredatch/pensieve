@@ -3,7 +3,7 @@ import Foundation
 /// An unsaved edit: the skill it belongs to and the editor's whole text. An entry enters
 /// `SkillLibraryViewModel.drafts` when the text differs from the file's last known document (the self-write
 /// fingerprint) and leaves on Save, Revert, the skill's deletion, or the user typing back to that body;
-/// Its baseline advances to the disk text when an external-change question is shown.
+/// Its baseline follows an adopted equal file or the disk text shown in an external-change question.
 /// Whether it is dirty NOW is measured against the fingerprint (`hasUnsavedChanges(forDirectory:)`), never
 /// remembered — a file that moves under the draft and back never costs it.
 struct EditorDraft: Equatable {
@@ -78,6 +78,9 @@ extension SkillLibraryViewModel {
             observeExternalDocument(directoryName: directoryName, document: onDisk)
         } else {
             setLastWrittenBody(onDisk, directoryName: directoryName)
+            if !isApplyingCoordinatorChanges {
+                advanceCaughtUpDraft(directoryName: directoryName, document: onDisk)
+            }
         }
         return drafts[directoryName]?.body ?? onDisk
     }
@@ -122,7 +125,7 @@ extension SkillLibraryViewModel {
         }
         if pendingUnsavedChanges?.directoryName == skill.directoryName,
            pendingUnsavedChanges?.reason == .externalChange {
-            if let continuation { pendingLeaveContinuation = continuation }
+            pendingLeaveContinuation = joinedReplies(pendingLeaveContinuation, continuation)
             return .awaitingAnswer
         }
         guard hasUnsavedChanges(forDirectory: skill.directoryName) else { return .saved }
@@ -213,13 +216,26 @@ extension SkillLibraryViewModel {
                                        continuation: ((Bool) -> Void)? = nil) {
         if pendingUnsavedChanges?.directoryName == directoryName, pendingUnsavedChanges?.reason == .externalChange,
            Self.bodiesMatch(currentOnDiskBody(directoryName: directoryName), drafts[directoryName]?.baseline) {
-            if let continuation { pendingLeaveContinuation = continuation }
+            pendingLeaveContinuation = joinedReplies(pendingLeaveContinuation, continuation)
             return
         }
         var question = externalChangeQuestions[directoryName] ?? ExternalChangeQuestion()
         question.saveIfUnchanged = question.saveIfUnchanged || saveIfUnchanged
-        question.continuation = continuation ?? question.continuation
+        question.continuation = joinedReplies(question.continuation, continuation)
         externalChangeQuestions[directoryName] = question
+    }
+
+    private func joinedReplies(_ first: ((Bool) -> Void)?, _ second: ((Bool) -> Void)?) -> ((Bool) -> Void)? {
+        guard let first else { return second }
+        guard let second else { return first }
+        return { proceed in first(proceed); second(proceed) }
+    }
+
+    /// Retain the draft through transient sync text, but start its next edit from an adopted equal file.
+    func advanceCaughtUpDraft(directoryName: String, document: String) {
+        if Self.bodiesMatch(document, drafts[directoryName]?.body) {
+            drafts[directoryName]?.baseline = document
+        }
     }
 
     /// Re-read at presentation: Cancel acknowledges exactly this text; a later change needs another answer.

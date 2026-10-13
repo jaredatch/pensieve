@@ -48,5 +48,64 @@ extension SkillInstallServiceTests {
                 XCTAssertFalse(library.externallyModified.contains(slug), "\(slug), updating: \(updating)")
             }
         }
+        try NativeTestWork.run { [self] in try checkVendorReadAdmission(repository: repository) }
     }
+
+    @MainActor
+    private func checkVendorReadAdmission(repository: String) throws {
+        let source = try service.fetch(repo: repository, ref: nil, credential: nil)
+        let candidate = try XCTUnwrap(source.candidates.first { $0.slug == "test" })
+        for updating in [false, true] {
+            for kind in ["regular", "invalid UTF-8", "symlink", "directory"] {
+                let root = tempDir + "/admission-" + UUID().uuidString
+                let context = try makeInstallContext()
+                if updating {
+                    _ = try makeInstallService(root: root).install(candidate: candidate, from: source, context: context)
+                }
+                let destination = root + "/skills/test/SKILL.md"
+                let before = updating ? try fileService.readData(at: destination) : nil
+                let spy = ImportPublicationFileService()
+                var sampled: String?
+                spy.beforeDataRead = { path, maximum in
+                    guard sampled == nil, path.hasSuffix("/skills/test/SKILL.md") else { return }
+                    sampled = path
+                    XCTAssertEqual(maximum, Int.max, "Install and update use the store's bounded regular-file read")
+                    try self.changeVendorLeaf(kind: kind, path: path, root: root, files: spy.files)
+                }
+                let installer = makeInstallService(root: root, using: spy)
+                let apply = {
+                    if updating {
+                        try installer.update(existingSlug: "test", candidate: candidate, from: source, context: context)
+                    } else { _ = try installer.install(candidate: candidate, from: source, context: context) }
+                }
+                if kind == "regular" { try apply() } else {
+                    XCTAssertThrowsError(try apply()) { error in
+                        if kind == "invalid UTF-8" {
+                            XCTAssertEqual((error as NSError).userInfo[NSFilePathErrorKey] as? String, sampled)
+                            XCTAssertTrue(error.localizedDescription.contains("SKILL.md"))
+                        }
+                    }
+                    if let before { XCTAssertEqual(try fileService.readData(at: destination), before) } else {
+                        XCTAssertFalse(fileService.fileExists(at: destination))
+                    }
+                }
+                XCTAssertNotNil(sampled, "The vendor read must be reached: \(kind), update: \(updating)")
+            }
+        }
+    }
+    private func changeVendorLeaf(kind: String, path: String, root: String, files: FileService) throws {
+        switch kind {
+        case "invalid UTF-8": try files.writeData(at: path, data: Data([0xff]))
+        case "symlink":
+            let target = root + "/linked-source"
+            try files.writeFile(at: target, content: "linked bytes")
+            try files.deleteFile(at: path)
+            try files.createSymlink(at: path, pointingTo: target)
+        case "directory":
+            try files.deleteFile(at: path)
+            try files.createDirectory(at: path)
+        default: break
+        }
+    }
+
 }

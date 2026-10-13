@@ -33,7 +33,7 @@ enum SkillDocumentEditing {
     }
 
     static func rewrite(draft: String, original: String, name: String,
-                        description: String, slug: String) throws -> SkillRewriteResult {
+                        description: String) throws -> SkillRewriteResult {
         let before = SkillParser.parse(original, retainingBOM: true)
         let hasBOM = original.unicodeScalars.first == "\u{feff}"
         let text = hasBOM && draft.unicodeScalars.first != "\u{feff}" ? "\u{feff}" + draft : draft
@@ -52,14 +52,14 @@ enum SkillDocumentEditing {
             output = (hasBOM ? "\u{feff}" : "") + normalized(fallback, ending: before.preferredLineEnding)
                 + before.trailingLineBreaks
         } else {
-            try validateFrontmatter(after, currentName: before.name ?? name, slug: slug)
+            try validateFrontmatter(after, currentName: before.name ?? name)
             output = normalized(text, ending: before.preferredLineEnding)
         }
         return SkillRewriteResult(content: output, didChange: !output.utf8.elementsEqual(original.utf8))
     }
 
     /// One admission point for edited frontmatter, reusable by a future folder-rename operation.
-    static func validateFrontmatter(_ parsed: ParsedSkill, currentName: String, slug: String) throws {
+    static func validateFrontmatter(_ parsed: ParsedSkill, currentName: String) throws {
         guard let file = parsed.preservedFile,
               let loaded = try? CheckedYAMLLoader.composeAndLoad(yaml: file.frontmatterSource),
               let root = loaded.root, let mapping = loaded.value as? [String: Any],

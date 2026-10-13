@@ -68,8 +68,22 @@ final class RecordingWatcher: FileWatchServiceProtocol {
     func emit(_ slug: String) { onChange(slug) }
 }
 
+enum IdentityRefreshMode { case window, draft, failure }
+
 extension SyncNudgeTests {
-    func assertFinalIdentityDuringRecheck(refresh: String) async throws {
+    func testFinalIdentityDuringRecheckReachesWindowRow() async throws {
+        try await assertFinalIdentityDuringRecheck(refresh: .window)
+    }
+
+    func testFinalIdentityDuringRecheckReachesRetainedDraft() async throws {
+        try await assertFinalIdentityDuringRecheck(refresh: .draft)
+    }
+
+    func testFinalIdentityDuringRecheckPreservesPassiveFailureMessage() async throws {
+        try await assertFinalIdentityDuringRecheck(refresh: .failure)
+    }
+
+    func assertFinalIdentityDuringRecheck(refresh: IdentityRefreshMode) async throws {
         let fixture = try DocumentSaveFixture()
         defer { fixture.cleanup() }
         let before = "---\nname: Test\ndescription: Before\n---\nBody"
@@ -77,7 +91,7 @@ extension SyncNudgeTests {
         let final = "---\nname: Final name\ndescription: Final\n---\nBody"
         try fixture.write(before)
         _ = fixture.library.editorBody(for: fixture.skill)
-        if refresh == "draft" {
+        if refresh == .draft {
             fixture.library.onSkillDocumentObserved = nil
             fixture.library.noteEditorChanged(fixture.skill, body: before + " draft")
         }
@@ -86,7 +100,7 @@ extension SyncNudgeTests {
         try fixture.write(intermediate)
         fixture.watcher.emit("test")
         XCTAssertEqual(fixture.skill.skillDescription, "Intermediate")
-        if refresh == "failure" {
+        if refresh == .failure {
             fixture.library.onSkillDocumentObserved = { _, _ in throw CocoaError(.fileReadUnknown) }
         }
         fixture.library.error = "An earlier refused Save"
@@ -99,17 +113,17 @@ extension SyncNudgeTests {
             })
         XCTAssertEqual(checks.value, 1)
         XCTAssertFalse(fixture.library.isApplyingCoordinatorChanges)
-        XCTAssertEqual(fixture.skill.skillDescription, refresh == "failure" ? "Intermediate" : "Final")
-        XCTAssertEqual(fixture.skill.name, refresh == "failure" ? "Test" : "Final name")
+        XCTAssertEqual(fixture.skill.skillDescription, refresh == .failure ? "Intermediate" : "Final")
+        XCTAssertEqual(fixture.skill.name, refresh == .failure ? "Test" : "Final name")
         XCTAssertEqual(fixture.library.error, "An earlier refused Save")
         XCTAssertTrue(fixture.library.wasLastWrittenByApp(directoryName: "test", currentBody: final))
         let token = fixture.library.reloadToken
         fixture.watcher.emit("test") // Delivered only after completion adopts the final file.
         XCTAssertEqual(fixture.library.reloadToken, token)
-        XCTAssertEqual(fixture.skill.skillDescription, refresh == "failure" ? "Intermediate" : "Final")
+        XCTAssertEqual(fixture.skill.skillDescription, refresh == .failure ? "Intermediate" : "Final")
         XCTAssertEqual(fixture.counter.value, 1)
         XCTAssertTrue(fixture.library.externallyModified.contains("test"))
-        XCTAssertEqual(fixture.library.hasUnsavedChanges, refresh == "draft")
-        XCTAssertEqual(fixture.library.pendingUnsavedChanges?.reason, refresh == "draft" ? .externalChange : nil)
+        XCTAssertEqual(fixture.library.hasUnsavedChanges, refresh == .draft)
+        XCTAssertEqual(fixture.library.pendingUnsavedChanges?.reason, refresh == .draft ? .externalChange : nil)
     }
 }

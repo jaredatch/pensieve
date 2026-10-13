@@ -36,6 +36,26 @@ extension SkillDocumentSaveTests {
         fixture.library.resolveUnsavedChanges(.discard)
         XCTAssertEqual(fixture.library.editorBody(for: live), second + " further")
         XCTAssertFalse(fixture.library.hasUnsavedChanges)
+        try checkDiskCatchingDraft(fixture)
+    }
+
+    private func checkDiskCatchingDraft(_ fixture: DocumentSaveFixture) throws {
+        let source = try fixture.read()
+        let caughtUp = source + " caught up"
+        fixture.library.noteEditorChanged(fixture.skill, body: caughtUp)
+        try fixture.write(caughtUp)
+        fixture.watcher.emit("test")
+        XCTAssertNil(fixture.library.pendingUnsavedChanges)
+        XCTAssertEqual(fixture.library.drafts["test"]?.body, caughtUp, "Keep the retained draft")
+        XCTAssertEqual(fixture.library.drafts["test"]?.baseline, caughtUp)
+        fixture.library.noteEditorChanged(fixture.skill, body: caughtUp + " next edit")
+        XCTAssertTrue(fixture.library.saveDraft(fixture.skill), "Unchanged caught-up disk needs no new question")
+        XCTAssertEqual(try fixture.read(), caughtUp + " next edit")
+        fixture.library.noteEditorChanged(fixture.skill, body: caughtUp + " another edit")
+        try fixture.write(caughtUp + " real outside change")
+        XCTAssertFalse(fixture.library.saveDraft(fixture.skill), "A real outside change still asks")
+        XCTAssertEqual(fixture.library.pendingUnsavedChanges?.reason, .externalChange)
+        fixture.library.resolveUnsavedChanges(.cancel)
     }
 
     private func checkUnopenedAndReplacementRows(_ fixture: DocumentSaveFixture, source: String,
@@ -91,6 +111,33 @@ extension SkillDocumentSaveTests {
             XCTAssertEqual(try fixture.read(), pulled)
             XCTAssertEqual(fixture.skill.skillDescription, "Pulled")
         }
+        try await checkFinalDiskCatchingDraft()
+    }
+
+    private func checkFinalDiskCatchingDraft() async throws {
+        let fixture = try DocumentSaveFixture()
+        defer { fixture.cleanup() }
+        let source = "---\nname: Test\ndescription: Before\n---\nBody"
+        let draft = source + " caught up"
+        try fixture.write(source)
+        _ = fixture.library.editorBody(for: fixture.skill)
+        fixture.library.noteEditorChanged(fixture.skill, body: draft)
+        fixture.library.beginCoordinatorChanges()
+        try fixture.write(source + " intermediate")
+        fixture.watcher.emit("test")
+        try fixture.write(draft)
+        await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false)
+        XCTAssertNil(fixture.library.pendingUnsavedChanges)
+        XCTAssertEqual(fixture.library.drafts["test"]?.body, draft)
+        XCTAssertEqual(fixture.library.drafts["test"]?.baseline, draft)
+        fixture.library.noteEditorChanged(fixture.skill, body: draft + " next edit")
+        XCTAssertTrue(fixture.library.saveDraft(fixture.skill))
+        XCTAssertEqual(try fixture.read(), draft + " next edit")
+        fixture.library.noteEditorChanged(fixture.skill, body: draft + " more")
+        try fixture.write(draft + " real outside change")
+        XCTAssertFalse(fixture.library.saveDraft(fixture.skill))
+        XCTAssertEqual(fixture.library.pendingUnsavedChanges?.reason, .externalChange)
+        fixture.library.resolveUnsavedChanges(.cancel)
     }
 
     func testWriteBracketsKeepFailedAndRacingFrontmatterChangesOutside() throws {
@@ -143,10 +190,19 @@ extension SkillDocumentSaveTests {
             XCTAssertEqual(skill.updatedAt, timestamp)
             XCTAssertTrue(library.wasLastWrittenByApp(directoryName: "test", currentBody: source))
             XCTAssertNotNil(library.error)
+            if restore {
+                XCTAssertEqual(library.error, "Couldn't restore this version: \(DeletionTestError().localizedDescription)")
+            }
             files.failingWrites.remove(path)
             if restore {
                 try restoreSkillHistoryVersion(skill: skill, body: draft, store: store, library: library, notifier: {})
             } else { XCTAssertTrue(library.saveDraft(skill)) }
+            XCTAssertNil(library.error, "A successful retry clears its own failure")
+            if restore {
+                library.error = "Another skill's refused Save"
+                try restoreSkillHistoryVersion(skill: skill, body: draft, store: store, library: library, notifier: {})
+                XCTAssertEqual(library.error, "Another skill's refused Save")
+            }
             XCTAssertEqual(files.files[path], draft)
             XCTAssertEqual(skill.skillDescription, "After")
             XCTAssertFalse(library.hasUnsavedChanges)
