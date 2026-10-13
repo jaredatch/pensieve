@@ -6,7 +6,7 @@ import SwiftData
 /// The outcome of a disk + manifest -> SwiftData reconcile. `Equatable` so an idempotence test can
 /// assert an all-zero second pass. `warnings` collects non-fatal anomalies: a skill file skipped for
 /// missing required frontmatter, an overlay whose SKILL.md is absent (a corruption signal), and an
-/// unreadable manifest (a newer schema).
+/// unreadable manifest (a newer schema), or a failed local category fetch.
 struct RebuildResult: Equatable {
     var skillsInserted: Int = 0
     var skillsUpdated: Int = 0
@@ -24,6 +24,19 @@ struct RebuildResult: Equatable {
     var storeUnreadable: Bool = false
     /// The rebuild computed changes but its save failed. Unrelated caller edits do not set this flag.
     var saveFailed: Bool = false
+    /// A successful category fetch, ordered against local edits. Only the disk-reading entry point
+    /// announces this receipt, after the rebuild saves. Previews and acceptance never announce.
+    var categoryRead: CategorySaveWindow.ReadReceipt?
+
+    // Equality describes reconcile effects; a fresh read receipt is not another store change.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.skillsInserted == rhs.skillsInserted && lhs.skillsUpdated == rhs.skillsUpdated
+            && lhs.skillsRemoved == rhs.skillsRemoved && lhs.categoriesInserted == rhs.categoriesInserted
+            && lhs.categoriesUpdated == rhs.categoriesUpdated && lhs.categoriesRemoved == rhs.categoriesRemoved
+            && lhs.deployIntentsInserted == rhs.deployIntentsInserted && lhs.deployIntentsUpdated == rhs.deployIntentsUpdated
+            && lhs.deployIntentsRemoved == rhs.deployIntentsRemoved && lhs.warnings == rhs.warnings
+            && lhs.storeUnreadable == rhs.storeUnreadable && lhs.saveFailed == rhs.saveFailed
+    }
 }
 
 // MARK: - Protocol
@@ -74,13 +87,15 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
             return result
         }
 
-        return rebuild(snapshot: snapshot, fromRoot: root, context: context, recordsCategoryRead: true)
+        result = rebuild(snapshot: snapshot, fromRoot: root, context: context)
+        if !result.saveFailed, let read = result.categoryRead { CategorySaveWindow.didRebuild(read) }
+        return result
     }
 
     /// A lock-owning GUI writer already read and updated the manifest. Reuse its plain result,
     /// including pending local edits, rather than sampling disk again during presentation merge.
     func rebuild(snapshot: ManifestSnapshot, fromRoot root: String, context: ModelContext,
-                 manifestIsAuthoritative: Bool? = nil, recordsCategoryRead: Bool = false) -> RebuildResult {
+                 manifestIsAuthoritative: Bool? = nil) -> RebuildResult {
         var result = RebuildResult()
         let manifestIsAuthoritative = manifestIsAuthoritative ?? manifestHasContent(root: root)
         let filePresentSlugs = rebuildSkills(
@@ -91,7 +106,7 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
             result: &result
         )
         warnOverlaysWithoutFiles(snapshot: snapshot, filePresentSlugs: filePresentSlugs, result: &result)
-        let categoryRead = manifestIsAuthoritative
+        result.categoryRead = manifestIsAuthoritative
             ? rebuildCategories(snapshot: snapshot, context: context, result: &result) : nil
         rebuildDeployIntents(snapshot: snapshot, context: context, result: &result)
 
@@ -99,7 +114,6 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
         // (PLAN-07 / 07.4 review — the codebase's surface-don't-swallow rule).
         do {
             try save(context)
-            if recordsCategoryRead, let categoryRead { CategorySaveWindow.didRebuild(categoryRead) }
         } catch {
             result.saveFailed = true
             result.warnings.append(
@@ -333,8 +347,13 @@ extension StoreRebuildService {
     func rebuildCategories(snapshot: ManifestSnapshot,
                            context: ModelContext,
                            result: inout RebuildResult,
-                           removingOnlyIDs: Set<UUID>? = nil) -> CategorySaveWindow.ReadReceipt {
-        let read = CategorySaveWindow.fetchCategories(in: context)
+                           removingOnlyIDs: Set<UUID>? = nil) -> CategorySaveWindow.ReadReceipt? {
+        let read: (rows: [Category], receipt: CategorySaveWindow.ReadReceipt)
+        do { read = try CategorySaveWindow.fetchCategories(in: context) } catch {
+            result.warnings.append(
+                "Couldn't read local categories; skipped the category reconcile: " + error.localizedDescription)
+            return nil
+        }
         let existingCategories = read.rows
         var existingByName = Dictionary(existingCategories.map { ($0.name, $0) },
                                         uniquingKeysWith: { first, _ in first })

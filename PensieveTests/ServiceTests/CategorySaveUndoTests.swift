@@ -23,11 +23,13 @@ final class CategorySaveUndoTests: XCTestCase {
             XCTAssertEqual(category.name, "Local", refusal)
         }
         try await checkRefusalHoldsLockThroughUndoSave()
+        try await checkFailedCategoryFetch()
         try await checkEditAfterRebuildFetch(["rename", "rename-after-save"])
         try await checkEditBetweenManifestReadAndCategoryFetch()
         try await checkPriorSaveAfterPullDoesNotAcknowledgeRefusal()
         try await checkUnrelatedCategoryDoesNotAcknowledgeRename()
-        try await checkRefusalAcrossSync(["rename-peer", "rename-plain", "rename-normal", "rename-peer-after-save"])
+        try await checkRefusalAcrossSync(["rename-peer", "rename-plain", "rename-normal", "rename-peer-after-save",
+                                         "rename-published-lock", "rename-dependent-published-lock"])
         try await checkRefusalAfterPulledDeletion(fields: ["name"])
     }
 

@@ -35,7 +35,7 @@ extension CategorySaveUndoTests {
             ["alpha", "beta"])
         XCTAssertEqual(try h.manifestBytes(), before)
         try await checkEditAfterRebuildFetch(["delete"])
-        try await checkRefusalAcrossSync(["delete", "delete-normal", "delete-schema-gone"])
+        try await checkRefusalAcrossSync(["delete", "delete-normal", "delete-schema-gone", "delete-published-lock"])
     }
 
     func testHealingPublicationKeepsLaterEditWhenItsOwnLockFails() async throws {
@@ -59,7 +59,8 @@ extension CategorySaveUndoTests {
             XCTAssertEqual(Set(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.id)), identities, kind)
             let notice = try XCTUnwrap(h.saves.categoryNotice)
             XCTAssertEqual(notice.title, "Category changes were already saved", kind)
-            XCTAssertTrue(notice.message.contains("already saved"), kind)
+            XCTAssertTrue(notice.messages.allSatisfy { $0.contains("was already saved, so it was kept.") }, kind)
+            XCTAssertFalse(notice.message.contains("couldn't be confirmed"), kind)
             XCTAssertFalse(notice.message.contains("undone"), kind)
             _ = h.categories.create(name: "Unsaved", context: h.context)
             await h.saves.waitUntilIdle()

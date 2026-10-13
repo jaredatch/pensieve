@@ -15,15 +15,15 @@ extension CategorySaveUndoTests {
             let local = try XCTUnwrap(try context.fetch(FetchDescriptor<Pensieve.Category>()).first { $0.name == "Local" })
             let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
             defer { lock.release() }
-            if scenario == "rename-peer-after-save" {
+            if categorySyncHasHead(scenario) {
                 h.library.updateMetadata(try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first),
                                          tags: ["ahead"], scope: .user, context: context)
             }
             enqueueCategorySyncEdit(scenario, local: local, context: context, h: h)
-            await h.assertWaitingBehindHeldLock(pending: scenario == "rename-peer-after-save" ? 2 : 1,
+            await h.assertWaitingBehindHeldLock(pending: categorySyncHasHead(scenario) ? 2 : 1,
                                                 before: try h.manifestBytes())
             let peerName = try pushCategoryPeer(scenario, peer: peer, h: h)
-            let normal = scenario.hasPrefix("create") || scenario.hasSuffix("-normal")
+            let normal = scenario.hasPrefix("create") || (scenario.hasSuffix("-normal") || scenario.hasSuffix("-published-lock"))
             if !normal {
                 _ = try NativeTestWork.run { try TestPaths.git.pullRebase(at: h.root, credential: nil) }
             }
@@ -33,14 +33,7 @@ extension CategorySaveUndoTests {
             if !normal, scenario != "delete-schema-gone" {
                 XCTAssertTrue(saved.categories.contains { $0.name == "Local" }, scenario)
             }
-            if scenario.contains("schema") {
-                try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "schema_version: 99\n")
-            } else if scenario == "rename-peer-after-save" {
-                h.recording.afterWrite = { h.recording.failingWrites = 1 }
-            } else { h.recording.failingWrites = 1 }
-            lock.release()
-            await h.saves.waitUntilIdle()
-            h.recording.afterWrite = nil
+            try await refuseAfterCategorySync(scenario, lock: lock, h: h)
             try assertCategorySyncNotice(scenario, h: h)
             try assertCategoryWindow(context, matches: saved, phase: scenario + " / refused window")
             try assertCategoryWindow(ModelContext(context.container), matches: saved, phase: scenario + " / persisted window")
@@ -53,6 +46,41 @@ extension CategorySaveUndoTests {
             _ = try NativeTestWork.run { try TestPaths.git.pullRebase(at: peer, credential: nil) }
             XCTAssertEqual(try h.manifest.read(fromRoot: peer).categories, saved.categories, scenario + " / next peer pull")
             try assertCategoryWindow(context, matches: saved, phase: scenario + " / next window")
+        }
+    }
+
+    private func categorySyncHasHead(_ scenario: String) -> Bool {
+        scenario == "rename-peer-after-save" || scenario.hasSuffix("-published-lock")
+    }
+
+    private func refuseAfterCategorySync(_ scenario: String, lock: SyncLock, h: ManifestSaveFixture) async throws {
+        let head = TestWait.Gate(owner: self)
+        defer { head.open(); h.recording.afterWrite = nil }
+        if categorySyncHasHead(scenario) {
+            h.recording.afterWrite = { try? head.wait() }
+        } else if scenario.contains("schema") {
+            try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "schema_version: 99\n")
+        } else { h.recording.failingWrites = 1 }
+        var before = try h.manifestBytes()
+        lock.release()
+        if categorySyncHasHead(scenario) {
+            await TestWait.until(failureMessage: "The head item never published before the category refusal") {
+                head.waiterCount == 1
+            }
+            before = try h.manifestBytes()
+            if scenario == "rename-dependent-published-lock" {
+                _ = h.categories.create(name: "Local", context: h.context.container.mainContext)
+            }
+            if scenario.hasSuffix("-published-lock") {
+                try h.files.deleteFile(at: h.lockPath)
+                try h.files.createDirectory(at: h.lockPath)
+            } else { h.recording.failingWrites = 1 }
+            head.open()
+        }
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(try h.manifestBytes(), before, scenario + " / refusal must preserve manifest bytes")
+        if categorySyncHasHead(scenario) {
+            XCTAssertEqual(h.recording.writes.count, 1, scenario + " / only the head item writes")
         }
     }
 
@@ -75,14 +103,22 @@ extension CategorySaveUndoTests {
             XCTAssertTrue(h.recording.writes.isEmpty)
             return
         }
-        let notice = try XCTUnwrap(h.saves.categoryNotice, scenario).message
-        let kept = scenario.hasSuffix("-normal"), gone = scenario == "delete-schema-gone"
+        let notice = try XCTUnwrap(try XCTUnwrap(h.saves.categoryNotice, scenario).messages.last)
+        if scenario == "rename-dependent-published-lock" {
+            let burst = try XCTUnwrap(h.saves.categoryNotice)
+            XCTAssertEqual(burst.messages.count, 2)
+            XCTAssertTrue(burst.messages[0].contains("so it was undone."))
+            XCTAssertEqual(burst.title, "Category changes couldn't be saved")
+        }
+        let kept = scenario.hasSuffix("-normal") || scenario.hasSuffix("-published-lock")
+            || ["skill-schema", "project-schema", "delete-schema-gone"].contains(scenario)
         XCTAssertEqual(notice.contains("already saved"), kept, scenario + ": " + notice)
-        XCTAssertEqual(notice.contains("It now shows what's saved."), !kept && !gone, scenario + ": " + notice)
+        XCTAssertEqual(notice.contains("It now shows what's saved."), !kept, scenario + ": " + notice)
         XCTAssertFalse(notice.contains("undone"), scenario + ": " + notice)
-        XCTAssertEqual(notice.contains("gone"), gone, scenario + ": " + notice)
+        XCTAssertFalse(notice.contains("gone"), scenario + ": " + notice)
         XCTAssertTrue(notice.contains(scenario.hasPrefix("create") ? "Writing" : "Local"), notice)
         XCTAssertTrue(notice.contains(scenario.contains("schema") ? "Update Pensieve"
+                      : scenario.hasSuffix("-published-lock") ? "directory"
                       : CocoaError(.fileWriteNoPermission).localizedDescription), notice)
     }
 
@@ -90,7 +126,8 @@ extension CategorySaveUndoTests {
                                          context: ModelContext, h: ManifestSaveFixture) {
         switch scenario {
         case "create-peer", "create-schema": _ = h.categories.create(name: "Writing", context: context)
-        case "delete", "delete-normal", "delete-schema-gone": h.categories.delete(local, context: context)
+        case "delete", "delete-normal", "delete-schema-gone", "delete-published-lock":
+            h.categories.delete(local, context: context)
         case "skill-schema": h.categories.setSkill(h.alpha, inCategory: local, assigned: true, context: context)
         case "project-schema": h.categories.setProject(h.project, inCategory: local, member: true, context: context)
         default: h.categories.rename(local, to: "Drafts", context: context)

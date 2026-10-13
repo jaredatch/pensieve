@@ -42,7 +42,8 @@ struct CategorySaveEdit {
         }
     }
 
-    /// Evidence from this item's own attempt. Healing publication is tracked by the queue.
+    /// Compare the edited result with saved rules, or with the window for a superseded notice.
+    /// Healing publication is tracked permanently by the queue.
     func isSaved(in durable: ManifestSnapshot) -> Bool {
         let final = after
         if final == nil {
@@ -62,13 +63,22 @@ struct CategorySaveEdit {
         }
     }
 
-    enum Restoration { case undone, restored, removed }
+    enum Outcome { case undone, saved, restored, removed }
 
     /// A saved rebuild in any context of our container supersedes this inverse. Its rows can
     /// reuse our UUID by name. Without a rebuild, only our own delete can insert a missing row.
-    func restore(in context: ModelContext) throws -> Restoration {
+    func restore(in context: ModelContext) throws -> Outcome {
         let categories = try context.fetch(FetchDescriptor<Category>())
-        if wasRebuilt { return categories.contains { $0.name == name } ? .restored : .removed }
+        if wasRebuilt {
+            // Dependents have already been restored. This classifies the notice only; a rebuild
+            // supersedes the inverse whether it published our result or restored an earlier rule.
+            let displayed = ManifestSnapshot(schemaVersion: ManifestService.currentSchemaVersion,
+                categories: categories.map {
+                    CategoryRecord(name: $0.name, projectKeys: $0.projectKeys, skillSlugs: $0.skillSlugs)
+                }, projects: [], skills: [])
+            if isSaved(in: displayed) { return .saved }
+            return categories.contains { $0.name == name } ? .restored : .removed
+        }
         let existing = categories.first { $0.id == id }
         guard let before else {
             guard let existing else { return .removed }
@@ -145,10 +155,10 @@ final class CategorySaveWindow {
         savedAt = Self.order
     }
 
-    static func fetchCategories(in context: ModelContext) -> (rows: [Category], receipt: ReadReceipt) {
+    static func fetchCategories(in context: ModelContext) throws -> (rows: [Category], receipt: ReadReceipt) {
         ordering.lock()
         defer { ordering.unlock() }
-        let rows = (try? context.fetch(FetchDescriptor<Category>())) ?? []
+        let rows = try context.fetch(FetchDescriptor<Category>())
         order += 1
         return (rows, ReadReceipt(containerID: ObjectIdentifier(context.container), order: order))
     }
