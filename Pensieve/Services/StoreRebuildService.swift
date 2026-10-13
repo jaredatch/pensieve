@@ -74,16 +74,13 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
             return result
         }
 
-        let authoritative = manifestHasContent(root: root)
-        result = rebuild(snapshot: snapshot, fromRoot: root, context: context, manifestIsAuthoritative: authoritative)
-        if authoritative, !result.saveFailed { CategorySaveWindow.didRebuild(context) }
-        return result
+        return rebuild(snapshot: snapshot, fromRoot: root, context: context, recordsCategoryRead: true)
     }
 
     /// A lock-owning GUI writer already read and updated the manifest. Reuse its plain result,
     /// including pending local edits, rather than sampling disk again during presentation merge.
     func rebuild(snapshot: ManifestSnapshot, fromRoot root: String, context: ModelContext,
-                 manifestIsAuthoritative: Bool? = nil) -> RebuildResult {
+                 manifestIsAuthoritative: Bool? = nil, recordsCategoryRead: Bool = false) -> RebuildResult {
         var result = RebuildResult()
         let manifestIsAuthoritative = manifestIsAuthoritative ?? manifestHasContent(root: root)
         let filePresentSlugs = rebuildSkills(
@@ -94,15 +91,15 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
             result: &result
         )
         warnOverlaysWithoutFiles(snapshot: snapshot, filePresentSlugs: filePresentSlugs, result: &result)
-        if manifestIsAuthoritative {
-            rebuildCategories(snapshot: snapshot, context: context, result: &result)
-        }
+        let categoryRead = manifestIsAuthoritative
+            ? rebuildCategories(snapshot: snapshot, context: context, result: &result) : nil
         rebuildDeployIntents(snapshot: snapshot, context: context, result: &result)
 
         // Surface a persistence failure instead of returning success counts over an unsaved store
         // (PLAN-07 / 07.4 review — the codebase's surface-don't-swallow rule).
         do {
             try save(context)
+            if recordsCategoryRead, let categoryRead { CategorySaveWindow.didRebuild(categoryRead) }
         } catch {
             result.saveFailed = true
             result.warnings.append(
@@ -332,11 +329,13 @@ extension StoreRebuildService {
 // MARK: - Categories reconcile
 
 extension StoreRebuildService {
+    @discardableResult
     func rebuildCategories(snapshot: ManifestSnapshot,
                            context: ModelContext,
                            result: inout RebuildResult,
-                           removingOnlyIDs: Set<UUID>? = nil) {
-        let existingCategories = (try? context.fetch(FetchDescriptor<Category>())) ?? []
+                           removingOnlyIDs: Set<UUID>? = nil) -> CategorySaveWindow.ReadReceipt {
+        let read = CategorySaveWindow.fetchCategories(in: context)
+        let existingCategories = read.rows
         var existingByName = Dictionary(existingCategories.map { ($0.name, $0) },
                                         uniquingKeysWith: { first, _ in first })
 
@@ -364,5 +363,6 @@ extension StoreRebuildService {
             context.delete(category)
             result.categoriesRemoved += 1
         }
+        return read.receipt
     }
 }

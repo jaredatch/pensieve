@@ -35,6 +35,7 @@ extension CategorySaveUndoTests {
                 XCTAssertEqual(try h.manifestBytes(), before)
             }
         }
+        try await checkEditAfterRebuildFetch(["skill", "project"])
         try await checkRefusalAfterPulledDeletion(fields: ["skill", "project"])
         try await checkRefusalAcrossSync(["skill-schema", "project-schema"])
     }

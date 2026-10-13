@@ -87,7 +87,7 @@ struct CategoryStore: CategoryStoreProtocol {
         let edit = CategorySaveEdit(category: category, context: context,
             change: .createCategory(CategoryRecord(name: trimmed, projectKeys: [], skillSlugs: [])), existed: false)
         context.insert(category)
-        try? context.save()
+        try? edit.save(in: context)
         regenerateManifest(edit, context: context)
         notifier()
         return category
@@ -96,7 +96,7 @@ struct CategoryStore: CategoryStoreProtocol {
     func rename(_ category: Category, to name: String, context: ModelContext, notifier: SyncStateNotifying) {
         let edit = CategorySaveEdit(category: category, context: context, change: .renameCategory(category.name, name))
         category.name = name
-        try? context.save()
+        try? edit.save(in: context)
         regenerateManifest(edit, context: context)
         notifier()
     }
@@ -104,7 +104,7 @@ struct CategoryStore: CategoryStoreProtocol {
     func delete(_ category: Category, context: ModelContext, notifier: SyncStateNotifying) {
         let edit = CategorySaveEdit(category: category, context: context, change: .deleteCategory(category.name))
         context.delete(category)
-        try? context.save()
+        try? edit.save(in: context)
         regenerateManifest(edit, context: context)
         notifier()
     }
@@ -133,7 +133,7 @@ struct CategoryStore: CategoryStoreProtocol {
         } else {
             category.projectKeys.removeAll { $0 == key }
         }
-        try? context.save()
+        try? edit.save(in: context)
         regenerateManifest(edit, context: context)
         notifier()
     }
@@ -163,7 +163,7 @@ struct CategoryStore: CategoryStoreProtocol {
         } else {
             category.skillSlugs.removeAll { $0 == slug }
         }
-        try? context.save()
+        try? edit.save(in: context)
         regenerateManifest(edit, context: context)
         notifier()
     }

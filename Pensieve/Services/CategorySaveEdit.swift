@@ -13,6 +13,8 @@ struct CategorySaveEdit {
 
     var wasRebuilt: Bool { window.wasRebuilt }
 
+    func save(in context: ModelContext) throws { try window.save(in: context) }
+
     init(category: Category, context: ModelContext, change: ManifestChange, existed: Bool = true) {
         window = CategorySaveWindow(context: context)
         id = category.id
@@ -101,17 +103,22 @@ struct CategorySaveEdit {
     }
 }
 
-/// Each pending edit observes saved authoritative rebuilds across its shared container. The
-/// rebuild may run off the main actor, so its observation is protected independently of SwiftData.
-/// The queue's unsaved preview and acceptance of pending overlays send no rebuild notification.
+/// Order the local edit's save against the rebuild's category fetch, across shared contexts.
+/// Only successful authoritative rebuilds announce their read; queue previews never announce.
 final class CategorySaveWindow {
+    struct ReadReceipt {
+        let containerID: ObjectIdentifier
+        let order: UInt64
+    }
     private static let rebuilt = Notification.Name("Pensieve.categoryWindowRebuilt")
-    private let lock = NSLock()
+    private static let ordering = NSLock()
+    private static var order: UInt64 = 0
     private var observer: NSObjectProtocol?
+    private var savedAt: UInt64?
     private var rebuilt = false
     var wasRebuilt: Bool {
-        lock.lock()
-        defer { lock.unlock() }
+        Self.ordering.lock()
+        defer { Self.ordering.unlock() }
         return rebuilt
     }
 
@@ -120,9 +127,9 @@ final class CategorySaveWindow {
         observer = NotificationCenter.default.addObserver(
             forName: Self.rebuilt, object: nil, queue: nil
         ) { [weak self] notification in
-            guard let container = notification.object as? ModelContainer,
-                  ObjectIdentifier(container) == containerID else { return }
-            self?.recordRebuild()
+            guard let read = notification.object as? ReadReceipt,
+                  read.containerID == containerID else { return }
+            self?.recordRebuild(read)
         }
     }
 
@@ -130,13 +137,29 @@ final class CategorySaveWindow {
         if let observer { NotificationCenter.default.removeObserver(observer) }
     }
 
-    private func recordRebuild() {
-        lock.lock()
-        defer { lock.unlock() }
-        rebuilt = true
+    func save(in context: ModelContext) throws {
+        Self.ordering.lock()
+        defer { Self.ordering.unlock() }
+        try context.save()
+        Self.order += 1
+        savedAt = Self.order
     }
 
-    static func didRebuild(_ context: ModelContext) {
-        NotificationCenter.default.post(name: rebuilt, object: context.container)
+    static func fetchCategories(in context: ModelContext) -> (rows: [Category], receipt: ReadReceipt) {
+        ordering.lock()
+        defer { ordering.unlock() }
+        let rows = (try? context.fetch(FetchDescriptor<Category>())) ?? []
+        order += 1
+        return (rows, ReadReceipt(containerID: ObjectIdentifier(context.container), order: order))
+    }
+
+    private func recordRebuild(_ read: ReadReceipt) {
+        Self.ordering.lock()
+        defer { Self.ordering.unlock() }
+        if let savedAt, savedAt < read.order { rebuilt = true }
+    }
+
+    static func didRebuild(_ read: ReadReceipt) {
+        NotificationCenter.default.post(name: rebuilt, object: read)
     }
 }

@@ -22,6 +22,9 @@ final class CategorySaveUndoTests: XCTestCase {
             let category = try XCTUnwrap(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).first { $0.id == id })
             XCTAssertEqual(category.name, "Local", refusal)
         }
+        try await checkRefusalHoldsLockThroughUndoSave()
+        try await checkEditAfterRebuildFetch(["rename", "rename-after-save"])
+        try await checkEditBetweenManifestReadAndCategoryFetch()
         try await checkPriorSaveAfterPullDoesNotAcknowledgeRefusal()
         try await checkUnrelatedCategoryDoesNotAcknowledgeRename()
         try await checkRefusalAcrossSync(["rename-peer", "rename-plain", "rename-normal", "rename-peer-after-save"])
@@ -37,6 +40,7 @@ final class CategorySaveUndoTests: XCTestCase {
         await h.saves.waitUntilIdle()
         XCTAssertFalse(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.id == id })
         XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories.map(\.name), ["Local", "ZDelete"])
+        try await checkEditAfterRebuildFetch(["create"])
         try await checkRefusedCreateAfterPulledRebuild()
         try await checkRefusalAcrossSync(["create-peer", "create-schema"])
     }

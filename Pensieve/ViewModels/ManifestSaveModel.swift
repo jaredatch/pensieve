@@ -90,9 +90,10 @@ final class ManifestSaveModel {
     @MainActor
     private func save(_ item: Item) async -> Bool {
         var disk: ManifestSnapshot?
+        var heldLock: SyncLock?
+        defer { heldLock?.release() }
         do {
-            let lock = try await takeLock()
-            defer { lock.release() }
+            heldLock = try await takeLock()
             disk = try await readCurrentManifest()
             refreshRefused(durable: disk)
             let result = try await publish(item, disk: disk)
@@ -103,6 +104,7 @@ final class ManifestSaveModel {
                 refuseCategory(item, durable: disk, error: error)
                 return false
             }
+            heldLock?.release()
             if !item.wasHealed {
                 if disk != nil {
                     item.presentation.cache(local: try? manifest.snapshot(from: item.presentation.context))
