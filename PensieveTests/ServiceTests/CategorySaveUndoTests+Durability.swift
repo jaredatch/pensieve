@@ -34,6 +34,7 @@ extension CategorySaveUndoTests {
         XCTAssertEqual(try persisted.fetch(FetchDescriptor<Pensieve.Category>()).first { $0.id == id }?.skillSlugs,
             ["alpha", "beta"])
         XCTAssertEqual(try h.manifestBytes(), before)
+        try await checkRefusalAfterSyncRestoredWindow(["delete", "delete-schema-gone"])
     }
 
     func testHealingPublicationKeepsLaterEditWhenItsOwnLockFails() async throws {

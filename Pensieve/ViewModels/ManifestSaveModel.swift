@@ -154,8 +154,10 @@ final class ManifestSaveModel {
             var displayed = prepared.snapshot
             for edit in refused where edit.context === item.presentation.context { edit.project(onto: &displayed) }
             // Publication is permanent, even after a peer changes the manifest. Only edits still
-            // awaiting publication in this window need an overlay over the rebuilt disk state.
+            // awaiting publication and still shown locally need an overlay. An authoritative sync
+            // rebuild already replaced older category edits with saved state.
             for pending in items.dropFirst() where !pending.wasHealed
+                && pending.categoryEdit?.wasRebuilt != true
                 && pending.presentation.context === item.presentation.context {
                 pending.change.apply(to: &displayed)
             }

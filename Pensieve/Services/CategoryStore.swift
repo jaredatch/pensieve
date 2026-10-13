@@ -84,7 +84,7 @@ struct CategoryStore: CategoryStoreProtocol {
         guard !trimmed.isEmpty else { return nil }
 
         let category = Category(name: trimmed)
-        let edit = CategorySaveEdit(category: category,
+        let edit = CategorySaveEdit(category: category, context: context,
             change: .createCategory(CategoryRecord(name: trimmed, projectKeys: [], skillSlugs: [])), existed: false)
         context.insert(category)
         try? context.save()
@@ -94,7 +94,7 @@ struct CategoryStore: CategoryStoreProtocol {
     }
 
     func rename(_ category: Category, to name: String, context: ModelContext, notifier: SyncStateNotifying) {
-        let edit = CategorySaveEdit(category: category, change: .renameCategory(category.name, name))
+        let edit = CategorySaveEdit(category: category, context: context, change: .renameCategory(category.name, name))
         category.name = name
         try? context.save()
         regenerateManifest(edit, context: context)
@@ -102,7 +102,7 @@ struct CategoryStore: CategoryStoreProtocol {
     }
 
     func delete(_ category: Category, context: ModelContext, notifier: SyncStateNotifying) {
-        let edit = CategorySaveEdit(category: category, change: .deleteCategory(category.name))
+        let edit = CategorySaveEdit(category: category, context: context, change: .deleteCategory(category.name))
         context.delete(category)
         try? context.save()
         regenerateManifest(edit, context: context)
@@ -125,7 +125,7 @@ struct CategoryStore: CategoryStoreProtocol {
                     notifier: SyncStateNotifying) {
         guard let key = project.identityKey else { return }
 
-        let edit = CategorySaveEdit(category: category, change: .categoryProject(category.name, key, member))
+        let edit = CategorySaveEdit(category: category, context: context, change: .categoryProject(category.name, key, member))
         if member {
             if !category.projectKeys.contains(key) {
                 category.projectKeys.append(key)
@@ -154,7 +154,7 @@ struct CategoryStore: CategoryStoreProtocol {
     func setSkill(_ skill: Skill, inCategory category: Category, assigned: Bool, context: ModelContext,
                   notifier: SyncStateNotifying) {
         let slug = skill.directoryName
-        let edit = CategorySaveEdit(category: category, change: .categorySkill(category.name, slug, assigned))
+        let edit = CategorySaveEdit(category: category, context: context, change: .categorySkill(category.name, slug, assigned))
 
         if assigned {
             if !category.skillSlugs.contains(slug) {

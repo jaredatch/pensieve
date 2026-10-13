@@ -93,6 +93,7 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
         warnOverlaysWithoutFiles(snapshot: snapshot, filePresentSlugs: filePresentSlugs, result: &result)
         if manifestIsAuthoritative {
             rebuildCategories(snapshot: snapshot, context: context, result: &result)
+            CategorySaveWindow.didRebuild(context)
         }
         rebuildDeployIntents(snapshot: snapshot, context: context, result: &result)
 

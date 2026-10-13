@@ -9,8 +9,12 @@ struct CategorySaveEdit {
     let before: CategoryRecord?
     let after: CategoryRecord?
     let change: ManifestChange
+    private let window: CategorySaveWindow
 
-    init(category: Category, change: ManifestChange, existed: Bool = true) {
+    var wasRebuilt: Bool { window.wasRebuilt }
+
+    init(category: Category, context: ModelContext, change: ManifestChange, existed: Bool = true) {
+        window = CategorySaveWindow(context: context)
         id = category.id
         createdAt = category.createdAt
         before = existed ? CategoryRecord(name: category.name, projectKeys: category.projectKeys,
@@ -56,9 +60,13 @@ struct CategorySaveEdit {
         }
     }
 
-    /// False means sync removed the target; only undoing our own delete can insert a missing row.
+    /// An authoritative rebuild already replaced this edit with saved state. Its rows can reuse
+    /// our UUID by name, so identity alone cannot authorize an inverse. False means the category
+    /// is absent from the window; without a rebuild, only our own delete can insert a missing row.
     func restore(in context: ModelContext) throws -> Bool {
-        let existing = try context.fetch(FetchDescriptor<Category>()).first { $0.id == id }
+        let categories = try context.fetch(FetchDescriptor<Category>())
+        if wasRebuilt { return categories.contains { $0.name == name } }
+        let existing = categories.first { $0.id == id }
         guard let before else {
             guard let existing else { return false }
             context.delete(existing)
@@ -74,6 +82,11 @@ struct CategorySaveEdit {
             row.skillSlugs = before.skillSlugs
             context.insert(row)
         }
+        restoreFields(row, from: before)
+        return true
+    }
+
+    private func restoreFields(_ row: Category, from before: CategoryRecord) {
         switch change {
         case .renameCategory: row.name = before.name
         case .categorySkill(_, let slug, _):
@@ -84,6 +97,31 @@ struct CategorySaveEdit {
             if before.projectKeys.contains(key) { row.projectKeys.append(key) }
         default: break
         }
-        return true
+    }
+}
+
+/// A pending inverse belongs to the window that still shows its edit. Direct authoritative
+/// rebuilds invalidate it; the save queue's acceptance of pending overlays does not. Observations
+/// live only as long as their queued edits, and each context is used on its own serial executor.
+final class CategorySaveWindow {
+    private static let rebuilt = Notification.Name("Pensieve.categoryWindowRebuilt")
+    private var observer: NSObjectProtocol?
+    private(set) var wasRebuilt = false
+
+    init(context: ModelContext) {
+        observer = NotificationCenter.default.addObserver(
+            forName: Self.rebuilt, object: nil, queue: nil
+        ) { [weak self, weak context] notification in
+            guard let context, let rebuilt = notification.object as? ModelContext, rebuilt === context else { return }
+            self?.wasRebuilt = true
+        }
+    }
+
+    deinit {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+    }
+
+    static func didRebuild(_ context: ModelContext) {
+        NotificationCenter.default.post(name: rebuilt, object: context)
     }
 }

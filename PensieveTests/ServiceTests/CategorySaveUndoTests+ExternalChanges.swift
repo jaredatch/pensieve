@@ -3,6 +3,98 @@ import XCTest
 @testable import Pensieve
 
 extension CategorySaveUndoTests {
+    func checkRefusalAfterSyncRestoredWindow(_ scenarios: [String]) async throws {
+        for scenario in scenarios {
+            let h = try ManifestSaveFixture()
+            defer { h.cleanup() }
+            let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+            defer { lock.release() }
+            let interveningSave = scenario == "rename-peer-after-save"
+            let pulled = try await pullAndRebuildDuringEdit(scenario, h: h)
+            if scenario.contains("schema") {
+                try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "schema_version: 99\n")
+            } else if interveningSave {
+                h.recording.afterWrite = { h.recording.failingWrites = 1 }
+            } else {
+                h.recording.failingWrites = 1
+            }
+            let before = try h.manifestBytes()
+            lock.release()
+            await h.saves.waitUntilIdle()
+            h.recording.afterWrite = nil
+            let notice = try XCTUnwrap(h.saves.categoryNotice).message
+            let removed = scenario == "delete-schema-gone"
+            XCTAssertEqual(notice.contains("undone"), !removed, scenario + ": " + notice)
+            XCTAssertEqual(notice.contains("gone"), removed, scenario + ": " + notice)
+            XCTAssertFalse(notice.contains("already saved"), scenario + ": " + notice)
+            if interveningSave {
+                XCTAssertEqual(h.recording.writes.count, 1)
+                XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories, pulled.categories.sorted { $0.name < $1.name })
+            } else {
+                XCTAssertEqual(try h.manifestBytes(), before, scenario)
+            }
+            try assertWindowMatches(pulled, h: h, phase: scenario + " / refusal")
+            if scenario.contains("schema") {
+                try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "schema_version: 5\n")
+                try h.manifest.write(pulled, toRoot: h.root)
+            }
+            try rebuildPulledState(h)
+            try assertWindowMatches(pulled, h: h, phase: scenario + " / next rebuild")
+        }
+    }
+
+    private func pullAndRebuildDuringEdit(_ scenario: String, h: ManifestSaveFixture) async throws -> ManifestSnapshot {
+        let interveningSave = scenario == "rename-peer-after-save"
+        let editedID = try enqueueSyncScenario(scenario, h: h)
+        await h.assertWaitingBehindHeldLock(pending: interveningSave ? 2 : 1, before: try h.manifestBytes())
+        var pulled = try h.manifest.read(fromRoot: h.root)
+        if scenario.hasPrefix("create") || scenario.hasPrefix("rename-peer") {
+            let name = scenario.hasPrefix("create") ? "Writing" : "Drafts"
+            pulled.categories.append(CategoryRecord(name: name, projectKeys: ["peer-key"], skillSlugs: ["alpha"]))
+        } else if scenario == "delete" {
+            pulled.categories[0].skillSlugs = ["beta"]
+        }
+        if scenario == "delete-schema-gone" { pulled.categories.removeAll { $0.name == "Local" } }
+        if scenario == "skill-schema" { pulled.categories[0].skillSlugs = ["alpha", "beta"] }
+        if scenario == "project-schema" { pulled.categories[0].projectKeys = ["local-key", "peer-key"] }
+        try h.manifest.write(pulled, toRoot: h.root)
+        try rebuildPulledState(h)
+        let afterSync = try h.context.fetch(FetchDescriptor<Pensieve.Category>())
+        if scenario.hasPrefix("create") || scenario.hasPrefix("rename-peer") {
+            XCTAssertEqual(afterSync.first { $0.id == editedID }?.skillSlugs, ["alpha"], scenario)
+        } else if scenario == "delete" || scenario.hasPrefix("rename") || scenario == "delete-schema-gone" {
+            XCTAssertFalse(afterSync.contains { $0.id == editedID }, scenario)
+        }
+        return pulled
+    }
+
+    private func enqueueSyncScenario(_ scenario: String, h: ManifestSaveFixture) throws -> UUID {
+        let interveningSave = scenario == "rename-peer-after-save"
+        if interveningSave {
+            h.library.updateMetadata(h.beta, tags: ["ahead"], scope: .user, context: h.context)
+        }
+        switch scenario {
+        case "delete", "delete-schema-gone":
+            h.categories.delete(h.local, context: h.context)
+        case "create-peer", "create-schema":
+            return try XCTUnwrap(h.categories.create(name: "Writing", context: h.context)).id
+        case "skill-schema":
+            h.categories.setSkill(h.alpha, inCategory: h.local, assigned: true, context: h.context)
+        case "project-schema":
+            h.categories.setProject(h.project, inCategory: h.local, member: true, context: h.context)
+        default:
+            h.categories.rename(h.local, to: "Drafts", context: h.context)
+        }
+        return h.local.id
+    }
+
+    private func assertWindowMatches(_ saved: ManifestSnapshot, h: ManifestSaveFixture, phase: String) throws {
+        let rows = try h.context.fetch(FetchDescriptor<Pensieve.Category>())
+        XCTAssertEqual(rows.count, Set(rows.map(\.name)).count, phase + ": duplicate category names")
+        let actual = rows.map { CategoryRecord(name: $0.name, projectKeys: $0.projectKeys, skillSlugs: $0.skillSlugs) }
+        XCTAssertEqual(actual.sorted { $0.name < $1.name }, saved.categories.sorted { $0.name < $1.name }, phase)
+    }
+
     func checkRefusedCreateAfterPulledRebuild() async throws {
         for refusal in ["schema", "lock", "write"] {
             let h = try ManifestSaveFixture()
