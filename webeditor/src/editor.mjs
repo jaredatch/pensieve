@@ -1,8 +1,10 @@
 import { EditorState, Annotation, Compartment, countColumn } from "@codemirror/state";
 import { EditorView, lineNumbers, keymap, drawSelection, highlightActiveLine, highlightActiveLineGutter, Decoration, ViewPlugin } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab, undoDepth, redoDepth, undo as undoCommand } from "@codemirror/commands";
-import { syntaxHighlighting, HighlightStyle, indentOnInput, syntaxTree } from "@codemirror/language";
+import { syntaxHighlighting, HighlightStyle, indentOnInput, syntaxTree, Language, LanguageSupport } from "@codemirror/language";
 import { markdown } from "@codemirror/lang-markdown";
+import { yamlLanguage } from "@codemirror/lang-yaml";
+import { parseMixed, Parser, TreeFragment } from "@lezer/common";
 import { styleTags, Tag, tags as t } from "@lezer/highlight";
 
 const post = (name, body) => window.webkit?.messageHandlers?.[name]?.postMessage(body ?? null);
@@ -15,7 +17,52 @@ const fromSwift = Annotation.define();
 // reaches the mark and the pill reaches inline code — a code block's lines stay plain.
 const listMarkTag = Tag.define();
 const inlineCodeTag = Tag.define();
-const markdownSupport = markdown({ extensions: [{ props: [styleTags({ ListMark: listMarkTag, InlineCode: inlineCodeTag })] }] });
+const yamlKeyTag = Tag.define();
+const yamlStringTag = Tag.define();
+const yamlFenceTag = Tag.define();
+const yamlParser = yamlLanguage.parser.configure({ props: [styleTags({
+  "Key/Literal Key/QuotedLiteral": yamlKeyTag, QuotedLiteral: yamlStringTag,
+})] });
+const mixFrontmatter = parseMixed(node => node.name === "FrontmatterContent" ? { parser: yamlParser } : null);
+
+// Match SkillParser's fences: the first LF/CRLF line, one optional BOM, only trailing ASCII space/tab/CR,
+// and a column-zero closing fence. Look ahead before consuming anything: an unclosed header stays Markdown.
+// The package's yamlFrontmatter grammar admits unclosed headers and rejects BOM/trailing-tab fences.
+const frontmatter = {
+  defineNodes: ["Frontmatter", "FrontmatterContent", { name: "FrontmatterFence", style: yamlFenceTag }],
+  parseBlock: [{
+    name: "Frontmatter", before: "HorizontalRule",
+    parse(cx, line) {
+      if (cx.lineStart !== 0 || !/^\uFEFF?---[ \t\r]*$/.test(line.text)) return false;
+      const contentFrom = Math.min(line.text.length + 1, cx.input.length);
+      const close = /(?:^|\n)(---[ \t\r]*)(?=\n|$)/.exec(cx.input.read(contentFrom, cx.input.length));
+      if (!close) return false;
+      const closeFrom = contentFrom + close.index + close[0].length - close[1].length;
+      const closeTo = closeFrom + close[1].length;
+      const children = [cx.elt("FrontmatterFence", 0, line.text.length)];
+      if (closeFrom > contentFrom) children.push(cx.elt("FrontmatterContent", contentFrom, closeFrom));
+      children.push(cx.elt("FrontmatterFence", closeFrom, closeTo));
+      while (cx.lineStart < closeTo && cx.nextLine()) { /* consume through the closing fence */ }
+      cx.addElement(cx.elt("Frontmatter", 0, closeTo, children));
+      return true;
+    },
+  }],
+  wrap: mixFrontmatter,
+};
+const markdownSyntax = markdown({ extensions: [frontmatter, {
+  props: [styleTags({ ListMark: listMarkTag, InlineCode: inlineCodeTag })],
+}] });
+class FrontmatterParser extends Parser {
+  createParse(input, fragments, ranges) {
+    // A closing fence typed later can change the unchanged opener's meaning. Exclude its first character
+    // from fragment reuse so the lookahead runs again, while the rest of the Markdown can remain incremental.
+    const rest = fragments.filter(f => f.to > 1).map(f =>
+      new TreeFragment(Math.max(1, f.from), f.to, f.tree, f.offset, true, f.openEnd));
+    return markdownSyntax.language.parser.startParse(input, rest, ranges);
+  }
+}
+const markdownSupport = new LanguageSupport(
+  new Language(markdownSyntax.language.data, new FrontmatterParser(), [], "markdown"), markdownSyntax.support);
 
 // MarkEdit's values: SF Mono 12 px on an 18 px
 // line; the gutter a 28 px column of right-aligned numbers, the content at 40; a full-width caret-line
@@ -39,7 +86,9 @@ const lightHighlight = HighlightStyle.define([
   { tag: t.strong, fontWeight: "bold" },
   { tag: t.emphasis, fontStyle: "italic" },
   { tag: inlineCodeTag, backgroundColor: "rgba(0,0,0,0.06)", borderRadius: "3px", padding: "0 3px" },
-  { tag: listMarkTag, color: "#8a5a2b" },
+  { tag: [listMarkTag, yamlStringTag], color: "#8a5a2b" },
+  { tag: yamlKeyTag, color: "#0f5db5" },
+  { tag: yamlFenceTag, color: "#7f848e" },
   { tag: [t.link, t.url], color: "#0f5db5", textDecoration: "underline" },
   { tag: t.comment, color: "#7f848e", fontStyle: "italic" },
 ]);
@@ -52,7 +101,9 @@ const darkHighlight = HighlightStyle.define([
   { tag: t.emphasis, fontStyle: "italic", color: "#e6e6e6" },
   { tag: inlineCodeTag, color: "#9fe88d", backgroundColor: "rgba(255,255,255,0.08)", borderRadius: "3px", padding: "0 3px" },
   { tag: t.monospace, color: "#9fe88d" },   // a code block's text keeps the dark code ink, without the pill
-  { tag: listMarkTag, color: "#d9a066" },
+  { tag: [listMarkTag, yamlStringTag], color: "#d9a066" },
+  { tag: yamlKeyTag, color: "#6fb3ff" },
+  { tag: yamlFenceTag, color: "#7f848e" },
   { tag: [t.link, t.url], color: "#6fb3ff", textDecoration: "underline" },
   { tag: t.comment, color: "#7f848e", fontStyle: "italic" },
 ]);
