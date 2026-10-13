@@ -20,6 +20,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 ### Changed
 
 - HTTPS sync ignores git credential helpers and other askpass programs. If you relied on one, add an access token in Settings › Sync. You can replace a refused or expired token there, even while a conflict is open.
+- Pensieve's access token now goes only to your sync remote's own host over HTTPS. A remote that redirects somewhere else gets no token, so Connect now uses `github.com` when you enter `www.github.com`. If your sync remote already starts with `https://www.github.com/`, disconnect and connect again.
 - The app is about half its old size, with crash symbols saved separately for troubleshooting.
 - The Projects list now shows projects from your other Macs too.
 - A GitHub link to a folder of skills now lists the skills in it, the same as a link to the whole repository.
@@ -39,6 +40,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- When a git command fails, Pensieve's error keeps git's own message, even when part of git's output isn't valid UTF-8.
 - Reopening sync conflicts while they load now shows the ongoing load and its result.
 - Connecting to a sync remote now tells you when Pensieve uses a fallback branch, and which branch it chose.
 - Launch, Connect, resolving sync conflicts and skill history keep the window responsive while Git runs. History shows progress while loading, comparing, or restoring a version, and a delayed Restore leaves newer edits alone. A Restore that doesn't finish tells you why.
