@@ -57,6 +57,15 @@ extension AppRuntime {
     }
 
     func installRuntimeCallbacks() {
+        syncSetup.syncToken.onSaved = { [weak syncModel] in
+            guard let syncModel, !syncModel.isConflicted else { return }
+            syncModel.syncNow()
+        }
+        library.onSkillDocumentObserved = { [weak self] directoryName, document in
+            guard let self else { return }
+            try self.library.refreshSkillIdentity(directoryName: directoryName, document: document,
+                                              context: self.container.mainContext)
+        }
         scheduler.installGitRecheck(isUnknown: { [weak self] in
             guard let self else { return false }
             return self.gitUsability == nil

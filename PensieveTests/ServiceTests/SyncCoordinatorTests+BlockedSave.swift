@@ -28,7 +28,8 @@ extension SyncCoordinatorTests {
         let cycle = Task { await coordinator.runCycle() }
         await TestWait.until(failureMessage: "push did not block") { block.isBlocked }
         XCTAssertNil(SyncLock.tryAcquire(at: paths.syncLockPath))
-        library.noteEditorChanged(skill, body: "saved during git")
+        library.noteEditorChanged(skill, body: library.editorBody(for: skill)
+            .replacingOccurrences(of: "before", with: "saved during git"))
         XCTAssertTrue(library.saveDraft(skill), library.error ?? "save refused")
         library.updateMetadata(skill, tags: ["saved-during-git"], scope: .user, context: context)
         let savedAt = skill.updatedAt

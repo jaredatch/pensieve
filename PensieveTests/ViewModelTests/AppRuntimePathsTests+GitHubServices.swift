@@ -108,7 +108,7 @@ extension AppRuntimePathsTests {
 
     private func assertSharedCredentials(paths: AppRuntimePaths, historyStore: InMemoryCredentialStore) throws -> Bool {
         let provenance = try XCTUnwrap(paths.makeSkillProvenanceServiceFactory()().credentialStore as? InMemoryCredentialStore)
-        let expected = GitCredential.httpsToken(username: "fixture", token: "fixture-install-token")
+        let expected = GitCredential.httpsToken(username: "fixture", token: "fixture-install-token", host: "github.com")
         let stores = [historyStore, provenance]
         for store in stores { XCTAssertEqual(store.credential(forHost: CredentialHost.githubInstall), expected) }
         let separateRuntime = AppRuntimePaths(storeRoot: paths.storeRoot, appSupportDir: paths.appSupportDir)

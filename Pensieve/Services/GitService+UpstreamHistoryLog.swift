@@ -96,10 +96,6 @@ extension GitService {
     }
 
     private func malformedHistoryLog(_ args: [String]) -> GitError {
-        GitError.commandFailed(
-            args: args,
-            exitCode: 0,
-            stderr: "git returned malformed upstream history"
-        )
+        commandError(args: args, exitCode: 0, detail: "git returned malformed upstream history")
     }
 }

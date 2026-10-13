@@ -41,6 +41,7 @@ final class SyncSetupModelTests: XCTestCase {
         var remoteHasCommitsResult = false
         var pullResult: PullResult = .upToDate
         var throwAuthOn: String?
+        var authDetail = "stub"
         var throwOn: String?
         var defaultBranchFixture: String? = "main"
         var branchesFixture = ["main"]
@@ -61,7 +62,7 @@ final class SyncSetupModelTests: XCTestCase {
         }
 
         private func maybeThrowAuth(_ tag: String, remote: String) throws {
-            if throwAuthOn == tag { throw GitError.authenticationFailed(remote: remote, detail: "stub") }
+            if throwAuthOn == tag { throw GitError.authenticationFailed(remote: remote, detail: authDetail) }
         }
 
         func initRepository(at path: String) throws { try record("init:\(path)") }
@@ -331,6 +332,16 @@ extension SyncSetupModelTests {
         XCTAssertNil(SyncSetupModel.parseRemote("file:///tmp/x"))
     }
 
+    func testInvalidConnectRemoteExplainsAcceptedTransports() async throws {
+        let git = RecordingGitService()
+        let model = try makeModel(git: git, credentials: InMemoryCredentialStore(),
+            rebuilder: RecordingRebuilder(), fileService: existingUserFiles())
+        await model.connectAndReport(url: "file:///tmp/x", username: "octocat", token: "tok")
+        XCTAssertEqual(model.state, .failed("That doesn’t look like a git remote you can sync. Use an https:// URL or an "
+            + "ssh remote (git@host:path)."))
+        XCTAssertTrue(git.calls.isEmpty)
+    }
+
     // MARK: - connect: call order
 
     func testConnectInitAndPushCallOrder() async throws {
@@ -462,14 +473,54 @@ extension SyncSetupModelTests {
 
     // MARK: - connect: credentials
 
+    func testHTTPSConnectRefusesBlankTokenBeforeAnyGitOrWrite() async throws {
+        for token in ["", " ", "\t\n"] {
+            let git = RecordingGitService()
+            let trace = EventTrace()
+            let credentials = InMemoryCredentialStore()
+            try credentials.store(token: "original", username: "old", forHost: "github.com")
+            let files = virginScaffold(trace: trace)
+            let model = try makeModel(git: git, credentials: credentials,
+                rebuilder: RecordingRebuilder(), fileService: files)
+            await model.connectAndReport(url: "https://github.com/octocat/x.git", username: "u", token: token)
+            guard case let .failed(message) = model.state else { return XCTFail("Blank token was accepted") }
+            XCTAssertTrue(message.lowercased().contains("token"))
+            XCTAssertEqual(git.publicProbeCalls, 0)
+            XCTAssertTrue(git.calls.isEmpty)
+            XCTAssertTrue(trace.events.isEmpty)
+            XCTAssertEqual(credentials.credential(forHost: "github.com"),
+                           .httpsToken(username: "old", token: "original", host: "github.com"))
+        }
+    }
+
     func testHTTPSConnectStoresPAT() async throws {
-        let git = RecordingGitService()
-        let creds = InMemoryCredentialStore()
-        let model = try makeModel(git: git, credentials: creds,
-                                  rebuilder: RecordingRebuilder(), fileService: existingUserFiles())
-        await model.connectAndReport(url: "https://github.com/octocat/x.git", username: "octocat", token: "secret")
-        XCTAssertEqual(creds.credential(forHost: "github.com"), .httpsToken(username: "octocat", token: "secret"))
-        XCTAssertEqual(git.lastCredential, .httpsToken(username: "octocat", token: "secret"))
+        for (username, expected) in [("  octocat \n", "octocat"), (" \t\n", "x-access-token")] {
+            let git = RecordingGitService()
+            let creds = InMemoryCredentialStore()
+            let model = try makeModel(git: git, credentials: creds,
+                                      rebuilder: RecordingRebuilder(), fileService: existingUserFiles())
+            await model.connectAndReport(url: "https://github.com/octocat/x.git", username: username, token: " secret \n")
+            XCTAssertEqual(creds.credential(forHost: "github.com"),
+                .httpsToken(username: expected, token: "secret", host: "github.com"))
+            XCTAssertEqual(git.lastCredential, .httpsToken(username: expected, token: "secret", host: "github.com"))
+        }
+    }
+
+    func testHTTPSConnectCanonicalizesWWWGitHubBeforeUsingAndStoringCredentials() async throws {
+        for url in ["https://www.github.com/octocat/x.git", "https://WWW.GITHUB.COM:443/octocat/x.git"] {
+            let git = RecordingGitService()
+            let credentials = InMemoryCredentialStore()
+            let model = try makeModel(git: git, credentials: credentials,
+                rebuilder: RecordingRebuilder(), fileService: existingUserFiles())
+            await model.connectAndReport(url: url, username: "octocat", token: "tok")
+            XCTAssertEqual(model.state, .done)
+            let remote = url.contains(":443") ? "https://github.com:443/octocat/x.git" : "https://github.com/octocat/x.git"
+            XCTAssertTrue(git.calls.contains("lsremote-refs:" + remote), "Check must use the canonical remote")
+            XCTAssertTrue(git.calls.contains("remote:" + remote), "Saved remote must avoid the redirect")
+            XCTAssertEqual(git.lastCredential, .httpsToken(username: "octocat", token: "tok", host: "github.com"))
+            XCTAssertEqual(credentials.credential(forHost: "github.com"), git.lastCredential)
+            XCTAssertNil(credentials.credential(forHost: "www.github.com"))
+        }
     }
 
     // MARK: - connect: auth-failure messaging
@@ -481,8 +532,8 @@ extension SyncSetupModelTests {
                                        rebuilder: RecordingRebuilder(), fileService: existingUserFiles())
         await httpsModel.connectAndReport(url: "https://github.com/octocat/x.git", username: "octocat", token: "tok")
         guard case let .failed(httpsMessage) = httpsModel.state else { return XCTFail("expected .failed") }
-        XCTAssertTrue(httpsMessage.contains("authenticate"), "https message: \(httpsMessage)")
-        XCTAssertTrue(httpsMessage.contains("access token"), "https message should be https-specific")
+        XCTAssertEqual(httpsMessage, "Couldn’t authenticate to github.com. Check the access token has repo access "
+            + "and hasn’t expired.")
 
         let sshGit = RecordingGitService()
         sshGit.throwAuthOn = "clone"
@@ -490,8 +541,19 @@ extension SyncSetupModelTests {
                                      rebuilder: RecordingRebuilder(), fileService: StubFileService())
         await sshModel.connectAndReport(url: "git@github.com:octocat/x.git", username: "", token: "")
         guard case let .failed(sshMessage) = sshModel.state else { return XCTFail("expected .failed") }
-        XCTAssertTrue(sshMessage.contains("authenticate"), "ssh message: \(sshMessage)")
-        XCTAssertTrue(sshMessage.contains("SSH"), "ssh message should be ssh-specific")
+        XCTAssertEqual(sshMessage, "Couldn’t authenticate to github.com over SSH. Add your key to the agent "
+            + "(run ssh-add in Terminal) and confirm it can reach the repo.")
+    }
+
+    func testSSHHostKeyFailureAsksToAcceptTheRemoteKey() async throws {
+        let git = RecordingGitService()
+        git.throwAuthOn = "clone"
+        git.authDetail = "Host key verification failed."
+        let model = try makeModel(git: git, credentials: InMemoryCredentialStore(),
+            rebuilder: RecordingRebuilder(), fileService: StubFileService())
+        await model.connectAndReport(url: "git@example.com:skills.git", username: "", token: "")
+        XCTAssertEqual(model.state, .failed(
+            "Connect to example.com once with ssh in Terminal to check and accept its key, then sync again."))
     }
 
     // MARK: - connect: a diverged remote fails safely (no push/clobber; PLAN-09 resolves)
@@ -724,7 +786,7 @@ extension SyncSetupModelTests {
         let model = try await runConnect(
             file: virginScaffold(trace: trace), git: git, rebuilder: RecordingRebuilder(trace: trace)
         )
-        guard case .failed = model.state else { return XCTFail("expected failure") }
+        XCTAssertEqual(model.state, .failed("Couldn’t determine a safe default branch for this remote."))
         XCTAssertEqual(trace.events, ["lsremote-refs:\(remoteURL)"])
     }
 
@@ -735,6 +797,33 @@ extension SyncSetupModelTests {
                                          rebuilder: RecordingRebuilder(trace: trace))
         guard case let .failed(message) = model.state else { return XCTFail("expected failure") }
         XCTAssertTrue(message.contains("access token"))
+    }
+
+    func testDamagedRemoteAuthOutputStillShowsConnectAdvice() async throws {
+        let fixture = try GitFailureFixture()
+        defer { try? fixture.remove() }
+        let git = try fixture.executable("""
+            simulate_auth_failure() {
+                \(FakeGitScript.skipGlobalOptions)
+                if [ "$1" = 'ls-remote' ]; then
+                    printf 'progress\\n'
+                    printf 'remote: \\377 Authentication failed\\n' >&2
+                    exit 128
+                fi
+            }
+            simulate_auth_failure "$@"
+            exec /usr/bin/git "$@"
+            """)
+        let context = try makeContext()
+        let credentials = InMemoryCredentialStore()
+        let model = SyncSetupModel(context: context, git: git, credentials: credentials,
+                                   root: fixture.root, lockPath: fixture.support + "/sync.lock", steps: SyncStepModel())
+        await model.connectAndReport(url: "https://fixture.test/store.git", username: "test", token: "token")
+        guard case let .failed(message) = model.state else { return XCTFail("Expected failed Connect") }
+        XCTAssertTrue(message.contains("authenticate"), message)
+        XCTAssertTrue(message.contains("access token"), message)
+        XCTAssertTrue(message.contains("repo access"), message)
+        XCTAssertNil(credentials.credential(forHost: "fixture.test"))
     }
 
     func testRemoteRefReadFailureSurfacesBeforeWriting() async throws {
@@ -1321,7 +1410,7 @@ extension SyncSetupModelTests {
                     cancelled: try XCTUnwrap(cancelled), step: step)
                 XCTAssertEqual(file.contents, before, step)
                 XCTAssertEqual(credentials.credential(forHost: "github.com"),
-                    .httpsToken(username: "old", token: "original"), step)
+                    .httpsToken(username: "old", token: "original", host: "github.com"), step)
                 continue
             }
             let reopened = await reopenHeldSetup(model: model, previous: host, step: step)
@@ -1377,7 +1466,8 @@ extension SyncSetupModelTests {
                 await model.connectAndReport(url: remoteURL, username: "new", token: "replacement")
                 guard case .failed = model.state else { return XCTFail("Check must fail: \(failure)") }
             }
-            XCTAssertEqual(credentials.credential(forHost: "github.com"), .httpsToken(username: "old", token: "original"))
+            XCTAssertEqual(credentials.credential(forHost: "github.com"),
+                .httpsToken(username: "old", token: "original", host: "github.com"))
             XCTAssertEqual(file.contents, before)
             XCTAssertEqual(git.calls, ["lsremote-refs:\(remoteURL)"],
                            "No store/config write after a failed check")
@@ -1672,13 +1762,16 @@ extension SyncSetupModelTests {
     }
 
     private func assertButtonAvailability(in host: NSHostingView<AnyView>, runtime: AppRuntime, expected: Bool) async {
-        var enabled: Bool?
-        host.rootView = AnyView(SyncSettingsView().environment(runtime)
-            .buttonStyle(RenderedViewTestSupport.AvailabilityStyle { enabled = $0 }))
-        await TestWait.until(failureMessage: "The rendered Sync settings button did not report availability \(expected)") {
-            enabled != nil
-        }
-        XCTAssertEqual(enabled, expected, "Sync settings must disable the button until its job finishes")
+        let probe = RenderedButtonTestSupport()
+        host.rootView = AnyView(SyncSettingsView().environment(runtime).buttonStyle(probe.style))
+        let connecting = runtime.syncSetup.state == .working
+            || (runtime.syncModel.canConnect && !runtime.syncSetup.isDisconnecting)
+        let title = connecting ? "Connect…" : "Disconnect…"
+        do {
+            let button = try await probe.button(titled: title, in: host)
+            XCTAssertEqual(button.enabled, expected, "Sync settings must disable \(title) until its job finishes")
+        } catch { XCTFail("Couldn't inspect the rendered \(title) control: \(error)") }
+        probe.clear()
         host.rootView = settingsRoot(runtime)
     }
 
@@ -1728,7 +1821,7 @@ extension SyncSetupModelTests {
     }
 
     private func assertReadCancellation(checkingPoint: String) async throws {
-        let files = FileService()
+        let files = FileService(), credentials = InMemoryCredentialStore()
         defer { try? files.deleteDirectory(at: root) }
         try writeRealScaffold()
         try NativeTestWork.run { [self] in try TestPaths.git.initRepository(at: root) }
@@ -1736,7 +1829,6 @@ extension SyncSetupModelTests {
             try files.writeFile(at: root + "/partial.txt", content: "interrupted adoption")
             try NativeTestWork.run { [self] in try TestPaths.git.setRemote("https://github.com/octocat/x.git", at: root) }
         }
-        let credentials = InMemoryCredentialStore()
         try credentials.store(token: "original", username: "old", forHost: "github.com")
         let config = try files.readData(at: root + "/.git/config")
         let manifest = try ManifestSaveFixture.manifestBytes(root: root, files: files)
@@ -1774,7 +1866,8 @@ extension SyncSetupModelTests {
         if checkingPoint == "read-tracking" {
             XCTAssertEqual(try files.readFile(at: root + "/partial.txt"), "interrupted adoption")
         }
-        XCTAssertEqual(credentials.credential(forHost: "github.com"), .httpsToken(username: "old", token: "original"))
+        XCTAssertEqual(credentials.credential(forHost: "github.com"),
+            .httpsToken(username: "old", token: "original", host: "github.com"))
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: root + "-sync.lock"), "Cancel must release the whole-cycle lock")
         lock.release()
         if checkingPoint != "escape" { await assertFreshSetup(model: model) }
@@ -1838,14 +1931,14 @@ extension SyncSetupModelTests {
             XCTAssertEqual(model.state, .done)
             XCTAssertTrue(git.calls.contains("fetch:\(selected)"))
             XCTAssertEqual(git.calls.filter { $0.hasPrefix("lsremote-") }, ["lsremote-refs:\(remoteURL)"])
-            let expected = "Connected using branch “\(selected)” because Pensieve couldn't use the remote's default branch."
+            let expected = "Connected using branch “\(selected)” because Pensieve couldn’t use the remote’s default branch."
+            let notice = try XCTUnwrap(model.connectionNotice)
+            XCTAssertEqual(notice, expected)
             await TestWait.until(failureMessage: "Fallback notice didn't render in the completed sheet") {
                 guard let content = host.window.attachedSheet?.contentView else { return false }
                 return RenderedViewTestSupport.values(in: content).compactMap { $0 as? Text }
-                    .flatMap(RenderedViewTestSupport.strings).contains(expected)
+                    .flatMap(RenderedViewTestSupport.strings).contains(notice)
             }
-            let notice = try XCTUnwrap(model.connectionNotice)
-            XCTAssertEqual(notice, expected)
             XCTAssertTrue(presentation.shown, "Completion must leave the explanation open for acknowledgement")
             await assertFinishedSetup(sheet: sheet, content: content,
                 presentation: presentation, parent: host.window, key: key)
@@ -1863,6 +1956,36 @@ extension SyncSetupModelTests {
     private func setupFields(in root: NSView) -> [NSTextField] {
         [root].compactMap { $0 as? NSTextField }.filter { $0.placeholderString != nil }
             + root.subviews.flatMap { setupFields(in: $0) }
+    }
+
+    func testConnectSheetKeepsBlankHTTPSTokenDisabledAndExplainsWhy() async throws {
+        let trace = EventTrace()
+        let model = try makeModel(git: RecordingGitService(trace: trace), credentials: InMemoryCredentialStore(),
+            rebuilder: RecordingRebuilder(trace: trace), fileService: virginScaffold(trace: trace),
+            syncedFamiliesEmpty: { true })
+        let presentation = NoticePresentation()
+        let host = setupHost(AnyView(NoticeHost(presentation: presentation, model: model)))
+        defer { removeSetup(host) }
+        await TestWait.until(failureMessage: "Connect sheet didn't open") { host.window.attachedSheet != nil }
+        let (_, content) = try await prepareHTTPSSetupForm(parent: host.window)
+        await TestWait.until(failureMessage: "HTTPS token caption didn't render") {
+            RenderedViewTestSupport.values(in: content).compactMap { $0 as? Text }
+                .flatMap(RenderedViewTestSupport.strings).contains("Sync over HTTPS needs an access token.")
+        }
+        XCTAssertFalse(pressFinishedSetupKey("\r", in: content), "Return must not submit a blank HTTPS token")
+        let token = try XCTUnwrap(setupFields(in: content).last)
+        token.stringValue = " \t"
+        token.delegate?.controlTextDidChange?(Notification(name: NSTextField.textDidChangeNotification, object: token))
+        content.layoutSubtreeIfNeeded()
+        XCTAssertFalse(pressFinishedSetupKey("\r", in: content), "Whitespace must keep Connect disabled")
+        token.stringValue = "accepted"
+        token.delegate?.controlTextDidChange?(Notification(name: NSTextField.textDidChangeNotification, object: token))
+        await TestWait.until(failureMessage: "Nonblank token did not enable the Connect shortcut") {
+            self.pressFinishedSetupKey("\r", in: content)
+        }
+        await TestWait.until(failureMessage: "Connect didn't finish") { model.state == .done }
+        presentation.shown = false
+        await TestWait.until(failureMessage: "Connect sheet cleanup didn't detach") { host.window.attachedSheet == nil }
     }
 
     private func prepareHTTPSSetupForm(parent: NSWindow) async throws -> (NSWindow, NSView) {

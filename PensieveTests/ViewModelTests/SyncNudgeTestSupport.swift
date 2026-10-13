@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import XCTest
 @testable import Pensieve
 
 struct LibraryFixture {
@@ -65,4 +66,64 @@ final class RecordingWatcher: FileWatchServiceProtocol {
     func start() -> Bool { true }
     func stop() {}
     func emit(_ slug: String) { onChange(slug) }
+}
+
+enum IdentityRefreshMode { case window, draft, failure }
+
+extension SyncNudgeTests {
+    func testFinalIdentityDuringRecheckReachesWindowRow() async throws {
+        try await assertFinalIdentityDuringRecheck(refresh: .window)
+    }
+
+    func testFinalIdentityDuringRecheckReachesRetainedDraft() async throws {
+        try await assertFinalIdentityDuringRecheck(refresh: .draft)
+    }
+
+    func testFinalIdentityDuringRecheckPreservesPassiveFailureMessage() async throws {
+        try await assertFinalIdentityDuringRecheck(refresh: .failure)
+    }
+
+    func assertFinalIdentityDuringRecheck(refresh: IdentityRefreshMode) async throws {
+        let fixture = try DocumentSaveFixture()
+        defer { fixture.cleanup() }
+        let before = "---\nname: Test\ndescription: Before\n---\nBody"
+        let intermediate = before.replacingOccurrences(of: "Before", with: "Intermediate")
+        let final = "---\nname: Final name\ndescription: Final\n---\nBody"
+        try fixture.write(before)
+        _ = fixture.library.editorBody(for: fixture.skill)
+        if refresh == .draft {
+            fixture.library.onSkillDocumentObserved = nil
+            fixture.library.noteEditorChanged(fixture.skill, body: before + " draft")
+        }
+        fixture.library.beginCoordinatorChanges()
+        let sampledSequence = fixture.library.coordinatorWatcherEventSequence
+        try fixture.write(intermediate)
+        fixture.watcher.emit("test")
+        XCTAssertEqual(fixture.skill.skillDescription, "Intermediate")
+        if refresh == .failure {
+            fixture.library.onSkillDocumentObserved = { _, _ in throw CocoaError(.fileReadUnknown) }
+        }
+        fixture.library.error = "An earlier refused Save"
+        let checks = Counter()
+        await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: true,
+            sampledWatcherEventSequence: sampledSequence, recheckHasUnsyncedChanges: {
+                checks.increment()
+                do { try fixture.write(final) } catch { XCTFail("Final write failed: \(error)") }
+                return true
+            })
+        XCTAssertEqual(checks.value, 1)
+        XCTAssertFalse(fixture.library.isApplyingCoordinatorChanges)
+        XCTAssertEqual(fixture.skill.skillDescription, refresh == .failure ? "Intermediate" : "Final")
+        XCTAssertEqual(fixture.skill.name, refresh == .failure ? "Test" : "Final name")
+        XCTAssertEqual(fixture.library.error, "An earlier refused Save")
+        XCTAssertTrue(fixture.library.wasLastWrittenByApp(directoryName: "test", currentBody: final))
+        let token = fixture.library.reloadToken
+        fixture.watcher.emit("test") // Delivered only after completion adopts the final file.
+        XCTAssertEqual(fixture.library.reloadToken, token)
+        XCTAssertEqual(fixture.skill.skillDescription, refresh == .failure ? "Intermediate" : "Final")
+        XCTAssertEqual(fixture.counter.value, 1)
+        XCTAssertTrue(fixture.library.externallyModified.contains("test"))
+        XCTAssertEqual(fixture.library.hasUnsavedChanges, refresh == .draft)
+        XCTAssertEqual(fixture.library.pendingUnsavedChanges?.reason, refresh == .draft ? .externalChange : nil)
+    }
 }

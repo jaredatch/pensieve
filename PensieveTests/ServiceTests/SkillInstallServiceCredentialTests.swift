@@ -76,7 +76,7 @@ extension SkillInstallServiceTests {
             )
             XCTAssertEqual(
                 rejectingGit.receivedCredentials.last!,
-                .httpsToken(username: "x-access-token", token: "install-secret")
+                .httpsToken(username: "x-access-token", token: "install-secret", host: "github.com")
             )
 
             try credentials.delete(forHost: CredentialHost.githubInstall)
@@ -84,7 +84,7 @@ extension SkillInstallServiceTests {
                 try installer.fetch(
                     repo: "https://github.com/example/public.git",
                     ref: nil,
-                    credential: .httpsToken(username: "sync-user", token: "sync-decoy")
+                    credential: .httpsToken(username: "sync-user", token: "sync-decoy", host: "github.com")
                 )
             )
             XCTAssertNil(
@@ -96,7 +96,7 @@ extension SkillInstallServiceTests {
 
     func testAuthFailureMappedDistinctFromNotFound() throws {
         try NativeTestWork.run { [self] in
-            assertShallowCloneDisablesConfiguredCredentialHelpers()
+            assertShallowClonePreservesCommandFailure()
 
             let authGit = RejectingInstallGitService(cloneError: GitError.commandFailed(
                 args: ["clone"],
@@ -137,7 +137,23 @@ extension SkillInstallServiceTests {
         }
     }
 
-    private func assertShallowCloneDisablesConfiguredCredentialHelpers() {
+    func testInstallMapsProxyResolutionResetAndEmptyReplyToNetworkUnavailable() throws {
+        try NativeTestWork.run { [self] in
+            for detail in ["Could not resolve proxy: proxy.example", "Connection reset by peer", "Empty reply from server"] {
+                let git = RejectingInstallGitService(cloneError:
+                    GitError.commandFailed(args: ["clone"], exitCode: 128, stderr: detail))
+                let installer = SkillInstallService(gitService: git, credentialStore: InMemoryCredentialStore(),
+                    fileService: fileService, scratchRoot: tempDir + "/network-scratch", storeRoot: tempDir + "/store",
+                    lockPath: tempDir + "/sync.lock")
+                XCTAssertThrowsError(try installer.fetch(repo: "https://github.com/example/skills.git",
+                    ref: nil, credential: nil)) { error in
+                    XCTAssertEqual(error as? SkillInstallError, .networkUnavailable, detail)
+                }
+            }
+        }
+    }
+
+    private func assertShallowClonePreservesCommandFailure() {
         let productionGit = TestPaths.git
         XCTAssertThrowsError(
             try productionGit.cloneShallow(
@@ -150,7 +166,7 @@ extension SkillInstallServiceTests {
             guard case let GitError.commandFailed(args, _, _, _) = error else {
                 return XCTFail("expected command failure, got \(error)")
             }
-            XCTAssertEqual(Array(args.prefix(3)), ["-c", "credential.helper=", "clone"])
+            XCTAssertEqual(args.first, "clone")
         }
     }
 

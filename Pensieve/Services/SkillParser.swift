@@ -18,6 +18,9 @@ struct PreservedFrontmatter {
 }
 
 struct PreservedSkillFile {
+    let header: String
+    let rawBody: String
+    let frontmatterSource: String
     /// Exact original file bytes, returned directly when a body-only save changes no body text.
     let source: String
     /// Exact bytes around the frontmatter source, used by migration to replace only identity entries.
@@ -78,10 +81,13 @@ enum SkillParser {
     /// Agent-Skills standard's two fields). Tolerant: returns whatever keys are present;
     /// absent/extra keys are ignored. Falls back to treating the entire content as body when
     /// there is no parseable YAML mapping carrying a `name`.
-    static func parse(_ content: String) -> ParsedSkill {
+    static func parse(_ content: String) -> ParsedSkill { parse(content, retainingBOM: false) }
+
+    /// Raw editor documents retain the BOM that ordinary text decoding already consumed.
+    static func parse(_ content: String, retainingBOM: Bool) -> ParsedSkill {
         let trailingLineBreaks = trailingLineBreaks(in: content)
         let preferredLineEnding = preferredLineEnding(in: content)
-        if let extracted = extractFrontmatter(content) {
+        if let extracted = extractFrontmatter(content, retainingBOM: retainingBOM) {
             if let parsed = parseYAMLFrontmatter(
                 extracted.frontmatter,
                 body: extracted.body,
@@ -147,19 +153,17 @@ enum SkillParser {
     }
 
     /// Strip YAML frontmatter (if present) and return only the markdown body.
-    /// Used by editor and preview to hide raw frontmatter from the user.
-    /// A file with no frontmatter reads in the same canonical form, so a fingerprint seeded from it compares
-    /// with a draft the way a frontmatter-backed one does (batch Layer-2, round 4).
-    static func stripFrontmatter(_ content: String) -> String {
-        guard let extracted = extractFrontmatter(content) else { return canonicalBody(content) }
+    /// Used by Rendered and token estimates; the editor reads the complete document.
+    static func stripFrontmatter(_ content: String, retainingBOM: Bool = false) -> String {
+        guard let extracted = extractFrontmatter(content, retainingBOM: retainingBOM) else {
+            let text = retainingBOM && content.unicodeScalars.first == "\u{feff}"
+                ? String(content.unicodeScalars.dropFirst()) : content
+            return canonicalBody(text)
+        }
         return extracted.body
     }
 
-    /// The body as the store reads it back: newlines trimmed at both ends (what `extractFrontmatter` returns).
-    /// The self-write fingerprint and a draft's dirtiness compare in this form, so a body that ends in a
-    /// newline is neither unsaved after its own save nor an external change when the file is read back
-    /// (batch Layer-2: the app's own Save read as "Modified externally — reloaded", and the editor's last
-    /// empty line vanished).
+    /// Legacy body rewrites and previews trim boundary line breaks. Complete-document drafts retain them.
     static func canonicalBody(_ body: String) -> String {
         String(body[canonicalBodyRange(in: body)])
     }
@@ -182,10 +186,13 @@ enum SkillParser {
     // MARK: - Private
 
     /// Frontmatter opens on the first LF/CRLF line and closes at the next column-zero fence.
-    private static func extractFrontmatter(_ content: String) -> ExtractedFrontmatter? {
+    private static func extractFrontmatter(_ content: String, retainingBOM: Bool = false) -> ExtractedFrontmatter? {
         let lines = sourceLines(in: content, yamlBreaks: false)
-        guard let first = lines.first, isFrontmatterFence(content[first.contentRange]),
-              let closeIndex = lines.indices.dropFirst().first(where: {
+        guard let first = lines.first else { return nil }
+        let opening = content[first.contentRange]
+        let fence = retainingBOM && opening.unicodeScalars.first == "\u{feff}"
+            ? opening[opening.unicodeScalars.index(after: opening.startIndex)...] : opening
+        guard isFrontmatterFence(fence), let closeIndex = lines.indices.dropFirst().first(where: {
                   isFrontmatterFence(content[lines[$0].contentRange])
               }) else { return nil }
         let frontmatterStart = first.sourceRange.upperBound
@@ -205,6 +212,9 @@ enum SkillParser {
             frontmatter: frontmatter,
             body: body,
             preservedFile: PreservedSkillFile(
+                header: String(content[..<lines[closeIndex].contentRange.upperBound]),
+                rawBody: String(content[lines[closeIndex].contentRange.upperBound...]),
+                frontmatterSource: frontmatter,
                 source: content,
                 frontmatterPrefix: String(content[..<frontmatterStart]),
                 frontmatterSuffix: String(content[frontmatterEnd...]),

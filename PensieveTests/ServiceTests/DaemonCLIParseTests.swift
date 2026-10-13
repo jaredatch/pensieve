@@ -74,7 +74,8 @@ final class DaemonCLIParseTests: XCTestCase {
         assertRunOutcome(.synced(changed: false), stdout: "pensieve-daemon synced upToDate\n", exitCode: 0)
         assertRunOutcome(.synced(changed: true), stdout: "pensieve-daemon synced fastForwarded\n", exitCode: 0)
         assertRunOutcome(.skipped(.locked), stdout: "pensieve-daemon skipped locked\n", exitCode: 0)
-        assertRunOutcome(.failed(.authentication), stdout: "pensieve-daemon failed authentication\n", exitCode: 1)
+        assertRunOutcome(.failed(.authentication("token refused")),
+            stdout: "pensieve-daemon failed token refused\n", exitCode: 1)
     }
 
     func testExecuteBareWritesUsageAndDoesNotRunCycle() {

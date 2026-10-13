@@ -101,7 +101,8 @@ struct SkillContentTab: View {
     }
 
     func preview(markdownBody: String, skillsBase: String, onSelectFile: @escaping (String) -> Void) -> SkillPreviewView {
-        SkillPreviewView(markdownBody: markdownBody, scrolls: false,
+        SkillPreviewView(markdownBody: markdownBody, frontmatterRows: choice.isSkillFile ? snapshot.frontmatterRows : [],
+                         scrolls: false,
                          skillDirectory: SkillStore.skillDirectoryPath(slug: skill.directoryName, base: skillsBase),
                          documentRelativePath: file,
                          imageRevision: folderRevision,

@@ -7,7 +7,7 @@ extension GitService {
         remoteRef: String,
         depth: Int
     ) -> [String] {
-        installCredentialIsolationArgs + [
+        [
             "-C", repositoryPath, "fetch", "--quiet", "--no-tags", "--depth", "\(depth)",
             "--", remote, remoteRef
         ]
@@ -18,7 +18,7 @@ extension GitService {
         remote: String,
         commit: String
     ) -> [String] {
-        installCredentialIsolationArgs + [
+        [
             "-C", repositoryPath, "fetch", "--quiet", "--no-tags", "--depth", "1",
             "--", remote, commit
         ]
@@ -112,18 +112,12 @@ extension GitService {
         remote: String,
         ref: String
     ) throws -> Never {
-        let combined = output.stdout + output.stderr
-        if isAuthFailure(combined) {
-            throw GitError.authenticationFailed(remote: remote, detail: combined)
-        }
-        let lower = combined.lowercased()
-        if lower.contains("couldn't find remote ref") || lower.contains("remote ref does not exist") {
+        let failure = commandError(output, args: args, authenticationRemote: remote)
+        if case .authenticationFailed = failure { throw failure }
+        if isMissingRemoteRef(output) {
             throw UpstreamHistoryError.trackedRefNotFound(ref)
         }
-        throw GitError.commandFailed(
-            args: args,
-            exitCode: output.exit,
-            stderr: output.stderr.isEmpty ? output.stdout : output.stderr, confirmingProbe: output.confirmingProbe)
+        throw failure
     }
 
     func fetchTrackedRef(_ request: UpstreamHistoryGitRequest) throws {
@@ -262,8 +256,7 @@ extension GitService {
         ], in: nil)
         if output.exit == 0 { return true }
         if output.exit == 1 { return false }
-        throw GitError.commandFailed(args: ["merge-base"], exitCode: output.exit, stderr: output.stderr,
-            confirmingProbe: output.confirmingProbe)
+        throw commandError(output, args: ["merge-base"])
     }
 
     func isShallowRepository(at repositoryPath: String) throws -> Bool {

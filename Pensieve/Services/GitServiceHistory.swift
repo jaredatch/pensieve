@@ -12,10 +12,7 @@ extension GitService {
         let args = ["-C", workingDir, "log", "-n", "\(limit)", "--format=\(format)", "--", path]
         let result = try run(args, in: nil)
         guard result.exit == 0 else {
-            throw GitError.commandFailed(
-                args: ["log"],
-                exitCode: result.exit,
-                stderr: result.stderr.isEmpty ? result.stdout : result.stderr, confirmingProbe: result.confirmingProbe)
+            throw commandError(result, args: ["log"])
         }
         return result.stdout.split(separator: "\n").compactMap { line in
             let fields = line.components(separatedBy: "\u{1f}")

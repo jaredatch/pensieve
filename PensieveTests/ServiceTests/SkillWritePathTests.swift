@@ -127,7 +127,9 @@ final class SkillWritePathTests: XCTestCase {
                        tags: [], context: context)
         let skill = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
 
-        XCTAssertTrue(vm.updateBody(skill, body: "# v2").succeeded)
+        let original = try rawFile("editable")
+        XCTAssertTrue(vm.updateDocument(skill, document: original.replacingOccurrences(of: "# v1", with: "# v2"),
+                                        original: original).succeeded)
 
         let parsed = SkillParser.parse(try rawFile("editable"))
         XCTAssertEqual(parsed.name, "Editable")
@@ -250,7 +252,7 @@ final class SkillWritePathTests: XCTestCase {
         let skill = Skill(name: "Legacy", directoryName: "legacy")   // skillDescription defaults to ""
         context.insert(skill)
 
-        XCTAssertTrue(vm.updateBody(skill, body: "# new body").succeeded)
+        XCTAssertTrue(vm.updateDocument(skill, document: "# new body", original: "# old body").succeeded)
 
         let parsed = SkillParser.parse(try rawFile("legacy"))
         XCTAssertEqual(parsed.name, "Legacy")

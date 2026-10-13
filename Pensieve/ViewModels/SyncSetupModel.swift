@@ -21,7 +21,7 @@ enum SyncSetupError: LocalizedError, Equatable {
             return "The remote already has \(count) diverging change(s). Open Sync to resolve them "
                 + "before connecting."
         case .remoteDefaultBranchUndetermined:
-            return "Couldn't determine a safe default branch for this remote."
+            return "Couldn’t determine a safe default branch for this remote."
         case .midAdoptionStoreUnrecognized:
             return "This store is in an unrecognized partial sync state. Nothing was changed. Back up "
                 + "anything you added, remove ~/.pensieve, relaunch Pensieve, and reconnect."
@@ -33,6 +33,7 @@ enum SyncSetupError: LocalizedError, Equatable {
 @MainActor
 @Observable
 final class SyncSetupModel {
+    let syncToken: SyncTokenModel
     enum State: Equatable {
         case idle
         case working
@@ -70,14 +71,23 @@ final class SyncSetupModel {
         self.lockPath = lockPath
         self.syncedFamiliesEmpty = syncedFamiliesEmpty
         self.steps = steps
+        syncToken = SyncTokenModel(git: git, credentials: credentials, root: root, lockPath: lockPath, steps: steps)
     }
 
     // MARK: - Pure logic (unit-testable without git)
 
     /// Thin delegate to the single source of truth. The full admission policy (transport allowlist,
     /// remote-helper/userinfo/dash/newline rejection) lives in `RemoteURLPolicy` so the sync-time
-    /// re-check in `SyncEngine` enforces the identical allowlist (C1). (PLAN-10 / 10.3)
-    nonisolated static func parseRemote(_ raw: String) -> RemoteSpec? { RemoteURLPolicy.parse(raw) }
+    /// re-check in `SyncEngine` enforces the identical allowlist (C1). Connect also canonicalizes
+    /// GitHub’s www host before credential storage and network calls to avoid a cross-host redirect.
+    nonisolated static func parseRemote(_ raw: String) -> RemoteSpec? {
+        guard let spec = RemoteURLPolicy.parse(raw) else { return nil }
+        guard spec.transport == .https, spec.host.lowercased() == "www.github.com",
+              var components = URLComponents(string: spec.url) else { return spec }
+        components.host = "github.com"
+        guard let url = components.string else { return nil }
+        return RemoteSpec(url: url, host: "github.com", transport: .https)
+    }
 
     nonisolated static func firstSyncPlan(hasGitDir: Bool, hasLocalSkills: Bool) -> FirstSyncPlan {
         if hasGitDir { return .alreadyConfigured }
@@ -137,18 +147,24 @@ final class SyncSetupModel {
 
     private func runConnect(url: String, username: String, token: String) async {
         guard let spec = Self.parseRemote(url) else {
-            state = .failed("That doesn't look like a git remote you can sync. Use an https:// URL or an "
+            state = .failed("That doesn’t look like a git remote you can sync. Use an https:// URL or an "
                 + "ssh remote (git@host:path).")
+            return
+        }
+        let username = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard spec.transport != .https || !token.isEmpty else {
+            state = .failed("Sync over HTTPS needs an access token.")
             return
         }
         do {
             try await perform(spec: spec, credential: spec.transport == .ssh ? .sshAgent
-                : .httpsToken(username: username.isEmpty ? "x-access-token" : username, token: token))
+                : .httpsToken(username: username.isEmpty ? "x-access-token" : username, token: token, host: spec.host))
             state = .done
         } catch is CancellationError {
             state = .cancelled
-        } catch GitError.authenticationFailed {
-            state = .failed(authMessage(for: spec.transport, host: spec.host))
+        } catch GitError.authenticationFailed(_, let detail) {
+            state = .failed(authMessage(for: spec.transport, host: spec.host, detail: detail))
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -195,14 +211,17 @@ final class SyncSetupModel {
         }
     }
 
-    private func authMessage(for transport: GitTransport, host: String) -> String {
+    private func authMessage(for transport: GitTransport, host: String, detail: String) -> String {
+        if transport == .ssh, let advice = SyncAuthentication.hostKeyMessage(host: host, detail: detail) {
+            return advice
+        }
         switch transport {
         case .ssh:
-            return "Couldn't authenticate to \(host) over SSH. Add your key to the agent "
+            return "Couldn’t authenticate to \(host) over SSH. Add your key to the agent "
                 + "(run ssh-add in Terminal) and confirm it can reach the repo."
         case .https:
-            return "Couldn't authenticate to \(host). Check the access token has repo access "
-                + "and hasn't expired."
+            return "Couldn’t authenticate to \(host). Check the access token has repo access "
+                + "and hasn’t expired."
         }
     }
 }

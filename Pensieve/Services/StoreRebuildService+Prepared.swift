@@ -9,6 +9,7 @@ struct PreparedStoreRebuild {
         let name: String
         let description: String
     }
+    let scanStartedAt: UInt64
     var snapshot: ManifestSnapshot
     let skills: [SkillIdentity]
     let scannedSkillIDs: Set<UUID>
@@ -19,6 +20,7 @@ struct PreparedStoreRebuild {
 extension StoreRebuildService {
     func prepare(snapshot: ManifestSnapshot, fromRoot root: String, container: ModelContainer,
                  manifest: ManifestSnapshotting) throws -> PreparedStoreRebuild {
+        let scanStartedAt = DispatchTime.now().uptimeNanoseconds
         let context = ModelContext(container)
         context.autosaveEnabled = false
         let skillIDs = Set(try context.fetch(FetchDescriptor<Skill>()).map(\.id))
@@ -27,7 +29,7 @@ extension StoreRebuildService {
         // Reuse the convergent rebuild without committing its potentially superseded projection.
         let preview = StoreRebuildService(fileService: fileService, manifestService: manifest, save: { _ in })
         _ = preview.rebuild(snapshot: snapshot, fromRoot: root, context: context, manifestIsAuthoritative: authoritative)
-        return PreparedStoreRebuild(snapshot: try manifest.snapshot(from: context),
+        return PreparedStoreRebuild(scanStartedAt: scanStartedAt, snapshot: try manifest.snapshot(from: context),
             skills: try context.fetch(FetchDescriptor<Skill>()).map {
                 PreparedStoreRebuild.SkillIdentity(slug: $0.directoryName, name: $0.name, description: $0.skillDescription)
             }, scannedSkillIDs: skillIDs, scannedCategoryIDs: categoryIDs, manifestIsAuthoritative: authoritative)
@@ -43,7 +45,10 @@ extension StoreRebuildService {
         var result = RebuildResult()
         for overlay in snapshot.skills {
             guard let identity = identities[overlay.slug] else { continue }
-            let parsed = ParsedSkill(name: identity.name, description: identity.description, tags: [], body: "")
+            let current = bySlug[overlay.slug]
+            let newer = current.map { $0.fileIdentityObservedAt > prepared.scanStartedAt } ?? false
+            let parsed = ParsedSkill(name: newer ? current?.name : identity.name,
+                description: newer ? current?.skillDescription : identity.description, tags: [], body: "")
             upsertSkill(slug: overlay.slug, parsed: parsed, overlay: overlay,
                 existing: bySlug[overlay.slug], context: context, result: &result)
         }

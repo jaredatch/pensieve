@@ -31,6 +31,14 @@ final class ThirdPartyNoticesTests: XCTestCase {
             notices: readNotices(),
             credits: bundledCredits()
         )
+        let lock = try JSONSerialization.jsonObject(with: fileService.readData(at: sourceRoot + "/webeditor/package-lock.json"))
+        let packages = try XCTUnwrap((lock as? [String: Any])?["packages"] as? [String: Any])
+        let copies = packages.keys.filter { $0 == "node_modules/@lezer/common" || $0.hasSuffix("/node_modules/@lezer/common") }
+        XCTAssertEqual(copies.sorted(), ["node_modules/@lezer/common"], "Exactly one shared parser runtime must be installed")
+        let package = try JSONSerialization.jsonObject(with: fileService.readData(at: sourceRoot + "/webeditor/package.json"))
+        let dependencies = (package as? [String: Any])?["dependencies"] as? [String: String]
+        XCTAssertTrue(dependencies?["@lezer/common"]?.hasPrefix("^1.") == true,
+                      "The shared Lezer dependency must allow compatible 1.x updates, avoiding a second parser runtime")
     }
 
     func testBundledCreditsContainEverySourceLicenseBlock() throws {

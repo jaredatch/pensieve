@@ -6,6 +6,7 @@ import SwiftUI
 typealias SyncStateNotifying = () -> Void
 typealias SyncWriteEchoRegistering = ([String]) -> Void
 
+/// Legacy name; the bracket registers complete SKILL.md text, including frontmatter.
 struct SyncBodyWriteRegistration {
     let begin: (_ directoryName: String, _ expectedBody: String) -> Void
     // succeeded=false means the bracketed replacement threw: the finalizer must not

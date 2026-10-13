@@ -94,7 +94,7 @@ final class NudgeInstallService: SkillInstallServiceProtocol {
         let raw = SkillSerializer.serialize(
             name: slug, description: "Description", body: "Installed"
         )
-        registration.begin(slug, SkillParser.stripFrontmatter(raw))
+        registration.begin(slug, raw)
         var bodyWriteSucceeded = false
         defer { registration.end(slug, bodyWriteSucceeded) }
         try onInstallWrite(slug)
@@ -115,6 +115,7 @@ final class InstallEchoSkillStore: SkillStoreProtocol {
     var bodies: [String: String] = [:]
 
     func createSkill(name: String, description: String, body: String) throws -> String { "unused" }
+    func readData(directoryName: String) throws -> Data { Data(try readBody(directoryName: directoryName).utf8) }
     func readBody(directoryName: String) throws -> String { bodies[directoryName] ?? "" }
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
                       fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {

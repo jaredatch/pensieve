@@ -35,16 +35,16 @@ extension UpdatesViewModelTests {
         await sheet.applySelectedAndReport(context: context)
         guard case let .failed(message, _) = sheet.status(for: row) else { return XCTFail("The manifest write must fail") }
         XCTAssertTrue(message.contains(CrashManifest.InjectedFailure().localizedDescription))
-        let replacedBody = library.readBody(fixture.skill)
+        let replacedBody = try XCTUnwrap(library.readSkillDocument(fixture.skill))
         XCTAssertTrue(replacedBody.contains("fresh body"), "The failure follows a real file replacement")
         XCTAssertNotEqual(oldBody, replacedBody)
         XCTAssertGreaterThan(library.reloadToken, reload, "A post-replacement failure must invalidate the open editor")
         XCTAssertTrue(library.saveDraft(fixture.skill))
-        XCTAssertEqual(library.readBody(fixture.skill), replacedBody, "Save cannot restore the retained old text")
+        XCTAssertEqual(library.readSkillDocument(fixture.skill), replacedBody, "Save cannot restore the retained old text")
         XCTAssertEqual(library.editorBody(for: fixture.skill), replacedBody, "The editor reload seam returns the disk body")
         let edited = replacedBody + "\nEdited after the failed update\n"
         library.noteEditorChanged(fixture.skill, body: edited)
         XCTAssertTrue(library.saveDraft(fixture.skill))
-        XCTAssertEqual(library.readBody(fixture.skill), SkillParser.canonicalBody(edited))
+        XCTAssertEqual(library.readSkillDocument(fixture.skill), edited)
     }
 }

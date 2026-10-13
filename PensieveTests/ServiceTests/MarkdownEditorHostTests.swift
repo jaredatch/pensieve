@@ -6,7 +6,7 @@ import WebKit
 final class MarkdownEditorHostTests: XCTestCase {
     /// The editor loaded in a programmatic window: navigation finished, the document ready, the coordinator
     /// and the window that keeps the web view alive.
-    private func makeReadyEditor() -> (MarkdownEditorWebView.Coordinator, NSWindow) {
+    func makeReadyEditor() -> (MarkdownEditorWebView.Coordinator, NSWindow) {
         let ready = expectation(description: "editorDidReady")
         let coordinator = MarkdownEditorWebView.Coordinator(onReady: { ready.fulfill() }, onContentChange: { _ in })
         let webView = coordinator.makeWebView()
@@ -20,7 +20,7 @@ final class MarkdownEditorHostTests: XCTestCase {
         return (coordinator, window)
     }
 
-    private func probe(_ coordinator: MarkdownEditorWebView.Coordinator, _ js: String) -> String {
+    func probe(_ coordinator: MarkdownEditorWebView.Coordinator, _ js: String) -> String {
         let done = expectation(description: "probe")
         var value = ""
         coordinator.evaluateJavaScript(js) { result, _ in

@@ -114,7 +114,7 @@ final class ExternalChangeTests: XCTestCase {
         XCTAssertEqual(viewModel.reloadToken, 0)
     }
 
-    func testAFileRewrittenWithoutFrontmatterReadsCanonically() throws {
+    func testAFileRewrittenWithoutFrontmatterLoadsItsExactText() throws {
         // An admitted skill's file rewritten outside without its frontmatter (the rebuild rejects it on its next
         // pass; the row stands until then): the read is still the store's canonical form, so typing back to the
         // file's exact text is clean (batch Layer-2, round 4: the raw "A\n" fingerprint left a phantom draft).
@@ -126,7 +126,7 @@ final class ExternalChangeTests: XCTestCase {
         let skill = Skill(name: "Bare Skill", directoryName: directoryName)
         try store.writeBody(directoryName: directoryName, body: "A\n")
 
-        XCTAssertEqual(viewModel.editorBody(for: skill), "A")
+        XCTAssertEqual(viewModel.editorBody(for: skill), "A\n")
         viewModel.noteEditorChanged(skill, body: "A\n")
         XCTAssertFalse(viewModel.hasUnsavedChanges(for: skill))
         XCTAssertTrue(viewModel.drafts.isEmpty)
@@ -148,9 +148,11 @@ final class ExternalChangeTests: XCTestCase {
 
         XCTAssertFalse(viewModel.hasUnsavedChanges(for: skill))
         XCTAssertEqual(viewModel.readBody(skill), "B")
-        XCTAssertTrue(viewModel.wasLastWrittenByApp(directoryName: directoryName, currentBody: "B"))
+        XCTAssertTrue(viewModel.wasLastWrittenByApp(directoryName: directoryName,
+            currentBody: SkillSerializer.serialize(name: skill.name, description: skill.name, body: "B")))
+        let expected = SkillSerializer.serialize(name: skill.name, description: skill.name, body: "B")
         let reloadToken = viewModel.reloadToken
-        XCTAssertEqual(viewModel.editorBody(for: skill), "B")
+        XCTAssertEqual(viewModel.editorBody(for: skill), expected)
         XCTAssertTrue(viewModel.externallyModified.isEmpty)
         XCTAssertEqual(viewModel.reloadToken, reloadToken)
         viewModel.startWatching()

@@ -3,11 +3,11 @@ import Foundation
 // PLAN-24 keeps the ten tightly-coupled adoption subprocess members beside the existing git runner.
 // swiftlint:disable file_length
 
-/// How a network-touching git op authenticates. Introduced in 08.1 as an opaque, nil-defaulted seam;
-/// the `.httpsToken` injection body lands in 08.2 (§E). In 08.1 only `.sshAgent`/`nil` is exercised.
+/// HTTPS credentials carry their saved host. The helper answers only HTTPS prompts for that host.
+/// Blank tokens are treated as absent.
 enum GitCredential: Equatable {
     case sshAgent
-    case httpsToken(username: String, token: String)
+    case httpsToken(username: String, token: String, host: String)
 }
 
 enum GitError: LocalizedError, Equatable {
@@ -34,6 +34,35 @@ enum GitError: LocalizedError, Equatable {
 }
 
 extension GitError {
+    var isRepositoryNotFound: Bool {
+        guard case let .commandFailed(_, _, stderr, _) = self else { return false }
+        let detail = stderr.lowercased()
+        if detail.contains("error: 404") || detail.contains("http 404") {
+            return true
+        }
+        return detail.contains("repository")
+            && (detail.contains("not found") || detail.contains("does not exist")
+                || detail.contains("does not appear to be a git repository"))
+    }
+
+    /// curl's and ssh's words for a remote that cannot be reached at all — no DNS, no route, no answer.
+    var isNetworkFailure: Bool {
+        guard case let .commandFailed(_, _, stderr, _) = self else { return false }
+        let detail = stderr.lowercased()
+        let markers = [
+            "could not resolve host",
+            "could not resolve proxy",
+            "connection reset by peer",
+            "empty reply from server",
+            "failed to connect to",
+            "couldn't connect to server",
+            "network is unreachable",
+            "connection timed out",
+            "operation timed out"
+        ]
+        return markers.contains { detail.contains($0) }
+    }
+
     /// Best-effort reads swallow git rejections, but host and local output-read failures reach the caller.
     static func preservingUnusability<T>(_ operation: () throws -> T) throws -> T? {
         do { return try operation() } catch let error as GitError {
@@ -205,7 +234,7 @@ struct GitService: GitServiceProtocol {
         "GIT_ASKPASS", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_SSH_VARIANT", "GIT_PROXY_COMMAND",
         "GIT_EXTERNAL_DIFF", "GIT_CONFIG", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT",
         "GIT_CONFIG_PARAMETERS", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE",
-        "GIT_ALLOW_PROTOCOL", "GIT_PROTOCOL_FROM_USER", "PENSIEVE_GIT_USERNAME", "PENSIEVE_GIT_PASSWORD"
+        "GIT_ALLOW_PROTOCOL", "GIT_PROTOCOL_FROM_USER", "PENSIEVE_GIT_USERNAME", "PENSIEVE_GIT_PASSWORD", "PENSIEVE_GIT_HOST"
     ]
     // Prefix strips for indexed/family vars only: GIT_CONFIG_KEY_<n>/VALUE_<n> injection + all GIT_TRACE*
     // sinks. Scoped to these families so GIT_CONFIG_NOSYSTEM survives.
@@ -218,10 +247,9 @@ struct GitService: GitServiceProtocol {
     /// ssh-agent keys authenticate), augment PATH with the standard git/ssh locations, and set
     /// GIT_TERMINAL_PROMPT=0 so git FAILS FAST instead of hanging on a credential prompt in a process
     /// with no TTY. Pensieve strips inherited git-behavior overrides first, including the HTTPS-auth
-    /// variables it owns, so a `.sshAgent`/`nil` op can never ride a stale parent askpass or secret, and
-    /// `applyCredential` is the ONLY thing that (re)sets them — for `.httpsToken` alone (§E).
-    /// Internal (not private) so 08.2's GitServiceTests can assert the credential rides the child ENV
-    /// (GIT_ASKPASS + PENSIEVE_GIT_PASSWORD) and never argv, and that a non-token op is sanitized.
+    /// variables it owns, so a `.sshAgent`/`nil` op can never ride a stale parent askpass or secret.
+    /// Git's empty askpass default disables core.askPass and SSH_ASKPASS for HTTP
+    /// credentials. SSH itself still receives SSH_ASKPASS and SSH_AUTH_SOCK for key authentication.
     func childEnvironment(credential: GitCredential?) throws -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         // C5: drop inherited git-behavior overrides a hostile/misconfigured parent could carry BEFORE we
@@ -234,6 +262,7 @@ struct GitService: GitServiceProtocol {
         let extra = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
         env["PATH"] = env["PATH"].map { "\($0):\(extra)" } ?? extra
         env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_ASKPASS"] = ""
         env["GIT_EDITOR"] = "true"
         env["GIT_SEQUENCE_EDITOR"] = "true"
         try applyCredential(credential, to: &env)   // sets the auth vars for `.httpsToken`; no-op otherwise
@@ -246,9 +275,11 @@ struct GitService: GitServiceProtocol {
     /// The token rides ONLY the child env (`PENSIEVE_GIT_PASSWORD`/`USERNAME`), never argv and never the
     /// on-disk askpass helper file; the helper body references only `$PENSIEVE_GIT_*`.
     private func applyCredential(_ credential: GitCredential?, to env: inout [String: String]) throws {
-        guard case let .httpsToken(username, token) = credential else { return }
+        guard case let .httpsToken(username, token, host) = credential,
+              !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let helper = try ensureAskpassHelper()      // propagate a write failure (was try?-swallowed)
         env["GIT_ASKPASS"] = helper
+        env["PENSIEVE_GIT_HOST"] = host
         env["PENSIEVE_GIT_USERNAME"] = username
         env["PENSIEVE_GIT_PASSWORD"] = token   // CHILD ENV only — not argv, not disk
     }
@@ -263,14 +294,66 @@ struct GitService: GitServiceProtocol {
         let path = askpassHelperPath
         let body = """
         #!/bin/sh
+        export LC_ALL=C
+        \(Self.canonicalHostFunction)
+        case "$1" in
+          "Username for '"*"': "|"Password for '"*"': ") ;;
+          *) exit 1 ;;
+        esac
+        address=${1#*\\'}
+        address=${address%\\'*}
+        case "$address" in
+          [hH][tT][tT][pP][sS]://*) ;;
+          *) exit 1 ;;
+        esac
+        authority=${address#*://}
+        authority=${authority%%/*}
+        authority=${authority##*@}
+        case "$authority" in
+          \\[*\\]*) host=${authority#\\[}; host=${host%%\\]*}; suffix=${authority#*\\]} ;;
+          *) host=${authority%%:*}; suffix=${authority#"$host"} ;;
+        esac
+        case "$suffix" in
+          "") ;;
+          :*) case "${suffix#:}" in ""|*[!0-9]*) exit 1 ;; esac ;;
+          *) exit 1 ;;
+        esac
+        host=$(canonical_host "$host") || exit 1
+        saved_host=$(canonical_host "$PENSIEVE_GIT_HOST") || exit 1
+        [ "$host" = "$saved_host" ] || exit 1
         case "$1" in
           Username*) printf '%s' "$PENSIEVE_GIT_USERNAME" ;;
-          *)         printf '%s' "$PENSIEVE_GIT_PASSWORD" ;;
+          Password*) printf '%s' "$PENSIEVE_GIT_PASSWORD" ;;
         esac
         """
         try fileService.writeExecutableFile(at: path, content: body + "\n")
         return path
     }
+
+    /// One byte-level form for both saved and sanitized prompt hosts: decode once, then fold ASCII.
+    /// Parsing authority delimiters precedes decoding, so escaped userinfo cannot become a host.
+    private static let canonicalHostFunction = """
+        canonical_host() {
+          value=$1
+          decoded=
+          while [ -n "$value" ]; do
+            case "$value" in
+              %??*)
+                pair=${value#%}; pair=${pair%"${pair#??}"}
+                case "$pair" in
+                  *[!0-9a-fA-F]*|0[0-9a-fA-F]|1[0-9a-fA-F]|7[fF]) return 1 ;;
+                esac
+                decoded=$decoded$(printf "\\\\$(printf '%03o' "0x$pair")")
+                value=${value#???}
+                ;;
+              %*) return 1 ;;
+              *) decoded=$decoded${value%"${value#?}"}; value=${value#?} ;;
+            esac
+          done
+          case "$decoded" in ""|*[[:cntrl:]]*) return 1 ;; esac
+          printf '%s' "$decoded" | /usr/bin/tr 'A-Z' 'a-z'
+        }
+        """
 
     // MARK: Process runner (§B — verbatim)
 
@@ -304,9 +387,11 @@ struct GitService: GitServiceProtocol {
         var environment = try childEnvironment(credential: credential)
         if storeRules { environment["GIT_ATTR_NOSYSTEM"] = "1" }
         let configuredArguments = storeRules ? Self.storeConfigurationArgs + args : args
-        // A remote check must not ask a configured helper to save the form's token in a Keychain.
-        let arguments = GitCancellation.isReadOnly
-            ? ["-c", "credential.helper="] + configuredArguments : configuredArguments
+        // Reset the configured helper chain for reads and writes: no get, store or erase.
+        // Sanitized prompts keep userinfo delimiters escaped until after host parsing.
+        // childEnvironment also disables foreign HTTP askpass programs. Credentials the user
+        // configures elsewhere in git or curl can still apply, even with a Pensieve token.
+        let arguments = ["-c", "credential.helper=", "-c", "credential.sanitizePrompt=true"] + configuredArguments
         let child = try GitProcess(executable: gitPath, arguments: arguments, workingDirectory: workingDir,
                                    environment: environment)
         #if GIT_PROCESS_PROBE
@@ -317,9 +402,9 @@ struct GitService: GitServiceProtocol {
         // Command output is only a hint: repository-controlled text can resemble a broken shim.
         // Confirm at the shared runner so clone, fetch, conflict and install callers agree.
         // The diagnostic command bypasses this branch, preventing recursive probes.
-        let stderr = String(bytes: output.stderr, encoding: .utf8) ?? ""
-        let detail = stderr.isEmpty ? (String(bytes: output.stdout, encoding: .utf8) ?? "") : stderr
-        if args != ["--version"], GitUsability.environmentFailure(exit: output.exit, output: detail) != nil {
+        if output.exit != 0, args != ["--version"],
+           GitUsability.environmentFailure(exit: output.exit,
+               output: output.textOutput.stdout + output.textOutput.stderr) != nil {
             let answer = try probeUsability()
             try answer.requireUsable()
             output.confirmingProbe = answer
@@ -355,15 +440,13 @@ struct GitService: GitServiceProtocol {
     private static let authSignatures = [
         "Permission denied (publickey)",
         "Authentication failed",
+        "The requested URL returned error: 403",
+        "HTTP 403",
         "could not read Username",
         "Host key verification failed",
         "Invalid username or password",
         "terminal prompts disabled"
     ]
-
-    func isAuthFailure(_ text: String) -> Bool {
-        Self.authSignatures.contains { text.contains($0) }
-    }
 
     func headSHA(at path: String) throws -> String? {
         guard let r = try runBestEffort(["-C", path, "rev-parse", "HEAD"], in: nil), r.exit == 0 else { return nil }
@@ -424,10 +507,7 @@ extension GitService {
         case 1:
             return nil   // `git config --get`: exit 1 = key absent
         default:
-            throw GitError.commandFailed(
-                args: ["config", "--local", "--get", "remote.origin.url"],
-                exitCode: r.exit,
-                stderr: r.stderr, confirmingProbe: r.confirmingProbe)
+            throw commandError(r, args: ["config", "--local", "--get", "remote.origin.url"])
         }
     }
 
@@ -454,24 +534,13 @@ extension GitService {
             try fileService.publishDirectory(at: staging, to: path)
             return
         }
-        let combined = r.stdout + r.stderr
-        if isAuthFailure(combined) {
-            throw GitError.authenticationFailed(remote: remote, detail: combined)
-        }
-        throw GitError.commandFailed(args: args, exitCode: r.exit, stderr: r.stderr.isEmpty ? r.stdout : r.stderr,
-            confirmingProbe: r.confirmingProbe)
+        throw commandError(r, args: args, authenticationRemote: remote)
     }
-
-    /// The empty credential.helper value resets Git's configured helper list. EVERY install-path
-    /// network invocation (cloneShallow today; remoteHead/ls-remote when 19.7 adds them) must prefix
-    /// its args with this — a helper like osxkeychain would otherwise silently authenticate with a
-    /// machine-level credential the install namespace never granted.
-    static let installCredentialIsolationArgs = ["-c", "credential.helper="]
 
     @_disfavoredOverload
     func cloneShallow(remote: String, branch: String?, into path: String,
                       credential: GitCredential?) throws {
-        var args = Self.installCredentialIsolationArgs + ["clone", "--quiet", "--depth", "1"]
+        var args = ["clone", "--quiet", "--depth", "1"]
         if let branch {
             args += ["--branch", branch]
         }
@@ -479,12 +548,7 @@ extension GitService {
         args += ["--", remote, path]
         let r = try run(args, in: nil, credential: credential)
         guard r.exit != 0 else { return }
-        let combined = r.stdout + r.stderr
-        if isAuthFailure(combined) {
-            throw GitError.authenticationFailed(remote: remote, detail: combined)
-        }
-        throw GitError.commandFailed(args: args, exitCode: r.exit, stderr: r.stderr.isEmpty ? r.stdout : r.stderr,
-            confirmingProbe: r.confirmingProbe)
+        throw commandError(r, args: args, authenticationRemote: remote)
     }
 
     @_disfavoredOverload
@@ -523,12 +587,7 @@ extension GitService {
         let args = ["ls-remote", "--symref", "--", remote, "HEAD", "refs/heads/*"]
         let result = try runData(args, in: nil, credential: credential)
         guard result.exit == 0 else {
-            let combined = (String(data: result.stdout, encoding: .utf8) ?? "")
-                + (String(data: result.stderr, encoding: .utf8) ?? "")
-            if Self.classifyLsRemoteFailure(exitCode: result.exit, combinedOutput: combined) == .auth {
-                throw GitError.authenticationFailed(remote: remote, detail: combined)
-            }
-            throw dataCommandError(result, args: args)
+            throw dataCommandError(result, args: args, authenticationRemote: remote)
         }
         let defaultPrefix = Array("ref: refs/heads/".utf8)
         let headPrefix = Array("refs/heads/".utf8)
@@ -612,10 +671,7 @@ extension GitService {
         case 1:
             return false
         default:
-            throw GitError.commandFailed(
-                args: args,
-                exitCode: result.exit,
-                stderr: result.stderr.isEmpty ? result.stdout : result.stderr, confirmingProbe: result.confirmingProbe)
+            throw commandError(result, args: args)
         }
     }
 }
@@ -625,10 +681,8 @@ extension GitService {
         let output = try runOrThrow(["-C", path, "rev-parse"] + args, in: nil)
         let value = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else {
-            throw GitError.commandFailed(
-                args: ["-C", path, "rev-parse"] + args,
-                exitCode: output.exit,
-                stderr: "git returned an empty revision", confirmingProbe: output.confirmingProbe)
+            throw commandError(args: ["-C", path, "rev-parse"] + args, exitCode: output.exit,
+                               detail: "git returned an empty revision", confirmingProbe: output.confirmingProbe)
         }
         return value
     }
@@ -678,12 +732,7 @@ extension GitService {
         let args = ["-C", path, "push", "-u", "origin", "main"]
         let r = try run(args, in: nil, credential: credential)
         guard r.exit != 0 else { return }
-        let combined = r.stdout + r.stderr
-        if isAuthFailure(combined) {
-            throw GitError.authenticationFailed(remote: authenticationRemoteLabel(at: path), detail: combined)
-        }
-        throw GitError.commandFailed(args: args, exitCode: r.exit, stderr: r.stderr.isEmpty ? r.stdout : r.stderr,
-            confirmingProbe: r.confirmingProbe)
+        throw commandError(r, args: args, authenticationRemote: authenticationRemoteLabel(at: path))
     }
 
     @_disfavoredOverload

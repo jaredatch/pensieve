@@ -59,12 +59,7 @@ extension GitService {
         let args = ["-C", path, "fetch", "origin", "main"]
         let r = try run(args, in: nil, credential: credential)
         guard r.exit != 0 else { return }
-        let combined = r.stdout + r.stderr
-        if isAuthFailure(combined) {
-            throw GitError.authenticationFailed(remote: authenticationRemoteLabel(at: path), detail: combined)
-        }
-        throw GitError.commandFailed(args: args, exitCode: r.exit, stderr: r.stderr.isEmpty ? r.stdout : r.stderr,
-            confirmingProbe: r.confirmingProbe)
+        throw commandError(r, args: args, authenticationRemote: authenticationRemoteLabel(at: path))
     }
 
     static func cleanupCloneTemps(fileService: FileServiceProtocol = FileService(),

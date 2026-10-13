@@ -296,8 +296,7 @@ extension StoreRebuildService {
     /// `createdAt` is durable: applied ONLY when an overlay is present (deterministic), never when absent.
     private func applyUpdate(to skill: Skill, fields: ResolvedSkillFields, result: inout RebuildResult) {
         var changed = false
-        if skill.name != fields.name { skill.name = fields.name; changed = true }
-        if skill.skillDescription != fields.description { skill.skillDescription = fields.description; changed = true }
+        if Self.refreshIdentity(of: skill, name: fields.name, description: fields.description) { changed = true }
         if skill.scope != fields.scope { skill.scope = fields.scope; changed = true }
         if skill.tags != fields.tags { skill.tags = fields.tags; changed = true }
         if skill.cursorConfig != fields.cursor { skill.cursorConfig = fields.cursor; changed = true }
@@ -383,5 +382,25 @@ extension StoreRebuildService {
             result.categoriesRemoved += 1
         }
         return read.receipt
+    }
+}
+
+extension StoreRebuildService {
+    @discardableResult
+    static func refreshIdentity(of skill: Skill, document: String, retainingBOM: Bool = false) -> Bool {
+        let parsed = SkillParser.parse(document, retainingBOM: retainingBOM)
+        guard parsed.hasRequiredFrontmatter, let name = parsed.name, let description = parsed.description else { return false }
+        let changed = refreshIdentity(of: skill, name: name, description: description)
+        skill.fileIdentityObservedAt = DispatchTime.now().uptimeNanoseconds
+        return changed
+    }
+
+    @discardableResult
+    static func refreshIdentity(of skill: Skill, name: String, description: String) -> Bool {
+        guard skill.name != name || skill.skillDescription != description else { return false }
+        skill.name = name
+        skill.skillDescription = description
+        skill.fileIdentityObservedAt = DispatchTime.now().uptimeNanoseconds
+        return true
     }
 }

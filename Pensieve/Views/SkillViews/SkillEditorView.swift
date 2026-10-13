@@ -42,7 +42,7 @@ struct SkillEditorView: View {
     private func reloadIfClean() {
         guard !isDirty else { return }
         let body = library.editorBody(for: skill)
-        guard SkillParser.canonicalBody(editorText) != body else { return }
+        guard !SkillDocumentEditing.matches(editorText, body) else { return }
         push(body)
     }
 

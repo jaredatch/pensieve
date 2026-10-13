@@ -13,12 +13,12 @@ enum DaemonCycleResult: Equatable {
         case locked, noRemote, branchless, rejectedRemote, dirtyTree, diverged
     }
     enum FailureReason: Equatable {
-        case authentication, gitError
+        case authentication(String), gitError
         case preflight(String)
 
         var detail: String {
             switch self {
-            case .authentication: return "authentication"
+            case let .authentication(message): return message
             case .gitError: return "gitError"
             case let .preflight(message): return message
             }
@@ -122,8 +122,10 @@ struct SyncDaemon {
         let ff: FastForwardResult
         do {
             ff = try git.fastForwardOnly(at: root, credential: credential)
-        } catch GitError.authenticationFailed {
-            return finish(.failed(.authentication))
+        } catch GitError.authenticationFailed(_, let detail) {
+            let advice = SyncAuthentication(remote: spec, credential: credential)
+                .message(authenticationDetail: detail) ?? "authentication"
+            return finish(.failed(.authentication(advice)))
         } catch let error as StoreUpdateError {
             return finish(.failed(.preflight(error.localizedDescription)))
         } catch {

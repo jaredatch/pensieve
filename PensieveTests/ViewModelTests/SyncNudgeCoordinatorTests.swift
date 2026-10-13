@@ -19,13 +19,13 @@ extension SyncNudgeTests {
         XCTAssertEqual(fixture.counter.value, 0)
         XCTAssertFalse(fixture.library.externallyModified.contains(skill.directoryName))
     }
-
     func testExternalEditDuringCoordinatorCycleRemainsExternal() async throws {
         let fixture = try libraryFixture()
         let skill = try insertSkill(slug: "cycle-external", store: fixture.store, context: fixture.context)
         _ = fixture.library.editorBody(for: skill)
         fixture.library.startWatching()
-        fixture.library.noteEditorChanged(skill, body: "Pending")
+        fixture.library.noteEditorChanged(skill, body: SkillSerializer.serialize(
+            name: skill.name, description: skill.skillDescription, body: "Pending"))
 
         fixture.library.beginCoordinatorChanges()
         fixture.store.bodies[skill.directoryName] = SkillSerializer.serialize(
@@ -38,9 +38,9 @@ extension SyncNudgeTests {
         XCTAssertEqual(fixture.library.readBody(skill), "External")
         XCTAssertTrue(fixture.library.externallyModified.contains(skill.directoryName))
         XCTAssertTrue(fixture.library.hasUnsavedChanges(for: skill))
-        XCTAssertEqual(fixture.library.drafts[skill.directoryName]?.body, "Pending")
+        XCTAssertEqual(fixture.library.drafts[skill.directoryName]?.body, SkillSerializer.serialize(
+            name: skill.name, description: skill.skillDescription, body: "Pending"))
     }
-
     func testWatcherEventAfterCleanSampleRechecksBeforeClassification() async throws {
         let fixture = try libraryFixture()
         let skill = try insertSkill(slug: "classification-race", store: fixture.store, context: fixture.context)
@@ -67,7 +67,6 @@ extension SyncNudgeTests {
         XCTAssertEqual(fixture.counter.value, 1)
         XCTAssertTrue(fixture.library.externallyModified.contains(skill.directoryName))
     }
-
     func testFinalScanChangeRechecksBeforeDelayedWatcherEvent() async throws {
         let fixture = try libraryFixture()
         let skill = try insertSkill(slug: "delayed-event", store: fixture.store, context: fixture.context)
@@ -94,7 +93,6 @@ extension SyncNudgeTests {
         XCTAssertEqual(fixture.counter.value, 1)
         XCTAssertTrue(fixture.library.externallyModified.contains(skill.directoryName))
     }
-
     func testCoordinatorTransientBodyIsReseededFromFinalDiskState() async throws {
         let fixture = try libraryFixture()
         let skill = try insertSkill(slug: "transient", store: fixture.store, context: fixture.context)
@@ -115,7 +113,6 @@ extension SyncNudgeTests {
         XCTAssertEqual(fixture.counter.value, 0)
         XCTAssertFalse(fixture.library.externallyModified.contains(skill.directoryName))
     }
-
     func testTheCyclesFinalReseedPublishesAnObservedSignal() async throws {
         // The fingerprint is not observed (an off-main mutation under the lock deadlocks against SwiftUI), so a
         // draft that matched a transient body and reads dirty again after the cycle's final re-seed needs one
@@ -124,7 +121,8 @@ extension SyncNudgeTests {
         let skill = try insertSkill(slug: "reseed-signal", store: fixture.store, context: fixture.context)
         _ = fixture.library.editorBody(for: skill)
         fixture.library.startWatching()
-        fixture.library.noteEditorChanged(skill, body: "Transient")
+        fixture.library.noteEditorChanged(skill, body: SkillSerializer.serialize(
+            name: skill.name, description: skill.skillDescription, body: "Transient"))
         fixture.library.beginCoordinatorChanges()
         fixture.store.bodies[skill.directoryName] = SkillSerializer.serialize(
             name: skill.name, description: skill.skillDescription, body: "Transient"
@@ -140,7 +138,6 @@ extension SyncNudgeTests {
         XCTAssertTrue(fixture.library.hasUnsavedChanges(for: skill))
         XCTAssertGreaterThan(fixture.library.reloadToken, token)
     }
-
     func testCoordinatorTransientBodyMatchingTheDraftKeepsItAndAsksNothing() async throws {
         // The draft happens to equal a body the cycle writes on its way to restoring the original: the draft
         // reads clean for that moment and dirty again after — the text is never dropped, and no question is
@@ -151,7 +148,8 @@ extension SyncNudgeTests {
         fixture.library.unsavedChangesPresenter = { prompt, _ in prompts.append(prompt) }
         _ = fixture.library.editorBody(for: skill)
         fixture.library.startWatching()
-        fixture.library.noteEditorChanged(skill, body: "Transient")
+        fixture.library.noteEditorChanged(skill, body: SkillSerializer.serialize(
+            name: skill.name, description: skill.skillDescription, body: "Transient"))
 
         fixture.library.beginCoordinatorChanges()
         fixture.store.bodies[skill.directoryName] = SkillSerializer.serialize(
@@ -165,10 +163,12 @@ extension SyncNudgeTests {
         await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false)
 
         XCTAssertTrue(fixture.library.hasUnsavedChanges(for: skill))
-        XCTAssertEqual(fixture.library.drafts[skill.directoryName]?.body, "Transient")
+        XCTAssertEqual(fixture.library.drafts[skill.directoryName]?.body, SkillSerializer.serialize(
+            name: skill.name, description: skill.skillDescription, body: "Transient"))
+        XCTAssertTrue(prompts.isEmpty)
+        XCTAssertTrue(fixture.library.saveDraft(skill), "A transient equal sample cannot change the final Save baseline")
         XCTAssertTrue(prompts.isEmpty)
     }
-
     func testCoordinatorFinalBodyUnderADraftAsksOnceAfterTheCycle() async throws {
         // The cycle moves the file for good (a pull with a newer body): the draft survives and the one question
         // comes after the cycle, against the final body, not at the intermediate event.
@@ -178,7 +178,8 @@ extension SyncNudgeTests {
         fixture.library.unsavedChangesPresenter = { prompt, _ in prompts.append(prompt) }
         _ = fixture.library.editorBody(for: skill)
         fixture.library.startWatching()
-        fixture.library.noteEditorChanged(skill, body: "Mine")
+        fixture.library.noteEditorChanged(skill, body: SkillSerializer.serialize(
+            name: skill.name, description: skill.skillDescription, body: "Mine"))
 
         fixture.library.beginCoordinatorChanges()
         fixture.store.bodies[skill.directoryName] = SkillSerializer.serialize(
@@ -192,37 +193,41 @@ extension SyncNudgeTests {
         await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: true)
 
         XCTAssertEqual(prompts.map(\.reason), [.externalChange])
-        XCTAssertEqual(fixture.library.drafts[skill.directoryName]?.body, "Mine")
+        XCTAssertEqual(fixture.library.drafts[skill.directoryName]?.body, SkillSerializer.serialize(
+            name: skill.name, description: skill.skillDescription, body: "Mine"))
         XCTAssertEqual(fixture.library.readBody(skill), "New")
     }
-
     func testCoordinatorFinalBodyMatchingTheDraftAsksNothing() async throws {
         // The cycle passes through a body that differs from the draft and lands on one that equals it: the
         // question is decided against the final body — clean, the draft retained, nothing asked. A question
         // decided before the fingerprints are refreshed to the final body would ask (round 4).
-        let fixture = try libraryFixture()
-        let skill = try insertSkill(slug: "final-matches-draft", store: fixture.store, context: fixture.context)
-        var prompts: [UnsavedChangesPrompt] = []
-        fixture.library.unsavedChangesPresenter = { prompt, _ in prompts.append(prompt) }
-        _ = fixture.library.editorBody(for: skill)
-        fixture.library.startWatching()
-        fixture.library.noteEditorChanged(skill, body: "Mine")
+        for saveBeforeFinalBody in [false, true] {
+            let fixture = try libraryFixture()
+            let skill = try insertSkill(slug: "final-matches-draft", store: fixture.store, context: fixture.context)
+            var prompts: [UnsavedChangesPrompt] = []
+            fixture.library.unsavedChangesPresenter = { prompt, _ in prompts.append(prompt) }
+            _ = fixture.library.editorBody(for: skill)
+            fixture.library.startWatching()
+            fixture.library.noteEditorChanged(skill, body: SkillSerializer.serialize(
+                name: skill.name, description: skill.skillDescription, body: "Mine"))
 
-        fixture.library.beginCoordinatorChanges()
-        fixture.store.bodies[skill.directoryName] = SkillSerializer.serialize(
-            name: skill.name, description: skill.skillDescription, body: "Transient"
-        )
-        fixture.watcher.emit(skill.directoryName)
-        fixture.store.bodies[skill.directoryName] = SkillSerializer.serialize(
-            name: skill.name, description: skill.skillDescription, body: "Mine"
-        )
-        await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false)
+            fixture.library.beginCoordinatorChanges()
+            fixture.store.bodies[skill.directoryName] = SkillSerializer.serialize(
+                name: skill.name, description: skill.skillDescription, body: "Transient"
+            )
+            if saveBeforeFinalBody { XCTAssertFalse(fixture.library.saveDraft(skill)) }
+            fixture.watcher.emit(skill.directoryName)
+            fixture.store.bodies[skill.directoryName] = SkillSerializer.serialize(
+                name: skill.name, description: skill.skillDescription, body: "Mine"
+            )
+            await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false)
 
-        XCTAssertFalse(fixture.library.hasUnsavedChanges(for: skill))
-        XCTAssertEqual(fixture.library.drafts[skill.directoryName]?.body, "Mine")
-        XCTAssertTrue(prompts.isEmpty)
+            XCTAssertFalse(fixture.library.hasUnsavedChanges(for: skill))
+            XCTAssertEqual(fixture.library.drafts[skill.directoryName]?.body, SkillSerializer.serialize(
+                name: skill.name, description: skill.skillDescription, body: "Mine"))
+            XCTAssertTrue(prompts.isEmpty)
+        }
     }
-
     func testACleanPullKeepsTheWarningOnARetainedDraft() async throws {
         // A successful pull (no unsynced changes) settles the "modified externally" mark — except on a file whose
         // dirty draft the user kept with Cancel: the label is the warning that Save overwrites (round 2).
@@ -231,7 +236,8 @@ extension SyncNudgeTests {
         fixture.library.unsavedChangesPresenter = { _, resolve in resolve(.cancel) }
         _ = fixture.library.editorBody(for: skill)
         fixture.library.startWatching()
-        fixture.library.noteEditorChanged(skill, body: "Mine")
+        fixture.library.noteEditorChanged(skill, body: SkillSerializer.serialize(
+            name: skill.name, description: skill.skillDescription, body: "Mine"))
 
         fixture.library.beginCoordinatorChanges()
         fixture.store.bodies[skill.directoryName] = SkillSerializer.serialize(
@@ -241,10 +247,10 @@ extension SyncNudgeTests {
         await fixture.library.finishCoordinatorChanges(hasUnsyncedChanges: false)
 
         XCTAssertTrue(fixture.library.hasUnsavedChanges(for: skill))
-        XCTAssertEqual(fixture.library.drafts[skill.directoryName]?.body, "Mine")
+        XCTAssertEqual(fixture.library.drafts[skill.directoryName]?.body, SkillSerializer.serialize(
+            name: skill.name, description: skill.skillDescription, body: "Mine"))
         XCTAssertTrue(fixture.library.externallyModified.contains(skill.directoryName))
     }
-
     func testARemountOverADivergentBodyNudgesSyncOnce() throws {
         // A body that changed while no editor was mounted is classified by the remount: sync is nudged then,
         // and the watcher's later event — an echo of a body the fingerprint already holds — nudges nothing.
@@ -256,13 +262,12 @@ extension SyncNudgeTests {
             name: skill.name, description: skill.skillDescription, body: "External"
         )
 
-        XCTAssertEqual(fixture.library.editorBody(for: skill), "External")   // the remount
+        XCTAssertEqual(fixture.library.editorBody(for: skill), fixture.store.bodies[skill.directoryName])   // the remount
         XCTAssertEqual(fixture.counter.value, 1)
         XCTAssertTrue(fixture.library.externallyModified.contains(skill.directoryName))
         fixture.watcher.emit(skill.directoryName)
         XCTAssertEqual(fixture.counter.value, 1)
     }
-
     func testARemountDuringACycleAfterACleanSampleTriggersTheRecheck() async throws {
         // The remount's classification counts as an observed change: a cycle that sampled a clean worktree
         // before it rechecks, exactly as it would after a watcher event.
@@ -276,7 +281,7 @@ extension SyncNudgeTests {
         fixture.store.bodies[skill.directoryName] = SkillSerializer.serialize(
             name: skill.name, description: skill.skillDescription, body: "External"
         )
-        XCTAssertEqual(fixture.library.editorBody(for: skill), "External")   // the remount, no event yet
+        XCTAssertEqual(fixture.library.editorBody(for: skill), fixture.store.bodies[skill.directoryName])
         XCTAssertEqual(fixture.counter.value, 0)                              // a cycle nudges at its end
         var recheckCount = 0
         await fixture.library.finishCoordinatorChanges(

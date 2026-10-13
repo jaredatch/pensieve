@@ -15,7 +15,7 @@ final class GitHubCredentialSettingsModelTests: XCTestCase {
         XCTAssertEqual(model.token, "")
         XCTAssertEqual(
             credentials.credential(forHost: CredentialHost.githubInstall),
-            .httpsToken(username: "x-access-token", token: "github_pat_secret")
+            .httpsToken(username: "x-access-token", token: "github_pat_secret", host: "github.com")
         )
 
         model.remove()
@@ -46,7 +46,7 @@ final class GitHubCredentialSettingsModelTests: XCTestCase {
         XCTAssertEqual(model.token, "")
         XCTAssertFalse(model.canSave)
         XCTAssertEqual(credentials.credential(forHost: CredentialHost.githubInstall),
-                       .httpsToken(username: "x-access-token", token: "original-token"))
+                       .httpsToken(username: "x-access-token", token: "original-token", host: "github.com"))
     }
 
     func testCancelReplacementHidesEntryAndClearsTypedText() throws {
@@ -61,7 +61,7 @@ final class GitHubCredentialSettingsModelTests: XCTestCase {
         XCTAssertFalse(model.isReplacingToken)
         XCTAssertEqual(model.token, "")
         XCTAssertEqual(credentials.credential(forHost: CredentialHost.githubInstall),
-                       .httpsToken(username: "x-access-token", token: "original-token"))
+                       .httpsToken(username: "x-access-token", token: "original-token", host: "github.com"))
     }
 
     func testSaveReplacementStoresNewTokenAndHidesEntry() throws {
@@ -77,7 +77,7 @@ final class GitHubCredentialSettingsModelTests: XCTestCase {
         XCTAssertFalse(model.isReplacingToken)
         XCTAssertEqual(model.token, "")
         XCTAssertEqual(credentials.credential(forHost: CredentialHost.githubInstall),
-                       .httpsToken(username: "x-access-token", token: "replacement-token"))
+                       .httpsToken(username: "x-access-token", token: "replacement-token", host: "github.com"))
     }
 
     func testRemoveWhileReplacingShowsEmptyEntry() throws {

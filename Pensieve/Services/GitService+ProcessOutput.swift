@@ -177,25 +177,60 @@ extension GitService {
         -> GitOutput {
         let result = try runData(args, in: workingDir, credential: credential, storeRules: storeRules,
                                  file: file, line: line)
-        return GitOutput(
-            stdout: String(bytes: result.stdout, encoding: .utf8) ?? "",
-            stderr: String(bytes: result.stderr, encoding: .utf8) ?? "",
-            exit: result.exit, confirmingProbe: result.confirmingProbe
-        )
+        return result.textOutput
     }
 
-    func commandError(_ output: GitOutput, args: [String]) -> GitError {
-        GitError.commandFailed(args: args, exitCode: output.exit,
-            stderr: output.stderr.isEmpty ? output.stdout : output.stderr, confirmingProbe: output.confirmingProbe)
+    /// Classify both streams, but display only useful stderr, falling back to stdout.
+    /// Resolve a stored remote's display label only after recognizing an authentication failure.
+    func commandError(_ output: GitOutput, args: [String],
+                      authenticationRemote: @autoclosure () -> String? = nil) -> GitError {
+        let auth = Self.classifyLsRemoteFailure(exitCode: output.exit, combinedOutput: output.stderr) == .auth
+            || Self.classifyLsRemoteFailure(exitCode: output.exit, combinedOutput: output.stdout) == .auth
+        if auth, let remote = authenticationRemote() {
+            return .authenticationFailed(remote: remote, detail: output.failureDetail)
+        }
+        return GitError.commandFailed(args: args, exitCode: output.exit,
+                                      stderr: output.failureDetail, confirmingProbe: output.confirmingProbe)
     }
 
-    func dataCommandError(_ output: GitDataOutput, args: [String]) -> GitError {
-        GitError.commandFailed(
-            args: args,
-            exitCode: output.exit,
-            stderr: String(
-                bytes: output.stderr.isEmpty ? output.stdout : output.stderr,
-                encoding: .utf8
-            ) ?? "", confirmingProbe: output.confirmingProbe)
+    func dataCommandError(_ output: GitDataOutput, args: [String],
+                          authenticationRemote: @autoclosure () -> String? = nil) -> GitError {
+        commandError(output.textOutput, args: args, authenticationRemote: authenticationRemote())
+    }
+
+    /// Parser failures retain their synthetic explanation, including a successful command's exit code.
+    func commandError(args: [String], exitCode: Int32, detail: String,
+                      confirmingProbe: GitUsability? = nil) -> GitError {
+        commandError(GitOutput(stdout: "", stderr: detail, exit: exitCode, confirmingProbe: confirmingProbe), args: args)
+    }
+}
+
+extension GitService.GitDataOutput {
+    var textOutput: GitService.GitOutput {
+        // Successful strings preserve Foundation's BOM removal and invalid-UTF-8 fallback.
+        // Repair bytes only on nonzero exit; binary callers keep their original data.
+        if exit == 0 {
+            return GitService.GitOutput(stdout: String(bytes: stdout, encoding: .utf8) ?? "",
+                                        stderr: String(bytes: stderr, encoding: .utf8) ?? "",
+                                        exit: exit, confirmingProbe: confirmingProbe)
+        }
+        return GitService.GitOutput(stdout: repairedUTF8(stdout), stderr: repairedUTF8(stderr),
+                                    exit: exit, confirmingProbe: confirmingProbe)
+    }
+
+    private func repairedUTF8(_ bytes: Data) -> String {
+        // A failable decode would discard the diagnostic surrounding an invalid byte.
+        // swiftlint:disable:next optional_data_string_conversion
+        return String(decoding: bytes, as: UTF8.self)
+    }
+}
+
+extension GitService.GitOutput {
+    var failureDetail: String {
+        // Whitespace and replacement characters alone provide no diagnostic text.
+        let usefulStderr = stderr.unicodeScalars.contains {
+            $0.value != 0xFFFD && !CharacterSet.whitespacesAndNewlines.contains($0)
+        }
+        return usefulStderr || stdout.isEmpty ? stderr : stdout
     }
 }

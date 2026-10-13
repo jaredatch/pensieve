@@ -55,15 +55,15 @@ final class SkillPreservingWriteTests: XCTestCase {
         let beforeFrontmatter = try XCTUnwrap(SkillParser.parse(original).preservedFrontmatter?.source)
 
         _ = vm.editorBody(for: skill)
-        vm.noteEditorChanged(skill, body: "Edited body")
+        vm.noteEditorChanged(skill, body: original.replacingOccurrences(of: "Old body", with: "Edited body"))
         XCTAssertTrue(vm.saveDraft(skill))
         let first = try fileService.readFile(at: tempDir + "/installed/SKILL.md")
         XCTAssertEqual(SkillParser.parse(first).preservedFrontmatter?.source, beforeFrontmatter)
         XCTAssertEqual(SkillParser.parse(first).body, "Edited body")
         XCTAssertEqual(SkillParser.parse(first).trailingLineBreaks, "\n")
-        XCTAssertTrue(vm.wasLastWrittenByApp(directoryName: "installed", currentBody: "Edited body"))
+        XCTAssertTrue(vm.wasLastWrittenByApp(directoryName: "installed", currentBody: first))
 
-        vm.noteEditorChanged(skill, body: "Edited body\n")
+        vm.noteEditorChanged(skill, body: first)
         XCTAssertTrue(vm.saveDraft(skill))
         XCTAssertEqual(try fileService.readFile(at: tempDir + "/installed/SKILL.md"), first)
     }

@@ -70,16 +70,16 @@ extension UpstreamHistoryServiceTests {
             let request = try XCTUnwrap(git.headRequests.first)
             XCTAssertEqual(request.remote, "https://github.com/example/repository.git")
             XCTAssertEqual(request.ref, "main")
-            XCTAssertEqual(request.credential, .httpsToken(username: "installer", token: "install"))
+            XCTAssertEqual(request.credential, .httpsToken(username: "installer", token: "install", host: "github.com"))
             XCTAssertTrue(git.requests.isEmpty)
         }
     }
 
-    func testProbeGitInvocationUsesReadCredentialIsolationArguments() throws {
+    func testProbeGitInvocationCarriesRemoteAndCredential() throws {
         try NativeTestWork.run { [self] in
             let expectedHead = String(repeating: "c", count: 40)
             let remote = "https://github.com/example/repository.git"
-            let credential = GitCredential.httpsToken(username: "installer", token: "secret")
+            let credential = GitCredential.httpsToken(username: "installer", token: "secret", host: "github.com")
             var capturedArgs: [String] = []
             var capturedCredential: GitCredential?
             let git = GitService(fileService: fileService,
@@ -97,9 +97,8 @@ extension UpstreamHistoryServiceTests {
                 try git.remoteHead(remote: remote, ref: "main", credential: credential),
                 expectedHead
             )
-            XCTAssertEqual(Array(capturedArgs.prefix(2)), GitService.installCredentialIsolationArgs)
-            XCTAssertEqual(capturedArgs[2...3], ["ls-remote", "--"])
-            XCTAssertEqual(capturedArgs[4], remote)
+            XCTAssertEqual(capturedArgs[0...1], ["ls-remote", "--"])
+            XCTAssertEqual(capturedArgs[2], remote)
             XCTAssertEqual(capturedCredential, credential)
         }
     }

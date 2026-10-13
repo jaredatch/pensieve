@@ -81,7 +81,7 @@ struct PensieveApp: App {
             updatesModel: runtime.updates,
             machineDependencies: runtime.machineObservability,
             importModel: runtime.paths.makeImportViewModel(notifier: runtime.syncStateNotifier,
-                echoRegistrar: runtime.syncWriteEchoRegistrar)
+                echoRegistrar: runtime.syncWriteEchoRegistrar, bodyWriteRegistration: runtime.syncBodyWriteRegistration)
         )
     }
 
