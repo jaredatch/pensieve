@@ -58,6 +58,7 @@ final class SocketEndpointTests: XCTestCase {
     func testConcurrentCopiesElectOneListener() {
         do {
             let directory = try SocketTestDirectory()
+            try assertStartingOwnerSurvivesContender(in: directory)
             let path = directory.path + "/s"
             let results = ListenerRaceResults()
             DispatchQueue.concurrentPerform(iterations: 2) { _ in
@@ -70,6 +71,35 @@ final class SocketEndpointTests: XCTestCase {
             XCTAssertTrue(try directory.files.entryExistsWithoutFollowingLinks(at: path))
             withExtendedLifetime(results) {}
         } catch { XCTFail(error.localizedDescription) }
+    }
+
+    private func assertStartingOwnerSurvivesContender(in directory: SocketTestDirectory) throws {
+        let path = directory.path + "/starting"
+        // Model the first copy between bind and listen, holding the real on-disk election lock.
+        // Only the OS owner state is supplied; the contender uses production admission and cleanup.
+        let lock = try FileService.openRegularFile(at: path + ".lock", creatingWithPermissions: 0o600).descriptor
+        defer { close(lock) }
+        XCTAssertEqual(flock(lock, LOCK_EX | LOCK_NB), 0)
+        let owner = try rawSocket(at: path, listening: false)
+        defer { close(owner) }
+        let identity = try XCTUnwrap(directory.files.fileIdentity(at: path, followingLinks: false))
+        XCTAssertThrowsError(try SocketTransport.connect(to: path)) {
+            guard case SocketError.system(_, ECONNREFUSED) = $0 else {
+                return XCTFail("The bound owner must not be listening yet: \($0)")
+            }
+        }
+
+        let contender = try? FileService().makeSocketListener(at: path)
+        XCTAssertNil(contender, "A starting copy already owns this endpoint")
+        XCTAssertEqual(directory.files.fileIdentity(at: path, followingLinks: false), identity,
+                       "The contender must not unlink the starting copy's socket")
+        XCTAssertEqual(listen(owner, 4), 0)
+        let client = try SocketTransport.connect(to: path)
+        defer { close(client) }
+        let accepted = accept(owner, nil, nil)
+        XCTAssertGreaterThanOrEqual(accepted, 0, "The original socket must remain reachable after it starts listening")
+        if accepted >= 0 { close(accepted) }
+        withExtendedLifetime(contender) {}
     }
 
     func testShutdownPreservesReplacementAtItsPath() throws {
