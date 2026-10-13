@@ -74,7 +74,10 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
             return result
         }
 
-        return rebuild(snapshot: snapshot, fromRoot: root, context: context)
+        let authoritative = manifestHasContent(root: root)
+        result = rebuild(snapshot: snapshot, fromRoot: root, context: context, manifestIsAuthoritative: authoritative)
+        if authoritative, !result.saveFailed { CategorySaveWindow.didRebuild(context) }
+        return result
     }
 
     /// A lock-owning GUI writer already read and updated the manifest. Reuse its plain result,
@@ -93,7 +96,6 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
         warnOverlaysWithoutFiles(snapshot: snapshot, filePresentSlugs: filePresentSlugs, result: &result)
         if manifestIsAuthoritative {
             rebuildCategories(snapshot: snapshot, context: context, result: &result)
-            CategorySaveWindow.didRebuild(context)
         }
         rebuildDeployIntents(snapshot: snapshot, context: context, result: &result)
 

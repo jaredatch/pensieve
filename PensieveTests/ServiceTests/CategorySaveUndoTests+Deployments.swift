@@ -36,7 +36,7 @@ extension CategorySaveUndoTests {
             }
         }
         try await checkRefusalAfterPulledDeletion(fields: ["skill", "project"])
-        try await checkRefusalAfterSyncRestoredWindow(["skill-schema", "project-schema"])
+        try await checkRefusalAcrossSync(["skill-schema", "project-schema"])
     }
 
     func testUndoRetainsCleanupWhileProjectIsMissingAndRemovesWhenItReturns() async throws {

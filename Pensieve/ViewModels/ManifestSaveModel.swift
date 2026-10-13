@@ -273,7 +273,7 @@ extension ManifestSaveModel {
                 let restored = try edit.restore(in: item.presentation.context)
                 try item.presentation.context.save()
                 categoryMessages.append(CategorySaveNotice.entry(edit: edit, error: error,
-                    outcome: restored ? .undone : .removed))
+                    outcome: CategorySaveNotice.Outcome(restoration: restored)))
             } catch {
                 categoryMessages.append(CategorySaveNotice.Entry(
                     text: "Couldn't restore “\(edit.name)”: " + error.localizedDescription, wasKept: false))

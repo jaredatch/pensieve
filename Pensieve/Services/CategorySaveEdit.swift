@@ -60,21 +60,22 @@ struct CategorySaveEdit {
         }
     }
 
-    /// An authoritative rebuild already replaced this edit with saved state. Its rows can reuse
-    /// our UUID by name, so identity alone cannot authorize an inverse. False means the category
-    /// is absent from the window; without a rebuild, only our own delete can insert a missing row.
-    func restore(in context: ModelContext) throws -> Bool {
+    enum Restoration { case undone, restored, removed }
+
+    /// A saved rebuild in any context of our container supersedes this inverse. Its rows can
+    /// reuse our UUID by name. Without a rebuild, only our own delete can insert a missing row.
+    func restore(in context: ModelContext) throws -> Restoration {
         let categories = try context.fetch(FetchDescriptor<Category>())
-        if wasRebuilt { return categories.contains { $0.name == name } }
+        if wasRebuilt { return categories.contains { $0.name == name } ? .restored : .removed }
         let existing = categories.first { $0.id == id }
         guard let before else {
-            guard let existing else { return false }
+            guard let existing else { return .removed }
             context.delete(existing)
-            return true
+            return .undone
         }
         let row: Category
         if let existing { row = existing } else {
-            guard case .deleteCategory = change else { return false }
+            guard case .deleteCategory = change else { return .removed }
             row = Category(name: before.name)
             row.id = id
             row.createdAt = createdAt
@@ -83,7 +84,7 @@ struct CategorySaveEdit {
             context.insert(row)
         }
         restoreFields(row, from: before)
-        return true
+        return .undone
     }
 
     private func restoreFields(_ row: Category, from before: CategoryRecord) {
@@ -100,20 +101,28 @@ struct CategorySaveEdit {
     }
 }
 
-/// A pending inverse belongs to the window that still shows its edit. Direct authoritative
-/// rebuilds invalidate it; the save queue's acceptance of pending overlays does not. Observations
-/// live only as long as their queued edits, and each context is used on its own serial executor.
+/// Each pending edit observes saved authoritative rebuilds across its shared container. The
+/// rebuild may run off the main actor, so its observation is protected independently of SwiftData.
+/// The queue's unsaved preview and acceptance of pending overlays send no rebuild notification.
 final class CategorySaveWindow {
     private static let rebuilt = Notification.Name("Pensieve.categoryWindowRebuilt")
+    private let lock = NSLock()
     private var observer: NSObjectProtocol?
-    private(set) var wasRebuilt = false
+    private var rebuilt = false
+    var wasRebuilt: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return rebuilt
+    }
 
     init(context: ModelContext) {
+        let containerID = ObjectIdentifier(context.container)
         observer = NotificationCenter.default.addObserver(
             forName: Self.rebuilt, object: nil, queue: nil
-        ) { [weak self, weak context] notification in
-            guard let context, let rebuilt = notification.object as? ModelContext, rebuilt === context else { return }
-            self?.wasRebuilt = true
+        ) { [weak self] notification in
+            guard let container = notification.object as? ModelContainer,
+                  ObjectIdentifier(container) == containerID else { return }
+            self?.recordRebuild()
         }
     }
 
@@ -121,7 +130,13 @@ final class CategorySaveWindow {
         if let observer { NotificationCenter.default.removeObserver(observer) }
     }
 
+    private func recordRebuild() {
+        lock.lock()
+        defer { lock.unlock() }
+        rebuilt = true
+    }
+
     static func didRebuild(_ context: ModelContext) {
-        NotificationCenter.default.post(name: rebuilt, object: context)
+        NotificationCenter.default.post(name: rebuilt, object: context.container)
     }
 }
