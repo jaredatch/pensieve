@@ -5,6 +5,10 @@ private struct SnapshotFileService: FileServiceProtocol {
     let document: String
 
     func readFile(at path: String) throws -> String { document }
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        guard isRegularFile(at: path), document.utf8.count <= maximumBytes else { throw CocoaError(.fileReadUnknown) }
+        return Data(document.utf8)
+    }
     func writeFile(at path: String, content: String) throws {}
     func deleteFile(at path: String) throws {}
     func fileExists(at path: String) -> Bool { false }
@@ -28,6 +32,10 @@ private struct InventoryFileService: FileServiceProtocol {
 
     private func isEntry(_ path: String) -> Bool { entries.contains { path.hasSuffix("/" + $0) } }
     func readFile(at path: String) throws -> String { document }
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        guard isRegularFile(at: path), document.utf8.count <= maximumBytes else { throw CocoaError(.fileReadUnknown) }
+        return Data(document.utf8)
+    }
     func readData(at path: String) throws -> Data {
         guard isEntry(path), let data = document.data(using: .utf8) else { throw CocoaError(.fileReadNoSuchFile) }
         return data

@@ -59,7 +59,7 @@ extension AppRuntime {
     func installRuntimeCallbacks() {
         library.onSkillDocumentObserved = { [weak self] directoryName, document in
             guard let self else { return }
-            self.library.refreshSkillIdentity(directoryName: directoryName, document: document,
+            try self.library.refreshSkillIdentity(directoryName: directoryName, document: document,
                                               context: self.container.mainContext)
         }
         scheduler.installGitRecheck(isUnknown: { [weak self] in

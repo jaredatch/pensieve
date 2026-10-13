@@ -365,8 +365,8 @@ extension StoreRebuildService {
 
 extension StoreRebuildService {
     @discardableResult
-    static func refreshIdentity(of skill: Skill, document: String) -> Bool {
-        let parsed = SkillParser.parse(document)
+    static func refreshIdentity(of skill: Skill, document: String, retainingBOM: Bool = false) -> Bool {
+        let parsed = SkillParser.parse(document, retainingBOM: retainingBOM)
         guard parsed.hasRequiredFrontmatter, let name = parsed.name, let description = parsed.description else { return false }
         let changed = refreshIdentity(of: skill, name: name, description: description)
         skill.fileIdentityObservedAt = DispatchTime.now().uptimeNanoseconds

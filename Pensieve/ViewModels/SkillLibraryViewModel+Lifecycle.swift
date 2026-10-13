@@ -31,7 +31,6 @@ extension SkillLibraryViewModel {
         coordinatorCompletionGeneration &+= 1
         isApplyingCoordinatorChanges = true
         coordinatorObservedSlugs.removeAll()
-        coordinatorDeferredSaveSlugs.removeAll()
         coordinatorChangeSequences.removeAll()
         coordinatorBaselineBodies = Dictionary(uniqueKeysWithValues:
             ((try? skillStore.listSkills()) ?? []).map { ($0, currentOnDiskBody(directoryName: $0)) })
@@ -83,9 +82,9 @@ extension SkillLibraryViewModel {
         }
         coordinatorBaselineBodies.removeAll()
         coordinatorObservedSlugs.removeAll()
-        coordinatorDeferredSaveSlugs.removeAll()
         coordinatorChangeSequences.removeAll()
         isApplyingCoordinatorChanges = false
+        drainExternalQuestions()
         if needsLaterSync || (effectiveHasUnsyncedChanges && !acceptedSlugs.isEmpty) { notifier() }
     }
 
@@ -104,13 +103,11 @@ extension SkillLibraryViewModel {
         return foundChange
     }
 
-    /// Ask against the final body when the cycle moved the file or deferred a refused Save's question.
-    /// Without an attempted Save, a transient change that returned to the baseline asks nothing.
+    /// Queue final changes. Explicit Save intent survives independently until it is answered or saved.
     private func askAboutCoordinatorChanges(_ slugs: Set<String>) {
         for directoryName in slugs.sorted()
         where hasUnsavedChanges(forDirectory: directoryName)
-            && (coordinatorDeferredSaveSlugs.contains(directoryName)
-                || !Self.bodiesMatch(currentOnDiskBody(directoryName: directoryName), coordinatorBaselineBodies[directoryName])) {
+            && !Self.bodiesMatch(currentOnDiskBody(directoryName: directoryName), coordinatorBaselineBodies[directoryName]) {
             requestUnsavedChangesPrompt(directoryName: directoryName, reason: .externalChange)
         }
     }

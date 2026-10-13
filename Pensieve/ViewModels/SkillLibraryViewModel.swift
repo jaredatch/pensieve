@@ -38,7 +38,7 @@ final class SkillLibraryViewModel {
     let skillStore: SkillStoreProtocol
     let fileService: FileServiceProtocol
     /// The runtime resolves current window rows when a document is observed, including newly added slugs.
-    @ObservationIgnored var onSkillDocumentObserved: ((String, String) -> Void)?
+    @ObservationIgnored var onSkillDocumentObserved: ((String, String) throws -> Void)?
     /// The self-write fingerprint by slug: the complete document the app last wrote or loaded.
     /// NOT observed: the install and update finalizers mutate it off the main thread
     /// under `fingerprintLock`, and an observed mutation there would take SwiftUI's update lock while holding ours,
@@ -63,7 +63,6 @@ final class SkillLibraryViewModel {
     var isApplyingCoordinatorChanges = false
     var coordinatorBaselineBodies: [String: String] = [:]
     var coordinatorObservedSlugs: Set<String> = []
-    var coordinatorDeferredSaveSlugs: Set<String> = []
     var coordinatorChangeSequences: [String: UInt64] = [:]
     var acceptedChangeSequence: UInt64 = 0
     var watcherEventSequence: UInt64 = 0
@@ -82,6 +81,8 @@ final class SkillLibraryViewModel {
     var textEditRevisions: [String: UInt64] = [:]
     /// The one unsaved-changes question open, if any, and what a leaving question does with the answer.
     var pendingUnsavedChanges: UnsavedChangesPrompt?
+    @ObservationIgnored var externalChangeQuestions: [String: ExternalChangeQuestion] = [:]
+    @ObservationIgnored var isDrainingExternalQuestions = false
     @ObservationIgnored var pendingLeaveContinuation: ((Bool) -> Void)?
     /// Shows the stock sheet and reports the answer. The app wires `UnsavedChangesAlert.present`
     /// (`PensieveApp.init`); the default answers Cancel, so a headless library never writes or discards on
@@ -332,16 +333,18 @@ extension SkillLibraryViewModel {
     }
 
     /// Resolve the live row for each event; editor history and other contexts cannot redirect the refresh.
-    func refreshSkillIdentity(directoryName: String, document: String, context: ModelContext) {
-        do {
-            var descriptor = FetchDescriptor<Skill>(predicate: #Predicate { $0.directoryName == directoryName })
-            descriptor.fetchLimit = 1
-            if let skill = try context.fetch(descriptor).first, !skill.isDeleted {
-                StoreRebuildService.refreshIdentity(of: skill, document: document)
-            }
-        } catch {
-            self.error = "Couldn't refresh skill: \(error.localizedDescription)"
+    func refreshSkillIdentity(directoryName: String, document: String, context: ModelContext) throws {
+        let descriptor = FetchDescriptor<Skill>(predicate: #Predicate { $0.directoryName == directoryName })
+        if let skill = try context.fetch(descriptor).first(where: { !$0.isDeleted }) {
+            StoreRebuildService.refreshIdentity(of: skill, document: document, retainingBOM: true)
         }
+    }
+
+    /// A disk observation discovered by an editor load or Save has the watcher's sequence and nudge policy.
+    func observeExternalDocument(directoryName: String, document: String) {
+        guard !wasLastWrittenByApp(directoryName: directoryName, currentBody: document) else { return }
+        watcherEventSequence &+= 1
+        acceptExternalChange(directoryName: directoryName, currentBody: document, shouldNotify: !isApplyingCoordinatorChanges)
     }
 
     func acceptExternalChange(directoryName: String, currentBody: String, shouldNotify: Bool) {
@@ -357,9 +360,10 @@ extension SkillLibraryViewModel {
         // to save and nothing is dropped; during a sync cycle the question waits for the cycle's final body
         // (`finishCoordinatorChanges`) — a transient body must not cost the draft or ask about itself.
         if let observe = onSkillDocumentObserved {
-            observe(directoryName, currentBody)
+            // Passive identity refresh must not replace an actionable error from a user operation.
+            try? observe(directoryName, currentBody)
         } else if let draft = drafts[directoryName] {
-            StoreRebuildService.refreshIdentity(of: draft.skill, document: currentBody)
+            StoreRebuildService.refreshIdentity(of: draft.skill, document: currentBody, retainingBOM: true)
         }
         setLastWrittenBody(currentBody, directoryName: directoryName)
         externallyModified.insert(directoryName)

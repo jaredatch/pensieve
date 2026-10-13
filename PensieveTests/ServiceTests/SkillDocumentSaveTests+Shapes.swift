@@ -95,6 +95,24 @@ extension SkillDocumentSaveTests {
             }
         }
         XCTAssertEqual(count, 240)
+        try checkHeaderlessBoundaryEdits(fixture)
+    }
+
+    private func checkHeaderlessBoundaryEdits(_ fixture: DocumentSaveFixture) throws {
+        for source in ["Body", "\nBody\n"] {
+            for draft in ["\n\nBody\n\n", "Body"] where draft != source {
+                fixture.library.discardDraft(fixture.skill)
+                try fixture.write(source)
+                _ = fixture.library.editorBody(for: fixture.skill)
+                fixture.library.noteEditorChanged(fixture.skill, body: draft)
+                let token = fixture.library.reloadToken
+                XCTAssertTrue(fixture.library.saveDraft(fixture.skill))
+                let saved = try fixture.read()
+                XCTAssertTrue(saved.hasPrefix("---\nname: Test\n"), "A boundary edit still takes the legacy fallback write")
+                XCTAssertEqual(fixture.library.editorBody(for: fixture.skill), saved)
+                XCTAssertGreaterThan(fixture.library.reloadToken, token, "The mounted editor reloads canonical fallback text")
+            }
+        }
     }
 
     func testBodyAppendToUnreadableHeaderAtEOFAndUnicodeSpellingRemainEdits() throws {

@@ -254,11 +254,8 @@ final class FileService: FileServiceProtocol {
     }
 
     func readFile(at path: String) throws -> String {
-        let data = try Data(contentsOf: URL(fileURLWithPath: path))
-        guard let text = String(validating: data, as: UTF8.self) else {
-            throw CocoaError(.fileReadInapplicableStringEncoding)
-        }
-        return text
+        let url = URL(fileURLWithPath: path)
+        return try String(contentsOf: url, encoding: .utf8)
     }
 
     func writeFile(at path: String, content: String) throws {

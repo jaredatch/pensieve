@@ -10,11 +10,6 @@ extension SkillDocumentSaveTests {
         try fixture.write(source)
         let container = fixture.container
         let context = container.mainContext
-        let paths = AppRuntimePaths(storeRoot: fixture.root, appSupportDir: fixture.root + "/app-support")
-        let runtime = try AppRuntime(container: container, library: fixture.library,
-            scheduler: SyncScheduler(startAutomatically: false), paths: paths, gitUsabilityProbe: { .usable })
-        defer { withExtendedLifetime(runtime) {} }
-        XCTAssertNil(runtime.syncModel.remoteURL)
         let live = try checkUnopenedAndReplacementRows(fixture, source: source, context: context)
         _ = fixture.library.editorBody(for: live)
         let outside = source.replacingOccurrences(of: "Before", with: "Outside")
@@ -36,9 +31,10 @@ extension SkillDocumentSaveTests {
         fixture.library.resolveUnsavedChanges(.cancel)
         XCTAssertEqual(try fixture.read(), second)
         XCTAssertEqual(fixture.library.drafts["test"]?.body, draft)
+        try fixture.write(second + " further")
         XCTAssertFalse(fixture.library.saveDraft(live))
         fixture.library.resolveUnsavedChanges(.discard)
-        XCTAssertEqual(fixture.library.editorBody(for: live), second)
+        XCTAssertEqual(fixture.library.editorBody(for: live), second + " further")
         XCTAssertFalse(fixture.library.hasUnsavedChanges)
     }
 
@@ -52,24 +48,26 @@ extension SkillDocumentSaveTests {
         fixture.watcher.emit("test")
         XCTAssertEqual(fixture.skill.skillDescription, "Added after launch", "An unopened new row follows the watcher")
         _ = fixture.library.editorBody(for: fixture.skill)
-        XCTAssertEqual(fixture.library.deleteSkillEntry(fixture.skill, context: context), .deleted)
         try fixture.write(source)
         let live = Skill(name: "Test", skillDescription: "Before", directoryName: "test")
         context.insert(live)
         try context.save()
+        context.delete(fixture.skill) // Both rows were persisted before the old row became a pending deletion.
         let replacementOutside = source.replacingOccurrences(of: "Before", with: "Replacement outside")
         try fixture.write(replacementOutside)
         fixture.watcher.emit("test")
         XCTAssertEqual(live.skillDescription, "Replacement outside", "Refresh the replacement that the window displays")
         XCTAssertEqual(fixture.skill.skillDescription, "Added after launch", "The held deleted row is retired")
-        // A different context must not redirect the refresh away from the window's row.
-        let otherContext = ModelContext(fixture.container)
-        let otherRows = try otherContext.fetch(FetchDescriptor<Skill>())
-        fixture.library.refreshQuarantine(context: otherContext)
+        try context.save()
+        fixture.library.error = "An earlier refused Save"
+        fixture.library.onSkillDocumentObserved = { _, _ in throw CocoaError(.fileReadUnknown) }
         try fixture.write(source)
         fixture.watcher.emit("test")
-        XCTAssertEqual(live.skillDescription, "Before")
-        withExtendedLifetime(otherRows) {}
+        XCTAssertEqual(fixture.library.error, "An earlier refused Save",
+                       "Passive refresh failures do not replace actionable errors")
+        fixture.library.onSkillDocumentObserved = { [weak library = fixture.library] slug, document in
+            try library?.refreshSkillIdentity(directoryName: slug, document: document, context: context)
+        }
         return live
     }
 
@@ -133,6 +131,7 @@ extension SkillDocumentSaveTests {
             _ = library.editorBody(for: skill)
             library.noteEditorChanged(skill, body: draft)
             let timestamp = skill.updatedAt
+            library.error = restore ? "Another skill could not save" : nil
             files.failingWrites.insert(path)
             if restore {
                 XCTAssertThrowsError(try restoreSkillHistoryVersion(skill: skill, body: draft, store: store,
@@ -144,7 +143,7 @@ extension SkillDocumentSaveTests {
             XCTAssertEqual(skill.skillDescription, "Before")
             XCTAssertEqual(skill.updatedAt, timestamp)
             XCTAssertTrue(library.wasLastWrittenByApp(directoryName: "test", currentBody: source))
-            XCTAssertNotNil(library.error)
+            if restore { XCTAssertEqual(library.error, "Another skill could not save") } else { XCTAssertNotNil(library.error) }
             files.failingWrites.remove(path)
             if restore {
                 try restoreSkillHistoryVersion(skill: skill, body: draft, store: store, library: library, notifier: {})
@@ -152,6 +151,7 @@ extension SkillDocumentSaveTests {
             XCTAssertEqual(files.files[path], draft)
             XCTAssertEqual(skill.skillDescription, "After")
             XCTAssertFalse(library.hasUnsavedChanges)
+            if restore { XCTAssertEqual(library.error, "Another skill could not save") }
             XCTAssertTrue(library.wasLastWrittenByApp(directoryName: "test", currentBody: draft))
         }
     }

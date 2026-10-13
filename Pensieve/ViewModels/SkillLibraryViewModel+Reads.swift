@@ -2,19 +2,24 @@ import Foundation
 
 extension SkillLibraryViewModel {
     func readSkillDocument(_ skill: Skill) -> String? {
-        try? skillStore.readBody(directoryName: skill.directoryName)
+        readDocument(directoryName: skill.directoryName)
     }
 
     func readBody(_ skill: Skill) -> String {
-        guard let raw = readSkillDocument(skill) else { return "" }
+        guard let raw = try? skillStore.readBody(directoryName: skill.directoryName) else { return "" }
         return SkillParser.stripFrontmatter(raw)
     }
 
     /// Reads the complete on-disk document the same way the editor sees it, so the
     /// comparison against the `lastWrittenBody` fingerprint is apples-to-apples.
     func currentOnDiskBody(directoryName: String) -> String {
-        guard let raw = try? skillStore.readBody(directoryName: directoryName) else { return "" }
-        return raw
+        readDocument(directoryName: directoryName) ?? ""
+    }
+
+    /// Complete editor reads retain the optional BOM; ordinary store readers keep Foundation's decoding policy.
+    private func readDocument(directoryName: String) -> String? {
+        guard let bytes = try? skillStore.readData(directoryName: directoryName) else { return nil }
+        return String(validating: bytes, as: UTF8.self)
     }
 
     func estimatedTokens(_ skill: Skill) -> Int {

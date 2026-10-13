@@ -175,14 +175,8 @@ func restoreSkillHistoryVersion(
     if let library, library.isWriteFenced(skill) {
         throw SkillHistoryRestoreError.skillFilesUnavailable
     }
-    do {
-        try store.writeBody(directoryName: skill.directoryName, body: body)
-    } catch {
-        library?.error = "Couldn't restore this version: \(error.localizedDescription)"
-        throw error
-    }
-    StoreRebuildService.refreshIdentity(of: skill, document: body)
-    library?.error = nil
+    try store.writeBody(directoryName: skill.directoryName, body: body)
+    StoreRebuildService.refreshIdentity(of: skill, document: body, retainingBOM: true)
     // A draft for this skill is stale once the version is written back — and only then: a refused write keeps it
     // (the sheet was answered at the button, 33.2; batch Layer-2).
     library?.discardDraft(skill)

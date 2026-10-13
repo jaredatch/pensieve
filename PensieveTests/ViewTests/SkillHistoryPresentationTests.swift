@@ -95,6 +95,7 @@ private final class RecordingHistorySkillStore: SkillStoreProtocol {
         SkillStore.slugify(name)
     }
 
+    func readData(directoryName: String) throws -> Data { Data(try readBody(directoryName: directoryName).utf8) }
     func readBody(directoryName: String) throws -> String { writtenBodies[directoryName] ?? "" }
 
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,

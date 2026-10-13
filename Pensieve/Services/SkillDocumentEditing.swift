@@ -14,8 +14,8 @@ enum SkillDocumentEditing {
                 return "Couldn't save. The frontmatter at the top of the file can't be read."
             case .missingIdentity(let keys):
                 return "Couldn't save. The frontmatter needs a " + keys.joined(separator: " and a ") + "."
-            case .renamed(let slug):
-                return "Couldn't save. A skill's name has to match its folder, \(slug), so it can't change here."
+            case .renamed(let currentName):
+                return "Couldn't save. A skill can't be renamed here yet, so change the name back to \"\(currentName)\"."
             }
         }
     }
@@ -34,11 +34,11 @@ enum SkillDocumentEditing {
 
     static func rewrite(draft: String, original: String, name: String,
                         description: String, slug: String) throws -> SkillRewriteResult {
-        let before = SkillParser.parse(original)
+        let before = SkillParser.parse(original, retainingBOM: true)
         let hasBOM = original.unicodeScalars.first == "\u{feff}"
         let text = hasBOM && draft.unicodeScalars.first != "\u{feff}" ? "\u{feff}" + draft : draft
         if matches(text, original) { return SkillRewriteResult(content: original, didChange: false) }
-        let after = SkillParser.parse(text)
+        let after = SkillParser.parse(text, retainingBOM: true)
         let output: String
         if let previous = before.preservedFile, let next = after.preservedFile,
            matches(previous.header, next.header) {
@@ -46,10 +46,11 @@ enum SkillDocumentEditing {
             output = previous.header + normalized(next.rawBody, ending: before.preferredLineEnding)
         } else if before.preservedFile == nil && after.preservedFile == nil {
             // No recognized frontmatter on either side: retain the legacy canonical fallback.
-            let body = hasBOM ? String(text.dropFirst()) : text
-            let result = SkillSerializer.rewrite(body: body, preserving: SkillParser.parse(
-                hasBOM ? String(original.dropFirst()) : original), fallbackName: name, fallbackDescription: description)
-            output = (hasBOM ? "\u{feff}" : "") + result.content
+            let body = hasBOM ? String(text.unicodeScalars.dropFirst()) : text
+            let fallback = SkillSerializer.serialize(name: name, description: description,
+                body: SkillParser.canonicalBody(body))
+            output = (hasBOM ? "\u{feff}" : "") + normalized(fallback, ending: before.preferredLineEnding)
+                + before.trailingLineBreaks
         } else {
             try validateFrontmatter(after, currentName: before.name ?? name, slug: slug)
             output = normalized(text, ending: before.preferredLineEnding)
@@ -68,6 +69,6 @@ enum SkillDocumentEditing {
         }
         let missing = ["name", "description"].filter { (mapping[$0] as? String)?.isEmpty != false }
         guard missing.isEmpty else { throw Refusal.missingIdentity(missing) }
-        guard mapping["name"] as? String == currentName else { throw Refusal.renamed(slug) }
+        guard mapping["name"] as? String == currentName else { throw Refusal.renamed(currentName) }
     }
 }

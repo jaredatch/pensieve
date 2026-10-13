@@ -81,10 +81,13 @@ enum SkillParser {
     /// Agent-Skills standard's two fields). Tolerant: returns whatever keys are present;
     /// absent/extra keys are ignored. Falls back to treating the entire content as body when
     /// there is no parseable YAML mapping carrying a `name`.
-    static func parse(_ content: String) -> ParsedSkill {
+    static func parse(_ content: String) -> ParsedSkill { parse(content, retainingBOM: false) }
+
+    /// Raw editor documents retain the BOM that ordinary text decoding already consumed.
+    static func parse(_ content: String, retainingBOM: Bool) -> ParsedSkill {
         let trailingLineBreaks = trailingLineBreaks(in: content)
         let preferredLineEnding = preferredLineEnding(in: content)
-        if let extracted = extractFrontmatter(content) {
+        if let extracted = extractFrontmatter(content, retainingBOM: retainingBOM) {
             if let parsed = parseYAMLFrontmatter(
                 extracted.frontmatter,
                 body: extracted.body,
@@ -151,9 +154,10 @@ enum SkillParser {
 
     /// Strip YAML frontmatter (if present) and return only the markdown body.
     /// Used by Rendered and token estimates; the editor reads the complete document.
-    static func stripFrontmatter(_ content: String) -> String {
-        guard let extracted = extractFrontmatter(content) else {
-            let text = content.unicodeScalars.first == "\u{feff}" ? String(content.dropFirst()) : content
+    static func stripFrontmatter(_ content: String, retainingBOM: Bool = false) -> String {
+        guard let extracted = extractFrontmatter(content, retainingBOM: retainingBOM) else {
+            let text = retainingBOM && content.unicodeScalars.first == "\u{feff}"
+                ? String(content.unicodeScalars.dropFirst()) : content
             return canonicalBody(text)
         }
         return extracted.body
@@ -182,11 +186,12 @@ enum SkillParser {
     // MARK: - Private
 
     /// Frontmatter opens on the first LF/CRLF line and closes at the next column-zero fence.
-    private static func extractFrontmatter(_ content: String) -> ExtractedFrontmatter? {
+    private static func extractFrontmatter(_ content: String, retainingBOM: Bool = false) -> ExtractedFrontmatter? {
         let lines = sourceLines(in: content, yamlBreaks: false)
         guard let first = lines.first else { return nil }
         let opening = content[first.contentRange]
-        let fence = opening.unicodeScalars.first == "\u{feff}" ? opening.dropFirst() : opening
+        let fence = retainingBOM && opening.unicodeScalars.first == "\u{feff}"
+            ? opening[opening.unicodeScalars.index(after: opening.startIndex)...] : opening
         guard isFrontmatterFence(fence), let closeIndex = lines.indices.dropFirst().first(where: {
                   isFrontmatterFence(content[lines[$0].contentRange])
               }) else { return nil }

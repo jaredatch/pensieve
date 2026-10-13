@@ -17,17 +17,13 @@ extension SkillLibraryViewModel {
             let result = try SkillDocumentEditing.rewrite(draft: document, original: original,
                 name: skill.name, description: description, slug: skill.directoryName)
             if result.didChange {
-                // Header-less legacy documents retain the existing store's canonical rewrite operation.
-                if SkillParser.parse(original).preservedFile == nil && SkillParser.parse(document).preservedFile == nil
-                    && original.unicodeScalars.first != "\u{feff}" {
-                    return updateBody(skill, body: document)
-                }
                 try skillStore.writeBody(directoryName: skill.directoryName, body: result.content)
             }
-            StoreRebuildService.refreshIdentity(of: skill, document: result.content)
+            StoreRebuildService.refreshIdentity(of: skill, document: result.content, retainingBOM: true)
             if result.didChange {
                 skill.updatedAt = Date()
                 noteAppAuthoredBody(skill, body: result.content)
+                if !Self.bodiesMatch(document, result.content) { noteEditorBodyInvalidated() }
             } else { setLastWrittenBody(result.content, directoryName: skill.directoryName) }
             error = nil
             return result.didChange ? .written : .unchanged

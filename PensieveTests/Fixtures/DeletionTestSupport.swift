@@ -126,6 +126,11 @@ final class MemoryDeployFileService: FileServiceProtocol {
         files[path] == nil ? nil : .regular
     }
     func readData(at path: String) throws -> Data { Data(try readFile(at: path).utf8) }
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        let data = try readData(at: path)
+        guard data.count <= maximumBytes else { throw DeletionTestError() }
+        return data
+    }
     func fileExists(at path: String) -> Bool { files[path] != nil }
     func isExecutableFile(at path: String) -> Bool { false }
     func directoryExists(at path: String) -> Bool { false }
@@ -173,6 +178,7 @@ final class RecordingDeletionSkillStore: SkillStoreProtocol {
         return slug
     }
 
+    func readData(directoryName: String) throws -> Data { Data(try readBody(directoryName: directoryName).utf8) }
     func readBody(directoryName: String) throws -> String {
         if !readAnswers.isEmpty, !readAnswers.removeFirst() { throw DeletionTestError() }
         if unsafeLeaves.contains(directoryName) { throw SkillStoreError.unsafeLeaf(directoryName) }

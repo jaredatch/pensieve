@@ -214,12 +214,18 @@ final class SkillParserTests: XCTestCase {
         XCTAssertTrue(crlfFrontmatter.entriesAreTrustworthy)
     }
 
-    func testNonFrontmatterShapesPreserveExistingFallbackBehavior() {
+    func testNonFrontmatterShapesPreserveExistingFallbackBehavior() throws {
         let bodyOnly = "# Just Markdown\n\nNo frontmatter here.\n"
         let unclosed = "---\nname: Unclosed\ndescription: Still body\n# Body\n"
 
-        for content in [bodyOnly, unclosed] {
-            let parsed = SkillParser.parse(content)
+        let files = FileService()
+        let path = TestTemporaryDirectory.path + "DoubleBOM-" + UUID().uuidString
+        defer { try? files.deleteFile(at: path) }
+        try files.writeFile(at: path, content: "\u{feff}\u{feff}---\nname: Test\ndescription: Test\n---\nBody\n")
+        let raw = try XCTUnwrap(String(validating: files.readData(at: path), as: UTF8.self))
+        let cases = [(bodyOnly, false), (unclosed, false), (try files.readFile(at: path), false), (raw, true)]
+        for (content, retainingBOM) in cases {
+            let parsed = retainingBOM ? SkillParser.parse(content, retainingBOM: true) : SkillParser.parse(content)
             XCTAssertNil(parsed.preservedFrontmatter)
             XCTAssertNil(parsed.name)
             XCTAssertNil(parsed.description)

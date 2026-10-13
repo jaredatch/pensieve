@@ -40,8 +40,8 @@ struct DetailContentSnapshot: Equatable {
             perProject[project.id] = status
         }
         let document = library.readSkillDocument(skill) ?? ""
-        let parsed = SkillParser.parse(document)
-        let body = SkillParser.stripFrontmatter(document)
+        let parsed = SkillParser.parse(document, retainingBOM: true)
+        let body = SkillParser.stripFrontmatter(document, retainingBOM: true)
         return DetailContentSnapshot(body: body,
                                      tokenCount: TokenCounter.estimate(body),
                                      frontmatterName: parsed.name ?? "",

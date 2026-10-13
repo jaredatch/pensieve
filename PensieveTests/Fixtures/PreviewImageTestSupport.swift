@@ -61,6 +61,10 @@ final class PreviewImageFileSpy: FileServiceProtocol {
     }
 
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        // The store reads its validated skill document separately from contained preview images.
+        if URL(fileURLWithPath: path).lastPathComponent == "SKILL.md" {
+            return try files.readRegularFileData(at: path, maximumBytes: maximumBytes)
+        }
         XCTFail("Preview image read omitted its containment guard")
         throw CocoaError(.featureUnsupported)
     }
