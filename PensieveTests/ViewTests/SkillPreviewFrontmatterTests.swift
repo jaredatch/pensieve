@@ -12,7 +12,7 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
         ---
         license: MIT
         name: Example
-        description: |-
+        description: CHOMP
           First line.
           \(longLine)
         metadata:
@@ -28,26 +28,19 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
 
         Body remains Markdown.
         """
-        for ending in ["\n", "\r\n"] {
-            let fixture = try host("\u{feff}" + document.replacingOccurrences(of: "\n", with: ending))
+        for (ending, chomp) in [("\n", "|-"), ("\r\n", "|-"), ("\n", "|"), ("\r\n", "|+")] {
+            let source = document.replacingOccurrences(of: "CHOMP", with: chomp)
+            let fixture = try host("\u{feff}" + source.replacingOccurrences(of: "\n", with: ending))
             defer { fixture.close() }
             let expected: [(String, String)] = [
                 ("license", "MIT"), ("name", "Example"), ("description", description),
                 ("metadata", "version: \"3.1.0\"\nenabled: true"), ("tools", "- Read\n- Bash(git:*)"),
                 ("flow", "{one: [1, 2], two: \"value\"}"), ("count", "42")
             ]
-            var previousY = CGFloat.infinity
-            var valueX: CGFloat?
-            for (key, value) in expected {
-                let keyFrame = try await text(key, in: fixture.host).accessibilityFrame()
-                let valueFrame = try await text(value, in: fixture.host).accessibilityFrame()
-                XCTAssertLessThan(keyFrame.maxY, previousY, "Rows must follow file order")
-                XCTAssertGreaterThan(valueFrame.minX, keyFrame.minX)
-                if let valueX { XCTAssertEqual(valueFrame.minX, valueX, accuracy: 0.5) }
-                valueX = valueFrame.minX
-                previousY = keyFrame.minY
-            }
-            let descriptionFrame = try await text(description, in: fixture.host).accessibilityFrame()
+            let previousY = try await assertRows(expected, in: fixture.host)
+            try assertGridPaint(fixture.snapshot.frontmatterRows)
+            let descriptionFrame = try await text(description, in: fixture.host, allowingTrailingNewlines: true)
+                .accessibilityFrame()
             XCTAssertGreaterThan(descriptionFrame.height, 100, "Long values wrap in full")
             let body = try await text("Body heading", in: fixture.host)
             XCTAssertLessThan(body.accessibilityFrame().maxY, previousY, "The Markdown body follows the table")
@@ -134,13 +127,66 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
         try FrontmatterHost(document: document)
     }
 
-    private func text(_ value: String, in host: NSView) async throws -> NSAccessibilityProtocol {
+    private func assertGridPaint(_ rows: [SkillFrontmatterRow]) throws {
+        let renderer = ImageRenderer(content: SkillFrontmatterTable(rows: rows)
+            .frame(width: 612).background(Color.white).environment(\.colorScheme, .light))
+        renderer.scale = 2
+        let image = try XCTUnwrap(renderer.cgImage, "Production table must render offscreen")
+        let bitmap = NSBitmapImageRep(cgImage: image)
+        func luminance(_ x: Int, _ y: Int) -> CGFloat {
+            guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return -1 }
+            return (color.redComponent + color.greenComponent + color.blueComponent) / 3
+        }
+        let width = bitmap.pixelsWide, height = bitmap.pixelsHigh
+        XCTAssertGreaterThan(width, 100)
+        XCTAssertGreaterThan(height, 50)
+        // A blank capture must fail before any comparisons of borders or fills.
+        let ink = (12..<min(width / 3, 200)).flatMap { x in (4..<height - 4).map { luminance(x, $0) } }
+        XCTAssertLessThan(ink.min() ?? 1, 0.2, "Capture must include visible key text")
+        XCTAssertGreaterThan(ink.max() ?? 0, 0.8, "Capture must include the light table background")
+        let candidates = (12..<width / 3).map { x in
+            (x, (4..<height - 4).filter { y in
+                luminance(x, y) + 0.02 < min(luminance(x - 4, y), luminance(x + 4, y))
+            }.count)
+        }
+        let divider = try XCTUnwrap(candidates.max { $0.1 < $1.1 })
+        XCTAssertGreaterThan(divider.1, height - 8 - rows.count * 4,
+                             "One straight divider must span the rows, apart from horizontal rule intersections")
+        // Blank padding gutters must have the same row fill and bottom rule on both sides of the divider.
+        let gaps = (4..<height - 4).filter { y in
+            let left = luminance(6, y), middle = luminance(divider.0 - 6, y), right = luminance(width - 6, y)
+            return max(left, middle, right) - min(left, middle, right) > 0.01
+        }
+        XCTAssertTrue(gaps.isEmpty, "Both cells' fills and bottom rules must span the full row height: \(gaps.count) gaps")
+    }
+
+    private func assertRows(_ rows: [(String, String)], in host: NSView) async throws -> CGFloat {
+        var previousY = CGFloat.infinity
+        var valueX: CGFloat?
+        for (key, value) in rows {
+            let keyFrame = try await text(key, in: host).accessibilityFrame()
+            let element = try await text(value, in: host, allowingTrailingNewlines: key == "description")
+            let valueFrame = element.accessibilityFrame()
+            XCTAssertEqual(element.accessibilityValue() as? String, value, "Values end at their last text line")
+            XCTAssertLessThan(keyFrame.maxY, previousY, "Rows must follow file order")
+            XCTAssertGreaterThan(valueFrame.minX, keyFrame.minX)
+            if let valueX { XCTAssertEqual(valueFrame.minX, valueX, accuracy: 0.5) }
+            valueX = valueFrame.minX
+            previousY = keyFrame.minY
+        }
+        return previousY
+    }
+
+    private func text(_ value: String, in host: NSView,
+                      allowingTrailingNewlines: Bool = false) async throws -> NSAccessibilityProtocol {
         var found: NSAccessibilityProtocol?
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                              failureMessage: "Rendered literal text must appear: \(value)") {
             host.layoutSubtreeIfNeeded()
             found = self.elements(in: host).first {
-                ($0.accessibilityValue() as? String) == value && $0.accessibilityFrame().width > 0
+                guard let actual = $0.accessibilityValue() as? String else { return false }
+                let matches = actual == value || (allowingTrailingNewlines && actual.trimmingCharacters(in: .newlines) == value)
+                return matches && $0.accessibilityFrame().width > 0
             }
             return found != nil
         }
