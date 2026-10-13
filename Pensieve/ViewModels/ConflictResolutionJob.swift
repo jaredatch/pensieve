@@ -20,8 +20,11 @@ struct ConflictResolutionJob {
         try GitCancellation.$isReadOnly.withValue(false) {
             let context = ModelContext(container)
             let previous = headStamp()
-            let credential = try resolveCredential()
-            let inspection = try engine.inspectConflicts(root: root, credential: credential, context: context)
+            let authentication = try resolveAuthentication()
+            let inspection: ConflictInspection
+            do {
+                inspection = try engine.inspectConflicts(root: root, credential: authentication.credential, context: context)
+            } catch { throw authentication.reporting(error, resolvingConflict: true) }
             let groups: [ConflictResolutionModel.ConflictGroup]
             if case let .conflicts(set) = inspection {
                 groups = try self.groups(from: set, context: context)
@@ -44,8 +47,11 @@ struct ConflictResolutionJob {
                         expectedOtherMode: item.otherMode)
                 }
             }
-            let credential = try resolveCredential()
-            return (try engine.resolveConflicts(root: root, picks: picks, credential: credential, context: context), previous)
+            let authentication = try resolveAuthentication()
+            do {
+                return (try engine.resolveConflicts(root: root, picks: picks,
+                    credential: authentication.credential, context: context), previous)
+            } catch { throw authentication.reporting(error, resolvingConflict: true) }
         }
     }
 
@@ -99,15 +105,11 @@ struct ConflictResolutionJob {
         return "Settings differ"
     }
 
-    private func resolveCredential() throws -> GitCredential? {
+    private func resolveAuthentication() throws -> SyncAuthentication {
         try git.probeUsability().requireUsable()
         guard let remote = try git.remoteURL(at: root),
-              let spec = SyncSetupModel.parseRemote(remote) else { return nil }
-        switch spec.transport {
-        case .ssh:
-            return .sshAgent
-        case .https:
-            return credentials.credential(forHost: spec.host)
-        }
+              let spec = RemoteURLPolicy.parse(remote) else { return SyncAuthentication(remote: nil, credential: nil) }
+        return SyncAuthentication(remote: spec, credential: spec.transport == .ssh
+            ? .sshAgent : credentials.credential(forHost: spec.host))
     }
 }

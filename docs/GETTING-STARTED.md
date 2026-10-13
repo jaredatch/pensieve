@@ -130,8 +130,20 @@ Sync runs through a git remote you own. Setup:
 
 1. For your first Mac, create an **empty, private** repo on GitHub (or any git host). Private matters: your skills may encode how you work. Import or create your local skills, then connect the repo.
 2. On each fresh additional Mac, dismiss the import wizard and connect that same repo before adding local skills. Pensieve creates a small empty scaffold on launch; Connect recognizes it, adopts it in place, and brings down your existing library on the first try. You do not need to delete `~/.pensieve` first.
-3. HTTPS remotes authenticate with a personal access token, which Pensieve stores in the macOS Keychain and never writes to disk or `.git/config`. SSH remotes go through your existing `ssh-agent`, so if `git push` works in your terminal, it works here.
+3. For HTTPS, enter a personal access token in Pensieve. Pensieve stores it in the macOS Keychain and ignores credentials from git helpers or other askpass programs. A blank token is refused. Pensieve never writes the token into a command line or `.git/config`.
+
+   Credentials you configure yourself for git or curl still apply over HTTPS, even with a nonblank Pensieve token. For example, `.netrc`, `http.extraHeader` or URL rewrites containing credentials can supply authentication. Any of these sources can authenticate before or instead of the saved token. See [Git remotes and credentials](../SECURITY.md#git-remotes-and-credentials) for the transport and credential boundaries.
+
+   Pensieve's token helper answers only git's prompts for the remote's own host over HTTPS. A rewrite, extra URL or proxy elsewhere never receives Pensieve's token. Credentials you configured yourself can still go wherever git sends them.
+
+   For SSH, use your agent or identity files from your SSH configuration. A key with a passphrase must be loaded in the agent, or have its passphrase saved in the macOS Keychain through `UseKeychain`. A Finder launch has no Terminal for a passphrase prompt.
 4. Sync. `~/.pensieve` becomes a git working tree; Pensieve commits, pulls, and pushes it for you.
+
+Settings › Sync shows **Token saved** or **No token saved** for a connected HTTPS repo. Use Add… or Replace… to open the access token sheet. Pensieve checks the new token with the remote before saving it. A refused token leaves your saved token unchanged. A successful save runs sync once, even with background sync off. If a conflict is open, use its Try again button after replacing the token.
+
+On a repo anyone can read, the token check succeeds without presenting the token. The next push tests whether the token can write.
+
+If sign-in fails, HTTPS advice points you to this token control. SSH advice asks you to run `ssh-add` in Terminal. If the host's key hasn't been accepted, it asks you to connect to that host once with `ssh` in Terminal to check and accept its key, then sync again.
 
 To stop syncing, use Disconnect… in Settings › Sync. It removes the link to the repo and the token saved for it, and leaves your skills and their history alone.
 

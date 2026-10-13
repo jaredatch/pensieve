@@ -19,7 +19,7 @@ extension UpdateCheckServiceTests {
         try makeService(credentials: credentials).checkAll(context: context)
 
         XCTAssertTrue(git.receivedCredentials.allSatisfy {
-            $0 == .httpsToken(username: "x-access-token", token: "install-secret")
+            $0 == .httpsToken(username: "x-access-token", token: "install-secret", host: "github.com")
         })
         try credentials.delete(forHost: CredentialHost.githubInstall)
         git.receivedCredentials.removeAll()

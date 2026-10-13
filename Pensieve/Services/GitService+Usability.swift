@@ -53,8 +53,8 @@ extension GitService {
         do {
             let result = try run(["--version"], in: nil)
             guard result.exit != 0 else { return .usable }
-            let detail = (result.stderr + result.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
-            return GitUsability.environmentFailure(exit: result.exit, output: detail)
+            let detail = result.failureDetail.trimmingCharacters(in: .whitespacesAndNewlines)
+            return GitUsability.environmentFailure(exit: result.exit, output: result.stderr + result.stdout)
                 ?? .failed(GitFailureDetail(detail.isEmpty ? "git --version exited \(result.exit)." : detail))
         } catch {
             if error is CancellationError { throw error }
@@ -85,9 +85,7 @@ extension GitService {
                 try runOrThrow(["-C", path, "rev-parse", "--git-dir"], in: nil)
                 return nil
             default:
-                throw GitError.commandFailed(args: ["remote", "get-url", "origin"],
-                                             exitCode: result.exit, stderr: result.stderr,
-                                                 confirmingProbe: result.confirmingProbe)
+                throw commandError(result, args: ["remote", "get-url", "origin"])
             }
         } catch {
             if error is CancellationError { throw error }

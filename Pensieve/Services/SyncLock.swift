@@ -59,13 +59,14 @@ final class SyncLock {
         return SyncLock(fd: fd)
     }
 
-    /// A queued GUI save waits on one descriptor on its native worker. The initial attempt and
-    /// contended wait share that job; flock sleeps in the kernel rather than reopening and polling.
-    /// This whole-cycle wait is distinct from acquire's leaf-only contract. Pending saves finish
-    /// even if their awaiting task is cancelled; Quit Anyway remains the user's escape from a holder.
-    static func waitForSave(at path: String) throws -> SyncLock {
+    /// Queued GUI saves and token checks wait on one descriptor on their native worker.
+    /// Saves sleep in flock and finish even if cancelled. Token checks opt into a cancellable
+    /// nonblocking wait, so dismissing their sheet never waits for a whole sync cycle.
+    /// This whole-cycle wait is distinct from acquire's leaf-only contract.
+    static func waitForSave(at path: String, cancellable: Bool = false) throws -> SyncLock {
         precondition(!Thread.isMainThread)
         let fd = try openLockFile(at: path)
+        if cancellable { return try waitCancellably(fd: fd) }
         if flock(fd, LOCK_EX | LOCK_NB) == 0 { return SyncLock(fd: fd) }
         let code = errno
         guard code == EWOULDBLOCK else {
@@ -79,6 +80,26 @@ final class SyncLock {
             throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
         }
         return SyncLock(fd: fd)
+    }
+
+    private static func waitCancellably(fd: Int32) throws -> SyncLock {
+        do {
+            while true {
+                try Task.checkCancellation()
+                if flock(fd, LOCK_EX | LOCK_NB) == 0 {
+                    try Task.checkCancellation()
+                    return SyncLock(fd: fd)
+                }
+                let code = errno
+                guard code == EWOULDBLOCK || code == EINTR else {
+                    throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+                }
+                usleep(20_000)
+            }
+        } catch {
+            close(fd)
+            throw error
+        }
     }
 
     /// A fresh install has no parent. The askpass helper there is written lazily, so it cannot

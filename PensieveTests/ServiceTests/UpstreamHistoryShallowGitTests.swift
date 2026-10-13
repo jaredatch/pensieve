@@ -106,7 +106,7 @@ extension UpstreamHistoryServiceTests {
         }
     }
 
-    func testBothNetworkCallSitesCarryIsolationRemoteAndRequestCredential() throws {
+    func testBothNetworkCallSitesCarryRemoteAndRequestCredential() throws {
         try NativeTestWork.run { [self] in
             let repository = try repositoryWithVersions(4)
             let installed = try revision("HEAD~3", in: repository)
@@ -138,7 +138,6 @@ extension UpstreamHistoryServiceTests {
 
             XCTAssertEqual(invocations.count, 2)
             for (args, credential) in invocations {
-                XCTAssertEqual(Array(args.prefix(2)), GitService.installCredentialIsolationArgs)
                 let terminator = try XCTUnwrap(args.lastIndex(of: "--"))
                 XCTAssertEqual(args[args.index(after: terminator)], remote)
                 XCTAssertEqual(credential, .sshAgent)

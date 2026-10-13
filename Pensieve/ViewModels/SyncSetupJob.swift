@@ -48,7 +48,7 @@ struct SyncSetupJob {
         try beginWriting()
         // From the first Keychain/store write onward, task cancellation cannot interrupt git.
         try GitCancellation.$isReadOnly.withValue(false) {
-            if case let .httpsToken(username, token) = credential {
+            if case let .httpsToken(username, token, _) = credential {
                 try credentials.store(token: token, username: username, forHost: spec.host)
             }
             try action.run()
@@ -151,7 +151,7 @@ struct SyncSetupJob {
         }
         let notice: String?
         if refs.defaultBranch != branch {
-            notice = "Connected using branch “\(branch)” because Pensieve couldn't use the remote's default branch."
+            notice = "Connected using branch “\(branch)” because Pensieve couldn’t use the remote’s default branch."
         } else {
             notice = nil
         }

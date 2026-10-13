@@ -127,7 +127,7 @@ extension GitServiceTests {
 
     // MARK: Tests
 
-    func testReadChecksDisableCredentialHelpersWithoutChangingConfig() throws {
+    func testReadsAndWritesDisableCredentialHelpersWithoutChangingConfig() throws {
         try NativeTestWork.run { [self] in
             try git.initRepository(at: tempDir)
             try git.runOrThrow(["config", "credential.helper", "fixture-helper"], in: tempDir)
@@ -138,7 +138,7 @@ extension GitServiceTests {
             }
             XCTAssertEqual(helpers, configured + "\n", "An empty final helper resets the helper chain during checks")
             XCTAssertEqual(try git.runOrThrow(["config", "--get-all", "credential.helper"], in: tempDir).stdout,
-                           configured, "Writing calls retain their configured credential helpers")
+                           configured + "\n", "Writing calls also reset their configured credential helpers")
             XCTAssertEqual(try FileService().readData(at: tempDir + "/.git/config"), config)
         }
     }
@@ -592,7 +592,8 @@ extension GitServiceTests {
     func testHttpsTokenFeedsAskpassViaChildEnv() throws {
         try NativeTestWork.run { [self] in
             let secret = "ghp_\(UUID().uuidString)"
-            let env = try git.childEnvironment(credential: .httpsToken(username: "x-access-token", token: secret))
+            let env = try git.childEnvironment(
+                credential: .httpsToken(username: "x-access-token", token: secret, host: "github.com"))
             XCTAssertNotNil(env["GIT_ASKPASS"])
             XCTAssertEqual(env["PENSIEVE_GIT_USERNAME"], "x-access-token")
             XCTAssertEqual(env["PENSIEVE_GIT_PASSWORD"], secret)   // the token rides the CHILD ENV
@@ -602,7 +603,8 @@ extension GitServiceTests {
     func testAskpassHelperExistsExecutableAndCarriesNoSecret() throws {
         try NativeTestWork.run { [self] in
             let secret = "ghp_\(UUID().uuidString)"
-            let env = try git.childEnvironment(credential: .httpsToken(username: "x-access-token", token: secret))
+            let env = try git.childEnvironment(
+                credential: .httpsToken(username: "x-access-token", token: secret, host: "github.com"))
             let helper = try XCTUnwrap(env["GIT_ASKPASS"])
             XCTAssertTrue(git.fileService.isExecutableFile(at: helper))
             let helperBody = try git.fileService.readFile(at: helper)
@@ -630,7 +632,7 @@ extension GitServiceTests {
             XCTAssertEqual(try FileService().readFile(at: helper), body)
             let process = Process()
             process.executableURL = URL(fileURLWithPath: helper)
-            process.arguments = ["Password"]
+            process.arguments = ["Password for 'https://x-access-token@github.com': "]
             process.environment = environment
             let output = Pipe()
             process.standardOutput = output
@@ -645,7 +647,8 @@ extension GitServiceTests {
         }
         let writer = GitService(fileService: files, askpassHelperPath: helper)
         for _ in 0..<2 {
-            _ = try writer.childEnvironment(credential: .httpsToken(username: "other", token: "other-fixture-token"))
+            _ = try writer.childEnvironment(
+                credential: .httpsToken(username: "other", token: "other-fixture-token", host: "github.com"))
         }
         XCTAssertGreaterThan(observations, 0, "The replacement must be observed")
         XCTAssertGreaterThan(executions, 0, "A second caller must execute the shared helper")
@@ -672,7 +675,7 @@ extension GitServiceTests {
             let fixture = try GitFailureFixture()
             defer { try? fixture.remove() }
             let secret = "ghp_\(UUID().uuidString)"
-            let credential = GitCredential.httpsToken(username: "u", token: secret)
+            let credential = GitCredential.httpsToken(username: "u", token: secret, host: "github.com")
             let service = try fixture.credentialRecordingExecutable(expectedToken: secret)
             let remote = "https://fixture.test/store.git"
             let root = fixture.root
@@ -738,7 +741,7 @@ extension GitServiceTests {
                     remote: "https://fixture.test/store.git", ref: ref, installedCommit: installed,
                     path: "skills/example", repositoryPath: fixture.root, commitLimit: 2, rowLimit: 3,
                     textByteLimit: 1_024, baselineFileLimit: 10, baselineByteLimit: 10_000,
-                    credential: .httpsToken(username: "u", token: secret)
+                    credential: .httpsToken(username: "u", token: secret, host: "github.com")
                 ))
             }
         }
@@ -748,16 +751,23 @@ extension GitServiceTests {
         try NativeTestWork.run { [self] in
             // Seed STALE auth vars in the parent process env, then prove childEnvironment sanitizes them
             // for a non-.httpsToken op — a .sshAgent/nil op must never ride an inherited askpass or secret.
+            let previousSSHAskpass = ProcessInfo.processInfo.environment["SSH_ASKPASS"]
+            setenv("SSH_ASKPASS", tempDir + "/ssh-key-askpass", 1)
             setenv("GIT_ASKPASS", "/tmp/evil-askpass", 1)
             setenv("PENSIEVE_GIT_USERNAME", "stale-user", 1)
             setenv("PENSIEVE_GIT_PASSWORD", "stale-secret", 1)
+            setenv("PENSIEVE_GIT_HOST", "stale.test", 1)
             defer {
                 unsetenv("GIT_ASKPASS"); unsetenv("PENSIEVE_GIT_USERNAME"); unsetenv("PENSIEVE_GIT_PASSWORD")
+                unsetenv("PENSIEVE_GIT_HOST")
+                if let previousSSHAskpass { setenv("SSH_ASKPASS", previousSSHAskpass, 1) } else { unsetenv("SSH_ASKPASS") }
             }
             let env = try git.childEnvironment(credential: .sshAgent)
-            XCTAssertNil(env["GIT_ASKPASS"])           // inherited askpass stripped
+            XCTAssertEqual(env["SSH_ASKPASS"], tempDir + "/ssh-key-askpass", "SSH retains its key-passphrase askpass")
+            XCTAssertEqual(env["GIT_ASKPASS"], "") // inherited askpass cannot answer for Git
             XCTAssertNil(env["PENSIEVE_GIT_USERNAME"]) // inherited username stripped
             XCTAssertNil(env["PENSIEVE_GIT_PASSWORD"]) // inherited secret stripped
+            XCTAssertNil(env["PENSIEVE_GIT_HOST"])
             if let sock = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"] {
                 XCTAssertEqual(env["SSH_AUTH_SOCK"], sock)   // agent socket passes through untouched
             }
@@ -787,13 +797,20 @@ extension GitServiceTests {
         }
     }
 
-    func testAskpassHelperWriteFailurePropagates() throws {
+    func testAskpassHelperWriteFailurePropagatesForNonblankTokenOnly() throws {
         try NativeTestWork.run { [self] in
             let failingGit = GitService(fileService: AskpassWriteFailingFileService(),
                 askpassHelperPath: TestPaths.gitAskpassHelperPath)
             XCTAssertThrowsError(
-                try failingGit.childEnvironment(credential: .httpsToken(username: "u", token: "ghp_x"))
+                try failingGit.childEnvironment(credential: .httpsToken(username: "u", token: "ghp_x", host: "github.com"))
             )
+            for token in ["", " \t\n"] {
+                let environment = try failingGit.childEnvironment(
+                    credential: .httpsToken(username: "u", token: token, host: "github.com"))
+                XCTAssertNil(environment["PENSIEVE_GIT_PASSWORD"], "A blank stored token is absent")
+                XCTAssertNil(environment["PENSIEVE_GIT_USERNAME"])
+                XCTAssertEqual(environment["GIT_ASKPASS"], "")
+            }
         }
     }
 }
@@ -966,7 +983,8 @@ extension GitServiceTests {
                 try files.writeExecutableFile(at: executable, content: """
                 #!/usr/bin/python3
                 import base64, sys
-                assert sys.argv[1:] == ['ls-remote', '--symref', '--', 'https://fixture.test/refs.git', 'HEAD', 'refs/heads/*']
+                assert sys.argv[1:5] == ['-c', 'credential.helper=', '-c', 'credential.sanitizePrompt=true']
+                assert sys.argv[5:] == ['ls-remote', '--symref', '--', 'https://fixture.test/refs.git', 'HEAD', 'refs/heads/*']
                 with open('\(receipt)', 'a') as stream: stream.write('call\\n')
                 sys.stdout.buffer.write(base64.b64decode('\(encoded)'))
                 """)
@@ -987,30 +1005,176 @@ extension GitServiceTests {
             let files = FileService()
             let executable = tempDir + "/failed-git"
             let remote = "https://fixture.test/refs.git"
-            for (stdout, stderr, message) in [
-                (Data([0xFF]), Data("fatal: Authentication failed\n".utf8), "Authentication failed"),
-                (Data("Permission denied (publickey).\n".utf8), Data([0xFF]), "Permission denied (publickey)")
+            for (stdout, stderr, expected) in [
+                (Data([0xFF]), Data("fatal: Authentication failed\n".utf8), "fatal: Authentication failed\n"),
+                (Data("Permission denied (publickey).\n".utf8), Data([0xFF]), "Permission denied (publickey).\n"),
+                (Data("progress\n".utf8), Data("remote: ".utf8) + Data([0xFF]) + Data(" Authentication failed\n".utf8),
+                 "remote: \u{FFFD} Authentication failed\n"),
+                (Data([0xFF]) + Data("Permission denied (publickey).\n".utf8), Data(),
+                 "\u{FFFD}Permission denied (publickey).\n")
             ] {
                 try writeFailedGit(files: files, executable: executable, stdout: stdout, stderr: stderr)
                 let service = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
-                XCTAssertThrowsError(try service.remoteReferences(remote: remote, credential: nil)) { error in
-                    guard case let GitError.authenticationFailed(actualRemote, detail) = error else {
-                        return XCTFail("Expected an auth failure with \(message), got \(error)")
+                let operations: [() throws -> Void] = [
+                    { _ = try service.remoteReferences(remote: remote, credential: nil) },
+                    { try service.cloneShallow(remote: remote, branch: nil, into: self.tempDir + "/unused", credential: nil) }
+                ]
+                for operation in operations {
+                    XCTAssertThrowsError(try operation()) { error in
+                        guard case let GitError.authenticationFailed(actualRemote, detail) = error else {
+                            return XCTFail("Expected an auth failure with \(expected), got \(error)")
+                        }
+                        XCTAssertEqual(actualRemote, remote)
+                        XCTAssertEqual(detail, expected)
                     }
-                    XCTAssertEqual(actualRemote, remote)
-                    XCTAssertTrue(detail.contains(message), detail)
                 }
             }
         }
     }
 
-    private func writeFailedGit(files: FileService, executable: String, stdout: Data, stderr: Data) throws {
+    func testHTTP403IsARefusedCredential() throws {
+        try NativeTestWork.run { [self] in
+            let executable = tempDir + "/refused-token"
+            try writeFailedGit(files: FileService(), executable: executable,
+                stdout: Data(), stderr: Data("fatal: The requested URL returned error: 403\n".utf8))
+            let service = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+            XCTAssertThrowsError(try service.remoteReferences(remote: "https://example.com/store.git", credential: nil)) {
+                guard case GitError.authenticationFailed = $0 else { return XCTFail("Expected sign-in failure, got \($0)") }
+            }
+        }
+    }
+
+    func testHistoryMissingRefClassificationUsesBothStreamsInOrder() throws {
+        try NativeTestWork.run { [self] in
+            let service = GitService(askpassHelperPath: tempDir + "/askpass", upstreamHistoryNetworkRunner: { _, _ in
+                .init(stdout: "fatal: couldn't find remote ", stderr: "ref refs/tags/missing", exit: 128)
+            })
+            let request = UpstreamHistoryGitRequest(remote: "https://example.com/store.git", ref: "missing",
+                installedCommit: String(repeating: "a", count: 40), path: "skills/example", repositoryPath: tempDir,
+                commitLimit: 2, rowLimit: 3, textByteLimit: 1_024, baselineFileLimit: 10,
+                baselineByteLimit: 10_000, credential: nil)
+            XCTAssertThrowsError(try service.fetchTrackedRef(request)) {
+                XCTAssertEqual($0 as? UpstreamHistoryError, .trackedRefNotFound("missing"))
+            }
+        }
+    }
+
+    func testFailedOutputKeepsDamagedTextAndPrefersUsefulStderr() throws {
+        try NativeTestWork.run { [self] in
+            let files = FileService()
+            let executable = tempDir + "/failed-output"
+            let service = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+            let cases = [
+                (Data("progress\n".utf8), Data("fatal: caf".utf8) + Data([0xE9]) + Data(" refused\n".utf8),
+                 "fatal: caf\u{FFFD} refused\n"),
+                (Data("progress\n".utf8), Data("fatal: remote rejected\n".utf8), "fatal: remote rejected\n"),
+                (Data("fatal: stdout ".utf8) + Data([0xFF]) + Data(" refused\n".utf8), Data(),
+                 "fatal: stdout \u{FFFD} refused\n"),
+                (Data("stdout failure\n".utf8), Data(" \t\n".utf8), "stdout failure\n"),
+                (Data(), Data([0xFF]), "\u{FFFD}")
+            ]
+            for (stdout, stderr, expected) in cases {
+                try writeFailedGit(files: files, executable: executable, stdout: stdout, stderr: stderr)
+                let operations: [() throws -> Void] = [
+                    { _ = try service.runOrThrow(["fixture"], in: nil) },
+                    { _ = try service.remoteReferences(remote: "https://fixture.test/refs.git", credential: nil) },
+                    { try service.cloneShallow(remote: "https://fixture.test/refs.git", branch: nil,
+                                               into: self.tempDir + "/unused", credential: nil) }
+                ]
+                for operation in operations {
+                    XCTAssertThrowsError(try operation()) { error in
+                        guard case let GitError.commandFailed(_, exit, detail, _) = error else {
+                            return XCTFail("Expected command failure, got \(error)")
+                        }
+                        XCTAssertEqual(exit, 128)
+                        XCTAssertEqual(detail, expected)
+                        XCTAssertTrue(error.localizedDescription.hasSuffix(expected))
+                    }
+                }
+            }
+        }
+    }
+
+    func testSuccessfulOutputRetainsLegacyUTF8Decoding() throws {
+        try NativeTestWork.run { [self] in
+            let files = FileService()
+            let executable = tempDir + "/successful-output"
+            let service = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+            for (bytes, expected) in [
+                (Data("---\nname: Café\n---\nBody\n".utf8), "---\nname: Café\n---\nBody\n"),
+                (Data([0xEF, 0xBB, 0xBF]) + Data("---\nBody\n".utf8), "---\nBody\n"),
+                (Data("partial".utf8) + Data([0xFF]), "")
+            ] {
+                try writeFailedGit(files: files, executable: executable, stdout: bytes, stderr: bytes, exit: 0)
+                XCTAssertEqual(try service.show(sha: "HEAD", path: "SKILL.md", at: tempDir), expected)
+                let output = try service.runOrThrow(["fixture"], in: nil)
+                XCTAssertEqual(output.stdout, expected)
+                XCTAssertEqual(output.stderr, expected)
+            }
+        }
+    }
+
+    /// The plan requires one error builder. Count construction sites without binding its file or name.
+    func testCommandFailuresHaveOneBuilder() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().path
+        let files = FileService()
+        let pattern = try NSRegularExpression(
+            pattern: #"\bcase\s+(?:let\s+)?GitError\s*\.\s*commandFailed\s*\([^)]*\)|"#
+                + #"((?:\bGitError|\b(?:return|throw))\s*\.\s*commandFailed\s*\()"#
+        )
+        var pending = [root + "/Pensieve", root + "/PensieveDaemon"]
+        var sites: [String] = []
+        while let directory = pending.popLast() {
+            for entry in try files.listDirectory(at: directory) {
+                let path = directory + "/" + entry
+                if files.directoryExists(at: path) {
+                    pending.append(path)
+                } else if path.hasSuffix(".swift") {
+                    let source = try files.readFile(at: path)
+                    let matches = pattern.matches(in: source, range: NSRange(source.startIndex..., in: source))
+                    sites += matches.filter { $0.range(at: 1).location != NSNotFound }.map { _ in path }
+                }
+            }
+        }
+        XCTAssertEqual(sites.count, 1, "Git command errors must use the shared builder: \(sites)")
+    }
+
+    func testSyntheticErrorMessagesRemainIntact() throws {
+        try NativeTestWork.run { [self] in
+            let files = FileService()
+            let executable = tempDir + "/synthetic-output"
+            let service = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+            try writeFailedGit(files: files, executable: executable, stdout: Data(), stderr: Data(), exit: 0)
+            assertSyntheticFailure("git returned an empty revision") { _ = try service.currentBranch(at: self.tempDir) }
+            assertSyntheticFailure("git returned an invalid commit date") { _ = try service.commitDate(at: self.tempDir) }
+            try writeFailedGit(files: files, executable: executable,
+                               stdout: Data("malformed".utf8), stderr: Data(), exit: 0)
+            assertSyntheticFailure("git returned malformed upstream history") {
+                _ = try service.historyLogRecords(commits: [String(repeating: "a", count: 40)],
+                                                  path: "SKILL.md", repositoryPath: self.tempDir)
+            }
+        }
+    }
+
+    private func assertSyntheticFailure(_ expected: String, operation: () throws -> Void) {
+        XCTAssertThrowsError(try operation()) { error in
+            guard case let GitError.commandFailed(_, exit, detail, _) = error else {
+                return XCTFail("Expected a synthetic command failure, got \(error)")
+            }
+            XCTAssertEqual(exit, 0)
+            XCTAssertEqual(detail, expected)
+        }
+    }
+
+    private func writeFailedGit(files: FileService, executable: String, stdout: Data, stderr: Data,
+                                exit: Int32 = 128) throws {
         try files.writeExecutableFile(at: executable, content: """
         #!/usr/bin/python3
         import base64, sys
         sys.stdout.buffer.write(base64.b64decode('\(stdout.base64EncodedString())'))
         sys.stderr.buffer.write(base64.b64decode('\(stderr.base64EncodedString())'))
-        sys.exit(128)
+        sys.exit(\(exit))
         """)
     }
 }

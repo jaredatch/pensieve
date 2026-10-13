@@ -9,18 +9,10 @@ extension GitService {
         let branch = "refs/heads/\(ref)"
         let tag = "refs/tags/\(ref)"
         let peeledTag = tag + "^{}"
-        let args = Self.installCredentialIsolationArgs
-            + ["ls-remote", "--", remote, branch, tag, peeledTag]
+        let args = ["ls-remote", "--", remote, branch, tag, peeledTag]
         let output = try runUpstreamHistoryNetwork(args, credential: credential)
         guard output.exit == 0 else {
-            let combined = output.stdout + output.stderr
-            if isAuthFailure(combined) {
-                throw GitError.authenticationFailed(remote: remote, detail: combined)
-            }
-            throw GitError.commandFailed(
-                args: args,
-                exitCode: output.exit,
-                stderr: output.stderr.isEmpty ? output.stdout : output.stderr, confirmingProbe: output.confirmingProbe)
+            throw commandError(output, args: args, authenticationRemote: remote)
         }
 
         var revisions: [String: String] = [:]
@@ -39,10 +31,8 @@ extension GitService {
         let output = try runOrThrow(args, in: nil)
         let value = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let date = ISO8601DateFormatter().date(from: value) else {
-            throw GitError.commandFailed(
-                args: args,
-                exitCode: output.exit,
-                stderr: "git returned an invalid commit date", confirmingProbe: output.confirmingProbe)
+            throw commandError(args: args, exitCode: output.exit,
+                               detail: "git returned an invalid commit date", confirmingProbe: output.confirmingProbe)
         }
         return date
     }

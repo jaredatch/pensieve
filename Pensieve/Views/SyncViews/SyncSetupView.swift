@@ -35,6 +35,9 @@ struct SyncSetupView: View {
                         .textFieldStyle(.roundedBorder)
                     SecureField("Access token", text: $token)
                         .textFieldStyle(.roundedBorder)
+                    Text("Sync over HTTPS needs an access token.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .disabled(model.state == .working || model.state == .done)
@@ -88,7 +91,8 @@ struct SyncSetupView: View {
                     }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .disabled(url.isEmpty || model.state == .working)
+                    .disabled(url.isEmpty || model.state == .working
+                        || (isHTTPS && token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
                 }
             }
         }

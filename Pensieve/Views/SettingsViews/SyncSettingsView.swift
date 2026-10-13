@@ -7,6 +7,7 @@ struct SyncSettingsView: View {
     @Environment(AppRuntime.self) private var runtime
     @AppStorage("backgroundSyncEnabled") private var backgroundSyncEnabled = true
     @State private var showSetup = false
+    @State private var showToken = false
     @State private var confirmDisconnect = false
     @State private var disconnectError: String?
     private var model: SyncSetupModel { runtime.syncSetup }
@@ -23,6 +24,9 @@ struct SyncSettingsView: View {
                         .lineLimit(remoteError == nil ? 1 : nil)
                         .fixedSize(horizontal: false, vertical: true)
                         .truncationMode(.middle)
+                }
+                if model.syncToken.remote != nil {
+                    tokenRow
                 }
                 if remoteError != nil && model.state != .working && !model.isDisconnecting {
                     EmptyView()
@@ -60,6 +64,7 @@ struct SyncSettingsView: View {
         .formStyle(.grouped)
         .padding()
         .task { await runtime.refreshGitUsability() }
+        .task(id: remoteURL) { model.syncToken.refresh(remoteURL: remoteURL) }
         .onChange(of: backgroundSyncEnabled) { _, _ in
             runtime.scheduler.drainPendingRequests()
         }
@@ -70,6 +75,7 @@ struct SyncSettingsView: View {
             },
             content: { SyncSetupView(model: model) }
         )
+        .sheet(isPresented: $showToken) { SyncTokenView(model: model.syncToken) }
         .confirmationDialog(
             "Disconnect from \(remoteURL ?? "this repository")?",
             isPresented: $confirmDisconnect,
@@ -89,6 +95,28 @@ struct SyncSettingsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(disconnectError ?? "")
+        }
+    }
+
+    private var tokenRow: some View {
+        Group {
+            HStack(spacing: Spacing.sm) {
+                if model.syncToken.hasSavedToken {
+                    Label { Text("Token saved") } icon: {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    }
+                } else {
+                    Label("No token saved", systemImage: "circle").foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(model.syncToken.hasSavedToken ? "Replace…" : "Add…") { showToken = true }
+                    .controlSize(.small)
+            }
+            if !model.syncToken.hasSavedToken {
+                Text("Sync over HTTPS needs an access token. Add one to keep syncing.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

@@ -262,7 +262,7 @@ final class UpdateCheckServiceTests: XCTestCase {
         )
     }
 
-    func testRemoteHeadUsesCredentialIsolationArguments() throws {
+    func testRemoteHeadPreservesRemoteInCommandFailure() throws {
         let productionGit = GitService(fileService: fileService, askpassHelperPath: tempDir + "/askpass")
         XCTAssertThrowsError(
             try NativeTestWork.run { [self] in
@@ -277,8 +277,8 @@ final class UpdateCheckServiceTests: XCTestCase {
                 return XCTFail("expected command failure, got \(error)")
             }
             XCTAssertEqual(
-                Array(args.prefix(5)),
-                ["-c", "credential.helper=", "ls-remote", "--",
+                Array(args.prefix(3)),
+                ["ls-remote", "--",
                  "file:///definitely-missing-pensieve-update-repository"]
             )
         }

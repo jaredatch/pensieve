@@ -90,12 +90,15 @@ actor SyncCoordinator {
             return .failed("Sync coordinator has not been configured.")
         }
         let result: SyncCycleResult
+        var cycleError: Error?
+        var authentication = SyncAuthentication(remote: nil, credential: nil)
         do {
             // A fresh context prevents an earlier cycle's registered objects from hiding a newer UI save.
             let cycleContext = ModelContext(modelContainer)
             var preflightWarnings: [String] = [], preparedHeadStamp: String?, preflightAdvanced = false
+            authentication = try resolveAuthentication()
             let outcome = try engine.sync(root: root, message: Self.commitMessage(at: now()),
-                                          credential: resolveCredential(), context: cycleContext,
+                                          credential: authentication.credential, context: cycleContext,
                                           prepare: { context in
                     let currentStamp = self.headStamp()
                     preparedHeadStamp = currentStamp
@@ -134,11 +137,21 @@ actor SyncCoordinator {
             result = cycleResult(from: outcome, preflightWarnings: preflightWarnings,
                                  preparedHeadStamp: preparedHeadStamp, preflightAdvanced: preflightAdvanced)
         } catch {
-            result = Self.cycleFailure(error)
+            cycleError = error
+            result = Self.cycleFailure(authentication.reporting(error))
         }
-        let fields = result.auditFields
-        audit.record(category: fields.category, detail: fields.detail)
+        Self.recordAudit(for: result, error: cycleError, audit: audit)
         return result
+    }
+
+    /// The UI keeps its repair advice; the audit keeps git’s original authentication diagnostic.
+    private static func recordAudit(for result: SyncCycleResult, error: Error?, audit: SyncAuditWriting) {
+        let fields = result.auditFields
+        if let error, case GitError.authenticationFailed = error {
+            audit.record(category: fields.category, detail: error.localizedDescription)
+        } else {
+            audit.record(category: fields.category, detail: fields.detail)
+        }
     }
 
     private func cycleResult(
@@ -191,17 +204,13 @@ actor SyncCoordinator {
         }
     }
 
-    private func resolveCredential() throws -> GitCredential? {
-        guard let git, let credentials else { return nil }
+    private func resolveAuthentication() throws -> SyncAuthentication {
+        guard let git, let credentials else { return SyncAuthentication(remote: nil, credential: nil) }
         try git.probeUsability().requireUsable()
         guard let remote = try git.remoteURL(at: root),
-              let spec = RemoteURLPolicy.parse(remote) else { return nil }
-        switch spec.transport {
-        case .ssh:
-            return .sshAgent
-        case .https:
-            return credentials.credential(forHost: spec.host)
-        }
+              let spec = RemoteURLPolicy.parse(remote) else { return SyncAuthentication(remote: nil, credential: nil) }
+        return SyncAuthentication(remote: spec, credential: spec.transport == .ssh
+            ? .sshAgent : credentials.credential(forHost: spec.host))
     }
 
     private static func commitMessage(at date: Date) -> String {

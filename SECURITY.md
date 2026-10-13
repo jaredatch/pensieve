@@ -33,9 +33,19 @@ A skill installed from GitHub is text someone else wrote. Pensieve treats it tha
 
 ## Git remotes and credentials
 
-Pensieve accepts only `https://`, `ssh://` and `user@host:path` remotes. It refuses git's `ext::` and other helper transports, `file://`, plain `http://`, and anything that could be read as a command-line option. It checks the remote when you connect and again before every sync. Git runs with a cleaned environment, so variables like `GIT_SSH_COMMAND` from your shell can't redirect it.
+Connect checks the URL you enter, and Pensieve checks again before each sync. These checks accept `https://`, `ssh://` and `user@host:path`, and refuse git's `ext::` and other helper transports, `file://`, plain `http://`, and anything that could be read as a command-line option. Git applies rewrites from your own config, and Pensieve does not check every rewritten address. Those checks do not cover `pushInsteadOf`, `remote.origin.pushurl`, extra origin URLs or rewritten addresses used by Connect, installs, update checks, History fetches and token checks. Git config can change the destination host as well as the transport, including plain `http://`.
 
-A personal access token is stored in your macOS Keychain. It reaches git only through a small helper that reads it from the environment of that one git process. It never lands in a URL, a command line, `.git/config` or a log.
+Pensieve stores the HTTPS token you enter in your macOS Keychain. Git credential helpers cannot supply, save or erase credentials during Pensieve's git commands. Other askpass programs from git config or the environment cannot answer HTTP credential requests. A missing or blank token leaves Pensieve's token helper disabled. Connect refuses a blank token.
+
+Pensieve's token helper answers only git's prompts for the remote's own host over HTTPS. A rewrite, extra URL or proxy elsewhere never receives Pensieve's token. A redirect to another host also gets no token, matching git's host-scoped credential helpers. Connect normalizes `www.github.com` to `github.com` to avoid that redirect. Credentials you configured yourself can still go wherever git sends them.
+
+Credentials you configure yourself for git or curl remain available over HTTPS, even with a nonblank Pensieve token. Examples include `.netrc`, `http.extraHeader`, URL rewrites containing credentials, cookies and client certificates. Any of these sources can authenticate before or instead of Pensieve's token.
+
+SSH can use your agent, on-disk identity files and `~/.ssh/config`. A passphrase-protected key must be loaded in the agent, or have its passphrase saved in the macOS Keychain through `UseKeychain`. A Finder launch has no TTY; retained `SSH_ASKPASS` runs only when `DISPLAY` is set or `SSH_ASKPASS_REQUIRE=force`, so a passphrase prompt is not guaranteed. Pensieve strips the inherited `GIT_SSH_COMMAND` environment variable, but `core.sshCommand` in your git config can still select a different SSH command.
+
+Git runs with a cleaned environment: Pensieve strips inherited `GIT_SSH`, `GIT_SSH_COMMAND`, `GIT_SSH_VARIANT`, `GIT_PROXY_COMMAND`, configuration redirects and injection variables (`GIT_CONFIG`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_COUNT`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_KEY_*`, `GIT_CONFIG_VALUE_*`), and all `GIT_TRACE*` variables. It preserves the hardening `GIT_CONFIG_NOSYSTEM`.
+
+Pensieve passes the saved token to git through a small helper that reads it from that git process's environment. Pensieve never writes the token into a URL, a command line, `.git/config` or a log.
 
 ## Releases and updates
 

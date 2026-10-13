@@ -13,7 +13,7 @@ final class CredentialStoreTests: XCTestCase {
         let store = InMemoryCredentialStore()
         XCTAssertNil(store.credential(forHost: "example.com"))
         try store.store(token: "tok", username: "user", forHost: "example.com")
-        guard case let .httpsToken(username, token) = store.credential(forHost: "example.com") else {
+        guard case let .httpsToken(username, token, _) = store.credential(forHost: "example.com") else {
             return XCTFail("expected a stored credential")
         }
         XCTAssertEqual(username, "user")
@@ -34,7 +34,7 @@ final class CredentialStoreTests: XCTestCase {
                 for iteration in 0..<128 {
                     let value = "worker-\(worker)-\(iteration)"
                     try store.store(token: value, username: value, forHost: host)
-                    if store.credential(forHost: host) != .httpsToken(username: value, token: value) {
+                    if store.credential(forHost: host) != .httpsToken(username: value, token: value, host: host) {
                         failuresLock.withLock { failures.append("\(host) lost its stored credential") }
                     }
                     try store.delete(forHost: host)
@@ -42,7 +42,7 @@ final class CredentialStoreTests: XCTestCase {
                         failuresLock.withLock { failures.append("\(host) kept its deleted credential") }
                     }
                     try store.store(token: value, username: value, forHost: "shared.invalid")
-                    if case let .httpsToken(username, token) = store.credential(forHost: "shared.invalid"), username != token {
+                    if case let .httpsToken(username, token, _) = store.credential(forHost: "shared.invalid"), username != token {
                         failuresLock.withLock { failures.append("shared credential mixed two writes") }
                     }
                     try store.delete(forHost: "shared.invalid")
@@ -55,7 +55,7 @@ final class CredentialStoreTests: XCTestCase {
         XCTAssertTrue(failures.isEmpty, failures.joined(separator: "\n"))
         for worker in 0..<workerCount {
             XCTAssertEqual(store.credential(forHost: "worker-\(worker).invalid"),
-                           .httpsToken(username: "worker", token: "final-\(worker)"))
+                           .httpsToken(username: "worker", token: "final-\(worker)", host: "worker-\(worker).invalid"))
         }
     }
 
@@ -68,11 +68,25 @@ final class CredentialStoreTests: XCTestCase {
 
         XCTAssertNil(store.credential(forHost: host))
         try store.store(token: "pat-123", username: "x-access-token", forHost: host)
-        guard case let .httpsToken(username, token) = store.credential(forHost: host) else {
+        guard case let .httpsToken(username, token, _) = store.credential(forHost: host) else {
             return XCTFail("expected a Keychain credential")
         }
         XCTAssertEqual(username, "x-access-token")
         XCTAssertEqual(token, "pat-123")
+        try store.store(token: "replacement", username: "new-user", forHost: host)
+        XCTAssertEqual(store.credential(forHost: host), .httpsToken(username: "new-user", token: "replacement", host: host))
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: KeychainCredentialStore.serviceName(
+                bundleIdentifier: Bundle.main.bundleIdentifier, host: host),
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+        var items: CFTypeRef?
+        XCTAssertEqual(SecItemCopyMatching(query as CFDictionary, &items), errSecSuccess)
+        let attributes = try XCTUnwrap(items as? [[String: Any]])
+        XCTAssertEqual(attributes.count, 1)
+        XCTAssertEqual(attributes.first?[kSecAttrAccount as String] as? String, "new-user")
         try store.delete(forHost: host)
         XCTAssertNil(store.credential(forHost: host))
     }
@@ -92,18 +106,18 @@ final class CredentialStoreTests: XCTestCase {
 
         XCTAssertEqual(
             store.credential(forHost: baseHost),
-            .httpsToken(username: "sync-user", token: "sync-decoy")
+            .httpsToken(username: "sync-user", token: "sync-decoy", host: baseHost)
         )
         XCTAssertEqual(
             store.credential(forHost: installHost),
-            .httpsToken(username: "x-access-token", token: "install-secret")
+            .httpsToken(username: "x-access-token", token: "install-secret", host: baseHost)
         )
 
         try store.delete(forHost: installHost)
         XCTAssertNil(store.credential(forHost: installHost))
         XCTAssertEqual(
             store.credential(forHost: baseHost),
-            .httpsToken(username: "sync-user", token: "sync-decoy")
+            .httpsToken(username: "sync-user", token: "sync-decoy", host: baseHost)
         )
 
         try store.store(token: "install-secret", username: "x-access-token", forHost: installHost)
@@ -111,7 +125,7 @@ final class CredentialStoreTests: XCTestCase {
         XCTAssertNil(store.credential(forHost: baseHost))
         XCTAssertEqual(
             store.credential(forHost: installHost),
-            .httpsToken(username: "x-access-token", token: "install-secret")
+            .httpsToken(username: "x-access-token", token: "install-secret", host: baseHost)
         )
     }
 
