@@ -2,9 +2,10 @@ import XCTest
 @testable import Pensieve
 
 extension MarkdownEditorHostTests {
-    func testClosedFrontmatterUsesYAMLStylesAndKeepsMarkdownBodyStyles() {
+    func testClosedFrontmatterUsesYAMLStylesAndKeepsMarkdownBodyStyles() throws {
         let (coordinator, window) = makeReadyEditor()
         defer { window.close() }
+        XCTAssertEqual(try parserCheck(coordinator, name: "boundedClosedHeader"), "bounded")
         let body = "# Heading\n**bold** and *italic* with `code` and [link](https://example.com)\n"
             + "- item\n\n---\n\n```yaml\n- code\n```"
         for theme in ["light", "dark"] {
@@ -46,21 +47,38 @@ extension MarkdownEditorHostTests {
         }
     }
 
-    func testUnrecognizedFrontmatterKeepsMarkdownStyling() {
+    func testUnrecognizedFrontmatterKeepsMarkdownStyling() throws {
         let (coordinator, window) = makeReadyEditor()
         defer { window.close() }
+        XCTAssertEqual(try parserCheck(coordinator, name: "nonFenceReuse"), "reused")
         let shapes = [
             " ---\nname: Example\n---", "\t---\nname: Example\n---",
             "\n---\nname: Example\n---", "\u{feff}\u{feff}---\nname: Example\n---",
             "---\u{a0}\nname: Example\n---", "----\nname: Example\n---",
             "---\nname: Example\n ---", "---\nname: Example\n...", "---\nname: Example"
         ]
+        var checked: [String] = []
+        checkUnrecognizedShapes(shapes, coordinator: coordinator, checked: &checked)
+        XCTAssertEqual(checked, shapes)
+        checked = []
+        let options = XCTExpectedFailure.Options()
+        options.issueMatcher = { $0.compactDescription.contains("Missing fixture key") }
+        XCTExpectFailure("The malformed fixture is reported and later shapes still run", options: options) {
+            checkUnrecognizedShapes(Array(shapes.prefix(4)) + ["malformed fixture"] + shapes.dropFirst(4),
+                                    coordinator: coordinator, checked: &checked)
+        }
+        XCTAssertEqual(checked, shapes, "A malformed fixture must not stop later shapes")
+    }
+
+    private func checkUnrecognizedShapes(_ shapes: [String], coordinator: MarkdownEditorWebView.Coordinator,
+                                         checked: inout [String]) {
         for shape in shapes {
             let document = shape + "\n\n# Markdown heading"
             XCTAssertNil(SkillParser.parse(document, retainingBOM: true).preservedFile, shape)
             coordinator.setBody(document)
             guard let index = document.components(separatedBy: "\n").firstIndex(of: "name: Example") else {
-                return XCTFail("Missing fixture key")
+                XCTFail("Missing fixture key")
+                continue
             }
             let line = index + 1
             let expected = shape.hasSuffix("---")
@@ -68,6 +86,7 @@ extension MarkdownEditorHostTests {
             XCTAssertEqual(tokenStyle(coordinator, line: line, text: "name"), expected, shape)
             XCTAssertEqual(tokenStyle(coordinator, line: lineStyles(coordinator).count, text: "Markdown"),
                            "rgb(15, 93, 181)|17px|700|normal", shape)
+            checked.append(shape)
         }
     }
 
@@ -95,6 +114,14 @@ extension MarkdownEditorHostTests {
             + "var w=document.createTreeWalker(l,NodeFilter.SHOW_TEXT),n;while(n=w.nextNode()){"
             + "if(i<n.length){var s=getComputedStyle(n.parentElement);"
             + "return [s.color,s.fontSize,s.fontWeight,s.fontStyle].join('|')}i-=n.length}return 'missing style';})()")
+    }
+
+    private func parserCheck(_ coordinator: MarkdownEditorWebView.Coordinator, name: String) throws -> String {
+        let path = try XCTUnwrap(Bundle(for: MarkdownEditorHostTests.self)
+            .url(forResource: "EditorParserChecks.bundle", withExtension: "js")).path
+        let script = try FileService().readFile(at: path)
+        return probe(coordinator, script + "\n(function(){try{return EditorParserChecks.\(name)();}"
+            + "catch(e){return String(e)}})()")
     }
 
     private func lineStyles(_ coordinator: MarkdownEditorWebView.Coordinator) -> [String] {

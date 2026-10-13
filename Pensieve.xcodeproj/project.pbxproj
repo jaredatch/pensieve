@@ -454,6 +454,7 @@
 		771D1AAB59D30481241A0A4B /* ProjectFolderRoundOneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7D1B6CEB8F41C16731AB856 /* ProjectFolderRoundOneTests.swift */; };
 		7730540763E74776D3DEAE28 /* DeployTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 434E930F09AF67D29461076D /* DeployTarget.swift */; };
 		7772817E799403C97FFEF634 /* ListRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DAE126FF838442F2098DF8D /* ListRows.swift */; };
+		77F714566BE0EEC9D611AF47 /* EditorParserChecks.bundle.js in Resources */ = {isa = PBXBuildFile; fileRef = 2AD8D73DC15E225DFF09E321 /* EditorParserChecks.bundle.js */; };
 		782B9DEDA9CA37B50AF0ADC1 /* StoreRebuildServiceTests+CheckedYAML.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E6508FA3B393A962FF22465 /* StoreRebuildServiceTests+CheckedYAML.swift */; };
 		78356E53AA90C56E66A18EE9 /* AppRuntimeLaunchCompletionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 031B2028544D61F0A1986F26 /* AppRuntimeLaunchCompletionTests.swift */; };
 		7835DAB93E4A4674EE634962 /* FileTreeComparisonTests+Bounds.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4A7425C45957D862418693F /* FileTreeComparisonTests+Bounds.swift */; };
@@ -1237,6 +1238,7 @@
 		2922322CAC6936D869763A61 /* UnsavedChangesNavigationGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnsavedChangesNavigationGuard.swift; sourceTree = "<group>"; };
 		29894E52843F7F2EADA75425 /* FileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileService.swift; sourceTree = "<group>"; };
 		2AB5E4749F6A5EFA842F2F3E /* DetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailView.swift; sourceTree = "<group>"; };
+		2AD8D73DC15E225DFF09E321 /* EditorParserChecks.bundle.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = EditorParserChecks.bundle.js; sourceTree = "<group>"; };
 		2B00504E1EDA89F3FF04FA73 /* DetailTabTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailTabTests.swift; sourceTree = "<group>"; };
 		2B3FDC1E61D6E53F8D92E8CB /* ImportScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportScannerTests.swift; sourceTree = "<group>"; };
 		2B40F27061EA7F63AFD35A34 /* LinkService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkService.swift; sourceTree = "<group>"; };
@@ -2353,6 +2355,7 @@
 				940FA035C56AB3ED31EF1851 /* CategoryReconcilerTestSupport.swift */,
 				75809273856B03C992082D4E /* DeletionTestSupport.swift */,
 				432586951533DA7C669DD1A7 /* DeployReconcilerTestSupport.swift */,
+				2AD8D73DC15E225DFF09E321 /* EditorParserChecks.bundle.js */,
 				4B139A9FD0FE4674D53DA39F /* ExcludedFileCollisionFixture.swift */,
 				1ABAB2A8105DCBF2018C5742 /* FakeGitScript.swift */,
 				8913865428654BDE695C3BB5 /* FileServiceErrorAssertions.swift */,
@@ -3354,6 +3357,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				77F714566BE0EEC9D611AF47 /* EditorParserChecks.bundle.js in Resources */,
 				8DDB99F388D1E8332D5F15CC /* PreProjectIntent.store in Resources */,
 				EFE4CE377A74402D1195D5D5 /* libyaml-license.txt in Resources */,
 				202FC230651E359B40C7859C /* release-appcast-single-archive.xml in Resources */,

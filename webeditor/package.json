@@ -7,7 +7,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "esbuild src/editor.mjs --bundle --format=iife --minify --legal-comments=eof --target=safari16 --outfile=../Pensieve/Resources/EditorAssets/editor.bundle.js"
+    "build": "esbuild src/editor.mjs --bundle --format=iife --minify --legal-comments=eof --target=safari16 --outfile=../Pensieve/Resources/EditorAssets/editor.bundle.js && esbuild test/parser-checks.mjs --bundle --format=iife --minify --target=safari16 --outfile=../PensieveTests/Fixtures/EditorParserChecks.bundle.js"
   },
   "dependencies": {
     "@codemirror/commands": "^6.0.0",
@@ -16,7 +16,7 @@
     "@codemirror/language": "^6.0.0",
     "@codemirror/state": "^6.0.0",
     "@codemirror/view": "^6.0.0",
-    "@lezer/common": "1.5.2",
+    "@lezer/common": "^1.5.2",
     "@lezer/highlight": "^1.0.0"
   },
   "devDependencies": {
