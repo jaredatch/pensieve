@@ -26,7 +26,8 @@ struct SkillFrontmatterRow: Equatable {
 
     private static func scalarText(_ value: String) -> String {
         var scalars = value.unicodeScalars
-        while let last = scalars.last, CharacterSet.newlines.contains(last) { scalars.removeLast() }
+        // LF ends normalized YAML block scalars; other hidden scalars must remain for the table to mark.
+        while scalars.last?.value == 10 { scalars.removeLast() }
         return String(scalars)
     }
 

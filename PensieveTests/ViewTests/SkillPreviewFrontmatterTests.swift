@@ -95,9 +95,22 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
         Body text.
         """)
         defer { fixture.close() }
+        let expected: [(String, String)] = [
+            ("Final line", "Final line"),
+            ("Final line\r", "Final line␍"),
+            ("Final line\r", "Final line␍"),
+            ("Final line\u{000b}", "Final line⟨U+000B⟩"),
+            ("Final line\u{000c}", "Final line⟨U+000C⟩"),
+            ("Final line\u{0085}", "Final line⟨U+0085⟩"),
+            ("Final line\u{2028}", "Final line⟨U+2028⟩"),
+            ("Final line\u{2029}", "Final line⟨U+2029⟩"),
+            ("Final line\r\n\u{2028}\u{2029}", "Final line␍\n⟨U+2028⟩⟨U+2029⟩"),
+            ("Final line", "Final line")
+        ]
         XCTAssertEqual(fixture.snapshot.frontmatterRows.dropFirst(3).map(\.value),
-                       Array(repeating: "Final line", count: 9), "The snapshot trims every terminal line break")
-        _ = try await text("before⟨U+200B⟩⟨U+202E⟩⟨U+0007⟩␍⟨U+200D⟩⟨U+FE0F⟩after", in: fixture.host)
+                       expected.map(\.0), "Only terminal LF scalars are trimmed; marked characters and internal breaks stay")
+        for (_, shown) in expected { _ = try await text(shown, in: fixture.host) }
+        _ = try await text("before⟨U+200B⟩⟨U+202E⟩⟨U+0007⟩␍⟨U+200D⟩⟨U+FE0F⟩after␍\n⟨U+2028⟩⟨U+2029⟩", in: fixture.host)
         _ = try await text("hidden⟨U+200B⟩key", in: fixture.host)
         _ = try await text("literal ⟨U+200B⟩", in: fixture.host)
     }
@@ -157,7 +170,7 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
     }
 
     private var terminalBreakFields: String {
-        ["\\n", "\\r", "\\r\\n", "\\v", "\\f", "\\N", "\\L", "\\P", "\\r\\n\\L\\P"]
+        ["\\n", "\\r", "\\r\\n", "\\v", "\\f", "\\N", "\\L", "\\P", "\\r\\n\\L\\P", "\\n\\n"]
             .enumerated().map { "terminal\($0.offset): \"Final line\($0.element)\"" }.joined(separator: "\n")
     }
 
