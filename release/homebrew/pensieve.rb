@@ -18,6 +18,7 @@ cask "pensieve" do
   end
 
   app "Pensieve.app"
+  binary "#{appdir}/Pensieve.app/Contents/Helpers/pensieve"
 
   zap trash: [
     "~/Library/Caches/com.jaredatch.Pensieve",

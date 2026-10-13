@@ -19,10 +19,12 @@ final class RuntimePathGuardTests: XCTestCase {
             withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("PensieveDaemon"),
             withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("PensieveCLI"),
+            withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let inventory = try fixtureInventory(in: directory)
         let cases = rejectedSources(members: try XCTUnwrap(inventory["location"]))
-        for folder in ["Pensieve", "PensieveDaemon"] {
+        for folder in ["Pensieve", "PensieveDaemon", "PensieveCLI"] {
             let path = directory.appendingPathComponent(folder + "/NewCollaborator.swift")
             for source in cases {
                 try ("struct NewCollaborator {\n" + source + "\n}\n").write(to: path, atomically: true, encoding: .utf8)

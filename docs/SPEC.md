@@ -354,6 +354,29 @@ Each installation has a canonical UUID in app support. Its single-writer `machin
 
 ---
 
+## Command line reads
+
+The app bundles `pensieve` in `Contents/Helpers`. The Homebrew cask links that binary
+onto PATH. It accepts `skill list` (`skill ls`, `skills`), `skill show <slug> [--content]`,
+`agent list`, `machine list`, `project list`, `deployment list` (`deployed`), `status`,
+`log [--lines <n>]`, `commands`, `completion <bash|zsh|fish>` and `version` (`--version`).
+A bare noun shows help. Commands require their full names.
+
+Library reads query the running app through its per-user, bundle-specific socket.
+The client refuses a different app path or protocol before sending a command.
+An unavailable app exits 3. Status, log and deployments share the daemon's disk
+readers and work without the app; absent or unreadable state exits 2.
+`skill show` omits content unless `--content` is explicit.
+
+`--json` prints one schema-1 envelope on stdout, with `ok`, success `data` and
+`changed`, or `error.code`, `error.message`, `error.hint` and `error.retryable`.
+Agent IDs are `claude`, `grok`, `cursor`, `codex`, `openclaw` and `hermes`.
+`commands --json` and `<command> --help --json` describe accepted input.
+Usage errors exit 64; a missing skill exits 4; the last failed sync exits 1.
+Piped human output has no color, prompts or truncation. `NO_COLOR`, `--no-input`
+and `PENSIEVE_NO_INPUT=1` are accepted. `--app-support <directory>` selects alternate
+recorded state and an endpoint in that directory.
+
 ## UI Model
 
 ### Three-Panel Layout (NavigationSplitView)

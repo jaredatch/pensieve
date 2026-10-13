@@ -19,7 +19,8 @@ PATHS_TYPES = {"RuntimePaths", "AppRuntimePaths"}
 RESOLVERS = {
     "Pensieve/Utilities/PathConstants.swift",  # Defines the real paths without performing I/O.
     "Pensieve/Utilities/Constants.swift",  # App re-exports the same definitions.
-    "Pensieve/Utilities/RuntimePaths.swift",  # Selects the process paths and credential store.
+    "Pensieve/Utilities/RuntimePaths.swift",
+    "PensieveCLI/main.swift",  # Resolves the CLI process App Support path.  # Selects the process paths and credential store.
 }
 # These callers explicitly select the process value; their collaborators still receive named paths.
 PRODUCTION_CALLERS = {"Pensieve/AppRuntime.swift", "Pensieve/AppRuntime+Paths.swift",
@@ -295,7 +296,7 @@ def main():
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.error(f'{inventory_path}: {error}')
     failures = []
-    for folder in ("Pensieve", "PensieveDaemon"):
+    for folder in ("Pensieve", "PensieveDaemon", "PensieveCLI"):
         directory = args.root / folder
         if not directory.is_dir():
             parser.error(f"missing source directory: {directory}")

@@ -37,7 +37,7 @@ final class DeployRemovalBoundaryTests: XCTestCase {
 
     private func swiftSources(root: URL) throws -> [String: String] {
         var sources: [String: String] = [:]
-        for directory in ["Pensieve", "PensieveDaemon"] {
+        for directory in ["Pensieve", "PensieveDaemon", "PensieveCLI"] {
             let folder = root.appendingPathComponent(directory)
             let files = try XCTUnwrap(FileManager.default.enumerator(at: folder,
                 includingPropertiesForKeys: nil)?.allObjects as? [URL])

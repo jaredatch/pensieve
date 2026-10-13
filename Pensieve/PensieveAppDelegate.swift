@@ -93,6 +93,7 @@ final class PensieveAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        runtime?.commandServer?.stop()
         NSApp.windows.forEach { $0.makeFirstResponder(nil) }
     }
 }

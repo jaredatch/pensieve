@@ -31,7 +31,6 @@ final class AppRuntime {
     /// and initial callbacks and watcher startup finish. A deferred ingest waits for its retry.
     /// Coordinator signaling and any backfill deferred to a later sync cycle are separate.
     private(set) var launchWorkCompleted = false
-
     private(set) var storeQuarantined = false
     private(set) var updateCheckInFlight = false
     private(set) var updateCheckError: String?
@@ -62,6 +61,8 @@ final class AppRuntime {
     private var forceLaunchPreflight = false
     @ObservationIgnored private var launchIngestRetryTask: Task<Void, Never>?
     @ObservationIgnored private var openMainWindowAction: (() -> Void)?
+    @ObservationIgnored var commandServer: AppSocketServing?
+    var commandServerError: String?
     @ObservationIgnored private(set) lazy var viewChanges = makeViewChangesModel()
     @ObservationIgnored private(set) lazy var updates = makeUpdatesModel()
     @ObservationIgnored private(set) lazy var conflictResolution = makeConflictResolutionModel()
@@ -175,6 +176,7 @@ final class AppRuntime {
         self.gitState = RuntimeGitState(probe: gitUsabilityProbe ?? { try paths.makeGitService().probeUsability() })
         resolvedSyncModel.observeGitState(gitState)
         installRuntimeCallbacks()
+        startCommandServer()
         _ = bootstrapTask
     }
 

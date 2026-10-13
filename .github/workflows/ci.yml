@@ -23,9 +23,9 @@ jobs:
     permissions:
       contents: read
     runs-on: macos-26
-    # Recovery/workflow: worst of three serial samples, rounded up to milliseconds, 2026-10-05;
-    # Mac16,11 / Apple M4 Pro, macOS 26.6.2 (25G83): 481.623/8.951 s, 2x runner and 3x margin.
-    timeout-minutes: 162 # 152 step minutes + 10 headroom; no job-cap limit.
+    # Expanded release suite: 696.103 s local (2026-10-13); workflow baseline: 8.951 s.
+    # Bounds use 2x runner time and 3x margin.
+    timeout-minutes: 184 # 174 step minutes + 10 headroom; no job-cap limit.
     env:
       CI_LARGEST_PUSH: 200 # Covers plan merges; larger pushes must resize the measured bounds.
     # Worst times: Actions runs 37074075055 and 37063706683, with local additions scaled by 2x below.
@@ -107,9 +107,8 @@ jobs:
         run: ruby script/workflow_self_test.rb
 
       - name: Test release recovery
-        # Worst of three serial samples, rounded up to milliseconds, 2026-10-05;
-        # Mac16,11 / Apple M4 Pro, macOS 26.6.2 (25G83): 481.623 s.
-        timeout-minutes: 49 # Estimate 964 s = ceil(2 x 481.623); absent from API runs; bound >= 3x.
+        # Full suite including CLI release checks, 2026-10-13: 696.103 s local.
+        timeout-minutes: 70 # Estimate 1393 s = ceil(2 x 696.103); bound >= 3x.
         run: python3 -B script/release_self_test.py
 
       - name: Test development build host selection
@@ -147,6 +146,10 @@ jobs:
             echo "::error::test count ${count:-none} below committed floor $floor"
             exit 1
           fi
+
+      - name: Test CLI contract
+        timeout-minutes: 1 # Three serial local samples: 1.300/1.119/1.174 s; 2x runner and 3x margin.
+        run: python3 -B script/cli_contract_test.py --binary DerivedData/Build/Products/Debug/Pensieve.app/Contents/Helpers/pensieve
 
       - name: Upload failed test evidence
         timeout-minutes: 5 # Worst measured: 7 s; bound >= 3x.

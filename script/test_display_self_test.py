@@ -24,7 +24,7 @@ class DisplayLifecycleTests(unittest.TestCase):
         for name in ("test.sh", "test_runs.py", "test_temp_cleanup.py", "check-live-defaults.py",
                      "runtime-path-members.json", "check-path-syntax.py"):
             shutil.copy2(source / name, scripts / name)
-        for name in ("Pensieve", "PensieveDaemon", "bin"):
+        for name in ("Pensieve", "PensieveDaemon", "PensieveCLI", "bin"):
             (self.root / name).mkdir()
         self.events = self.root / "events.jsonl"
         self.lock = self.root / ".local/state/execplan/test.lock"

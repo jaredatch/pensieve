@@ -324,6 +324,7 @@ sign_inside_out() {
   sign_path "$sparkle_b/Autoupdate"
   sign_path "$sparkle_b/Updater.app"
   sign_path "$sparkle"
+  sign_path "$APP_PATH/Contents/Helpers/pensieve"
   sign_path "$APP_PATH/Contents/MacOS/pensieve-daemon"
   sign_path "$APP_PATH"
 }

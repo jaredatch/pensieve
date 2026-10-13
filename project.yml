@@ -8,6 +8,9 @@ options:
   groupSortPosition: top
 
 packages:
+  ArgumentParser:
+    url: https://github.com/apple/swift-argument-parser.git
+    exactVersion: 1.6.2
   Yams:
     url: https://github.com/jpsim/Yams.git
     exactVersion: 6.2.2
@@ -68,6 +71,12 @@ targets:
       - package: Yams
       - package: MarkdownUI
       - package: Sparkle
+      - target: PensieveCLI
+        embed: true
+        codeSign: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Helpers
       - target: PensieveDaemon
         embed: true
         codeSign: true
@@ -129,6 +138,8 @@ targets:
       - path: Pensieve/Services/GitServiceHistory.swift
       - path: Pensieve/Services/GitServiceConflict.swift
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+Socket.swift
+      - path: Pensieve/Services/SocketTransport.swift
       - path: Pensieve/Services/FileService+Publication.swift
       - path: Pensieve/Services/VendorTemporaryDirectory.swift
       - path: Pensieve/Services/FileService+ProjectFolder.swift
@@ -139,6 +150,7 @@ targets:
       - path: Pensieve/Services/FileService+DirectoryProbe.swift
       - path: Pensieve/Services/FileTreeComparison.swift
       - path: Pensieve/Services/FileService+ImportCopy.swift
+      - path: Pensieve/Services/StoreExclusions.swift
       - path: Pensieve/Services/FileService+TreeWalk.swift
       - path: Pensieve/Services/FileService+TreeComparison.swift
       - path: Pensieve/Services/RemoteURLPolicy.swift
@@ -162,6 +174,8 @@ targets:
     sources:
       - path: PensieveDaemon
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+Socket.swift
+      - path: Pensieve/Services/SocketTransport.swift
       - path: Pensieve/Services/FileService+Publication.swift
       - path: Pensieve/Services/VendorTemporaryDirectory.swift
       - path: Pensieve/Services/FileService+ProjectFolder.swift
@@ -174,6 +188,7 @@ targets:
       - path: Pensieve/Services/FileService+DirectoryProbe.swift
       - path: Pensieve/Services/FileTreeComparison.swift
       - path: Pensieve/Services/FileService+ImportCopy.swift
+      - path: Pensieve/Services/StoreExclusions.swift
       - path: Pensieve/Services/FileService+TreeWalk.swift
       - path: Pensieve/Services/FileService+TreeComparison.swift
       - path: Pensieve/Services/GitService.swift
@@ -209,10 +224,12 @@ targets:
       - path: Pensieve/Services/DaemonCLI.swift
       - path: Pensieve/Services/DaemonCLI+Deployed.swift
       - path: Pensieve/Services/SyncDaemon.swift
+      - path: Pensieve/Services/DaemonCycleResult.swift
       - path: Pensieve/Services/SyncAuthentication.swift
       - path: Pensieve/Services/SyncAudit.swift
       - path: Pensieve/Services/DeployReconciler.swift
       - path: Pensieve/Models/PlatformTarget.swift
+      - path: Pensieve/Models/PlatformTarget+CLI.swift
       - path: Pensieve/Models/SkillScope.swift
       - path: Pensieve/Models/AdapterConfig.swift
       - path: Pensieve/Utilities/PathConstants.swift
@@ -230,3 +247,50 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
     dependencies:
       - package: Yams
+
+  PensieveCLI:
+    type: tool
+    platform: macOS
+    sources:
+      - path: PensieveCLI
+      - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+Socket.swift
+      - path: Pensieve/Services/FileService+Publication.swift
+      - path: Pensieve/Services/VendorTemporaryDirectory.swift
+      - path: Pensieve/Services/FileService+ProjectFolder.swift
+      - path: Pensieve/Services/ProjectFolderError.swift
+      - path: Pensieve/Services/FileService+BoundedRead.swift
+      - path: Pensieve/Services/FileService+RuleHeader.swift
+      - path: Pensieve/Services/FileService+DescriptorCopy.swift
+      - path: Pensieve/Services/FileService+DirectoryProbe.swift
+      - path: Pensieve/Services/FileTreeComparison.swift
+      - path: Pensieve/Services/FileService+ImportCopy.swift
+      - path: Pensieve/Services/StoreExclusions.swift
+      - path: Pensieve/Services/FileService+TreeWalk.swift
+      - path: Pensieve/Services/FileService+TreeComparison.swift
+      - path: Pensieve/Utilities/PathSyntax.swift
+      - path: Pensieve/Services/CLIProtocol.swift
+      - path: Pensieve/Services/SocketTransport.swift
+      - path: Pensieve/Services/DaemonCLI.swift
+      - path: Pensieve/Services/DaemonCLI+Deployed.swift
+      - path: Pensieve/Services/DaemonCycleResult.swift
+      - path: Pensieve/Services/SyncAudit.swift
+      - path: Pensieve/Services/SyncLock.swift
+      - path: Pensieve/Services/DeployStateStore.swift
+      - path: Pensieve/Services/DeployPaths.swift
+      - path: Pensieve/Utilities/PathConstants.swift
+      - path: Pensieve/Utilities/DisplayTextSanitizer.swift
+      - path: Pensieve/Models/PlatformTarget.swift
+      - path: Pensieve/Models/PlatformTarget+CLI.swift
+    settings:
+      base:
+        PRODUCT_NAME: pensieve
+        PRODUCT_MODULE_NAME: PensieveCLI
+        MARKETING_VERSION: "0.14.0"
+        SWIFT_VERSION: "5.10"
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_REQUIRED: NO
+        ENABLE_HARDENED_RUNTIME: YES
+    dependencies:
+      - package: ArgumentParser

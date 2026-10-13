@@ -4,6 +4,7 @@ import Foundation
 // MARK: - Protocol
 
 protocol FileServiceProtocol {
+    func makeSocketListener(at path: String) throws -> SocketListener
     func readFile(at path: String) throws -> String
     func readData(at path: String) throws -> Data
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data
@@ -82,6 +83,8 @@ struct RegularFileMetadata: Equatable {
 // MARK: - Default implementations
 
 extension FileServiceProtocol {
+    /// Unmodeled endpoints never create host files.
+    func makeSocketListener(at path: String) throws -> SocketListener { throw CocoaError(.featureUnsupported) }
     /// Unmodeled folder copies refuse without host I/O.
     func copyImportedSkillContents(fromDirectory source: String,
                                    toDirectory destination: String) throws -> [SkillFolderCopySkip] {

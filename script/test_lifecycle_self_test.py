@@ -29,6 +29,7 @@ class TestLifecycleTests(unittest.TestCase):
         scripts.mkdir()
         (self.root / "Pensieve").mkdir()
         (self.root / "PensieveDaemon").mkdir()
+        (self.root / "PensieveCLI").mkdir()
         for name in ("test.sh", "test_diagnostics.py", "test_runs.py", "test_temp_cleanup.py", "check-live-defaults.py",
                      "runtime-path-members.json", "check-path-syntax.py"):
             source = SCRIPTS / name

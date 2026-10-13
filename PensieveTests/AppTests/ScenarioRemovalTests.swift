@@ -19,7 +19,7 @@ final class ScenarioRemovalTests: XCTestCase {
                 + #"ScenarioDetailView|ScenarioDetailModel|ScenarioListView|ScenarioRecord|Scenario|ScenarioAssignment)\b"#
         )
         var scanned = 0
-        for folder in ["Pensieve", "PensieveDaemon"] {
+        for folder in ["Pensieve", "PensieveDaemon", "PensieveCLI"] {
             let files = try XCTUnwrap(FileManager.default.enumerator(
                 at: root.appendingPathComponent(folder), includingPropertiesForKeys: nil
             ))
