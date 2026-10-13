@@ -111,7 +111,7 @@ extension SyncNudgeTests {
         let expectedBody = SkillSerializer.serialize(
             name: target.name, description: "New description", body: "New"
         )
-        registration.begin(target.directoryName, SkillParser.stripFrontmatter(expectedBody))
+        registration.begin(target.directoryName, expectedBody)
         var bodyWriteSucceeded = false
         defer { registration.end(target.directoryName, bodyWriteSucceeded) }
         try write(target.directoryName, expectedBody)

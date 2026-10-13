@@ -219,9 +219,15 @@ extension SkillInstallService {
         beforeReplace: () throws -> Void = {},
         registration: SyncBodyWriteRegistration
     ) throws {
-        let expectedBody = SkillParser.stripFrontmatter(
-            try fileService.readFile(at: sourceDirectory + "/SKILL.md")
-        )
+        // Own-write records retain the BOM, matching the watcher's whole-file read.
+        let path = sourceDirectory + "/SKILL.md"
+        let data = try fileService.readRegularFileData(at: path, maximumBytes: Int.max)
+        guard let expectedBody = String(validating: data, as: UTF8.self) else {
+            throw CocoaError(.fileReadInapplicableStringEncoding, userInfo: [
+                NSFilePathErrorKey: path,
+                NSLocalizedDescriptionKey: "Couldn't read \(path): the file isn't valid UTF-8."
+            ])
+        }
         var bodyWriteBegan = false
         var bodyWriteSucceeded = false
         defer { if bodyWriteBegan { registration.end(slug, bodyWriteSucceeded) } }

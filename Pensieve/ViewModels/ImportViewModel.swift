@@ -14,6 +14,7 @@ final class ImportViewModel {
     private let manifestRoot: String
     private let notifier: SyncStateNotifying
     private let echoRegistrar: SyncWriteEchoRegistering
+    private let bodyWriteRegistration: SyncBodyWriteRegistration
 
     var discoveredSkills: [DiscoveredSkill] = []
     var duplicateGroups: [[DiscoveredSkill]] = []
@@ -55,7 +56,8 @@ final class ImportViewModel {
         manifestService: ManifestSnapshotting? = nil,
         manifestRoot: String,
         notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
-        echoRegistrar: @escaping SyncWriteEchoRegistering = SyncWriteEchoRegistrar.suppressed
+        echoRegistrar: @escaping SyncWriteEchoRegistering = SyncWriteEchoRegistrar.suppressed,
+        bodyWriteRegistration: SyncBodyWriteRegistration = .suppressed
     ) {
         self.scanner = scanner
         self.skillStore = skillStore
@@ -64,6 +66,7 @@ final class ImportViewModel {
         self.manifestRoot = manifestRoot
         self.notifier = notifier
         self.echoRegistrar = echoRegistrar
+        self.bodyWriteRegistration = bodyWriteRegistration
     }
 
     // MARK: - Scan
@@ -175,9 +178,10 @@ final class ImportViewModel {
             do {
                 let resolvedDescription = resolvedDescription(for: discovered)
                 let prepared = preparedContent(for: discovered, description: resolvedDescription)
-                let result = try createImportedSkill(discovered, description: resolvedDescription,
-                                                      content: prepared.content, avoiding: taken)
+                let result = try createImportedSkill(discovered, content: prepared.content, avoiding: taken)
                 let dirName = result.directoryName
+                bodyWriteRegistration.begin(dirName, prepared.content)
+                bodyWriteRegistration.end(dirName, true)
                 importNotices += SkillFolderCopySkip.notices(for: result.skipped).map { "\(discovered.name): \($0)" }
                 if prepared.keptAsText {
                     importNotices.append("\(discovered.name): frontmatter was kept as text.")
@@ -251,21 +255,22 @@ final class ImportViewModel {
     }
 
     private func createImportedSkill(
-        _ discovered: DiscoveredSkill, description: String, content: String?, avoiding: Set<String>
+        _ discovered: DiscoveredSkill, content: String, avoiding: Set<String>
     ) throws -> SkillFolderImportResult {
-        let text = content ?? SkillSerializer.serialize(name: discovered.name, description: description, body: discovered.body)
         if discovered.sourceContent != nil, discovered.sourcePlatform != "cursor" {
-            return try skillStore.createSkill(name: discovered.name, content: text,
+            return try skillStore.createSkill(name: discovered.name, content: content,
                 copying: (discovered.sourcePath as NSString).deletingLastPathComponent, avoiding: avoiding)
         }
         return SkillFolderImportResult(directoryName: try skillStore.createSkill(name: discovered.name,
-            content: text, avoiding: avoiding))
+            content: content, avoiding: avoiding))
     }
 
     private func preparedContent(
         for discovered: DiscoveredSkill, description: String
-    ) -> (content: String?, keptAsText: Bool) {
-        guard let source = discovered.sourceContent else { return (nil, false) }
+    ) -> (content: String, keptAsText: Bool) {
+        guard let source = discovered.sourceContent else {
+            return (SkillSerializer.serialize(name: discovered.name, description: description, body: discovered.body), false)
+        }
         let parsed = SkillParser.parse(source)
         if parsed.preservedFrontmatter != nil,
            let normalized = SkillSerializer.normalizeIdentity(name: discovered.name, description: description, parsed: parsed) {

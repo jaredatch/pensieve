@@ -26,7 +26,7 @@ extension SkillLibraryViewModel {
         }
     }
 
-    /// Treat watcher events produced by the resident coordinator's pull/rebuild as self-authored.
+    /// Observe the coordinator's whole-file changes and defer dirty-draft questions to its final state.
     func beginCoordinatorChanges() {
         coordinatorCompletionGeneration &+= 1
         isApplyingCoordinatorChanges = true
@@ -66,9 +66,10 @@ extension SkillLibraryViewModel {
             needsLaterSync = !laterSlugs.isEmpty
         }
         for directoryName in coordinatorObservedSlugs {
-            setLastWrittenBody(
-                currentOnDiskBody(directoryName: directoryName), directoryName: directoryName
-            )
+            let document = currentOnDiskBody(directoryName: directoryName)
+            refreshObservedIdentity(directoryName: directoryName, document: document)
+            setLastWrittenBody(document, directoryName: directoryName)
+            advanceCaughtUpDraft(directoryName: directoryName, document: document)
         }
         askAboutCoordinatorChanges(acceptedSlugs)
         // The fingerprint is not observed (`lastWrittenBody`): one main-thread signal after the final re-seed
@@ -84,6 +85,7 @@ extension SkillLibraryViewModel {
         coordinatorObservedSlugs.removeAll()
         coordinatorChangeSequences.removeAll()
         isApplyingCoordinatorChanges = false
+        drainExternalQuestions()
         if needsLaterSync || (effectiveHasUnsyncedChanges && !acceptedSlugs.isEmpty) { notifier() }
     }
 
@@ -93,7 +95,7 @@ extension SkillLibraryViewModel {
         var foundChange = false
         for directoryName in candidateSlugs where !acceptedSlugs.contains(directoryName) {
             let currentBody = currentOnDiskBody(directoryName: directoryName)
-            guard coordinatorBaselineBodies[directoryName] != currentBody,
+            guard !Self.bodiesMatch(currentBody, coordinatorBaselineBodies[directoryName]),
                   !wasLastWrittenByApp(directoryName: directoryName, currentBody: currentBody) else { continue }
             acceptExternalChange(directoryName: directoryName, currentBody: currentBody, shouldNotify: false)
             acceptedSlugs.insert(directoryName)
@@ -102,13 +104,11 @@ extension SkillLibraryViewModel {
         return foundChange
     }
 
-    /// The cycle's one question, against its final body: a draft still dirty on a file the cycle moved (its
-    /// body differs from the cycle's baseline) is asked about once, here, never at an intermediate event; a
-    /// transient body that came and went asks nothing and keeps the draft.
+    /// Queue final changes. Explicit Save intent survives independently until it is answered or saved.
     private func askAboutCoordinatorChanges(_ slugs: Set<String>) {
         for directoryName in slugs.sorted()
         where hasUnsavedChanges(forDirectory: directoryName)
-            && coordinatorBaselineBodies[directoryName] != currentOnDiskBody(directoryName: directoryName) {
+            && !Self.bodiesMatch(currentOnDiskBody(directoryName: directoryName), coordinatorBaselineBodies[directoryName]) {
             requestUnsavedChangesPrompt(directoryName: directoryName, reason: .externalChange)
         }
     }
@@ -135,7 +135,7 @@ extension SkillLibraryViewModel {
     /// Handle an external-change notification for `directoryName`.
     /// The watcher delivers on the MAIN queue, so this runs on main — safe to mutate
     /// @Observable state directly, no extra hop. Suppress the app's OWN writes via the
-    /// last-written-content fingerprint: if the on-disk body equals what we last wrote/loaded,
+    /// last-written-content fingerprint: if the complete file equals what we last wrote/loaded,
     /// this event is our echo, not a real external edit.
     /// An unreadable file reads as an empty body: the app's own deletion records that fingerprint
     /// (`deleteSkillEntry`, PLAN-26), so its echo — and every repeat event for one disappearance — is ours;
@@ -148,7 +148,6 @@ extension SkillLibraryViewModel {
             return
         }
         if isApplyingCoordinatorChanges {
-            coordinatorObservedSlugs.insert(directoryName)
             acceptExternalChange(directoryName: directoryName, currentBody: currentBody, shouldNotify: false)
             return
         }

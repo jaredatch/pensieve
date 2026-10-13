@@ -12,6 +12,9 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - Overview also warns about known agent limits, like a name too long for Codex or an always-on Cursor rule that loads into every chat.
 - About Pensieve now credits the open-source code Pensieve ships with, and shows each project's license.
 - View Changes opens its own window. It lists every file an update would change, with lines added and removed, and shows each one as an inline diff. Open it from a skill's update banner or from any row in the Updates sheet. Invisible characters show up as visible marks, so nothing can hide in a diff.
+- You can edit a skill's whole `SKILL.md` in Content › Source now, frontmatter included. Before it saves a changed header, Pensieve checks that the header still reads as YAML, still has a name and a description, and keeps the skill's name. If not, nothing is written and the header says why.
+- Source colors a skill's frontmatter as YAML.
+- Rendered shows a skill's frontmatter as a table of keys and values above the text. Values show as plain text, with invisible characters marked.
 
 ### Removed
 
@@ -66,6 +69,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - Pensieve could freeze while running git on Macs with only a few cores. Several git commands at once could wait on each other forever. They don't anymore.
 - A crafted `SKILL.md` could trick Pensieve into rewriting the wrong line of its frontmatter on import or upgrade. Pensieve now only rewrites a key when it and the YAML parser agree on exactly where that key starts, and it double-checks the result. If anything looks off, the file stays as it was.
 - Saving a skill with Windows line endings no longer shows up as a change made outside the app.
+- If a skill's file changes on disk while you're editing it, Save asks before overwriting it, even when Pensieve hasn't noticed the change yet.
+- When another app changes only a skill's frontmatter, its name and description in the list now update.
 
 ## [0.14.0] - 2026-09-30
 

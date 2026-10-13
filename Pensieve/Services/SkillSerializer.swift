@@ -179,7 +179,7 @@ enum SkillSerializer {
         return inserted + (lines.last?.ending ?? "")
     }
 
-    /// Shared by unchanged serialization and editor/watcher comparisons.
+    /// Canonical comparison for legacy body rewrites. Complete editor documents retain boundary newlines.
     static func comparableBody(_ body: String) -> String {
         normalizeLineEndings(SkillParser.canonicalBody(body), to: "\n")
     }

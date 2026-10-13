@@ -5,6 +5,9 @@ import XCTest
 struct ReverseListingFileService: FileServiceProtocol {
     let wrapped: FileService
 
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes)
+    }
     func readFile(at path: String) throws -> String { try wrapped.readFile(at: path) }
     func writeFile(at path: String, content: String) throws {
         try wrapped.writeFile(at: path, content: content)
@@ -31,6 +34,9 @@ struct FailingCopyFileService: FileServiceProtocol {
     let wrapped: FileService
     let failingName: String
 
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes)
+    }
     func readFile(at path: String) throws -> String { try wrapped.readFile(at: path) }
     func writeFile(at path: String, content: String) throws {
         try wrapped.writeFile(at: path, content: content)
@@ -65,6 +71,9 @@ final class RecordingVendorFileService: FileServiceProtocol {
         self.wrapped = wrapped
     }
 
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes)
+    }
     func readFile(at path: String) throws -> String { try wrapped.readFile(at: path) }
     func writeFile(at path: String, content: String) throws {
         try wrapped.writeFile(at: path, content: content)
@@ -111,6 +120,9 @@ final class SwapSourceOnRegularCheckFileService: FileServiceProtocol {
         self.symlinkTarget = symlinkTarget
     }
 
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes)
+    }
     func readFile(at path: String) throws -> String { try wrapped.readFile(at: path) }
     func writeFile(at path: String, content: String) throws {
         try wrapped.writeFile(at: path, content: content)

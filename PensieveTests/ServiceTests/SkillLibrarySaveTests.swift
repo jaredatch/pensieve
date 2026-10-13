@@ -21,10 +21,12 @@ final class SkillLibrarySaveTests: XCTestCase {
         library.startWatching()
         _ = library.editorBody(for: skill)
         let token = library.reloadToken
-        library.noteEditorChanged(skill, body: "Edited\nSecond")
+        let edited = library.editorBody(for: skill).replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "Old", with: "Edited\nSecond")
+        library.noteEditorChanged(skill, body: edited)
         XCTAssertTrue(library.saveDraft(skill))
         let body = library.currentOnDiskBody(directoryName: slug)
-        XCTAssertEqual(body, "Edited\r\nSecond")
+        XCTAssertEqual(body, edited.replacingOccurrences(of: "\n", with: "\r\n"))
         XCTAssertTrue(library.wasLastWrittenByApp(directoryName: slug, currentBody: body))
         watcher.emit(slug)
         XCTAssertEqual(library.reloadToken, token)
@@ -79,7 +81,7 @@ final class SkillLibrarySaveTests: XCTestCase {
         XCTAssertEqual(store.writeCount, 0)
     }
 
-    func testTypingBackToTheFileWithATrailingNewlineIsClean() {
+    func testATrailingNewlineIsAnEditUntilTheExactFileIsRestored() {
         let store = CountingSkillStore(body: "A")
         let library = SkillLibraryViewModel(
             skillStore: store, fileWatchService: FileWatchService(rootDir: TestPaths.skillsDir), manifestRoot: TestPaths.storeRoot
@@ -89,6 +91,9 @@ final class SkillLibrarySaveTests: XCTestCase {
 
         library.noteEditorChanged(skill, body: "A\n")
 
+        XCTAssertTrue(library.hasUnsavedChanges(for: skill))
+        XCTAssertEqual(library.drafts[skill.directoryName]?.body, "A\n")
+        library.noteEditorChanged(skill, body: "A")
         XCTAssertFalse(library.hasUnsavedChanges(for: skill))
         XCTAssertTrue(library.drafts.isEmpty)
         library.noteEditorChanged(skill, body: "A\nB")
@@ -123,9 +128,11 @@ final class SkillLibrarySaveTests: XCTestCase {
         XCTAssertTrue(library.saveDraft(skill))
 
         XCTAssertEqual(store.writeCount, 1)
-        XCTAssertEqual(store.lastWrittenBody, "B")
+        let saved = "---\nname: Test Skill\ndescription: Test Skill\n---\n\nB"
+        XCTAssertEqual(store.lastWrittenBody, saved)
         XCTAssertFalse(library.hasUnsavedChanges(for: skill))
-        XCTAssertTrue(library.wasLastWrittenByApp(directoryName: skill.directoryName, currentBody: "B"))
+        XCTAssertTrue(library.wasLastWrittenByApp(directoryName: skill.directoryName, currentBody: saved))
+        XCTAssertEqual(library.editorBody(for: skill), saved)
         XCTAssertEqual(nudges, 1)
     }
 
@@ -217,14 +224,15 @@ final class SkillLibrarySaveTests: XCTestCase {
         library.noteEditorChanged(skillY, body: "Y edited")
         XCTAssertTrue(library.saveUnsavedDrafts())
         XCTAssertEqual(store.writeCount, 1)
-        XCTAssertEqual(store.lastWrittenBody, "Y edited")
+        XCTAssertEqual(store.lastWrittenBody, "---\nname: Skill Y\ndescription: Skill Y\n---\n\nY edited")
         XCTAssertFalse(library.hasUnsavedChanges)
 
         library.noteEditorChanged(skillX, body: "X edited")
-        library.noteEditorChanged(skillY, body: "Y again")
+        let editedY = library.editorBody(for: skillY).replacingOccurrences(of: "Y edited", with: "Y again")
+        library.noteEditorChanged(skillY, body: editedY)
         XCTAssertTrue(library.saveUnsavedDrafts())
         XCTAssertEqual(store.writeCount, 3)
-        XCTAssertEqual(store.lastWrittenBody, "Y again")            // X first by name, then Y
+        XCTAssertEqual(store.lastWrittenBody, "---\nname: Skill Y\ndescription: Skill Y\n---\n\nY again") // X first, then Y
         XCTAssertFalse(library.hasUnsavedChanges)
     }
 
@@ -287,6 +295,7 @@ private struct FilesGone: Error {}
 final class ThrowingSkillStore: SkillStoreProtocol {
     let baseDir = TestPaths.skillsDir
     func createSkill(name: String, description: String, body: String) throws -> String { "created-skill" }
+    func readData(directoryName: String) throws -> Data { Data(try readBody(directoryName: directoryName).utf8) }
     func readBody(directoryName: String) throws -> String { "A" }
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
                       fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult { throw SaveFailure() }
@@ -301,31 +310,36 @@ final class CountingSkillStore: SkillStoreProtocol {
     private(set) var lastWrittenBody: String?
     /// The skill's files removed from under the app: every read fails, as `FileService` would.
     var filesGone = false
-    var rewriteOverride: String?
+    private var bodies: [String: String] = [:]
+    private let initialBody: String
 
     init(body: String? = nil) {
         lastWrittenBody = body
+        initialBody = body ?? ""
     }
 
     func createSkill(name: String, description: String, body: String) throws -> String {
         "created-skill"
     }
 
+    func readData(directoryName: String) throws -> Data { Data(try readBody(directoryName: directoryName).utf8) }
     func readBody(directoryName: String) throws -> String {
         if filesGone { throw FilesGone() }
-        return lastWrittenBody ?? ""
+        return bodies[directoryName] ?? initialBody
     }
 
     func rewriteSkill(directoryName: String, body: String, preserving parsed: ParsedSkill,
                       fallbackName: String, fallbackDescription: String) throws -> SkillRewriteResult {
         writeCount += 1
-        lastWrittenBody = rewriteOverride ?? body
+        lastWrittenBody = body
+        bodies[directoryName] = lastWrittenBody
         return SkillRewriteResult(content: lastWrittenBody ?? body, didChange: true)
     }
 
     func writeBody(directoryName: String, body: String) throws {
         writeCount += 1
         lastWrittenBody = body
+        bodies[directoryName] = body
     }
 
     func deleteSkill(directoryName: String) throws {}

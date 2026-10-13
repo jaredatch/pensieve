@@ -4,6 +4,7 @@ import MarkdownUI
 struct SkillPreviewView: View {
     @Environment(\.colorScheme) private var colorScheme
     let markdownBody: String
+    var frontmatterRows: [SkillFrontmatterRow] = []
     var scrolls = true
     var skillDirectory: String?
     var documentRelativePath = "SKILL.md"
@@ -21,11 +22,18 @@ struct SkillPreviewView: View {
     }
 
     private var markdown: some View {
-        RenderedSkillMarkdown(preview: self, colorScheme: colorScheme)
-            // MarkdownUI keys inline-image tasks only by markdown. Rebuild the document and its
-            // budget when text, watched assets, document context or placeholder colors change.
-            .id(ImageContext(markdown: markdownBody, directory: skillDirectory, document: documentRelativePath,
-                             revision: imageRevision, colorScheme: colorScheme))
+        VStack(alignment: .leading, spacing: 0) {
+            if !frontmatterRows.isEmpty {
+                SkillFrontmatterTable(rows: frontmatterRows)
+                    .padding(.horizontal, Spacing.lg)
+                    .padding(.top, Spacing.lg)
+            }
+            RenderedSkillMarkdown(preview: self, colorScheme: colorScheme)
+                // MarkdownUI keys inline-image tasks only by markdown. Rebuild the document and its
+                // budget when text, watched assets, document context or placeholder colors change.
+                .id(ImageContext(markdown: markdownBody, directory: skillDirectory, document: documentRelativePath,
+                                 revision: imageRevision, colorScheme: colorScheme))
+        }
     }
 
     func imageProvider(budget: PreviewImageBudgeting, colorScheme: ColorScheme) -> PreviewImageProvider {

@@ -6,6 +6,8 @@ final class Skill {
     @Attribute(.unique) var id: UUID
     var name: String
     var skillDescription: String
+    /// Process-local identity freshness; a queued scan must not replace a newer file observation.
+    @Transient var fileIdentityObservedAt: UInt64 = 0
     var tags: [String]
     var scope: SkillScope
     var directoryName: String

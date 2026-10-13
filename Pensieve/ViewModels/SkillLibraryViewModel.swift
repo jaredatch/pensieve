@@ -37,8 +37,10 @@ final class SkillLibraryViewModel {
 
     let skillStore: SkillStoreProtocol
     let fileService: FileServiceProtocol
-    /// The self-write fingerprint by slug: the body the app last wrote or loaded, in the store's canonical form
-    /// (`SkillParser.canonicalBody`). NOT observed: the install and update finalizers mutate it off the main thread
+    /// The runtime resolves current window rows when a document is observed, including newly added slugs.
+    @ObservationIgnored var onSkillDocumentObserved: ((String, String) throws -> Void)?
+    /// The self-write fingerprint by slug: the complete document the app last wrote or loaded.
+    /// NOT observed: the install and update finalizers mutate it off the main thread
     /// under `fingerprintLock`, and an observed mutation there would take SwiftUI's update lock while holding ours,
     /// against a `body` that takes ours while holding SwiftUI's (`hasUnsavedChanges`) — an ABBA deadlock the batch
     /// Layer-2 reproduced. Views that show dirtiness observe the main-thread signals instead: `drafts`, `reloadToken`,
@@ -46,6 +48,8 @@ final class SkillLibraryViewModel {
     @ObservationIgnored var lastWrittenBody: [String: String] = [:]
     @ObservationIgnored let fingerprintLock = NSLock()
     @ObservationIgnored var pendingAppWrittenBody: [String: String] = [:]
+    /// Completion callbacks must not replace a writer's expected bytes with a racing disk read.
+    @ObservationIgnored var registeredAppWriteSlugs: Set<String> = []
     @ObservationIgnored var appWritePublishQueued = false
     /// Monotonic invalidation for successful app-authored SKILL.md rewrites (frontmatter-only ones included).
     @MainActor private(set) var appWriteRevision: Int = 0
@@ -53,6 +57,7 @@ final class SkillLibraryViewModel {
     let manifestSaves: ManifestSaveModel?
     let manifestRoot: String
     var skillsDirectory: String { skillStore.baseDir }
+    @ObservationIgnored var historyRestoreFailureMessage: String?
     private var lastManifestError: String?
     let notifier: SyncStateNotifying
     var isWatching = false
@@ -67,16 +72,18 @@ final class SkillLibraryViewModel {
     var folderChangeRevisions: [String: UInt64] = [:]
     var error: String?
     var showCreateSheet = false
-    /// Skill `directoryName`s whose on-disk body changed outside the app and have not yet been re-edited.
+    /// Skill `directoryName`s whose on-disk document changed outside the app and have not yet been re-edited.
     var externallyModified: Set<String> = []
     /// The unsaved editor drafts by slug — an entry enters when the editor's text differs from the file's last
-    /// known body and leaves on Save, Revert, deletion, or typing back to it; whether it is dirty now is measured
+    /// known document and leaves on Save, Revert, deletion, or typing back to it; whether it is dirty now is measured
     /// against the fingerprint (edits reach disk only on Save). `SkillLibraryViewModel+Draft.swift`.
     var drafts: [String: EditorDraft] = [:]
     /// A delayed Restore also retires after an edit that the user subsequently undid.
     var textEditRevisions: [String: UInt64] = [:]
     /// The one unsaved-changes question open, if any, and what a leaving question does with the answer.
     var pendingUnsavedChanges: UnsavedChangesPrompt?
+    @ObservationIgnored var externalChangeQuestions: [String: ExternalChangeQuestion] = [:]
+    @ObservationIgnored var isDrainingExternalQuestions = false
     @ObservationIgnored var pendingLeaveContinuation: ((Bool) -> Void)?
     /// Shows the stock sheet and reports the answer. The app wires `UnsavedChangesAlert.present`
     /// (`PensieveApp.init`); the default answers Cancel, so a headless library never writes or discards on
@@ -178,7 +185,8 @@ final class SkillLibraryViewModel {
             regenerateManifest(.createSkill(SkillOverlay(slug: dirName, createdAt: skill.createdAt,
                 scope: skill.scope, tags: skill.tags, cursor: skill.cursorConfig, agents: [], origin: .authored)),
                 context: context)
-            setLastWrittenBody(SkillParser.canonicalBody(body), directoryName: dirName)
+            setLastWrittenBody(SkillSerializer.serialize(name: name, description: resolvedDescription, body: body),
+                               directoryName: dirName)
             notifier()
             return skill
         } catch {
@@ -325,22 +333,51 @@ extension SkillLibraryViewModel {
         }
     }
 
+    /// Resolve the live row for each event; editor history and other contexts cannot redirect the refresh.
+    func refreshSkillIdentity(directoryName: String, document: String, context: ModelContext) throws {
+        let descriptor = FetchDescriptor<Skill>(predicate: #Predicate { $0.directoryName == directoryName })
+        if let skill = try context.fetch(descriptor).first(where: { !$0.isDeleted }) {
+            StoreRebuildService.refreshIdentity(of: skill, document: document, retainingBOM: true)
+        }
+    }
+
+    /// A disk observation discovered by an editor load or Save has the watcher's sequence and nudge policy.
+    func observeExternalDocument(directoryName: String, document: String) {
+        guard !wasLastWrittenByApp(directoryName: directoryName, currentBody: document) else { return }
+        watcherEventSequence &+= 1
+        acceptExternalChange(directoryName: directoryName, currentBody: document, shouldNotify: !isApplyingCoordinatorChanges)
+    }
+
     func acceptExternalChange(directoryName: String, currentBody: String, shouldNotify: Bool) {
         acceptedChangeSequence &+= 1
-        if isApplyingCoordinatorChanges { coordinatorChangeSequences[directoryName] = acceptedChangeSequence }
+        if isApplyingCoordinatorChanges {
+            coordinatorObservedSlugs.insert(directoryName)
+            coordinatorChangeSequences[directoryName] = acceptedChangeSequence
+        }
         // The fingerprint moves to what the file holds now, so a repeat event is an echo. A clean editor
         // reloads on the token; a dirty one keeps its draft and the view model asks what to do with it —
         // here, not in a view, because in the default Preview mode no editor is mounted (PLAN-02 / 02.3).
         // Dirty is measured against the new fingerprint, so a draft the file has caught up with has nothing
         // to save and nothing is dropped; during a sync cycle the question waits for the cycle's final body
         // (`finishCoordinatorChanges`) — a transient body must not cost the draft or ask about itself.
+        refreshObservedIdentity(directoryName: directoryName, document: currentBody)
         setLastWrittenBody(currentBody, directoryName: directoryName)
+        if !isApplyingCoordinatorChanges { advanceCaughtUpDraft(directoryName: directoryName, document: currentBody) }
         externallyModified.insert(directoryName)
         reloadToken &+= 1
         if !isApplyingCoordinatorChanges, hasUnsavedChanges(forDirectory: directoryName) {
             requestUnsavedChangesPrompt(directoryName: directoryName, reason: .externalChange)
         }
         if shouldNotify { notifier() }
+    }
+
+    func refreshObservedIdentity(directoryName: String, document: String) {
+        if let observe = onSkillDocumentObserved {
+            // Passive identity refresh must not replace an actionable error from a user operation.
+            try? observe(directoryName, document)
+        } else if let draft = drafts[directoryName] {
+            StoreRebuildService.refreshIdentity(of: draft.skill, document: document, retainingBOM: true)
+        }
     }
 }
 

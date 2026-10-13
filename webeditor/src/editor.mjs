@@ -3,6 +3,8 @@ import { EditorView, lineNumbers, keymap, drawSelection, highlightActiveLine, hi
 import { defaultKeymap, history, historyKeymap, indentWithTab, undoDepth, redoDepth, undo as undoCommand } from "@codemirror/commands";
 import { syntaxHighlighting, HighlightStyle, indentOnInput, syntaxTree } from "@codemirror/language";
 import { markdown } from "@codemirror/lang-markdown";
+import { yamlLanguage } from "@codemirror/lang-yaml";
+import { withFrontmatter } from "./frontmatter.mjs";
 import { styleTags, Tag, tags as t } from "@lezer/highlight";
 
 const post = (name, body) => window.webkit?.messageHandlers?.[name]?.postMessage(body ?? null);
@@ -15,7 +17,15 @@ const fromSwift = Annotation.define();
 // reaches the mark and the pill reaches inline code — a code block's lines stay plain.
 const listMarkTag = Tag.define();
 const inlineCodeTag = Tag.define();
-const markdownSupport = markdown({ extensions: [{ props: [styleTags({ ListMark: listMarkTag, InlineCode: inlineCodeTag })] }] });
+const yamlKeyTag = Tag.define();
+const yamlStringTag = Tag.define();
+const yamlFenceTag = Tag.define();
+const yamlParser = yamlLanguage.parser.configure({ props: [styleTags({
+  "Key/Literal Key/QuotedLiteral": yamlKeyTag, QuotedLiteral: yamlStringTag,
+})] });
+const markdownSupport = withFrontmatter(markdown({ extensions: [{
+  props: [styleTags({ ListMark: listMarkTag, InlineCode: inlineCodeTag })],
+}] }), yamlParser, yamlFenceTag);
 
 // MarkEdit's values: SF Mono 12 px on an 18 px
 // line; the gutter a 28 px column of right-aligned numbers, the content at 40; a full-width caret-line
@@ -39,7 +49,9 @@ const lightHighlight = HighlightStyle.define([
   { tag: t.strong, fontWeight: "bold" },
   { tag: t.emphasis, fontStyle: "italic" },
   { tag: inlineCodeTag, backgroundColor: "rgba(0,0,0,0.06)", borderRadius: "3px", padding: "0 3px" },
-  { tag: listMarkTag, color: "#8a5a2b" },
+  { tag: [listMarkTag, yamlStringTag], color: "#8a5a2b" },
+  { tag: yamlKeyTag, color: "#0f5db5" },
+  { tag: yamlFenceTag, color: "#7f848e" },
   { tag: [t.link, t.url], color: "#0f5db5", textDecoration: "underline" },
   { tag: t.comment, color: "#7f848e", fontStyle: "italic" },
 ]);
@@ -52,7 +64,9 @@ const darkHighlight = HighlightStyle.define([
   { tag: t.emphasis, fontStyle: "italic", color: "#e6e6e6" },
   { tag: inlineCodeTag, color: "#9fe88d", backgroundColor: "rgba(255,255,255,0.08)", borderRadius: "3px", padding: "0 3px" },
   { tag: t.monospace, color: "#9fe88d" },   // a code block's text keeps the dark code ink, without the pill
-  { tag: listMarkTag, color: "#d9a066" },
+  { tag: [listMarkTag, yamlStringTag], color: "#d9a066" },
+  { tag: yamlKeyTag, color: "#6fb3ff" },
+  { tag: yamlFenceTag, color: "#7f848e" },
   { tag: [t.link, t.url], color: "#6fb3ff", textDecoration: "underline" },
   { tag: t.comment, color: "#7f848e", fontStyle: "italic" },
 ]);

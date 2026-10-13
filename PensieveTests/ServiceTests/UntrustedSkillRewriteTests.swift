@@ -158,10 +158,11 @@ final class UntrustedSkillRewriteTests: XCTestCase {
                 .joined(separator: ending)
             let header = fixture.header ?? "---\(ending)name: A\(ending)description: D\(ending)---" + ending + ending
             let expected = header + expectedBody + fixture.terminal
-            for draft in [edited, edited + "\n", edited + "\r\n\r\n"] {
-                XCTAssertTrue(model.updateBody(skill, body: draft).succeeded, fixture.label)
-                XCTAssertEqual(try files.files.readData(at: path), Data(expected.utf8), fixture.label)
-            }
+            let draft = (fixture.header ?? "") + edited + fixture.terminal
+            XCTAssertTrue(model.updateDocument(skill, document: draft, original: fixture.source).succeeded, fixture.label)
+            XCTAssertEqual(try files.files.readData(at: path), Data(expected.utf8), fixture.label)
+            XCTAssertEqual(model.updateDocument(skill, document: expected, original: expected), .unchanged, fixture.label)
+            XCTAssertEqual(try files.files.readData(at: path), Data(expected.utf8), fixture.label)
         }
     }
 }

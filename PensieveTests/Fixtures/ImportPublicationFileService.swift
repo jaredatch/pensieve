@@ -15,6 +15,7 @@ final class ImportPublicationFileService: FileServiceProtocol {
     var directoryListings: [String] = []
     var importCheckpoint: (FileService.ImportCopyCheckpoint) throws -> Void = { _ in }
     var copyCheckpoint: (String, Int) throws -> Void = { _, _ in }
+    var beforeDataRead: (String, Int?) throws -> Void = { _, _ in }
     var read: (Int32, UnsafeMutableRawPointer?, Int) -> Int = Darwin.read
     func readFile(at path: String) throws -> String { try files.readFile(at: path) }
     func copyImportedSkillContents(fromDirectory source: String,
@@ -37,7 +38,14 @@ final class ImportPublicationFileService: FileServiceProtocol {
                                     options: .init(checkingCancellation: checkingCancellation, read: read),
                                     copiedChunk: { try copyCheckpoint(source, $0) })
     }
-    func readData(at path: String) throws -> Data { try files.readData(at: path) }
+    func readData(at path: String) throws -> Data {
+        try beforeDataRead(path, nil)
+        return try files.readData(at: path)
+    }
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        try beforeDataRead(path, maximumBytes)
+        return try files.readRegularFileData(at: path, maximumBytes: maximumBytes)
+    }
     func isRegularFile(at path: String) -> Bool { files.isRegularFile(at: path) }
     func isUserExecutableFile(at path: String) -> Bool { files.isUserExecutableFile(at: path) }
     func deleteFile(at path: String) throws { try files.deleteFile(at: path) }
