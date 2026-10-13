@@ -24,13 +24,16 @@ if [ "${1:-}" = "--self-test" ]; then
   [ -e "$st/kept/20200103T000000Z-1.xcresult" ] || fail "a bundle inside the newest five was pruned"
   if keep_failed_bundle "$st/missing.xcresult" "$st/kept" >/dev/null 2>&1; then fail "a missing bundle reported kept"; fi
   [ "$(ls -1d "$st/kept"/*.xcresult | wc -l | tr -d ' ')" -eq 5 ] || fail "a missing bundle changed the kept dir"
+  unset TEST_RUNNER_PENSIEVE_TEST_WINDOW_SAMPLE_DIR
   python3 -B "$(dirname "$0")/test_lifecycle_self_test.py" || fail "test lifecycle regressions"
+  python3 -B "$(dirname "$0")/test_display_self_test.py" || fail "display lifecycle regressions"
   echo "test.sh --self-test: OK"
   exit 0
 fi
 
 # One test run per machine (the playbook's modules/macos-swift.md § Wrapper scripts): take the machine's test lock
-# before anything else, so a second run from any checkout waits in line. The kernel drops it when the holder exits.
+# before anything else, so a second run from any checkout waits in line. The wrapper owns the locked descriptors,
+# so INT/TERM reaches its cleanup before the kernel drops the lock. lockf's descriptor mode retains the lock here.
 # Two lanes: a full suite first queues behind any other full suite on test-full.lock, and a --filter run skips that
 # line, so a focused proof never waits behind every queued suite. The holder line and the wait go to stderr.
 if [ -z "${XP_TEST_LOCK_HELD:-}" ]; then
@@ -38,11 +41,15 @@ if [ -z "${XP_TEST_LOCK_HELD:-}" ]; then
   : "${XP_TEST_T0:=$(date +%s)}"; export XP_TEST_T0
   case " $* " in *" --filter "*) ;; *)   # a full suite queues in its own lane first
     if [ -z "${XP_TEST_FULL_HELD:-}" ]; then
-      /usr/bin/lockf -k -s -t 0 "$dir/test-full.lock" true || echo "test.sh: waiting behind another full suite" >&2
-      XP_TEST_FULL_HELD=1 exec /usr/bin/lockf -k "$dir/test-full.lock" "$0" "$@"
+      exec 8>"$dir/test-full.lock"
+      /usr/bin/lockf -s -t 0 8 || echo "test.sh: waiting behind another full suite" >&2
+      /usr/bin/lockf 8
+      export XP_TEST_FULL_HELD=1
     fi ;; esac
-  /usr/bin/lockf -k -s -t 0 "$dir/test.lock" true || echo "test.sh: waiting for this machine's test lock, held by: $(cat "$dir/test.lock.holder" 2>/dev/null)" >&2
-  XP_TEST_LOCK_HELD=1 exec /usr/bin/lockf -k "$dir/test.lock" "$0" "$@"
+  exec 9>"$dir/test.lock"
+  /usr/bin/lockf -s -t 0 9 || echo "test.sh: waiting for this machine's test lock, held by: $(cat "$dir/test.lock.holder" 2>/dev/null)" >&2
+  /usr/bin/lockf 9
+  export XP_TEST_LOCK_HELD=1
 fi
 if [ -n "${XP_TEST_T0:-}" ]; then   # this run took the lock itself (a caller holding it, like the self-test, skips this)
   printf 'pid %s in %s: test.sh %s\n' "$$" "$PWD" "$*" > "$HOME/.local/state/execplan/test.lock.holder"   # before HOME moves below
@@ -123,10 +130,27 @@ mkdir "$TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT"
 # A missing or damaged fixture repo must not discover this checkout above TestRuns.
 export TEST_RUNNER_GIT_CEILING_DIRECTORIES="$TEST_RUNNER_PENSIEVE_TEST_TEMP_ROOT"
 # Xcode buffers parallel hosts' stdout. Relay completed reports while tests are still running.
-python3 -u "$REPO/script/test_diagnostics.py" "$TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR" "$$" --ready "$rdir/.diagnostics-ready" &
+python3 -u "$REPO/script/test_diagnostics.py" "$TEST_RUNNER_PENSIEVE_TEST_DIAGNOSTICS_DIR" "$$" --ready "$rdir/.diagnostics-ready" 8>&- 9>&- &
 relay_pid=$!
-finish_relay() { kill -TERM "$relay_pid" 2>/dev/null || true; wait "$relay_pid" 2>/dev/null || true; }
-trap finish_relay EXIT
+finish_relay() {
+  if [ -n "$relay_pid" ]; then
+    kill -TERM "$relay_pid" 2>/dev/null || true
+    wait "$relay_pid" 2>/dev/null || true
+    relay_pid=""
+  fi
+}
+display_owned=0
+finish_run() {
+  # Ignore repeated interrupts while waking and joining the relay, still inside the machine's test lock.
+  trap '' INT TERM
+  if [ "$display_owned" -eq 1 ]; then
+    caffeinate -u -t 5 || echo "test.sh: could not wake the display after window sampling" >&2
+  fi
+  finish_relay
+}
+trap finish_run EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 relay_start=$SECONDS
 until [ -f "$rdir/.diagnostics-ready" ]; do
   if ! kill -0 "$relay_pid" 2>/dev/null || [ "$((SECONDS - relay_start))" -ge 30 ]; then
@@ -137,6 +161,14 @@ until [ -f "$rdir/.diagnostics-ready" ]; do
 done
 rm -f "$rdir/.diagnostics-ready"
 bundle="$rdir/run.xcresult"
+if [ -n "${TEST_RUNNER_PENSIEVE_TEST_WINDOW_SAMPLE_DIR:-}" ]; then
+  # Arm cleanup first: even a failed sleep command may have changed the display.
+  display_owned=1
+  if ! pmset displaysleepnow; then
+    echo "test.sh: could not sleep the display for window sampling" >&2
+    exit 1
+  fi
+fi
 status=0
 set +e
 # This lock holder outlives a killed wrapper until xcodebuild exits. Pruning never breaks its lock.
@@ -151,7 +183,9 @@ set +e
   -resultBundlePath "$bundle" \
   CLANG_MODULE_CACHE_PATH="$CLANG_MODULE_CACHE_PATH" \
   SWIFT_MODULE_CACHE_PATH="$SWIFT_MODULE_CACHE_PATH" \
-  ${FILTER_ARGS[@]+"${FILTER_ARGS[@]}"} 2>&1
+  ${FILTER_ARGS[@]+"${FILTER_ARGS[@]}"} 8>&- 9>&- 2>&1 &
+# A shell waiting on a foreground command defers its traps; wait lets INT/TERM clean up promptly.
+wait "$!"
 status="$?"
 set -e
 
@@ -188,10 +222,9 @@ if [ "$status" -ne 0 ] && [ -d "$bundle" ]; then
   fi
 fi
 
-# Flush evidence before the count marker. On interruption, the EXIT trap stops the relay;
+# Flush evidence before the count marker. On interruption, the EXIT trap wakes the display and stops the relay;
 # the in-progress bundle stays in TestRuns instead of being deleted.
 finish_relay
-trap - EXIT
 if [ "$status" -eq 0 ]; then rm -rf "$rdir" 2>/dev/null || true; fi
 printf 'PENSIEVE_TEST_COUNT=%s\n' "$count"
 
