@@ -70,7 +70,7 @@ extension UpstreamHistoryServiceTests {
             let request = try XCTUnwrap(git.headRequests.first)
             XCTAssertEqual(request.remote, "https://github.com/example/repository.git")
             XCTAssertEqual(request.ref, "main")
-            XCTAssertEqual(request.credential, .httpsToken(username: "installer", token: "install"))
+            XCTAssertEqual(request.credential, .httpsToken(username: "installer", token: "install", host: "github.com"))
             XCTAssertTrue(git.requests.isEmpty)
         }
     }
@@ -79,7 +79,7 @@ extension UpstreamHistoryServiceTests {
         try NativeTestWork.run { [self] in
             let expectedHead = String(repeating: "c", count: 40)
             let remote = "https://github.com/example/repository.git"
-            let credential = GitCredential.httpsToken(username: "installer", token: "secret")
+            let credential = GitCredential.httpsToken(username: "installer", token: "secret", host: "github.com")
             var capturedArgs: [String] = []
             var capturedCredential: GitCredential?
             let git = GitService(fileService: fileService,

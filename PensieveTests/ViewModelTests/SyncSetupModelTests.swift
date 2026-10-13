@@ -41,6 +41,7 @@ final class SyncSetupModelTests: XCTestCase {
         var remoteHasCommitsResult = false
         var pullResult: PullResult = .upToDate
         var throwAuthOn: String?
+        var authDetail = "stub"
         var throwOn: String?
         var defaultBranchFixture: String? = "main"
         var branchesFixture = ["main"]
@@ -61,7 +62,7 @@ final class SyncSetupModelTests: XCTestCase {
         }
 
         private func maybeThrowAuth(_ tag: String, remote: String) throws {
-            if throwAuthOn == tag { throw GitError.authenticationFailed(remote: remote, detail: "stub") }
+            if throwAuthOn == tag { throw GitError.authenticationFailed(remote: remote, detail: authDetail) }
         }
 
         func initRepository(at path: String) throws { try record("init:\(path)") }
@@ -478,18 +479,21 @@ extension SyncSetupModelTests {
             XCTAssertTrue(git.calls.isEmpty)
             XCTAssertTrue(trace.events.isEmpty)
             XCTAssertEqual(credentials.credential(forHost: "github.com"),
-                           .httpsToken(username: "old", token: "original"))
+                           .httpsToken(username: "old", token: "original", host: "github.com"))
         }
     }
 
     func testHTTPSConnectStoresPAT() async throws {
-        let git = RecordingGitService()
-        let creds = InMemoryCredentialStore()
-        let model = try makeModel(git: git, credentials: creds,
-                                  rebuilder: RecordingRebuilder(), fileService: existingUserFiles())
-        await model.connectAndReport(url: "https://github.com/octocat/x.git", username: "octocat", token: "secret")
-        XCTAssertEqual(creds.credential(forHost: "github.com"), .httpsToken(username: "octocat", token: "secret"))
-        XCTAssertEqual(git.lastCredential, .httpsToken(username: "octocat", token: "secret"))
+        for (username, expected) in [("  octocat \n", "octocat"), (" \t\n", "x-access-token")] {
+            let git = RecordingGitService()
+            let creds = InMemoryCredentialStore()
+            let model = try makeModel(git: git, credentials: creds,
+                                      rebuilder: RecordingRebuilder(), fileService: existingUserFiles())
+            await model.connectAndReport(url: "https://github.com/octocat/x.git", username: username, token: " secret \n")
+            XCTAssertEqual(creds.credential(forHost: "github.com"),
+                .httpsToken(username: expected, token: "secret", host: "github.com"))
+            XCTAssertEqual(git.lastCredential, .httpsToken(username: expected, token: "secret", host: "github.com"))
+        }
     }
 
     // MARK: - connect: auth-failure messaging
@@ -512,6 +516,17 @@ extension SyncSetupModelTests {
         guard case let .failed(sshMessage) = sshModel.state else { return XCTFail("expected .failed") }
         XCTAssertTrue(sshMessage.contains("authenticate"), "ssh message: \(sshMessage)")
         XCTAssertTrue(sshMessage.contains("SSH"), "ssh message should be ssh-specific")
+    }
+
+    func testSSHHostKeyFailureAsksToAcceptTheRemoteKey() async throws {
+        let git = RecordingGitService()
+        git.throwAuthOn = "clone"
+        git.authDetail = "Host key verification failed."
+        let model = try makeModel(git: git, credentials: InMemoryCredentialStore(),
+            rebuilder: RecordingRebuilder(), fileService: StubFileService())
+        await model.connectAndReport(url: "git@example.com:skills.git", username: "", token: "")
+        XCTAssertEqual(model.state, .failed(
+            "Connect to example.com once with ssh in Terminal to check and accept its key, then sync again."))
     }
 
     // MARK: - connect: a diverged remote fails safely (no push/clobber; PLAN-09 resolves)
@@ -1368,7 +1383,7 @@ extension SyncSetupModelTests {
                     cancelled: try XCTUnwrap(cancelled), step: step)
                 XCTAssertEqual(file.contents, before, step)
                 XCTAssertEqual(credentials.credential(forHost: "github.com"),
-                    .httpsToken(username: "old", token: "original"), step)
+                    .httpsToken(username: "old", token: "original", host: "github.com"), step)
                 continue
             }
             let reopened = await reopenHeldSetup(model: model, previous: host, step: step)
@@ -1424,7 +1439,8 @@ extension SyncSetupModelTests {
                 await model.connectAndReport(url: remoteURL, username: "new", token: "replacement")
                 guard case .failed = model.state else { return XCTFail("Check must fail: \(failure)") }
             }
-            XCTAssertEqual(credentials.credential(forHost: "github.com"), .httpsToken(username: "old", token: "original"))
+            XCTAssertEqual(credentials.credential(forHost: "github.com"),
+                .httpsToken(username: "old", token: "original", host: "github.com"))
             XCTAssertEqual(file.contents, before)
             XCTAssertEqual(git.calls, ["lsremote-refs:\(remoteURL)"],
                            "No store/config write after a failed check")
@@ -1778,7 +1794,7 @@ extension SyncSetupModelTests {
     }
 
     private func assertReadCancellation(checkingPoint: String) async throws {
-        let files = FileService()
+        let files = FileService(), credentials = InMemoryCredentialStore()
         defer { try? files.deleteDirectory(at: root) }
         try writeRealScaffold()
         try NativeTestWork.run { [self] in try TestPaths.git.initRepository(at: root) }
@@ -1786,7 +1802,6 @@ extension SyncSetupModelTests {
             try files.writeFile(at: root + "/partial.txt", content: "interrupted adoption")
             try NativeTestWork.run { [self] in try TestPaths.git.setRemote("https://github.com/octocat/x.git", at: root) }
         }
-        let credentials = InMemoryCredentialStore()
         try credentials.store(token: "original", username: "old", forHost: "github.com")
         let config = try files.readData(at: root + "/.git/config")
         let manifest = try ManifestSaveFixture.manifestBytes(root: root, files: files)
@@ -1824,7 +1839,8 @@ extension SyncSetupModelTests {
         if checkingPoint == "read-tracking" {
             XCTAssertEqual(try files.readFile(at: root + "/partial.txt"), "interrupted adoption")
         }
-        XCTAssertEqual(credentials.credential(forHost: "github.com"), .httpsToken(username: "old", token: "original"))
+        XCTAssertEqual(credentials.credential(forHost: "github.com"),
+            .httpsToken(username: "old", token: "original", host: "github.com"))
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: root + "-sync.lock"), "Cancel must release the whole-cycle lock")
         lock.release()
         if checkingPoint != "escape" { await assertFreshSetup(model: model) }

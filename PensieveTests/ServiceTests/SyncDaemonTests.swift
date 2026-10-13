@@ -117,6 +117,13 @@ final class SyncDaemonTests: XCTestCase {
             try credentials.store(token: "expired", username: "kept", forHost: "github.com")
             XCTAssertEqual(makeDaemon().runOnce(), .failed(.authentication(
                 "github.com didn’t accept the access token. Replace it in Settings › Sync.")))
+            git.remote = "git@example.com:store.git"
+            git.authDetail = "Host key verification failed."
+            let hostKeyAdvice = "Connect to example.com once with ssh in Terminal to check and accept its key, then sync again."
+            XCTAssertEqual(makeDaemon().runOnce(), .failed(.authentication(hostKeyAdvice)))
+            let status = try JSONDecoder().decode(DaemonStatus.self,
+                from: FileService().readData(at: appSupport + "/daemon-status.json"))
+            XCTAssertEqual(status.detail, hostKeyAdvice)
         }
     }
 
@@ -169,12 +176,13 @@ private final class RecordingFFGit: FastForwardGitService {
     var clean = true
     var ffResult: FastForwardResult = .upToDate
     var throwAuth = false
+    var authDetail = "auth"
     var throwOther = false
     func remoteURL(at path: String) -> String? { remote }
     func isWorktreeClean(at path: String) -> Bool { clean }
     func fetch(at path: String, credential: GitCredential?) throws {}
     func fastForwardOnly(at path: String, credential: GitCredential?) throws -> FastForwardResult {
-        if throwAuth { throw GitError.authenticationFailed(remote: remote ?? "origin", detail: "auth") }
+        if throwAuth { throw GitError.authenticationFailed(remote: remote ?? "origin", detail: authDetail) }
         if throwOther { throw GitError.commandFailed(args: ["merge"], exitCode: 1, stderr: "boom") }
         return ffResult
     }

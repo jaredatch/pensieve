@@ -1,3 +1,4 @@
+import Darwin
 import SwiftData
 import XCTest
 @testable import Pensieve
@@ -16,7 +17,14 @@ final class GitCredentialIsolationTests: XCTestCase {
 
     func testSSHConnectSyncAndConflictKeepAgentAuthenticationWithoutPrompts() async throws {
         let agent = try NativeTestWork.run { try GitAgentFixture() }
-        defer { try? agent.remove() }
+        let pid = try XCTUnwrap(Int32(try agent.agentPID))
+        defer {
+            // Cleanup owns the process, even when a PID receipt becomes unreadable.
+            try? agent.fixture.files.writeFile(at: agent.socketDirectory + "/pid", content: "not-a-pid")
+            try? agent.remove()
+            XCTAssertEqual(kill(pid, 0), -1, "The owned ssh-agent must be stopped")
+        }
+        XCTAssertTrue(agent.socket.hasPrefix(TestTemporaryDirectory.path), "The suite must contain its agent socket")
         let previous = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"]
         setenv("SSH_AUTH_SOCK", agent.socket, 1)
         defer {
@@ -144,14 +152,18 @@ final class GitCredentialIsolationTests: XCTestCase {
             _ = try fixture.raw(["-C", seed, "commit", "-m", "Seed"])
             _ = try fixture.raw(["-C", seed, "push", "file://" + fixture.bare, "main"])
             try fixture.clearTraces()
+            let store = InMemoryCredentialStore()
+            let slot = CredentialHost.installNamespace(for: "fixture.test")
+            try store.store(token: fixture.token, username: "pensieve", forHost: slot)
+            let credential = try XCTUnwrap(store.credential(forHost: slot))
             let git = fixture.git
-            try git.cloneShallow(remote: fixture.remote, branch: "main", into: clone, credential: fixture.credential)
+            try git.cloneShallow(remote: fixture.remote, branch: "main", into: clone, credential: credential)
             let commit = try git.commitSHA(at: clone)
-            XCTAssertEqual(try git.remoteHead(remote: fixture.remote, ref: "main", credential: fixture.credential), commit)
+            XCTAssertEqual(try git.remoteHead(remote: fixture.remote, ref: "main", credential: credential), commit)
             let result = try git.upstreamHistory(UpstreamHistoryGitRequest(remote: fixture.remote, ref: "main",
                 installedCommit: commit, path: "skills/example", repositoryPath: fixture.base + "/history",
                 commitLimit: 2, rowLimit: 3, textByteLimit: 1_024, baselineFileLimit: 10,
-                baselineByteLimit: 10_000, credential: fixture.credential))
+                baselineByteLimit: 10_000, credential: credential))
             XCTAssertEqual(result.rows.first?.sha, commit)
             XCTAssertEqual(try fixture.files.readFile(at: fixture.foreignTrace), "")
             let commands = try fixture.files.readFile(at: fixture.networkTrace).split(separator: "\n")
@@ -163,14 +175,15 @@ final class GitCredentialIsolationTests: XCTestCase {
         try NativeTestWork.run {
             let fixture = try GitCredentialFixture()
             defer { try? fixture.remove() }
-            let credentials: [GitCredential?] = [nil, .httpsToken(username: "u", token: ""),
-                                                .httpsToken(username: "u", token: " \t\n")]
+            let credentials: [GitCredential?] = [nil, .httpsToken(username: "u", token: "", host: "fixture.test"),
+                                                .httpsToken(username: "u", token: " \t\n", host: "fixture.test")]
             let sources: [[String: String]] = [[:], ["GIT_ASKPASS": fixture.askpass],
-                                               ["SSH_ASKPASS": fixture.askpass]]
+                                               ["SSH_ASKPASS": fixture.askpass],
+                                               ["GIT_ASKPASS": fixture.askpass, "SSH_ASKPASS": fixture.askpass]]
             for source in sources {
                 // Disable just the helper to prove each askpass source is capable of supplying a token.
                 let config = try fixture.files.readFile(at: fixture.config)
-                if source["SSH_ASKPASS"] != nil {
+                if source["SSH_ASKPASS"] != nil && source["GIT_ASKPASS"] == nil {
                     try fixture.files.writeFile(at: fixture.config,
                         content: config.replacingOccurrences(of: "    askPass = \(fixture.askpass)\n", with: ""))
                 }
@@ -189,14 +202,81 @@ final class GitCredentialIsolationTests: XCTestCase {
                 for credential in credentials {
                     try fixture.clearTraces()
                     XCTAssertThrowsError(try fixture.git.remoteReferences(remote: fixture.remote, credential: credential)) {
-                        guard case GitError.authenticationFailed = $0 else {
+                        guard case let GitError.authenticationFailed(_, detail) = $0 else {
                             return XCTFail("Expected authentication failure, got \($0)")
                         }
+                        XCTAssertFalse(detail.contains("unable to read askpass response"), detail)
                     }
                     XCTAssertEqual(try fixture.files.readFile(at: fixture.foreignTrace), "")
                     XCTAssertEqual(try fixture.files.readFile(at: fixture.networkTrace), "")
                 }
             }
+        }
+    }
+
+    func testTokenIsWithheldFromRewritesExtraPushURLsAndProxyPrompts() throws {
+        try NativeTestWork.run {
+            let fixture = try GitCredentialFixture()
+            defer { try? fixture.remove() }
+            let root = fixture.base + "/store"
+            try fixture.files.createDirectory(at: root)
+            try fixture.git.initRepository(at: root)
+            try fixture.git.setRemote(fixture.remote, at: root)
+            // Git supplies the username itself, so every denied destination reaches a password prompt.
+            _ = try fixture.raw(["-C", root, "config", "credential.username", "pensieve"])
+            let cases = [
+                ["url.http://fixture.test/.pushInsteadOf", "https://fixture.test/"],
+                ["url.https://elsewhere.test/.pushInsteadOf", "https://fixture.test/"],
+                ["remote.origin.url", "https://elsewhere.test/store.git"],
+                ["http.proxy", "http://proxy.test:8080"]
+            ]
+            for entry in cases {
+                _ = try fixture.raw(["-C", root, "config", "--add"] + entry)
+                defer { _ = try? fixture.raw(["-C", root, "config", "--unset-all", entry[0]]) }
+                try fixture.clearTraces()
+                try fixture.files.writeFile(at: fixture.base + "/credential-receipts", content: "")
+                var failure: Error?
+                do { try fixture.git.push(at: root, credential: fixture.credential) } catch { failure = error }
+                let receipts = try fixture.files.readFile(at: fixture.base + "/credential-receipts")
+                // An extra origin URL first authenticates the legitimate destination, then refuses the extra.
+                XCTAssertEqual(receipts.components(separatedBy: "password=" + fixture.token).count - 1,
+                               entry[0] == "remote.origin.url" ? 1 : 0, "\(entry): \(receipts)")
+                guard case .authenticationFailed? = failure as? GitError else {
+                    XCTFail("Expected sign-in refusal for \(entry), got \(String(describing: failure))")
+                    continue
+                }
+                XCTAssertEqual(try fixture.files.readFile(at: fixture.networkTrace), "")
+                XCTAssertEqual(try fixture.files.readFile(at: fixture.foreignTrace), "")
+            }
+        }
+    }
+
+}
+
+extension GitCredentialIsolationTests {
+    func testRealGitPromptsMatchHTTPSHostExactlyWithCasePortsAndIPv6() throws {
+        try NativeTestWork.run {
+            let fixture = try GitCredentialFixture()
+            defer { try? fixture.remove() }
+            for (host, authority) in [("FiXtUrE.TeSt", "fixture.test:8443"),
+                                      ("2001:DB8::1", "[2001:db8::1]:8443")] {
+                let env = try fixture.git.childEnvironment(
+                    credential: .httpsToken(username: "kept", token: fixture.token, host: host))
+                let auth = try fixture.raw(["-c", "credential.helper=", "-c", "credential.useHttpPath=true",
+                                           "credential", "fill"],
+                    input: "url=https://\(authority)/store.git\n\n", environment: env)
+                XCTAssertTrue(auth.contains("username=kept"))
+                XCTAssertTrue(auth.contains("password=" + fixture.token))
+                for denied in ["http://\(authority)/store.git", "https://elsewhere.test/store.git",
+                               "https://[2001:db8::2]:8443/store.git"] {
+                    XCTAssertThrowsError(try fixture.raw(["-c", "credential.helper=", "credential", "fill"],
+                        input: "url=\(denied)\n\n", environment: env), denied)
+                }
+            }
+            let env = try fixture.git.childEnvironment(
+                credential: .httpsToken(username: "kept", token: fixture.token, host: "*.test"))
+            XCTAssertThrowsError(try fixture.raw(["-c", "credential.helper=", "credential", "fill"],
+                input: "url=https://fixture.test/store.git\n\n", environment: env), "Saved hosts cannot be shell patterns")
         }
     }
 

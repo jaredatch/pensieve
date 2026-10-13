@@ -18,6 +18,17 @@ final class GitUsabilityTests: XCTestCase {
                 """)
             XCTAssertEqual(try splitOutput.probeUsability(), .licenseNotAccepted,
                            "Display priority must not hide host-usability evidence in stdout")
+            XCTAssertThrowsError(try splitOutput.runOrThrow(["fixture"], in: nil)) {
+                XCTAssertEqual($0 as? GitError, .unusable(.licenseNotAccepted))
+            }
+            let splitDeveloperPath = try fixture.executable("""
+                printf 'xcrun: error: invalid active developer path\\n'
+                printf 'launcher diagnostic\\n' >&2
+                exit 1
+                """)
+            XCTAssertThrowsError(try splitDeveloperPath.runOrThrow(["fixture"], in: nil)) {
+                XCTAssertEqual($0 as? GitError, .unusable(.developerToolsMissing))
+            }
             let missing = GitService(askpassHelperPath: TestPaths.gitAskpassHelperPath,
                 executablePath: fixture.base + "/missing")
             guard case let .failed(detail) = try missing.probeUsability() else {

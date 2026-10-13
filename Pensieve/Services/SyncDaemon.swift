@@ -122,8 +122,9 @@ struct SyncDaemon {
         let ff: FastForwardResult
         do {
             ff = try git.fastForwardOnly(at: root, credential: credential)
-        } catch GitError.authenticationFailed {
-            let advice = SyncAuthentication(remote: spec, credential: credential).message() ?? "authentication"
+        } catch GitError.authenticationFailed(_, let detail) {
+            let advice = SyncAuthentication(remote: spec, credential: credential)
+                .message(authenticationDetail: detail) ?? "authentication"
             return finish(.failed(.authentication(advice)))
         } catch let error as StoreUpdateError {
             return finish(.failed(.preflight(error.localizedDescription)))

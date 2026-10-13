@@ -76,7 +76,7 @@ extension SkillInstallServiceTests {
             )
             XCTAssertEqual(
                 rejectingGit.receivedCredentials.last!,
-                .httpsToken(username: "x-access-token", token: "install-secret")
+                .httpsToken(username: "x-access-token", token: "install-secret", host: "github.com")
             )
 
             try credentials.delete(forHost: CredentialHost.githubInstall)
@@ -84,7 +84,7 @@ extension SkillInstallServiceTests {
                 try installer.fetch(
                     repo: "https://github.com/example/public.git",
                     ref: nil,
-                    credential: .httpsToken(username: "sync-user", token: "sync-decoy")
+                    credential: .httpsToken(username: "sync-user", token: "sync-decoy", host: "github.com")
                 )
             )
             XCTAssertNil(

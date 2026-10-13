@@ -19,7 +19,7 @@ struct GitCredentialFixture {
     var argvTrace: String { base + "/argv" }
     var bare: String { base + "/remote.git" }
     var acceptedToken: String { base + "/accepted-token" }
-    var credential: GitCredential { .httpsToken(username: "pensieve", token: token) }
+    var credential: GitCredential { .httpsToken(username: "pensieve", token: token, host: "fixture.test") }
     var git: GitService {
         GitService(askpassHelperPath: base + "/askpass", executablePath: base + "/git")
     }
@@ -95,11 +95,12 @@ struct GitCredentialFixture {
 
     private var authentication: String {
         """
-            auth=$(printf 'protocol=https\\nhost=fixture.test\\n\\n' |
+            auth=$(printf 'url=%s\\n\\n' "$target" |
               /usr/bin/git "${options[@]}" credential fill) || {
                 printf 'fatal: Authentication failed\\n' >&2; exit 128;
               }
             expected=$(cat '\(acceptedToken)')
+            printf '%s\\n' "$auth" >> '\(base)/credential-receipts'
             if ! /usr/bin/grep -qx "password=$expected" <<< "$auth"; then
               printf '%s\\n\\n' "$auth" | /usr/bin/git "${options[@]}" credential reject
               printf 'fatal: Authentication failed\\n' >&2
@@ -128,7 +129,21 @@ struct GitCredentialFixture {
             if [ "$1" = push ] && [ -f '\(base)/rotate-at-push' ]; then
               mv '\(base)/rotate-at-push' '\(acceptedToken)'
             fi
-            \(transport == .https ? authentication : "")
+            \(transport == .https ? """
+            if [ "$1" = push ]; then
+              targets=$(/usr/bin/git "${options[@]}" remote get-url --push --all origin) || exit
+            else
+              targets=$(/usr/bin/git "${options[@]}" ls-remote --get-url '\(remote)') || exit
+            fi
+            proxy=$(/usr/bin/git "${options[@]}" config --get http.proxy)
+            if [ -n "$proxy" ]; then targets="$proxy"; fi
+            while IFS= read -r target; do
+              \(authentication)
+            done <<< "$targets"
+            if [ "$targets" != '\(remote)' ]; then
+              printf 'fatal: offline destination refused\\n' >&2; exit 128
+            fi
+            """ : "")
             printf '%s\\n' "$1" >> '\(networkTrace)'
             \(transport == .https ? "exec /usr/bin/git -c 'url.file://\(bare).insteadOf=\(remote)' \"${original[@]}\"" : "")
             ;;

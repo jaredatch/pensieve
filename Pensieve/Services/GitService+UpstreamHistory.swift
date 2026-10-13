@@ -114,8 +114,7 @@ extension GitService {
     ) throws -> Never {
         let failure = commandError(output, args: args, authenticationRemote: remote)
         if case .authenticationFailed = failure { throw failure }
-        let lower = (output.stderr + output.stdout).lowercased()
-        if lower.contains("couldn't find remote ref") || lower.contains("remote ref does not exist") {
+        if isMissingRemoteRef(output) {
             throw UpstreamHistoryError.trackedRefNotFound(ref)
         }
         throw failure

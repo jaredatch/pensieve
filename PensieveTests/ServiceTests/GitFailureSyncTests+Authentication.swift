@@ -13,7 +13,10 @@ extension GitFailureSyncTests {
              "fixture.test didn’t accept the access token. Replace it in Settings › Sync."),
             .init(remote: "git@example.com:store.git", token: nil, advice:
              "Couldn’t authenticate to example.com over SSH. Add your key to the agent "
-                + "(run ssh-add in Terminal), then sync again.")
+                + "(run ssh-add in Terminal), then sync again."),
+            .init(remote: "git@example.com:store.git", token: nil, advice:
+             "Connect to example.com once with ssh in Terminal to check and accept its key, then sync again.",
+             detail: "Host key verification failed")
         ]
         for entry in cases {
             let remote = entry.remote, token = entry.token, advice = entry.advice
@@ -24,6 +27,7 @@ extension GitFailureSyncTests {
             if let token { try credentials.store(token: token, username: "kept", forHost: "fixture.test") }
             let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
             let engine = AuthenticationAdviceEngine()
+            engine.detail = entry.detail
             let coordinator = SyncCoordinator(modelContainer: container)
             await coordinator.configure(engine: engine, git: fixture.paths.makeGitService(), credentials: credentials,
                 root: fixture.root, audit: SyncAudit(appSupport: fixture.support),
@@ -56,11 +60,13 @@ private struct AdviceCase {
     let remote: String
     let token: String?
     let advice: String
+    var detail = "refused"
 }
 
 private final class AuthenticationAdviceEngine: SyncEngineProtocol {
     var failInspection = false
-    private var failure: GitError { .authenticationFailed(remote: "origin", detail: "refused") }
+    var detail = "refused"
+    private var failure: GitError { .authenticationFailed(remote: "origin", detail: detail) }
     func sync(root: String, message: String, credential: GitCredential?, context: ModelContext,
               prepare: ((ModelContext) throws -> Void)?) throws -> SyncOutcome { throw failure }
     func inspectConflicts(root: String, credential: GitCredential?, context: ModelContext) throws -> ConflictInspection {

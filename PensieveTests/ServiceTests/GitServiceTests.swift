@@ -592,7 +592,8 @@ extension GitServiceTests {
     func testHttpsTokenFeedsAskpassViaChildEnv() throws {
         try NativeTestWork.run { [self] in
             let secret = "ghp_\(UUID().uuidString)"
-            let env = try git.childEnvironment(credential: .httpsToken(username: "x-access-token", token: secret))
+            let env = try git.childEnvironment(
+                credential: .httpsToken(username: "x-access-token", token: secret, host: "github.com"))
             XCTAssertNotNil(env["GIT_ASKPASS"])
             XCTAssertEqual(env["PENSIEVE_GIT_USERNAME"], "x-access-token")
             XCTAssertEqual(env["PENSIEVE_GIT_PASSWORD"], secret)   // the token rides the CHILD ENV
@@ -602,7 +603,8 @@ extension GitServiceTests {
     func testAskpassHelperExistsExecutableAndCarriesNoSecret() throws {
         try NativeTestWork.run { [self] in
             let secret = "ghp_\(UUID().uuidString)"
-            let env = try git.childEnvironment(credential: .httpsToken(username: "x-access-token", token: secret))
+            let env = try git.childEnvironment(
+                credential: .httpsToken(username: "x-access-token", token: secret, host: "github.com"))
             let helper = try XCTUnwrap(env["GIT_ASKPASS"])
             XCTAssertTrue(git.fileService.isExecutableFile(at: helper))
             let helperBody = try git.fileService.readFile(at: helper)
@@ -630,7 +632,7 @@ extension GitServiceTests {
             XCTAssertEqual(try FileService().readFile(at: helper), body)
             let process = Process()
             process.executableURL = URL(fileURLWithPath: helper)
-            process.arguments = ["Password"]
+            process.arguments = ["Password for 'https://x-access-token@github.com': "]
             process.environment = environment
             let output = Pipe()
             process.standardOutput = output
@@ -645,7 +647,8 @@ extension GitServiceTests {
         }
         let writer = GitService(fileService: files, askpassHelperPath: helper)
         for _ in 0..<2 {
-            _ = try writer.childEnvironment(credential: .httpsToken(username: "other", token: "other-fixture-token"))
+            _ = try writer.childEnvironment(
+                credential: .httpsToken(username: "other", token: "other-fixture-token", host: "github.com"))
         }
         XCTAssertGreaterThan(observations, 0, "The replacement must be observed")
         XCTAssertGreaterThan(executions, 0, "A second caller must execute the shared helper")
@@ -672,7 +675,7 @@ extension GitServiceTests {
             let fixture = try GitFailureFixture()
             defer { try? fixture.remove() }
             let secret = "ghp_\(UUID().uuidString)"
-            let credential = GitCredential.httpsToken(username: "u", token: secret)
+            let credential = GitCredential.httpsToken(username: "u", token: secret, host: "github.com")
             let service = try fixture.credentialRecordingExecutable(expectedToken: secret)
             let remote = "https://fixture.test/store.git"
             let root = fixture.root
@@ -738,7 +741,7 @@ extension GitServiceTests {
                     remote: "https://fixture.test/store.git", ref: ref, installedCommit: installed,
                     path: "skills/example", repositoryPath: fixture.root, commitLimit: 2, rowLimit: 3,
                     textByteLimit: 1_024, baselineFileLimit: 10, baselineByteLimit: 10_000,
-                    credential: .httpsToken(username: "u", token: secret)
+                    credential: .httpsToken(username: "u", token: secret, host: "github.com")
                 ))
             }
         }
@@ -753,15 +756,18 @@ extension GitServiceTests {
             setenv("GIT_ASKPASS", "/tmp/evil-askpass", 1)
             setenv("PENSIEVE_GIT_USERNAME", "stale-user", 1)
             setenv("PENSIEVE_GIT_PASSWORD", "stale-secret", 1)
+            setenv("PENSIEVE_GIT_HOST", "stale.test", 1)
             defer {
                 unsetenv("GIT_ASKPASS"); unsetenv("PENSIEVE_GIT_USERNAME"); unsetenv("PENSIEVE_GIT_PASSWORD")
+                unsetenv("PENSIEVE_GIT_HOST")
                 if let previousSSHAskpass { setenv("SSH_ASKPASS", previousSSHAskpass, 1) } else { unsetenv("SSH_ASKPASS") }
             }
             let env = try git.childEnvironment(credential: .sshAgent)
             XCTAssertEqual(env["SSH_ASKPASS"], tempDir + "/ssh-key-askpass", "SSH retains its key-passphrase askpass")
-            XCTAssertEqual(env["GIT_ASKPASS"], "/usr/bin/false") // inherited askpass cannot answer for Git
+            XCTAssertEqual(env["GIT_ASKPASS"], "") // inherited askpass cannot answer for Git
             XCTAssertNil(env["PENSIEVE_GIT_USERNAME"]) // inherited username stripped
             XCTAssertNil(env["PENSIEVE_GIT_PASSWORD"]) // inherited secret stripped
+            XCTAssertNil(env["PENSIEVE_GIT_HOST"])
             if let sock = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"] {
                 XCTAssertEqual(env["SSH_AUTH_SOCK"], sock)   // agent socket passes through untouched
             }
@@ -796,13 +802,14 @@ extension GitServiceTests {
             let failingGit = GitService(fileService: AskpassWriteFailingFileService(),
                 askpassHelperPath: TestPaths.gitAskpassHelperPath)
             XCTAssertThrowsError(
-                try failingGit.childEnvironment(credential: .httpsToken(username: "u", token: "ghp_x"))
+                try failingGit.childEnvironment(credential: .httpsToken(username: "u", token: "ghp_x", host: "github.com"))
             )
             for token in ["", " \t\n"] {
-                let environment = try failingGit.childEnvironment(credential: .httpsToken(username: "u", token: token))
+                let environment = try failingGit.childEnvironment(
+                    credential: .httpsToken(username: "u", token: token, host: "github.com"))
                 XCTAssertNil(environment["PENSIEVE_GIT_PASSWORD"], "A blank stored token is absent")
                 XCTAssertNil(environment["PENSIEVE_GIT_USERNAME"])
-                XCTAssertEqual(environment["GIT_ASKPASS"], "/usr/bin/false")
+                XCTAssertEqual(environment["GIT_ASKPASS"], "")
             }
         }
     }
@@ -1021,6 +1028,33 @@ extension GitServiceTests {
                         XCTAssertEqual(detail, expected)
                     }
                 }
+            }
+        }
+    }
+
+    func testHTTP403IsARefusedCredential() throws {
+        try NativeTestWork.run { [self] in
+            let executable = tempDir + "/refused-token"
+            try writeFailedGit(files: FileService(), executable: executable,
+                stdout: Data(), stderr: Data("fatal: The requested URL returned error: 403\n".utf8))
+            let service = GitService(askpassHelperPath: tempDir + "/askpass", executablePath: executable)
+            XCTAssertThrowsError(try service.remoteReferences(remote: "https://example.com/store.git", credential: nil)) {
+                guard case GitError.authenticationFailed = $0 else { return XCTFail("Expected sign-in failure, got \($0)") }
+            }
+        }
+    }
+
+    func testHistoryMissingRefClassificationUsesBothStreamsInOrder() throws {
+        try NativeTestWork.run { [self] in
+            let service = GitService(askpassHelperPath: tempDir + "/askpass", upstreamHistoryNetworkRunner: { _, _ in
+                .init(stdout: "fatal: couldn't find remote ", stderr: "ref refs/tags/missing", exit: 128)
+            })
+            let request = UpstreamHistoryGitRequest(remote: "https://example.com/store.git", ref: "missing",
+                installedCommit: String(repeating: "a", count: 40), path: "skills/example", repositoryPath: tempDir,
+                commitLimit: 2, rowLimit: 3, textByteLimit: 1_024, baselineFileLimit: 10,
+                baselineByteLimit: 10_000, credential: nil)
+            XCTAssertThrowsError(try service.fetchTrackedRef(request)) {
+                XCTAssertEqual($0 as? UpstreamHistoryError, .trackedRefNotFound("missing"))
             }
         }
     }

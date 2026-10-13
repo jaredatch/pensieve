@@ -3,10 +3,11 @@ import Foundation
 // PLAN-24 keeps the ten tightly-coupled adoption subprocess members beside the existing git runner.
 // swiftlint:disable file_length
 
-/// How a network-touching git operation authenticates. Blank HTTPS tokens are treated as absent.
+/// HTTPS credentials carry their saved host. The helper answers only HTTPS prompts for that host.
+/// Blank tokens are treated as absent.
 enum GitCredential: Equatable {
     case sshAgent
-    case httpsToken(username: String, token: String)
+    case httpsToken(username: String, token: String, host: String)
 }
 
 enum GitError: LocalizedError, Equatable {
@@ -50,6 +51,9 @@ extension GitError {
         let detail = stderr.lowercased()
         let markers = [
             "could not resolve host",
+            "could not resolve proxy",
+            "connection reset by peer",
+            "empty reply from server",
             "failed to connect to",
             "couldn't connect to server",
             "network is unreachable",
@@ -230,7 +234,7 @@ struct GitService: GitServiceProtocol {
         "GIT_ASKPASS", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_SSH_VARIANT", "GIT_PROXY_COMMAND",
         "GIT_EXTERNAL_DIFF", "GIT_CONFIG", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT",
         "GIT_CONFIG_PARAMETERS", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE",
-        "GIT_ALLOW_PROTOCOL", "GIT_PROTOCOL_FROM_USER", "PENSIEVE_GIT_USERNAME", "PENSIEVE_GIT_PASSWORD"
+        "GIT_ALLOW_PROTOCOL", "GIT_PROTOCOL_FROM_USER", "PENSIEVE_GIT_USERNAME", "PENSIEVE_GIT_PASSWORD", "PENSIEVE_GIT_HOST"
     ]
     // Prefix strips for indexed/family vars only: GIT_CONFIG_KEY_<n>/VALUE_<n> injection + all GIT_TRACE*
     // sinks. Scoped to these families so GIT_CONFIG_NOSYSTEM survives.
@@ -244,7 +248,7 @@ struct GitService: GitServiceProtocol {
     /// GIT_TERMINAL_PROMPT=0 so git FAILS FAST instead of hanging on a credential prompt in a process
     /// with no TTY. Pensieve strips inherited git-behavior overrides first, including the HTTPS-auth
     /// variables it owns, so a `.sshAgent`/`nil` op can never ride a stale parent askpass or secret.
-    /// Git's askpass defaults to a failing program, overriding core.askPass and SSH_ASKPASS for HTTP
+    /// Git's empty askpass default disables core.askPass and SSH_ASKPASS for HTTP
     /// credentials. SSH itself still receives SSH_ASKPASS and SSH_AUTH_SOCK for key authentication.
     func childEnvironment(credential: GitCredential?) throws -> [String: String] {
         var env = ProcessInfo.processInfo.environment
@@ -258,7 +262,7 @@ struct GitService: GitServiceProtocol {
         let extra = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
         env["PATH"] = env["PATH"].map { "\($0):\(extra)" } ?? extra
         env["GIT_TERMINAL_PROMPT"] = "0"
-        env["GIT_ASKPASS"] = "/usr/bin/false"
+        env["GIT_ASKPASS"] = ""
         env["GIT_EDITOR"] = "true"
         env["GIT_SEQUENCE_EDITOR"] = "true"
         try applyCredential(credential, to: &env)   // sets the auth vars for `.httpsToken`; no-op otherwise
@@ -271,10 +275,11 @@ struct GitService: GitServiceProtocol {
     /// The token rides ONLY the child env (`PENSIEVE_GIT_PASSWORD`/`USERNAME`), never argv and never the
     /// on-disk askpass helper file; the helper body references only `$PENSIEVE_GIT_*`.
     private func applyCredential(_ credential: GitCredential?, to env: inout [String: String]) throws {
-        guard case let .httpsToken(username, token) = credential,
+        guard case let .httpsToken(username, token, host) = credential,
               !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let helper = try ensureAskpassHelper()      // propagate a write failure (was try?-swallowed)
         env["GIT_ASKPASS"] = helper
+        env["PENSIEVE_GIT_HOST"] = host.lowercased()
         env["PENSIEVE_GIT_USERNAME"] = username
         env["PENSIEVE_GIT_PASSWORD"] = token   // CHILD ENV only — not argv, not disk
     }
@@ -290,8 +295,23 @@ struct GitService: GitServiceProtocol {
         let body = """
         #!/bin/sh
         case "$1" in
+          "Username for 'https://"*"': "|"Password for 'https://"*"': ") ;;
+          *) exit 1 ;;
+        esac
+        address=${1#*\\'}
+        address=${address%\\'*}
+        authority=${address#https://}
+        authority=${authority%%/*}
+        authority=${authority##*@}
+        case "$authority" in
+          \\[*\\]*) host=${authority#\\[}; host=${host%%\\]*} ;;
+          *) host=${authority%%:*} ;;
+        esac
+        host=$(printf '%s' "$host" | LC_ALL=C /usr/bin/tr '[:upper:]' '[:lower:]')
+        [ "$host" = "$PENSIEVE_GIT_HOST" ] || exit 1
+        case "$1" in
           Username*) printf '%s' "$PENSIEVE_GIT_USERNAME" ;;
-          *)         printf '%s' "$PENSIEVE_GIT_PASSWORD" ;;
+          Password*) printf '%s' "$PENSIEVE_GIT_PASSWORD" ;;
         esac
         """
         try fileService.writeExecutableFile(at: path, content: body + "\n")
@@ -345,7 +365,8 @@ struct GitService: GitServiceProtocol {
         // Confirm at the shared runner so clone, fetch, conflict and install callers agree.
         // The diagnostic command bypasses this branch, preventing recursive probes.
         if output.exit != 0, args != ["--version"],
-           GitUsability.environmentFailure(exit: output.exit, output: output.textOutput.failureDetail) != nil {
+           GitUsability.environmentFailure(exit: output.exit,
+               output: output.textOutput.stdout + output.textOutput.stderr) != nil {
             let answer = try probeUsability()
             try answer.requireUsable()
             output.confirmingProbe = answer
@@ -381,6 +402,8 @@ struct GitService: GitServiceProtocol {
     private static let authSignatures = [
         "Permission denied (publickey)",
         "Authentication failed",
+        "The requested URL returned error: 403",
+        "HTTP 403",
         "could not read Username",
         "Host key verification failed",
         "Invalid username or password",

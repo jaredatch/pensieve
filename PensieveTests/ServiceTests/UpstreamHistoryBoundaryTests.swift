@@ -168,7 +168,7 @@ extension UpstreamHistoryServiceTests {
 
             let request = try XCTUnwrap(git.requests.first)
             XCTAssertEqual(request.remote, remote)
-            XCTAssertEqual(request.credential, .httpsToken(username: "installer", token: "install"))
+            XCTAssertEqual(request.credential, .httpsToken(username: "installer", token: "install", host: "github.com"))
         }
     }
 

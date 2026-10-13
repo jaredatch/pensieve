@@ -143,18 +143,20 @@ final class SyncSetupModel {
                 + "ssh remote (git@host:path).")
             return
         }
-        guard spec.transport != .https || !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let username = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard spec.transport != .https || !token.isEmpty else {
             state = .failed("Sync over HTTPS needs an access token.")
             return
         }
         do {
             try await perform(spec: spec, credential: spec.transport == .ssh ? .sshAgent
-                : .httpsToken(username: username.isEmpty ? "x-access-token" : username, token: token))
+                : .httpsToken(username: username.isEmpty ? "x-access-token" : username, token: token, host: spec.host))
             state = .done
         } catch is CancellationError {
             state = .cancelled
-        } catch GitError.authenticationFailed {
-            state = .failed(authMessage(for: spec.transport, host: spec.host))
+        } catch GitError.authenticationFailed(_, let detail) {
+            state = .failed(authMessage(for: spec.transport, host: spec.host, detail: detail))
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -201,7 +203,10 @@ final class SyncSetupModel {
         }
     }
 
-    private func authMessage(for transport: GitTransport, host: String) -> String {
+    private func authMessage(for transport: GitTransport, host: String, detail: String) -> String {
+        if transport == .ssh, let advice = SyncAuthentication.hostKeyMessage(host: host, detail: detail) {
+            return advice
+        }
         switch transport {
         case .ssh:
             return "Couldn't authenticate to \(host) over SSH. Add your key to the agent "

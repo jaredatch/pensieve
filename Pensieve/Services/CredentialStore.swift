@@ -15,6 +15,11 @@ protocol CredentialStoreProtocol {
 enum CredentialHost {
     static let githubInstall = installNamespace(for: "github.com")
 
+    /// Purpose suffixes select storage slots, never a network destination.
+    static func remoteHost(for slot: String) -> String {
+        String(slot.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0])
+    }
+
     static func installNamespace(for host: String) -> String {
         host + "#install"
     }
@@ -79,7 +84,7 @@ struct KeychainCredentialStore: CredentialStoreProtocol {
               let data = dict[kSecValueData as String] as? Data,
               let token = String(data: data, encoding: .utf8) else { return nil }
         let username = (dict[kSecAttrAccount as String] as? String) ?? "x-access-token"
-        return .httpsToken(username: username, token: token)
+        return .httpsToken(username: username, token: token, host: CredentialHost.remoteHost(for: host))
     }
 
     func delete(forHost host: String) throws {
@@ -108,7 +113,7 @@ final class InMemoryCredentialStore: CredentialStoreProtocol {
     func credential(forHost host: String) -> GitCredential? {
         lock.withLock {
             guard let entry = entries[host] else { return nil }
-            return .httpsToken(username: entry.username, token: entry.token)
+            return .httpsToken(username: entry.username, token: entry.token, host: CredentialHost.remoteHost(for: host))
         }
     }
 

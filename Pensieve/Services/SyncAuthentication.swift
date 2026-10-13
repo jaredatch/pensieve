@@ -6,14 +6,15 @@ struct SyncAuthentication {
     let credential: GitCredential?
 
     static func hasToken(_ credential: GitCredential?) -> Bool {
-        guard case let .httpsToken(_, token) = credential else { return false }
+        guard case let .httpsToken(_, token, _) = credential else { return false }
         return !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    func message(resolvingConflict: Bool = false) -> String? {
+    func message(resolvingConflict: Bool = false, authenticationDetail: String = "") -> String? {
         guard let remote else { return nil }
         switch remote.transport {
         case .ssh:
+            if let advice = Self.hostKeyMessage(host: remote.host, detail: authenticationDetail) { return advice }
             return "Couldn’t authenticate to \(remote.host) over SSH. Add your key to the agent "
                 + "(run ssh-add in Terminal), then sync again."
         case .https:
@@ -25,9 +26,14 @@ struct SyncAuthentication {
     }
 
     func reporting(_ error: Error, resolvingConflict: Bool = false) -> Error {
-        guard case GitError.authenticationFailed = error,
-              let message = message(resolvingConflict: resolvingConflict) else { return error }
+        guard case let GitError.authenticationFailed(_, detail) = error,
+              let message = message(resolvingConflict: resolvingConflict, authenticationDetail: detail) else { return error }
         return Failure(message: message)
+    }
+
+    static func hostKeyMessage(host: String, detail: String) -> String? {
+        guard detail.lowercased().contains("host key verification failed") else { return nil }
+        return "Connect to \(host) once with ssh in Terminal to check and accept its key, then sync again."
     }
 
     private struct Failure: LocalizedError {
