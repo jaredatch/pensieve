@@ -5,7 +5,8 @@ extension SkillParser {
     static func preservedFrontmatter(
         source: String,
         root: Node,
-        rootIsFlowMapping: Bool
+        rootIsFlowMapping: Bool,
+        hasAnchorsOrAliases: Bool
     ) -> PreservedFrontmatter {
         let lines = sourceLines(in: source)
         let entries = scanTopLevelEntries(in: source, lines: lines)
@@ -19,7 +20,7 @@ extension SkillParser {
         } ?? false
         let trustworthy = positionsAgree
             && !rootIsFlowMapping && !hasOddLineBreak(in: source)
-            && !source.contains("\t") && !source.contains("---") && !containsAnchorOrAlias(in: source)
+            && !source.contains("\t") && !source.contains("---") && !hasAnchorsOrAliases
         return PreservedFrontmatter(
             source: source,
             entries: entries,
@@ -60,11 +61,6 @@ extension SkillParser {
     /// Agent fences are at column zero, with only trailing ASCII spaces, tabs or CR.
     static func isFrontmatterFence(_ line: Substring) -> Bool {
         line.hasPrefix("---") && line.dropFirst(3).allSatisfy { $0 == " " || $0 == "\t" || $0 == "\r" }
-    }
-
-    static func containsAnchorOrAlias(in source: String) -> Bool {
-        let pattern = #"(^|[\s,\[\{])[&*][^\s,\[\]\{\}]+"#
-        return source.range(of: pattern, options: .regularExpression) != nil
     }
 
     static func trailingLineBreaks(in content: String) -> String {

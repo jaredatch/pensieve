@@ -64,7 +64,8 @@ enum SkillDocumentEditing {
               let loaded = try? CheckedYAMLLoader.composeAndLoad(yaml: file.frontmatterSource),
               let root = loaded.root, let mapping = loaded.value as? [String: Any],
               SkillParser.preservedFrontmatter(source: file.frontmatterSource, root: root,
-                  rootIsFlowMapping: loaded.rootIsFlowMapping).entriesAreTrustworthy else {
+                  rootIsFlowMapping: loaded.rootIsFlowMapping,
+                  hasAnchorsOrAliases: loaded.hasAnchorsOrAliases).entriesAreTrustworthy else {
             throw Refusal.unreadableFrontmatter
         }
         let missing = ["name", "description"].filter { (mapping[$0] as? String)?.isEmpty != false }

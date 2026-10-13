@@ -270,6 +270,29 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
     }
 }
 
+extension SkillPreviewFrontmatterTests {
+    func testRenderedTableAdmitsLiteralPunctuationAndRefusesYAMLAnchors() async throws {
+        for syntax in FrontmatterRewriteFixture.syntaxCases {
+            let fixture = try host(syntax.document(name: "Example"))
+            defer { fixture.close() }
+            _ = try await text("Original body", in: fixture.host)
+            if syntax.trusted {
+                _ = try await text("description", in: fixture.host)
+                _ = try await text("Use for *.md files", in: fixture.host)
+                if syntax.label == "plain star" {
+                    _ = try await text("allowed-tools", in: fixture.host)
+                    _ = try await text("Bash(npm run *)", in: fixture.host)
+                }
+            } else {
+                XCTAssertTrue(fixture.snapshot.frontmatterRows.isEmpty, syntax.label)
+                XCTAssertFalse(elements(in: fixture.host).contains {
+                    ($0.accessibilityValue() as? String) == "description"
+                }, syntax.label)
+            }
+        }
+    }
+}
+
 @MainActor final class FrontmatterHost {
     let files = PreviewImageFileSpy()
     let selection = PreviewFileSelection()

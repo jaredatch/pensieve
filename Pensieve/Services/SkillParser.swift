@@ -278,7 +278,8 @@ enum SkillParser {
             preservedFrontmatter: preservedFrontmatter(
                 source: yamlString,
                 root: root,
-                rootIsFlowMapping: loaded.rootIsFlowMapping
+                rootIsFlowMapping: loaded.rootIsFlowMapping,
+                hasAnchorsOrAliases: loaded.hasAnchorsOrAliases
             ),
             preservedFile: preservedFile,
             trailingNewlineCount: trailingLineBreaks.utf8.filter { $0 == 0x0A }.count,

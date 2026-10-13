@@ -3,6 +3,19 @@ import Yams
 @testable import Pensieve
 
 final class FrontmatterTrustTests: XCTestCase {
+    func testEventMetadataDistinguishesLiteralPunctuationFromYAMLAnchors() throws {
+        for syntax in FrontmatterRewriteFixture.syntaxCases {
+            let source = syntax.document(name: "A")
+            let parsed = SkillParser.parse(source)
+            let file = try XCTUnwrap(parsed.preservedFile, syntax.label)
+            let document = try CheckedYAMLLoader.composeAndLoad(yaml: file.frontmatterSource)
+            XCTAssertNotNil(document.root, syntax.label)
+            XCTAssertEqual(document.hasAnchorsOrAliases, !syntax.trusted, syntax.label)
+            XCTAssertEqual(try XCTUnwrap(parsed.preservedFrontmatter, syntax.label).entriesAreTrustworthy,
+                           syntax.trusted, syntax.label)
+        }
+    }
+
     func testGeneratedSweepTrustsOnlyMatchingKeyPositions() throws {
         let fixtures = FrontmatterRewriteFixture.sweep
         XCTAssertEqual(fixtures.count, 120)
@@ -75,6 +88,28 @@ final class FrontmatterTrustTests: XCTestCase {
                     + ending + ending + fixture.source
                 XCTAssertEqual(try XCTUnwrap(normalized, fixture.label), expected, fixture.label)
             }
+        }
+    }
+
+    func testGeneratedHeaderAndIdentityChangesAcrossPunctuationAndDocumentShapes() throws {
+        let fixtures = FrontmatterRewriteFixture.headerSweep
+        XCTAssertEqual(fixtures.count, 330)
+        for fixture in fixtures {
+            if fixture.trusted {
+                let rewritten = try SkillDocumentEditing.rewrite(draft: fixture.draft, original: fixture.original,
+                                                                 name: "A", description: "D")
+                XCTAssertTrue(rewritten.didChange, fixture.label)
+                XCTAssertEqual(Data(rewritten.content.utf8), Data(fixture.expected.utf8), fixture.label)
+            } else {
+                XCTAssertThrowsError(try SkillDocumentEditing.rewrite(draft: fixture.draft, original: fixture.original,
+                                                                     name: "A", description: "D"), fixture.label) {
+                    XCTAssertEqual($0.localizedDescription,
+                        "Couldn't save. The frontmatter at the top of the file can't be read.", fixture.label)
+                }
+            }
+            let normalized = SkillSerializer.normalizeIdentity(name: "New", description: "New description",
+                                                               parsed: SkillParser.parse(fixture.original))
+            XCTAssertEqual(normalized.map { Data($0.utf8) }, fixture.expectedIdentity.map { Data($0.utf8) }, fixture.label)
         }
     }
 

@@ -13,7 +13,8 @@ struct SkillFrontmatterRow: Equatable {
               let root = document.root, let mapping = root.mapping else { return [] }
         // Rendering needs a trustworthy mapping, even when required identity fields are absent.
         let preserved = SkillParser.preservedFrontmatter(
-            source: source, root: root, rootIsFlowMapping: document.rootIsFlowMapping)
+            source: source, root: root, rootIsFlowMapping: document.rootIsFlowMapping,
+            hasAnchorsOrAliases: document.hasAnchorsOrAliases)
         guard preserved.entriesAreTrustworthy else { return [] }
         return zip(preserved.entries, mapping).map { entry, pair in
             if case let .scalar(scalar) = pair.value {
