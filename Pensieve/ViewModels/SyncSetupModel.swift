@@ -21,7 +21,7 @@ enum SyncSetupError: LocalizedError, Equatable {
             return "The remote already has \(count) diverging change(s). Open Sync to resolve them "
                 + "before connecting."
         case .remoteDefaultBranchUndetermined:
-            return "Couldn't determine a safe default branch for this remote."
+            return "Couldn’t determine a safe default branch for this remote."
         case .midAdoptionStoreUnrecognized:
             return "This store is in an unrecognized partial sync state. Nothing was changed. Back up "
                 + "anything you added, remove ~/.pensieve, relaunch Pensieve, and reconnect."
@@ -147,7 +147,7 @@ final class SyncSetupModel {
 
     private func runConnect(url: String, username: String, token: String) async {
         guard let spec = Self.parseRemote(url) else {
-            state = .failed("That doesn't look like a git remote you can sync. Use an https:// URL or an "
+            state = .failed("That doesn’t look like a git remote you can sync. Use an https:// URL or an "
                 + "ssh remote (git@host:path).")
             return
         }

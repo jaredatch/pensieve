@@ -332,6 +332,16 @@ extension SyncSetupModelTests {
         XCTAssertNil(SyncSetupModel.parseRemote("file:///tmp/x"))
     }
 
+    func testInvalidConnectRemoteExplainsAcceptedTransports() async throws {
+        let git = RecordingGitService()
+        let model = try makeModel(git: git, credentials: InMemoryCredentialStore(),
+            rebuilder: RecordingRebuilder(), fileService: existingUserFiles())
+        await model.connectAndReport(url: "file:///tmp/x", username: "octocat", token: "tok")
+        XCTAssertEqual(model.state, .failed("That doesn’t look like a git remote you can sync. Use an https:// URL or an "
+            + "ssh remote (git@host:path)."))
+        XCTAssertTrue(git.calls.isEmpty)
+    }
+
     // MARK: - connect: call order
 
     func testConnectInitAndPushCallOrder() async throws {
@@ -776,7 +786,7 @@ extension SyncSetupModelTests {
         let model = try await runConnect(
             file: virginScaffold(trace: trace), git: git, rebuilder: RecordingRebuilder(trace: trace)
         )
-        guard case .failed = model.state else { return XCTFail("expected failure") }
+        XCTAssertEqual(model.state, .failed("Couldn’t determine a safe default branch for this remote."))
         XCTAssertEqual(trace.events, ["lsremote-refs:\(remoteURL)"])
     }
 
@@ -1921,14 +1931,14 @@ extension SyncSetupModelTests {
             XCTAssertEqual(model.state, .done)
             XCTAssertTrue(git.calls.contains("fetch:\(selected)"))
             XCTAssertEqual(git.calls.filter { $0.hasPrefix("lsremote-") }, ["lsremote-refs:\(remoteURL)"])
-            let expected = "Connected using branch “\(selected)” because Pensieve couldn't use the remote's default branch."
+            let expected = "Connected using branch “\(selected)” because Pensieve couldn’t use the remote’s default branch."
+            let notice = try XCTUnwrap(model.connectionNotice)
+            XCTAssertEqual(notice, expected)
             await TestWait.until(failureMessage: "Fallback notice didn't render in the completed sheet") {
                 guard let content = host.window.attachedSheet?.contentView else { return false }
                 return RenderedViewTestSupport.values(in: content).compactMap { $0 as? Text }
-                    .flatMap(RenderedViewTestSupport.strings).contains(expected)
+                    .flatMap(RenderedViewTestSupport.strings).contains(notice)
             }
-            let notice = try XCTUnwrap(model.connectionNotice)
-            XCTAssertEqual(notice, expected)
             XCTAssertTrue(presentation.shown, "Completion must leave the explanation open for acknowledgement")
             await assertFinishedSetup(sheet: sheet, content: content,
                 presentation: presentation, parent: host.window, key: key)

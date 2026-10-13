@@ -151,7 +151,7 @@ struct SyncSetupJob {
         }
         let notice: String?
         if refs.defaultBranch != branch {
-            notice = "Connected using branch “\(branch)” because Pensieve couldn't use the remote's default branch."
+            notice = "Connected using branch “\(branch)” because Pensieve couldn’t use the remote’s default branch."
         } else {
             notice = nil
         }

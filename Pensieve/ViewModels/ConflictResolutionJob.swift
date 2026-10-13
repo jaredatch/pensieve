@@ -108,7 +108,7 @@ struct ConflictResolutionJob {
     private func resolveAuthentication() throws -> SyncAuthentication {
         try git.probeUsability().requireUsable()
         guard let remote = try git.remoteURL(at: root),
-              let spec = SyncSetupModel.parseRemote(remote) else { return SyncAuthentication(remote: nil, credential: nil) }
+              let spec = RemoteURLPolicy.parse(remote) else { return SyncAuthentication(remote: nil, credential: nil) }
         return SyncAuthentication(remote: spec, credential: spec.transport == .ssh
             ? .sshAgent : credentials.credential(forHost: spec.host))
     }

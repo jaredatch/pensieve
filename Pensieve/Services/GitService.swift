@@ -297,17 +297,26 @@ struct GitService: GitServiceProtocol {
         export LC_ALL=C
         \(Self.canonicalHostFunction)
         case "$1" in
-          "Username for 'https://"*"': "|"Password for 'https://"*"': ") ;;
+          "Username for '"*"': "|"Password for '"*"': ") ;;
           *) exit 1 ;;
         esac
         address=${1#*\\'}
         address=${address%\\'*}
+        case "$address" in
+          [hH][tT][tT][pP][sS]://*) ;;
+          *) exit 1 ;;
+        esac
         authority=${address#*://}
         authority=${authority%%/*}
         authority=${authority##*@}
         case "$authority" in
-          \\[*\\]*) host=${authority#\\[}; host=${host%%\\]*} ;;
-          *) host=${authority%%:*} ;;
+          \\[*\\]*) host=${authority#\\[}; host=${host%%\\]*}; suffix=${authority#*\\]} ;;
+          *) host=${authority%%:*}; suffix=${authority#"$host"} ;;
+        esac
+        case "$suffix" in
+          "") ;;
+          :*) case "${suffix#:}" in ""|*[!0-9]*) exit 1 ;; esac ;;
+          *) exit 1 ;;
         esac
         host=$(canonical_host "$host") || exit 1
         saved_host=$(canonical_host "$PENSIEVE_GIT_HOST") || exit 1
@@ -334,7 +343,7 @@ struct GitService: GitServiceProtocol {
                 case "$pair" in
                   *[!0-9a-fA-F]*|0[0-9a-fA-F]|1[0-9a-fA-F]|7[fF]) return 1 ;;
                 esac
-                decoded=$decoded$(printf '%b' "\\\\$(printf '%03o' "0x$pair")")
+                decoded=$decoded$(printf "\\\\$(printf '%03o' "0x$pair")")
                 value=${value#???}
                 ;;
               %*) return 1 ;;

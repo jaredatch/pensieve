@@ -259,7 +259,7 @@ final class GitCredentialIsolationTests: XCTestCase {
 
 extension GitCredentialIsolationTests {
     func testRealGitPromptsMatchHTTPSHostExactlyWithCasePortsAndIPv6() throws {
-        try NativeTestWork.run {
+        try NativeTestWork.run { [self] in
             let fixture = try GitCredentialFixture()
             defer { try? fixture.remove() }
             let cases = [("FiXtUrE.TeSt", "fixture.test:8443"),
@@ -273,20 +273,19 @@ extension GitCredentialIsolationTests {
                 XCTAssertEqual(spec.host, authority == "fixture.test:8443" ? "fixture.test"
                     : authority.hasPrefix("[") ? "2001:db8::1" : host)
                 let credential = GitCredential.httpsToken(username: "kept", token: fixture.token, host: host)
-                try fixture.files.writeFile(at: fixture.base + "/credential-input",
-                    content: "url=https://\(authority)/store.git\n\n")
-                do {
-                    let auth = try fixture.git.runOrThrow(["-c", "credential.useHttpPath=true", "credential", "fill"],
-                        in: nil, credential: credential).stdout
-                    XCTAssertTrue(auth.contains("username=kept"), authority)
-                    XCTAssertTrue(auth.contains("password=" + fixture.token), authority)
-                } catch {
-                    XCTFail("Saved host \(host) must answer git’s prompt for \(authority): \(error)")
+                try assertCredentialFill(fixture, credential: credential, remote: "https://\(authority)/store.git",
+                    options: ["-c", "credential.useHttpPath=true"])
+                for scheme in ["HTTPS", "Https"] {
+                    try assertCredentialFill(fixture, credential: credential, remote: "\(scheme)://\(authority)/store.git")
                 }
-                for denied in ["http://\(authority)/store.git", "https://elsewhere.test/store.git",
+                for denied in ["http://\(authority)/store.git", "HTTP://\(authority)/store.git",
+                               "https://elsewhere.test/store.git", "HTTPS://elsewhere.test/store.git",
+                               "Https://example.com/x@\(host)/r.git", "HTTPS://example.com/x@\(host)/r.git",
                                "https://[2001:db8::2]:8443/store.git", "https://%65lsewhere.test/store.git",
                                "https://fixture.test%2F@example.com/store.git",
                                "https://fixture.test%40elsewhere.test/store.git",
+                               "https://fixture.test%3Aelsewhere.test/store.git",
+                               "https://fixture.test:/store.git", "https://[2001:db8::1]:elsewhere.test/store.git",
                                "https://%2567ithub.com/store.git", "https://äxample.test/store.git"] {
                     try fixture.files.writeFile(at: fixture.base + "/credential-input", content: "url=\(denied)\n\n")
                     XCTAssertThrowsError(try fixture.git.runOrThrow(["credential", "fill"],
@@ -299,6 +298,44 @@ extension GitCredentialIsolationTests {
                 XCTAssertThrowsError(try fixture.git.runOrThrow(["credential", "fill"], in: nil,
                     credential: .httpsToken(username: "kept", token: fixture.token, host: host)),
                     "Saved hosts cannot be patterns or hide control bytes: \(host)")
+            }
+        }
+    }
+
+    private func assertCredentialFill(_ fixture: GitCredentialFixture, credential: GitCredential,
+                                      remote: String, options: [String] = []) throws {
+        try fixture.files.writeFile(at: fixture.base + "/credential-input", content: "url=\(remote)\n\n")
+        do {
+            let auth = try fixture.git.runOrThrow(options + ["credential", "fill"], in: nil, credential: credential).stdout
+            XCTAssertTrue(auth.contains("username=kept"), remote)
+            XCTAssertTrue(auth.contains("password=" + fixture.token), remote)
+        } catch {
+            XCTFail("Saved credential must answer git’s prompt for \(remote): \(error)")
+        }
+    }
+
+    func testAskpassPercentDecodingWorksAcrossShellsInShMode() throws {
+        try NativeTestWork.run {
+            let fixture = try GitCredentialFixture()
+            defer { try? fixture.remove() }
+            let cases = [("my_host.test", "my%5Fhost.test"), ("%67ithub.com", "github.com"),
+                         ("ÄXAMPLE.test", "%C3%84XAMPLE.test")]
+            for (host, promptHost) in cases {
+                let environment = try fixture.git.childEnvironment(credential:
+                    .httpsToken(username: "kept", token: fixture.token, host: host))
+                let helper = try XCTUnwrap(environment["GIT_ASKPASS"])
+                for shell in ["/bin/sh", "/bin/dash", "/bin/zsh"] {
+                    for (field, expected) in [("Username", "kept"), ("Password", fixture.token)] {
+                        let arguments = (shell == "/bin/zsh" ? ["--emulate", "sh"] : [])
+                            + [helper, "\(field) for 'https://\(promptHost)': "]
+                        // Foundation Process decomposes Unicode environment values; use production’s byte-preserving spawn.
+                        let child = try GitProcess(executable: shell, arguments: arguments,
+                            workingDirectory: nil, environment: environment)
+                        let output = try child.readOutput()
+                        XCTAssertEqual(output.exit, 0, "\(shell): \(host)")
+                        XCTAssertEqual(String(bytes: output.stdout, encoding: .utf8), expected, "\(shell): \(host)")
+                    }
+                }
             }
         }
     }

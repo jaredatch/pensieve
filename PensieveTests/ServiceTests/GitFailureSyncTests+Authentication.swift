@@ -12,6 +12,9 @@ extension GitFailureSyncTests {
             .init(remote: "https://fixture.test/store.git", token: "expired", advice:
              "fixture.test didn’t accept the access token. Replace it in Settings › Sync.",
              detail: "fatal: SAML SSO authorization required. The requested URL returned error: 403"),
+            .init(remote: "https://www.github.com/o/r.git", token: "expired", advice:
+             "www.github.com didn’t accept the access token. Replace it in Settings › Sync.",
+             host: "www.github.com"),
             .init(remote: "git@example.com:store.git", token: nil, advice:
              "Couldn’t authenticate to example.com over SSH. Add your key to the agent "
                 + "(run ssh-add in Terminal), then sync again."),
@@ -25,7 +28,7 @@ extension GitFailureSyncTests {
             defer { try? fixture.remove() }
             try fixture.seedRepository(remote: remote)
             let credentials = InMemoryCredentialStore()
-            if let token { try credentials.store(token: token, username: "kept", forHost: "fixture.test") }
+            if let token { try credentials.store(token: token, username: "kept", forHost: entry.host) }
             let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
             let engine = AuthenticationAdviceEngine()
             engine.detail = entry.detail
@@ -41,19 +44,24 @@ extension GitFailureSyncTests {
             XCTAssertEqual(sync.state, .error(advice), "Chrome must retain the repair advice")
             let conflicts = ConflictResolutionModel(engine: engine, git: fixture.paths.makeGitService(),
                 credentials: credentials, root: fixture.root, steps: SyncStepModel())
-            await conflicts.loadAndReport(container: container)
-            guard case let .ready(groups) = conflicts.phase, let group = groups.first else {
-                return XCTFail("Expected one conflict before the refused push")
-            }
-            conflicts.choose(group.id, .thisMachine)
-            await conflicts.applyAndReport(container: container)
             let expected = remote.hasPrefix("https")
                 ? String(advice.dropLast()) + ", then try again." : advice
-            XCTAssertEqual(conflicts.phase, .error(expected))
-            engine.failInspection = true
-            await conflicts.loadAndReport(container: container)
-            XCTAssertEqual(conflicts.phase, .error(expected), "Conflict inspection needs the same repair path")
+            await assertConflictAdvice(conflicts, engine: engine, container: container, expected: expected)
         }
+    }
+
+    private func assertConflictAdvice(_ conflicts: ConflictResolutionModel, engine: AuthenticationAdviceEngine,
+                                      container: ModelContainer, expected: String) async {
+        await conflicts.loadAndReport(container: container)
+        guard case let .ready(groups) = conflicts.phase, let group = groups.first else {
+            return XCTFail("Expected one conflict before the refused push")
+        }
+        conflicts.choose(group.id, .thisMachine)
+        await conflicts.applyAndReport(container: container)
+        XCTAssertEqual(conflicts.phase, .error(expected))
+        engine.failInspection = true
+        await conflicts.loadAndReport(container: container)
+        XCTAssertEqual(conflicts.phase, .error(expected), "Conflict inspection needs the same repair path")
     }
 
     private func assertAuthenticationAudit(_ fixture: GitFailureFixture, detail: String) throws {
@@ -70,6 +78,7 @@ private struct AdviceCase {
     let token: String?
     let advice: String
     var detail = "refused"
+    var host = "fixture.test"
 }
 
 private final class AuthenticationAdviceEngine: SyncEngineProtocol {
