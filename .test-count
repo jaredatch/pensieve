@@ -1,4 +1,4 @@
-2806
+2809
 # lowered 2707 -> 2706 2026-10-09T07:23:04Z: PLAN-49 revert at the bound: R3 receipt scope reverted
 # lowered 2749 -> 2720 2026-10-09T17:38:54Z: PLAN-54 removes obsolete Scenario carry and compatibility-row tests; manifest guards and serialization remain in ManifestRetirementTests, copy errors in FileServiceAdmissionTests, and disk migration plus mixed-version sync have regression coverage
 # lowered 2757 -> 2756 2026-10-10T12:47:31Z: PLAN-54 / 54.6-c7: Planner-directed bounded revert removes the c6 branch-byte regression and restores 581db6f parser behavior

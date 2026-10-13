@@ -1,4 +1,3 @@
-import MarkdownUI
 import SwiftUI
 
 struct SkillFrontmatterTable: View {
@@ -33,9 +32,7 @@ struct SkillFrontmatterTable: View {
     }
 
     private func cell(_ value: String, isKey: Bool = false, isCollection: Bool = false) -> some View {
-        var shown = value.unicodeScalars
-        while shown.last == "\n" { shown.removeLast() }
-        return Text(ViewChangesPresentation.styledText(String(shown)))
+        Text(ViewChangesPresentation.styledText(value))
             .font(.system(size: isCollection ? (DesignTokens.markdownBodySize * DesignTokens.markdownCodeScale).rounded()
                           : DesignTokens.markdownBodySize,
                           weight: isKey ? .semibold : .regular, design: isCollection ? .monospaced : .default))
@@ -46,9 +43,8 @@ struct SkillFrontmatterTable: View {
     }
 }
 
-/// Measure keys intrinsically, then place both cells in each row at its full height. GridRow
-/// decorations otherwise follow each cell's intrinsic bounds, leaving gaps beside short keys.
-private struct FrontmatterTableLayout: Layout {
+/// Share a bounded key column and full row heights so dividers and fills remain continuous.
+struct FrontmatterTableLayout: Layout {
     private struct Metrics {
         let width: CGFloat
         let keyWidth: CGFloat
@@ -66,20 +62,34 @@ private struct FrontmatterTableLayout: Layout {
         for (row, height) in metrics.heights.enumerated() {
             subviews[row * 2].place(at: CGPoint(x: bounds.minX, y: top), anchor: .topLeading,
                                     proposal: ProposedViewSize(width: metrics.keyWidth, height: height))
-            subviews[row * 2 + 1].place(at: CGPoint(x: bounds.minX + metrics.keyWidth, y: top), anchor: .topLeading,
-                                        proposal: ProposedViewSize(width: metrics.width - metrics.keyWidth, height: height))
+            if row * 2 + 1 < subviews.count {
+                subviews[row * 2 + 1].place(at: CGPoint(x: bounds.minX + metrics.keyWidth, y: top), anchor: .topLeading,
+                                          proposal: ProposedViewSize(width: metrics.width - metrics.keyWidth, height: height))
+            }
             top += height
         }
     }
 
     private func measurements(width: CGFloat?, subviews: Subviews) -> Metrics {
+        guard !subviews.isEmpty else { return Metrics(width: 0, keyWidth: 0, heights: []) }
         let keys = stride(from: 0, to: subviews.count, by: 2)
-        let keyWidth = keys.map { subviews[$0].sizeThatFits(.unspecified).width }.max() ?? 0
-        let idealValueWidth = keys.map { subviews[$0 + 1].sizeThatFits(.unspecified).width }.max() ?? 0
-        let width = max(keyWidth, width.flatMap { $0.isFinite ? $0 : nil } ?? keyWidth + idealValueWidth)
+        let idealKeyWidth = keys.map { subviews[$0].sizeThatFits(.unspecified).width }.max() ?? 0
+        let idealValueWidth = keys.map { index in
+            index + 1 < subviews.count ? subviews[index + 1].sizeThatFits(.unspecified).width : 0
+        }.max() ?? 0
+        let width = width.flatMap { $0.isFinite ? max(0, $0) : nil } ?? min(idealKeyWidth, 240) + idealValueWidth
+        let keyWidth = min(idealKeyWidth, 240, width * 0.4)
+        // Reserve padding and a few glyphs before wrapping; smaller probes otherwise measure a glyph per line.
+        let minimumCellWidth = DesignTokens.markdownTableCellHorizontal * 2 + DesignTokens.markdownBodySize * 3
+        guard keyWidth >= min(idealKeyWidth, minimumCellWidth),
+              width - keyWidth >= min(idealValueWidth, minimumCellWidth) else {
+            return Metrics(width: width, keyWidth: keyWidth, heights: [])
+        }
         let heights = keys.map { index in
-            max(subviews[index].sizeThatFits(ProposedViewSize(width: keyWidth, height: nil)).height,
-                subviews[index + 1].sizeThatFits(ProposedViewSize(width: width - keyWidth, height: nil)).height)
+            let keyHeight = subviews[index].sizeThatFits(ProposedViewSize(width: keyWidth, height: nil)).height
+            guard index + 1 < subviews.count else { return keyHeight }
+            return max(keyHeight,
+                       subviews[index + 1].sizeThatFits(ProposedViewSize(width: width - keyWidth, height: nil)).height)
         }
         return Metrics(width: width, keyWidth: keyWidth, heights: heights)
     }

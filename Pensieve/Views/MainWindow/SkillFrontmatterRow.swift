@@ -12,16 +12,22 @@ struct SkillFrontmatterRow: Equatable {
               let document = try? CheckedYAMLLoader.composeAndLoad(yaml: source),
               let root = document.root, let mapping = root.mapping else { return [] }
         // Rendering needs a trustworthy mapping, even when required identity fields are absent.
-        let preserved = parsed.preservedFrontmatter ?? SkillParser.preservedFrontmatter(
+        let preserved = SkillParser.preservedFrontmatter(
             source: source, root: root, rootIsFlowMapping: document.rootIsFlowMapping)
         guard preserved.entriesAreTrustworthy else { return [] }
         return zip(preserved.entries, mapping).map { entry, pair in
             if case let .scalar(scalar) = pair.value {
-                return SkillFrontmatterRow(key: entry.key, value: scalar.string, isCollection: false)
+                return SkillFrontmatterRow(key: entry.key, value: scalarText(scalar.string), isCollection: false)
             }
             let source = String(preserved.source[entry.sourceRange])
             return SkillFrontmatterRow(key: entry.key, value: collectionYAML(source), isCollection: true)
         }
+    }
+
+    private static func scalarText(_ value: String) -> String {
+        var scalars = value.unicodeScalars
+        while let last = scalars.last, CharacterSet.newlines.contains(last) { scalars.removeLast() }
+        return String(scalars)
     }
 
     private static func collectionYAML(_ entry: String) -> String {
@@ -29,14 +35,25 @@ struct SkillFrontmatterRow: Equatable {
         let source = String(entry[entry.index(after: colon)...]).replacingOccurrences(of: "\r\n", with: "\n")
         var lines = source.components(separatedBy: "\n")
         let first = lines.removeFirst().trimmingCharacters(in: .whitespaces)
+        let contentLines = lines.indices.filter {
+            let text = lines[$0].trimmingCharacters(in: .whitespaces)
+            return !text.isEmpty && !text.hasPrefix("#")
+        }
+        let indent = contentLines.map { lines[$0].prefix(while: { $0 == " " }).count }.min() ?? 0
+        let commentIndent = first.isEmpty || first.hasPrefix("#") ? max(1, indent) : 1
+        // The trusted entry extends to the next key; lower-indent notes after its value aren't part of that value.
+        if let end = lines.indices.first(where: {
+            $0 > (contentLines.last ?? -1) && lines[$0].trimmingCharacters(in: .whitespaces).hasPrefix("#")
+                && lines[$0].prefix(while: { $0 == " " }).count < commentIndent
+        }) {
+            lines.removeSubrange(end...)
+        }
         // Inline flow collections already have meaningful indentation relative to their opening token.
         if !first.isEmpty, !first.hasPrefix("#") {
             return ([first] + lines).joined(separator: "\n").trimmingCharacters(in: .newlines)
         }
         while lines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeLast() }
         while lines.first?.trimmingCharacters(in: .whitespaces).isEmpty == true { lines.removeFirst() }
-        let indent = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            .map { $0.prefix(while: { $0 == " " }).count }.min() ?? 0
         return lines.map { String($0.dropFirst(min(indent, $0.prefix(while: { $0 == " " }).count))) }
             .joined(separator: "\n")
     }

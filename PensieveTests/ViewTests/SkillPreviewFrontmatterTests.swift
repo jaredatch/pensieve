@@ -8,47 +8,32 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
     func testRenderedTableKeepsFileOrderBlockLinesAndNestedYAMLAboveBody() async throws {
         let longLine = Array(repeating: "Long description text that wraps.", count: 12).joined(separator: " ")
         let description = "First line.\n" + longLine
-        let document = """
-        ---
-        license: MIT
-        name: Example
-        description: CHOMP
-          First line.
-          \(longLine)
-        metadata:
-          version: "3.1.0"
-          enabled: true
-        tools:
-          - Read
-          - Bash(git:*)
-        flow: {one: [1, 2], two: "value"}
-        count: 42
-        ---
-        # Body heading
-
-        Body remains Markdown.
-        """
+        let document = orderedDocument(longLine)
+        var paintedRows: [SkillFrontmatterRow]?
         for (ending, chomp) in [("\n", "|-"), ("\r\n", "|-"), ("\n", "|"), ("\r\n", "|+")] {
             let source = document.replacingOccurrences(of: "CHOMP", with: chomp)
             let fixture = try host("\u{feff}" + source.replacingOccurrences(of: "\n", with: ending))
             defer { fixture.close() }
             let expected: [(String, String)] = [
                 ("license", "MIT"), ("name", "Example"), ("description", description),
-                ("metadata", "version: \"3.1.0\"\nenabled: true"), ("tools", "- Read\n- Bash(git:*)"),
+                ("metadata", "version: \"3.1.0\"\nenabled: true\n# Keep this nested note."),
+                ("tools", "- Read\n- Bash(git:*)"),
                 ("flow", "{one: [1, 2], two: \"value\"}"), ("count", "42")
             ]
             let previousY = try await assertRows(expected, in: fixture.host)
-            try assertGridPaint(fixture.snapshot.frontmatterRows)
-            let descriptionFrame = try await text(description, in: fixture.host, allowingTrailingNewlines: true)
-                .accessibilityFrame()
+            XCTAssertEqual(fixture.snapshot.frontmatterRows.map(\.value), expected.map(\.1))
+            if let paintedRows { XCTAssertEqual(fixture.snapshot.frontmatterRows, paintedRows) }
+            paintedRows = fixture.snapshot.frontmatterRows
+            let descriptionFrame = try await text(description, in: fixture.host).accessibilityFrame()
             XCTAssertGreaterThan(descriptionFrame.height, 100, "Long values wrap in full")
             let body = try await text("Body heading", in: fixture.host)
             XCTAssertLessThan(body.accessibilityFrame().maxY, previousY, "The Markdown body follows the table")
             let scalar = try await text("MIT", in: fixture.host)
-            let collection = try await text("version: \"3.1.0\"\nenabled: true", in: fixture.host)
+            let collection = try await text(expected[3].1, in: fixture.host)
             XCTAssertEqual(try fontSize(of: scalar), 13, accuracy: 0.01)
             XCTAssertEqual(try fontSize(of: collection), 11, accuracy: 0.01)
         }
+        try assertGridPaint(XCTUnwrap(paintedRows))
     }
 
     func testReadableMappingWithoutRequiredStringIdentityStillShowsItsEntries() async throws {
@@ -59,6 +44,20 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
             _ = try await text("MIT", in: fixture.host)
             _ = try await text("Body text.", in: fixture.host)
         }
+    }
+
+    func testLongKeysWrapAndLeaveTheValueReadable() async throws {
+        let key = String(repeating: "long", count: 80)
+        let value = "The value keeps a readable column."
+        let fixture = try host("---\n\(key): \(value)\nlicense: MIT\n---\n\nBody text.")
+        defer { fixture.close() }
+        let keyFrame = try await text(key, in: fixture.host).accessibilityFrame()
+        let valueFrame = try await text(value, in: fixture.host).accessibilityFrame()
+        XCTAssertLessThanOrEqual(keyFrame.width, 240)
+        XCTAssertGreaterThan(keyFrame.height, valueFrame.height, "The long key wraps")
+        XCTAssertGreaterThan(valueFrame.width, 200, "The value retains readable space")
+        XCTAssertLessThan(valueFrame.height, 100, "The value must not wrap a glyph per line")
+        XCTAssertLessThanOrEqual(valueFrame.maxX, fixture.host.accessibilityFrame().maxX)
     }
 
     func testFrontmatterMarkdownLinksAndImagesAreLiteralAndLoadNothing() async throws {
@@ -89,12 +88,15 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
         let fixture = try host("""
         ---
         name: Example
-        description: "before\\u200B\\u202E\\u0007\\u000D\\u200D\\uFE0Fafter"
+        description: "before\\u200B\\u202E\\u0007\\u000D\\u200D\\uFE0Fafter\\r\\n\\u2028\\u2029"
         hidden\u{200b}key: literal ⟨U+200B⟩
+        \(terminalBreakFields)
         ---
         Body text.
         """)
         defer { fixture.close() }
+        XCTAssertEqual(fixture.snapshot.frontmatterRows.dropFirst(3).map(\.value),
+                       Array(repeating: "Final line", count: 9), "The snapshot trims every terminal line break")
         _ = try await text("before⟨U+200B⟩⟨U+202E⟩⟨U+0007⟩␍⟨U+200D⟩⟨U+FE0F⟩after", in: fixture.host)
         _ = try await text("hidden⟨U+200B⟩key", in: fixture.host)
         _ = try await text("literal ⟨U+200B⟩", in: fixture.host)
@@ -123,8 +125,40 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
         }
     }
 
+    private func orderedDocument(_ longLine: String) -> String {
+        """
+        ---
+        license: MIT
+        name: Example
+        description: CHOMP
+          First line.
+          \(longLine)
+        metadata:
+          version: "3.1.0"
+          enabled: true
+          # Keep this nested note.
+        # Notes for the following entry.
+        tools:
+          - Read
+          - Bash(git:*)
+        # deploy notes
+        flow: {one: [1, 2], two: "value"}
+        # Notes after the inline value.
+        count: 42
+        ---
+        # Body heading
+
+        Body remains Markdown.
+        """
+    }
+
     private func host(_ document: String) throws -> FrontmatterHost {
         try FrontmatterHost(document: document)
+    }
+
+    private var terminalBreakFields: String {
+        ["\\n", "\\r", "\\r\\n", "\\v", "\\f", "\\N", "\\L", "\\P", "\\r\\n\\L\\P"]
+            .enumerated().map { "terminal\($0.offset): \"Final line\($0.element)\"" }.joined(separator: "\n")
     }
 
     private func assertGridPaint(_ rows: [SkillFrontmatterRow]) throws {
@@ -132,12 +166,17 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
             .frame(width: 612).background(Color.white).environment(\.colorScheme, .light))
         renderer.scale = 2
         let image = try XCTUnwrap(renderer.cgImage, "Production table must render offscreen")
-        let bitmap = NSBitmapImageRep(cgImage: image)
+        let width = image.width, height = image.height
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                             bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                                                | CGBitmapInfo.byteOrder32Big.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let pixels = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
         func luminance(_ x: Int, _ y: Int) -> CGFloat {
-            guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return -1 }
-            return (color.redComponent + color.greenComponent + color.blueComponent) / 3
+            let offset = y * context.bytesPerRow + x * 4
+            return CGFloat(Int(pixels[offset]) + Int(pixels[offset + 1]) + Int(pixels[offset + 2])) / 765
         }
-        let width = bitmap.pixelsWide, height = bitmap.pixelsHigh
         XCTAssertGreaterThan(width, 100)
         XCTAssertGreaterThan(height, 50)
         // A blank capture must fail before any comparisons of borders or fills.
@@ -165,7 +204,7 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
         var valueX: CGFloat?
         for (key, value) in rows {
             let keyFrame = try await text(key, in: host).accessibilityFrame()
-            let element = try await text(value, in: host, allowingTrailingNewlines: key == "description")
+            let element = try await text(value, in: host)
             let valueFrame = element.accessibilityFrame()
             XCTAssertEqual(element.accessibilityValue() as? String, value, "Values end at their last text line")
             XCTAssertLessThan(keyFrame.maxY, previousY, "Rows must follow file order")
@@ -177,16 +216,14 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
         return previousY
     }
 
-    private func text(_ value: String, in host: NSView,
-                      allowingTrailingNewlines: Bool = false) async throws -> NSAccessibilityProtocol {
+    private func text(_ value: String, in host: NSView) async throws -> NSAccessibilityProtocol {
         var found: NSAccessibilityProtocol?
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                              failureMessage: "Rendered literal text must appear: \(value)") {
             host.layoutSubtreeIfNeeded()
             found = self.elements(in: host).first {
                 guard let actual = $0.accessibilityValue() as? String else { return false }
-                let matches = actual == value || (allowingTrailingNewlines && actual.trimmingCharacters(in: .newlines) == value)
-                return matches && $0.accessibilityFrame().width > 0
+                return actual == value && $0.accessibilityFrame().width > 0
             }
             return found != nil
         }
