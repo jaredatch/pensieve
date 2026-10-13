@@ -66,9 +66,9 @@ extension SkillLibraryViewModel {
             needsLaterSync = !laterSlugs.isEmpty
         }
         for directoryName in coordinatorObservedSlugs {
-            setLastWrittenBody(
-                currentOnDiskBody(directoryName: directoryName), directoryName: directoryName
-            )
+            let document = currentOnDiskBody(directoryName: directoryName)
+            refreshObservedIdentity(directoryName: directoryName, document: document)
+            setLastWrittenBody(document, directoryName: directoryName)
         }
         askAboutCoordinatorChanges(acceptedSlugs)
         // The fingerprint is not observed (`lastWrittenBody`): one main-thread signal after the final re-seed

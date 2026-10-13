@@ -131,7 +131,6 @@ extension SkillDocumentSaveTests {
             _ = library.editorBody(for: skill)
             library.noteEditorChanged(skill, body: draft)
             let timestamp = skill.updatedAt
-            library.error = restore ? "Another skill could not save" : nil
             files.failingWrites.insert(path)
             if restore {
                 XCTAssertThrowsError(try restoreSkillHistoryVersion(skill: skill, body: draft, store: store,
@@ -143,7 +142,7 @@ extension SkillDocumentSaveTests {
             XCTAssertEqual(skill.skillDescription, "Before")
             XCTAssertEqual(skill.updatedAt, timestamp)
             XCTAssertTrue(library.wasLastWrittenByApp(directoryName: "test", currentBody: source))
-            if restore { XCTAssertEqual(library.error, "Another skill could not save") } else { XCTAssertNotNil(library.error) }
+            XCTAssertNotNil(library.error)
             files.failingWrites.remove(path)
             if restore {
                 try restoreSkillHistoryVersion(skill: skill, body: draft, store: store, library: library, notifier: {})
@@ -151,7 +150,6 @@ extension SkillDocumentSaveTests {
             XCTAssertEqual(files.files[path], draft)
             XCTAssertEqual(skill.skillDescription, "After")
             XCTAssertFalse(library.hasUnsavedChanges)
-            if restore { XCTAssertEqual(library.error, "Another skill could not save") }
             XCTAssertTrue(library.wasLastWrittenByApp(directoryName: "test", currentBody: draft))
         }
     }

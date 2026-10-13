@@ -112,7 +112,9 @@ extension SyncNudgeTests {
 
         XCTAssertEqual(fixture.counter.value, 0)
         XCTAssertFalse(fixture.library.externallyModified.contains(skill.directoryName))
+        for refresh in ["window", "draft", "failure"] { try await assertFinalIdentityDuringRecheck(refresh: refresh) }
     }
+
     func testTheCyclesFinalReseedPublishesAnObservedSignal() async throws {
         // The fingerprint is not observed (an off-main mutation under the lock deadlocks against SwiftUI), so a
         // draft that matched a transient body and reads dirty again after the cycle's final re-seed needs one

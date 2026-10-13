@@ -359,12 +359,7 @@ extension SkillLibraryViewModel {
         // Dirty is measured against the new fingerprint, so a draft the file has caught up with has nothing
         // to save and nothing is dropped; during a sync cycle the question waits for the cycle's final body
         // (`finishCoordinatorChanges`) — a transient body must not cost the draft or ask about itself.
-        if let observe = onSkillDocumentObserved {
-            // Passive identity refresh must not replace an actionable error from a user operation.
-            try? observe(directoryName, currentBody)
-        } else if let draft = drafts[directoryName] {
-            StoreRebuildService.refreshIdentity(of: draft.skill, document: currentBody, retainingBOM: true)
-        }
+        refreshObservedIdentity(directoryName: directoryName, document: currentBody)
         setLastWrittenBody(currentBody, directoryName: directoryName)
         externallyModified.insert(directoryName)
         reloadToken &+= 1
@@ -372,6 +367,15 @@ extension SkillLibraryViewModel {
             requestUnsavedChangesPrompt(directoryName: directoryName, reason: .externalChange)
         }
         if shouldNotify { notifier() }
+    }
+
+    func refreshObservedIdentity(directoryName: String, document: String) {
+        if let observe = onSkillDocumentObserved {
+            // Passive identity refresh must not replace an actionable error from a user operation.
+            try? observe(directoryName, document)
+        } else if let draft = drafts[directoryName] {
+            StoreRebuildService.refreshIdentity(of: draft.skill, document: document, retainingBOM: true)
+        }
     }
 }
 
