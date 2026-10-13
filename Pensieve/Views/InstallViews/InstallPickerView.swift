@@ -7,7 +7,7 @@ struct InstallPickerView: View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("Found \(model.candidates.count) Skills")
+                    Text(SkillDiscoveryTitle.text(count: model.candidates.count))
                         .font(.title2)
                     Text("Select which skills to install into Pensieve.")
                         .font(.caption)

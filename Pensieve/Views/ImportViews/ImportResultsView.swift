@@ -9,7 +9,7 @@ struct ImportResultsView: View {
             // Header
             HStack {
                 VStack(alignment: .leading) {
-                    Text("Found \(importVM.discoveredSkills.count) Skills")
+                    Text(SkillDiscoveryTitle.text(count: importVM.discoveredSkills.count))
                         .font(.title2.bold())
                     Text("Select which skills to import into Pensieve.")
                         .font(.caption)

@@ -43,6 +43,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Import from Folder… and Add Skill from GitHub… now say "Found 1 Skill" when there's just one.
 - When a git command fails, Pensieve's error keeps git's own message, even when part of git's output isn't valid UTF-8.
 - Reopening sync conflicts while they load now shows the ongoing load and its result.
 - Connecting to a sync remote now tells you when Pensieve uses a fallback branch, and which branch it chose.
