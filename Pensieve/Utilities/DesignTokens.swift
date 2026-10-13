@@ -30,6 +30,7 @@ enum DesignTokens {
     static let markdownQuoteInset: CGFloat = markdownBodySize // 1em
     static let markdownTableCellVertical: CGFloat = Spacing.xs // 6 px → 4.875 → 4 pt
     static let markdownTableCellHorizontal: CGFloat = markdownBodySize * 0.8125 // .8125em; outside grid tolerance
+    static let frontmatterTableRuleThickness: CGFloat = 1 // Signed-off frontmatter table frame.
     static let markdownThematicBreakMargin: CGFloat = Spacing.xl // 24 px → 19.5 → 20 pt
     static let markdownCodeFill = Color(nsColor: .quaternaryLabelColor)
     static let markdownSeparator = Color(nsColor: .separatorColor)

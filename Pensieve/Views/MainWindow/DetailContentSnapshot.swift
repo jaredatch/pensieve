@@ -11,6 +11,7 @@ struct DetailContentSnapshot: Equatable {
     var frontmatterName: String = ""
     var frontmatterDescription: String = ""
     var frontmatterWhenToUse: String = ""
+    var frontmatterRows: [SkillFrontmatterRow] = []
     var cursorAlwaysApply: Bool = false
     var inventory: SkillBundleInventory = .empty
     /// Per installed platform (`deployablePlatforms(forProject: false)`), from `PlatformViewModel.isDeployed`.
@@ -47,6 +48,7 @@ struct DetailContentSnapshot: Equatable {
                                      frontmatterName: parsed.name ?? "",
                                      frontmatterDescription: parsed.description ?? "",
                                      frontmatterWhenToUse: parsed.whenToUse ?? "",
+                                     frontmatterRows: SkillFrontmatterRow.rows(from: parsed),
                                      cursorAlwaysApply: skill.cursorConfig?.alwaysApply == true,
                                      inventory: library.bundleInventory(skill),
                                      macStatus: mac,
