@@ -219,7 +219,11 @@ extension SkillInstallService {
         beforeReplace: () throws -> Void = {},
         registration: SyncBodyWriteRegistration
     ) throws {
-        let expectedBody = try fileService.readFile(at: sourceDirectory + "/SKILL.md")
+        // Own-write records retain the BOM, matching the watcher's whole-file read.
+        guard let expectedBody = String(validating: try fileService.readData(at: sourceDirectory + "/SKILL.md"),
+                                        as: UTF8.self) else {
+            throw CocoaError(.fileReadInapplicableStringEncoding)
+        }
         var bodyWriteBegan = false
         var bodyWriteSucceeded = false
         defer { if bodyWriteBegan { registration.end(slug, bodyWriteSucceeded) } }
