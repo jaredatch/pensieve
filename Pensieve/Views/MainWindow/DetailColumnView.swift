@@ -52,7 +52,7 @@ struct DetailColumnView: View {
             remoteProjectDetail(key)
         case .category(let id):
             CategoryDetailView(
-                categoryID: id, platformVM: platformVM,
+                categoryID: id, platformVM: platformVM, library: library,
                 manifestSaves: library.manifestSaves, notifier: notifier, onReveal: onReveal
             )
                 .id(id)
@@ -77,15 +77,17 @@ struct DetailColumnView: View {
                         + "Update Pensieve, then relaunch to see your skills and add new ones.")
                 )
             } else {
-                EmptyStateView("No Skills Yet", description: library.launchIngestPending
-                    ? SkillLibraryViewModel.launchIngestMessage : "Import existing skills or create your first one.") {
+                EmptyStateView("No Skills Yet", description: "Import existing skills or create your first one.") {
                     VStack(spacing: Spacing.sm) {
                         Button("Find Skills on This Mac", action: onImport)
                             .buttonStyle(.borderedProminent).disabled(library.addsFenced)
+                            .help(library.addFenceReason ?? "")
                         Button("Import from Folder…", action: onImportFolder)
                             .buttonStyle(.bordered).disabled(library.addsFenced)
+                            .help(library.addFenceReason ?? "")
                         Button("Create Skill", action: onCreate)
                             .buttonStyle(.bordered).disabled(library.addsFenced)
+                            .help(library.addFenceReason ?? "")
                     }
                 }
             }
@@ -116,15 +118,15 @@ struct DetailColumnView: View {
                 Label("Add Skill", systemImage: "plus")
             }
             .disabled(library.addsFenced)
-            .help(library.launchIngestPending ? SkillLibraryViewModel.launchIngestMessage : "Add Skill")
+            .help(library.addFenceReason ?? "Add Skill")
         case .projects:
             Button { onAdd(.projects) } label: { Label("Add Project", systemImage: "plus") }
                 .disabled(library.addsFenced)
-                .help(library.launchIngestPending ? SkillLibraryViewModel.launchIngestMessage : "Add Project")
+                .help(library.addFenceReason ?? "Add Project")
         case .categories:
             Button { onAdd(.categories) } label: { Label("Add Category", systemImage: "plus") }
                 .disabled(library.addsFenced)
-                .help(library.launchIngestPending ? SkillLibraryViewModel.launchIngestMessage : "Add Category")
+                .help(library.addFenceReason ?? "Add Category")
         case .tags, .machines:
             EmptyView()
         }

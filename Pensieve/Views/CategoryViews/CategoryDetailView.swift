@@ -4,6 +4,7 @@ import SwiftData
 /// The category management surface: one place to manage a category's member PROJECTS and its assigned
 /// SKILLS (the standing rule). Each toggle reconciles and surfaces a resilient §5 result. (PLAN-06 / 06.5)
 struct CategoryDetailView: View {
+    let library: SkillLibraryViewModel
     let categoryID: UUID
     let onReveal: (Skill) -> Void
     @Environment(\.modelContext) private var context
@@ -14,9 +15,10 @@ struct CategoryDetailView: View {
     @State private var model: CategoryDetailModel
     @State private var showRename = false
 
-    init(categoryID: UUID, platformVM: PlatformViewModel,
+    init(categoryID: UUID, platformVM: PlatformViewModel, library: SkillLibraryViewModel,
          manifestSaves: ManifestSaveModel?,
          notifier: @escaping SyncStateNotifying, onReveal: @escaping (Skill) -> Void) {
+        self.library = library
         self.categoryID = categoryID
         self.onReveal = onReveal
         _categories = Query(filter: #Predicate<Category> { $0.id == categoryID })
@@ -78,6 +80,8 @@ struct CategoryDetailView: View {
                 } label: {
                     Label("Rename", systemImage: "pencil")
                 }
+                .disabled(library.categoryEditsFenced)
+                .help(library.persistentFenceReason ?? "")
             }
         }
         .sheet(isPresented: $showRename) {
@@ -117,6 +121,8 @@ struct CategoryDetailView: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(.vertical, Spacing.xs)
+        } footer: {
+            if let reason = library.persistentFenceReason { Text(reason) }
         }
     }
 
@@ -140,6 +146,8 @@ struct CategoryDetailView: View {
             )) {
                 Label(project.name, systemImage: "folder")
             }
+            .disabled(library.categoryEditsFenced)
+            .help(library.persistentFenceReason ?? "")
         } else {
             // Pending identity — cannot be a durable member (§A). Shown disabled with a calm hint.
             Label {
@@ -163,6 +171,8 @@ struct CategoryDetailView: View {
         )) {
             Label(skill.name, systemImage: "doc.text")
         }
+        .disabled(library.categoryEditsFenced)
+        .help(library.persistentFenceReason ?? "")
     }
 
     @ViewBuilder

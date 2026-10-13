@@ -109,8 +109,7 @@ struct SkillListView: View {
                     EmptyStateView("No Matching Skills", description: "Clear the filter to see every skill.")
                 } else {
                     EmptyStateView("No Skills", description: library.storeUnreadable
-                        ? "This library can't be read." : library.launchIngestPending
-                        ? SkillLibraryViewModel.launchIngestMessage : "Create a new skill or import existing ones.")
+                        ? "This library can't be read." : "Create a new skill or import existing ones.")
                 }
             }
         }
