@@ -132,7 +132,10 @@ extension SyncBytePreservationTests {
             try seedRemote(git: git, remote: remote)
             let before = try git.runOrThrow(["--git-dir", remote, "rev-parse", "main"], in: nil).stdout
             for source in [".gitattributes", ".pensieve-retired-paths"] {
-                for badLine in ["# Pensieve retired path: %%%\n", receiptText(["skills/x/../bad"])] {
+                let encoded = "# Pensieve retired path: " + Data("skills/a/b".utf8).base64EncodedString()
+                let badLines = ["# Pensieve retired path: %%%\n", receiptText(["skills/x/../bad"])]
+                    + ["\r", "\u{0085}", "\u{2028}", "\u{2029}"].map { encoded + $0 + "junk\n" }
+                for badLine in badLines {
                     let store = base + "/malformed-" + UUID().uuidString
                     try git.clone(remote: remoteURL, into: store, credential: nil)
                     let manifestBefore = try files.readData(at: store + "/manifest/manifest.yaml")

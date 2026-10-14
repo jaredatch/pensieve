@@ -277,3 +277,33 @@ struct SyncConflictByteFixture {
         Data([0xFF, 0xFE] + text.utf16.flatMap { [UInt8($0 & 0xFF), UInt8($0 >> 8)] })
     }
 }
+
+extension SyncConflictByteFixture {
+    /// Places real worktree witnesses after native rebase has produced its unmerged index.
+    /// The optional leaf models a non-directory at the deletion sink; the displaced nested
+    /// checkout stays available for preservation assertions. Index stages and reads remain native.
+    func protectedDeletionEngine() throws -> SyncEngine {
+        let executable = root + "/protected-deletion-git"
+        try files.writeExecutableFile(at: executable, content: """
+            #!/bin/sh
+            /usr/bin/git "$@"
+            result=$?
+            place_witness() {
+                \(FakeGitScript.skipGlobalOptions)
+                if [ "$1" = rebase ] && [ "$2" != --abort ] && [ "$2" != --continue ] && \
+                   /usr/bin/git -C '\(storeB)' rev-parse --verify REBASE_HEAD >/dev/null 2>&1; then
+                    cp '\(root)/resolution-marker' '\(storeB)/\(path)/keep' || exit 1
+                    if [ -f '\(root)/resolution-leaf' ]; then
+                        mv '\(storeB)/\(path)' '\(root)/displaced-repository' || exit 1
+                        cp '\(root)/resolution-leaf' '\(storeB)/\(path)' || exit 1
+                    fi
+                fi
+            }
+            place_witness "$@"
+            exit "$result"
+            """ + "\n")
+        let fault = GitService(askpassHelperPath: root + "/askpass", executablePath: executable)
+        return SyncEngine(gitService: AllowlistedRemoteGit(wrapping: fault), lockPath: root + "/sync.lock")
+    }
+
+}

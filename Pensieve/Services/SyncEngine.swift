@@ -33,6 +33,8 @@ enum SyncError: LocalizedError, Equatable {
     case storeUnreadable([String])
     case conflictsChanged
     case conflictSideUnavailable(path: String)
+    case conflictRequiresGitResolution(path: String)
+    case protectedGitlinkUnavailable(path: String)
     case conflictFolderMustMove(path: String)
     case rejectedRemote(String)
     case syncInProgress
@@ -46,6 +48,10 @@ enum SyncError: LocalizedError, Equatable {
             return "The conflict changed while you were resolving it — reopen to see the latest."
         case let .conflictSideUnavailable(path):
             return "Pensieve can’t keep this version of \(path) as a file. Choose the other version."
+        case let .conflictRequiresGitResolution(path):
+            return "Pensieve can’t resolve this conflict. Resolve it in git: \(path)"
+        case let .protectedGitlinkUnavailable(path):
+            return "Pensieve can’t sync the nested repository at \(path). Choose the other version."
         case let .conflictFolderMustMove(path):
             return "Move the folder at \(path), then choose this version again. You can also choose the other version."
         case .rejectedRemote:
@@ -314,6 +320,11 @@ struct SyncEngine: SyncEngineProtocol {
             guard let full = validatedWorktreePath(path, root: root) else {
                 throw SyncError.conflictsChanged
             }
+            let item = ConflictItem(path: path, kind: Self.kind(for: path),
+                                    thisMachine: this.bytes, otherMachine: other.bytes,
+                                    thisUnavailable: this.unavailable, otherUnavailable: other.unavailable,
+                                    thisMode: this.mode, otherMode: other.mode)
+            if let error = item.selectionError(for: pick.side) { throw error }
             let chosen = pick.side == .thisMachine ? this : other
             let hasGitlink = this.isGitlink || other.isGitlink
             if StoreIgnoreRules.canRetire(path)

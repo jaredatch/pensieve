@@ -249,6 +249,7 @@ struct ConflictFileComparison: View {
     private let this: Side
     private let other: Side
     private let retiresGitlink: Bool
+    private let hasProtectedGitlink: Bool
     private let gitResolutionPath: String?
     private let removesOtherFile: Bool
 
@@ -256,6 +257,7 @@ struct ConflictFileComparison: View {
         this = Side(item.thisMachine, unavailable: item.thisUnavailable)
         other = Side(item.otherMachine, unavailable: item.otherUnavailable)
         retiresGitlink = item.retiresGitlink
+        hasProtectedGitlink = item.hasProtectedGitlink
         gitResolutionPath = item.requiresGitResolution ? item.path : nil
         removesOtherFile = item.otherMode != nil && item.otherUnavailable?.isGitlink != true
     }
@@ -270,6 +272,16 @@ struct ConflictFileComparison: View {
                     Text(ViewChangesPresentation.styledText(
                         "Pensieve can’t resolve this conflict. Resolve it in git: " + gitResolutionPath, filename: true))
                         .foregroundStyle(.secondary).textSelection(.enabled)
+                } else if hasProtectedGitlink {
+                    Text("The nested repository can’t be chosen at this path.").foregroundStyle(.secondary)
+                    if this.keepsFile || other.keepsFile {
+                        Text("Choosing a file or link keeps it in sync.").foregroundStyle(.secondary)
+                    } else {
+                        Text("Choosing the other version removes the nested repository from sync. "
+                            + "A folder and its contents stay on this Mac. A file or link at this path is deleted. "
+                            + "New files here can still sync.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if retiresGitlink {
                     if this.keepsFile || other.keepsFile {

@@ -30,7 +30,9 @@ extension SyncBytePreservationTests {
                                 let sample = ReceiptSweepCase(source: source,
                                     text: sweepText(lines, ending: ending, finalNewline: finalNewline),
                                     safe: Array(Set(paths.filter { safe.contains($0) })).sorted(),
-                                    unsafe: Array(Set(paths.filter { unsafe.contains($0) })), malformed: !fault.isEmpty)
+                                    unsafe: Array(Set(paths.filter { unsafe.contains($0) })),
+                                    malformed: !fault.isEmpty || (ending == "\r" && !lines.isEmpty
+                                        && (finalNewline || lines.count > 1)))
                                 try assertReceiptRewrite(sample, at: base + "/sweep-\(cases)")
                                 cases += 1
                             }
@@ -39,6 +41,20 @@ extension SyncBytePreservationTests {
                 }
             }
             XCTAssertEqual(cases, 240)
+            try assertReceiptRecordBoundaries()
+        }
+    }
+
+    private func assertReceiptRecordBoundaries() throws {
+        let line = "# Pensieve retired path: " + Data("skills/a/b".utf8).base64EncodedString()
+        for source in [".gitattributes", ".pensieve-retired-paths"] {
+            for separator in ["\r", "\u{0085}", "\u{2028}", "\u{2029}"] {
+                for tail in [false, true] {
+                    let text = tail ? line + separator + "junk\n" : "x" + separator + line + "\n"
+                    let sample = ReceiptSweepCase(source: source, text: text, safe: [], unsafe: [], malformed: tail)
+                    try assertReceiptRewrite(sample, at: base + "/record-boundary-" + UUID().uuidString)
+                }
+            }
         }
     }
 

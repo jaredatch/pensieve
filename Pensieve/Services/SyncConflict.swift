@@ -28,7 +28,18 @@ struct ConflictItem: Equatable {
         StoreIgnoreRules.canRetire(path) && (thisUnavailable?.isGitlink == true || otherUnavailable?.isGitlink == true)
     }
     var requiresGitResolution: Bool {
-        !StoreIgnoreRules.canRetire(path) && thisUnavailable?.isGitlink == true && otherUnavailable?.isGitlink == true
+        thisUnavailable?.canChoose == false && otherUnavailable?.canChoose == false
+    }
+    var hasProtectedGitlink: Bool {
+        thisUnavailable?.reason == .unsafeRetirement || otherUnavailable?.reason == .unsafeRetirement
+    }
+
+    func selectionError(for side: ConflictSide) -> SyncError? {
+        let unavailable = side == .thisMachine ? thisUnavailable : otherUnavailable
+        guard let unavailable, !unavailable.canChoose else { return nil }
+        if requiresGitResolution { return .conflictRequiresGitResolution(path: path) }
+        if unavailable.reason == .unsafeRetirement { return .protectedGitlinkUnavailable(path: path) }
+        return .conflictSideUnavailable(path: path)
     }
 
     init(path: String, kind: ConflictKind, thisMachine: Data?, otherMachine: Data?,

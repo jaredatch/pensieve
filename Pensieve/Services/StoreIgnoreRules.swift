@@ -41,7 +41,7 @@ enum StoreIgnoreRules {
             let data = try files.readRegularFileData(at: full, maximumBytes: 1_048_576, containedIn: root)
             guard let text = String(data: data, encoding: .utf8) else { throw StoreReceiptError.unreadable(full) }
             receipts.sources[source] = text
-            for line in text.components(separatedBy: .newlines) where line.hasPrefix(marker) {
+            for line in receiptLines(text) where line.hasPrefix(marker) {
                 guard let data = Data(base64Encoded: String(line.dropFirst(marker.count))),
                       let path = String(data: data, encoding: .utf8), hasValidSyntax(path) else {
                     throw StoreReceiptError.invalidPath(line)
@@ -50,6 +50,17 @@ enum StoreIgnoreRules {
             }
         }
         return receipts
+    }
+
+    /// Git's union driver separates records at LF. Accept CRLF too, without treating a bare
+    /// CR or a Unicode line separator inside a record as another receipt.
+    private static func receiptLines(_ text: String) -> [String] {
+        let records = text.utf8.split(separator: 0x0A, omittingEmptySubsequences: false)
+        // The source is valid UTF-8; splitting at ASCII LF cannot cut a scalar.
+        return records.enumerated().compactMap { index, record in
+            let bytes = index < records.count - 1 && record.last == 0x0D ? record.dropLast() : record
+            return String(bytes: bytes, encoding: .utf8)
+        }
     }
 
     /// One rule for receipt consumption, creation and legacy gitlink choices.
