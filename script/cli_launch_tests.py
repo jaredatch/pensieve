@@ -1,5 +1,6 @@
 """Exercise the built CLI's LaunchServices path using apps with disposable identities and no store."""
 import json
+import errno
 import string
 import os
 from pathlib import Path
@@ -183,9 +184,18 @@ __attribute__((used, section("__DATA,__interpose"))) static struct {
         error = self.run_cli('skill', 'list', code=3)['error']
         self.assertEqual(error['code'], 'app_starting')
         self.assertTrue(error['retryable'])
+        endpoint = self.root / (self.bundle_id + '.sock')
+        self.assertIn(str(endpoint), error['message'])
+        self.assertIn(os.strerror(errno.ENOENT), error['message'])
         self.assertLess(time.monotonic() - start, 5)
         self.wait_for_state(self.app)
-        self.assertEqual(self.run_cli('skill', 'list', code=3)['error']['code'], 'app_starting')
+        stale = socket.socket(socket.AF_UNIX)
+        stale.bind(str(endpoint)); stale.close()
+        error = self.run_cli('skill', 'list', code=3)['error']
+        self.assertEqual(error['code'], 'app_starting')
+        self.assertTrue(error['retryable'])
+        self.assertIn(str(endpoint), error['message'])
+        self.assertIn(os.strerror(errno.ECONNREFUSED), error['message'])
         self.assertEqual(self.state()['reopens'], 0, 'an already starting app must not receive a reopen')
         requests, finish = self.peer_after_launch(bundle=self.root / 'Wrong.app')
         try:
@@ -221,11 +231,25 @@ __attribute__((used, section("__DATA,__interpose"))) static struct {
                 self.assertEqual(error['code'], 'app_unavailable')
                 self.assertIn('dogfood.sh', error['hint'])
                 self.assertIsNone(self.state())
+                long_home = str(self.root / ('long-home-' * 15))
+                long_env = dict(env, CFFIXED_USER_HOME=long_home)
+                long_env.pop('PENSIEVE_SOCKET_DIRECTORY', None)
+                unavailable = self.run_cli('skill', 'list', environment=long_env, code=3)['error']
+                self.assertIn('104-byte limit', unavailable['message'])
+                self.assertEqual(unavailable['hint'], error['hint'], 'connect failures retain the isolated-home advice')
+                self.assertIsNone(self.state())
         info_path = self.app / 'Contents/Info.plist'
         info = plistlib.loads(info_path.read_bytes()); info['CFBundleIdentifier'] += '.dogfood'
         info_path.write_bytes(plistlib.dumps(info))
         error = self.run_cli('skill', 'list', code=3)['error']
         self.assertEqual(error['code'], 'app_unavailable')
+        self.assertIsNone(self.state())
+
+        info['CFBundleIdentifier'] = 'p58.' + ('long-' * 24) + '.dogfood'
+        info_path.write_bytes(plistlib.dumps(info))
+        unavailable = self.run_cli('skill', 'list', code=3)['error']
+        self.assertIn('104-byte limit', unavailable['message'])
+        self.assertEqual(unavailable['hint'], error['hint'], 'an overlong dogfood endpoint must still recommend the fence')
         self.assertIsNone(self.state())
 
     def test_production_normal_and_background_launch_present_only_the_requested_window(self):

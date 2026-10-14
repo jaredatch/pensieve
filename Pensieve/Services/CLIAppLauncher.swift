@@ -3,6 +3,8 @@ import Darwin
 import Foundation
 
 protocol CLIAppLaunching {
+    /// A launch-safety refusal, without asking LaunchServices to start or reopen anything.
+    func launchRefusal(appPath: String, bundleID: String) -> CLIReply?
     /// Nil means the requested app was started or was already running at that path.
     func launch(appPath: String, bundleID: String, deadline: TimeInterval) -> CLIReply?
 }
@@ -15,7 +17,7 @@ struct CLIAppLauncher: CLIAppLaunching {
     var environment = ProcessInfo.processInfo.environment
     var usesAlternateAppSupport = false
 
-    func launch(appPath: String, bundleID: String, deadline: TimeInterval) -> CLIReply? {
+    func launchRefusal(appPath: String, bundleID: String) -> CLIReply? {
         guard !usesAlternateAppSupport else {
             return unavailable("Automatic launch is disabled for an alternate App Support directory.", appPath: appPath,
                 hint: "Start the isolated app with script/dogfood.sh, then use its CLI against the same directory.")
@@ -32,6 +34,11 @@ struct CLIAppLauncher: CLIAppLaunching {
             return unavailable("Automatic launch is disabled for an isolated home or dogfood app.", appPath: appPath,
                 hint: "Start the isolated app with script/dogfood.sh, then run its CLI through dogfood.sh --cli.")
         }
+        return nil
+    }
+
+    func launch(appPath: String, bundleID: String, deadline: TimeInterval) -> CLIReply? {
+        if let refusal = launchRefusal(appPath: appPath, bundleID: bundleID) { return refusal }
         let runningCopies = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
         for running in runningCopies {
             guard let path = running.bundleURL?.path else {

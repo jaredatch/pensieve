@@ -141,11 +141,12 @@ class DogfoodCLITests(DogfoodTestCase):
             if source != self.app:
                 make_app(source, 'com.fixture.debug')
                 shutil.copytree(self.app, self.root / 'sandbox/Pensieve.app')
-            result = subprocess.run(['/bin/bash', str(SCRIPT), '--cli', str(source), 'skill', 'show', 'two words', '--json'],
-                                    env=dict(self.env, STUB_LSREGISTER='fail'), capture_output=True, text=True, timeout=15)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertEqual(json.loads(result.stdout), {'arguments': ['skill', 'show', 'two words', '--json'],
-                'home': str(self.fake_home), 'fixed': str(self.fake_home), 'dogfood': '1'})
+            for prefix in (['--cli', str(source)], [str(source), '--cli']):
+                result = subprocess.run(['/bin/bash', str(SCRIPT), *prefix, 'skill', 'show', 'two words', '--json'],
+                                        env=dict(self.env, STUB_LSREGISTER='fail'), capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout), {'arguments': ['skill', 'show', 'two words', '--json'],
+                    'home': str(self.fake_home), 'fixed': str(self.fake_home), 'dogfood': '1'})
         refused = subprocess.run(['/bin/bash', str(SCRIPT), '--reset', '--cli', str(self.app), 'skill', 'list'],
                                  env=self.env, capture_output=True, text=True, timeout=15)
         self.assertEqual(refused.returncode, 1)
@@ -155,6 +156,9 @@ class DogfoodCLITests(DogfoodTestCase):
         executable = self.app / 'Contents/MacOS/Pensieve'
         executable.write_text('#!/bin/sh\nprintf "received: %s\\n" "$@"\nsleep 1\n')
         executable.chmod(0o755)
+        dry = self.run_script('clean', '--background', '--dry-run')
+        self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
+        self.assertIn("PENSIEVE_SOCKET_DIRECTORY='" + str(self.fake_home / '.s') + "'", dry.stdout)
         result = self.run_script('clean', '--background', '--foreground')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('received: --background', result.stdout)

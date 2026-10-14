@@ -105,7 +105,8 @@ while [ "$#" -gt 0 ]; do
     --foreground) FOREGROUND=1; shift ;;
     --dry-run)    DRY_RUN=1; shift ;;
     --background) BACKGROUND=1; APP_ARGS=(--background); shift ;;
-    --cli)        CLI_MODE=1; shift ;;
+    --cli)        CLI_MODE=1; shift
+                  if [ -n "$APP" ]; then CLI_ARGS=("$@"); break; fi ;;
     --home)       [ "$#" -ge 2 ] || die "--home needs a value"; FAKE_HOME="$2"; shift 2 ;;
     -h|--help)    usage 0 ;;
     -*)           printf 'unknown option: %s\n\n' "$1" >&2; usage 64 ;;
@@ -421,7 +422,7 @@ say "home: $FAKE_HOME"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "--- $PROFILE"; cat "$PROFILE"; echo "---"
-  echo "env HOME='$FAKE_HOME' CFFIXED_USER_HOME='$FAKE_HOME' PENSIEVE_DOGFOOD=1 /usr/bin/sandbox-exec -f '$PROFILE' '$STAGED/$EXEC_REL' ${APP_ARGS[*]-}"
+  echo "env HOME='$FAKE_HOME' CFFIXED_USER_HOME='$FAKE_HOME' PENSIEVE_DOGFOOD=1 PENSIEVE_SOCKET_DIRECTORY='$SOCKET_DIRECTORY' /usr/bin/sandbox-exec -f '$PROFILE' '$STAGED/$EXEC_REL' ${APP_ARGS[*]-}"
   exit 0
 fi
 

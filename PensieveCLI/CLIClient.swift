@@ -44,14 +44,16 @@ struct CLIClient {
             return refusal.reply
         } catch SocketError.timeout {
             if !waitingForStartup {
-                return .failure("app_unavailable", "Pensieve did not reply to the command within 30 seconds.",
+                let seconds = Int(CLIProtocol.commandReplyTimeout)
+                return .failure("app_unavailable", "Pensieve did not reply to the command within \(seconds) seconds.",
                     hint: "Check Pensieve before running this command again.", exit: 3)
             }
             return .failure("app_starting", "Pensieve has not finished starting.",
                 hint: "Wait a moment, then run this command again.", exit: 3, retryable: true)
         } catch {
             return .failure("app_unavailable", "\(socketPath): \(error.localizedDescription)",
-                hint: "Open \(appPath), then run this command again.", exit: 3, retryable: true)
+                hint: launcher.launchRefusal(appPath: appPath, bundleID: bundleID)?.envelope.error?.hint
+                    ?? "Open \(appPath), then run this command again.", exit: 3, retryable: true)
         }
     }
 
@@ -67,12 +69,14 @@ struct CLIClient {
     }
 
     private func connect(deadline: TimeInterval) throws -> Int32 {
+        var lastError: Error = SocketError.timeout
         do {
             return try SocketTransport.connect(to: socketPath,
                 timeout: max(0, deadline - ProcessInfo.processInfo.systemUptime))
         } catch let SocketError.system(_, code) {
             guard code == ENOENT || code == ECONNREFUSED else { throw SocketError.system(socketPath, code) }
-        }
+            lastError = SocketError.system("connect", code)
+        } catch SocketError.timeout { throw connectionTimeout(lastError) }
         if let refusal = launcher.launch(appPath: appPath, bundleID: bundleID, deadline: deadline) {
             throw LaunchRefusal(reply: refusal)
         }
@@ -82,10 +86,17 @@ struct CLIClient {
                     timeout: max(0, deadline - ProcessInfo.processInfo.systemUptime))
             } catch let SocketError.system(_, code) {
                 guard code == ENOENT || code == ECONNREFUSED else { throw SocketError.system(socketPath, code) }
-            }
+                lastError = SocketError.system("connect", code)
+            } catch SocketError.timeout { lastError = SocketError.timeout; break }
             Thread.sleep(forTimeInterval: 0.02)
         }
-        throw SocketError.timeout
+        throw connectionTimeout(lastError)
+    }
+
+    private func connectionTimeout(_ error: Error) -> LaunchRefusal {
+        LaunchRefusal(reply: .failure("app_starting",
+            "Pensieve has not finished starting. \(socketPath): \(error.localizedDescription)",
+            hint: "Wait a moment, then run this command again.", exit: 3, retryable: true))
     }
 }
 
