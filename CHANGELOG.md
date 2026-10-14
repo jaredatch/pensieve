@@ -40,9 +40,12 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - Import discovery skips a linked or special `SKILL.md` or Cursor rule, and refuses one over 4 MiB, and tells you how many it skipped and why. The "kept as text" notice now lists each skill on its own line.
 - A skill's Content tab drops the line under the file picker, and the picker now has the same space above and below it.
 - Frontmatter has to start on a skill's first line, the way your agents read it. If there are blank lines above the opening `---`, Pensieve reads the whole file as text. Skills already in your library stay put either way.
+- Two categories can't share a name on one Mac, even when the names differ only in capitals or spaces. Add Category and Rename say so under the name field and keep their button off until you pick another name.
+- When Pensieve can't change your library, the buttons it turns off tell you why when you point at them. While it can't read the library, the empty Projects and Categories lists say so too, and a category's Rename button and switches are off.
 
 ### Fixed
 
+- A category change Pensieve couldn't save, say because another Mac with a newer Pensieve had written the library, used to stay in the window as if it had worked. It's undone now, and an alert names the category and the reason.
 - When a git command fails, Pensieve's error keeps git's own message, even when part of git's output isn't valid UTF-8.
 - Reopening sync conflicts while they load now shows the ongoing load and its result.
 - Connecting to a sync remote now tells you when Pensieve uses a fallback branch, and which branch it chose.
