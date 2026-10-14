@@ -12,7 +12,7 @@ struct ConflictEntry {
 struct UnavailableConflictSide: Error, Equatable {
     let mode: String
     let objectID: String
-    enum Reason: Equatable { case gitlink, missingObject }
+    enum Reason: Equatable { case gitlink, unsafeRetirement, missingObject }
     var reason: Reason = .missingObject
     var isGitlink: Bool { mode == "160000" }
     var canChoose: Bool { isGitlink && reason == .gitlink }
@@ -49,7 +49,8 @@ extension GitService {
         }.first
         guard let entry else { return nil }
         if entry.isGitlink {
-            throw UnavailableConflictSide(mode: entry.mode, objectID: entry.objectID, reason: .gitlink)
+            throw UnavailableConflictSide(mode: entry.mode, objectID: entry.objectID,
+                reason: StoreIgnoreRules.canRetire(path) ? .gitlink : .unsafeRetirement)
         }
         let args = ["-C", workingDir, "show", ":\(stage):\(path)"]
         let result = try runData(args, in: nil)

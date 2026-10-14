@@ -24,7 +24,12 @@ struct ConflictItem: Equatable {
     let otherUnavailable: UnavailableConflictSide?
     let thisMode: String?
     let otherMode: String?
-    var retiresGitlink: Bool { thisUnavailable?.isGitlink == true || otherUnavailable?.isGitlink == true }
+    var retiresGitlink: Bool {
+        StoreIgnoreRules.canRetire(path) && (thisUnavailable?.isGitlink == true || otherUnavailable?.isGitlink == true)
+    }
+    var requiresGitResolution: Bool {
+        !StoreIgnoreRules.canRetire(path) && thisUnavailable?.isGitlink == true && otherUnavailable?.isGitlink == true
+    }
 
     init(path: String, kind: ConflictKind, thisMachine: Data?, otherMachine: Data?,
          thisUnavailable: UnavailableConflictSide? = nil, otherUnavailable: UnavailableConflictSide? = nil,

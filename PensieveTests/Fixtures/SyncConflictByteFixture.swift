@@ -187,7 +187,11 @@ struct SyncConflictByteFixture {
         try git.stageAllAndCommit(at: root, message: "third nested commit")
         let third = try git.commitSHA(at: root)
         let changed = otherEntry ?? (both ? .gitlink(third) : .deleted)
-        return try Self(name: "legacy-link", initial: .gitlink(first),
+        // A file-to-folder transition conflicts with the other side's file-to-gitlink
+        // transition. Modifying an existing gitlink opposite a folder can merge cleanly.
+        let initial: Entry
+        if case .folder = changed { initial = .file(Data("base file".utf8)) } else { initial = .gitlink(first) }
+        return try Self(name: "legacy-link", initial: initial,
                         this: changedEntryOnThisMachine ? changed : .gitlink(second),
                         other: changedEntryOnThisMachine ? .gitlink(second) : changed,
                         indexMerge: otherEntry != nil, skillRoot: skillRoot)

@@ -7,7 +7,6 @@ extension SyncConflictResolutionTests {
             try assertInvalidRootIgnoreCannotBlockRetirement()
             try assertThisMachineFileAgainstGitlinkRefuses()
             try assertGitlinkFilePicksRemainTracked()
-            try assertGitlinkRetirement(both: true, side: .thisMachine, skillRoot: true)
             for both in [false, true] {
                 for side in [ConflictSide.thisMachine, .otherMachine] {
                     try assertGitlinkRetirement(both: both, side: side, skillRoot: false)

@@ -43,6 +43,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Old sync retirement receipts can no longer hide new skills, a skill’s `SKILL.md`, or Pensieve’s own files. Unsafe receipts are ignored and removed on the next sync. A legacy nested-repository conflict at a skill root keeps syncing stopped until you choose an ordinary version or resolve it in git.
+
 - Literal `*` and `&` in frontmatter now work in Source edits, the Rendered table, import and migration. Values like `allowed-tools: Bash(npm run *)` no longer get mistaken for YAML anchors or aliases.
 - Import from Folder… and Add Skill from GitHub… now say "Found 1 Skill" when there's just one.
 - When a git command fails, Pensieve's error keeps git's own message, even when part of git's output isn't valid UTF-8.

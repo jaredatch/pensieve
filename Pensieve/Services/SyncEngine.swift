@@ -316,7 +316,8 @@ struct SyncEngine: SyncEngineProtocol {
             }
             let chosen = pick.side == .thisMachine ? this : other
             let hasGitlink = this.isGitlink || other.isGitlink
-            if chosen.unavailable?.canChoose == true || (hasGitlink && chosen.mode == nil) {
+            if StoreIgnoreRules.canRetire(path)
+                && (chosen.unavailable?.canChoose == true || (hasGitlink && chosen.mode == nil)) {
                 try gitService.retireConflictPath(path, at: root)
                 continue
             }

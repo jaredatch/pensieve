@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 enum StoreReceiptError: LocalizedError {
     case unreadable(String)
@@ -21,27 +22,44 @@ enum StoreIgnoreRules {
     private static let attributes = "manifest/categories/*.yaml merge=union\n"
         + "manifest/projects.yaml merge=union\n"
 
+    private struct Receipts {
+        var safe: Set<String> = []
+        var unsafe: Set<String> = []
+        var sources: [String: String] = [:]
+    }
+
     static func retiredPaths(at root: String, files: FileServiceProtocol) throws -> [String] {
-        var paths: [String] = []
-        // Read the unpublished predecessor's comments exactly too, then migrate them on preparation.
+        try readReceipts(at: root, files: files).safe.sorted()
+    }
+
+    private static func readReceipts(at root: String, files: FileServiceProtocol) throws -> Receipts {
+        var receipts = Receipts()
+        // Read both sources completely before writes or logging. Malformed input remains a stop.
         for source in [".gitattributes", receiptFile] {
             let full = root + "/" + source
             guard try files.entryTypeWithoutFollowingLinks(at: full) != nil else { continue }
             let data = try files.readRegularFileData(at: full, maximumBytes: 1_048_576, containedIn: root)
             guard let text = String(data: data, encoding: .utf8) else { throw StoreReceiptError.unreadable(full) }
-            for line in text.split(separator: "\n") where line.hasPrefix(marker) {
+            receipts.sources[source] = text
+            for line in text.components(separatedBy: .newlines) where line.hasPrefix(marker) {
                 guard let data = Data(base64Encoded: String(line.dropFirst(marker.count))),
-                      let path = String(data: data, encoding: .utf8), isRetirable(path) else {
-                    throw StoreReceiptError.invalidPath(String(line))
+                      let path = String(data: data, encoding: .utf8), hasValidSyntax(path) else {
+                    throw StoreReceiptError.invalidPath(line)
                 }
-                paths.append(path)
+                if canRetire(path) { receipts.safe.insert(path) } else { receipts.unsafe.insert(path) }
             }
         }
-        return Array(Set(paths)).sorted()
+        return receipts
     }
 
-    /// Retirement admits relative paths with nonempty, nontraversing, noncontrol components.
-    private static func isRetirable(_ path: String) -> Bool {
+    /// One rule for receipt consumption, creation and legacy gitlink choices.
+    static func canRetire(_ path: String) -> Bool {
+        let parts = PathSyntax.components(path, omittingEmptySubsequences: false)
+        return hasValidSyntax(path) && parts.count >= 3 && parts[0] == "skills"
+            && parts[2].caseInsensitiveCompare("SKILL.md") != .orderedSame
+    }
+
+    private static func hasValidSyntax(_ path: String) -> Bool {
         let parts = PathSyntax.components(path, omittingEmptySubsequences: false)
         return !parts.isEmpty && !PathSyntax.isAbsolute(path)
             && parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." })
@@ -57,22 +75,31 @@ enum StoreIgnoreRules {
         }.joined()
     }
 
-    static func prepare(at root: String, files: FileServiceProtocol, retiring path: String? = nil) throws {
-        var paths = try retiredPaths(at: root, files: files)
+    static func prepare(at root: String, files: FileServiceProtocol, retiring path: String? = nil,
+                        log: (String) -> Void = logDroppedPath) throws {
+        var receipts = try readReceipts(at: root, files: files)
         if let path {
-            guard isRetirable(path) else { throw StoreReceiptError.invalidPath(path) }
-            paths.append(path)
+            guard canRetire(path) else { throw StoreReceiptError.invalidPath(path) }
+            receipts.safe.insert(path)
         }
-        paths = Array(Set(paths)).sorted()
-        if !paths.isEmpty {
-            let receipts = paths.map { marker + Data($0.utf8).base64EncodedString() + "\n" }.joined()
-            try files.writeFile(at: root + "/" + receiptFile, content: receipts)
+        // Keep an empty tracked file after dropping its last receipt: concurrent additions must
+        // remain ordinary union-merged content edits rather than modify/delete conflicts.
+        if receipts.sources[receiptFile] != nil || !receipts.safe.isEmpty || !receipts.unsafe.isEmpty {
+            let text = receipts.safe.sorted().map { marker + Data($0.utf8).base64EncodedString() + "\n" }.joined()
+            if receipts.sources[receiptFile] != text {
+                try files.writeFile(at: root + "/" + receiptFile, content: text)
+            }
         }
-        try files.writeFile(at: root + "/.gitattributes", content: attributes)
+        if receipts.sources[".gitattributes"] != attributes {
+            try files.writeFile(at: root + "/.gitattributes", content: attributes)
+        }
+        for path in receipts.unsafe.sorted() { log(path) }
         // A folder is user data. Keep it in place; staging uses generated rules in metadata.
         let ignore = root + "/.gitignore"
         let type = try? files.entryTypeWithoutFollowingLinks(at: ignore)
         if type == .regular {
+            if let data = try? files.readRegularFileData(at: ignore, maximumBytes: 1_048_576, containedIn: root),
+               data == Data(".DS_Store\n".utf8) { return }
             // A fresh file restores readable permissions even if the remote file had mode 000.
             let temporary = root + "/.pensieve-ignore-" + UUID().uuidString
             defer { try? files.deleteFile(at: temporary) }
@@ -81,5 +108,10 @@ enum StoreIgnoreRules {
         } else if type != .directory {
             try files.writeFile(at: ignore, content: ".DS_Store\n")
         }
+    }
+
+    private static func logDroppedPath(_ path: String) {
+        os_log("Dropped unsafe retirement receipt: %{public}@",
+               log: OSLog(subsystem: "com.jaredatch.pensieve", category: "sync"), type: .info, path)
     }
 }

@@ -77,6 +77,61 @@ extension SyncConflictResolutionTests {
         }
     }
 
+    func testProtectedSkillRootGitlinksCannotRetireAndFolderPickStillSyncs() throws {
+        try NativeTestWork.run { [self] in try assertProtectedGitlinkChoices() }
+    }
+
+    private func assertProtectedGitlinkChoices() throws {
+        for both in [false, true] {
+            for changedOnThisMac in [false, true] {
+                let fixture = try SyncConflictByteFixture.gitlinkConflict(both: both,
+                    otherEntry: both ? nil : .folder, changedEntryOnThisMachine: changedOnThisMac, skillRoot: true)
+                defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+                let items = try fixture.inspectAll()
+                let rootItem = try XCTUnwrap(items.first { $0.path == fixture.path })
+                let nestedSide: ConflictSide = changedOnThisMac ? .otherMachine : .thisMachine
+                let unavailable = nestedSide == .thisMachine ? rootItem.thisUnavailable : rootItem.otherUnavailable
+                XCTAssertEqual(unavailable?.canChoose, false, "A skill-root gitlink must be unavailable")
+                let remote = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout
+                func picks(_ side: ConflictSide) -> [String: ResolutionPick] {
+                    Dictionary(uniqueKeysWithValues: items.map { item in
+                        (item.path, ResolutionPick(side: side, expectedThis: item.thisMachine,
+                            expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
+                            expectedOtherUnavailable: item.otherUnavailable, expectedThisMode: item.thisMode,
+                            expectedOtherMode: item.otherMode))
+                    })
+                }
+                XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB,
+                    picks: picks(nestedSide), credential: nil, context: fixture.contextB)) {
+                    XCTAssertEqual($0 as? SyncError, .conflictSideUnavailable(path: fixture.path))
+                }
+                XCTAssertEqual(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout,
+                               remote)
+                if both {
+                    let otherSide: ConflictSide = nestedSide == .thisMachine ? .otherMachine : .thisMachine
+                    XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB,
+                        picks: picks(otherSide), credential: nil, context: fixture.contextB)) {
+                        XCTAssertEqual($0 as? SyncError, .conflictSideUnavailable(path: fixture.path))
+                    }
+                } else {
+                    let folderSide: ConflictSide = nestedSide == .thisMachine ? .otherMachine : .thisMachine
+                    _ = try fixture.engine.resolveConflicts(root: fixture.storeB,
+                        picks: picks(folderSide), credential: nil, context: fixture.contextB)
+                    let kept = try fixture.git.runData(["--git-dir", fixture.remote, "show",
+                        "main:" + fixture.path + "/keep"], in: nil)
+                    XCTAssertEqual(kept.exit, 0)
+                    XCTAssertEqual(kept.stdout, Data("chosen folder bytes".utf8))
+                }
+                XCTAssertTrue(try StoreIgnoreRules.retiredPaths(at: fixture.storeB, files: fixture.files).isEmpty)
+                XCTAssertFalse(fixture.files.fileExists(at: fixture.storeB + "/.pensieve-retired-paths"),
+                               "Protected conflicts must write no receipt, including one the reader would ignore")
+                XCTAssertNotEqual(try fixture.git.runData(["--git-dir", fixture.remote, "show",
+                    "main:.pensieve-retired-paths"], in: nil).exit, 0)
+                XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
+            }
+        }
+    }
+
     func assertGitlinkRetirement(both: Bool, side: ConflictSide, skillRoot: Bool) throws {
         let fixture = try SyncConflictByteFixture.gitlinkConflict(both: both, skillRoot: skillRoot)
         defer { try? fixture.files.deleteDirectory(at: fixture.root) }

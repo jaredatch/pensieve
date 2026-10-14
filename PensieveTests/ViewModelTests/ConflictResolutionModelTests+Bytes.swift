@@ -187,6 +187,37 @@ extension ConflictResolutionModelTests {
         }
     }
 
+    func testSkillRootGitlinksRefuseNestedSideAndExplainTwoGitlinkConflict() async throws {
+        for both in [false, true] {
+            let fixture = try NativeTestWork.run { [self] in
+                try SyncConflictByteFixture.gitlinkConflict(both: both, otherEntry: both ? nil : .folder, skillRoot: true)
+            }
+            defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+            let model = ConflictResolutionModel(engine: fixture.engine, git: fixture.git,
+                credentials: InMemoryCredentialStore(), root: fixture.storeB, steps: SyncStepModel())
+            await model.loadAndReport(container: fixture.contextB.container)
+            let group = try XCTUnwrap(readyGroups(from: model.phase).first)
+            let item = try XCTUnwrap(group.items.first { $0.path == fixture.path })
+            let strings = await renderedComparison(item)
+            XCTAssertFalse(strings.contains("Choosing a nested repository or a deletion stops syncing this path. "
+                + "Whatever is at this path on this Mac stays where it is."))
+            if both {
+                XCTAssertTrue(strings.contains("Pensieve can’t resolve this conflict. Resolve it in git: " + fixture.path))
+            }
+            model.choose(group.id, .thisMachine)
+            XCTAssertFalse(model.canApply)
+            XCTAssertEqual(model.selectionError, SyncError.conflictSideUnavailable(path: fixture.path).errorDescription)
+            for card in try readyGroups(from: model.phase) { model.choose(card.id, .otherMachine) }
+            XCTAssertEqual(model.canApply, !both)
+        }
+        let unavailable = UnavailableConflictSide(mode: "160000", objectID: String(repeating: "1", count: 40),
+                                                  reason: .unsafeRetirement)
+        let hiddenPath = ConflictItem(path: "skills/\u{202E}legacy", kind: .body, thisMachine: nil, otherMachine: nil,
+                                      thisUnavailable: unavailable, otherUnavailable: unavailable)
+        let strings = await renderedComparison(hiddenPath)
+        XCTAssertTrue(strings.contains("Pensieve can’t resolve this conflict. Resolve it in git: skills/⟨U+202E⟩legacy"))
+    }
+
     private func assertFilePickRefusesFolderAndOtherPickResolves() async throws {
         let fixture = try NativeTestWork.run { [self] in
             try SyncConflictByteFixture.gitlinkConflict(otherEntry: .file(Data("kept file".utf8)))

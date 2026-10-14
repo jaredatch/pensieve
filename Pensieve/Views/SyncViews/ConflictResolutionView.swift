@@ -249,12 +249,14 @@ struct ConflictFileComparison: View {
     private let this: Side
     private let other: Side
     private let retiresGitlink: Bool
+    private let gitResolutionPath: String?
     private let removesOtherFile: Bool
 
     init(item: ConflictItem) {
         this = Side(item.thisMachine, unavailable: item.thisUnavailable)
         other = Side(item.otherMachine, unavailable: item.otherUnavailable)
         retiresGitlink = item.retiresGitlink
+        gitResolutionPath = item.requiresGitResolution ? item.path : nil
         removesOtherFile = item.otherMode != nil && item.otherUnavailable?.isGitlink != true
     }
 
@@ -264,6 +266,11 @@ struct ConflictFileComparison: View {
             LineDiffView(this: this, other: other)
         } else {
             VStack(alignment: .leading, spacing: Spacing.md) {
+                if let gitResolutionPath {
+                    Text(ViewChangesPresentation.styledText(
+                        "Pensieve can’t resolve this conflict. Resolve it in git: " + gitResolutionPath, filename: true))
+                        .foregroundStyle(.secondary).textSelection(.enabled)
+                }
                 if retiresGitlink {
                     if this.keepsFile || other.keepsFile {
                         Text("Choosing a file or link keeps it in sync.").foregroundStyle(.secondary)
@@ -292,7 +299,7 @@ struct ConflictFileComparison: View {
             case .deleted:
                 Text("Deleted").foregroundStyle(.secondary)
             case let .unavailable(side):
-                Text(side.canChoose ? "Nested repository" : "Can’t be read")
+                Text(side.isGitlink && side.reason != .missingObject ? "Nested repository" : "Can’t be read")
                     .foregroundStyle(.secondary)
             case let .text(text, preview, hiddenLines):
                 Text(text.isEmpty ? "Empty file" : preview)
