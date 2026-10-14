@@ -6,6 +6,7 @@ import XCTest
 @MainActor
 final class ProjectRemovalDurabilityTests: XCTestCase {
     func testFailedProjectSaveKeepsRegistrationAndRelaunchRetryWithdrawsManifestIntent() throws {
+        try assertPendingWithdrawalRefuses()
         let h = try fixture()
         defer { h.cleanup() }
         let readOnly = try AppRuntime.makeContainer(configuration: ModelConfiguration(
@@ -23,6 +24,32 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
                        "A refused save must leave the manifest agreeing with the registered project's intents")
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 2)
         try relaunchAndRetry(h, projectID: projectID)
+    }
+
+    private func assertPendingWithdrawalRefuses() throws {
+        let h = try fixture()
+        defer { h.cleanup() }
+        var pulled = try manifest(h).read(fromRoot: h.root + "/sync")
+        pulled.deployIntents.append(DeployIntentRecord(machineID: ProjectIntentHarness.localID,
+            skillSlug: "peer-added", platformRaw: "codex", projectKey: h.project.identityKey))
+        try manifest(h).write(pulled, toRoot: h.root + "/sync")
+        let readOnly = try AppRuntime.makeContainer(configuration: ModelConfiguration(
+            url: URL(fileURLWithPath: h.root + "/removal.sqlite"), allowsSave: false))
+        let context = ModelContext(readOnly)
+        let project = try XCTUnwrap(context.fetch(FetchDescriptor<Project>()).first { $0.id == h.project.id })
+        XCTAssertThrowsError(try StoreIngestState.rebuild(
+            using: StoreRebuildService(manifestService: manifest(h)), root: h.root + "/sync", context: context))
+        XCTAssertTrue(StoreIngestState.shared(for: readOnly).needsRebuild)
+        var writes = 0
+        h.mapped.beforeFileWrite = { path in
+            if path.contains(".manifest-build-") { writes += 1 }
+        }
+        let result = remove(h, project: project, context: context)
+        XCTAssertTrue(result.hasFailures)
+        XCTAssertEqual(writes, 0, "pending ingestion must not repair from the stale window")
+        XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync"), pulled)
+        XCTAssertTrue(StoreIngestState.shared(for: readOnly).needsRebuild)
+        XCTAssertFalse(context.hasChanges)
     }
 
     func testBusySyncRefusesBeforeWithdrawalOrArtifactCleanup() throws {

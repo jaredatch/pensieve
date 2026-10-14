@@ -5,6 +5,8 @@ import XCTest
 extension IngestPreflightTests {
     func testImportAndProjectIntentAfterFailedPullKeepPeerCategoriesAndLocalEdit() async throws {
         try await assertRemovedDeploySelections()
+        try await assertContentFreeWriterIngest()
+        try await assertQueuedWriterEdits()
         for importsSkill in [true, false] {
             for fault in WriterFault.allCases {
                 try await assertWriterRecovery(importsSkill: importsSkill, fault: fault)
@@ -85,7 +87,12 @@ extension IngestPreflightTests {
         }
         for _ in 0..<2 {
             XCTAssertTrue(attempt(), "\(importsSkill ? "import" : "intent") must refuse a repeated \(fault) failure")
-            XCTAssertNotNil(reportedError())
+            XCTAssertEqual(reportedError(), importsSkill
+                ? "Import is blocked until sync updates this Mac's library. Sync again, then retry the import."
+                : "Deployment is blocked until sync updates this Mac's library. Sync again, then retry the deployment.")
+            XCTAssertTrue(StoreIngestState.shared(for: context.container).needsRebuild)
+            XCTAssertFalse(context.hasChanges, "refused preflight must roll back its partial rebuild")
+            XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Deleted", "Kept"])
             XCTAssertEqual(manifest.writes, 0, "refused ingestion must not reach the manifest writer")
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<Skill>()), 1)
@@ -99,52 +106,73 @@ extension IngestPreflightTests {
     }
 
     private func assertRemovedDeploySelections() async throws {
-        for action in RemovedSelectionAction.allCases {
-            let fixture = try NativeTestWork.run {
-                try IncompleteIngestFixture(base: self.tempDir + "/removed-\(action)", includingSurvivor: true)
+        for alreadyIngested in [false, true] {
+            for action in RemovedSelectionAction.allCases {
+                try await assertRemovedDeploySelection(action, alreadyIngested: alreadyIngested)
             }
-            let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
-            try NativeTestWork.run(container: container) { context in
-                _ = StoreRebuildService().rebuild(fromRoot: fixture.app, context: context)
-                try fixture.files.deleteDirectory(at: fixture.peer + "/skills/item")
-                try fixture.changePeer()
-            }
-            let context = ModelContext(container)
-            let rows = try context.fetch(FetchDescriptor<Skill>())
-            let selected = try XCTUnwrap(rows.first { $0.directoryName == "item" })
-            let survivor = try XCTUnwrap(rows.first { $0.directoryName == "survivor" })
-            let project = Project(name: "Project", path: fixture.base + "/project")
-            project.identityKey = "github.com/owner/project"
-            context.insert(project)
-            try context.save()
-            let rebuild = IncompleteIngestRebuild()
-            rebuild.failWhenAddedCategoryExists = true
-            let coordinator = await makeIncompleteCoordinator(container: container, fixture: fixture, rebuild: rebuild)
-            let failed = await coordinator.runCycle()
-            XCTAssertEqual(failed, .failed(IncompleteIngestFixture.message))
-            let (platform, links) = intentPlatform(fixture: fixture, installed: [.codex])
-            var writes = 0
-            let model = DeployIntentModel(platformVM: platform, dependencies: DeployIntentDependencies(
-                identity: InertMachineIdentity(), stateService: InertMachineStateService(), root: fixture.app,
-                writeManifest: { context in
-                    writes += 1
-                    try fixture.manifest.write(try fixture.manifest.snapshot(from: context), toRoot: fixture.app)
-                }, notifier: {}, lockPath: fixture.base + "/sync.lock"))
-            XCTAssertThrowsError(try action.perform(model, skills: [survivor, selected], project: project, context: context),
-                                 "\(action)")
-            XCTAssertEqual(writes, 0, "\(action): a removed selection must not write the manifest")
-            XCTAssertTrue(links.linkCalls.isEmpty, "\(action): a removed selection must not deploy")
-            XCTAssertEqual(try context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0, "\(action)")
-            XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).map(\.directoryName), ["survivor"],
-                           "\(action): ingestion must keep the peer's skill removal")
-            rebuild.failWhenAddedCategoryExists = false
-            guard case .synced = await coordinator.runCycle() else { return XCTFail("sync after refusal failed") }
-            try NativeTestWork.run { try fixture.assertRemoteCategories() }
-            XCTAssertTrue(try fixture.manifest.read(fromRoot: fixture.app).deployIntents.isEmpty)
         }
     }
 
-    private func importModel(fixture: IncompleteIngestFixture, manifest: ManifestSnapshotting) -> ImportViewModel {
+    private func assertRemovedDeploySelection(_ action: RemovedSelectionAction, alreadyIngested: Bool) async throws {
+        let fixture = try NativeTestWork.run {
+            try IncompleteIngestFixture(base: self.tempDir + "/removed-\(action)-\(alreadyIngested)", includingSurvivor: true)
+        }
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        try NativeTestWork.run(container: container) { context in
+            _ = StoreRebuildService().rebuild(fromRoot: fixture.app, context: context)
+            try fixture.files.deleteDirectory(at: fixture.peer + "/skills/item")
+            try fixture.changePeer()
+        }
+        let context = ModelContext(container)
+        let rows = try context.fetch(FetchDescriptor<Skill>())
+        let selected = try XCTUnwrap(rows.first { $0.directoryName == "item" })
+        let survivor = try XCTUnwrap(rows.first { $0.directoryName == "survivor" })
+        let project = Project(name: "Project", path: fixture.base + "/project")
+        project.identityKey = "github.com/owner/project"
+        context.insert(project)
+        try context.save()
+        let rebuild = IncompleteIngestRebuild()
+        rebuild.failWhenAddedCategoryExists = true
+        let coordinator = await makeIncompleteCoordinator(container: container, fixture: fixture, rebuild: rebuild)
+        let failed = await coordinator.runCycle()
+        XCTAssertEqual(failed, .failed(IncompleteIngestFixture.message))
+        if alreadyIngested {
+            rebuild.failWhenAddedCategoryExists = false
+            guard case .synced = await coordinator.runCycle() else { return XCTFail("earlier ingest failed") }
+            XCTAssertFalse(StoreIngestState.shared(for: container).needsRebuild)
+        }
+        let (platform, links) = intentPlatform(fixture: fixture, installed: [.codex])
+        var writes = 0
+        let model = DeployIntentModel(platformVM: platform, dependencies: DeployIntentDependencies(
+            identity: InertMachineIdentity(), stateService: InertMachineStateService(), root: fixture.app,
+            writeManifest: { context in
+                writes += 1
+                try fixture.manifest.write(try fixture.manifest.snapshot(from: context), toRoot: fixture.app)
+            }, notifier: {}, lockPath: fixture.base + "/sync.lock"))
+        assertSelectionRefused(model) {
+            try action.perform(model, skills: [survivor, selected], project: project, context: context)
+        }
+        XCTAssertEqual(writes, 0, "\(action): a removed selection must not write the manifest")
+        XCTAssertTrue(links.linkCalls.isEmpty, "\(action): a removed selection must not deploy")
+        XCTAssertEqual(try context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0, "\(action)")
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).map(\.directoryName), ["survivor"],
+                       "\(action): ingestion must keep the peer's skill removal")
+        rebuild.failWhenAddedCategoryExists = false
+        guard case .synced = await coordinator.runCycle() else { return XCTFail("sync after refusal failed") }
+        try NativeTestWork.run { try fixture.assertRemoteCategories() }
+        XCTAssertTrue(try fixture.manifest.read(fromRoot: fixture.app).deployIntents.isEmpty)
+    }
+
+    private func assertSelectionRefused(_ model: DeployIntentModel, action: () throws -> Void) {
+        let message = "A selected skill was removed while the library updated. Choose the skills again."
+        XCTAssertThrowsError(try action()) { error in
+            XCTAssertEqual(error.localizedDescription, message)
+            guard case DeployIntentModelError.selectionChanged = error else { return XCTFail("Wrong refusal: \(error)") }
+        }
+        XCTAssertEqual(model.error, message)
+    }
+
+    func importModel(fixture: IncompleteIngestFixture, manifest: ManifestSnapshotting) -> ImportViewModel {
         let scanner = ImportScanner(fileService: fixture.files,
             claudeSkillsDir: fixture.base + "/claude", grokSkillsDir: fixture.base + "/grok",
             cursorRulesDir: fixture.base + "/cursor", codexSkillsDir: fixture.base + "/codex", storeRoot: fixture.app)
@@ -158,8 +186,8 @@ extension IngestPreflightTests {
         return model
     }
 
-    private func intentModel(fixture: IncompleteIngestFixture, manifest: ManifestSnapshotting,
-                             saveContext: @escaping (ModelContext) throws -> Void) -> DeployIntentModel {
+    func intentModel(fixture: IncompleteIngestFixture, manifest: ManifestSnapshotting,
+                     saveContext: @escaping (ModelContext) throws -> Void) -> DeployIntentModel {
         let platform = intentPlatform(fixture: fixture, installed: []).platform
         return DeployIntentModel(platformVM: platform, dependencies: DeployIntentDependencies(
             identity: InertMachineIdentity(), stateService: InertMachineStateService(), root: fixture.app,
@@ -168,7 +196,7 @@ extension IngestPreflightTests {
             saveContext: saveContext, notifier: {}, lockPath: fixture.base + "/sync.lock"))
     }
 
-    private func intentPlatform(fixture: IncompleteIngestFixture, installed: [PlatformTarget])
+    func intentPlatform(fixture: IncompleteIngestFixture, installed: [PlatformTarget])
         -> (platform: PlatformViewModel, links: DeployRecordingLinkService) {
         let files = DeployRecordingFileService()
         let links = DeployRecordingLinkService(fileService: files)
@@ -199,11 +227,12 @@ private final class ControlledWriterManifest: ManifestSnapshotting {
 }
 
 private enum RemovedSelectionAction: CaseIterable {
-    case remoteProject, local, localProject, projectBulk, selected, apply, retract
+    case remoteProject, local, localProject, projectBulk, selected, apply, retract, direct, directBulk
 
     @MainActor
     func perform(_ model: DeployIntentModel, skills: [Skill], project: Project, context: ModelContext) throws {
         let skill = try XCTUnwrap(skills.last)
+        if self == .direct || self == .directBulk { project.identityKey = nil }
         switch self {
         case .remoteProject:
             try model.setRemote(true, machineID: "22222222-2222-4222-8222-222222222222",
@@ -220,6 +249,10 @@ private enum RemovedSelectionAction: CaseIterable {
         case .apply:
             _ = try model.apply(skills: skills, platforms: [.codex],
                                 selectedMachineIDs: [InertMachineIdentity.value], context: context)
+        case .direct:
+            _ = try model.set(true, skill: skill, platform: .codex, target: .project(project), context: context)
+        case .directBulk:
+            _ = try model.setProjectSelection(true, skills: skills, platforms: [.codex], project: project, context: context)
         case .retract:
             _ = try model.retract(skills: skills, platforms: [.codex], machineIDs: [InertMachineIdentity.value], context: context)
         }

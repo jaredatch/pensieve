@@ -339,6 +339,7 @@
 		57553BA656D8C63C14463F48 /* SyncLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = F603CCC66023043826D64841 /* SyncLock.swift */; };
 		5756156EA765B2CD160CF820 /* UpdatesViewModelTests+FolderPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 848D11E7374FE5538FAB45D2 /* UpdatesViewModelTests+FolderPreview.swift */; };
 		57884E5F2925165DBE77AED9 /* TestWait+Editor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EE045738E665A7980401633 /* TestWait+Editor.swift */; };
+		579F262521372A2D20AC8EF7 /* IngestPreflightTests+ReadFailures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C39B0719AA66C1D28C8CECE /* IngestPreflightTests+ReadFailures.swift */; };
 		5858800A31A6DEC75359DEA3 /* BatchResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FBD4ABDB51C57E7D6A60E44 /* BatchResult.swift */; };
 		58C31E087A256621C938A094 /* WindowCloseGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A75484323D306FD5638971 /* WindowCloseGuardTests.swift */; };
 		58DAB87912AB3E45DF9EE344 /* SyncLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = F603CCC66023043826D64841 /* SyncLock.swift */; };
@@ -483,6 +484,7 @@
 		78EBA73EA7321C1D2688966F /* ProjectFolderDeployTests+Deletion.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13E93B6C7A1E03A1D200870 /* ProjectFolderDeployTests+Deletion.swift */; };
 		78FEEA4329FFF7F2F4F142B4 /* PlatformViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26ED8D9EDA8729984655172B /* PlatformViewModel.swift */; };
 		791188DD1F6BE1DB0BCEC5EE /* AppRuntimeUpdateRulesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA6CC007048F440FE74BD142 /* AppRuntimeUpdateRulesTests.swift */; };
+		792577FBE54F0D3DFB514A0C /* IngestPreflightTests+WriterState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FFEA31BF2AB26B624D0474D /* IngestPreflightTests+WriterState.swift */; };
 		794AC731E28B0E3B17C58E57 /* WaitingRemovalRoundTwoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F60DB06EE41BC98C6B49AE5 /* WaitingRemovalRoundTwoTests.swift */; };
 		7A104F41B2C2F9F7E3D84BDF /* MarkdownEditorWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21F28E70C4DFCF4254FCAEC0 /* MarkdownEditorWebView.swift */; };
 		7A95AF9BF263C228DC0210F9 /* ImportFolderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4490A79128483D4AFF50E36E /* ImportFolderTests.swift */; };
@@ -1714,6 +1716,7 @@
 		9B11D412198CA94D0EFDF37B /* SyncBytePreservationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncBytePreservationTests.swift; sourceTree = "<group>"; };
 		9B3EAB253D81063B8C2BA29C /* SkillHistoryTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillHistoryTimeline.swift; sourceTree = "<group>"; };
 		9B9D786F7326EC92A4A7EC2F /* SkillInstallGitServing+CallSite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillInstallGitServing+CallSite.swift"; sourceTree = "<group>"; };
+		9C39B0719AA66C1D28C8CECE /* IngestPreflightTests+ReadFailures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "IngestPreflightTests+ReadFailures.swift"; sourceTree = "<group>"; };
 		9C58AB6D59E3FE6559C2D611 /* FastForwardGitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FastForwardGitService.swift; sourceTree = "<group>"; };
 		9C761A4ECB2CB540479C6ACA /* IntentEndToEndTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentEndToEndTests.swift; sourceTree = "<group>"; };
 		9C89875DFA209F64C4FDB2A5 /* CategorySaveUndoTests+Deployments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CategorySaveUndoTests+Deployments.swift"; sourceTree = "<group>"; };
@@ -1730,6 +1733,7 @@
 		9EFED54571C0A47E86F78572 /* UpdatesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdatesViewModel.swift; sourceTree = "<group>"; };
 		9F022937A434A5A11A964A32 /* AddProjectSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddProjectSheet.swift; sourceTree = "<group>"; };
 		9F7D5354B69CDA1AAAD6E302 /* GitProcessProbe+Lifetime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GitProcessProbe+Lifetime.swift"; sourceTree = "<group>"; };
+		9FFEA31BF2AB26B624D0474D /* IngestPreflightTests+WriterState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "IngestPreflightTests+WriterState.swift"; sourceTree = "<group>"; };
 		A0C450635ECB55BAB3A2145E /* CheckedYAMLLoaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckedYAMLLoaderTests.swift; sourceTree = "<group>"; };
 		A12D7456AC67896DBEAEBE6F /* SkillLibraryViewModel+Write.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SkillLibraryViewModel+Write.swift"; sourceTree = "<group>"; };
 		A153E83B00BABF7B403A13E9 /* PostSyncConvergenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostSyncConvergenceTests.swift; sourceTree = "<group>"; };
@@ -3163,6 +3167,8 @@
 				2345201BA90E4F7068E97AE4 /* IngestPreflightTests.swift */,
 				477B2CF67FDFA26F0406299E /* IngestPreflightTests+Incomplete.swift */,
 				910FE53F61BB3010055723D0 /* IngestPreflightTests+ManifestWriters.swift */,
+				9C39B0719AA66C1D28C8CECE /* IngestPreflightTests+ReadFailures.swift */,
+				9FFEA31BF2AB26B624D0474D /* IngestPreflightTests+WriterState.swift */,
 				E68480397218831C9FB0DD41 /* IngestPreflightTestSupport.swift */,
 				06F00C6C5255D40BF9E98C50 /* IntentAssignmentMigrationTests.swift */,
 				9C761A4ECB2CB540479C6ACA /* IntentEndToEndTests.swift */,
@@ -3786,6 +3792,8 @@
 				E34A1FA84CB1CAD25D3CFBE2 /* IngestPreflightTestSupport.swift in Sources */,
 				83026506271AEEF5B7F0654A /* IngestPreflightTests+Incomplete.swift in Sources */,
 				F58F16CA6CD00D3636EB3BB0 /* IngestPreflightTests+ManifestWriters.swift in Sources */,
+				579F262521372A2D20AC8EF7 /* IngestPreflightTests+ReadFailures.swift in Sources */,
+				792577FBE54F0D3DFB514A0C /* IngestPreflightTests+WriterState.swift in Sources */,
 				F7ADEA921C45A5EB742C594E /* IngestPreflightTests.swift in Sources */,
 				EF3CA6ADB6F9F26948CADD7C /* InstalledSkillHistoryFlowLifetimeTests.swift in Sources */,
 				FC2E67F739760A9536B19FC5 /* InstalledSkillHistoryHostTests.swift in Sources */,

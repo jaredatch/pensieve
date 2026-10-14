@@ -10,14 +10,15 @@ extension DeployIntentModel {
         context: ModelContext
     ) throws {
         try reportErrors {
-            try Self.validate(machineID: machineID, slug: skill.directoryName, platformRaw: platform.rawValue)
-            if let projectKey, !ManifestService.isAdmittedProjectKey(projectKey) {
-                throw DeployIntentModelError.invalidComponent(projectKey)
-            }
-            try withIntentLock {
+            try withSelectionLock(skills: [skill], context: context) {
+                try Self.validate(machineID: machineID, slug: skill.directoryName, platformRaw: platform.rawValue)
+                if let projectKey, !ManifestService.isAdmittedProjectKey(projectKey) {
+                    throw DeployIntentModelError.invalidComponent(projectKey)
+                }
+
                 let localID = try dependencies.identity.identifier()
                 guard machineID != localID else { throw DeployIntentModelError.remoteTargetIsThisMac }
-                try persistIntentOnly(localMachineID: localID, skills: [skill], context: context) {
+                try persistIntentOnly(localMachineID: localID, context: context) {
                     try mutateOne(
                         selected, machineID: machineID, skill: skill, platform: platform,
                         projectKey: projectKey, context: context
@@ -35,15 +36,16 @@ extension DeployIntentModel {
         context: ModelContext
     ) throws -> BatchResult {
         let result: BatchResult = try reportErrors {
-            if let project = target.project,
-               project.identityKey.map(ManifestService.isAdmittedProjectKey) != true {
-                return directSet(selected, skills: [skill], platforms: [platform], target: target, context: context)
-            }
-            return try withIntentLock {
+            return try withSelectionLock(skills: [skill], context: context) {
+                if let project = target.project,
+                   project.identityKey.map(ManifestService.isAdmittedProjectKey) != true {
+                    return directSet(selected, skills: [skill], platforms: [platform], target: target, context: context)
+                }
+
                 let machineID = try dependencies.identity.identifier()
                 try Self.validate(machineID: machineID, slug: skill.directoryName, platformRaw: platform.rawValue)
                 let projectKey = target.project?.identityKey
-                let persistence = try persistAndReconcile(localMachineID: machineID, skills: [skill], context: context) {
+                let persistence = try persistAndReconcile(localMachineID: machineID, context: context) {
                     try mutateOne(
                         selected, machineID: machineID, skill: skill, platform: platform,
                         projectKey: projectKey, context: context
@@ -70,22 +72,19 @@ extension DeployIntentModel {
         project: Project,
         context: ModelContext
     ) throws -> DeployIntentApplyOutcome {
-        let target = DeployTarget.project(project)
-        guard let projectKey = project.identityKey,
-              ManifestService.isAdmittedProjectKey(projectKey) else {
-            let result = directSet(selected, skills: skills, platforms: Array(platforms),
-                                   target: target, context: context)
-            presentFailures(result)
-            return .localDeploy(result)
-        }
         let result: BatchResult = try reportErrors {
-            try withIntentLock {
+            try withSelectionLock(skills: skills, context: context) {
+                let target = DeployTarget.project(project)
+                guard let projectKey = project.identityKey,
+                      ManifestService.isAdmittedProjectKey(projectKey) else {
+                    return directSet(selected, skills: skills, platforms: Array(platforms), target: target, context: context)
+                }
                 let machineID = try dependencies.identity.identifier()
                 try Self.validateSelection(
                     machineIDs: [machineID], slugs: Set(skills.map(\.directoryName)),
                     platformRaws: Set(platforms.map(\.rawValue))
                 )
-                let persistence = try persistAndReconcile(localMachineID: machineID, skills: skills, context: context) {
+                let persistence = try persistAndReconcile(localMachineID: machineID, context: context) {
                     try reconcileProjectRows(
                         selected, machineID: machineID, projectKey: projectKey,
                         skills: skills, platforms: platforms, context: context
@@ -114,10 +113,11 @@ extension DeployIntentModel {
         context: ModelContext
     ) throws -> BatchResult? {
         try reportErrors {
-            try Self.validate(machineID: machineID, slug: skill.directoryName, platformRaw: platform.rawValue)
-            return try withIntentLock {
+            return try withSelectionLock(skills: [skill], context: context) {
+                try Self.validate(machineID: machineID, slug: skill.directoryName, platformRaw: platform.rawValue)
+
                 let localID = try dependencies.identity.identifier()
-                let persistence = try persistAndReconcile(localMachineID: localID, skills: [skill], context: context) {
+                let persistence = try persistAndReconcile(localMachineID: localID, context: context) {
                     try mutateOne(
                         selected, machineID: machineID, skill: skill, platform: platform,
                         projectKey: nil, context: context
@@ -146,14 +146,14 @@ extension DeployIntentModel {
         context: ModelContext
     ) throws -> DeployIntentApplyOutcome {
         try reportErrors {
-            try withIntentLock {
+            try withSelectionLock(skills: skills, context: context) {
                 let localID = try dependencies.identity.identifier()
                 let slugs = Set(skills.map(\.directoryName))
                 let platformRaws = Set(platforms.map(\.rawValue))
                 try Self.validateSelection(
                     machineIDs: selectedMachineIDs, slugs: slugs, platformRaws: platformRaws
                 )
-                let persistence = try persistAndReconcile(localMachineID: localID, skills: skills, context: context) {
+                let persistence = try persistAndReconcile(localMachineID: localID, context: context) {
                     try reconcileRows(
                         skills: skills, platforms: platforms,
                         selectedMachineIDs: selectedMachineIDs, context: context
@@ -181,12 +181,12 @@ extension DeployIntentModel {
         context: ModelContext
     ) throws -> DeployIntentApplyOutcome {
         try reportErrors {
-            try withIntentLock {
+            try withSelectionLock(skills: skills, context: context) {
                 let localID = try dependencies.identity.identifier()
                 let slugs = Set(skills.map(\.directoryName))
                 let platformRaws = Set(platforms.map(\.rawValue))
                 try Self.validateSelection(machineIDs: machineIDs, slugs: slugs, platformRaws: platformRaws)
-                let persistence = try persistAndReconcile(localMachineID: localID, skills: skills, context: context) {
+                let persistence = try persistAndReconcile(localMachineID: localID, context: context) {
                     let rows = try context.fetch(FetchDescriptor<MachineDeployIntent>())
                     var mutated = false
                     for row in rows where row.projectKey == nil && machineIDs.contains(row.machineID)
@@ -220,11 +220,12 @@ extension DeployIntentModel {
 }
 
 private extension DeployIntentModel {
-    func withIntentLock<T>(_ operation: () throws -> T) throws -> T {
+    func withSelectionLock<T>(skills: [Skill], context: ModelContext, _ operation: () throws -> T) throws -> T {
         guard let lock = dependencies.lockProvider(dependencies.lockPath) else {
             throw DeployIntentModelError.syncInProgress
         }
         defer { lock.release() }
+        try prepareSelection(skills: skills, context: context)
         return try operation()
     }
 

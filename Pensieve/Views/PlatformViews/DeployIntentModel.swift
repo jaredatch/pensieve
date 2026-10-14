@@ -89,6 +89,7 @@ enum DeployIntentModelError: LocalizedError {
     case remoteTargetIsThisMac
     case syncInProgress
     case selectionChanged
+    case ingestPending
 
     var errorDescription: String? {
         switch self {
@@ -98,6 +99,8 @@ enum DeployIntentModelError: LocalizedError {
             "This Mac must use its local deployment controls."
         case .syncInProgress:
             "Sync is running. Try again when it finishes."
+        case .ingestPending:
+            "Deployment is blocked until sync updates this Mac's library. Sync again, then retry the deployment."
         case .selectionChanged:
             "A selected skill was removed while the library updated. Choose the skills again."
         }

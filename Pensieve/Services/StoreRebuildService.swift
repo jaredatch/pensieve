@@ -49,7 +49,7 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
         // A successful read is admitted by the caller after its HEAD validation. Launch may
         // discover that the files moved during this rebuild, so this service cannot clear it.
         if result.ingestIncomplete { StoreIngestState.shared(for: context.container).invalidate() }
-        if !result.saveFailed, let read = result.categoryRead { CategorySaveWindow.didRebuild(read) }
+        if !result.ingestIncomplete, let read = result.categoryRead { CategorySaveWindow.didRebuild(read) }
         return result
     }
 
@@ -69,7 +69,8 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
         warnOverlaysWithoutFiles(snapshot: snapshot, filePresentSlugs: filePresentSlugs, result: &result)
         result.categoryRead = manifestIsAuthoritative
             ? rebuildCategories(snapshot: snapshot, context: context, result: &result) : nil
-        rebuildDeployIntents(snapshot: snapshot, context: context, result: &result)
+        if manifestIsAuthoritative { rebuildDeployIntents(snapshot: snapshot, context: context, result: &result) }
+        guard !result.ingestIncomplete else { return result }
 
         // Surface a persistence failure instead of returning success counts over an unsaved store
         // (PLAN-07 / 07.4 review — the codebase's surface-don't-swallow rule).
@@ -110,7 +111,12 @@ extension StoreRebuildService {
                                result: inout RebuildResult) -> Set<String> {
         let overlaysBySlug = Dictionary(snapshot.skills.map { ($0.slug, $0) },
                                         uniquingKeysWith: { first, _ in first })
-        let existingSkills = (try? context.fetch(FetchDescriptor<Skill>())) ?? []
+        let existingSkills: [Skill]
+        do { existingSkills = try context.fetch(FetchDescriptor<Skill>()) } catch {
+            result.skillReadFailed = true
+            result.warnings.append("Couldn't read local skills; skipped the skill reconcile: " + error.localizedDescription)
+            return []
+        }
         let existingBySlug = Dictionary(existingSkills.map { ($0.directoryName, $0) },
                                         uniquingKeysWith: { first, _ in first })
 
@@ -171,6 +177,7 @@ extension StoreRebuildService {
     private func listSkillEntries(at skillsDir: String, result: inout RebuildResult) -> [String]? {
         guard fileService.directoryExists(at: skillsDir) else { return [] }
         guard let entries = try? fileService.listDirectory(at: skillsDir) else {
+            result.skillListFailed = true
             result.warnings.append(
                 "Couldn't list the skills directory; skipped the skill reconcile to avoid deleting rows.")
             return nil

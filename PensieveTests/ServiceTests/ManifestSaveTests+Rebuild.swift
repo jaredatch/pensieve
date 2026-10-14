@@ -4,6 +4,7 @@ import XCTest
 
 extension ManifestSaveTests {
     func testFallbackRefreshesRefusedMetadataBeforePublication() async throws {
+        try await assertPendingFallbackRefuses()
         for corrupt in [false, true] {
             let h = try ManifestSaveFixture()
             defer { h.cleanup() }
@@ -20,6 +21,28 @@ extension ManifestSaveTests {
             XCTAssertEqual(h.recording.writes.count, 1)
             XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "alpha" }?.tags, ["b"])
             XCTAssertEqual(h.alpha.tags, ["b"], "A refused fallback edit must use the current context before publishing")
+        }
+    }
+
+    private func assertPendingFallbackRefuses() async throws {
+        for corrupt in [false, true] {
+            let h = try ManifestSaveFixture()
+            defer { h.cleanup() }
+            if corrupt {
+                try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "not: [yaml\n")
+            } else { try h.files.deleteDirectory(at: h.root + "/manifest") }
+            let before = try? h.manifestBytes()
+            XCTAssertThrowsError(try StoreIngestState.rebuild(
+                using: StoreRebuildService(save: { _ in throw CocoaError(.fileWriteUnknown) }),
+                root: h.root, context: h.context))
+            XCTAssertTrue(StoreIngestState.shared(for: h.context.container).needsRebuild)
+            h.library.updateMetadata(h.alpha, tags: ["blocked"], scope: .user, context: h.context)
+            await h.saves.waitUntilIdle()
+            XCTAssertTrue(h.recording.writes.isEmpty, "pending ingestion must refuse a whole-window fallback")
+            XCTAssertNotNil(h.library.error)
+            XCTAssertTrue(StoreIngestState.shared(for: h.context.container).needsRebuild)
+            XCTAssertEqual(try? h.manifestBytes(), before)
+            XCTAssertEqual(h.alpha.tags, ["blocked"], "a refused publication keeps the local edit")
         }
     }
 

@@ -23,7 +23,13 @@ struct RebuildResult: Equatable {
     /// A non-authoritative manifest does not attempt that fetch and leaves this false.
     var categoryReadFailed: Bool = false
 
-    var ingestIncomplete: Bool { saveFailed || categoryReadFailed }
+    var skillReadFailed: Bool = false
+    var deployIntentReadFailed: Bool = false
+    var skillListFailed: Bool = false
+
+    var ingestIncomplete: Bool {
+        saveFailed || categoryReadFailed || skillReadFailed || deployIntentReadFailed || skillListFailed
+    }
     /// A successful category fetch, ordered against local edits. Only the disk-reading entry point
     /// announces this receipt, after the rebuild saves. Previews and acceptance never announce.
     @Receipt var categoryRead: CategorySaveWindow.ReadReceipt?
