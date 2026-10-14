@@ -37,9 +37,7 @@ extension ManifestService: ManifestSnapshotting {
                 origin: origin
             )
         }
-        let categoryRecords = categories.map {
-            CategoryRecord(name: $0.name, projectKeys: $0.projectKeys, skillSlugs: $0.skillSlugs)
-        }
+        let categoryRecords = categories.map(CategoryRecord.init)
         // Project identities are per-machine and are published in `machines/<id>.yaml`
         // (`MachineStateService.projectRecords`); the manifest carries none, so `projects.yaml` is the
         // constant `projects:` on every machine and never ping-pongs between them.

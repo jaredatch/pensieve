@@ -4,23 +4,27 @@ import SwiftData
 /// The category management surface: one place to manage a category's member PROJECTS and its assigned
 /// SKILLS (the standing rule). Each toggle reconciles and surfaces a resilient §5 result. (PLAN-06 / 06.5)
 struct CategoryDetailView: View {
+    let library: SkillLibraryViewModel
     let categoryID: UUID
     let onReveal: (Skill) -> Void
     @Environment(\.modelContext) private var context
     @Query private var categories: [Category]
+    @Query private var allCategories: [Category]
     @Query(sort: \Project.name) private var projects: [Project]
     @Query(sort: \Skill.name) private var skills: [Skill]
     @State private var model: CategoryDetailModel
     @State private var showRename = false
 
-    init(categoryID: UUID, platformVM: PlatformViewModel,
+    init(categoryID: UUID, platformVM: PlatformViewModel, library: SkillLibraryViewModel,
          manifestSaves: ManifestSaveModel?,
          notifier: @escaping SyncStateNotifying, onReveal: @escaping (Skill) -> Void) {
+        self.library = library
         self.categoryID = categoryID
         self.onReveal = onReveal
         _categories = Query(filter: #Predicate<Category> { $0.id == categoryID })
         _model = State(initialValue: CategoryDetailModel(
-            store: CategoryStore(notifier: notifier, manifestSaves: manifestSaves),
+            store: CategoryStore(notifier: notifier, manifestSaves: manifestSaves,
+                                      reconciler: CategoryReconciler(platformVM: platformVM)),
             reconciler: CategoryReconciler(platformVM: platformVM)
         ))
     }
@@ -76,6 +80,8 @@ struct CategoryDetailView: View {
                 } label: {
                     Label("Rename", systemImage: "pencil")
                 }
+                .disabled(library.categoryEditsFenced)
+                .help(library.persistentFenceReason ?? "")
             }
         }
         .sheet(isPresented: $showRename) {
@@ -115,6 +121,8 @@ struct CategoryDetailView: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(.vertical, Spacing.xs)
+        } footer: {
+            if let reason = library.persistentFenceReason { Text(reason) }
         }
     }
 
@@ -123,21 +131,27 @@ struct CategoryDetailView: View {
             title: "Rename Category",
             fieldLabel: "Category Name",
             actionTitle: "Rename",
-            initialName: category.name
-        ) { name in
-            model.rename(category, to: name, context: context)
-        }
+            initialName: category.name,
+            validate: { CategoryName.validationMessage($0, among: allCategories, excluding: category.id) },
+            onCommit: { name in model.rename(category, to: name, context: context) }
+        )
     }
 
     @ViewBuilder
     private func projectRow(_ project: Project, category: Category) -> some View {
         if let key = project.identityKey {
-            Toggle(isOn: Binding(
-                get: { category.projectKeys.contains(key) },
-                set: { model.setProject(project, inCategory: category, member: $0, context: context) }
-            )) {
-                Label(project.name, systemImage: "folder")
+            // In a grouped Form, the row must own help for it to reach a disabled switch.
+            HStack {
+                Toggle(isOn: Binding(
+                    get: { category.projectKeys.contains(key) },
+                    set: { model.setProject(project, inCategory: category, member: $0, context: context) }
+                )) {
+                    Label(project.name, systemImage: "folder")
+                }
+                .disabled(library.categoryEditsFenced)
             }
+            .contentShape(Rectangle())
+            .help(library.persistentFenceReason ?? "")
         } else {
             // Pending identity — cannot be a durable member (§A). Shown disabled with a calm hint.
             Label {
@@ -155,12 +169,17 @@ struct CategoryDetailView: View {
     }
 
     private func skillRow(_ skill: Skill, category: Category) -> some View {
-        Toggle(isOn: Binding(
-            get: { category.skillSlugs.contains(skill.directoryName) },
-            set: { model.setSkill(skill, inCategory: category, assigned: $0, context: context) }
-        )) {
-            Label(skill.name, systemImage: "doc.text")
+        HStack {
+            Toggle(isOn: Binding(
+                get: { category.skillSlugs.contains(skill.directoryName) },
+                set: { model.setSkill(skill, inCategory: category, assigned: $0, context: context) }
+            )) {
+                Label(skill.name, systemImage: "doc.text")
+            }
+            .disabled(library.categoryEditsFenced)
         }
+        .contentShape(Rectangle())
+        .help(library.persistentFenceReason ?? "")
     }
 
     @ViewBuilder

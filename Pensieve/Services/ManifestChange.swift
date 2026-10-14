@@ -19,6 +19,15 @@ enum ManifestChange {
         }
     }
 
+    /// Validate before durable publication and before projecting pending edits into the window.
+    /// A conflicting pending rename is refused and undone before its projection is accepted.
+    func validate(in snapshot: ManifestSnapshot) throws {
+        guard case .renameCategory(let old, let new) = self,
+              let target = snapshot.categories.firstIndex(where: { $0.name == old }) else { return }
+        let others = snapshot.categories.indices.filter { $0 != target }.map { snapshot.categories[$0].name }
+        if let taken = CategoryName.takenName(new, among: others) { throw CategoryNameError.taken(taken) }
+    }
+
     /// False means the target is absent. The queue still publishes idempotent deletions.
     @discardableResult
     func apply(to snapshot: inout ManifestSnapshot) -> Bool {

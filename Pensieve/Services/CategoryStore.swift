@@ -70,38 +70,45 @@ extension CategoryStoreProtocol {
 struct CategoryStore: CategoryStoreProtocol {
     private let manifestSaves: ManifestSaveModel?
     let notifier: SyncStateNotifying
+    private let undoReconciler: CategoryReconcilerProtocol?
 
     init(notifier: @escaping SyncStateNotifying = SyncStateNotifier.suppressed,
-         manifestSaves: ManifestSaveModel? = nil) {
+         manifestSaves: ManifestSaveModel? = nil, reconciler: CategoryReconcilerProtocol? = nil) {
         self.manifestSaves = manifestSaves
         self.notifier = notifier
+        self.undoReconciler = reconciler
     }
 
     func create(name: String, context: ModelContext, notifier: SyncStateNotifying) -> Category? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
+        guard !trimmed.isEmpty, admits(trimmed, context: context) else { return nil }
 
         let category = Category(name: trimmed)
+        let edit = CategorySaveEdit(category: category, context: context,
+            change: .createCategory(CategoryRecord(name: trimmed, projectKeys: [], skillSlugs: [])), existed: false)
         context.insert(category)
-        try? context.save()
-        regenerateManifest(.createCategory(CategoryRecord(name: trimmed, projectKeys: [], skillSlugs: [])), context: context)
+        try? edit.save(in: context)
+        regenerateManifest(edit, context: context)
         notifier()
         return category
     }
 
     func rename(_ category: Category, to name: String, context: ModelContext, notifier: SyncStateNotifying) {
-        let oldName = category.name
-        category.name = name
-        try? context.save()
-        regenerateManifest(.renameCategory(oldName, name), context: context)
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != category.name,
+              admits(trimmed, excluding: category.id, context: context) else { return }
+        let edit = CategorySaveEdit(category: category, context: context, change: .renameCategory(category.name, trimmed))
+        category.name = trimmed
+        try? edit.save(in: context)
+        regenerateManifest(edit, context: context)
         notifier()
     }
 
     func delete(_ category: Category, context: ModelContext, notifier: SyncStateNotifying) {
-        let name = category.name, id = category.id
+        let edit = CategorySaveEdit(category: category, context: context, change: .deleteCategory(category.name))
         context.delete(category)
-        try? context.save()
-        regenerateManifest(.deleteCategory(name), context: context, categoryID: id)
+        try? edit.save(in: context)
+        regenerateManifest(edit, context: context)
         notifier()
     }
 
@@ -110,7 +117,8 @@ struct CategoryStore: CategoryStoreProtocol {
     @discardableResult
     func delete(_ category: Category, reconciler: CategoryReconcilerProtocol, context: ModelContext,
                 notifier: SyncStateNotifying) -> BatchResult {
-        delete(category, context: context, notifier: SyncStateNotifier.suppressed)
+        CategoryStore(manifestSaves: manifestSaves, reconciler: reconciler)
+            .delete(category, context: context, notifier: SyncStateNotifier.suppressed)
         let result = reconciler.reconcile(context: context)
         notifier()
         return result
@@ -120,6 +128,7 @@ struct CategoryStore: CategoryStoreProtocol {
                     notifier: SyncStateNotifying) {
         guard let key = project.identityKey else { return }
 
+        let edit = CategorySaveEdit(category: category, context: context, change: .categoryProject(category.name, key, member))
         if member {
             if !category.projectKeys.contains(key) {
                 category.projectKeys.append(key)
@@ -127,8 +136,8 @@ struct CategoryStore: CategoryStoreProtocol {
         } else {
             category.projectKeys.removeAll { $0 == key }
         }
-        try? context.save()
-        regenerateManifest(.categoryProject(category.name, key, member), context: context)
+        try? edit.save(in: context)
+        regenerateManifest(edit, context: context)
         notifier()
     }
 
@@ -137,8 +146,9 @@ struct CategoryStore: CategoryStoreProtocol {
     func setProject(_ project: Project, inCategory category: Category, member: Bool,
                     reconciler: CategoryReconcilerProtocol, context: ModelContext,
                     notifier: SyncStateNotifying) -> BatchResult {
-        setProject(project, inCategory: category, member: member, context: context,
-                   notifier: SyncStateNotifier.suppressed)
+        CategoryStore(manifestSaves: manifestSaves, reconciler: reconciler)
+            .setProject(project, inCategory: category, member: member, context: context,
+                        notifier: SyncStateNotifier.suppressed)
         let result = reconciler.reconcile(context: context)
         notifier()
         return result
@@ -147,6 +157,7 @@ struct CategoryStore: CategoryStoreProtocol {
     func setSkill(_ skill: Skill, inCategory category: Category, assigned: Bool, context: ModelContext,
                   notifier: SyncStateNotifying) {
         let slug = skill.directoryName
+        let edit = CategorySaveEdit(category: category, context: context, change: .categorySkill(category.name, slug, assigned))
 
         if assigned {
             if !category.skillSlugs.contains(slug) {
@@ -155,8 +166,8 @@ struct CategoryStore: CategoryStoreProtocol {
         } else {
             category.skillSlugs.removeAll { $0 == slug }
         }
-        try? context.save()
-        regenerateManifest(.categorySkill(category.name, slug, assigned), context: context)
+        try? edit.save(in: context)
+        regenerateManifest(edit, context: context)
         notifier()
     }
 
@@ -165,8 +176,9 @@ struct CategoryStore: CategoryStoreProtocol {
     func setSkill(_ skill: Skill, inCategory category: Category, assigned: Bool,
                   reconciler: CategoryReconcilerProtocol, context: ModelContext,
                   notifier: SyncStateNotifying) -> BatchResult {
-        setSkill(skill, inCategory: category, assigned: assigned, context: context,
-                 notifier: SyncStateNotifier.suppressed)
+        CategoryStore(manifestSaves: manifestSaves, reconciler: reconciler)
+            .setSkill(skill, inCategory: category, assigned: assigned, context: context,
+                      notifier: SyncStateNotifier.suppressed)
         let result = reconciler.reconcile(context: context)
         notifier()
         return result
@@ -182,7 +194,21 @@ struct CategoryStore: CategoryStoreProtocol {
         return categories.filter { $0.skillSlugs.contains(slug) }
     }
 
-    private func regenerateManifest(_ change: ManifestChange, context: ModelContext, categoryID: UUID? = nil) {
-        manifestSaves?.submit(change, context: context, categoryID: categoryID) { manifestSaves?.reportCategoryFailure($0) }
+    private func admits(_ name: String, excluding id: UUID? = nil, context: ModelContext) -> Bool {
+        do {
+            let names = try context.fetch(FetchDescriptor<Category>()).filter { $0.id != id }.map(\.name)
+            return CategoryName.takenName(name, among: names) == nil
+        } catch {
+            Logger(subsystem: "com.jaredatch.pensieve", category: "categories")
+                .warning("Couldn't check category names: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+    }
+
+    private func regenerateManifest(_ edit: CategorySaveEdit, context: ModelContext) {
+        manifestSaves?.submit(edit.change, context: context, categoryEdit: edit,
+            reconcile: undoReconciler.map { reconciler in { reconciler.reconcile(context: context) } }) {
+                manifestSaves?.reportCategoryFailure($0)
+            }
     }
 }

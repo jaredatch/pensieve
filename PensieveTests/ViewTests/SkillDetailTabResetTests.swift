@@ -72,6 +72,9 @@ final class SkillDetailTabResetTests: XCTestCase {
             deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: base),
             skillsDirectory: TestPaths.skillsDir
         )
+        let library = SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: fileService, baseDir: base + "/skills", storeRoot: base),
+            fileWatchService: FileWatchService(rootDir: base + "/skills"), manifestRoot: base)
         let dependencies = DeployIntentDependencies(
             identity: InertMachineIdentity(),
             stateService: InertMachineStateService(),
@@ -90,6 +93,7 @@ final class SkillDetailTabResetTests: XCTestCase {
         let host = NSHostingView(rootView: SkillDeploymentsTabResetHarness(
             model: model,
             platformVM: platformVM,
+            library: library,
             dependencies: dependencies,
             intentModel: intentModel,
             presentation: presentation
@@ -243,6 +247,7 @@ private final class SkillDetailTabResetGit: GitServiceProtocol {
 private struct SkillDeploymentsTabResetHarness: View {
     @Bindable var model: SkillDetailTabResetModel
     @Bindable var platformVM: PlatformViewModel
+    let library: SkillLibraryViewModel
     let dependencies: DeployIntentDependencies
     let intentModel: DeployIntentModel
     let presentation: SkillDeploymentsTabPresentation
@@ -254,7 +259,7 @@ private struct SkillDeploymentsTabResetHarness: View {
             statusIsCurrent: true,
             projects: [],
             platformVM: platformVM,
-            addsFenced: false,
+            library: library,
             intentDependencies: dependencies,
             machineStates: [],
             localMachineID: InertMachineIdentity.value,

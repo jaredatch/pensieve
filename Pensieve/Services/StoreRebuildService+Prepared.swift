@@ -56,9 +56,17 @@ extension StoreRebuildService {
             context.delete(row)
         }
         if prepared.manifestIsAuthoritative {
-            rebuildCategories(snapshot: snapshot, context: context, result: &result, removingOnlyIDs: prepared.scannedCategoryIDs)
+            guard rebuildCategories(snapshot: snapshot, context: context, result: &result,
+                                    removingOnlyIDs: prepared.scannedCategoryIDs) != nil else {
+                throw CategoryReadFailure(message: result.warnings.joined(separator: "\n"))
+            }
         }
         rebuildDeployIntents(snapshot: snapshot, context: context, result: &result)
         try save(context)
     }
+}
+
+private struct CategoryReadFailure: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
 }

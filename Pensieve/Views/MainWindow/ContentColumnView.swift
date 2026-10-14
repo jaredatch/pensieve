@@ -41,7 +41,7 @@ struct ContentColumnView: View {
                 localMachineID: localMachineID,
                 notifier: notifier,
                 onAdd: { onAdd(.projects) },
-                addsFenced: library.addsFenced
+                library: library
             )
         case .categoryList:
             CategoryListView(
@@ -50,7 +50,7 @@ struct ContentColumnView: View {
                 platformVM: platformVM,
                 manifestSaves: library.manifestSaves, notifier: notifier,
                 onAdd: { onAdd(.categories) },
-                addsFenced: library.addsFenced
+                library: library
             )
         case .tagList:
             TagListView(entitySelection: $entitySelection, searchText: $searchText)
