@@ -130,8 +130,8 @@ protocol DeployMutationServicing: AnyObject {
     var dependencies: DeployIntentDependencies { get }
     var machines: [DeployIntentMachine] { get }
     var availablePlatforms: [PlatformTarget] { get }
-    var error: String? { get set }
-    func reload(context: ModelContext)
+    func reload(context: ModelContext) throws
+    func targetCatalog(context: ModelContext, localID: String) throws -> DeployTargetCatalog
     func selectedMachineIDs(skills: [Skill], platforms: Set<PlatformTarget>, context: ModelContext) throws -> Set<String>
     func setRemote(_ selected: Bool, machineID: String, projectKey: String?, skill: Skill,
                    platform: PlatformTarget, context: ModelContext) throws
@@ -157,46 +157,20 @@ final class DeployMutationService: DeployMutationServicing {
 
     private(set) var machines: [DeployIntentMachine] = []
     private(set) var availablePlatforms: [PlatformTarget] = []
-    var error: String?
 
     init(platformVM: PlatformViewModel, dependencies: DeployIntentDependencies) {
         self.platformVM = platformVM
         self.dependencies = dependencies
     }
 
-    func reload(context: ModelContext) {
-        do {
-            let localID = try dependencies.identity.identifier()
-            let states = dependencies.stateService.readAll(fromRoot: dependencies.root)
-            let stateByID = Dictionary(states.map { ($0.machineID, $0) }, uniquingKeysWith: { first, _ in first })
-            let intents = try context.fetch(FetchDescriptor<MachineDeployIntent>())
-            let intentIDs = Set(intents.compactMap { $0.projectKey == nil ? $0.machineID : nil })
-            let allIDs = Set(stateByID.keys).union(intentIDs).union([localID])
-            machines = allIDs.map { machineID in
-                let state = stateByID[machineID]
-                return DeployIntentMachine(
-                    id: machineID,
-                    name: machineID == localID ? "This Mac" : state.map {
-                        PublishedStringSanitizer.name($0.name, fallback: "Mac")
-                    } ?? machineID,
-                    isLocal: machineID == localID,
-                    isUnseen: machineID != localID && state == nil
-                )
-            }.sorted {
-                if $0.isLocal != $1.isLocal { return $0.isLocal }
-                let nameOrder = $0.name.localizedStandardCompare($1.name)
-                if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
-                return $0.id < $1.id
-            }
-            let remoteRaws = states.flatMap(\.agents) + intents.filter { $0.projectKey == nil }.map(\.platformRaw)
-            let remotePlatforms = remoteRaws.compactMap(PlatformTarget.init(rawValue:))
-            let localPlatforms = platformVM.deployablePlatforms(forProject: false)
-            let admitted = Set(localPlatforms + remotePlatforms)
-            availablePlatforms = PlatformTarget.allCases.filter(admitted.contains)
-            error = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
+    func reload(context: ModelContext) throws {
+        let catalog = try targetCatalog(context: context, localID: dependencies.identity.identifier())
+        machines = catalog.machines
+        let remoteRaws = catalog.states.flatMap(\.agents) + catalog.intents.filter { $0.projectKey == nil }.map(\.platformRaw)
+        let remotePlatforms = remoteRaws.compactMap(PlatformTarget.init(rawValue:))
+        let localPlatforms = platformVM.deployablePlatforms(forProject: false)
+        let admitted = Set(localPlatforms + remotePlatforms)
+        availablePlatforms = PlatformTarget.allCases.filter(admitted.contains)
     }
 
     func selectedMachineIDs(
@@ -206,15 +180,10 @@ final class DeployMutationService: DeployMutationServicing {
     ) throws -> Set<String> {
         let slugs = Set(skills.map(\.directoryName))
         let platformRaws = Set(platforms.map(\.rawValue))
-        do {
-            let rows = try dependencies.fetchIntents(context)
-            return Set(rows.compactMap { row in
-                row.projectKey == nil && slugs.contains(row.skillSlug) && platformRaws.contains(row.platformRaw)
-                    ? row.machineID : nil
-            })
-        } catch {
-            self.error = "Deployment selection could not be read: \(error.localizedDescription)"
-            throw error
-        }
+        let rows = try dependencies.fetchIntents(context)
+        return Set(rows.compactMap { row in
+            row.projectKey == nil && slugs.contains(row.skillSlug) && platformRaws.contains(row.platformRaw)
+                ? row.machineID : nil
+        })
     }
 }

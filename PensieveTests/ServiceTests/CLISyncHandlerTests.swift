@@ -29,6 +29,16 @@ final class CLISyncHandlerTests: XCTestCase {
                 XCTAssertEqual(fields["pulled"], .bool(pulled))
             }
         }
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let probe = Process()
+        probe.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        probe.arguments = ["-B", root.appendingPathComponent("script/cli_contract_test.py").path, "--binary",
+            Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/pensieve").path,
+            "CLIContractTests.test_sync_waits_for_its_cycle_and_reports_still_running_after_deadline"]
+        let outcome = try await BlockingWork.run { try CLIProcessProbe.run(probe) }
+        XCTAssertFalse(outcome.timedOut)
+        XCTAssertEqual(outcome.status, 0, "The built client must wait for sync and distinguish an expired wait from failure")
     }
 
     func testCommandWaitsForFollowupAndReturnsConflictWhenFollowupIsDropped() async throws {

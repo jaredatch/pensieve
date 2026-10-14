@@ -3,7 +3,8 @@ import Darwin
 import Foundation
 
 struct DeployOptions: ParsableArguments {
-    @Option(name: [.short, .long], help: "Agent ID; repeat for more. '*' selects installed agents.") var agent: [String] = []
+    @Option(name: [.short, .long], help: "Agent ID; repeat for more. '*' includes intent-bearing agents on undeploy.")
+    var agent: [String] = []
     @Flag(name: [.customShort("g"), .long], help: "Deploy user-wide.") var global = false
     @Option(name: [.short, .long], help: "Registered project name or path; '.' uses this folder.") var project: String?
     @Option(name: [.short, .long], help: "Target Mac name or ID (requires -g); repeat for more.") var machine: [String] = []

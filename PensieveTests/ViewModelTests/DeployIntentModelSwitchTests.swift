@@ -8,7 +8,7 @@ private struct UnreadableSwitchIdentity: MachineIdentityProviding {
 
 @MainActor
 extension DeployIntentModelTests {
-    func testLocalAndProjectSwitchesPersistBeforeDeployAndNudge() throws {
+    func testLocalAndProjectSwitchesPersistBeforeDeployAndNudge() async throws {
         var events: [String] = []
         var nudges = 0
         let harness = try makeHarness(
@@ -37,6 +37,7 @@ extension DeployIntentModelTests {
         XCTAssertEqual(rows.filter { $0.projectKey == nil }.count, 1)
         let manifest = try ManifestService(fileService: harness.manifestFileService).read(fromRoot: harness.root)
         XCTAssertEqual(manifest.deployIntents.count, 2)
+        try await assertRuntimeDeploymentNudges()
     }
 
     func testTurningOffIntentAndManualDeploysAlwaysRemovesArtifactWithoutAdoption() throws {
@@ -219,6 +220,7 @@ extension DeployIntentModelTests {
         rows = try harness.context.fetch(FetchDescriptor<MachineDeployIntent>())
         XCTAssertTrue(rows.isEmpty)
         XCTAssertEqual(harness.linkService.unlinkCalls.map(\.projectPath), [project.path, project.path])
+        try assertDeploymentErrorsStayWithTheirWindow()
     }
 
     func testSwitchRefusesWhileSyncLockIsHeldBeforeChangingAnything() throws {

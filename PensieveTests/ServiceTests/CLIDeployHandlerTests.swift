@@ -41,6 +41,7 @@ final class CLIDeployHandlerTests: XCTestCase {
             XCTAssertEqual(try h.tree(), stable)
             try assertRemoval(h, project: project, target: target, stable: stable, rows: rows)
         }
+        try assertUninstalledAndUnseenIntentWithdrawal(wildcard: false)
     }
 
     private func assertRemoval(_ h: CLIDeployFixture, project: String?, target: DeployTarget,
@@ -95,6 +96,7 @@ final class CLIDeployHandlerTests: XCTestCase {
         XCTAssertEqual(try h.intents().count, 5)
         XCTAssertTrue(h.platform.isDeployed(skill: h.skill, platform: .claudeCode))
         XCTAssertTrue(h.platform.isDeployed(skill: h.skill, platform: .codex))
+        try assertUninstalledAndUnseenIntentWithdrawal(wildcard: true)
     }
 
     func testKeylessProjectsStayLocalAndWildcardListsUnsupportedAgents() throws {
@@ -122,6 +124,9 @@ final class CLIDeployHandlerTests: XCTestCase {
         let h = try CLIDeployFixture()
         let duplicate = Project(name: "App", path: h.directory.path + "/another")
         h.context.insert(duplicate)
+        for slug in ["aardvark", "aardwolf", "revise", "reviews", "zzzz"] {
+            h.context.insert(Skill(name: slug, directoryName: slug))
+        }
         try h.context.save()
         let cases: [(CLIRequest, (String, Int32))] = [
             (h.request(skills: ["revie"]), ("skill_not_found", 4)),
@@ -143,6 +148,13 @@ final class CLIDeployHandlerTests: XCTestCase {
             XCTAssertEqual(result.envelope.error?.code, code)
             XCTAssertFalse(try XCTUnwrap(result.envelope.error?.hint).isEmpty)
             if code.hasSuffix("_not_found") { XCTAssertTrue(result.envelope.error?.hint.contains("Closest names:") == true) }
+            if code == "skill_not_found" {
+                XCTAssertTrue(result.envelope.error?.hint.hasPrefix("Closest names: review, revise, reviews.") == true,
+                    "Suggestions must rank distance ahead of alphabetical order")
+            }
+            if code == "project_not_registered" {
+                XCTAssertTrue(result.envelope.error?.hint.contains("pensieve project add") == true)
+            }
             if code == "ambiguous" { XCTAssertTrue(result.envelope.error?.message.contains(duplicate.path) == true) }
             XCTAssertEqual(try h.tree(), before, code)
             XCTAssertTrue(try h.intents().isEmpty)
@@ -152,10 +164,13 @@ final class CLIDeployHandlerTests: XCTestCase {
     func testAmbiguousMachinesListIDsAndAnIDDisambiguatesTheTarget() throws {
         let otherID = "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC"
         let states = [CLIDeployFixture.remoteID, otherID].map { machineID in
-            MachineState(schemaVersion: 1, machineID: machineID, name: "Mini", appVersion: "fixture",
+            MachineState(schemaVersion: 1, machineID: machineID, name: " \nMi\u{200E}ni\t ", appVersion: "fixture",
                 publishedAt: Date(), agents: ["claudeCode"], projects: [], userDeploys: [], projectDeploys: [])
         }
         let h = try CLIDeployFixture(states: states)
+        let window = DeployIntentModel(service: h.service)
+        window.reload(context: h.context)
+        XCTAssertEqual(window.machines.filter { !$0.isLocal }.map(\.name), ["Mini", "Mini"])
         let refusal = h.handler.handle(h.request(machines: ["Mini"]), context: h.context)
         XCTAssertEqual(refusal.exitCode, 5)
         XCTAssertEqual(refusal.envelope.error?.code, "ambiguous")

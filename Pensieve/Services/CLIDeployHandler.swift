@@ -16,7 +16,8 @@ struct CLIDeployHandler {
             let lookup = CLINameResolver(context: context, files: files)
             let skills = try Array(Set(request.arguments)).sorted().map(lookup.skill)
             let project = try options.project.map { try lookup.project($0, cwd: options.workingDirectory) }
-            let pairs = try resolvePairs(skills: skills, options: options, project: project, lookup: lookup, context: context)
+            let pairs = try resolvePairs(skills: skills, options: options, project: project, lookup: lookup,
+                context: context, selected: request.command == "deploy")
             let report = try service.change(request.command == "deploy", pairs: pairs.pairs,
                 dryRun: options.dryRun, context: context)
             return reply(report, selected: request.command == "deploy", dryRun: options.dryRun, skipped: pairs.skipped)
@@ -34,17 +35,13 @@ struct CLIDeployHandler {
     }
 
     private func resolvePairs(skills: [Skill], options: CLIDeployOptions, project: Project?,
-                              lookup: CLINameResolver, context: ModelContext) throws
+                              lookup: CLINameResolver, context: ModelContext, selected: Bool) throws
         -> (pairs: [DeployMutationPair], skipped: [CLIValue]) {
         let isDirect = project.map { $0.identityKey.map(ManifestService.isAdmittedProjectKey) != true } ?? false
         let localID = isDirect ? (try? service.dependencies.identity.identifier()) ?? ""
             : try service.dependencies.identity.identifier()
-        let states = service.dependencies.stateService.readAll(fromRoot: service.dependencies.root)
-        var machines = states.map { DeployIntentMachine(id: $0.machineID, name: $0.name,
-            isLocal: $0.machineID == localID, isUnseen: false) }
-        if !machines.contains(where: \.isLocal) {
-            machines.append(DeployIntentMachine(id: localID, name: "This Mac", isLocal: true, isUnseen: false))
-        }
+        let catalog = try service.targetCatalog(context: context, localID: localID)
+        let machines = catalog.machines, states = catalog.states
         let targets = options.machines.isEmpty ? machines.filter(\.isLocal)
             : try options.machines.map { try lookup.machine($0, machines: machines) }
         let explicit = try options.agents.filter { $0 != "*" }.map(lookup.agent)
@@ -53,12 +50,17 @@ struct CLIDeployHandler {
         for machine in targets {
             let installed = machine.isLocal ? service.platformVM.installedPlatforms()
                 : states.first(where: { $0.machineID == machine.id })?.agents.compactMap(PlatformTarget.init(rawValue:)) ?? []
-            for agent in explicit where !installed.contains(agent) {
+            for agent in explicit where selected && !installed.contains(agent) {
                 throw CLICommandRefusal(reply: .failure("agent_not_installed",
                     "\(agent.cliID) is not installed on \(machine.name) (\(machine.id)).",
                     hint: "Check pensieve agent list and pensieve machine list.", exit: 1))
             }
-            let agents = Set(explicit + (options.agents.contains("*") ? installed : []))
+            let heldIntents = catalog.intents.filter { row in
+                row.machineID == machine.id && row.projectKey == project?.identityKey
+                    && skills.contains(where: { $0.directoryName == row.skillSlug })
+            }
+            let heldAgents = selected ? [] : heldIntents.compactMap { PlatformTarget(rawValue: $0.platformRaw) }
+            let agents = Set(explicit + (options.agents.contains("*") ? installed + heldAgents : []))
             for agent in PlatformTarget.allCases where agents.contains(agent) {
                 if project != nil && !agent.supportsProjectScope {
                     if explicit.contains(agent) {
@@ -70,6 +72,9 @@ struct CLIDeployHandler {
                     continue
                 }
                 for skill in skills {
+                    guard explicit.contains(agent) || installed.contains(agent) || heldIntents.contains(where: {
+                        $0.skillSlug == skill.directoryName && $0.platformRaw == agent.rawValue
+                    }) else { continue }
                     let key = machine.id + "|" + skill.directoryName + "|" + agent.rawValue
                     guard seen.insert(key).inserted else { continue }
                     pairs.append(DeployMutationPair(skill: skill, platform: agent, machineID: machine.id,

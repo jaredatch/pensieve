@@ -12,6 +12,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
 import unicodedata
 import unittest
 
@@ -29,7 +30,8 @@ class CLIContractTests(unittest.TestCase):
         self.endpoint = self.root / (self.info["CFBundleIdentifier"] + ".sock")
         self.environment = dict(os.environ, CFFIXED_USER_HOME=str(self.root), HOME=str(self.root), NO_COLOR="1")
 
-    def run_cli(self, *arguments, code=0, json_output=True, invocation="absolute", app_support=True):
+    def run_cli(self, *arguments, code=0, json_output=True, invocation="absolute", app_support=True,
+                input_text="", timeout=15):
         environment = self.environment.copy()
         executable = str(BINARY)
         if invocation != "absolute":
@@ -47,8 +49,9 @@ class CLIContractTests(unittest.TestCase):
             args += ["--app-support", str(self.root)]
         if json_output:
             args.append("--json")
-        result = subprocess.run(args, input="", text=True, capture_output=True,
-            env=environment, cwd=self.root, timeout=15)
+        result = subprocess.run(args, input=input_text, text=True, capture_output=True,
+            env=environment, cwd=self.root, timeout=timeout)
+        self.assertNotIn("Scope", result.stderr, "Piped input must never receive a scope prompt")
         self.assertEqual(result.returncode, code, result.stdout + result.stderr)
         self.assertNotIn("\x1b", result.stdout + result.stderr)
         if not json_output:
@@ -62,7 +65,8 @@ class CLIContractTests(unittest.TestCase):
             self.assertIsInstance(envelope["error"]["retryable"], bool)
         return envelope
 
-    def peer(self, *, reply=None, bundle=None, protocol=1, commit=False, drop_reply=False):
+    def peer(self, *, reply=None, bundle=None, protocol=1, commit=False, drop_reply=False,
+             reply_delay=0, release_reply=None):
         listener = socket.socket(socket.AF_UNIX)
         self.addCleanup(listener.close)
         listener.bind(str(self.endpoint))
@@ -88,9 +92,17 @@ class CLIContractTests(unittest.TestCase):
                             self.assertEqual(json.loads(reader.readline(65537)), {"commit": True})
                         if drop_reply:
                             return
+                        if release_reply is not None:
+                            release_reply.wait(10)
+                            return
+                        if reply_delay:
+                            time.sleep(reply_delay)
                         response = reply or {"envelope": {"schema": 1, "ok": True, "changed": False,
                             "data": [{"slug": "review", "name": "Review"}], "next": []}, "exitCode": 0}
                         connection.sendall(json.dumps(response).encode() + b"\n")
+            except (BrokenPipeError, ConnectionResetError) as error:
+                if not reply_delay:
+                    failures.append(error)
             except Exception as error:
                 failures.append(error)
 
@@ -98,6 +110,8 @@ class CLIContractTests(unittest.TestCase):
         worker.start()
 
         def finish():
+            if release_reply is not None:
+                release_reply.set()
             try:
                 worker.join(15)
                 self.assertFalse(worker.is_alive(), "Stub peer did not finish")
@@ -238,9 +252,21 @@ class CLIContractTests(unittest.TestCase):
         for command in ("deploy", "undeploy"):
             for options in ((), ("-m", "Mini"), ("-p", ".", "-m", "Mini")):
                 with self.subTest(command=command, options=options):
-                    result = self.run_cli(command, "review", "-a", "claude", *options, code=64)
+                    result = self.run_cli(command, "review", "-a", "claude", *options, code=64, input_text="g\n")
                     self.assertEqual(result["error"]["code"], "usage")
                     self.assertIn("-g", result["error"]["message"])
+            listener = socket.socket(socket.AF_UNIX)
+            try:
+                listener.bind(str(self.endpoint))
+                listener.listen(1)
+                listener.settimeout(.1)
+                for scope in ("g\n", str(self.root) + "\n"):
+                    self.run_cli(command, "review", "-a", "codex", code=64, input_text=scope)
+                    with self.assertRaises(socket.timeout):
+                        listener.accept()
+            finally:
+                listener.close()
+                self.endpoint.unlink()
             for no_input in ("flag", "environment"):
                 master, slave = pty.openpty()
                 try:
@@ -256,6 +282,60 @@ class CLIContractTests(unittest.TestCase):
                 finally:
                     os.close(slave)
                     os.close(master)
+
+    def test_sync_waits_for_its_cycle_and_reports_still_running_after_deadline(self):
+        expected = {"schema": 1, "ok": True, "changed": True,
+                    "data": {"result": "synced", "pushed": False, "pulled": True, "warnings": ["own cycle"]}}
+        with self.subTest(wait="cycle longer than 30 seconds"):
+            observed, finish = self.peer(commit=True, reply_delay=31,
+                reply={"envelope": expected, "exitCode": 0})
+            try:
+                self.assertEqual(self.run_cli("sync", timeout=40), expected)
+            finally:
+                finish()
+            self.assertEqual(observed[0]["command"], "sync")
+
+        # Interpose only long poll waits in this child. The real client selects and passes its
+        # production deadline; a kernel timeout is returned early so this case stays bounded.
+        source = self.root / "poll.c"
+        library = self.root / "poll.dylib"
+        receipt = self.root / "poll-timeout"
+        source.write_text(r'''
+#include <poll.h>
+#include <stdio.h>
+#include <stdlib.h>
+static int expire_poll(struct pollfd *fds, nfds_t count, int milliseconds) {
+    if (milliseconds > 25000 && count == 1 && (fds[0].events & POLLIN)) {
+        FILE *receipt = fopen(getenv("PENSIEVE_POLL_RECEIPT"), "w");
+        if (receipt) { fprintf(receipt, "%d", milliseconds); fclose(receipt); }
+        return poll(fds, count, 100);
+    }
+    return poll(fds, count, milliseconds);
+}
+__attribute__((used)) static struct { const void *replacement; const void *original; }
+interpose_poll __attribute__((section("__DATA,__interpose"))) = { (void *)expire_poll, (void *)poll };
+''')
+        subprocess.run(["/usr/bin/clang", "-dynamiclib", str(source), "-o", str(library)],
+                       check=True, capture_output=True, timeout=30)
+        self.environment.update(DYLD_INSERT_LIBRARIES=str(library), PENSIEVE_POLL_RECEIPT=str(receipt))
+        for command, seconds, code in [("sync", 600, "sync_still_running"), ("skill", 30, "app_unavailable")]:
+            release = threading.Event()
+            observed, finish = self.peer(commit=True, release_reply=release)
+            try:
+                args = (command,) if command == "sync" else (command, "list")
+                result = self.run_cli(*args, code=3)
+                requested = int(receipt.read_text())
+                self.assertGreaterEqual(requested, seconds * 1000 - 100)
+                self.assertLessEqual(requested, seconds * 1000 + 1)
+                self.assertEqual(result["error"]["code"], code)
+                self.assertFalse(result["error"]["retryable"])
+                if command == "sync":
+                    self.assertIn("still running in Pensieve", result["error"]["message"])
+                    self.assertIn("pensieve status", result["error"]["hint"])
+                    self.assertNotIn("failed", result["error"]["message"].lower())
+                self.assertEqual(len(observed), 1)
+            finally:
+                finish()
 
     def test_wrong_copy_and_protocol_are_refused_before_sending_a_command(self):
         cases = [(self.root / "Other.app", 1, "wrong_app", invocation)

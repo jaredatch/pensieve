@@ -9,6 +9,7 @@ enum CLIProtocol {
     // Three times the slowest isolated cold launch (0.942 s), rounded up to a whole second.
     static let readyTimeout: TimeInterval = 3
     static let commandReplyTimeout: TimeInterval = 30
+    static let syncReplyTimeout: TimeInterval = 10 * 60
 
     static func socketPath(appSupport: String, bundleID: String,
                            fileService: FileServiceProtocol = FileService()) -> String {

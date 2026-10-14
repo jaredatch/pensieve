@@ -12,6 +12,7 @@ struct CLIClient {
         let deadline = SocketTransport.deadline(after: CLIProtocol.readyTimeout)
         var waitingForStartup = true
         var mayHaveApplied = false
+        let replyTimeout = request.command == "sync" ? CLIProtocol.syncReplyTimeout : CLIProtocol.commandReplyTimeout
         do {
             let descriptor = try connect(deadline: deadline)
             defer { close(descriptor) }
@@ -36,13 +37,17 @@ struct CLIClient {
                 try SocketTransport.writeFrame(CLICommandCommit(commit: true), to: descriptor, timeout: 5)
             }
             response = try SocketTransport.readFrame(descriptor, limit: CLIProtocol.replyLimit,
-                timeout: CLIProtocol.commandReplyTimeout)
+                timeout: replyTimeout)
             return try validatedReply(response)
         } catch let refusal as LaunchRefusal {
             return refusal.reply
         } catch SocketError.timeout {
             if !waitingForStartup {
-                let seconds = Int(CLIProtocol.commandReplyTimeout)
+                if request.command == "sync" {
+                    return .failure("sync_still_running", "Sync is still running in Pensieve.",
+                        hint: "Run pensieve status to check its progress. Avoid starting another sync.", exit: 3)
+                }
+                let seconds = Int(replyTimeout)
                 return .failure("app_unavailable", "Pensieve did not reply to the command within \(seconds) seconds.",
                     hint: "Check Pensieve before running this command again.", exit: 3)
             }

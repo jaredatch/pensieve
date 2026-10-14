@@ -9,21 +9,19 @@ extension DeployMutationService {
         platform: PlatformTarget,
         context: ModelContext
     ) throws {
-        try reportErrors {
-            try withSelectionLock(skills: [skill], context: context) {
-                try Self.validate(machineID: machineID, slug: skill.directoryName, platformRaw: platform.rawValue)
-                if let projectKey, !ManifestService.isAdmittedProjectKey(projectKey) {
-                    throw DeployIntentModelError.invalidComponent(projectKey)
-                }
+        try withSelectionLock(skills: [skill], context: context) {
+            try Self.validate(machineID: machineID, slug: skill.directoryName, platformRaw: platform.rawValue)
+            if let projectKey, !ManifestService.isAdmittedProjectKey(projectKey) {
+                throw DeployIntentModelError.invalidComponent(projectKey)
+            }
 
-                let localID = try dependencies.identity.identifier()
-                guard machineID != localID else { throw DeployIntentModelError.remoteTargetIsThisMac }
-                try persistIntentOnly(localMachineID: localID, context: context) {
-                    try mutateOne(
-                        selected, machineID: machineID, skill: skill, platform: platform,
-                        projectKey: projectKey, context: context
-                    )
-                }
+            let localID = try dependencies.identity.identifier()
+            guard machineID != localID else { throw DeployIntentModelError.remoteTargetIsThisMac }
+            try persistIntentOnly(localMachineID: localID, context: context) {
+                try mutateOne(
+                    selected, machineID: machineID, skill: skill, platform: platform,
+                    projectKey: projectKey, context: context
+                )
             }
         }
     }
@@ -35,33 +33,29 @@ extension DeployMutationService {
         target: DeployTarget,
         context: ModelContext
     ) throws -> BatchResult {
-        let result: BatchResult = try reportErrors {
-            if let project = target.project,
-               project.identityKey.map(ManifestService.isAdmittedProjectKey) != true {
-                return directSet(selected, skills: [skill], platforms: [platform], target: target, context: context)
-            }
-            return try withSelectionLock(skills: [skill], context: context) {
-                let machineID = try dependencies.identity.identifier()
-                try Self.validate(machineID: machineID, slug: skill.directoryName, platformRaw: platform.rawValue)
-                let projectKey = target.project?.identityKey
-                let persistence = try persistAndReconcile(localMachineID: machineID, context: context) {
-                    try mutateOne(
-                        selected, machineID: machineID, skill: skill, platform: platform,
-                        projectKey: projectKey, context: context
-                    )
-                }
-                var reconciliation = persistence.reconciliation
-                if !persistence.mutated {
-                    reconciliation.append(dependencies.reconcile(context))
-                }
-                return realizeSelection(
-                    selected, skills: [skill], platforms: [platform], target: target,
-                    reconciliation: reconciliation, context: context
+        if let project = target.project,
+           project.identityKey.map(ManifestService.isAdmittedProjectKey) != true {
+            return directSet(selected, skills: [skill], platforms: [platform], target: target, context: context)
+        }
+        return try withSelectionLock(skills: [skill], context: context) {
+            let machineID = try dependencies.identity.identifier()
+            try Self.validate(machineID: machineID, slug: skill.directoryName, platformRaw: platform.rawValue)
+            let projectKey = target.project?.identityKey
+            let persistence = try persistAndReconcile(localMachineID: machineID, context: context) {
+                try mutateOne(
+                    selected, machineID: machineID, skill: skill, platform: platform,
+                    projectKey: projectKey, context: context
                 )
             }
+            var reconciliation = persistence.reconciliation
+            if !persistence.mutated {
+                reconciliation.append(dependencies.reconcile(context))
+            }
+            return realizeSelection(
+                selected, skills: [skill], platforms: [platform], target: target,
+                reconciliation: reconciliation, context: context
+            )
         }
-        presentFailures(result)
-        return result
     }
 
     func setProjectSelection(
@@ -76,33 +70,29 @@ extension DeployMutationService {
               ManifestService.isAdmittedProjectKey(projectKey) else {
             let result = directSet(selected, skills: skills, platforms: Array(platforms),
                                    target: target, context: context)
-            presentFailures(result)
             return .localDeploy(result)
         }
-        let result: BatchResult = try reportErrors {
-            try withSelectionLock(skills: skills, context: context) {
-                let machineID = try dependencies.identity.identifier()
-                try Self.validateSelection(
-                    machineIDs: [machineID], slugs: Set(skills.map(\.directoryName)),
-                    platformRaws: Set(platforms.map(\.rawValue))
-                )
-                let persistence = try persistAndReconcile(localMachineID: machineID, context: context) {
-                    try reconcileProjectRows(
-                        selected, machineID: machineID, projectKey: projectKey,
-                        skills: skills, platforms: platforms, context: context
-                    )
-                }
-                var reconciliation = persistence.reconciliation
-                if !persistence.mutated {
-                    reconciliation.append(dependencies.reconcile(context))
-                }
-                return realizeSelection(
-                    selected, skills: skills, platforms: Array(platforms), target: target,
-                    reconciliation: reconciliation, context: context
+        let result = try withSelectionLock(skills: skills, context: context) {
+            let machineID = try dependencies.identity.identifier()
+            try Self.validateSelection(
+                machineIDs: [machineID], slugs: Set(skills.map(\.directoryName)),
+                platformRaws: Set(platforms.map(\.rawValue))
+            )
+            let persistence = try persistAndReconcile(localMachineID: machineID, context: context) {
+                try reconcileProjectRows(
+                    selected, machineID: machineID, projectKey: projectKey,
+                    skills: skills, platforms: platforms, context: context
                 )
             }
+            var reconciliation = persistence.reconciliation
+            if !persistence.mutated {
+                reconciliation.append(dependencies.reconcile(context))
+            }
+            return realizeSelection(
+                selected, skills: skills, platforms: Array(platforms), target: target,
+                reconciliation: reconciliation, context: context
+            )
         }
-        presentFailures(result)
         return .localDeploy(result)
     }
 
@@ -114,30 +104,28 @@ extension DeployMutationService {
         platform: PlatformTarget,
         context: ModelContext
     ) throws -> BatchResult? {
-        try reportErrors {
-            return try withSelectionLock(skills: [skill], context: context) {
-                try Self.validate(machineID: machineID, slug: skill.directoryName, platformRaw: platform.rawValue)
+        return try withSelectionLock(skills: [skill], context: context) {
+            try Self.validate(machineID: machineID, slug: skill.directoryName, platformRaw: platform.rawValue)
 
-                let localID = try dependencies.identity.identifier()
-                let persistence = try persistAndReconcile(localMachineID: localID, context: context) {
-                    try mutateOne(
-                        selected, machineID: machineID, skill: skill, platform: platform,
-                        projectKey: nil, context: context
-                    )
-                }
-                var reconciliation = persistence.reconciliation
-                guard machineID == localID else {
-                    reload(context: context)
-                    return nil
-                }
-                if !persistence.mutated { reconciliation.append(dependencies.reconcile(context)) }
-                let result = realizeSelection(
-                    selected, skills: [skill], platforms: [platform], target: .userWide,
-                    reconciliation: reconciliation, context: context
+            let localID = try dependencies.identity.identifier()
+            let persistence = try persistAndReconcile(localMachineID: localID, context: context) {
+                try mutateOne(
+                    selected, machineID: machineID, skill: skill, platform: platform,
+                    projectKey: nil, context: context
                 )
-                reload(context: context)
-                return result
             }
+            var reconciliation = persistence.reconciliation
+            guard machineID == localID else {
+                try reload(context: context)
+                return nil
+            }
+            if !persistence.mutated { reconciliation.append(dependencies.reconcile(context)) }
+            let result = realizeSelection(
+                selected, skills: [skill], platforms: [platform], target: .userWide,
+                reconciliation: reconciliation, context: context
+            )
+            try reload(context: context)
+            return result
         }
     }
 
@@ -147,32 +135,30 @@ extension DeployMutationService {
         selectedMachineIDs: Set<String>,
         context: ModelContext
     ) throws -> DeployIntentApplyOutcome {
-        try reportErrors {
-            try withSelectionLock(skills: skills, context: context) {
-                let localID = try dependencies.identity.identifier()
-                let slugs = Set(skills.map(\.directoryName))
-                let platformRaws = Set(platforms.map(\.rawValue))
-                try Self.validateSelection(
-                    machineIDs: selectedMachineIDs, slugs: slugs, platformRaws: platformRaws
+        try withSelectionLock(skills: skills, context: context) {
+            let localID = try dependencies.identity.identifier()
+            let slugs = Set(skills.map(\.directoryName))
+            let platformRaws = Set(platforms.map(\.rawValue))
+            try Self.validateSelection(
+                machineIDs: selectedMachineIDs, slugs: slugs, platformRaws: platformRaws
+            )
+            let persistence = try persistAndReconcile(localMachineID: localID, context: context) {
+                try reconcileRows(
+                    skills: skills, platforms: platforms,
+                    selectedMachineIDs: selectedMachineIDs, context: context
                 )
-                let persistence = try persistAndReconcile(localMachineID: localID, context: context) {
-                    try reconcileRows(
-                        skills: skills, platforms: platforms,
-                        selectedMachineIDs: selectedMachineIDs, context: context
-                    )
-                }
-                var reconciliation = persistence.reconciliation
-                guard selectedMachineIDs.contains(localID) else { return .intentOnly }
-                if !persistence.mutated {
-                    reconciliation.append(dependencies.reconcile(context))
-                }
-                let installed = Set(platformVM.installedPlatforms())
-                let localPlatforms = Array(platforms.filter(installed.contains))
-                return .localDeploy(realizeSelection(
-                    true, skills: skills, platforms: localPlatforms, target: .userWide,
-                    reconciliation: reconciliation, context: context
-                ))
             }
+            var reconciliation = persistence.reconciliation
+            guard selectedMachineIDs.contains(localID) else { return .intentOnly }
+            if !persistence.mutated {
+                reconciliation.append(dependencies.reconcile(context))
+            }
+            let installed = Set(platformVM.installedPlatforms())
+            let localPlatforms = Array(platforms.filter(installed.contains))
+            return .localDeploy(realizeSelection(
+                true, skills: skills, platforms: localPlatforms, target: .userWide,
+                reconciliation: reconciliation, context: context
+            ))
         }
     }
 
@@ -182,32 +168,30 @@ extension DeployMutationService {
         machineIDs: Set<String>,
         context: ModelContext
     ) throws -> DeployIntentApplyOutcome {
-        try reportErrors {
-            try withSelectionLock(skills: skills, context: context) {
-                let localID = try dependencies.identity.identifier()
-                let slugs = Set(skills.map(\.directoryName))
-                let platformRaws = Set(platforms.map(\.rawValue))
-                try Self.validateSelection(machineIDs: machineIDs, slugs: slugs, platformRaws: platformRaws)
-                let persistence = try persistAndReconcile(localMachineID: localID, context: context) {
-                    let rows = try context.fetch(FetchDescriptor<MachineDeployIntent>())
-                    var mutated = false
-                    for row in rows where row.projectKey == nil && machineIDs.contains(row.machineID)
-                        && slugs.contains(row.skillSlug) && platformRaws.contains(row.platformRaw) {
-                        context.delete(row)
-                        mutated = true
-                    }
-                    return mutated
+        try withSelectionLock(skills: skills, context: context) {
+            let localID = try dependencies.identity.identifier()
+            let slugs = Set(skills.map(\.directoryName))
+            let platformRaws = Set(platforms.map(\.rawValue))
+            try Self.validateSelection(machineIDs: machineIDs, slugs: slugs, platformRaws: platformRaws)
+            let persistence = try persistAndReconcile(localMachineID: localID, context: context) {
+                let rows = try context.fetch(FetchDescriptor<MachineDeployIntent>())
+                var mutated = false
+                for row in rows where row.projectKey == nil && machineIDs.contains(row.machineID)
+                    && slugs.contains(row.skillSlug) && platformRaws.contains(row.platformRaw) {
+                    context.delete(row)
+                    mutated = true
                 }
-                var reconciliation = persistence.reconciliation
-                guard machineIDs.contains(localID) else { return .intentOnly }
-                if !persistence.mutated {
-                    reconciliation.append(dependencies.reconcile(context))
-                }
-                return .localDeploy(realizeSelection(
-                    false, skills: skills, platforms: Array(platforms), target: .userWide,
-                    reconciliation: reconciliation, context: context
-                ))
+                return mutated
             }
+            var reconciliation = persistence.reconciliation
+            guard machineIDs.contains(localID) else { return .intentOnly }
+            if !persistence.mutated {
+                reconciliation.append(dependencies.reconcile(context))
+            }
+            return .localDeploy(realizeSelection(
+                false, skills: skills, platforms: Array(platforms), target: .userWide,
+                reconciliation: reconciliation, context: context
+            ))
         }
     }
 
@@ -231,17 +215,6 @@ extension DeployMutationService {
         return try operation()
     }
 
-    func reportErrors<T>(_ operation: () throws -> T) throws -> T {
-        do {
-            let value = try operation()
-            error = nil
-            return value
-        } catch {
-            self.error = error.localizedDescription
-            throw error
-        }
-    }
-
     func directSet(
         _ selected: Bool,
         skills: [Skill],
@@ -255,11 +228,6 @@ extension DeployMutationService {
             )
         }
         return platformVM.removeSelection(skills: skills, platforms: platforms, target: target)
-    }
-
-    func presentFailures(_ result: BatchResult) {
-        let messages = result.readFailures.map(\.message) + result.failures.compactMap(\.error)
-        error = messages.isEmpty ? nil : messages.joined(separator: "\n")
     }
 
     func mutateOne(
