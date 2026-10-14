@@ -5,6 +5,9 @@ enum CLIProtocol {
     static let version = 1
     static let requestLimit = 64 * 1_024
     static let replyLimit = 16 * 1_024 * 1_024
+    static let backgroundArgument = "--background"
+    // Three times the slowest isolated cold launch (0.942 s), rounded up to a whole second.
+    static let readyTimeout: TimeInterval = 3
 
     static func socketPath(appSupport: String, bundleID: String) -> String {
         appSupport + "/" + bundleID + ".sock"

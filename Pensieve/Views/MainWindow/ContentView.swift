@@ -176,16 +176,6 @@ struct ContentView: View {
         let appearedView = sheetView
             .onAppear {
             Task { await runtime.mainWindowAppeared() }
-            let openMainWindow = openWindow
-            runtime.registerOpenMainWindowAction {
-                openMainWindow(id: "main")
-            }
-            Task {
-                await runtime.performLaunchWorkIfNeeded(
-                    context: modelContext,
-                    beforeStartingWatcher: runtime.checkForSkillUpdatesIfDue
-                )
-            }
             reloadMachineStates()
         }
         .onChange(of: runtime.launchWorkCompleted, initial: true) { _, completed in

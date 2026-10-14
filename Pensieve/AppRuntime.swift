@@ -228,19 +228,17 @@ final class AppRuntime {
 
     func clearUpdateCheckAlert() { updateCheckAlertError = nil }
 
-    /// Runs process-lifetime launch work at most once. The callback keeps the existing auto-update check
-    /// between deploy-state backfill and watcher startup while the view retains its presentation state.
+    /// Runs process-lifetime launch work at most once, before any window is needed.
     @discardableResult
     func performLaunchWorkIfNeeded(
-        context: ModelContext,
-        beforeStartingWatcher: () -> Void = {}
+        context: ModelContext
     ) async -> Bool {
         guard !didPerformLaunchWork else { return false }
         didPerformLaunchWork = true
         launchWorkInvocationCount += 1
         let result = await runLaunchJob()
         acceptLaunchIngest(result, context: context)
-        beforeStartingWatcher()
+        checkForSkillUpdatesIfDue()
         library.startWatching()
         if result.outcome.ingestionNeedsRetry { scheduleLaunchIngestRetry(context: context) }
         didFinishInitialLaunchCallbacks = true

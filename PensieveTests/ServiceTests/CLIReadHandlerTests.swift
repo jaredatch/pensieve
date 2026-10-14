@@ -76,6 +76,7 @@ final class CLIReadHandlerTests: XCTestCase {
         XCTAssertNil(runtime.commandServerError)
         let socket = CLIProtocol.socketPath(appSupport: directory.path,
             bundleID: Bundle.main.bundleIdentifier ?? "com.jaredatch.Pensieve")
+        runtime.start()
         let response = try await BlockingWork.run {
             let client = try SocketTransport.connect(to: socket)
             defer { close(client) }

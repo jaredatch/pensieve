@@ -253,6 +253,8 @@ targets:
     platform: macOS
     sources:
       - path: PensieveCLI
+      - path: Pensieve/Services/CLIAppLauncher.swift
+      - path: Pensieve/Services/CLIDesktopSession.swift
       - path: Pensieve/Services/FileService.swift
       - path: Pensieve/Services/FileService+Socket.swift
       - path: Pensieve/Services/FileService+Publication.swift

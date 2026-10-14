@@ -785,7 +785,7 @@ class WorkflowTests < Minitest::Test
   CI_LOCAL_WORST_SECONDS = {
     'Wrapper self-test' => 9.826, 'Hygiene added checks' => 0.731,
     'Workflow suite' => 8.951,
-    'CLI contract' => 1.300,
+    'CLI contract' => 16.524,
     'Release recovery' => 696.103
   }.freeze
   CI_WORST_SECONDS = {

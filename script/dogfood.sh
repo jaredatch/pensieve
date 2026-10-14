@@ -38,6 +38,8 @@
 #   dogfood.sh --foreground App.app       attached to this terminal, Ctrl-C quits (agent-driven runs)
 #   dogfood.sh --dry-run App.app          show the profile and the launch command, launch nothing
 #   dogfood.sh --home /Volumes/X/h App.app  a different fake home (never under /tmp or /var)
+#   dogfood.sh --background App.app       launch without opening a window
+#   dogfood.sh --cli App.app skill list --json  run the staged copy's CLI in the same home
 #
 # OPTIONS
 #   --reset        wipe the fake home, the dogfood prefs domain, and the dogfood Keychain items first
@@ -45,6 +47,9 @@
 #   --foreground   run attached to this terminal (Ctrl-C quits) instead of detached
 #   --home DIR     fake home (default: ~/PensieveSandbox/home, or $PENSIEVE_SANDBOX/home)
 #   --dry-run      print the profile and the launch command; launch nothing
+#   --background   pass --background to the app
+#   --cli          run CLI arguments after the app path; requires an existing sandbox home and staged app
+#                  If the socket path is too long, use the same shorter --home on launch and --cli.
 #   -h, --help     this text
 #
 # ENVIRONMENT
@@ -79,6 +84,10 @@ DO_RESET=0
 OFFLINE=0
 FOREGROUND=0
 DRY_RUN=0
+BACKGROUND=0
+CLI_MODE=0
+CLI_ARGS=()
+APP_ARGS=()
 APP=""
 
 die() { printf 'dogfood: %s\n' "$1" >&2; exit 1; }
@@ -95,10 +104,13 @@ while [ "$#" -gt 0 ]; do
     --offline)    OFFLINE=1; shift ;;
     --foreground) FOREGROUND=1; shift ;;
     --dry-run)    DRY_RUN=1; shift ;;
+    --background) BACKGROUND=1; APP_ARGS=(--background); shift ;;
+    --cli)        CLI_MODE=1; shift ;;
     --home)       [ "$#" -ge 2 ] || die "--home needs a value"; FAKE_HOME="$2"; shift 2 ;;
     -h|--help)    usage 0 ;;
     -*)           printf 'unknown option: %s\n\n' "$1" >&2; usage 64 ;;
-    *)            [ -z "$APP" ] || die "one app path only"; APP="$1"; shift ;;
+    *)            [ -z "$APP" ] || die "one app path only"; APP="$1"; shift
+                  if [ "$CLI_MODE" -eq 1 ]; then CLI_ARGS=("$@"); break; fi ;;
   esac
 done
 
@@ -118,8 +130,22 @@ case "$bundle_id" in
   *)       die "$APP is not a Debug build (bundle id $bundle_id) — its prefs would land in the production domain; refusing" ;;
 esac
 
-# --- the fake home: canonical, never an alias, never the real home ----------
 canon() { (cd "$1" 2>/dev/null && pwd -P); }
+
+if [ "$CLI_MODE" -eq 1 ]; then
+  [ "$DO_RESET$OFFLINE$FOREGROUND$DRY_RUN$BACKGROUND" = "00000" ] || die "--cli cannot be combined with launch options"
+  [ -f "$FAKE_HOME/$MARKER" ] || die "start this sandbox with dogfood.sh before running --cli"
+  FAKE_HOME="$(canon "$FAKE_HOME")" || die "cannot resolve the sandbox home"
+  [ "$FAKE_HOME" != "$(canon "$HOME")" ] || die "fake home resolves to the real home"
+  if [ "$bundle_id" = "$DOGFOOD_ID" ]; then CLI_APP="$APP"; else CLI_APP="$SANDBOX_ROOT/Pensieve.app"; fi
+  cli_id="$(defaults read "$CLI_APP/Contents/Info" CFBundleIdentifier 2>/dev/null || true)"
+  [ "$cli_id" = "$DOGFOOD_ID" ] || die "no staged dogfood app at $CLI_APP; start dogfood.sh first"
+  [ -x "$CLI_APP/Contents/Helpers/pensieve" ] || die "no CLI in $CLI_APP"
+  exec env HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" PENSIEVE_DOGFOOD=1 \
+    "$CLI_APP/Contents/Helpers/pensieve" ${CLI_ARGS[@]+"${CLI_ARGS[@]}"}
+fi
+
+# --- the fake home: canonical, never an alias, never the real home ----------
 
 if [ "$DO_RESET" -eq 1 ] && [ -d "$FAKE_HOME" ]; then
   [ -f "$FAKE_HOME/$MARKER" ] || die "refusing to reset $FAKE_HOME: no $MARKER marker (not a dogfood home this script created)"
@@ -382,18 +408,18 @@ say "home: $FAKE_HOME"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "--- $PROFILE"; cat "$PROFILE"; echo "---"
-  echo "env HOME='$FAKE_HOME' CFFIXED_USER_HOME='$FAKE_HOME' PENSIEVE_DOGFOOD=1 /usr/bin/sandbox-exec -f '$PROFILE' '$STAGED/$EXEC_REL'"
+  echo "env HOME='$FAKE_HOME' CFFIXED_USER_HOME='$FAKE_HOME' PENSIEVE_DOGFOOD=1 /usr/bin/sandbox-exec -f '$PROFILE' '$STAGED/$EXEC_REL' ${APP_ARGS[*]-}"
   exit 0
 fi
 
 if [ "$FOREGROUND" -eq 1 ]; then
   say "running in the foreground (Ctrl-C quits)"
   exec env HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" PENSIEVE_DOGFOOD=1 \
-    /usr/bin/sandbox-exec -f "$PROFILE" "$STAGED/$EXEC_REL"
+    /usr/bin/sandbox-exec -f "$PROFILE" "$STAGED/$EXEC_REL" ${APP_ARGS[@]+"${APP_ARGS[@]}"}
 fi
 
 nohup env HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" PENSIEVE_DOGFOOD=1 \
-  /usr/bin/sandbox-exec -f "$PROFILE" "$STAGED/$EXEC_REL" > "$LOG" 2>&1 < /dev/null &
+  /usr/bin/sandbox-exec -f "$PROFILE" "$STAGED/$EXEC_REL" ${APP_ARGS[@]+"${APP_ARGS[@]}"} > "$LOG" 2>&1 < /dev/null &
 pid=$!
 disown "$pid" 2>/dev/null || true
 sleep 2

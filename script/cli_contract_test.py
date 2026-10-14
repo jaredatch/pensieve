@@ -282,4 +282,6 @@ if __name__ == "__main__":
     parser.add_argument("--binary", type=Path, required=True)
     args, remaining = parser.parse_known_args()
     BINARY = args.binary.resolve(strict=True)
+    from cli_launch_tests import CLILaunchTests
+    CLILaunchTests.binary = BINARY
     unittest.main(argv=[__file__, *remaining])

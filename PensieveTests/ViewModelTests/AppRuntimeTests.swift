@@ -172,6 +172,7 @@ extension AppRuntimeTests {
             deployReconciler: deploy
         )
 
+        harness.runtime.start()
         let window = hostMainWindow(runtime: harness.runtime)
         defer { if let sheet = window.attachedSheet { window.endSheet(sheet) }; window.close() }
         await fulfillment(of: [entered], timeout: TestWait.firstRenderTimeoutSeconds)

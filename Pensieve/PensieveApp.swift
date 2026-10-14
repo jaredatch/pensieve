@@ -42,11 +42,13 @@ struct PensieveTestHostApp: App {
 
 struct PensieveApp: App {
     @NSApplicationDelegateAdaptor(PensieveAppDelegate.self) private var appDelegate
+    @Environment(\.openWindow) private var openWindow
 
     private let updaterDelegate: UpdaterDelegate
     /// nil in dogfood mode: Sparkle's controller is never constructed there.
     private let updaterController: SPUStandardUpdaterController?
     private let runtime: AppRuntime
+    private let isBackgroundLaunch = CommandLine.arguments.contains(CLIProtocol.backgroundArgument)
 
     init() {
         WindowPolicy.apply()
@@ -68,6 +70,7 @@ struct PensieveApp: App {
         }
         appDelegate.runtime = runtime
         runtime.library.unsavedChangesPresenter = UnsavedChangesAlert.present
+        runtime.start()
 
         LaunchSignaler().signalLaunch()
     }
@@ -86,12 +89,15 @@ struct PensieveApp: App {
     }
 
     var body: some Scene {
+        let _ = runtime.registerOpenMainWindowAction { openWindow(id: "main") }
         WindowGroup("Pensieve", id: "main") {
             Self.makeContentView(runtime: runtime)
                 .environment(runtime)
         }
         .modelContainer(runtime.container)
         .defaultSize(width: 1280, height: 850)
+        .restorationBehavior(isBackgroundLaunch ? .disabled : .automatic)
+        .defaultLaunchBehavior(isBackgroundLaunch ? .suppressed : .presented)
         .commands {
             // ⌘N creates a skill (PLAN-29 / 29.4-m): this group REPLACES the WindowGroup's
             // standard New group, retiring New Window ⌘N in a single-window app. It comes first so the
@@ -141,7 +147,6 @@ struct PensieveApp: App {
 }
 
 private struct PensieveMenuBarView: View {
-    @Environment(\.openWindow) private var openWindow
     @Environment(AppRuntime.self) private var runtime
     @AppStorage("backgroundSyncEnabled") private var backgroundSyncEnabled = true
 
@@ -157,7 +162,7 @@ private struct PensieveMenuBarView: View {
             }
         Divider()
         Button("Open Pensieve") {
-            WindowPolicy.showMainWindow(among: NSApp.windows) { openWindow(id: "main") }
+            WindowPolicy.showMainWindow(among: NSApp.windows) { runtime.openMainWindow() }
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
         Button("Sync Now") {

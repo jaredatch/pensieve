@@ -10,5 +10,9 @@ guard _NSGetExecutablePath(&executablePath, &executableSize) == 0 else {
     FileHandle.standardError.write(Data("Unable to locate the pensieve executable\n".utf8))
     exit(1)
 }
-exit(CLIEntry.run(arguments: Array(CommandLine.arguments.dropFirst()),
-    appSupport: PathConstants.pensieveAppSupportDir, executable: String(cString: executablePath)))
+Thread {
+    exit(CLIEntry.run(arguments: Array(CommandLine.arguments.dropFirst()),
+        appSupport: PathConstants.pensieveAppSupportDir, executable: String(cString: executablePath)))
+}.start()
+// NSWorkspace delivers launch callbacks while the CLI worker waits for readiness.
+dispatchMain()

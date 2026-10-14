@@ -25,7 +25,7 @@ jobs:
     runs-on: macos-26
     # Expanded release suite: 696.103 s local (2026-10-13); workflow baseline: 8.951 s.
     # Bounds use 2x runner time and 3x margin.
-    timeout-minutes: 184 # 174 step minutes + 10 headroom; no job-cap limit.
+    timeout-minutes: 185 # 175 step minutes + 10 headroom; no job-cap limit.
     env:
       CI_LARGEST_PUSH: 200 # Covers plan merges; larger pushes must resize the measured bounds.
     # Worst times: Actions runs 37074075055 and 37063706683, with local additions scaled by 2x below.
@@ -148,7 +148,7 @@ jobs:
           fi
 
       - name: Test CLI contract
-        timeout-minutes: 1 # Three serial local samples: 1.300/1.119/1.174 s; 2x runner and 3x margin.
+        timeout-minutes: 2 # Three serial local samples: 16.524/15.360/15.968 s; 2x runner and 3x margin.
         run: python3 -B script/cli_contract_test.py --binary DerivedData/Build/Products/Debug/Pensieve.app/Contents/Helpers/pensieve
 
       - name: Upload failed test evidence

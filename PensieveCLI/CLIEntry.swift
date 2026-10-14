@@ -34,7 +34,8 @@ enum CLIEntry {
         let bundleID = info["CFBundleIdentifier"] as? String ?? "com.jaredatch.Pensieve"
         if let command = command as? ReadCommand {
             let client = CLIClient(appPath: app,
-                socketPath: CLIProtocol.socketPath(appSupport: appSupport, bundleID: bundleID), fileService: files)
+                socketPath: CLIProtocol.socketPath(appSupport: appSupport, bundleID: bundleID), fileService: files,
+                launcher: CLIAppLauncher(fileService: files), bundleID: bundleID)
             return (client.send(command.request), nil)
         }
         if command is VersionCommand {
