@@ -31,6 +31,7 @@ enum SyncOutcome: Equatable {
 /// it (a downgrade) and tell the user to update. (PLAN-08 / 08.4 review)
 enum SyncError: LocalizedError, Equatable {
     case storeUnreadable([String])
+    case ingestIncomplete
     case conflictsChanged
     case conflictSideUnavailable(path: String)
     case conflictRequiresGitResolution(path: String)
@@ -44,6 +45,9 @@ enum SyncError: LocalizedError, Equatable {
         case .storeUnreadable:
             return "Couldn't read the synced store — it may have been written by a newer version of "
                 + "Pensieve. Update Pensieve, then sync again."
+        case .ingestIncomplete:
+            return "Sync stopped because Pensieve couldn't update this Mac's library from the synced changes. "
+                + "It will try again on the next sync."
         case .conflictsChanged:
             return "The conflict changed while you were resolving it — reopen to see the latest."
         case let .conflictSideUnavailable(path):
@@ -138,6 +142,9 @@ struct SyncEngine: SyncEngineProtocol {
         let headStamp = GitHeadStamp(fileService: fileService)
         let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
         try prepare?(context)
+        if StoreIngestState.shared(for: context.container).needsRebuild {
+            _ = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context)
+        }
 
         // 1. SwiftData → manifest files (the portable, mergeable source of truth).
         try manifestService.write(manifestService.snapshot(from: context), toRoot: root)
@@ -159,13 +166,7 @@ struct SyncEngine: SyncEngineProtocol {
         }
 
         // 5. Rebuild the local index from the merged files.
-        let rebuild = storeRebuildService.rebuild(fromRoot: root, context: context)
-        // A fatal rebuild skip (the pulled manifest is a newer/unreadable schema) means we did NOT ingest
-        // what we just pulled. Do NOT push our older snapshot over it (a downgrade) and do NOT report
-        // success — surface it so the user updates Pensieve; the local commit stays unpushed for a retry.
-        if rebuild.storeUnreadable {
-            throw SyncError.storeUnreadable(rebuild.warnings)
-        }
+        let rebuild = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context)
         // 6. Publish.
         let ingestedHeadStamp = headStamp.read(root: root)
         try gitService.push(at: root, credential: credential)
@@ -252,13 +253,8 @@ struct SyncEngine: SyncEngineProtocol {
         }
     }
 
-    /// Write `~/.pensieve/.gitattributes` (union-merge for the manifest LIST files ONLY) plus a minimal
-    /// `.gitignore`, idempotently, through `FileService`. Category files and `projects.yaml` get
-    /// `merge=union` — git's built-in driver keeps BOTH sides' lines on a conflicting hunk, which with the
-    /// one-item-per-line list format and dedup-on-read yields set-union semantics with no custom merge
-    /// driver. Skill overlays (`manifest/skills/*.yaml`) are deliberately NOT unioned: they are
-    /// scalar-dominant, so a concurrent same-skill edit is a genuine conflict the safe `.conflicted`
-    /// interim handles — unioning it would produce a duplicate-key YAML file Yams refuses to parse.
+    /// Install union merge for list-shaped category/project manifests plus ignore rules.
+    /// Skill overlays contain scalars: union would produce duplicate keys and corrupt YAML.
     private func ensureSyncAttributes(root: String) throws {
         try StoreIgnoreRules.prepare(at: root, files: fileService)
     }
@@ -284,6 +280,8 @@ struct SyncEngine: SyncEngineProtocol {
     @discardableResult
     private func prepareLocalHead(root: String, credential: GitCredential?,
                                   context: ModelContext, incoming: FetchedStoreRevision?) throws -> Bool {
+        // A retry owns a fresh context, including after a completed rebase whose local save failed.
+        _ = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context)
         try manifestService.write(manifestService.snapshot(from: context), toRoot: root)
         try ensureSyncAttributes(root: root)
         return try gitService.collapseToSingleCommit(at: root, message: Self.resolveMessage,
@@ -293,8 +291,7 @@ struct SyncEngine: SyncEngineProtocol {
     private func finishSync(root: String, credential: GitCredential?,
                             context: ModelContext) throws -> SyncOutcome {
         let pushed = try gitService.hasCommitsToPush(at: root)
-        let rebuild = storeRebuildService.rebuild(fromRoot: root, context: context)
-        if rebuild.storeUnreadable { throw SyncError.storeUnreadable(rebuild.warnings) }
+        let rebuild = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context)
         try gitService.push(at: root, credential: credential)
         let ingestedHeadStamp = GitHeadStamp(fileService: fileService).read(root: root)
         return .synced(

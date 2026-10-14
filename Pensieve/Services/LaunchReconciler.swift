@@ -118,14 +118,14 @@ struct LaunchReconciler {
                 let retryHead = observedHead
                 rebuild = rebuildService.rebuild(fromRoot: root, context: context)
                 observedHead = headStamp()
-                if !rebuild.storeUnreadable, observedHead == retryHead {
+                if !rebuild.storeUnreadable, !rebuild.ingestIncomplete, observedHead == retryHead {
                     ingestedHeadStamp = retryHead
                 } else {
                     ingestedHeadStamp = nil
                     ingestionNeedsRetry = !rebuild.storeUnreadable
                 }
             } else {
-                ingestedHeadStamp = rebuild.storeUnreadable ? nil : before
+                ingestedHeadStamp = rebuild.storeUnreadable || rebuild.ingestIncomplete ? nil : before
             }
         }
         // One-time PLAN-07 migration: skipped ENTIRELY on an unreadable (newer/corrupt) store — never
@@ -174,7 +174,8 @@ struct LaunchReconciler {
         context: ModelContext
     ) -> FinalHeadValidation {
         var result = initial
-        guard !result.rebuild.storeUnreadable else {
+        StoreIngestState.shared(for: context.container).record(result.rebuild)
+        guard !result.rebuild.storeUnreadable, !result.rebuild.ingestIncomplete else {
             result.ingestedHeadStamp = nil
             result.ingestionNeedsRetry = false
             return result

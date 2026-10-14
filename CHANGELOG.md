@@ -45,6 +45,7 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- If sync can't update this Mac's library, it now stops before pushing and retries from the pulled files. A failed rebuild no longer lets stale local categories undo another Mac's additions or deletions.
 - Old sync settings can no longer hide new skills, a skill’s `SKILL.md`, or Pensieve’s own files. Pensieve removes those settings on the next sync. If a nested repository conflicts at a skill root, the sheet explains which version you can choose or names the path to resolve in git.
 - Literal `*` and `&` in frontmatter now work in Source edits, the Rendered table, import and migration. Values like `allowed-tools: Bash(npm run *)` no longer get mistaken for YAML anchors or aliases.
 - Import from Folder… and Add Skill from GitHub… now say "Found 1 Skill" when there's just one.
