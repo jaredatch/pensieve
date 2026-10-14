@@ -188,7 +188,7 @@ extension ConflictResolutionModelTests {
     }
 
     func testSkillRootGitlinksRefuseNestedSideAndExplainTwoGitlinkConflict() async throws {
-        for counterpart in ["folder", "deleted", "gitlink", "missing"] {
+        for counterpart in ["folder", "deleted", "file", "gitlink", "missing"] {
             for nestedOnThisMac in [false, true] {
                 try await assertProtectedConflictGuidance(counterpart: counterpart, nestedOnThisMac: nestedOnThisMac)
             }

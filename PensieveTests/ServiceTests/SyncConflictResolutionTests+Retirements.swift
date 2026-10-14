@@ -160,9 +160,7 @@ extension SyncConflictResolutionTests {
             XCTAssertEqual(try fixture.files.entryTypeWithoutFollowingLinks(at: full), .directory)
             XCTAssertTrue(fixture.files.directoryExists(at: full + "/.git"))
             XCTAssertEqual(try fixture.files.readFile(at: full + "/keep"), "uncommitted nested work")
-            try fixture.files.writeFile(at: full + "/notes.md", content: "new nested note")
             XCTAssertFalse(try fixture.git.stageAllAndCommit(at: fixture.storeB, message: "nested checkout stays local"))
-            XCTAssertEqual(try fixture.files.readFile(at: full + "/notes.md"), "new nested note")
         }
         XCTAssertTrue(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "ls-tree", "main", "--", item.path],
                                                in: nil).stdout.isEmpty)

@@ -7,6 +7,7 @@ extension ConflictResolutionModelTests {
             let entry: SyncConflictByteFixture.Entry?
             switch counterpart {
             case "folder": entry = .folder
+            case "file": entry = .file(Data("available file".utf8))
             case "missing": entry = .file(Data("unavailable file".utf8))
             default: entry = nil
             }
@@ -32,11 +33,10 @@ extension ConflictResolutionModelTests {
             XCTAssertTrue(strings.contains(message), "No available version must explain git resolution: \(counterpart)")
         } else {
             XCTAssertTrue(strings.contains("The nested repository can’t be chosen at this path."))
-            XCTAssertTrue(strings.contains("Choosing the other version removes the nested repository from sync. "
-                + "A folder and its contents stay on this Mac. A file or link at this path is deleted. "
-                + "A nested repository kept after deletion stays local, including new files. "
-                + "New files in an ordinary folder can sync."))
         }
+        XCTAssertEqual(strings.contains("Choosing a file or link keeps it in sync."),
+                       counterpart == "file")
+        XCTAssertFalse(strings.contains { $0.hasPrefix("Choosing the other version removes the nested repository") })
         let nestedSide: ConflictSide = nestedOnThisMac ? .thisMachine : .otherMachine
         let otherSide: ConflictSide = nestedOnThisMac ? .otherMachine : .thisMachine
         model.choose(group.id, nestedSide)

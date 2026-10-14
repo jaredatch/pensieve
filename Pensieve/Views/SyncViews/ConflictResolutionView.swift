@@ -276,12 +276,6 @@ struct ConflictFileComparison: View {
                     Text("The nested repository can’t be chosen at this path.").foregroundStyle(.secondary)
                     if this.keepsFile || other.keepsFile {
                         Text("Choosing a file or link keeps it in sync.").foregroundStyle(.secondary)
-                    } else {
-                        Text("Choosing the other version removes the nested repository from sync. "
-                            + "A folder and its contents stay on this Mac. A file or link at this path is deleted. "
-                            + "A nested repository kept after deletion stays local, including new files. "
-                            + "New files in an ordinary folder can sync.")
-                            .foregroundStyle(.secondary)
                     }
                 }
                 if retiresGitlink {
