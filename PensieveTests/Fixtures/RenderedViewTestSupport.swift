@@ -5,13 +5,25 @@ import SwiftUI
 enum RenderedViewTestSupport {
     /// Observe the enabled environment delivered to a real button in a test host.
     struct AvailabilityStyle: PrimitiveButtonStyle {
-        let report: (Bool) -> Void
         @Environment(\.isEnabled) private var isEnabled
         func makeBody(configuration: Configuration) -> some View {
             DefaultButtonStyle().makeBody(configuration: configuration)
-                .onAppear { report(isEnabled) }
-                .onChange(of: isEnabled) { _, enabled in report(enabled) }
+                .background(HStack {
+                    configuration.label
+                    Text(isEnabled ? "__enabled_control__" : "__disabled_control__")
+                }.hidden())
         }
+    }
+
+    /// The hidden probe renders its own label followed by its enabled environment. Read that
+    /// pair across the live nested AppKit label hosts; never substitute another button's state.
+    static func buttonIsEnabled(_ title: String, in host: NSHostingView<AnyView>) -> Bool? {
+        let labels = values(in: host).compactMap { $0 as? Text }.flatMap { strings(in: $0) }
+        for (label, state) in zip(labels, labels.dropFirst()) where label == title {
+            if state == "__disabled_control__" { return false }
+            if state == "__enabled_control__" { return true }
+        }
+        return nil
     }
 
     static func strings(in text: Text) -> [String] {
@@ -30,20 +42,21 @@ enum RenderedViewTestSupport {
     /// Inspect only rendered values/children; never evaluate a new body or substitute model state.
     /// Missing debug data or changed SDK fields fail the owning UI assertions instead of passing empty.
     static func values(in host: NSView) -> [Any] {
+        nodes(in: host).compactMap { node in
+            let properties = Mirror(reflecting: node).descendant("data") as? [_ViewDebug.Property: Any]
+            return properties?[.value]
+        }
+    }
+
+    static func nodes(in host: NSView) -> [_ViewDebug.Data] {
         host.layoutSubtreeIfNeeded()
-        func values(_ nodes: [_ViewDebug.Data]) -> [Any] {
-            nodes.flatMap { node in
-                let mirror = Mirror(reflecting: node)
-                let properties = mirror.descendant("data") as? [_ViewDebug.Property: Any]
-                let children = mirror.descendant("childData") as? [_ViewDebug.Data] ?? []
-                return [properties?[.value]].compactMap { $0 } + values(children)
-            }
+        func flatten(_ nodes: [_ViewDebug.Data]) -> [_ViewDebug.Data] {
+            nodes.flatMap { [$0] + flatten(Mirror(reflecting: $0).descendant("childData") as? [_ViewDebug.Data] ?? []) }
         }
-        func hostValues(_ view: NSView) -> [Any] {
-            let nodes = (view as? RenderedTestHost)?.renderedTestData ?? []
-            return values(nodes) + view.subviews.flatMap(hostValues)
+        func hostNodes(_ view: NSView) -> [_ViewDebug.Data] {
+            flatten((view as? RenderedTestHost)?.renderedTestData ?? []) + view.subviews.flatMap(hostNodes)
         }
-        return hostValues(host)
+        return hostNodes(host)
     }
 
     static func hasButtonProgress(in host: NSHostingView<AnyView>) -> Bool {

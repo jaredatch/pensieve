@@ -154,15 +154,25 @@ extension SkillLibraryViewModel {
         acceptExternalChange(directoryName: directoryName, currentBody: currentBody, shouldNotify: true)
     }
 
-    // MARK: - The unreadable-store fence (PLAN-31); its two writers sit with the flag
+    // MARK: - Library change fence
 
-    /// Every entry point that creates a new entity — a skill by sheet, scan, folder, or GitHub; a
-    /// project; a category — and the first-launch wizard read this, never
-    /// `libraryUnavailable` alone. Edits read `libraryUnavailable` / `isWriteFenced` as before.
-    var addsFenced: Bool { libraryUnavailable || storeUnreadable || launchIngestPending }
+    /// Adds wait for launch ingestion; existing category rules also wait for a readable library.
+    var addsFenced: Bool { addFenceReason != nil }
+    var categoryEditsFenced: Bool { libraryUnavailable || storeUnreadable }
 
-    /// One sentence for a refused add; the sidebar's sync card carries the longer explanation.
+    /// Lasting failures take precedence over the transient launch state.
+    var addFenceReason: String? {
+        if libraryUnavailable { return Self.libraryUnavailableMessage }
+        if storeUnreadable { return Self.storeUnreadableMessage }
+        if launchIngestPending { return Self.launchIngestMessage }
+        return nil
+    }
+
+    /// Launch explains disabled controls only on hover, so normal ingestion adds no body text.
+    var persistentFenceReason: String? { categoryEditsFenced ? addFenceReason : nil }
+
     static let launchIngestMessage = "Pensieve is still reading this library."
     static let storeUnreadableMessage =
-        "Pensieve can't add to this library until it can read it. Update Pensieve, then relaunch."
+        "Pensieve can't change this library until it can read it. Update Pensieve, then relaunch."
+    static let libraryUnavailableMessage = "Pensieve couldn't open this library. Relaunch to try again."
 }

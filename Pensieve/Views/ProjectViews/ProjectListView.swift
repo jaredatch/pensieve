@@ -16,13 +16,13 @@ struct ProjectListView: View {
     @AppStorage(ListPreferenceKeys.showsLine3(.projects)) private var showsLine3 = true
     private let notifier: SyncStateNotifying
     let onAdd: () -> Void
-    let addsFenced: Bool
+    let library: SkillLibraryViewModel
 
     init(entitySelection: Binding<EntitySelection?>, searchText: Binding<String>,
          platformVM: PlatformViewModel, remoteProjects: [RemoteProjectModel], localMachineID: String?,
          notifier: @escaping SyncStateNotifying,
          onAdd: @escaping () -> Void,
-         addsFenced: Bool) {
+         library: SkillLibraryViewModel) {
         _entitySelection = entitySelection
         _searchText = searchText
         self.platformVM = platformVM
@@ -30,7 +30,7 @@ struct ProjectListView: View {
         self.localMachineID = localMachineID
         self.notifier = notifier
         self.onAdd = onAdd
-        self.addsFenced = addsFenced
+        self.library = library
     }
 
     private var model: ProjectListModel {
@@ -66,10 +66,12 @@ struct ProjectListView: View {
             if model.rows.isEmpty {
                 if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
                     EmptyStateView("No Projects",
-                                   description: "Add a project to organize and deploy skills by workspace.") {
+                                   description: library.persistentFenceReason
+                                    ?? "Add a project to organize and deploy skills by workspace.") {
                         Button("Add Project") { onAdd() }
                             .buttonStyle(.borderedProminent)
-                            .disabled(addsFenced)
+                            .disabled(library.addsFenced)
+                            .help(library.addFenceReason ?? "")
                     }
                 } else {
                     EmptyStateView.search(text: searchText)

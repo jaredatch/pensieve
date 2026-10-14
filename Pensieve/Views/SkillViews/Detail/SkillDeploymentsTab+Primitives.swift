@@ -187,7 +187,8 @@ extension SkillDeploymentsTab {
         .frame(height: DesignTokens.footerHeight)
         .background(DesignTokens.footerFill)
         .overlay(alignment: .top) { separator() }
-        .disabled(addsFenced)
+        .disabled(library.addsFenced)
+        .help(library.addFenceReason ?? "")
         .accessibilityLabel("Add Project")
     }
 

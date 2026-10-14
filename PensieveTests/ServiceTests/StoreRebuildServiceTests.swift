@@ -109,7 +109,7 @@ final class StoreRebuildServiceTests: XCTestCase {
         )
 
         let result = service.rebuild(fromRoot: tempDir, context: context)
-
+        XCTAssertNotNil(result.categoryRead, "An authoritative rebuild returns its successful category read")
         XCTAssertEqual(result.skillsInserted, 2)
         XCTAssertEqual(result.categoriesInserted, 1)
         XCTAssertEqual(result.skillsUpdated, 0)

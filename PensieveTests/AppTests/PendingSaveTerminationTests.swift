@@ -7,7 +7,7 @@ import XCTest
 @MainActor
 final class PendingSaveTerminationTests: XCTestCase {
     func testWaitingNoticeAppearsAfterFiveSecondsAndQuitCompletesWhenSaveLands() async throws {
-        let h = try ManifestSaveFixture(waitSeconds: 5)
+        let h = try await fixtureAfterCategoryRefusal()
         defer { h.cleanup() }
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
         defer { lock.release() }
@@ -57,6 +57,15 @@ final class PendingSaveTerminationTests: XCTestCase {
         XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories.first?.name, "Saved")
         choices?(true)
         XCTAssertEqual(replies, [true], "A late alert callback cannot answer quit twice")
+    }
+
+    private func fixtureAfterCategoryRefusal() async throws -> ManifestSaveFixture {
+        let h = try ManifestSaveFixture(waitSeconds: 5)
+        h.recording.failingWrites = 1
+        h.categories.rename(h.local, to: "Refused", context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(h.local.name, "Local")
+        return h
     }
 
     func testWaitKeepsAppRunningAndQuitAnywayCompletesWhileSaveStillWaits() async throws {

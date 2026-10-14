@@ -15,18 +15,19 @@ struct CategoryListView: View {
     @AppStorage(ListPreferenceKeys.showsLine3(.categories)) private var showsLine3 = true
     private let categoryStore: CategoryStoreProtocol
     let onAdd: () -> Void
-    let addsFenced: Bool
+    let library: SkillLibraryViewModel
 
     init(entitySelection: Binding<EntitySelection?>, searchText: Binding<String>,
          platformVM: PlatformViewModel, manifestSaves: ManifestSaveModel?,
          notifier: @escaping SyncStateNotifying, onAdd: @escaping () -> Void,
-         addsFenced: Bool) {
+         library: SkillLibraryViewModel) {
         _entitySelection = entitySelection
         _searchText = searchText
         self.platformVM = platformVM
-        self.categoryStore = CategoryStore(notifier: notifier, manifestSaves: manifestSaves)
+        self.categoryStore = CategoryStore(notifier: notifier, manifestSaves: manifestSaves,
+                                      reconciler: CategoryReconciler(platformVM: platformVM))
         self.onAdd = onAdd
-        self.addsFenced = addsFenced
+        self.library = library
     }
 
     private var filteredCategories: [Category] {
@@ -45,6 +46,7 @@ struct CategoryListView: View {
                         Button("Rename") {
                             categoryToRename = category
                         }
+                        .disabled(library.categoryEditsFenced)
 
                         Button("Remove", role: .destructive) {
                             let result = categoryStore.delete(
@@ -64,6 +66,7 @@ struct CategoryListView: View {
                                 removalError = messages.joined(separator: "\n\n")
                             }
                         }
+                        .disabled(library.categoryEditsFenced)
                     }
             }
         }
@@ -76,10 +79,12 @@ struct CategoryListView: View {
             if filteredCategories.isEmpty {
                 if searchText.trimmingCharacters(in: .whitespaces).isEmpty {
                     EmptyStateView("No Categories",
-                                   description: "Add a category to assign skills across projects.") {
+                                   description: library.persistentFenceReason
+                                    ?? "Add a category to assign skills across projects.") {
                         Button("Add Category") { onAdd() }
                             .buttonStyle(.borderedProminent)
-                            .disabled(addsFenced)
+                            .disabled(library.addsFenced)
+                            .help(library.addFenceReason ?? "")
                     }
                 } else {
                     EmptyStateView.search(text: searchText)
@@ -96,10 +101,10 @@ struct CategoryListView: View {
                 title: "Rename Category",
                 fieldLabel: "Category Name",
                 actionTitle: "Rename",
-                initialName: category.name
-            ) { name in
-                categoryStore.rename(category, to: name, context: context)
-            }
+                initialName: category.name,
+                validate: { CategoryName.validationMessage($0, among: categories, excluding: category.id) },
+                onCommit: { name in categoryStore.rename(category, to: name, context: context) }
+            )
         }
         .alert(
             "Removal incomplete",

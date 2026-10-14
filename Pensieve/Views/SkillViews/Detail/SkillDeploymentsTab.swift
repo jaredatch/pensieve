@@ -23,7 +23,7 @@ struct SkillDeploymentsTab: View {
     let statusIsCurrent: Bool
     let projects: [Project]
     @Bindable var platformVM: PlatformViewModel
-    let addsFenced: Bool
+    let library: SkillLibraryViewModel
     let onAddProject: () -> Void
     @Environment(\.modelContext) var context
     @Query var intentRows: [MachineDeployIntent]
@@ -44,7 +44,7 @@ struct SkillDeploymentsTab: View {
         statusIsCurrent: Bool,
         projects: [Project],
         platformVM: PlatformViewModel,
-        addsFenced: Bool,
+        library: SkillLibraryViewModel,
         intentDependencies: DeployIntentDependencies,
         machineStates: [MachineState],
         localMachineID: String?,
@@ -59,7 +59,7 @@ struct SkillDeploymentsTab: View {
         self.statusIsCurrent = statusIsCurrent
         self.projects = projects
         self.platformVM = platformVM
-        self.addsFenced = addsFenced
+        self.library = library
         self.machineStates = machineStates
         self.localMachineID = localMachineID
         self.hostedPresentation = hostedPresentation

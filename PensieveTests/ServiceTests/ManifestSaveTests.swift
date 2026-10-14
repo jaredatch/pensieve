@@ -149,54 +149,51 @@ final class ManifestSaveTests: XCTestCase {
         }
     }
 
-    func testNewerSchemaRefusesCategoryAndSkillSavesWithoutLosingWindowEdit() async throws {
+    func testRefusedCategoriesUndoWhileSkillFieldsStayLocal() async throws {
         for refusal in ["newer schema", "write", "snapshot"] {
             let h = try ManifestSaveFixture()
             defer { h.cleanup() }
             let disk = try h.manifest.read(fromRoot: h.root)
-            let header = try h.files.readFile(at: h.root + "/manifest/manifest.yaml")
             let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
             defer { lock.release() }
-            let created = try XCTUnwrap(h.categories.create(name: "Kept", context: h.context))
-            h.categories.rename(h.local, to: "Renamed Kept", context: h.context)
+            let created = try XCTUnwrap(h.categories.create(name: "Undone", context: h.context))
+            let createdID = created.id
+            h.categories.rename(h.local, to: "Renamed", context: h.context)
             h.library.updateMetadata(h.alpha, tags: ["kept"], scope: .project, context: h.context)
             if refusal == "newer schema" {
                 try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "schema_version: 99\n")
             } else if refusal == "write" { h.recording.failingWrites = 3 } else {
                 try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "not: [yaml\n")
-                h.recording.failingSnapshots = .max // Keep fallback and refused-edit reads unavailable until the queue drains.
+                h.recording.failingSnapshots = .max
             }
             let before = try h.manifestBytes()
             lock.release()
             await h.saves.waitUntilIdle()
             h.recording.failingSnapshots = 0
             XCTAssertEqual(try h.manifestBytes(), before, refusal)
-            XCTAssertEqual(created.name, "Kept")
-            XCTAssertEqual(h.local.name, "Renamed Kept")
+            XCTAssertFalse(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.id == createdID })
+            XCTAssertEqual(h.local.name, "Local")
             XCTAssertEqual(h.alpha.tags, ["kept"])
-            XCTAssertTrue(h.messages.lines.contains { $0.contains("Category mutation") })
+            XCTAssertEqual(h.alpha.scope, .project)
+            let notice = try XCTUnwrap(h.saves.categoryNotice)
+            XCTAssertTrue(notice.message.contains("Undone"))
+            XCTAssertTrue(notice.message.contains("Local"))
             XCTAssertNotNil(h.library.error)
+            if refusal == "newer schema" {
+                XCTAssertTrue(h.library.error?.contains("newer version") == true)
+                XCTAssertTrue(notice.message.contains("Update Pensieve"))
+            }
             XCTAssertFalse(h.saves.isWaiting)
             var remote = disk
             remote.categories.append(CategoryRecord(name: "Remote", projectKeys: [], skillSlugs: []))
-            try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: header)
+            try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "schema_version: 5\n")
             try h.manifest.write(remote, toRoot: h.root)
-            h.categories.setSkill(h.alpha, inCategory: created, assigned: true, context: h.context)
             h.categories.rename(h.doomed, to: "Saved Other", context: h.context)
             await h.saves.waitUntilIdle()
             let window = try h.context.fetch(FetchDescriptor<Pensieve.Category>())
-            XCTAssertEqual(Set(window.map(\.name)), ["Renamed Kept", "Kept", "Remote", "Saved Other"], refusal)
-            XCTAssertEqual(window.first { $0.name == "Kept" }?.skillSlugs, ["alpha"], refusal)
+            XCTAssertEqual(Set(window.map(\.name)), ["Local", "Remote", "Saved Other"], refusal)
             XCTAssertEqual(h.alpha.tags, ["kept"], refusal)
             XCTAssertEqual(h.alpha.scope, .project, refusal)
-            XCTAssertFalse(h.messages.lines.contains { $0.contains("removed by sync") }, refusal)
-            XCTAssertFalse(try h.manifest.read(fromRoot: h.root).categories.contains { $0.name == "Kept" })
-            let reported = h.messages.lines.count
-            h.categories.rename(created, to: "K2", context: h.context)
-            await h.saves.waitUntilIdle()
-            XCTAssertEqual(h.messages.lines.count, reported + 1, "The dependent rename must report its own refusal")
-            XCTAssertTrue(h.messages.lines.last?.contains("depends on an earlier change") == true, refusal)
-            XCTAssertFalse(h.messages.lines.contains { $0.contains("removed by sync") }, refusal)
             try await checkRefusedFieldAcknowledgement(h, window: window)
         }
         try await checkPresentationReadFailureAfterDurableWrite()
@@ -240,7 +237,7 @@ final class ManifestSaveTests: XCTestCase {
         XCTAssertEqual(try h.manifestBytes(), before)
         XCTAssertFalse(h.saves.isWaiting)
         XCTAssertNil(h.saves.statusMessage)
-        XCTAssertTrue(h.messages.lines.contains { $0.contains("Category mutation") })
+        XCTAssertTrue(h.messages.lines.contains { $0.contains("Category change") })
         XCTAssertNotNil(h.library.error)
     }
 }
@@ -297,7 +294,7 @@ extension ManifestSaveTests {
         XCTAssertEqual(try h.manifest.read(fromRoot: h.root).skills.first { $0.slug == "alpha" }?.tags, ["saved"])
         XCTAssertNil(h.library.error, "Presentation read failure cannot report a durable write as refused")
         XCTAssertEqual(Set(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name)),
-            ["Refused", "Pulled", "ZDelete"])
+            ["Local", "Pulled", "ZDelete"])
         h.recording.afterWrite = nil
         h.recording.failingWrites = 1
         h.library.updateMetadata(h.alpha, tags: ["refused"], scope: .project, context: h.context)

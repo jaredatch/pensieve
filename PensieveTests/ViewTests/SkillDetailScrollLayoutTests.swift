@@ -148,6 +148,9 @@ extension SkillDetailScrollLayoutTests {
             deployStateStore: DeployStateStore(fileService: fileService, appSupportDir: base),
             skillsDirectory: TestPaths.skillsDir
         )
+        let library = SkillLibraryViewModel(
+            skillStore: SkillStore(fileService: fileService, baseDir: base + "/skills", storeRoot: base),
+            fileWatchService: FileWatchService(rootDir: base + "/skills"), manifestRoot: base)
         let dependencies = DeployIntentDependencies(
             identity: InertMachineIdentity(),
             stateService: InertMachineStateService(),
@@ -166,7 +169,7 @@ extension SkillDetailScrollLayoutTests {
             statusIsCurrent: true,
             projects: [],
             platformVM: platformVM,
-            addsFenced: false,
+            library: library,
             intentDependencies: dependencies,
             machineStates: [],
             localMachineID: InertMachineIdentity.value,
