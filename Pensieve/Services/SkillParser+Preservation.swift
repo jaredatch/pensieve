@@ -4,13 +4,11 @@ import Yams
 extension SkillParser {
     static func preservedFrontmatter(
         source: String,
-        root: Node,
-        rootIsFlowMapping: Bool,
-        hasAnchorsOrAliases: Bool
+        document: CheckedYAMLLoader.Document
     ) -> PreservedFrontmatter {
         let lines = sourceLines(in: source)
         let entries = scanTopLevelEntries(in: source, lines: lines)
-        let positionsAgree = root.mapping.map { mapping in
+        let positionsAgree = document.root?.mapping.map { mapping in
             mapping.count == entries.count && Set(entries.map(\.key)).count == entries.count
                 && zip(mapping, entries).allSatisfy { pair, entry in
                 guard let mark = pair.key.mark, mark.line > 0, mark.line <= lines.count else { return false }
@@ -19,8 +17,8 @@ extension SkillParser {
             }
         } ?? false
         let trustworthy = positionsAgree
-            && !rootIsFlowMapping && !hasOddLineBreak(in: source)
-            && !source.contains("\t") && !source.contains("---") && !hasAnchorsOrAliases
+            && !document.rootIsFlowMapping && !hasOddLineBreak(in: source)
+            && !source.contains("\t") && !source.contains("---") && !document.hasAnchorsOrAliases
         return PreservedFrontmatter(
             source: source,
             entries: entries,

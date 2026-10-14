@@ -245,7 +245,6 @@ enum SkillParser {
         preferredLineEnding: String
     ) -> ParsedSkill? {
         guard let loaded = try? CheckedYAMLLoader.composeAndLoad(yaml: yamlString),
-              let root = loaded.root,
               let mapping = loaded.value as? [String: Any],
               let name = mapping["name"] as? String else {
             return nil
@@ -277,9 +276,7 @@ enum SkillParser {
             body: body,
             preservedFrontmatter: preservedFrontmatter(
                 source: yamlString,
-                root: root,
-                rootIsFlowMapping: loaded.rootIsFlowMapping,
-                hasAnchorsOrAliases: loaded.hasAnchorsOrAliases
+                document: loaded
             ),
             preservedFile: preservedFile,
             trailingNewlineCount: trailingLineBreaks.utf8.filter { $0 == 0x0A }.count,

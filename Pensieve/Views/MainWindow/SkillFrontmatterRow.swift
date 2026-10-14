@@ -10,11 +10,10 @@ struct SkillFrontmatterRow: Equatable {
     static func rows(from parsed: ParsedSkill) -> [SkillFrontmatterRow] {
         guard let source = parsed.preservedFile?.frontmatterSource,
               let document = try? CheckedYAMLLoader.composeAndLoad(yaml: source),
-              let root = document.root, let mapping = root.mapping else { return [] }
+              let mapping = document.root?.mapping else { return [] }
         // Rendering needs a trustworthy mapping, even when required identity fields are absent.
         let preserved = SkillParser.preservedFrontmatter(
-            source: source, root: root, rootIsFlowMapping: document.rootIsFlowMapping,
-            hasAnchorsOrAliases: document.hasAnchorsOrAliases)
+            source: source, document: document)
         guard preserved.entriesAreTrustworthy else { return [] }
         return zip(preserved.entries, mapping).map { entry, pair in
             if case let .scalar(scalar) = pair.value {

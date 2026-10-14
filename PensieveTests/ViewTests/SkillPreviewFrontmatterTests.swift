@@ -272,6 +272,20 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
 
 extension SkillPreviewFrontmatterTests {
     func testRenderedTableAdmitsLiteralPunctuationAndRefusesYAMLAnchors() async throws {
+        let literalRows: [String: (key: String, value: String)] = [
+            "plain star": ("allowed-tools", "Bash(npm run *)"),
+            "plain ampersand": ("company", "A &partner"),
+            "double quoted star": ("patterns", "*.md files"),
+            "double quoted ampersand": ("patterns", "A &partner"),
+            "single quoted star": ("patterns", "*.md files"),
+            "single quoted ampersand": ("patterns", "A &partner"),
+            "comment star": ("license", "MIT"),
+            "comment ampersand": ("license", "MIT"),
+            "flow star": ("tools", "{commands: [Bash(npm run *), '*.md']}"),
+            "flow ampersand": ("tools", "{names: [\"A &partner\"]}"),
+            "block scalar star": ("notes", "Use *.md"),
+            "block scalar ampersand": ("notes", "Use A &partner")
+        ]
         for syntax in FrontmatterRewriteFixture.syntaxCases {
             let fixture = try host(syntax.document(name: "Example"))
             defer { fixture.close() }
@@ -279,10 +293,9 @@ extension SkillPreviewFrontmatterTests {
             if syntax.trusted {
                 _ = try await text("description", in: fixture.host)
                 _ = try await text("Use for *.md files", in: fixture.host)
-                if syntax.label == "plain star" {
-                    _ = try await text("allowed-tools", in: fixture.host)
-                    _ = try await text("Bash(npm run *)", in: fixture.host)
-                }
+                let expected = try XCTUnwrap(literalRows[syntax.label], syntax.label)
+                _ = try await text(expected.key, in: fixture.host)
+                _ = try await text(expected.value, in: fixture.host)
             } else {
                 XCTAssertTrue(fixture.snapshot.frontmatterRows.isEmpty, syntax.label)
                 XCTAssertFalse(elements(in: fixture.host).contains {

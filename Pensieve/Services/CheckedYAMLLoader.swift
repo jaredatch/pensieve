@@ -223,6 +223,7 @@ private extension CheckedYAMLLoader {
                     anchor: anchor
                 )
             case YAML_ALIAS_EVENT:
+                hasAnchorsOrAliases = true
                 guard let name = decodedAnchor(event.data.alias.anchor),
                       let aliased = anchors[name] else {
                     throw LoaderError.invalidYAML
@@ -292,16 +293,16 @@ private extension CheckedYAMLLoader {
             )
         }
 
-        private mutating func completeNode(
-            _ node: NodeInfo,
-            anchor: String?
-        ) throws {
+        private mutating func completeNode(_ node: NodeInfo, anchor: String?) throws {
             if frames.count + node.constructedDepth > maximumDepth {
                 throw LoaderError.nestingTooDeep
             }
             if isMappingKey, node.kind != .scalar { throw LoaderError.nonScalarKey }
             if isMappingKey, node.hasExplicitMergeTag { throw LoaderError.explicitMergeTag }
-            if let anchor { anchors[anchor] = node }
+            if let anchor {
+                hasAnchorsOrAliases = true
+                anchors[anchor] = node
+            }
 
             guard !frames.isEmpty else { return }
             let index = frames.index(before: frames.endIndex)
@@ -392,9 +393,8 @@ private extension CheckedYAMLLoader {
             return tag.isEmpty ? nil : tag
         }
 
-        private mutating func decodedAnchor(_ pointer: UnsafePointer<UInt8>?) -> String? {
-            if pointer != nil { hasAnchorsOrAliases = true }
-            return String.decodeCString(pointer, as: UTF8.self, repairingInvalidCodeUnits: true)?.result
+        private func decodedAnchor(_ pointer: UnsafePointer<UInt8>?) -> String? {
+            String.decodeCString(pointer, as: UTF8.self, repairingInvalidCodeUnits: true)?.result
         }
     }
 }
