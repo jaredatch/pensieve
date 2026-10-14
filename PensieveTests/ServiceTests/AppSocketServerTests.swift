@@ -46,7 +46,6 @@ final class AppSocketServerTests: XCTestCase {
                 }
             }
         }
-
     }
 
     func testBadRequestsAndTotalSendDeadlineDoNotBlockNextClient() async throws {
@@ -75,8 +74,17 @@ final class AppSocketServerTests: XCTestCase {
                     }
                 default: break
                 }
-                let receiveTimeout = kind == "trickle" ? 0.05 : TestWait.hostedActionTimeoutSeconds // upper-bound: frame deadline
-                let bytes = try SocketTransport.readFrame(client, limit: 4_096, timeout: receiveTimeout)
+                if kind == "silent" || kind == "trickle" {
+                    XCTAssertThrowsError(try SocketTransport.readFrame(client, limit: 4_096,
+                        timeout: TestWait.hostedActionTimeoutSeconds)) { error in
+                        guard case SocketError.disconnected = error else {
+                            return XCTFail("A transport timeout must close without a usage frame: \(error)")
+                        }
+                    }
+                    XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - started, 1.5, kind)
+                    return
+                }
+                let bytes = try SocketTransport.readFrame(client, limit: 4_096, timeout: TestWait.hostedActionTimeoutSeconds)
                 let reply = try JSONDecoder().decode(CLIReply.self, from: bytes)
                 XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - started, 1.5, kind)
                 XCTAssertFalse(reply.envelope.ok, kind)
@@ -100,13 +108,29 @@ final class AppSocketServerTests: XCTestCase {
         try await BlockingWork.run {
             _ = try SocketTransport.readFrame(client, limit: 1_024, timeout: TestWait.hostedActionTimeoutSeconds)
             try SocketTransport.writeFrame(CLIRequest(command: "large"), to: client, timeout: TestWait.hostedActionTimeoutSeconds)
+            try SocketTransport.wait(client, events: Int16(POLLIN),
+                                     deadline: SocketTransport.deadline(after: TestWait.hostedActionTimeoutSeconds))
         }
         let next = try await exchange(path)
         XCTAssertTrue(next.envelope.ok)
         try await BlockingWork.run {
-            Thread.sleep(forTimeInterval: 0.6)
-            XCTAssertThrowsError(try SocketTransport.readFrame(client, limit: CLIProtocol.replyLimit,
-                                                               timeout: TestWait.hostedActionTimeoutSeconds))
+            // Drain after the reply deadline, while the former catch-all could still append its error frame.
+            Thread.sleep(forTimeInterval: 0.3)
+            var received = Data()
+            var bytes = [UInt8](repeating: 0, count: 16_384)
+            let deadline = SocketTransport.deadline(after: TestWait.hostedActionTimeoutSeconds)
+            while true {
+                let count = recv(client, &bytes, bytes.count, 0)
+                if count > 0 { received.append(contentsOf: bytes.prefix(count)); continue }
+                if count == 0 { break }
+                guard errno == EAGAIN || errno == EWOULDBLOCK else { throw SocketError.system("recv", errno) }
+                try SocketTransport.wait(client, events: Int16(POLLIN), deadline: deadline)
+            }
+            XCTAssertFalse(received.isEmpty)
+            XCTAssertLessThan(received.count, 8 * 1_024 * 1_024)
+            XCTAssertFalse(received.contains(10), "A partial reply must not acquire another frame's terminator")
+            let text = try XCTUnwrap(String(data: received, encoding: .utf8))
+            XCTAssertFalse(text.contains("invalid_request"))
         }
     }
 

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Shares the retained daemon's readers, preserving its CLI behavior while wrapping this CLI's result.
+/// Shares the retained daemon's disk readers and status summary, wrapping data in this CLI's envelope.
 struct CLIFileReads {
     let appSupport: String
     let fileService: FileServiceProtocol
@@ -17,7 +17,9 @@ struct CLIFileReads {
         }
         let value: CLIValue
         if command == "log" {
-            value = .object(["lines": .array(outcome.stdout.split(separator: "\n").map { .string(String($0)) })])
+            var logLines = outcome.stdout.components(separatedBy: "\n")
+            if logLines.last == "" { logLines.removeLast() }
+            value = .object(["lines": .array(logLines.map(CLIValue.string))])
         } else {
             guard let data = outcome.stdout.data(using: .utf8),
                   let decoded = try? JSONDecoder().decode(CLIValue.self, from: data) else {
@@ -34,6 +36,11 @@ struct CLIFileReads {
             return reply
         }
         return .success(value)
+    }
+
+    func statusSummary(for reply: CLIReply) -> String? {
+        guard let value = reply.envelope.data, let bytes = try? JSONEncoder().encode(value) else { return nil }
+        return DaemonCLI.renderStatus(data: bytes, path: appSupport + "/daemon-status.json", json: false, now: Date()).output
     }
 
     private func canonicalAgents(_ value: CLIValue) -> CLIValue {

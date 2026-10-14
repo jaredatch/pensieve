@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Black-box pensieve contract tests; the binary and a local protocol peer are the only interfaces."""
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -26,7 +27,7 @@ class CLIContractTests(unittest.TestCase):
         self.endpoint = self.root / (self.info["CFBundleIdentifier"] + ".sock")
         self.environment = dict(os.environ, CFFIXED_USER_HOME=str(self.root), HOME=str(self.root), NO_COLOR="1")
 
-    def run_cli(self, *arguments, code=0, json_output=True, invocation="absolute"):
+    def run_cli(self, *arguments, code=0, json_output=True, invocation="absolute", app_support=True):
         environment = self.environment.copy()
         executable = str(BINARY)
         if invocation != "absolute":
@@ -39,7 +40,9 @@ class CLIContractTests(unittest.TestCase):
                     link.symlink_to(BINARY)
             environment["PATH"] = str(directory) + os.pathsep + environment.get("PATH", "")
             executable = "pensieve"
-        args = [executable, *arguments, "--app-support", str(self.root)]
+        args = [executable, *arguments]
+        if app_support:
+            args += ["--app-support", str(self.root)]
         if json_output:
             args.append("--json")
         result = subprocess.run(args, input="", text=True, capture_output=True,
@@ -85,10 +88,13 @@ class CLIContractTests(unittest.TestCase):
         worker.start()
 
         def finish():
-            worker.join(15)
-            self.assertFalse(worker.is_alive(), "Stub peer did not finish")
-            self.assertEqual(failures, [])
-            self.endpoint.unlink(missing_ok=True)
+            try:
+                worker.join(15)
+                self.assertFalse(worker.is_alive(), "Stub peer did not finish")
+                self.assertEqual(failures, [])
+            finally:
+                listener.close()
+                self.endpoint.unlink(missing_ok=True)
 
         return observed, finish
 
@@ -103,6 +109,16 @@ class CLIContractTests(unittest.TestCase):
         self.assertNotIn("SwiftUI", output)
 
     def test_app_requests_and_aliases_carry_exact_commands_and_content_opt_in(self):
+        # A failed stub must release its endpoint before another subtest starts.
+        with self.subTest(command="failed peer cleanup"):
+            _, finish = self.peer()
+            with socket.socket(socket.AF_UNIX) as client:
+                client.connect(str(self.endpoint))
+                client.recv(4096)
+                client.sendall(b"not-json\n")
+            with self.assertRaises(AssertionError):
+                finish()
+            self.assertFalse(self.endpoint.exists())
         cases = [("skill list", "skill list"), ("skill ls", "skill list"), ("skills", "skill list"),
                  ("skill show review", "skill show"), ("agent list", "agent list"),
                  ("machine list", "machine list"), ("project list", "project list")]
@@ -122,8 +138,10 @@ class CLIContractTests(unittest.TestCase):
                 self.assertFalse(observed[0]["content"])
                 self.assertEqual(observed[0]["arguments"], ["review"] if expected == "skill show" else [])
         observed, finish = self.peer()
-        self.run_cli("skill", "show", "review", "--content")
-        finish()
+        try:
+            self.run_cli("skill", "show", "review", "--content")
+        finally:
+            finish()
         self.assertTrue(observed[0]["content"])
 
     def test_wrong_copy_and_protocol_are_refused_before_sending_a_command(self):
@@ -183,6 +201,13 @@ class CLIContractTests(unittest.TestCase):
             "recorded_at": "2026-10-13T10:00:00Z"}]}))
         self.assertEqual(self.run_cli("status")["data"]["result"], "synced")
         self.assertEqual(self.run_cli("log", "--lines", "2")["data"]["lines"], ["first", "second"])
+        (self.root / "daemon.log").write_text("first\n\nsecond\n\n")
+        self.assertEqual(self.run_cli("log", "--lines", "4")["data"]["lines"], ["first", "", "second", ""])
+        human = self.run_cli("log", "--lines", "4", json_output=False).stdout
+        self.assertEqual(sum(not line.strip() for line in human.splitlines()), 2)
+        for args in [("--app-support", str(self.root), "--json", "status"),
+                     ("status", "--app-support=" + str(self.root))]:
+            self.assertEqual(self.run_cli(*args, app_support=False)["data"]["result"], "synced")
         for command in cases[2:]:
             self.assertEqual(self.run_cli(*command)["data"]["records"][0]["platform"], "claude")
         for name in ("daemon-status.json", "daemon.log", "deploy-state.json"):
@@ -209,6 +234,11 @@ class CLIContractTests(unittest.TestCase):
             self.assertIn("USAGE:", self.run_cli(noun, json_output=False).stdout)
         for args in [("sk",), ("skill", "li"), ("log", "--lines", "0"), ("skill", "list", "--bogus")]:
             self.assertEqual(self.run_cli(*args, code=64)["error"]["code"], "usage")
+        for args in [("--app-support", "--json", "status"), ("status", "--app-support"),
+                     ("skill", "list", "--app-support"), ("--app-support", "--version")]:
+            with self.subTest(arguments=args):
+                self.assertEqual(self.run_cli(*args, code=64, app_support=False)["error"]["code"], "usage")
+        self.assertEqual(self.run_cli("--json", "--version")["data"]["version"], self.info["CFBundleShortVersionString"])
 
     def test_piped_human_output_stays_human_and_untruncated(self):
         rows = [{"slug": "skill-" + str(index), "name": "Full skill " + str(index)} for index in range(200)]
@@ -229,7 +259,7 @@ class CLIContractTests(unittest.TestCase):
 
         escapes = "\x1b[31m\x90ignored\x9c\x98ignored\x9c\x9b31m\x9dignored\x07\x9eignored\x9c\x9fignored\x9c"
         controls = "".join(chr(code) for code in [*range(32), *range(127, 160)]
-                           if code not in (10, 27, 0x90, 0x98, 0x9b, 0x9d, 0x9e, 0x9f))
+                           if code not in (9, 10, 13, 27, 0x90, 0x98, 0x9b, 0x9d, 0x9e, 0x9f))
         body = "---\nname: Review\n---\n\n# Review\nFirst line\nSecond" + controls + " line" + escapes + "\n"
         clean_lines = ["---", "name: Review", "---", "", "# Review", "First line", "Second line"]
         observed, finish = self.peer(reply={"envelope": {"schema": 1, "ok": True,
@@ -245,6 +275,17 @@ class CLIContractTests(unittest.TestCase):
             self.assertEqual(lines[start:start + len(clean_lines)], clean_lines)
             self.assertFalse(any(unicodedata.category(char) == "Cc" and char != "\n" for char in result.stdout))
             self.assertTrue(observed[0]["content"])
+
+        for ending in ("\n", "\r\n", "\r"):
+            with self.subTest(line_ending=repr(ending)):
+                body = ending.join(["# Body", "slug: spoofed", "\tkey\tvalue"])
+                observed, finish = self.peer(reply={"envelope": {"schema": 1, "ok": True,
+                    "data": {"slug": "review", "content": body}}, "exitCode": 0})
+                try:
+                    result = self.run_cli("skill", "show", "review", "--content", json_output=False)
+                finally:
+                    finish()
+                self.assertIn("content:\n  # Body\n  slug: spoofed\n      key    value\nslug: review\n", result.stdout)
 
         records = [{"slug": slug, "platform": platform, "scope": "user", "artifact_path": "/fixture/" + slug,
                     "recorded_at": "2026-10-13T10:00:00Z"}
@@ -269,6 +310,14 @@ class CLIContractTests(unittest.TestCase):
                 result = self.run_cli("status", code=code, json_output=False)
                 for key, value in status.items():
                     self.assertIn(f"{key}: {value}", [line.strip() for line in result.stdout.splitlines()])
+                self.assertRegex(result.stdout, r"last cycle .* \(.* ago\): " + outcome)
+                self.assertIn("stale: daemon may be disabled or the Mac was asleep", result.stdout)
+        status["timestamp"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        status["result"] = "synced"
+        (self.root / "daemon-status.json").write_text(json.dumps(status))
+        fresh = self.run_cli("status", json_output=False).stdout
+        self.assertRegex(fresh, r"last cycle .* \(.* ago\): synced")
+        self.assertNotIn("stale:", fresh)
         (self.root / "daemon.log").write_text("first\nsecond\x07\x1b[31m\n")
         result = self.run_cli("log", json_output=False)
         self.assertIn("lines:", result.stdout)

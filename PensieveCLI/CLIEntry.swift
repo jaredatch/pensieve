@@ -9,17 +9,31 @@ enum CLIEntry {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
         let info = (try? files.readData(at: app + "/Contents/Info.plist"))
             .flatMap { try? PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: Any] } ?? [:]
-        let json = arguments.prefix { $0 != "--" }.contains("--json")
-        var args = outputArgumentsRemoved(arguments)
-        if args.first == "--version" { args[0] = "version" }
+        // This only selects the format for parser failures; successful commands use decoded options.
+        var json = arguments.prefix { $0 != "--" }.contains("--json")
         do {
-            if json, let help = try jsonHelp(args) { return printReply(.success(help), json: true) }
-            let command = try PensieveCommand.parseAsRoot(args)
+            let command: ParsableCommand
+            let options: OutputOptions
+            if arguments.prefix(while: { $0 != "--" }).contains("--version") {
+                let version = try VersionOptions.parse(arguments)
+                command = VersionCommand()
+                options = version.output
+            } else {
+                command = try PensieveCommand.parseAsRoot(arguments)
+                guard let output = command as? OutputCommand else {
+                    var help = command
+                    try help.run()
+                    return 0
+                }
+                options = output.output
+            }
+            json = options.json
             let result = try execute(command, app: app, info: info,
-                appSupport: supportDirectory(in: arguments, fallback: appSupport), defaultAppSupport: appSupport, files: files)
+                appSupport: options.appSupport ?? appSupport, defaultAppSupport: appSupport, files: files)
             return printReply(result.reply, json: json, human: result.human)
         } catch {
             if PensieveCommand.exitCode(for: error).rawValue == 0 {
+                if json, let help = try? jsonHelp(arguments) { return printReply(.success(help), json: true) }
                 let message = PensieveCommand.fullMessage(for: error)
                 return printReply(.success(.object(["help": .string(message)])), json: json, human: message + "\n")
             }
@@ -53,19 +67,14 @@ enum CLIEntry {
         }
         if command is StatusCommand || command is DeploymentListCommand || command is DeployedCommand || command is LogCommand {
             let name = command is StatusCommand ? "status" : (command is LogCommand ? "log" : "deployed")
-            let result = CLIFileReads(appSupport: appSupport, fileService: files)
-                .run(command: name, lines: (command as? LogCommand)?.lines ?? 20)
-            return (result, nil)
+            let reader = CLIFileReads(appSupport: appSupport, fileService: files)
+            let result = reader.run(command: name, lines: (command as? LogCommand)?.lines ?? 20)
+            let human = name == "status" ? reader.statusSummary(for: result).map {
+                $0 + (result.envelope.data.map { render($0) } ?? "")
+            } : nil
+            return (result, human)
         }
         return (.success(try CLICatalog.value(for: type(of: command))), type(of: command).helpMessage())
-    }
-
-    private static func outputArgumentsRemoved(_ args: [String]) -> [String] {
-        var positional = false
-        return args.filter { item in
-            if item == "--" { positional = true }
-            return positional || !["--json", "--no-input"].contains(item)
-        }
     }
 
     private static func jsonHelp(_ args: [String]) throws -> CLIValue? {
@@ -76,15 +85,6 @@ enum CLIEntry {
             return try JSONDecoder().decode(CLIValue.self, from: Data(PensieveCommand.fullMessage(for: error).utf8))
         }
         return nil
-    }
-
-    private static func supportDirectory(in args: [String], fallback: String) -> String {
-        let options = Array(args.prefix { $0 != "--" })
-        for (index, item) in options.enumerated().reversed() {
-            if item == "--app-support", options.indices.contains(index + 1) { return options[index + 1] }
-            if item.hasPrefix("--app-support=") { return String(item.dropFirst("--app-support=".count)) }
-        }
-        return fallback
     }
 
     private static func printReply(_ reply: CLIReply, json: Bool, human: String? = nil) -> Int32 {
@@ -98,17 +98,17 @@ enum CLIEntry {
                 FileHandle.standardError.write(Data("Unable to encode command result\n".utf8))
                 return 1
             }
-        } else if let error = reply.envelope.error {
-            if let data = reply.envelope.data {
+        } else {
+            if let human {
+                FileHandle.standardOutput.write(Data(human.utf8))
+            } else if let data = reply.envelope.data {
                 FileHandle.standardOutput.write(Data(render(data).utf8))
             }
-            let text = DisplayTextSanitizer.singleLine(error.message) + "\n"
-                + DisplayTextSanitizer.singleLine(error.hint) + "\n"
-            FileHandle.standardError.write(Data(text.utf8))
-        } else if let human {
-            FileHandle.standardOutput.write(Data(human.utf8))
-        } else if let data = reply.envelope.data {
-            FileHandle.standardOutput.write(Data(render(data).utf8))
+            if let error = reply.envelope.error {
+                let text = DisplayTextSanitizer.singleLine(error.message) + "\n"
+                    + DisplayTextSanitizer.singleLine(error.hint) + "\n"
+                FileHandle.standardError.write(Data(text.utf8))
+            }
         }
         return reply.exitCode
     }
@@ -116,8 +116,8 @@ enum CLIEntry {
     private static func render(_ value: CLIValue, indent: String = "") -> String {
         switch value {
         case let .string(text):
-            return text.components(separatedBy: "\n").map {
-                indent + DisplayTextSanitizer.logLine($0).replacingOccurrences(of: "\t", with: "")
+            return normalizedLines(text).components(separatedBy: "\n").map {
+                indent + DisplayTextSanitizer.logLine($0).replacingOccurrences(of: "\t", with: "    ")
             }.joined(separator: "\n") + "\n"
         case let .array(items):
             if items.isEmpty { return indent + "[]\n" }
@@ -139,11 +139,44 @@ enum CLIEntry {
             switch value {
             case .array, .object:
                 return label + "\n" + render(value, indent: indent + "  ")
-            case let .string(text) where text.contains("\n"):
+            case let .string(text) where normalizedLines(text).contains("\n"):
                 return label + "\n" + render(value, indent: indent + "  ")
             default:
                 return label + " " + render(value)
             }
         }.joined()
     }
+
+    private static func normalizedLines(_ text: String) -> String {
+        text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+    }
 }
+
+private struct VersionOptions: ParsableArguments {
+    @OptionGroup var output: OutputOptions
+    @Flag var version = false
+}
+
+private protocol OutputCommand: ParsableCommand {
+    var output: OutputOptions { get }
+}
+
+extension PensieveCommand: OutputCommand {}
+extension SkillCommand: OutputCommand {}
+extension SkillListCommand: OutputCommand {}
+extension SkillsCommand: OutputCommand {}
+extension SkillShowCommand: OutputCommand {}
+extension AgentCommand: OutputCommand {}
+extension AgentListCommand: OutputCommand {}
+extension MachineCommand: OutputCommand {}
+extension MachineListCommand: OutputCommand {}
+extension ProjectCommand: OutputCommand {}
+extension ProjectListCommand: OutputCommand {}
+extension DeploymentCommand: OutputCommand {}
+extension DeploymentListCommand: OutputCommand {}
+extension DeployedCommand: OutputCommand {}
+extension StatusCommand: OutputCommand {}
+extension LogCommand: OutputCommand {}
+extension CommandsCommand: OutputCommand {}
+extension CompletionCommand: OutputCommand {}
+extension VersionCommand: OutputCommand {}

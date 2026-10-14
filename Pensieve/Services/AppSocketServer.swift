@@ -30,10 +30,17 @@ final class AppSocketServer: AppSocketServing {
         let clients = DispatchQueue(label: "com.jaredatch.pensieve.socket.clients", attributes: .concurrent)
         let slots = DispatchSemaphore(value: 32)
         source = DispatchSource.makeReadSource(fileDescriptor: listener.descriptor, queue: queue)
-        source.setEventHandler {
+        source.setEventHandler { [weak self] in
             while true {
                 let client = accept(listener.descriptor, nil, nil)
-                guard client >= 0 else { return }
+                guard client >= 0 else {
+                    if errno == EMFILE || errno == ENFILE, let source = self?.source {
+                        source.suspend()
+                        // Retain and balance this suspension even if stop/deinit cancels the source meanwhile.
+                        queue.asyncAfter(deadline: .now() + .milliseconds(100)) { source.resume() }
+                    }
+                    return
+                }
                 guard slots.wait(timeout: .now()) == .success else { close(client); continue }
                 clients.async {
                     defer { close(client); slots.signal() }
@@ -89,14 +96,18 @@ final class AppSocketServer: AppSocketServing {
             ready.wait()
             if result.refusal == nil, request.acknowledgeReadiness == true {
                 // An accepted command still finishes if the client leaves before this acknowledgement.
-                try? SocketTransport.writeFrame(CLIReadinessAcknowledgement(ready: true), to: client, timeout: replyTimeout)
+                try SocketTransport.writeFrame(CLIReadinessAcknowledgement(ready: true), to: client, timeout: replyTimeout)
             }
             completed.wait()
             if let reply = result.reply { try SocketTransport.writeFrame(reply, to: client, timeout: replyTimeout) }
         } catch {
-            // A malformed or expired connection gets its own bounded error attempt, then closes.
-            try? SocketTransport.writeFrame(CLIReply.failure("invalid_request", error.localizedDescription,
-                hint: "Use pensieve commands --json.", exit: 64), to: client, timeout: replyTimeout)
+            switch error {
+            case is DecodingError, SocketError.oversized:
+                // Only request validation can send a usage frame. Failed transport writes may be partial.
+                try? SocketTransport.writeFrame(CLIReply.failure("invalid_request", error.localizedDescription,
+                    hint: "Use pensieve commands --json.", exit: 64), to: client, timeout: replyTimeout)
+            default: return
+            }
         }
     }
 }
