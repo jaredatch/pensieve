@@ -280,7 +280,7 @@ Writer preflight uses the writer's configured manifest reader and save closure. 
 
 Intent-backed deployment checks selected model identities against the current index before reading their fields, whether or not ingestion is pending. A removed selection asks for a new choice before changing intents or deploying. Direct deployment to a project without an admitted identity key writes no manifest and runs outside the selection lock and preflight.
 
-Project removal holds `sync.lock` through withdrawal and any repair. It refuses while ingestion is pending, before changing requests. Manifest saves merge individual changes into a readable disk snapshot and can fall back to the whole window when the manifest is missing or corrupt, even while ingestion is pending. A content-free or absent manifest does not authorize deleting local deploy intents.
+Project removal holds `sync.lock` through ingestion, withdrawal and any repair. Before preparing cleanup, it retries a pending rebuild with the caller's manifest reader, even when no remote is configured. If the rebuild fails, removal refuses before changing requests or publishing the manifest. Manifest saves merge individual changes into a readable disk snapshot and can fall back to the whole window when the manifest is missing or corrupt, even while ingestion is pending. A content-free or absent manifest does not authorize deleting local deploy intents.
 
 #161 tracks three open cases: whole-window fallback while ingestion is pending, queued or refused edits replaced by a writer rebuild, and unsaved partial changes left after a failed writer preflight.
 

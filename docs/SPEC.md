@@ -358,7 +358,7 @@ Conflict resolution and Connect show the same reason when their rebuild cannot c
 
 If ingestion is pending, import and deploy-intent changes rebuild before applying their edit. They keep the imported skill or intent change without replacing the other Mac's categories with stale window state.
 
-Import and intent-backed deployment explain when sync must update the library before they can proceed. Intent-backed deployment checks for removed selections on each attempt and asks for a new selection before changing intents or deploying. Project removal also refuses while ingestion is pending. Healthy conflict preparation still publishes saved window edits.
+Import and intent-backed deployment explain when sync must update the library before they can proceed. Intent-backed deployment checks for removed selections on each attempt and asks for a new selection before changing intents or deploying. Project removal retries pending ingestion before preparing cleanup, even without a sync remote. It refuses if that rebuild still fails. Healthy conflict preparation still publishes saved window edits.
 
 Direct deployment to a local project without a shared identity writes no manifest and runs no preflight. A failed writer preflight leaves any unsaved rebuild changes in the window's context. Whole-window fallback while ingestion is pending, queued or refused edits replaced by a writer rebuild, and these unsaved partial changes remain open under #161.
 
