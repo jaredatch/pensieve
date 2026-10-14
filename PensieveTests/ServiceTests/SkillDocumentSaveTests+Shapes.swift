@@ -2,6 +2,27 @@ import XCTest
 @testable import Pensieve
 
 extension SkillDocumentSaveTests {
+    func testHeaderChangesAdmitLiteralPunctuationAndRefuseYAMLAnchors() throws {
+        let fixture = try DocumentSaveFixture()
+        defer { fixture.cleanup() }
+        for syntax in FrontmatterRewriteFixture.syntaxCases {
+            fixture.library.discardDraft(fixture.skill)
+            let source = syntax.document(name: "Test")
+            try fixture.write(source)
+            _ = fixture.library.editorBody(for: fixture.skill)
+            let draft = source.replacingOccurrences(of: "description: Use for *.md files",
+                                                    with: "description: Use for *.md files and reviews")
+            fixture.library.noteEditorChanged(fixture.skill, body: draft)
+            XCTAssertEqual(fixture.library.saveDraft(fixture.skill), syntax.trusted, syntax.label)
+            XCTAssertEqual(Data(try fixture.read().utf8), Data((syntax.trusted ? draft : source).utf8), syntax.label)
+            if !syntax.trusted {
+                XCTAssertEqual(fixture.library.error,
+                    "Couldn't save. The frontmatter at the top of the file can't be read.", syntax.label)
+                XCTAssertEqual(fixture.library.drafts["test"]?.body, draft, syntax.label)
+            }
+        }
+    }
+
     func testGeneratedSaveShapesPreserveBytesRefuseInvalidEditsAndRepeatWithoutChange() throws {
         let fixture = try DocumentSaveFixture()
         defer { fixture.cleanup() }

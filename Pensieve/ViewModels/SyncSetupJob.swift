@@ -46,6 +46,9 @@ struct SyncSetupJob {
         }
         try Task.checkCancellation()
         try beginWriting()
+        StoreIngestState.shared(for: context.container).invalidate()
+        // A successful setup rebuild must still leave the first sync requiring its own preflight.
+        defer { StoreIngestState.shared(for: context.container).invalidate() }
         // From the first Keychain/store write onward, task cancellation cannot interrupt git.
         try GitCancellation.$isReadOnly.withValue(false) {
             if case let .httpsToken(username, token, _) = credential {
@@ -172,8 +175,7 @@ struct SyncSetupJob {
     }
 
     func rebuildAndRequireReadable() throws {
-        let result = rebuilder.rebuild(fromRoot: root, context: context)
-        if result.storeUnreadable { throw SyncError.storeUnreadable(result.warnings) }
+        _ = try StoreIngestState.rebuild(using: rebuilder, root: root, context: context)
     }
 
     func isVirginScaffoldStore(toleratingGitDir: Bool) -> Bool {

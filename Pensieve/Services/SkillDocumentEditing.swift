@@ -62,9 +62,9 @@ enum SkillDocumentEditing {
     static func validateFrontmatter(_ parsed: ParsedSkill, currentName: String) throws {
         guard let file = parsed.preservedFile,
               let loaded = try? CheckedYAMLLoader.composeAndLoad(yaml: file.frontmatterSource),
-              let root = loaded.root, let mapping = loaded.value as? [String: Any],
-              SkillParser.preservedFrontmatter(source: file.frontmatterSource, root: root,
-                  rootIsFlowMapping: loaded.rootIsFlowMapping).entriesAreTrustworthy else {
+              let mapping = loaded.value as? [String: Any],
+              SkillParser.preservedFrontmatter(source: file.frontmatterSource,
+                  document: loaded).entriesAreTrustworthy else {
             throw Refusal.unreadableFrontmatter
         }
         let missing = ["name", "description"].filter { (mapping[$0] as? String)?.isEmpty != false }

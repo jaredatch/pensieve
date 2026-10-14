@@ -51,11 +51,14 @@ extension SyncBytePreservationTests {
                             return XCTFail("Expected invalidPath, got \(error)")
                         }
                         XCTAssertEqual(actual, String(receipt.dropLast()))
+                        XCTAssertTrue(error.localizedDescription.hasPrefix(
+                            "Sync stopped because a retirement receipt names an unsafe store path"))
                     }
                     XCTAssertTrue(spy.writes.isEmpty, "Invalid receipts must precede writes")
                     XCTAssertEqual(try files.readFile(at: store + "/" + source), receipt)
                 }
             }
+            try assertLargeMalformedReceiptsStayBounded()
             let store = base + "/valid"
             try files.createDirectory(at: store)
             try TestPaths.git.initRepository(at: store)
@@ -67,6 +70,27 @@ extension SyncBytePreservationTests {
             XCTAssertTrue(tree.contains("skills/new/SKILL.md"))
             XCTAssertFalse(tree.contains("skills/x/assets/legacy/keep"))
             XCTAssertEqual(try files.readFile(at: store + "/skills/x/assets/legacy/keep"), "retired bytes")
+        }
+    }
+
+    private func assertLargeMalformedReceiptsStayBounded() throws {
+        for source in [".gitattributes", ".pensieve-retired-paths"] {
+            for separator in ["\r", "\u{2028}", "\u{202E}"] {
+                let store = base + "/large-malformed-" + UUID().uuidString
+                let record = "# Pensieve retired path: " + String(repeating: "AAAA" + separator, count: 100_000)
+                try files.writeFile(at: store + "/" + source, content: record)
+                let spy = RetirementFileService()
+                XCTAssertThrowsError(try StoreIgnoreRules.prepare(at: store, files: spy)) { error in
+                    XCTAssertTrue(error.localizedDescription.hasPrefix(
+                        "Sync stopped because a retirement receipt names an unsafe store path"))
+                    XCTAssertLessThanOrEqual(error.localizedDescription.utf8.count, 512,
+                                             "Malformed receipt diagnostics must stay bounded")
+                    XCTAssertFalse(error.localizedDescription.contains(separator),
+                                   "A receipt diagnostic must not retain invisible formatting")
+                }
+                XCTAssertTrue(spy.writes.isEmpty)
+                XCTAssertEqual(try files.readFile(at: store + "/" + source), record)
+            }
         }
     }
 
@@ -114,7 +138,7 @@ extension SyncBytePreservationTests {
 /// Faults receipt reads, permits a real entry replacement after a read, and observes writes.
 /// Other modeled I/O forwards to a temp store; replacement never supplies a mocked read result.
 /// It does not intercept Git's own metadata writes or pretend to simulate process termination.
-private final class RetirementFileService: FileServiceProtocol {
+final class RetirementFileService: FileServiceProtocol {
     let wrapped = FileService()
     var readFailure: String?
     var writes: [String] = []

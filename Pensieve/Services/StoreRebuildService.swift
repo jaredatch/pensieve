@@ -1,40 +1,6 @@
 import Foundation
 import SwiftData
 
-// MARK: - Result
-
-/// Disk + manifest reconciliation effects. Warnings include missing skill frontmatter or files,
-/// unreadable manifests and failed category fetches. An idempotent second pass has zero effects.
-struct RebuildResult: Equatable {
-    var skillsInserted: Int = 0
-    var skillsUpdated: Int = 0
-    var skillsRemoved: Int = 0
-    var categoriesInserted: Int = 0
-    var categoriesUpdated: Int = 0
-    var categoriesRemoved: Int = 0
-    var deployIntentsInserted: Int = 0
-    var deployIntentsUpdated: Int = 0
-    var deployIntentsRemoved: Int = 0
-    var warnings: [String] = []
-    /// True when the rebuild BAILED because the manifest was unreadable (a newer/unsupported schema) —
-    /// nothing was ingested. Distinct from per-item `warnings`. `SyncEngine` refuses to push over a store
-    /// it couldn't read (a downgrade) and surfaces "update Pensieve" instead. (PLAN-08 / 08.4 review)
-    var storeUnreadable: Bool = false
-    /// The rebuild computed changes but its save failed. Unrelated caller edits do not set this flag.
-    var saveFailed: Bool = false
-    /// A successful category fetch, ordered against local edits. Only the disk-reading entry point
-    /// announces this receipt, after the rebuild saves. Previews and acceptance never announce.
-    @Receipt var categoryRead: CategorySaveWindow.ReadReceipt?
-
-    /// Receipts order observations but contribute no reconcile effects. The enclosing result's
-    /// synthesized equality still includes every effect field, including future additions.
-    @propertyWrapper
-    struct Receipt: Equatable {
-        var wrappedValue: CategorySaveWindow.ReadReceipt?
-        static func == (lhs: Self, rhs: Self) -> Bool { true }
-    }
-}
-
 // MARK: - Protocol
 
 protocol StoreRebuildServiceProtocol {
@@ -75,11 +41,15 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
             result.warnings.append(
                 "Manifest was unreadable (a newer schema version, or corrupt); skipped the rebuild to " +
                 "avoid destroying local metadata. Update Pensieve to read this store.")
+            StoreIngestState.shared(for: context.container).invalidate()
             return result
         }
 
         result = rebuild(snapshot: snapshot, fromRoot: root, context: context)
-        if !result.saveFailed, let read = result.categoryRead { CategorySaveWindow.didRebuild(read) }
+        // A successful read is admitted by the caller after its HEAD validation. Launch may
+        // discover that the files moved during this rebuild, so this service cannot clear it.
+        if result.ingestIncomplete { StoreIngestState.shared(for: context.container).invalidate() }
+        if !result.ingestIncomplete, let read = result.categoryRead { CategorySaveWindow.didRebuild(read) }
         return result
     }
 
@@ -99,7 +69,8 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
         warnOverlaysWithoutFiles(snapshot: snapshot, filePresentSlugs: filePresentSlugs, result: &result)
         result.categoryRead = manifestIsAuthoritative
             ? rebuildCategories(snapshot: snapshot, context: context, result: &result) : nil
-        rebuildDeployIntents(snapshot: snapshot, context: context, result: &result)
+        if manifestIsAuthoritative { rebuildDeployIntents(snapshot: snapshot, context: context, result: &result) }
+        guard !result.ingestIncomplete else { return result }
 
         // Surface a persistence failure instead of returning success counts over an unsaved store
         // (PLAN-07 / 07.4 review — the codebase's surface-don't-swallow rule).
@@ -140,7 +111,12 @@ extension StoreRebuildService {
                                result: inout RebuildResult) -> Set<String> {
         let overlaysBySlug = Dictionary(snapshot.skills.map { ($0.slug, $0) },
                                         uniquingKeysWith: { first, _ in first })
-        let existingSkills = (try? context.fetch(FetchDescriptor<Skill>())) ?? []
+        let existingSkills: [Skill]
+        do { existingSkills = try context.fetch(FetchDescriptor<Skill>()) } catch {
+            result.skillReadFailed = true
+            result.warnings.append("Couldn't read local skills; skipped the skill reconcile: " + error.localizedDescription)
+            return []
+        }
         let existingBySlug = Dictionary(existingSkills.map { ($0.directoryName, $0) },
                                         uniquingKeysWith: { first, _ in first })
 
@@ -201,6 +177,7 @@ extension StoreRebuildService {
     private func listSkillEntries(at skillsDir: String, result: inout RebuildResult) -> [String]? {
         guard fileService.directoryExists(at: skillsDir) else { return [] }
         guard let entries = try? fileService.listDirectory(at: skillsDir) else {
+            result.skillListFailed = true
             result.warnings.append(
                 "Couldn't list the skills directory; skipped the skill reconcile to avoid deleting rows.")
             return nil
@@ -340,6 +317,7 @@ extension StoreRebuildService {
                            removingOnlyIDs: Set<UUID>? = nil) -> CategorySaveWindow.ReadReceipt? {
         let read: (rows: [Category], receipt: CategorySaveWindow.ReadReceipt)
         do { read = try CategorySaveWindow.fetchCategories(in: context) } catch {
+            result.categoryReadFailed = true
             result.warnings.append(
                 "Couldn't read local categories; skipped the category reconcile: " + error.localizedDescription)
             return nil

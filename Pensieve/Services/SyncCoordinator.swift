@@ -102,16 +102,9 @@ actor SyncCoordinator {
                                           prepare: { context in
                     let currentStamp = self.headStamp()
                     preparedHeadStamp = currentStamp
-                    if self.lastIngestedHeadStamp == nil
-                        || currentStamp == nil
-                        || currentStamp != self.lastIngestedHeadStamp {
-                        let rebuild = self.rebuildService.rebuild(fromRoot: self.root, context: context)
-                        if rebuild.storeUnreadable {
-                            throw SyncError.storeUnreadable(rebuild.warnings)
-                        }
+                    if let rebuild = try self.ingestIfNeeded(context: context, stamp: currentStamp) {
                         preflightWarnings = rebuild.warnings
                         preflightAdvanced = true
-                        self.lastIngestedHeadStamp = currentStamp
                     }
                     // Machine state is observability: a publication failure must never block the pull
                     // that follows, or a persistent local fault would wedge sync on this machine for good.
@@ -142,6 +135,14 @@ actor SyncCoordinator {
         }
         Self.recordAudit(for: result, error: cycleError, audit: audit)
         return result
+    }
+
+    private func ingestIfNeeded(context: ModelContext, stamp: String?) throws -> RebuildResult? {
+        guard StoreIngestState.shared(for: modelContainer).needsRebuild
+            || lastIngestedHeadStamp == nil || stamp == nil || stamp != lastIngestedHeadStamp else { return nil }
+        let rebuild = try StoreIngestState.rebuild(using: rebuildService, root: root, context: context)
+        lastIngestedHeadStamp = stamp
+        return rebuild
     }
 
     /// The UI keeps its repair advice; the audit keeps git’s original authentication diagnostic.

@@ -172,9 +172,14 @@ final class SkillParserTests: XCTestCase {
         }
     }
 
-    func testDottedAnchorAndAliasNamesAreRejectedByGuard() {
-        XCTAssertTrue(SkillParser.containsAnchorOrAlias(in: "name: &identity.v1 Anchored"))
-        XCTAssertTrue(SkillParser.containsAnchorOrAlias(in: "description: *identity.v1"))
+    func testInvalidAnchorNamesKeepSourceAndRefuseIdentityRewriting() {
+        for yaml in ["name: &identity.v1 Anchored\ndescription: D", "name: A\ndescription: *identity.v1"] {
+            let source = "---\n" + yaml + "\n---\nBody"
+            let parsed = SkillParser.parse(source)
+            XCTAssertNil(parsed.preservedFrontmatter)
+            XCTAssertEqual(parsed.preservedFile?.source, source)
+            XCTAssertNil(SkillSerializer.normalizeIdentity(name: "New", description: "New description", parsed: parsed))
+        }
     }
 
     func testRecordsDistinctTrailingNewlineCountsWithoutChangingBody() {

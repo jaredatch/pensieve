@@ -24,7 +24,29 @@ struct ConflictItem: Equatable {
     let otherUnavailable: UnavailableConflictSide?
     let thisMode: String?
     let otherMode: String?
-    var retiresGitlink: Bool { thisUnavailable?.isGitlink == true || otherUnavailable?.isGitlink == true }
+    var retiresGitlink: Bool {
+        StoreIgnoreRules.canRetire(path) && (thisUnavailable?.isGitlink == true || otherUnavailable?.isGitlink == true)
+    }
+    var requiresGitResolution: Bool {
+        thisUnavailable?.canChoose == false && otherUnavailable?.canChoose == false
+    }
+    var hasProtectedGitlink: Bool {
+        thisUnavailable?.reason == .unsafeRetirement || otherUnavailable?.reason == .unsafeRetirement
+    }
+
+    func selectionError(for side: ConflictSide) -> SyncError? {
+        let unavailable = side == .thisMachine ? thisUnavailable : otherUnavailable
+        let other = side == .thisMachine ? otherUnavailable : thisUnavailable
+        return Self.selectionError(path: path, chosen: unavailable, other: other)
+    }
+
+    static func selectionError(path: String, chosen: UnavailableConflictSide?,
+                               other: UnavailableConflictSide?) -> SyncError? {
+        guard let unavailable = chosen, !unavailable.canChoose else { return nil }
+        if other?.canChoose == false { return .conflictRequiresGitResolution(path: path) }
+        if unavailable.reason == .unsafeRetirement { return .protectedGitlinkUnavailable(path: path) }
+        return .conflictSideUnavailable(path: path)
+    }
 
     init(path: String, kind: ConflictKind, thisMachine: Data?, otherMachine: Data?,
          thisUnavailable: UnavailableConflictSide? = nil, otherUnavailable: UnavailableConflictSide? = nil,

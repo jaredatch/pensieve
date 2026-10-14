@@ -187,6 +187,20 @@ extension ConflictResolutionModelTests {
         }
     }
 
+    func testSkillRootGitlinksRefuseNestedSideAndExplainTwoGitlinkConflict() async throws {
+        for counterpart in ["folder", "deleted", "file", "gitlink", "missing"] {
+            for nestedOnThisMac in [false, true] {
+                try await assertProtectedConflictGuidance(counterpart: counterpart, nestedOnThisMac: nestedOnThisMac)
+            }
+        }
+        let unavailable = UnavailableConflictSide(mode: "160000", objectID: String(repeating: "1", count: 40),
+                                                  reason: .unsafeRetirement)
+        let hiddenPath = ConflictItem(path: "skills/\u{202E}legacy", kind: .body, thisMachine: nil, otherMachine: nil,
+                                      thisUnavailable: unavailable, otherUnavailable: unavailable)
+        let strings = await renderedComparison(hiddenPath)
+        XCTAssertTrue(strings.contains("Pensieve can’t resolve this conflict. Resolve it in git: skills/⟨U+202E⟩legacy"))
+    }
+
     private func assertFilePickRefusesFolderAndOtherPickResolves() async throws {
         let fixture = try NativeTestWork.run { [self] in
             try SyncConflictByteFixture.gitlinkConflict(otherEntry: .file(Data("kept file".utf8)))
@@ -216,7 +230,7 @@ extension ConflictResolutionModelTests {
         XCTAssertEqual(try fixture.files.readFile(at: full + "/keep"), "local folder work")
     }
 
-    private func renderedComparison(_ item: ConflictItem) async -> [String] {
+    func renderedComparison(_ item: ConflictItem) async -> [String] {
         let host = NSHostingView(rootView: AnyView(ConflictFileComparison(item: item).frame(width: 520)))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 260),
                               styleMask: [.borderless], backing: .buffered, defer: false)

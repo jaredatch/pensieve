@@ -153,7 +153,7 @@ final class ImportViewModel {
     func importSelected(
         context: ModelContext,
         takenSlugs: (ModelContext) throws -> Set<String> = { Set(try $0.fetch(FetchDescriptor<Skill>()).map(\.directoryName)) },
-        saveContext: (ModelContext) throws -> Void = { try $0.save() }
+        saveContext: @escaping (ModelContext) throws -> Void = { try $0.save() }
     ) -> ImportOutcome {
         importNotices = []
         noticedError = nil
@@ -163,13 +163,8 @@ final class ImportViewModel {
         guard !toImport.isEmpty, let lock = acquireImportLock() else { return .refused }
         defer { lock.release() }
 
-        var taken: Set<String>
-        do {
-            taken = try takenSlugs(context).union(skillStore.prepareImport())
-        } catch {
-            self.error = "Failed to import: couldn't read the library (\(error.localizedDescription))"
-            return .refused
-        }
+        guard var taken = prepareLibraryForImport(context: context, takenSlugs: takenSlugs,
+                                         saveContext: saveContext) else { return .refused }
 
         importProgress = 0
         var writtenSlugs: [String] = []
@@ -284,4 +279,32 @@ final class ImportViewModel {
         )
     }
 
+}
+
+private extension ImportViewModel {
+    func ingestIfNeeded(context: ModelContext, saveContext: @escaping (ModelContext) throws -> Void) throws {
+        let rebuild = StoreRebuildService(manifestService: manifestService ?? ManifestService(), save: saveContext)
+        try StoreIngestState.rebuildIfNeeded(using: rebuild, root: manifestRoot, context: context)
+    }
+
+    func prepareLibraryForImport(context: ModelContext,
+                                 takenSlugs: (ModelContext) throws -> Set<String>,
+                                 saveContext: @escaping (ModelContext) throws -> Void) -> Set<String>? {
+        do {
+            try ingestIfNeeded(context: context, saveContext: saveContext)
+        } catch {
+            if let syncError = error as? SyncError, case .storeUnreadable = syncError {
+                self.error = error.localizedDescription
+            } else {
+                self.error = "Import couldn't update this Mac's library. Try importing again."
+            }
+            return nil
+        }
+        do {
+            return try takenSlugs(context).union(skillStore.prepareImport())
+        } catch {
+            self.error = "Failed to import: couldn't read the library (\(error.localizedDescription))"
+            return nil
+        }
+    }
 }

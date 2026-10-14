@@ -16,6 +16,12 @@ struct ProjectRemovalWithdrawal {
     let logFailure: (String) -> Void
 
     func apply(project: Project, request: ProjectRemovalWithdrawalRequest, context: ModelContext) throws -> Bool {
+        // The project-removal entry point holds sync.lock through this save and any repair.
+        guard !StoreIngestState.shared(for: context.container).needsRebuild else {
+            throw ProjectRemovalWithdrawalFailure(
+                message: "Pensieve couldn't update this Mac's library. Try removing the project again.",
+                didWithdrawRequests: false)
+        }
         let withdrawing = intentsToWithdraw(project: project, request: request)
         let facts = withdrawing.map {
             DeployIntentRecord(machineID: $0.machineID, skillSlug: $0.skillSlug,

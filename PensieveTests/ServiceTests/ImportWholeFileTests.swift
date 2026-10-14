@@ -73,6 +73,33 @@ final class ImportWholeFileTests: XCTestCase {
         try assertImports(Self.duplicateShapes)
     }
 
+    @MainActor
+    func testIdentityChangesAdmitLiteralPunctuationAndKeepAnchoredYAMLAsText() throws {
+        for (index, syntax) in FrontmatterRewriteFixture.syntaxCases.enumerated() {
+            let folder = root + "/syntax-\(index)"
+            let source = syntax.document(name: "Original")
+            try files.writeFile(at: folder + "/SKILL.md", content: source)
+            let model = model()
+            let context = try context()
+            XCTAssertEqual(model.scanFolder(folder), .found(1), syntax.label)
+            let discovered = try XCTUnwrap(model.discoveredSkills.first)
+            model.discoveredSkills = [DiscoveredSkill(
+                name: "New", body: discovered.body, sourcePlatform: discovered.sourcePlatform,
+                sourcePath: discovered.sourcePath, skillDescription: "New description", sourceContent: discovered.sourceContent
+            )]
+            model.importSelected(context: context)
+            XCTAssertNil(model.error, syntax.label)
+            let row = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
+            let expected = syntax.trusted
+                ? source.replacingOccurrences(of: "name: Original", with: "name: New")
+                    .replacingOccurrences(of: "description: Use for *.md files", with: "description: New description")
+                : "---\nname: New\ndescription: New description\n---\n\n" + source
+            XCTAssertEqual(try files.readData(at: root + "/store/skills/\(row.directoryName)/SKILL.md"),
+                           Data(expected.utf8), syntax.label)
+            XCTAssertEqual(model.importNotices, syntax.trusted ? [] : ["New: frontmatter was kept as text."], syntax.label)
+        }
+    }
+
     func testSourceBytesDropOnlyALeadingEncodingSignature() {
         let signature = Data([0xEF, 0xBB, 0xBF])
         let body = Data("Body".utf8)

@@ -23,6 +23,7 @@ enum CheckedYAMLLoader {
         let root: Node?
         let value: Any?
         let rootIsFlowMapping: Bool
+        let hasAnchorsOrAliases: Bool
     }
 
     enum LoaderError: Error, Equatable {
@@ -53,9 +54,10 @@ enum CheckedYAMLLoader {
     /// SkillParser needs both the composed node for source-preservation metadata and its value.
     /// Construction remains inside this chokepoint so a caller cannot bypass event validation.
     static func composeAndLoad(yaml: String) throws -> Document {
-        let rootIsFlowMapping = try validate(yaml)
+        let syntax = try validate(yaml)
         let root = try Yams.compose(yaml: yaml, resolver, checkedConstructor)
-        return Document(root: root, value: root?.any, rootIsFlowMapping: rootIsFlowMapping)
+        return Document(root: root, value: root?.any, rootIsFlowMapping: syntax.rootIsFlowMapping,
+                        hasAnchorsOrAliases: syntax.hasAnchorsOrAliases)
     }
 
     /// Compose an untrusted bare scalar once through the checked path for the writer's quoting
@@ -93,22 +95,20 @@ enum CheckedYAMLLoader {
         }
     }
 
-    /// Returns the first document's root style from its start event. Yams 6.2.2 takes a mapping's
-    /// style from the end event instead, where libyaml leaves the style field zeroed.
-    private static func validate(_ yaml: String) throws -> Bool {
+    /// Captures syntax before composition loses aliases and weak anchors. Yams also takes mapping
+    /// style from the end event, where libyaml leaves it zeroed; read it from the start event here.
+    private static func validate(_ yaml: String) throws -> (rootIsFlowMapping: Bool, hasAnchorsOrAliases: Bool) {
         var parser = yaml_parser_t()
         guard yaml_parser_initialize(&parser) == 1 else { throw LoaderError.invalidYAML }
         defer { yaml_parser_delete(&parser) }
-
         let bytes = yaml.utf8CString
         return try bytes.withUnsafeBufferPointer { buffer in
             guard let baseAddress = buffer.baseAddress else { throw LoaderError.invalidYAML }
             return try baseAddress.withMemoryRebound(to: UInt8.self, capacity: buffer.count) { input in
                 yaml_parser_set_input_string(&parser, input, buffer.count - 1)
                 var validator = EventValidator()
-                var reachedEnd = false
                 var rootFlow: Bool?
-                while !reachedEnd {
+                while true {
                     var event = yaml_event_t()
                     guard yaml_parser_parse(&parser, &event) == 1 else {
                         throw LoaderError.invalidYAML
@@ -119,10 +119,9 @@ enum CheckedYAMLLoader {
                         rootFlow = event.type == YAML_MAPPING_START_EVENT
                             && event.data.mapping_start.style == YAML_FLOW_MAPPING_STYLE
                     }
-                    reachedEnd = event.type == YAML_STREAM_END_EVENT
                     try validator.consume(event)
+                    if event.type == YAML_STREAM_END_EVENT { return (rootFlow ?? false, validator.hasAnchorsOrAliases) }
                 }
-                return rootFlow ?? false
             }
         }
     }
@@ -190,6 +189,7 @@ private extension CheckedYAMLLoader {
         private var frames: [Frame] = []
         private var anchors: [String: NodeInfo] = [:]
         private var aliasExpansionCost = 0
+        private(set) var hasAnchorsOrAliases = false
 
         mutating func consume(_ event: yaml_event_t) throws {
             switch event.type {
@@ -210,7 +210,7 @@ private extension CheckedYAMLLoader {
             switch event.type {
             case YAML_SCALAR_EVENT:
                 let tag = try decodedTag(event.data.scalar.tag)
-                let anchor = decodedString(event.data.scalar.anchor)
+                let anchor = decodedAnchor(event.data.scalar.anchor)
                 try completeNode(
                     NodeInfo(
                         kind: .scalar,
@@ -223,7 +223,8 @@ private extension CheckedYAMLLoader {
                     anchor: anchor
                 )
             case YAML_ALIAS_EVENT:
-                guard let name = decodedString(event.data.alias.anchor),
+                hasAnchorsOrAliases = true
+                guard let name = decodedAnchor(event.data.alias.anchor),
                       let aliased = anchors[name] else {
                     throw LoaderError.invalidYAML
                 }
@@ -235,14 +236,14 @@ private extension CheckedYAMLLoader {
             case YAML_SEQUENCE_START_EVENT:
                 try startContainer(
                     kind: .sequence,
-                    anchor: decodedString(event.data.sequence_start.anchor),
+                    anchor: decodedAnchor(event.data.sequence_start.anchor),
                     tag: try decodedTag(event.data.sequence_start.tag),
                     implicitTagByteCount: implicitSequenceTagByteCount
                 )
             case YAML_MAPPING_START_EVENT:
                 try startContainer(
                     kind: .mapping,
-                    anchor: decodedString(event.data.mapping_start.anchor),
+                    anchor: decodedAnchor(event.data.mapping_start.anchor),
                     tag: try decodedTag(event.data.mapping_start.tag),
                     implicitTagByteCount: implicitMappingTagByteCount
                 )
@@ -292,16 +293,16 @@ private extension CheckedYAMLLoader {
             )
         }
 
-        private mutating func completeNode(
-            _ node: NodeInfo,
-            anchor: String?
-        ) throws {
+        private mutating func completeNode(_ node: NodeInfo, anchor: String?) throws {
             if frames.count + node.constructedDepth > maximumDepth {
                 throw LoaderError.nestingTooDeep
             }
             if isMappingKey, node.kind != .scalar { throw LoaderError.nonScalarKey }
             if isMappingKey, node.hasExplicitMergeTag { throw LoaderError.explicitMergeTag }
-            if let anchor { anchors[anchor] = node }
+            if let anchor {
+                hasAnchorsOrAliases = true
+                anchors[anchor] = node
+            }
 
             guard !frames.isEmpty else { return }
             let index = frames.index(before: frames.endIndex)
@@ -392,7 +393,7 @@ private extension CheckedYAMLLoader {
             return tag.isEmpty ? nil : tag
         }
 
-        private func decodedString(_ pointer: UnsafePointer<UInt8>?) -> String? {
+        private func decodedAnchor(_ pointer: UnsafePointer<UInt8>?) -> String? {
             String.decodeCString(pointer, as: UTF8.self, repairingInvalidCodeUnits: true)?.result
         }
     }

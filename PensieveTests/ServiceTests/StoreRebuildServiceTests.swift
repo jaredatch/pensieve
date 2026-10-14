@@ -6,7 +6,7 @@ private typealias PensieveCategory = Pensieve.Category
 
 /// Wraps a real `FileService`, optionally throwing for one `readFile` path and/or one `listDirectory`
 /// path — models transient I/O on a present file or an existing directory.
-private struct FaultyFileService: FileServiceProtocol {
+struct FaultyFileService: FileServiceProtocol {
     struct Boom: Error {}
     let wrapped: FileService
     var failReadPath: String?
@@ -57,10 +57,7 @@ final class StoreRebuildServiceTests: XCTestCase {
 
     @MainActor
     func makeContext() throws -> ModelContext {
-        let container = try ModelContainer(
-            for: Skill.self, Project.self, SkillProjectAssignment.self, DeployRecord.self, PensieveCategory.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-        )
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         return ModelContext(container)
     }
 
