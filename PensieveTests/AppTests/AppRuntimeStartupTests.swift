@@ -39,6 +39,7 @@ final class AppRuntimeStartupTests: XCTestCase {
     }
 
     func testDockAndMenuWindowActionWorksBeforeAnyWindowAppearedWithoutRestartingWork() async throws {
+        try await BlockingWork.run { try CLIProcessProbe.assertHungProbeIsBounded() }
         // The test host has no production scene. Drive a disposable production process so removing
         // PensieveApp's registration cannot be masked by the runtime spy below.
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -48,15 +49,9 @@ final class AppRuntimeStartupTests: XCTestCase {
         probe.arguments = ["-B", root.appendingPathComponent("script/cli_contract_test.py").path, "--binary",
             Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/pensieve").path,
             "CLILaunchTests.test_background_production_reopens_from_the_dock"]
-        let guiLock = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(
-            "Projects/execplan-versions/0.33.0/kit/herdr/gui-lock.sh").path
-        if FileService().fileExists(at: guiLock) {
-            probe.arguments = [guiLock, "run", "pensieve PLAN-58", "--", "/usr/bin/python3"] + (probe.arguments ?? [])
-            probe.executableURL = URL(fileURLWithPath: "/bin/bash")
-        }
-        try probe.run()
-        await BlockingWork.run { probe.waitUntilExit() }
-        XCTAssertEqual(probe.terminationStatus, 0, "the real production scene must open from its registered action")
+        let result = try await BlockingWork.run { try CLIProcessProbe.run(probe) }
+        XCTAssertFalse(result.timedOut, "the production window probe exceeded its deadline")
+        XCTAssertEqual(result.status, 0, "the real production scene must open from its registered action")
         let paths = try AppRuntimePaths.temporary(named: "ReopenStartup")
         defer { try? FileService().deleteDirectory(at: (paths.storeRoot as NSString).deletingLastPathComponent) }
         let defaults = try isolatedDefaults()
