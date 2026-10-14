@@ -237,6 +237,30 @@ final class StoreMigrationServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testIdentityNormalizationAdmitsLiteralPunctuationAndSkipsYAMLAnchors() throws {
+        let context = try makeContext()
+        for (index, syntax) in FrontmatterRewriteFixture.syntaxCases.enumerated() {
+            let slug = "syntax-\(index)"
+            seedSkill(context, name: "New", description: "New description", dir: slug)
+            try writeRawFile(dir: slug, content: syntax.document(name: "Original"))
+        }
+        let result = service.migrateIfNeeded(fromRoot: tempDir, context: context)
+        for (index, syntax) in FrontmatterRewriteFixture.syntaxCases.enumerated() {
+            let slug = "syntax-\(index)"
+            let source = syntax.document(name: "Original")
+            let expected = syntax.trusted
+                ? source.replacingOccurrences(of: "name: Original", with: "name: New")
+                    .replacingOccurrences(of: "description: Use for *.md files", with: "description: New description")
+                : source
+            XCTAssertEqual(Data(try readFile(dir: slug).utf8), Data(expected.utf8), syntax.label)
+            let warnings = result.warnings.filter { $0.contains("'\(slug)'") }
+            XCTAssertEqual(warnings, syntax.trusted ? [] : [
+                "Skipped '\(slug)': frontmatter could not be split safely — not normalized."
+            ], syntax.label)
+        }
+    }
+
+    @MainActor
     func testMigrationDoesNotWarnWhenUntrustworthyIdentityAlreadyMatches() throws {
         let context = try makeContext()
         seedSkill(context, name: "Match", description: "Already correct", dir: "flow-match")

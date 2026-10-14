@@ -28,7 +28,8 @@ extension StoreRebuildService {
         let authoritative = manifestHasContent(root: root)
         // Reuse the convergent rebuild without committing its potentially superseded projection.
         let preview = StoreRebuildService(fileService: fileService, manifestService: manifest, save: { _ in })
-        _ = preview.rebuild(snapshot: snapshot, fromRoot: root, context: context, manifestIsAuthoritative: authoritative)
+        _ = preview.rebuild(snapshot: snapshot, fromRoot: root, context: context,
+                            manifestIsAuthoritative: authoritative)
         return PreparedStoreRebuild(scanStartedAt: scanStartedAt, snapshot: try manifest.snapshot(from: context),
             skills: try context.fetch(FetchDescriptor<Skill>()).map {
                 PreparedStoreRebuild.SkillIdentity(slug: $0.directoryName, name: $0.name, description: $0.skillDescription)
@@ -60,8 +61,8 @@ extension StoreRebuildService {
                                     removingOnlyIDs: prepared.scannedCategoryIDs) != nil else {
                 throw CategoryReadFailure(message: result.warnings.joined(separator: "\n"))
             }
+            rebuildDeployIntents(snapshot: snapshot, context: context, result: &result)
         }
-        rebuildDeployIntents(snapshot: snapshot, context: context, result: &result)
         try save(context)
     }
 }

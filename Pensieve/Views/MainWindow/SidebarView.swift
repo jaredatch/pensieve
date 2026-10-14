@@ -57,6 +57,19 @@ func removeRegisteredProject(_ project: Project,
     }
     defer { lock.release() }
     defer { notifier() }
+    do {
+        if let manifestService {
+            // Rebuild before capturing intents or skill objects for the removal plan.
+            try StoreIngestState.rebuildIfNeeded(
+                using: StoreRebuildService(manifestService: manifestService), root: manifestRoot, context: context)
+        }
+    } catch {
+        var result = BatchResult()
+        result.operationFailures.append(error as? SyncError == .ingestIncomplete
+            ? "Project removal couldn't update this Mac's library. Try removing the project again."
+            : error.localizedDescription)
+        return result
+    }
     return ProjectRemovalExecution(reconciler: reconciler, manifestService: manifestService,
         manifestRoot: manifestRoot, stateFetcher: stateFetcher, platformVM: platformVM, localMachineID: localMachineID,
         confirmedPreview: confirmedPreview, logFailure: logFailure).run(project: project, context: context)

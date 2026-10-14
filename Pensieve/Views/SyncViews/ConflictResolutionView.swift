@@ -249,12 +249,16 @@ struct ConflictFileComparison: View {
     private let this: Side
     private let other: Side
     private let retiresGitlink: Bool
+    private let hasProtectedGitlink: Bool
+    private let gitResolutionPath: String?
     private let removesOtherFile: Bool
 
     init(item: ConflictItem) {
         this = Side(item.thisMachine, unavailable: item.thisUnavailable)
         other = Side(item.otherMachine, unavailable: item.otherUnavailable)
         retiresGitlink = item.retiresGitlink
+        hasProtectedGitlink = item.hasProtectedGitlink
+        gitResolutionPath = item.requiresGitResolution ? item.path : nil
         removesOtherFile = item.otherMode != nil && item.otherUnavailable?.isGitlink != true
     }
 
@@ -264,10 +268,17 @@ struct ConflictFileComparison: View {
             LineDiffView(this: this, other: other)
         } else {
             VStack(alignment: .leading, spacing: Spacing.md) {
+                if let gitResolutionPath {
+                    Text(ViewChangesPresentation.styledText(
+                        SyncError.conflictRequiresGitResolution(path: gitResolutionPath).localizedDescription, filename: true))
+                        .foregroundStyle(.secondary).textSelection(.enabled)
+                } else if hasProtectedGitlink {
+                    Text("The nested repository can’t be chosen at this path.").foregroundStyle(.secondary)
+                }
+                if (hasProtectedGitlink || retiresGitlink) && (this.keepsFile || other.keepsFile) {
+                    Text("Choosing a file or link keeps it in sync.").foregroundStyle(.secondary)
+                }
                 if retiresGitlink {
-                    if this.keepsFile || other.keepsFile {
-                        Text("Choosing a file or link keeps it in sync.").foregroundStyle(.secondary)
-                    }
                     if this.canRetire || other.canRetire {
                         Text("Choosing a nested repository or a deletion stops syncing this path. "
                             + "Whatever is at this path on this Mac stays where it is.")
@@ -292,7 +303,7 @@ struct ConflictFileComparison: View {
             case .deleted:
                 Text("Deleted").foregroundStyle(.secondary)
             case let .unavailable(side):
-                Text(side.canChoose ? "Nested repository" : "Can’t be read")
+                Text(side.isGitlink && side.reason != .missingObject ? "Nested repository" : "Can’t be read")
                     .foregroundStyle(.secondary)
             case let .text(text, preview, hiddenLines):
                 Text(text.isEmpty ? "Empty file" : preview)

@@ -28,6 +28,8 @@ enum RenderedViewTestSupport {
 
     static func strings(in text: Text) -> [String] {
         func strings(_ value: Any, depth: Int) -> [String] {
+            if let text = value as? AttributedString { return [String(text.characters)] }
+            if let text = value as? NSAttributedString { return [text.string] }
             if let string = value as? String {
                 // SwiftUI's render debug values escape apostrophes in their text payloads.
                 return [string.replacingOccurrences(of: "\\'", with: "'")]

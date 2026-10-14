@@ -6,6 +6,8 @@ import XCTest
 @MainActor
 final class ProjectRemovalDurabilityTests: XCTestCase {
     func testFailedProjectSaveKeepsRegistrationAndRelaunchRetryWithdrawsManifestIntent() throws {
+        try assertLocalOnlyRemovalRecovers()
+        try assertPendingWithdrawalRefuses()
         let h = try fixture()
         defer { h.cleanup() }
         let readOnly = try AppRuntime.makeContainer(configuration: ModelConfiguration(
@@ -23,6 +25,33 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
                        "A refused save must leave the manifest agreeing with the registered project's intents")
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 2)
         try relaunchAndRetry(h, projectID: projectID)
+    }
+
+    private func assertPendingWithdrawalRefuses() throws {
+        let h = try fixture()
+        defer { h.cleanup() }
+        var pulled = try manifest(h).read(fromRoot: h.root + "/sync")
+        pulled.deployIntents.append(DeployIntentRecord(machineID: ProjectIntentHarness.localID,
+            skillSlug: "peer-added", platformRaw: "codex", projectKey: h.project.identityKey))
+        try manifest(h).write(pulled, toRoot: h.root + "/sync")
+        let readOnly = try AppRuntime.makeContainer(configuration: ModelConfiguration(
+            url: URL(fileURLWithPath: h.root + "/removal.sqlite"), allowsSave: false))
+        let context = ModelContext(readOnly)
+        let project = try XCTUnwrap(context.fetch(FetchDescriptor<Project>()).first { $0.id == h.project.id })
+        XCTAssertThrowsError(try StoreIngestState.rebuild(
+            using: StoreRebuildService(manifestService: manifest(h)), root: h.root + "/sync", context: ModelContext(readOnly)))
+        XCTAssertTrue(StoreIngestState.shared(for: readOnly).needsRebuild)
+        var writes = 0
+        h.mapped.beforeFileWrite = { path in
+            if path.contains(".manifest-build-") { writes += 1 }
+        }
+        let result = remove(h, project: project, context: context)
+        XCTAssertTrue(result.hasFailures)
+        XCTAssertEqual(result.operationFailures,
+            ["Project removal couldn't update this Mac's library. Try removing the project again."])
+        XCTAssertEqual(writes, 0, "pending ingestion must not repair from the stale window")
+        XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync"), pulled)
+        XCTAssertTrue(StoreIngestState.shared(for: readOnly).needsRebuild)
     }
 
     func testBusySyncRefusesBeforeWithdrawalOrArtifactCleanup() throws {
@@ -214,13 +243,68 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
 
     private func manifest(_ h: ProjectFolderCallerHarness) -> ManifestService { ManifestService(fileService: h.mapped) }
 
-    private func remove(_ h: ProjectFolderCallerHarness, project: Project, context: ModelContext) -> BatchResult {
+    private func remove(_ h: ProjectFolderCallerHarness, project: Project, context: ModelContext,
+                        manifestRoot: String? = nil) -> BatchResult {
         removeRegisteredProject(project,
             reconciler: CategoryReconciler(platformVM: h.platformVM),
-            manifestService: manifest(h), manifestRoot: h.root + "/sync",
+            manifestService: manifest(h), manifestRoot: manifestRoot ?? h.root + "/sync",
             platformVM: h.platformVM, localMachineID: ProjectIntentHarness.localID,
             context: context,
             lockPath: h.root + "/support" + ".sync.lock")
+    }
+
+}
+
+private extension ProjectRemovalDurabilityTests {
+    func assertLocalOnlyRemovalRecovers() throws {
+        let h = try fixture()
+        defer { h.cleanup() }
+        let root = h.root + "/store", lockPath = h.root + "/support.sync.lock"
+        let service = manifest(h), git = GitService(fileService: h.files, askpassHelperPath: h.root + "/unused-askpass")
+        var disk = try service.snapshot(from: h.context)
+        disk.categories = [CategoryRecord(name: "Added", projectKeys: [], skillSlugs: [])]
+        disk.deployIntents.append(DeployIntentRecord(machineID: ProjectIntentHarness.localID,
+            skillSlug: h.skill.directoryName, platformRaw: "claudeCode", projectKey: h.project.identityKey))
+        let kept = DeployIntentRecord(machineID: ProjectIntentHarness.localID,
+            skillSlug: h.skill.directoryName, platformRaw: "codex", projectKey: h.otherProject.identityKey)
+        disk.deployIntents.append(kept)
+        try service.write(disk, toRoot: root)
+        let container = h.context.container
+        let launch = try NativeTestWork.run(container: container) { context in
+            try git.initRepository(at: root)
+            return LaunchReconciler(
+                rebuildService: StoreRebuildService(manifestService: service, save: { _ in
+                    throw CocoaError(.fileWriteUnknown)
+                }),
+                migrationService: StoreMigrationService(manifestService: service, skillStore: SkillStore(
+                    fileService: h.files, baseDir: root + "/skills", storeRoot: root)),
+                fileService: h.files, manifestService: service, root: root, lockPath: lockPath, git: git)
+                .reconcileOnLaunch(context: context, alreadyMigrated: true)
+        }
+        XCTAssertTrue(launch.rebuild.saveFailed)
+        XCTAssertNil(launch.ingestedHeadStamp)
+        XCTAssertFalse(launch.ingestionNeedsRetry, "An incomplete local launch leaves recovery to the next writer")
+        let sync = try NativeTestWork.run(container: container) { context in
+            try SyncEngine(gitService: git, manifestService: service,
+                storeRebuildService: StoreRebuildService(manifestService: service, save: { _ in
+                    throw CocoaError(.fileWriteUnknown)
+                }), lockPath: lockPath)
+                .sync(root: root, message: "Local-only retry", credential: nil, context: context)
+        }
+        XCTAssertEqual(sync, .noRemote)
+        XCTAssertTrue(StoreIngestState.shared(for: container).needsRebuild)
+        let projectID = h.project.id
+        let artifacts = [PlatformTarget.codex, .cursor].map { h.artifact($0) }
+        let result = remove(h, project: h.project, context: h.context, manifestRoot: root)
+        XCTAssertFalse(result.hasFailures, "removal must recover locally without a remote or relaunch")
+        XCTAssertFalse(StoreIngestState.shared(for: container).needsRebuild)
+        let saved = ModelContext(container)
+        XCTAssertFalse(try saved.fetch(FetchDescriptor<Project>()).contains { $0.id == projectID })
+        XCTAssertEqual(try saved.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.projectKey), [kept.projectKey])
+        let published = try service.read(fromRoot: root)
+        XCTAssertEqual(published.deployIntents, [kept], "withdrawal must include intents ingested by this attempt")
+        XCTAssertEqual(published.categories.map(\.name), ["Added"])
+        for path in artifacts { XCTAssertFalse(try h.files.entryExistsWithoutFollowingLinks(at: path)) }
     }
 
 }

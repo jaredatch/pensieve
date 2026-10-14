@@ -103,11 +103,8 @@ final class ConflictResolutionModel {
     func choose(_ groupID: String, _ side: ConflictSide) {
         guard case var .ready(groups) = phase,
               let index = groups.firstIndex(where: { $0.id == groupID }) else { return }
-        if let unavailable = groups[index].items.first(where: {
-            let receipt = side == .thisMachine ? $0.thisUnavailable : $0.otherUnavailable
-            return receipt != nil && receipt?.canChoose != true
-        }) {
-            selectionError = SyncError.conflictSideUnavailable(path: unavailable.path).errorDescription
+        if let error = groups[index].items.compactMap({ $0.selectionError(for: side) }).first {
+            selectionError = error.errorDescription
             return
         }
         selectionError = nil
@@ -143,12 +140,15 @@ final class ConflictResolutionModel {
             }
         } catch SyncError.conflictsChanged {
             await reinspect(container: container)
-        } catch SyncError.conflictSideUnavailable(let path) {
-            selectionError = SyncError.conflictSideUnavailable(path: path).errorDescription
-            phase = .ready(groups)
-        } catch SyncError.conflictFolderMustMove(let path) {
-            selectionError = SyncError.conflictFolderMustMove(path: path).errorDescription
-            phase = .ready(groups)
+        } catch let error as SyncError {
+            switch error {
+            case .conflictSideUnavailable, .conflictRequiresGitResolution, .protectedGitlinkUnavailable,
+                 .conflictFolderMustMove:
+                selectionError = error.errorDescription
+                phase = .ready(groups)
+            default:
+                phase = .error(error.errorDescription ?? "Couldn't resolve conflicts.")
+            }
         } catch {
             phase = .error((error as? LocalizedError)?.errorDescription ?? "Couldn't resolve conflicts.")
         }
