@@ -126,6 +126,7 @@ final class AppRuntime {
         paths: AppRuntimePaths = .production,
         provenanceVM: SkillProvenanceViewModel? = nil,
         updateCheckOperation: UpdateCheckOperation? = nil,
+        updatesViewModelOperations: UpdatesViewModel.DefaultOperations? = nil,
         updateCheckApply: (([UUID: SkillUpdateCheckResult]) throws -> Void)? = nil,
         now: @escaping () -> Date = Date.init,
         gitUsabilityProbe: (() throws -> GitUsability)? = nil,
@@ -157,7 +158,7 @@ final class AppRuntime {
         self.syncSetup = syncSetup ?? paths.makeSyncSetupModel(context: resolvedContainer.mainContext)
         self.scheduler = resolvedScheduler
         self.provenanceVM = resolvedProvenanceVM
-        self.updatesViewModelOperations = paths.makeUpdatesViewModelOperations()
+        self.updatesViewModelOperations = updatesViewModelOperations ?? paths.makeUpdatesViewModelOperations()
         self.machineObservability = paths.makeMachineObservability(defaults: resolvedDefaults)
         self.reconcileIntent = { context in
             resolvedIntentReconciler.reconcile(context: context)
@@ -211,7 +212,6 @@ final class AppRuntime {
     }
 
     func checkForSkillUpdatesNow() { startUpdateCheck(showsFailureAlert: true) }
-
     func checkForSkillUpdatesFromSettings() { startUpdateCheck(showsFailureAlert: false) }
 
     func checkForSkillUpdatesIfDue() {
@@ -361,7 +361,7 @@ extension AppRuntime {
         scheduler.drainPendingRequests()
     }
 
-    private func startUpdateCheck(at checkedAt: Date? = nil, showsFailureAlert: Bool, automatic: Bool = false) {
+    func startUpdateCheck(at checkedAt: Date? = nil, showsFailureAlert: Bool, automatic: Bool = false) {
         guard !updateCheckInFlight else { return }
         if !automatic { automaticUpdateRetryDeferred = false }
         let evidence = gitState.beginEvidence()

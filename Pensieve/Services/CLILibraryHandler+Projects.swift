@@ -1,0 +1,64 @@
+import Foundation
+import SwiftData
+
+extension CLILibraryHandler {
+    func addProject(_ suppliedPath: String, options: CLILibraryOptions) async throws -> CLIReply {
+        try requireAddsAllowed()
+        let path = files.realPath(at: URL(fileURLWithPath: suppliedPath,
+            relativeTo: URL(fileURLWithPath: options.workingDirectory)).path)
+        let existing = try context.fetch(FetchDescriptor<Project>()).filter { files.realPath(at: $0.path) == path }
+        if let project = existing.sorted(by: { $0.id.uuidString < $1.id.uuidString }).first {
+            return success(projectValue(project), changed: false)
+        }
+        let name = (options.name ?? (path as NSString).lastPathComponent).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            throw CLICommandRefusal(reply: .failure("usage", "A project needs a name.", hint: "Pass --name <name>.", exit: 64))
+        }
+        let previewFiles = files
+        let identity = ProjectIdentityService(fileService: files)
+        if options.dryRun {
+            let preview = try await BlockingWork.run {
+                try previewFiles.requireProjectDirectory(at: path)
+                return identity.peekIdentity(forProjectAt: path)
+            }
+            return .success(.object(["name": .string(name), "path": .string(path),
+                "identity": preview.map { .string($0.key) } ?? .null,
+                "createsMarker": .bool(preview == nil)]))
+        }
+        // The sheet uses the same registration constructor and persistence operation.
+        let project = try ProjectRegistration.makeProject(name: name, path: path, using: identity)
+        let reconcile = runtime.reconcileIntent
+        let notifier = runtime.syncStateNotifier
+        let registered = try registerProject(project, context: context,
+            intentReconciler: reconcile, notifier: notifier)
+        return success(projectValue(registered), changed: true)
+    }
+
+    func removeProject(_ name: String, options: CLILibraryOptions) throws -> CLIReply {
+        let project = try resolver.project(name, cwd: options.workingDirectory)
+        let plan = try ProjectRemovalPlan.prepare(project: project, platformVM: runtime.platformVM, context: context)
+        let preview = plan.preview
+        let data: CLIValue = .object(["project": projectValue(project), "artifactCount": .number(preview.artifactCount),
+            "message": .string(preview.message), "waitingRemovals": .bool(preview.hasWaitingRemovals),
+            "artifacts": .array(plan.candidates.filter(\.isOwned).map { .string($0.path) })])
+        if let reply = previewOrConfirmation(data, options: options) { return reply }
+        let result = removeRegisteredProject(project, reconciler: CategoryReconciler(platformVM: runtime.platformVM),
+            manifestService: ManifestService(fileService: files), manifestRoot: runtime.paths.storeRoot,
+            platformVM: runtime.platformVM, localMachineID: try runtime.machineObservability.identity.existingIdentifier(),
+            confirmedPreview: preview, context: context, notifier: runtime.syncStateNotifier, lockPath: runtime.syncLockPath)
+        guard !result.hasFailures else {
+            let changed = result.didWithdrawProjectRequests || result.didRemoveArtifacts || result.didRetireProjectEvidence
+            let busy = result.syncLockUnavailable && !changed
+            var envelope = CLIReply.failure(changed ? "partial" : (busy ? "sync_running" : "operation_failed"),
+                ProjectRemovalModel.removalFailureMessage(projectName: project.name, result: result),
+                hint: "The project stays registered. Inspect its remaining deployments, then retry.",
+                exit: 1, retryable: busy).envelope
+            envelope.changed = changed
+            envelope.data = .object(["plan": data, "remaining": projectValue(project),
+                "withdrewRequests": .bool(result.didWithdrawProjectRequests),
+                "removedArtifacts": .bool(result.didRemoveArtifacts)])
+            return CLIReply(envelope: envelope, exitCode: 1)
+        }
+        return success(data, changed: true)
+    }
+}

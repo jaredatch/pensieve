@@ -5,6 +5,7 @@ struct SkillCleanupResult {
     var didChangeDeploys = false
     var waitingProjects: [String] = []
     var waitingRemovalIDs: Set<UUID> = []
+    var plannedRemovals: [DeployRemovalKey] = []
     var deferredRemovals: [DeployRemovalCandidate] = []
 }
 
@@ -39,7 +40,7 @@ extension PlatformViewModel {
     /// Remove owned deploys using one state snapshot and history only for unrecorded project rules.
     /// An unreadable snapshot fences owned artifacts; absent and foreign occupants remain no-ops.
     func removeAllDeploys(
-        skill: Skill, projects: [Project], localProjectEvidence: () throws -> SkillProjectDeployEvidence
+        skill: Skill, projects: [Project], dryRun: Bool = false, localProjectEvidence: () throws -> SkillProjectDeployEvidence
     ) -> SkillCleanupResult {
         var result = SkillCleanupResult()
         do {
@@ -71,6 +72,7 @@ extension PlatformViewModel {
         let locallyDeployed = localEvidence.cursorHistoryPaths.intersection(evidence.historyPaths)
         let candidates = skillCleanupCandidates(skill: skill, evidence: evidence, locallyDeployed: locallyDeployed,
             recorded: recorded, stateProblem: stateProblem)
+        if dryRun { return previewSkillCleanup(candidates, result: result) }
         do {
             try saveWaitingSkillCleanup(skill: skill, candidates: candidates.deferred, result: &result)
         } catch {
@@ -79,6 +81,27 @@ extension PlatformViewModel {
         }
         let removal = removalService.remove(candidates.available.map(\.removal))
         applySkillCleanupReport(removal, skill: skill, candidates: candidates.available, result: &result)
+        return result
+    }
+
+    private func previewSkillCleanup(
+        _ candidates: (available: [SkillCleanupCandidate], deferred: [SkillCleanupCandidate]), result initial: SkillCleanupResult
+    ) -> SkillCleanupResult {
+        var result = initial
+        for candidate in candidates.available {
+            do {
+                switch candidate.removal.action {
+                case .inspect(let operation):
+                    if try operation.classify().isOwned {
+                        if let blocker = candidate.removal.removalBlocker { throw blocker }
+                        result.plannedRemovals.append(candidate.removal.key)
+                    }
+                case .fail(let error): throw error
+                case .retireWithoutInspection: break
+                }
+            } catch { result.batch.recordReadFailure(candidate.location.path, error: error) }
+        }
+        result.plannedRemovals += candidates.deferred.map { $0.removal.key }
         return result
     }
 

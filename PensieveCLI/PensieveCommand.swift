@@ -13,7 +13,7 @@ protocol ReadCommand: ParsableCommand {
 struct PensieveCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "pensieve",
         abstract: "Manage AI skills through Pensieve.",
-        subcommands: [DeployCommand.self, UndeployCommand.self, SyncCommand.self,
+        subcommands: [DeployCommand.self, UndeployCommand.self, SyncCommand.self, InstallCommand.self,
                       SkillCommand.self, SkillsCommand.self, AgentCommand.self, MachineCommand.self,
                       ProjectCommand.self, DeploymentCommand.self, DeployedCommand.self, StatusCommand.self,
                       LogCommand.self, CommandsCommand.self, CompletionCommand.self, VersionCommand.self])
@@ -22,7 +22,8 @@ struct PensieveCommand: ParsableCommand {
 
 struct SkillCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "skill", abstract: "Read the skill library.",
-        subcommands: [SkillListCommand.self, SkillShowCommand.self])
+        subcommands: [SkillListCommand.self, SkillShowCommand.self, SkillOutdatedCommand.self,
+                      SkillUpdateCommand.self, SkillDeleteCommand.self])
     @OptionGroup var output: OutputOptions
 }
 
@@ -72,7 +73,7 @@ struct MachineListCommand: ReadCommand {
 
 struct ProjectCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "project", abstract: "Read registered projects.",
-        subcommands: [ProjectListCommand.self])
+        subcommands: [ProjectListCommand.self, ProjectAddCommand.self, ProjectRemoveCommand.self])
     @OptionGroup var output: OutputOptions
 }
 

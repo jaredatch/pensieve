@@ -7,6 +7,7 @@ struct AddProjectSheet: View {
 
     @State private var model: AddProjectModel
     @State private var didSubmit = false
+    @State private var saveError: String?
     @FocusState private var nameFocused: Bool
 
     private let notifier: SyncStateNotifying
@@ -56,6 +57,11 @@ struct AddProjectSheet: View {
         }
         .padding(Spacing.xl)
         .frame(width: 450)
+        .alert("Couldn’t Add Project", isPresented: Binding(
+            get: { saveError != nil }, set: { if !$0 { saveError = nil } }
+        )) {
+            Button("OK", role: .cancel) { saveError = nil }
+        } message: { Text(saveError ?? "") }
         .onAppear { nameFocused = true }
         .onDisappear { model.cancelSubmission() }
     }
@@ -67,15 +73,16 @@ struct AddProjectSheet: View {
 
     private func registerAndDismiss(_ project: Project) {
         guard !didSubmit else { return }
-        didSubmit = true
-        let created = registerProject(
-            project,
-            context: context,
-            intentReconciler: intentReconciler,
-            notifier: notifier
-        )
-        onCreated(created)
-        dismiss()
+        do {
+            let created = try registerProject(project, context: context,
+                intentReconciler: intentReconciler, notifier: notifier)
+            didSubmit = true
+            onCreated(created)
+            dismiss()
+        } catch {
+            model.allowSubmissionRetry()
+            saveError = error.localizedDescription
+        }
     }
 
     private func browseForDirectory() {

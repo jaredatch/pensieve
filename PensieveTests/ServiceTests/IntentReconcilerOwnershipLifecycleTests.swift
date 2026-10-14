@@ -80,7 +80,7 @@ final class IntentReconcilerOwnershipLifecycleTests: XCTestCase {
 
         let replacement = Project(name: "First Again", path: first.path)
         replacement.identityKey = "shared-key"
-        registerProject(
+        try registerProject(
             replacement,
             context: harness.context,
             intentReconciler: harness.reconciler.reconcile

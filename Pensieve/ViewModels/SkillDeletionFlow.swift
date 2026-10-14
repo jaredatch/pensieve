@@ -8,7 +8,8 @@ enum SkillDeletionFlow {
         platformVM: PlatformViewModel,
         projects: [Project],
         context: ModelContext,
-        persist: (ModelContext) throws -> Void = { try $0.save() }
+        persist: (ModelContext) throws -> Void = { try $0.save() },
+        reportChanges: (Bool) -> Void = { _ in }
     ) -> Bool {
         guard !library.libraryUnavailable else {
             library.deletionNotice = .failed(
@@ -20,32 +21,28 @@ enum SkillDeletionFlow {
             try platformVM.localSkillProjectDeployEvidence(skill: skill, projects: projects, context: context)
         })
         var retirementSaved = false
+        var retiredRecords = false
         var deletionOutcome: SkillLibraryViewModel.SkillDeletionResult?
         let presentation = SkillLibraryViewModel.DeletionPresentation()
         defer {
             settleWaitingCleanup(cleanupResult, retirementSaved: retirementSaved,
                 outcome: deletionOutcome, skill: skill, library: library, platformVM: platformVM)
             presentation.notice = library.deletionNotice
+            let removedFiles: Bool
+            switch deletionOutcome {
+            case .deleted, .directoryDeletedRowRetained: removedFiles = true
+            case .retainedDirectoryDeleteFailed, nil: removedFiles = false
+            }
+            reportChanges(cleanupResult.didChangeDeploys || (retirementSaved && retiredRecords) || removedFiles)
         }
         let cleanup = cleanupResult.batch
         if cleanup.hasFailures {
-            var messages = cleanup.readFailures.map(\.message)
-            if !cleanup.failures.isEmpty {
-                let details = cleanup.failures
-                    .map { "\($0.platform.displayName): \($0.error ?? "unknown error")" }
-                    .joined(separator: "; ")
-                messages.insert(
-                    "Couldn't remove agent links and rules for “\(skill.name)”: \(details).",
-                    at: 0
-                )
-            }
-            messages.append(retainedSkillMessage(didChangeDeploys: cleanupResult.didChangeDeploys))
-            library.deletionNotice = .failed(messages.joined(separator: " "))
+            library.deletionNotice = .failed(cleanupFailureMessage(cleanupResult, name: skill.name))
             return false
         }
 
         do {
-            try retire(skill: skill, context: context)
+            retiredRecords = try retire(skill: skill, context: context)
             try persist(context)
             retirementSaved = true
             library.regenerateManifest(.retireSkill(skill.directoryName), context: context)
@@ -61,6 +58,18 @@ enum SkillDeletionFlow {
         deletionOutcome = outcome
         let manifestNote = waitingCleanupNote(library: library, waitingProjects: cleanupResult.waitingProjects)
         return present(outcome, skill: skill, manifestNote: manifestNote, library: library)
+    }
+
+    private static func cleanupFailureMessage(_ result: SkillCleanupResult, name: String) -> String {
+        let cleanup = result.batch
+        var messages = cleanup.readFailures.map(\.message)
+        if !cleanup.failures.isEmpty {
+            let details = cleanup.failures
+                .map { "\($0.platform.displayName): \($0.error ?? "unknown error")" }.joined(separator: "; ")
+            messages.insert("Couldn't remove agent links and rules for “\(name)”: \(details).", at: 0)
+        }
+        messages.append(retainedSkillMessage(didChangeDeploys: result.didChangeDeploys))
+        return messages.joined(separator: " ")
     }
 
     private static func waitingCleanupNote(
@@ -114,17 +123,20 @@ enum SkillDeletionFlow {
             : "The skill was kept so you can retry."
     }
 
-    private static func retire(skill: Skill, context: ModelContext) throws {
+    private static func retire(skill: Skill, context: ModelContext) throws -> Bool {
+        var changed = false
         let intents = try context.fetch(FetchDescriptor<MachineDeployIntent>())
-        for intent in intents where intent.skillSlug == skill.directoryName { context.delete(intent) }
+        for intent in intents where intent.skillSlug == skill.directoryName { context.delete(intent); changed = true }
         let ledger = try context.fetch(FetchDescriptor<IntentAssignment>())
-        for row in ledger where row.skillID == skill.id { context.delete(row) }
+        for row in ledger where row.skillID == skill.id { context.delete(row); changed = true }
         let categoryLedger = try context.fetch(FetchDescriptor<SkillProjectAssignment>())
-        for row in categoryLedger where row.skillID == skill.id { context.delete(row) }
+        for row in categoryLedger where row.skillID == skill.id { context.delete(row); changed = true }
         for category in try context.fetch(FetchDescriptor<Category>())
             where category.skillSlugs.contains(skill.directoryName) {
             category.skillSlugs.removeAll { $0 == skill.directoryName }
+            changed = true
         }
+        return changed
     }
 
     private static func present(

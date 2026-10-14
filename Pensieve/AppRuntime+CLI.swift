@@ -1,6 +1,12 @@
 import Foundation
 
 extension AppRuntime {
+    func checkForSkillUpdatesAndReport() async -> String? {
+        startUpdateCheck(showsFailureAlert: false)
+        while updateCheckInFlight { try? await Task.sleep(for: .milliseconds(10)) }
+        return updateCheckError
+    }
+
     /// Starts process work independently of scene presentation. Repeated starts join the one launch.
     func start() {
         Task { await performLaunchWorkIfNeeded(context: container.mainContext) }
@@ -73,6 +79,10 @@ extension AppRuntime {
                             .handle(request, context: self.container.mainContext)
                     }
                     if request.command == "sync" { return await CLISyncHandler(model: self.syncModel).handle() }
+                    if ["install", "skill outdated", "skill update", "skill delete", "project add", "project remove"]
+                        .contains(request.command) {
+                        return await CLILibraryHandler(runtime: self, files: files).handle(request)
+                    }
                     return handler.handle(request, context: self.container.mainContext)
                 })
         } catch {

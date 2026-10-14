@@ -91,22 +91,10 @@ extension UpdatesViewModel {
             throw SkillUpdateFlowError.localEditsRequireConfirmation
         }
         let update = try PinnedSkillUpdate(skill: skill)
-        try skillInstallService.applyUpdate(
-            update,
-            allowLocalOverwrite: request.allowLocalOverwrite,
-            bodyWriteRegistration: request.bodyWriteRegistration,
-            context: context
-        )
-        guard let originData = skill.installedOriginData else {
-            throw SyncedStateMutationError(underlyingError: SkillUpdateFlowError.skillNotFound)
-        }
-        return SkillUpdateCompletion(
-            skillID: skill.id,
-            name: skill.name,
-            skillDescription: skill.skillDescription,
-            installedOriginData: originData,
-            updatedAt: skill.updatedAt
-        )
+        guard let origin = skill.installedOrigin else { throw SkillUpdateFlowError.missingPinnedUpdate }
+        return try skillInstallService.applyAndReport(update, expectedOrigin: origin,
+            allowLocalOverwrite: request.allowLocalOverwrite, registration: request.bodyWriteRegistration, context: context)
+
     }
 
     nonisolated static func defaultDiffOperation(
