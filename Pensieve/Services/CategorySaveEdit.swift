@@ -19,8 +19,7 @@ struct CategorySaveEdit {
         window = CategorySaveWindow(context: context)
         id = category.id
         createdAt = category.createdAt
-        before = existed ? CategoryRecord(name: category.name, projectKeys: category.projectKeys,
-                                          skillSlugs: category.skillSlugs) : nil
+        before = existed ? CategoryRecord(category) : nil
         self.change = change
         var snapshot = ManifestSnapshot(schemaVersion: ManifestService.currentSchemaVersion,
                                         categories: before.map { [$0] } ?? [], projects: [], skills: [])
@@ -73,9 +72,7 @@ struct CategorySaveEdit {
             // Dependents have already been restored. This classifies the notice only; a rebuild
             // supersedes the inverse whether it published our result or restored an earlier rule.
             let displayed = ManifestSnapshot(schemaVersion: ManifestService.currentSchemaVersion,
-                categories: categories.map {
-                    CategoryRecord(name: $0.name, projectKeys: $0.projectKeys, skillSlugs: $0.skillSlugs)
-                }, projects: [], skills: [])
+                categories: categories.map(CategoryRecord.init), projects: [], skills: [])
             if isSaved(in: displayed) { return .saved }
             return categories.contains { $0.name == name } ? .restored : .removed
         }

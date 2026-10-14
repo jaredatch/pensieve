@@ -19,8 +19,8 @@ enum ManifestChange {
         }
     }
 
-    /// Validate only the durable publication. Pending window projections may temporarily claim
-    /// a name a peer has since taken; the queue must reach that edit's turn to refuse and undo it.
+    /// Validate before durable publication and before projecting pending edits into the window.
+    /// A conflicting pending rename is refused and undone before its projection is accepted.
     func validate(in snapshot: ManifestSnapshot) throws {
         guard case .renameCategory(let old, let new) = self,
               let target = snapshot.categories.firstIndex(where: { $0.name == old }) else { return }

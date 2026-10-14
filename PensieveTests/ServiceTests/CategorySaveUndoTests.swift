@@ -29,7 +29,7 @@ final class CategorySaveUndoTests: XCTestCase {
         try await checkPriorSaveAfterPullDoesNotAcknowledgeRefusal()
         try await checkUnrelatedCategoryDoesNotAcknowledgeRename()
         try await checkRefusalAcrossSync(["rename-peer", "rename-plain", "rename-normal", "rename-peer-after-save",
-                                         "rename-published-lock", "rename-dependent-published-lock"])
+                                         "rename-published-lock", "rename-dependent-published-lock", "rename-schema-gone"])
         try await checkRefusalAfterPulledDeletion(fields: ["name"])
     }
 
@@ -44,10 +44,11 @@ final class CategorySaveUndoTests: XCTestCase {
         XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories.map(\.name), ["Local", "ZDelete"])
         try await checkEditAfterRebuildFetch(["create"])
         try await checkRefusedCreateAfterPulledRebuild()
-        try await checkRefusalAcrossSync(["create-peer", "create-schema"])
+        try await checkRefusalAcrossSync(["create-peer", "create-schema", "create-schema-gone"])
     }
 
     func testDependentRenamesUndoInReverseOrderIncludingRestoredName() async throws {
+        try await checkKeptDependentReason()
         for claimedName in ["Writing", " WRITING ", "writing"] {
             let h = try ManifestSaveFixture()
             defer { h.cleanup() }

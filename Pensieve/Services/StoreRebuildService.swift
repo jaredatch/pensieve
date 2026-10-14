@@ -24,16 +24,14 @@ struct RebuildResult: Equatable {
     var saveFailed: Bool = false
     /// A successful category fetch, ordered against local edits. Only the disk-reading entry point
     /// announces this receipt, after the rebuild saves. Previews and acceptance never announce.
-    var categoryRead: CategorySaveWindow.ReadReceipt?
+    @Receipt var categoryRead: CategorySaveWindow.ReadReceipt?
 
-    // Equality describes reconcile effects; a fresh read receipt is not another store change.
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.skillsInserted == rhs.skillsInserted && lhs.skillsUpdated == rhs.skillsUpdated
-            && lhs.skillsRemoved == rhs.skillsRemoved && lhs.categoriesInserted == rhs.categoriesInserted
-            && lhs.categoriesUpdated == rhs.categoriesUpdated && lhs.categoriesRemoved == rhs.categoriesRemoved
-            && lhs.deployIntentsInserted == rhs.deployIntentsInserted && lhs.deployIntentsUpdated == rhs.deployIntentsUpdated
-            && lhs.deployIntentsRemoved == rhs.deployIntentsRemoved && lhs.warnings == rhs.warnings
-            && lhs.storeUnreadable == rhs.storeUnreadable && lhs.saveFailed == rhs.saveFailed
+    /// Receipts order observations but contribute no reconcile effects. The enclosing result's
+    /// synthesized equality still includes every effect field, including future additions.
+    @propertyWrapper
+    struct Receipt: Equatable {
+        var wrappedValue: CategorySaveWindow.ReadReceipt?
+        static func == (lhs: Self, rhs: Self) -> Bool { true }
     }
 }
 

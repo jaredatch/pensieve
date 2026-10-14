@@ -58,6 +58,7 @@ extension CategorySaveUndoTests {
             XCTAssertEqual(window, expected, kind)
             XCTAssertEqual(Set(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.id)), identities, kind)
             let notice = try XCTUnwrap(h.saves.categoryNotice)
+            XCTAssertTrue(h.messages.lines.isEmpty, "Kept edits report no save failure: " + kind)
             XCTAssertEqual(notice.title, "Category changes were already saved", kind)
             XCTAssertTrue(notice.messages.allSatisfy { $0.contains("was already saved, so it was kept.") }, kind)
             XCTAssertFalse(notice.message.contains("couldn't be confirmed"), kind)

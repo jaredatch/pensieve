@@ -1,8 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// Reads control inputs from the mounted SwiftUI graph, including composed toolbar and menu
-/// content. No body or action is evaluated. SwiftUI's actual isEnabled transforms are applied
+/// Reads buttons and menus from the mounted SwiftUI graph, including composed toolbar and menu
+/// content. Toggles come only from the live probe style's labels. No body or action is evaluated.
+/// SwiftUI's actual isEnabled transforms are applied
 /// to the inherited environment; this checks view wiring, not native tooltip presentation.
 /// Unrecognized SDK fields leave a control absent, so its owner's assertion fails.
 @MainActor
@@ -48,13 +49,9 @@ enum RenderedControlInputs {
             let modifier = Mirror(reflecting: value).descendant("modifier") ?? value
             guard String(reflecting: type(of: modifier)).hasSuffix(".TooltipModifier"),
                   let text = Mirror(reflecting: modifier).descendant("text") as? Text else { return nil }
-            let labels = Set(texts(node).map(unescape))
-            let enabled = labels.contains("__enabled_toggle__")
-            let disabled = labels.contains("__disabled_toggle__")
-            let titles = labels.subtracting(["__enabled_toggle__", "__disabled_toggle__"])
-            guard enabled != disabled, titles.count == 1, let title = titles.first else { return nil }
+            guard let control = toggleProbe(in: node) else { return nil }
             let reason = RenderedViewTestSupport.strings(in: text).first.map(unescape)
-            return Control(kind: .toggle, title: title, enabled: enabled, help: reason,
+            return Control(kind: .toggle, title: control.title, enabled: control.enabled, help: reason,
                 rowHelp: hasToggleContainer(node) ? reason : nil)
         }
         // Enabled switches need no tooltip. Retain the real environment probe even when
@@ -64,15 +61,20 @@ enum RenderedControlInputs {
             guard let value = properties[.value], String(reflecting: type(of: value)).hasPrefix("SwiftUI.HStack<") else {
                 continue
             }
-            let labels = Set(texts(node).map(unescape))
-            let enabled = labels.contains("__enabled_toggle__")
-            let disabled = labels.contains("__disabled_toggle__")
-            let titles = labels.subtracting(["__enabled_toggle__", "__disabled_toggle__"])
-            guard enabled != disabled, titles.count == 1, let title = titles.first,
-                  !controls.contains(where: { $0.title == title }) else { continue }
-            controls.append(Control(kind: .toggle, title: title, enabled: enabled, help: nil))
+            guard let control = toggleProbe(in: node),
+                  !controls.contains(where: { $0.title == control.title }) else { continue }
+            controls.append(control)
         }
         return controls
+    }
+
+    private static func toggleProbe(in node: _ViewDebug.Data) -> Control? {
+        let labels = Set(texts(node).map(unescape))
+        let enabled = labels.contains("__enabled_toggle__")
+        let disabled = labels.contains("__disabled_toggle__")
+        let titles = labels.subtracting(["__enabled_toggle__", "__disabled_toggle__"])
+        guard enabled != disabled, titles.count == 1, let title = titles.first else { return nil }
+        return Control(kind: .toggle, title: title, enabled: enabled, help: nil)
     }
 
     /// A disabled Toggle in a grouped Form drops help over its switch. Help on a surrounding

@@ -3,6 +3,27 @@ import XCTest
 @testable import Pensieve
 
 extension CategorySaveUndoTests {
+    func checkKeptDependentReason() async throws {
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        let lock = try XCTUnwrap(SyncLock.tryAcquire(at: h.lockPath))
+        defer { lock.release() }
+        h.categories.rename(h.local, to: "Drafts", context: h.context)
+        h.categories.rename(h.local, to: "Final", context: h.context)
+        await h.assertWaitingBehindHeldLock(pending: 2, before: try h.manifestBytes())
+        try h.manifest.write(try h.manifest.snapshot(from: h.context), toRoot: h.root)
+        try rebuildPulledState(h)
+        try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "schema_version: 99\n")
+        lock.release()
+        await h.saves.waitUntilIdle()
+        let notice = try XCTUnwrap(h.saves.categoryNotice)
+        let kept = try XCTUnwrap(notice.messages.first { $0.contains("already saved") })
+        XCTAssertTrue(kept.contains("Update Pensieve"), kept)
+        XCTAssertFalse(kept.contains("depends on an earlier change"), kept)
+        XCTAssertEqual(h.messages.lines.count, 1, "Only the head's dropped edit reports a failure")
+        XCTAssertEqual(h.local.name, "Final")
+    }
+
     func checkRefusedCreateAfterPulledRebuild() async throws {
         for refusal in ["schema", "lock", "write"] {
             let h = try ManifestSaveFixture()

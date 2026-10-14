@@ -216,6 +216,7 @@ extension ManifestSaveTests {
     }
 
     func testRebuildFailureAfterManifestSuccessNamesTheRebuild() async throws {
+        try await checkAcceptedCategoryFetchFailure()
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
         h.recording.failingRebuildSnapshots = 1

@@ -105,7 +105,7 @@ final class LibraryFenceControlsTests: XCTestCase {
         let entered = expectation(description: "launch ingestion held")
         let fixture = try LibraryFenceFixture(defaults: isolatedDefaults(), launchReconcile: { _, _ in
             entered.fulfill()
-            try? gate.wait()
+            try? gate.wait(timeout: .seconds(6 * TestWait.heldFixtureTimeoutSeconds))
             return LaunchReconcileOutcome(rebuild: RebuildResult(), migrationRan: false)
         })
         addTeardownBlock { @MainActor in await fixture.close() }
@@ -125,8 +125,16 @@ final class LibraryFenceControlsTests: XCTestCase {
                     default: usual = "Add a category to assign skills across projects."
                     }
                     if content || section == .skills {
-                        await TestWait.until(failureMessage: "Normal launch must retain the usual description") {
+                        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                            failureMessage: "Normal launch is missing its usual description: \(usual)") {
                             fixture.strings.contains(usual)
+                        }
+                        guard fixture.strings.contains(usual) else {
+                            XCTAssertEqual(gate.waiterCount, pending ? 1 : 0,
+                                "Launch must still be held at the missing description")
+                            gate.open()
+                            await launch.value
+                            return
                         }
                     }
                     XCTAssertFalse(fixture.strings.contains(FenceState.launch.reason!), fixture.diagnostics)
@@ -138,7 +146,7 @@ final class LibraryFenceControlsTests: XCTestCase {
 
 }
 
-private enum FenceState: CaseIterable {
+enum FenceState: CaseIterable {
     case launch, unreadable, unavailable, readable
     case unreadableDuringLaunch, unavailableAndUnreadableDuringLaunch
 
@@ -163,7 +171,7 @@ private enum FenceState: CaseIterable {
 }
 
 @MainActor
-private final class LibraryFenceFixture {
+final class LibraryFenceFixture {
     let runtime: AppRuntime
     let host = NSHostingView(rootView: AnyView(EmptyView()))
     let window: NSWindow
@@ -241,6 +249,12 @@ private final class LibraryFenceFixture {
     var diagnostics: String { "controls=\(controls) text=\(strings)" }
 
     func close() async {
+        if let root = window.attachedSheet?.contentView {
+            renderedAction("Cancel", in: root)?()
+            await TestWait.until(failureMessage: "Dismiss a category sheet before unmounting its presenter") {
+                self.window.attachedSheet == nil
+            }
+        }
         host.rootView = AnyView(EmptyView())
         await TestWait.until(failureMessage: "The hosted queries must unmount before their container is released") {
             RenderedViewTestSupport.values(in: self.host).allSatisfy { !String(reflecting: type(of: $0)).hasPrefix("Pensieve.") }

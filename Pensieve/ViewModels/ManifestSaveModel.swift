@@ -259,7 +259,7 @@ extension ManifestSaveModel {
         guard let edit = item.categoryEdit, let start = items.firstIndex(where: { $0.id == item.id }) else { return }
         if categoryIsSaved(item, durable: durable) {
             categoryMessages.append(CategorySaveNotice.entry(edit: edit, error: error, outcome: .saved))
-            item.report(error)
+            item.report(nil)
             return
         }
         var affected = [item]
@@ -289,17 +289,19 @@ extension ManifestSaveModel {
         for (index, item) in affected.enumerated().reversed() {
             guard let edit = item.categoryEdit else { continue }
             let error = index == 0 ? reason : ManifestSaveError.unsavedTarget
+            var wasKept = false
             do {
                 let restored = try edit.restore(in: item.presentation.context)
                 try item.presentation.context.save()
-                categoryMessages.append(CategorySaveNotice.entry(edit: edit, error: error,
-                    outcome: restored))
+                categoryMessages.append(CategorySaveNotice.entry(edit: edit,
+                    error: restored == .saved ? reason : error, outcome: restored))
+                wasKept = restored == .saved
             } catch {
                 categoryMessages.append(CategorySaveNotice.Entry(
                     text: "Couldn't restore “\(edit.name)”: " + error.localizedDescription, wasKept: false))
                 log("Category undo failed: " + error.localizedDescription)
             }
-            item.report(error)
+            item.report(wasKept ? nil : error)
         }
         if let context = affected.first?.presentation.context {
             do {

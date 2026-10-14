@@ -19,3 +19,9 @@ final class Category {
         self.skillSlugs = []
     }
 }
+
+extension CategoryRecord {
+    init(_ category: Category) {
+        self.init(name: category.name, projectKeys: category.projectKeys, skillSlugs: category.skillSlugs)
+    }
+}
