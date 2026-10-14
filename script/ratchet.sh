@@ -9,7 +9,7 @@
 #
 # Usage
 #   ratchet.sh                     pre-commit, over the index: refuses a newly skipped test (outside the allowlist), a
-#                                  secret, a tmp/ cite from a plan that isn't in flight (on a merge, only a cite new against
+#                                  secret, a tmp/ cite outside a live plan or holding a <placeholder> (on a merge, only a cite new against
 #                                  every parent), a frozen acceptance section whose hash no longer matches, a change the
 #                                  project's own check refuses (RATCHET_PROJECT_CHECK), a file still holding conflict markers
 #                                  (an opening `<<<<<<<` and a closing `>>>>>>>` line both added), a staged briefing that fails
@@ -851,6 +851,7 @@ cite_ok() {   # $1 = cite, $2 = PLAN.md content → 0 iff an ADDED docs line may
   [ "$1" = "$RATCHET_RESUME_NOTE" ] && return 0                # the resume carrier
   case "$1" in
     tmp/PLAN-[A-Z]*) return 0 ;;                               # the convention's own placeholder (tmp/PLAN-NN/…)
+    tmp/PLAN-[0-9]*'<'[A-Za-z]*) return 1 ;;                  # a <placeholder> is no path: tmp-tidy refuses it at the close, so refuse it here (a </tag> is not one; one inside a brace set is left to tmp-tidy)
     tmp/PLAN-[0-9]*)
       plan="$(printf '%s\n' "$1" | grep -oE '^tmp/PLAN-[0-9]+' | cut -d/ -f2)"
       case "$(plan_status "$2" "$plan")" in
@@ -866,6 +867,7 @@ tmp_cite_offenders() {   # stdin = cites; $1 = PLAN.md content → one `cite (wh
     [ -n "$c" ] || continue
     cite_ok "$c" "$1" && continue
     case "$c" in
+      tmp/PLAN-[0-9]*'<'[A-Za-z]*) echo "$c (a <placeholder> is not a path; write a glob (\`*\`) or a brace set (\`{a,b}\`) for the files it means)" ;;
       tmp/PLAN-[0-9]*) plan="$(printf '%s\n' "$c" | grep -oE '^tmp/PLAN-[0-9]+' | cut -d/ -f2)"
                        echo "$c ($plan is $(plan_status "$1" "$plan") — cite the tracked ${RATCHET_PLANS_DIR:-docs/plans}/$plan-review/ path or the archive)" ;;
       tmp/bounded|tmp/bounded/*) echo "$c (a small change's scratch is disposable and goes with its worktree — commit what the entry must keep, and cite that)" ;;
@@ -901,7 +903,7 @@ tmp_cite_guard() {   # stdin = unified diff (vs the first parent); $1 = PLAN.md 
   fresh="$(fresh_cites)" || return 2
   for o in ${1+"$@"}; do fresh="$(comm -12 <(printf '%s\n' "$fresh") <(printf '%s\n' "$o"))" || return 2; done
   bad="$(tmp_cite_offenders "$pm" <<< "$fresh")" || return 2
-  [ -z "$bad" ] || { echo "ratchet: a docs line cites tmp/ scratch outside an open plan's tmp/PLAN-NN/ (drift):"; printf '%s\n' "$bad" | sed 's/^/  /'; return 1; }
+  [ -z "$bad" ] || { echo "ratchet: a docs line cites tmp/ scratch outside an open plan's tmp/PLAN-NN/ (drift), or with a <placeholder>:"; printf '%s\n' "$bad" | sed 's/^/  /'; return 1; }
   return 0
 }
 merge_heads() {   # → the in-progress merge's other parents (MERGE_HEAD, one per line; empty when no merge is in progress — the
@@ -2079,6 +2081,15 @@ outside'
   grep -qF '01.2-verdict.md' <<< "$so" && fail "a cite the other parent already carries was reported as new on the merge"
   tmp_cite_guard "$planmd" <<< "$inh" >/dev/null 2>&1 && fail "with no other parent both cites are new — the guard passed them"
   rc=0; ( PATH=/nonexistent fresh_cites <<< "$vs2" >/dev/null 2>&1 ) || rc=$?; [ "$rc" -eq 2 ] || fail "a tool failure in fresh_cites read as no cites (rc=$rc)"
+  # 8d. a <placeholder> in an open plan's cite is refused when it's written, with tmp-tidy's fix (PLAN-54 and PLAN-57 each met it only at
+  #     the close); the convention's own tmp/PLAN-NN/<stage>-<kind> form stays prose, and the same plan's plain cite stays legal, also
+  #     inside an HTML tag (a </code> is no placeholder)
+  ph="$(printf '%s\n' 'diff --git docs/plans/PLAN-02-review/EVIDENCE.md docs/plans/PLAN-02-review/EVIDENCE.md' '--- docs/plans/PLAN-02-review/EVIDENCE.md' '+++ docs/plans/PLAN-02-review/EVIDENCE.md' '@@ -0,0 +1,3 @@' \
+    '+| 02.1-b | t | abc, 0 | m | 1 | `tmp/PLAN-02/02.1-<letter>-c5-green.log` |' '+the form: `tmp/PLAN-NN/<stage>-<kind>[-rN].<ext>`; plain: `tmp/PLAN-02/02.1-b-green.log`' '+html: <code>tmp/PLAN-02/02.1-b-green.log</code>, and a < b')"
+  so="$(printf '%s\n' "$ph" | tmp_cite_guard "$planmd" 2>&1)" && fail "a <placeholder> in an open plan's cite passed the cite guard"
+  grep -qF 'tmp/PLAN-02/02.1-<letter>-c5-green.log (a <placeholder> is not a path' <<< "$so" || fail "the placeholder cite was not named with its fix: $so"
+  [ "$(grep -c '^  tmp/' <<< "$so")" -eq 1 ] || fail "expected exactly 1 placeholder offender: $so"
+  cite_ok 'tmp/PLAN-NN/<stage>-<kind>.log' "$planmd" || fail "the convention's own placeholder form was refused"
   # (8c's producer probes: the close branch's listing and its manifest read, each failing AFTER printing the true output — exit 2, never a pass)
   mkdir -p "$d/lsfail" "$d/showfail"
   printf '#!/bin/sh\nif [ "$1" = ls-files ] && [ "$2" = --cached ] && [ "$#" -eq 2 ]; then "%s" "$@"; exit 73; fi\nexec "%s" "$@"\n' "$(command -v git)" "$(command -v git)" > "$d/lsfail/git"
