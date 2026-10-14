@@ -21,6 +21,9 @@ final class CLIDeployFixture {
     let root: String
     let lock: String
     var handler: CLIDeployHandler { CLIDeployHandler(service: service, files: directory.files) }
+    var readHandler: CLIReadHandler {
+        CLIReadHandler(store: store, installedAgents: platform.installedPlatforms, deployments: service)
+    }
 
     init(installed: [PlatformTarget] = [.claudeCode, .codex, .cursor, .hermes],
          save: @escaping (ModelContext) throws -> Void = { try $0.save() },

@@ -50,9 +50,12 @@ struct CLINameResolver {
         return project
     }
 
-    func machine(_ name: String, machines: [DeployIntentMachine]) throws -> DeployIntentMachine {
+    func machine(_ name: String, catalog: DeployTargetCatalog) throws -> DeployIntentMachine {
+        let machines = catalog.machines
+        let aliases = catalog.publishedNamesByID
         let matches = machines.filter { $0.id.caseInsensitiveCompare(name) == .orderedSame
-            || $0.name.caseInsensitiveCompare(name) == .orderedSame }
+            || $0.name.caseInsensitiveCompare(name) == .orderedSame
+            || aliases[$0.id]?.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) == true }
         guard matches.count <= 1 else {
             throw ambiguous("machine", name, candidates: matches.map { $0.name + " — " + $0.id })
         }

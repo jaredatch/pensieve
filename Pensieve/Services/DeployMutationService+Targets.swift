@@ -5,6 +5,12 @@ struct DeployTargetCatalog {
     let machines: [DeployIntentMachine]
     let states: [MachineState]
     let intents: [MachineDeployIntent]
+
+    var publishedNamesByID: [String: [String]] {
+        Dictionary(states.map {
+            ($0.machineID, [$0.name, PublishedStringSanitizer.name($0.name, fallback: "Mac")])
+        }, uniquingKeysWith: { first, _ in first })
+    }
 }
 
 extension DeployMutationService {

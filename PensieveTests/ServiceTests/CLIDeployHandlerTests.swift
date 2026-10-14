@@ -97,6 +97,7 @@ final class CLIDeployHandlerTests: XCTestCase {
         XCTAssertTrue(h.platform.isDeployed(skill: h.skill, platform: .claudeCode))
         XCTAssertTrue(h.platform.isDeployed(skill: h.skill, platform: .codex))
         try assertUninstalledAndUnseenIntentWithdrawal(wildcard: true)
+        try assertListedMachineNamesReachTheirTargets()
     }
 
     func testKeylessProjectsStayLocalAndWildcardListsUnsupportedAgents() throws {
@@ -118,6 +119,7 @@ final class CLIDeployHandlerTests: XCTestCase {
         XCTAssertTrue(removal.envelope.ok)
         XCTAssertFalse(h.platform.isDeployed(skill: h.skill, platform: .codex, target: .project(h.keyless)))
         XCTAssertEqual(try h.intents(), before)
+        try assertKeylessWildcardIgnoresUserWideIntents()
     }
 
     func testRefusedAgentNamesAndAmbiguousProjectsChangeNothing() throws {
@@ -179,6 +181,7 @@ final class CLIDeployHandlerTests: XCTestCase {
         let applied = h.handler.handle(h.request(machines: [otherID]), context: h.context)
         XCTAssertTrue(applied.envelope.ok)
         XCTAssertEqual(try h.intents(), [otherID + "|" + h.skill.directoryName + "|claudeCode"])
+        try assertPublishedMachineAliasesRemainAmbiguous()
     }
 
     func testSharedWindowAndCommandLockAndSaveRollback() throws {

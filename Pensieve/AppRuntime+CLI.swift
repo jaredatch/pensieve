@@ -44,7 +44,7 @@ extension AppRuntime {
         let files = FileService()
         let handler = CLIReadHandler(store: SkillStore(fileService: files, baseDir: paths.skillsDir, storeRoot: paths.storeRoot),
             installedAgents: platformVM.installedPlatforms,
-            machines: machineObservability.stateService, storeRoot: paths.storeRoot)
+            deployments: deployMutations)
         let bundleID = Bundle.main.bundleIdentifier ?? "com.jaredatch.Pensieve"
         let path = CLIProtocol.socketPath(appSupport: paths.appSupportDir, bundleID: bundleID)
         do {

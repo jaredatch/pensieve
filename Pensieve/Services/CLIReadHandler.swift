@@ -8,8 +8,7 @@ protocol CLIReadHandling {
 struct CLIReadHandler: CLIReadHandling {
     let store: SkillStoreProtocol
     let installedAgents: () -> [PlatformTarget]
-    let machines: MachineStateServicing
-    let storeRoot: String
+    let deployments: DeployMutationServicing
 
     @MainActor
     func handle(_ request: CLIRequest, context: ModelContext) -> CLIReply {
@@ -34,9 +33,13 @@ struct CLIReadHandler: CLIReadHandling {
                              "projectScope": .bool($0.supportsProjectScope)])
                 }))
             case "machine list":
-                return .success(.array(machines.readAll(fromRoot: storeRoot).map {
-                    .object(["id": .string($0.machineID), "name": .string($0.name),
-                             "agents": .array($0.agents.map { .string(PlatformTarget.cliID(for: $0)) })])
+                let catalog = try deployments.targetCatalog(context: context,
+                    localID: deployments.dependencies.identity.identifier())
+                return .success(.array(catalog.machines.map { machine in
+                    let state = catalog.states.first { $0.machineID == machine.id }
+                    let agents = state?.agents ?? (machine.isLocal ? installedAgents().map(\.rawValue) : [])
+                    return .object(["id": .string(machine.id), "name": .string(machine.name),
+                             "agents": .array(agents.map { .string(PlatformTarget.cliID(for: $0)) })])
                 }))
             case "project list":
                 let projects = try context.fetch(FetchDescriptor<Project>()).sorted { ($0.name, $0.path) < ($1.name, $1.path) }

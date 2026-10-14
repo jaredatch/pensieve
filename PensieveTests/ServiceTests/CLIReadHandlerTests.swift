@@ -17,8 +17,10 @@ final class CLIReadHandlerTests: XCTestCase {
         let paths = AppRuntimePaths(storeRoot: directory.path + "/store", appSupportDir: directory.path + "/support")
         let store = SkillStore(fileService: directory.files, baseDir: paths.skillsDir, storeRoot: paths.storeRoot)
         let machines = paths.makeMachineStateService(defaults: try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString)))
-        let handler = CLIReadHandler(store: store, installedAgents: { [] },
-            machines: machines, storeRoot: paths.storeRoot)
+        let deployments = DeployMutationService(platformVM: paths.makePlatformViewModel(), dependencies: .live(
+            identity: DeployIntentIdentityStub(id: CLIDeployFixture.localID), stateService: machines,
+            root: paths.storeRoot, lockPath: paths.syncLockPath, notifier: {}, reconcile: { _ in BatchResult() }))
+        let handler = CLIReadHandler(store: store, installedAgents: { [] }, deployments: deployments)
         let shown = handler.handle(CLIRequest(command: "skill show", arguments: ["review"]), context: context)
         XCTAssertTrue(shown.envelope.ok, "Metadata succeeds even when content is missing")
         XCTAssertEqual(shown.envelope.data, .object([
@@ -60,6 +62,7 @@ final class CLIReadHandlerTests: XCTestCase {
         try machines.write(machine, toRoot: paths.storeRoot)
         let machineList = handler.handle(CLIRequest(command: "machine list"), context: context)
         XCTAssertEqual(machineList.envelope.data, .array([.object([
+            "id": .string(CLIDeployFixture.localID), "name": .string("This Mac"), "agents": .array([])]), .object([
             "id": .string(machine.machineID), "name": .string("Mini"), "agents": .array([.string("claude")])])]))
     }
 

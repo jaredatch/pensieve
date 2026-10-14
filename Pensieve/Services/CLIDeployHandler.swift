@@ -43,7 +43,7 @@ struct CLIDeployHandler {
         let catalog = try service.targetCatalog(context: context, localID: localID)
         let machines = catalog.machines, states = catalog.states
         let targets = options.machines.isEmpty ? machines.filter(\.isLocal)
-            : try options.machines.map { try lookup.machine($0, machines: machines) }
+            : try options.machines.map { try lookup.machine($0, catalog: catalog) }
         let explicit = try options.agents.filter { $0 != "*" }.map(lookup.agent)
         var pairs: [DeployMutationPair] = [], skipped: [CLIValue] = []
         var seen: Set<String> = []
@@ -55,7 +55,7 @@ struct CLIDeployHandler {
                     "\(agent.cliID) is not installed on \(machine.name) (\(machine.id)).",
                     hint: "Check pensieve agent list and pensieve machine list.", exit: 1))
             }
-            let heldIntents = catalog.intents.filter { row in
+            let heldIntents = isDirect ? [] : catalog.intents.filter { row in
                 row.machineID == machine.id && row.projectKey == project?.identityKey
                     && skills.contains(where: { $0.directoryName == row.skillSlug })
             }
