@@ -244,6 +244,14 @@ struct ContentView: View {
         } message: {
             Text(library.deletionNotice?.message ?? "")
         }
+        .alert(library.manifestSaves?.categoryNotice?.title ?? "", isPresented: Binding(
+            get: { library.manifestSaves?.categoryNotice != nil },
+            set: { if !$0 { library.manifestSaves?.categoryNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(library.manifestSaves?.categoryNotice?.message ?? "")
+        }
         .focusedSceneValue(\.addSkillFromGitHub, presentGitHubInstall)
     }
 }

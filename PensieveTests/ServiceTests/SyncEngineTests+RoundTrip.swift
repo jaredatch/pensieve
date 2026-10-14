@@ -73,6 +73,12 @@ extension SyncEngineTests {
             let readB = try manifest.read(fromRoot: cloneB).categories.first { $0.name == "Swift" }
             XCTAssertEqual(readA?.skillSlugs, ["alpha", "beta"], "clone A converges to both slugs deduped")
             XCTAssertEqual(readB?.skillSlugs, ["alpha", "beta"], "clone B converges to both slugs deduped")
+            for (root, context) in [(cloneA, contextA), (cloneB, contextB)] {
+                XCTAssertEqual(try manifest.read(fromRoot: root).categories.count, 1)
+                let rows = try context.fetch(FetchDescriptor<PensieveCategory>())
+                XCTAssertEqual(rows.count, 1)
+                XCTAssertEqual(rows.first?.skillSlugs, ["alpha", "beta"])
+            }
         }
     }
 

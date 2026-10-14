@@ -189,7 +189,7 @@ extension ManifestSaveTests {
             ["alpha", created.directoryName], file: file, line: line)
     }
 
-    func testRefusedCategoryDeletionSurvivesLocalSkillRetirement() async throws {
+    func testRestoredCategoryDeletionAcceptsLocalSkillRetirement() async throws {
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
         h.local.skillSlugs = ["alpha"]
@@ -198,7 +198,7 @@ extension ManifestSaveTests {
         h.recording.failingWrites = 1
         h.categories.delete(h.local, context: h.context)
         await h.saves.waitUntilIdle()
-        XCTAssertFalse(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.name == "Local" })
+        XCTAssertTrue(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.name == "Local" })
         XCTAssertTrue(try h.manifest.read(fromRoot: h.root).categories.contains { $0.name == "Local" })
         let platform = PlatformViewModel(fileService: h.files,
             linkService: TestPaths.linkService(fileService: h.files),
@@ -210,11 +210,13 @@ extension ManifestSaveTests {
         await h.saves.waitUntilIdle()
         let durable = try XCTUnwrap(try h.manifest.read(fromRoot: h.root).categories.first { $0.name == "Local" })
         XCTAssertTrue(durable.skillSlugs.isEmpty, "The later save must really rewrite the refused category's record")
-        XCTAssertFalse(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.name == "Local" },
-            "A successful local retirement must not look like a pulled recreation")
+        let restored = try XCTUnwrap(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).first { $0.name == "Local" })
+        XCTAssertEqual(restored.id, h.local.id)
+        XCTAssertTrue(restored.skillSlugs.isEmpty, "The restored category must accept the skill retirement")
     }
 
     func testRebuildFailureAfterManifestSuccessNamesTheRebuild() async throws {
+        try await checkAcceptedCategoryFetchFailure()
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
         h.recording.failingRebuildSnapshots = 1
@@ -254,52 +256,43 @@ extension ManifestSaveTests {
         XCTAssertFalse(message.contains("manifest was saved"), "A skipped change never published: " + message)
     }
 
-    func testDeletingRefusedRenamePublishesOriginalRemovalOrReportsRefusal() async throws {
-        let h = try ManifestSaveFixture()
-        defer { h.cleanup() }
-        h.recording.failingWrites = 1
-        h.categories.rename(h.local, to: "Refused", context: h.context)
-        await h.saves.waitUntilIdle()
-        XCTAssertEqual(h.local.name, "Refused")
-        let reports = h.messages.lines.count
-        let writes = h.recording.writes.count
-        var saves = 0
-        h.saves.didSave = { saves += 1 }
-        h.categories.delete(h.local, context: h.context)
-        await h.saves.waitUntilIdle()
-        let durable = try h.manifest.read(fromRoot: h.root)
-        XCTAssertTrue(durable.categories.contains { $0.name == "Local" },
-            "A dependent delete must retain the refused rename's original record")
-        XCTAssertFalse(durable.categories.contains { $0.name == "Refused" })
-        XCTAssertEqual(h.recording.writes.count, writes, "A refused delete must not publish")
-        XCTAssertEqual(saves, 0, "A refused delete must not count as a saved change")
-        XCTAssertEqual(h.messages.lines.count, reports + 1)
-        XCTAssertTrue(h.messages.lines.last?.contains("could not be saved") == true,
-            "Deleting the refused rename must report that it could not be saved")
-        XCTAssertFalse(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.name == "Refused" })
+    func testDeletingRestoredRenameRemovesOriginalOrRestoresSameIdentity() async throws {
+        for refusedDelete in [false, true] {
+            let h = try ManifestSaveFixture()
+            defer { h.cleanup() }
+            let id = h.local.id
+            h.recording.failingWrites = 1
+            h.categories.rename(h.local, to: "Refused", context: h.context)
+            await h.saves.waitUntilIdle()
+            XCTAssertEqual(h.local.name, "Local")
+            h.recording.failingWrites = refusedDelete ? 1 : 0
+            var saves = 0
+            h.saves.didSave = { saves += 1 }
+            h.categories.delete(h.local, context: h.context)
+            await h.saves.waitUntilIdle()
+            let durable = try h.manifest.read(fromRoot: h.root)
+            XCTAssertEqual(durable.categories.contains { $0.name == "Local" }, refusedDelete)
+            XCTAssertFalse(durable.categories.contains { $0.name == "Refused" })
+            let window = try h.context.fetch(FetchDescriptor<Pensieve.Category>())
+            XCTAssertEqual(window.contains { $0.id == id && $0.name == "Local" }, refusedDelete)
+            XCTAssertEqual(saves, refusedDelete ? 0 : 1)
+            XCTAssertEqual(h.recording.writes.count, refusedDelete ? 0 : 1)
+        }
     }
 
-    func testDeletingRefusedCreateReportsRefusalWhenPresentationCannotRefresh() async throws {
+    func testCreateUndoNeedsNoPresentationReadAndDeleteCanSaveAfterward() async throws {
         let h = try ManifestSaveFixture()
         defer { h.cleanup() }
         h.recording.failingWrites = 1
-        h.recording.failingSnapshots = 1
+        h.recording.failingSnapshots = .max
         let created = try XCTUnwrap(h.categories.create(name: "Refused", context: h.context))
+        let id = created.id
         await h.saves.waitUntilIdle()
-        let before = try h.manifestBytes(), reports = h.messages.lines.count, writes = h.recording.writes.count
-        var saves = 0
-        h.saves.didSave = { saves += 1 }
-        // Keep the refused creation when neither presentation read can acknowledge its removal.
-        h.recording.failingSnapshots = 1
-        h.categories.delete(created, context: h.context)
+        XCTAssertFalse(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.id == id })
+        XCTAssertTrue(h.saves.categoryNotice?.message.contains("undone") == true)
+        h.categories.delete(h.doomed, context: h.context)
         await h.saves.waitUntilIdle()
-        XCTAssertEqual(try h.manifestBytes(), before, "A refused create has no durable category to remove")
-        XCTAssertEqual(h.recording.writes.count, writes, "A refused delete must not publish")
-        XCTAssertEqual(saves, 0, "A refused delete must not count as a saved change")
-        XCTAssertEqual(h.messages.lines.count, reports + 2, "The failed refresh and dependent delete each report")
-        XCTAssertTrue(h.messages.lines.dropFirst(reports).first?.contains("Couldn't refresh a refused edit") == true)
-        XCTAssertTrue(h.messages.lines.last?.contains("could not be saved") == true,
-            "Deleting the refused create must report that it could not be saved")
-        XCTAssertFalse(try h.context.fetch(FetchDescriptor<Pensieve.Category>()).contains { $0.name == "Refused" })
+        XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories.map(\.name), ["Local"])
+        XCTAssertEqual(h.recording.writes.count, 1)
     }
 }

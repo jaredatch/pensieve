@@ -156,7 +156,7 @@ struct DetailView: View {
                              homeDirectory: runtime.paths.homeDirectory, skillsDirectory: runtime.paths.skillsDir)
         case .deployments:
             SkillDeploymentsTab(skill: skill, snapshot: snapshot, statusIsCurrent: statusIsCurrent, projects: projects,
-                                platformVM: platformVM, addsFenced: library.addsFenced,
+                                platformVM: platformVM, library: library,
                                 intentDependencies: intentDependencies,
                                 machineStates: machineStates,
                                 localMachineID: localMachineID,

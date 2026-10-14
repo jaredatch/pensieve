@@ -1,5 +1,6 @@
 import SwiftUI
 
+/// Category name entry shared by Add and the list/detail Rename actions.
 struct EntityNameSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -7,6 +8,7 @@ struct EntityNameSheet: View {
     let fieldLabel: String
     let actionTitle: String
     let onCommit: (String) -> Void
+    let validate: (String) -> String?
 
     @State private var name: String
     @State private var didSubmit = false
@@ -17,15 +19,20 @@ struct EntityNameSheet: View {
     }
 
     private var isValid: Bool {
-        !trimmedName.isEmpty
+        !trimmedName.isEmpty && nameError == nil
+    }
+
+    private var nameError: String? {
+        validate(trimmedName)
     }
 
     init(title: String, fieldLabel: String, actionTitle: String,
-         initialName: String = "", onCommit: @escaping (String) -> Void) {
+         initialName: String = "", validate: @escaping (String) -> String?, onCommit: @escaping (String) -> Void) {
         self.title = title
         self.fieldLabel = fieldLabel
         self.actionTitle = actionTitle
         self.onCommit = onCommit
+        self.validate = validate
         _name = State(initialValue: initialName)
     }
 
@@ -36,6 +43,11 @@ struct EntityNameSheet: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($nameFocused)
                 .onSubmit(submit)
+            if let nameError {
+                Text(nameError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
