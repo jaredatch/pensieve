@@ -90,8 +90,12 @@ final class AppRuntimeCommandReadinessTests: XCTestCase {
             let client = try SocketTransport.connect(to: socket)
             defer { close(client) }
             _ = try SocketTransport.readFrame(client, limit: 1_024, timeout: TestWait.timeoutSeconds)
-            try SocketTransport.writeFrame(CLIRequest(command: "skill list"), to: client, timeout: TestWait.timeoutSeconds)
+            try SocketTransport.writeFrame(CLIRequest(command: "skill list", acknowledgeReadiness: true),
+                to: client, timeout: TestWait.timeoutSeconds)
             sent.fulfill()
+            let ready = try SocketTransport.readFrame(client, limit: 1_024, timeout: TestWait.timeoutSeconds)
+            XCTAssertTrue(try JSONDecoder().decode(CLIReadinessAcknowledgement.self, from: ready).ready,
+                          "readiness must be acknowledged before a command's own reply")
             let data = try SocketTransport.readFrame(client, limit: CLIProtocol.replyLimit, timeout: TestWait.timeoutSeconds)
             received.increment()
             return try JSONDecoder().decode(CLIReply.self, from: data)

@@ -13,8 +13,13 @@ struct CLIAppLauncher: CLIAppLaunching {
     let fileService: FileServiceProtocol
     var desktopSession: CLIDesktopSessionReading = CLIDesktopSession()
     var environment = ProcessInfo.processInfo.environment
+    var usesAlternateAppSupport = false
 
     func launch(appPath: String, bundleID: String, deadline: TimeInterval) -> CLIReply? {
+        guard !usesAlternateAppSupport else {
+            return unavailable("Automatic launch is disabled for an alternate App Support directory.", appPath: appPath,
+                hint: "Start the isolated app with script/dogfood.sh, then use its CLI against the same directory.")
+        }
         guard let entry = getpwuid(getuid()), let home = entry.pointee.pw_dir else {
             return unavailable("Unable to resolve this user's real home.", appPath: appPath)
         }

@@ -92,7 +92,12 @@ enum SocketTransport {
         var buffer = [UInt8](repeating: 0, count: 4_096)
         while true {
             try wait(descriptor, events: Int16(POLLIN), deadline: expires)
-            let count = recv(descriptor, &buffer, buffer.count, 0)
+            // Leave the next frame in the stream when several arrive in one kernel read.
+            let available = recv(descriptor, &buffer, buffer.count, MSG_PEEK)
+            if available < 0 && (errno == EINTR || errno == EAGAIN) { continue }
+            guard available > 0 else { throw SocketError.disconnected }
+            let frameBytes = buffer.prefix(available).firstIndex(of: 10).map { $0 + 1 } ?? available
+            let count = recv(descriptor, &buffer, frameBytes, 0)
             if count < 0 && (errno == EINTR || errno == EAGAIN) { continue }
             guard count > 0 else { throw SocketError.disconnected }
             if let end = buffer.prefix(count).firstIndex(of: 10) {

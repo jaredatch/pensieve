@@ -16,7 +16,7 @@ enum CLIEntry {
             if json, let help = try jsonHelp(args) { return printReply(.success(help), json: true) }
             let command = try PensieveCommand.parseAsRoot(args)
             let result = try execute(command, app: app, info: info,
-                appSupport: supportDirectory(in: arguments, fallback: appSupport), files: files)
+                appSupport: supportDirectory(in: arguments, fallback: appSupport), defaultAppSupport: appSupport, files: files)
             return printReply(result.reply, json: json, human: result.human)
         } catch {
             if PensieveCommand.exitCode(for: error).rawValue == 0 {
@@ -29,13 +29,16 @@ enum CLIEntry {
     }
 
     private static func execute(_ command: ParsableCommand, app: String, info: [String: Any],
-                                appSupport: String, files: FileServiceProtocol) throws -> (reply: CLIReply, human: String?) {
+                                appSupport: String, defaultAppSupport: String,
+                                files: FileServiceProtocol) throws -> (reply: CLIReply, human: String?) {
         let version = info["CFBundleShortVersionString"] as? String ?? "unknown"
         let bundleID = info["CFBundleIdentifier"] as? String ?? "com.jaredatch.Pensieve"
         if let command = command as? ReadCommand {
             let client = CLIClient(appPath: app,
                 socketPath: CLIProtocol.socketPath(appSupport: appSupport, bundleID: bundleID), fileService: files,
-                launcher: CLIAppLauncher(fileService: files), bundleID: bundleID)
+                launcher: CLIAppLauncher(fileService: files,
+                    usesAlternateAppSupport: files.realPath(at: appSupport) != files.realPath(at: defaultAppSupport)),
+                bundleID: bundleID)
             return (client.send(command.request), nil)
         }
         if command is VersionCommand {

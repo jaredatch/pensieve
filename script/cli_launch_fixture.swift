@@ -31,6 +31,12 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate {
 
 if CommandLine.arguments.contains("--frontmost") {
     print(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1)
+} else if CommandLine.arguments.count > 2 && CommandLine.arguments[1] == "--reopen" {
+    let event = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass),
+        eventID: AEEventID(kAEReopenApplication),
+        targetDescriptor: NSAppleEventDescriptor(processIdentifier: Int32(CommandLine.arguments[2])!),
+        returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+    _ = try event.sendEvent(options: [.waitForReply], timeout: 5)
 } else if CommandLine.arguments.count > 2 && CommandLine.arguments[1] == "--windows" {
     let pid = Int32(CommandLine.arguments[2])!
     let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []

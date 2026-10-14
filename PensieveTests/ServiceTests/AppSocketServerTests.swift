@@ -5,6 +5,21 @@ import XCTest
 @MainActor
 final class AppSocketServerTests: XCTestCase {
     func testHandshakePermissionsAndRealPeerRequest() async throws {
+        // A stream may deliver the handshake/readiness/reply in one recv. Reading one frame
+        // must preserve the next, regardless of the sender's write boundaries.
+        try await BlockingWork.run {
+            var pair: [Int32] = [-1, -1]
+            XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair), 0)
+            defer { close(pair[0]); close(pair[1]) }
+            let burst = Data("{\"ready\":true}\n{\"ok\":true}\n".utf8)
+            let sent = burst.withUnsafeBytes { send(pair[1], $0.baseAddress, $0.count, 0) }
+            XCTAssertEqual(sent, burst.count)
+            shutdown(pair[1], SHUT_WR)
+            for expected in ["{\"ready\":true}", "{\"ok\":true}"] {
+                let frame = try SocketTransport.readFrame(pair[0], limit: 1_024, timeout: TestWait.hostedActionTimeoutSeconds)
+                XCTAssertEqual(String(data: frame, encoding: .utf8), expected)
+            }
+        }
         let directory = try SocketTestDirectory()
         let path = directory.path + "/s"
         let server = try server(at: path)

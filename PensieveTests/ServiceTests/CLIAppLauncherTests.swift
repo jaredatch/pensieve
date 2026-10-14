@@ -3,6 +3,14 @@ import XCTest
 
 final class CLIAppLauncherTests: XCTestCase {
     func testNoDesktopAndUnknownDesktopRefuseBeforeLaunching() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let query = Process()
+        query.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        query.arguments = ["-B", root.appendingPathComponent("script/cli_desktop_session_test.py").path]
+        try query.run()
+        query.waitUntilExit()
+        XCTAssertEqual(query.terminationStatus, 0, "an SSH caller must be able to use its user's console desktop")
         let session = SessionProbe()
         let launcher = CLIAppLauncher(fileService: FileService(), desktopSession: session, environment: [:])
         let path = "/unused-launch-fixture.app"

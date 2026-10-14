@@ -8,9 +8,17 @@ enum CLIProtocol {
     static let backgroundArgument = "--background"
     // Three times the slowest isolated cold launch (0.942 s), rounded up to a whole second.
     static let readyTimeout: TimeInterval = 3
+    static let commandReplyTimeout: TimeInterval = 30
 
-    static func socketPath(appSupport: String, bundleID: String) -> String {
-        appSupport + "/" + bundleID + ".sock"
+    static func socketPath(appSupport: String, bundleID: String,
+                           fileService: FileServiceProtocol = FileService()) -> String {
+        var directory = appSupport
+        if let alias = ProcessInfo.processInfo.environment["PENSIEVE_SOCKET_DIRECTORY"],
+           let identity = fileService.fileIdentity(at: appSupport, followingLinks: true),
+           fileService.fileIdentity(at: alias, followingLinks: true) == identity {
+            directory = alias
+        }
+        return directory + "/" + bundleID + ".sock"
     }
 }
 
@@ -85,6 +93,11 @@ struct CLIHandshake: Codable {
     let bundlePath: String
     var protocolVersion = CLIProtocol.version
     let appVersion: String
+    var supportsReadiness: Bool?
+}
+
+struct CLIReadinessAcknowledgement: Codable {
+    let ready: Bool
 }
 
 struct CLIRequest: Codable {
@@ -92,4 +105,5 @@ struct CLIRequest: Codable {
     let command: String
     var arguments: [String] = []
     var content = false
+    var acknowledgeReadiness: Bool?
 }

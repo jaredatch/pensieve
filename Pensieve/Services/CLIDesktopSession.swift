@@ -1,5 +1,6 @@
 import Foundation
-import Security
+import Darwin
+import SystemConfiguration
 
 protocol CLIDesktopSessionReading {
     func hasGraphicAccess() throws -> Bool
@@ -7,20 +8,25 @@ protocol CLIDesktopSessionReading {
 
 struct CLIDesktopSession: CLIDesktopSessionReading {
     func hasGraphicAccess() throws -> Bool {
-        var session: SecuritySessionId = 0
-        var attributes = SessionAttributeBits()
-        let status = SessionGetInfo(callerSecuritySession, &session, &attributes)
-        guard status == errSecSuccess else { throw DesktopSessionError.queryFailed(status) }
-        return attributes.contains(.sessionHasGraphicAccess)
+        // SSH and SSH-born tmux sessions have no graphics bit of their own. LaunchServices can
+        // still start an app in this user's console session, so query the console owner instead.
+        var user: uid_t = 0
+        var group: gid_t = 0
+        guard let name = SCDynamicStoreCopyConsoleUser(nil, &user, &group) as String? else {
+            let status = SCError()
+            guard status == kSCStatusOK || status == kSCStatusNoKey else { throw DesktopSessionError.queryFailed(status) }
+            return false
+        }
+        return name != "loginwindow" && name != "_mbsetupuser" && user == getuid()
     }
 }
 
 private enum DesktopSessionError: LocalizedError {
-    case queryFailed(OSStatus)
+    case queryFailed(Int32)
 
     var errorDescription: String? {
         switch self {
-        case let .queryFailed(status): "Unable to check the desktop session (Security error \(status))."
+        case let .queryFailed(status): "Unable to check the console desktop session (SystemConfiguration error \(status))."
         }
     }
 }

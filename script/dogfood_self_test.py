@@ -158,6 +158,13 @@ class DogfoodCLITests(DogfoodTestCase):
         result = self.run_script('clean', '--background', '--foreground')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('received: --background', result.stdout)
+        alias = self.fake_home / '.s'
+        self.assertEqual(alias.resolve(), self.fake_home / 'Library/Application Support/Pensieve')
+        alias.unlink()
+        alias.symlink_to(self.root)
+        refused = self.run_script('clean', '--background', '--foreground')
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn('socket alias is occupied', refused.stderr)
 
 
 class DogfoodKeychainTests(DogfoodTestCase):

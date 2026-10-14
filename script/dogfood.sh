@@ -49,7 +49,7 @@
 #   --dry-run      print the profile and the launch command; launch nothing
 #   --background   pass --background to the app
 #   --cli          run CLI arguments after the app path; requires an existing sandbox home and staged app
-#                  If the socket path is too long, use the same shorter --home on launch and --cli.
+#                  Uses the launcher's short alias to the same App Support socket directory.
 #   -h, --help     this text
 #
 # ENVIRONMENT
@@ -142,6 +142,7 @@ if [ "$CLI_MODE" -eq 1 ]; then
   [ "$cli_id" = "$DOGFOOD_ID" ] || die "no staged dogfood app at $CLI_APP; start dogfood.sh first"
   [ -x "$CLI_APP/Contents/Helpers/pensieve" ] || die "no CLI in $CLI_APP"
   exec env HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" PENSIEVE_DOGFOOD=1 \
+    PENSIEVE_SOCKET_DIRECTORY="$FAKE_HOME/.s" \
     "$CLI_APP/Contents/Helpers/pensieve" ${CLI_ARGS[@]+"${CLI_ARGS[@]}"}
 fi
 
@@ -191,6 +192,18 @@ if [ "$first_run" -eq 1 ]; then
   printf 'created by script/dogfood.sh %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$FAKE_HOME/$MARKER"
 fi
 [ -f "$FAKE_HOME/$MARKER" ] || die "$FAKE_HOME exists but has no $MARKER marker — pick another --home or reset by hand"
+
+# The socket remains in App Support under its bundle ID. This alias avoids Darwin's 104-byte
+# sockaddr limit at the default home; both peers verify that it names the same directory.
+mkdir -p "$FAKE_HOME/Library/Application Support/Pensieve"
+SOCKET_DIRECTORY="$FAKE_HOME/.s"
+if [ -e "$SOCKET_DIRECTORY" ] || [ -L "$SOCKET_DIRECTORY" ]; then
+  [ -L "$SOCKET_DIRECTORY" ] && [ "$(canon "$SOCKET_DIRECTORY")" = "$(canon "$FAKE_HOME/Library/Application Support/Pensieve")" ] ||
+    die "socket alias is occupied or points outside App Support: $SOCKET_DIRECTORY"
+else
+  ln -s 'Library/Application Support/Pensieve' "$SOCKET_DIRECTORY"
+fi
+export PENSIEVE_SOCKET_DIRECTORY="$SOCKET_DIRECTORY"
 
 # --- stage the app under its dogfood identity --------------------------------
 # A copy, never the source bundle: the Info.plist edit and re-seal must not touch

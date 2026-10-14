@@ -14,19 +14,21 @@ struct SocketTimeouts {
 /// Disconnecting a client only ends transport work; an accepted handler task runs to completion.
 final class AppSocketServer: AppSocketServing {
     typealias Handler = @MainActor (CLIRequest) async -> CLIReply
+    typealias Readiness = @MainActor () async -> CLIReply?
     private let source: DispatchSourceRead
     private let listener: SocketListener
 
     init(path: String, handshake: CLIHandshake, fileService: FileServiceProtocol,
          timeouts: SocketTimeouts = .init(), credentials: SocketPeerCredentialReading = SocketPeerCredentials(),
+         readiness: Readiness? = nil,
          handler: @escaping Handler) throws {
+        var handshake = handshake
+        handshake.supportsReadiness = readiness != nil
         let listener = try fileService.makeSocketListener(at: path)
         self.listener = listener
         let queue = DispatchQueue(label: "com.jaredatch.pensieve.socket.accept")
         let clients = DispatchQueue(label: "com.jaredatch.pensieve.socket.clients", attributes: .concurrent)
         let slots = DispatchSemaphore(value: 32)
-        let requestTimeout = timeouts.request
-        let replyTimeout = timeouts.reply
         source = DispatchSource.makeReadSource(fileDescriptor: listener.descriptor, queue: queue)
         source.setEventHandler {
             while true {
@@ -35,8 +37,8 @@ final class AppSocketServer: AppSocketServing {
                 guard slots.wait(timeout: .now()) == .success else { close(client); continue }
                 clients.async {
                     defer { close(client); slots.signal() }
-                    Self.serve(client, handshake: handshake, requestTimeout: requestTimeout,
-                               replyTimeout: replyTimeout, credentials: credentials, handler: handler)
+                    Self.serve(client, handshake: handshake, timeouts: timeouts,
+                               credentials: credentials, readiness: readiness, handler: handler)
                 }
             }
         }
@@ -55,9 +57,12 @@ final class AppSocketServer: AppSocketServing {
         listener.removeOwnedPath()
     }
 
-    private static func serve(_ client: Int32, handshake: CLIHandshake, requestTimeout: TimeInterval,
-                              replyTimeout: TimeInterval, credentials: SocketPeerCredentialReading,
+    private static func serve(_ client: Int32, handshake: CLIHandshake, timeouts: SocketTimeouts,
+                              credentials: SocketPeerCredentialReading,
+                              readiness: Readiness?,
                               handler: @escaping Handler) {
+        let requestTimeout = timeouts.request
+        let replyTimeout = timeouts.reply
         guard let user = try? credentials.userID(of: client), user == getuid() else { return }
         var enabled: Int32 = 1
         guard setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &enabled, socklen_t(MemoryLayout<Int32>.size)) == 0,
@@ -73,10 +78,18 @@ final class AppSocketServer: AppSocketServing {
                 return
             }
             let completed = DispatchSemaphore(value: 0)
+            let ready = DispatchSemaphore(value: 0)
             let result = SocketHandlerResult()
             Task { @MainActor in
-                result.reply = await handler(request)
+                result.refusal = await readiness?()
+                ready.signal()
+                if let refusal = result.refusal { result.reply = refusal } else { result.reply = await handler(request) }
                 completed.signal()
+            }
+            ready.wait()
+            if result.refusal == nil, request.acknowledgeReadiness == true {
+                // An accepted command still finishes if the client leaves before this acknowledgement.
+                try? SocketTransport.writeFrame(CLIReadinessAcknowledgement(ready: true), to: client, timeout: replyTimeout)
             }
             completed.wait()
             if let reply = result.reply { try SocketTransport.writeFrame(reply, to: client, timeout: replyTimeout) }
@@ -90,5 +103,6 @@ final class AppSocketServer: AppSocketServing {
 
 /// The semaphore publishes the main-actor result before the transport worker reads it.
 private final class SocketHandlerResult {
+    var refusal: CLIReply?
     var reply: CLIReply?
 }
