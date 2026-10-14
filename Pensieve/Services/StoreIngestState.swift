@@ -10,20 +10,6 @@ final class StoreIngestState {
         keyOptions: [.weakMemory, .objectPointerPersonality], valueOptions: .strongMemory)
     private let lock = NSLock()
     private var pending = false
-    private var unpublishedOwners: Set<ObjectIdentifier> = []
-
-    func setUnpublishedEdits(owner: AnyObject, pending: Bool) {
-        lock.lock()
-        defer { lock.unlock() }
-        let id = ObjectIdentifier(owner)
-        if pending { unpublishedOwners.insert(id) } else { unpublishedOwners.remove(id) }
-    }
-
-    private var hasUnpublishedEdits: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return !unpublishedOwners.isEmpty
-    }
 
     static func shared(for container: ModelContainer) -> StoreIngestState {
         registryLock.lock()
@@ -56,29 +42,17 @@ final class StoreIngestState {
     /// the edit could replace it with the still-pending disk snapshot.
     static func rebuildIfNeeded(using service: StoreRebuildServiceProtocol, root: String,
                                 context: ModelContext) throws {
-        let state = shared(for: context.container)
-        guard state.needsRebuild else { return }
-        guard !state.hasUnpublishedEdits else {
-            state.invalidate()
-            throw StoreIngestError.unpublishedEdits
-        }
+        guard shared(for: context.container).needsRebuild else { return }
         _ = try rebuild(using: service, root: root, context: context)
     }
 
     /// All sync writers use the same failure admission, including protocol-based rebuild services.
     static func rebuild(using service: StoreRebuildServiceProtocol, root: String,
                         context: ModelContext) throws -> RebuildResult {
-        let state = shared(for: context.container)
         let result = service.rebuild(fromRoot: root, context: context)
-        state.record(result)
-        if result.storeUnreadable || result.ingestIncomplete { context.rollback() }
+        shared(for: context.container).record(result)
         if result.storeUnreadable { throw SyncError.storeUnreadable(result.warnings) }
         if result.ingestIncomplete { throw SyncError.ingestIncomplete }
         return result
     }
-}
-
-enum StoreIngestError: LocalizedError {
-    case unpublishedEdits
-    var errorDescription: String? { "A library change is still waiting to save. Retry after it saves." }
 }

@@ -292,9 +292,6 @@ private extension ImportViewModel {
                                  saveContext: @escaping (ModelContext) throws -> Void) -> Set<String>? {
         do {
             try ingestIfNeeded(context: context, saveContext: saveContext)
-        } catch let error as StoreIngestError {
-            self.error = error.localizedDescription
-            return nil
         } catch {
             self.error = "Import is blocked until sync updates this Mac's library. Sync again, then retry the import."
             return nil

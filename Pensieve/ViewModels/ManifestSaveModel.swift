@@ -25,18 +25,6 @@ final class ManifestSaveModel {
     @ObservationIgnored private var refused: [ManifestRefusedEdit] = []
     @ObservationIgnored private var categoryMessages: [CategorySaveNotice.Entry] = []
     @ObservationIgnored private var worker: Task<Void, Never>?
-    @ObservationIgnored private var ingestStates: [ObjectIdentifier: StoreIngestState] = [:]
-
-    deinit {
-        for state in ingestStates.values { state.setUnpublishedEdits(owner: self, pending: false) }
-    }
-
-    private func updateIngestAdmission() {
-        let containers = Set((items.map(\.presentation) + refused).map { ObjectIdentifier($0.context.container) })
-        for (id, state) in ingestStates {
-            state.setUnpublishedEdits(owner: self, pending: containers.contains(id))
-        }
-    }
 
     private struct Item {
         let id = UUID()
@@ -64,7 +52,6 @@ final class ManifestSaveModel {
     func submit(_ change: ManifestChange, context: ModelContext, categoryEdit: CategorySaveEdit? = nil,
                 reconcile: (() -> BatchResult)? = nil, report: @escaping (Error?) -> Void) {
         precondition(Thread.isMainThread)
-        ingestStates[ObjectIdentifier(context.container)] = StoreIngestState.shared(for: context.container)
         for edit in refused where edit.context === context { edit.observe(change) }
         items.append(Item(change: change, categoryEdit: categoryEdit, reconcile: reconcile,
             presentation: ManifestRefusedEdit(change, context: context),
@@ -74,7 +61,6 @@ final class ManifestSaveModel {
                     .accept(prepared, snapshot: snapshot, context: context)
             }, report: report))
         pendingCount = items.count
-        updateIngestAdmission()
         guard worker == nil else { return }
         worker = Task { @MainActor in await self.drain() }
     }
@@ -91,7 +77,6 @@ final class ManifestSaveModel {
             savedAny = await save(items[0]) || savedAny
             items.removeFirst()
             pendingCount = items.count
-            updateIngestAdmission()
             isWaiting = false
         }
         worker = nil
@@ -125,7 +110,6 @@ final class ManifestSaveModel {
                     item.presentation.cache(local: try? manifest.snapshot(from: item.presentation.context))
                 }
                 refused.append(item.presentation)
-                updateIngestAdmission()
             }
             item.report(item.wasHealed ? nil : error)
             return false
@@ -135,9 +119,6 @@ final class ManifestSaveModel {
     @MainActor
     private func publish(_ item: Item, disk: ManifestSnapshot?) async throws
         -> (snapshot: ManifestSnapshot, published: Bool) {
-        if disk == nil, StoreIngestState.shared(for: item.presentation.context.container).needsRebuild {
-            throw ManifestSaveError.ingestPending
-        }
         var saved = try disk ?? item.fallback()
         // A fallback publishes this context's whole window. Capture its queue membership before
         // awaiting the write; another context or an edit submitted during the write is not healed.
@@ -160,7 +141,6 @@ final class ManifestSaveModel {
             items[index].wasHealed = true
         }
         refused = refused.filter { $0.acknowledge(durable: saved) }
-        updateIngestAdmission()
         return (saved, true)
     }
 
@@ -200,7 +180,6 @@ final class ManifestSaveModel {
                 refuseCategory(pending, durable: nil, error: error)
                 items.removeAll { $0.id == pending.id }
                 pendingCount = items.count
-            updateIngestAdmission()
                 continue
             }
             pending.change.apply(to: &snapshot)
@@ -236,7 +215,6 @@ final class ManifestSaveModel {
         }
         guard let durable else { return }
         refused = refused.filter { $0.refresh(durable: durable) }
-        updateIngestAdmission()
     }
 
     @MainActor
@@ -347,7 +325,6 @@ extension ManifestSaveModel {
 
 enum ManifestSaveError: LocalizedError {
     case rebuildFailed(String, manifestSaved: Bool)
-    case ingestPending
     case unsavedTarget
     var errorDescription: String? {
         switch self {
@@ -355,8 +332,6 @@ enum ManifestSaveError: LocalizedError {
             (manifestSaved ? "The sync manifest was saved, but rebuilding the local store failed: "
                 : "Rebuilding the local store failed: ") + message
         case .unsavedTarget: "This change depends on an earlier change that could not be saved."
-        case .ingestPending:
-            "This change can't update the sync manifest until sync updates this Mac's library. Sync again, then retry."
         }
     }
 }

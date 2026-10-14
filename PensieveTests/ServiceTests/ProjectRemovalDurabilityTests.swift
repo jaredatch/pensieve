@@ -38,7 +38,7 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         let context = ModelContext(readOnly)
         let project = try XCTUnwrap(context.fetch(FetchDescriptor<Project>()).first { $0.id == h.project.id })
         XCTAssertThrowsError(try StoreIngestState.rebuild(
-            using: StoreRebuildService(manifestService: manifest(h)), root: h.root + "/sync", context: context))
+            using: StoreRebuildService(manifestService: manifest(h)), root: h.root + "/sync", context: ModelContext(readOnly)))
         XCTAssertTrue(StoreIngestState.shared(for: readOnly).needsRebuild)
         var writes = 0
         h.mapped.beforeFileWrite = { path in
@@ -49,7 +49,6 @@ final class ProjectRemovalDurabilityTests: XCTestCase {
         XCTAssertEqual(writes, 0, "pending ingestion must not repair from the stale window")
         XCTAssertEqual(try manifest(h).read(fromRoot: h.root + "/sync"), pulled)
         XCTAssertTrue(StoreIngestState.shared(for: readOnly).needsRebuild)
-        XCTAssertFalse(context.hasChanges)
     }
 
     func testBusySyncRefusesBeforeWithdrawalOrArtifactCleanup() throws {

@@ -75,7 +75,7 @@ extension DeployIntentModel {
         let rebuild = StoreRebuildService(manifestService: dependencies.manifestService, save: dependencies.saveContext)
         do {
             try StoreIngestState.rebuildIfNeeded(using: rebuild, root: dependencies.root, context: context)
-        } catch let error as StoreIngestError { throw error } catch { throw DeployIntentModelError.ingestPending }
+        } catch { throw DeployIntentModelError.ingestPending }
         let currentIDs = Set(try context.fetch(FetchDescriptor<Skill>()).map(\.persistentModelID))
         guard selectedIDs.isSubset(of: currentIDs) else { throw DeployIntentModelError.selectionChanged }
     }

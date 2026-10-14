@@ -36,12 +36,11 @@ extension DeployIntentModel {
         context: ModelContext
     ) throws -> BatchResult {
         let result: BatchResult = try reportErrors {
+            if let project = target.project,
+               project.identityKey.map(ManifestService.isAdmittedProjectKey) != true {
+                return directSet(selected, skills: [skill], platforms: [platform], target: target, context: context)
+            }
             return try withSelectionLock(skills: [skill], context: context) {
-                if let project = target.project,
-                   project.identityKey.map(ManifestService.isAdmittedProjectKey) != true {
-                    return directSet(selected, skills: [skill], platforms: [platform], target: target, context: context)
-                }
-
                 let machineID = try dependencies.identity.identifier()
                 try Self.validate(machineID: machineID, slug: skill.directoryName, platformRaw: platform.rawValue)
                 let projectKey = target.project?.identityKey
@@ -72,13 +71,16 @@ extension DeployIntentModel {
         project: Project,
         context: ModelContext
     ) throws -> DeployIntentApplyOutcome {
+        let target = DeployTarget.project(project)
+        guard let projectKey = project.identityKey,
+              ManifestService.isAdmittedProjectKey(projectKey) else {
+            let result = directSet(selected, skills: skills, platforms: Array(platforms),
+                                   target: target, context: context)
+            presentFailures(result)
+            return .localDeploy(result)
+        }
         let result: BatchResult = try reportErrors {
             try withSelectionLock(skills: skills, context: context) {
-                let target = DeployTarget.project(project)
-                guard let projectKey = project.identityKey,
-                      ManifestService.isAdmittedProjectKey(projectKey) else {
-                    return directSet(selected, skills: skills, platforms: Array(platforms), target: target, context: context)
-                }
                 let machineID = try dependencies.identity.identifier()
                 try Self.validateSelection(
                     machineIDs: [machineID], slugs: Set(skills.map(\.directoryName)),

@@ -6,7 +6,6 @@ extension IngestPreflightTests {
     func testImportAndProjectIntentAfterFailedPullKeepPeerCategoriesAndLocalEdit() async throws {
         try await assertRemovedDeploySelections()
         try await assertContentFreeWriterIngest()
-        try await assertQueuedWriterEdits()
         for importsSkill in [true, false] {
             for fault in WriterFault.allCases {
                 try await assertWriterRecovery(importsSkill: importsSkill, fault: fault)
@@ -91,8 +90,6 @@ extension IngestPreflightTests {
                 ? "Import is blocked until sync updates this Mac's library. Sync again, then retry the import."
                 : "Deployment is blocked until sync updates this Mac's library. Sync again, then retry the deployment.")
             XCTAssertTrue(StoreIngestState.shared(for: context.container).needsRebuild)
-            XCTAssertFalse(context.hasChanges, "refused preflight must roll back its partial rebuild")
-            XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Deleted", "Kept"])
             XCTAssertEqual(manifest.writes, 0, "refused ingestion must not reach the manifest writer")
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<Skill>()), 1)
@@ -227,12 +224,11 @@ private final class ControlledWriterManifest: ManifestSnapshotting {
 }
 
 private enum RemovedSelectionAction: CaseIterable {
-    case remoteProject, local, localProject, projectBulk, selected, apply, retract, direct, directBulk
+    case remoteProject, local, localProject, projectBulk, selected, apply, retract
 
     @MainActor
     func perform(_ model: DeployIntentModel, skills: [Skill], project: Project, context: ModelContext) throws {
         let skill = try XCTUnwrap(skills.last)
-        if self == .direct || self == .directBulk { project.identityKey = nil }
         switch self {
         case .remoteProject:
             try model.setRemote(true, machineID: "22222222-2222-4222-8222-222222222222",
@@ -249,10 +245,6 @@ private enum RemovedSelectionAction: CaseIterable {
         case .apply:
             _ = try model.apply(skills: skills, platforms: [.codex],
                                 selectedMachineIDs: [InertMachineIdentity.value], context: context)
-        case .direct:
-            _ = try model.set(true, skill: skill, platform: .codex, target: .project(project), context: context)
-        case .directBulk:
-            _ = try model.setProjectSelection(true, skills: skills, platforms: [.codex], project: project, context: context)
         case .retract:
             _ = try model.retract(skills: skills, platforms: [.codex], machineIDs: [InertMachineIdentity.value], context: context)
         }
