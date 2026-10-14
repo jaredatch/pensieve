@@ -84,8 +84,8 @@ extension IngestPreflightTests {
         for _ in 0..<2 {
             XCTAssertTrue(attempt(), "\(importsSkill ? "import" : "intent") must refuse a repeated \(fault) failure")
             let expected = fault == .save ? (importsSkill
-                ? "Import is blocked until sync updates this Mac's library. Sync again, then retry the import."
-                : "Deployment is blocked until sync updates this Mac's library. Sync again, then retry the deployment.")
+                ? "Import couldn't update this Mac's library. Try importing again."
+                : "Deployment couldn't update this Mac's library. Try deploying again.")
                 : SyncError.storeUnreadable([]).localizedDescription
             XCTAssertEqual(reportedError(), expected)
             XCTAssertTrue(StoreIngestState.shared(for: context.container).needsRebuild)

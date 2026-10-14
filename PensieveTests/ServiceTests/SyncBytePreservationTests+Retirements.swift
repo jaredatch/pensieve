@@ -75,7 +75,7 @@ extension SyncBytePreservationTests {
 
     private func assertLargeMalformedReceiptsStayBounded() throws {
         for source in [".gitattributes", ".pensieve-retired-paths"] {
-            for separator in ["\r", "\u{2028}"] {
+            for separator in ["\r", "\u{2028}", "\u{202E}"] {
                 let store = base + "/large-malformed-" + UUID().uuidString
                 let record = "# Pensieve retired path: " + String(repeating: "AAAA" + separator, count: 100_000)
                 try files.writeFile(at: store + "/" + source, content: record)
@@ -86,7 +86,7 @@ extension SyncBytePreservationTests {
                     XCTAssertLessThanOrEqual(error.localizedDescription.utf8.count, 512,
                                              "Malformed receipt diagnostics must stay bounded")
                     XCTAssertFalse(error.localizedDescription.contains(separator),
-                                   "A receipt diagnostic must stay on one line")
+                                   "A receipt diagnostic must not retain invisible formatting")
                 }
                 XCTAssertTrue(spy.writes.isEmpty)
                 XCTAssertEqual(try files.readFile(at: store + "/" + source), record)

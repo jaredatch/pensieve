@@ -283,7 +283,7 @@ private extension ProjectRemovalDurabilityTests {
         }
         XCTAssertTrue(launch.rebuild.saveFailed)
         XCTAssertNil(launch.ingestedHeadStamp)
-        XCTAssertTrue(launch.ingestionNeedsRetry, "An incomplete local launch keeps its retry scheduled")
+        XCTAssertFalse(launch.ingestionNeedsRetry, "An incomplete local launch leaves recovery to the next writer")
         let sync = try NativeTestWork.run(container: container) { context in
             try SyncEngine(gitService: git, manifestService: service,
                 storeRebuildService: StoreRebuildService(manifestService: service, save: { _ in

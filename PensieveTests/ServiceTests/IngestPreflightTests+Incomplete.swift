@@ -56,10 +56,12 @@ extension IngestPreflightTests {
         for failsCategories in [false, true] {
             try await assertIncompleteLaunch(failsCategories: failsCategories)
         }
-        for fault in [false, true] {
-            for recoversAtLaunch in [false, true] {
-                try assertNoRemoteLaunchRecovery(failsListing: fault, recoversAtLaunch: recoversAtLaunch)
-            }
+        for failsListing in [false, true] {
+            try await assertIncompleteLocalLaunchCompletes(failsListing: failsListing)
+            try assertNoRemoteSyncRecovery(failsListing: failsListing)
+        }
+        for busyLock in [false, true] {
+            try assertCompleteLaunchRetryMigrates(busyLock: busyLock)
         }
     }
 
@@ -84,6 +86,7 @@ extension IngestPreflightTests {
         XCTAssertEqual(outcome.rebuild.saveFailed, !failsCategories)
         XCTAssertEqual(outcome.rebuild.categoryReadFailed, failsCategories)
         XCTAssertNil(outcome.ingestedHeadStamp)
+        XCTAssertFalse(outcome.ingestionNeedsRetry, "An incomplete remote-backed launch also finishes without a retry")
         XCTAssertFalse(outcome.migrationRan)
         XCTAssertEqual(try fixture.manifest.read(fromRoot: fixture.app).categories.map(\.name).sorted(), ["Added", "Kept"])
         rebuild.fails = false
@@ -101,9 +104,43 @@ extension IngestPreflightTests {
         XCTAssertTrue(later.migrationRan, "a later complete launch still performs the due migration")
     }
 
-    private func assertNoRemoteLaunchRecovery(failsListing: Bool, recoversAtLaunch: Bool) throws {
+    private func assertIncompleteLocalLaunchCompletes(failsListing: Bool) async throws {
         let fixture = try NativeTestWork.run {
-            try IncompleteIngestFixture(base: self.tempDir + "/launch-no-remote-\(failsListing)-\(recoversAtLaunch)")
+            try IncompleteIngestFixture(base: self.tempDir + "/persistent-local-launch-\(failsListing)")
+        }
+        try NativeTestWork.run { try fixture.git.removeRemote(at: fixture.app) }
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        let rebuild = IncompleteIngestRebuild()
+        rebuild.fails = true
+        rebuild.failsListing = failsListing
+        let launch = LaunchReconciler(rebuildService: rebuild,
+            migrationService: StoreMigrationService(skillStore: SkillStore(
+                fileService: fixture.files, baseDir: fixture.app + "/skills", storeRoot: fixture.app)),
+            root: fixture.app, lockPath: fixture.base + "/sync.lock", git: fixture.git)
+        let outcome = try NativeTestWork.run(container: container) { context in
+            launch.reconcileOnLaunch(context: context, alreadyMigrated: false)
+        }
+        XCTAssertTrue(outcome.rebuild.ingestIncomplete)
+        XCTAssertFalse(outcome.ingestionNeedsRetry, "A persistent local ingest failure must let launch finish")
+        XCTAssertFalse(outcome.migrationRan)
+        XCTAssertNil(outcome.ingestedHeadStamp)
+        let runtime = try AppRuntime(container: container, launchReconcile: { context, migrated in
+            launch.reconcileOnLaunch(context: context, alreadyMigrated: migrated, externallyHeldLock: true)
+        }, launchBackfill: { _ in }, hasRemoteConfigured: { false },
+            launchIngestLockPath: fixture.base + "/sync.lock",
+            paths: AppRuntimePaths.temporary(named: "IncompleteLocalLaunch"), gitUsabilityProbe: { .usable })
+        await runtime.bootstrapTask.value
+        _ = await runtime.performLaunchWorkIfNeeded(context: container.mainContext)
+        XCTAssertTrue(runtime.launchWorkCompleted, "Launch must finish even while every ingest attempt fails")
+        XCTAssertFalse(runtime.library.launchIngestPending)
+        XCTAssertFalse(runtime.library.addsFenced, "An incomplete ingest must not hold adds behind launch")
+        XCTAssertTrue(StoreIngestState.shared(for: container).needsRebuild)
+        XCTAssertEqual(rebuild.calls, 2, "Both attempts exercise the persistent failure")
+    }
+
+    private func assertNoRemoteSyncRecovery(failsListing: Bool) throws {
+        let fixture = try NativeTestWork.run {
+            try IncompleteIngestFixture(base: self.tempDir + "/sync-no-remote-\(failsListing)")
         }
         try NativeTestWork.run {
             try fixture.git.removeRemote(at: fixture.app)
@@ -114,31 +151,22 @@ extension IngestPreflightTests {
             let rebuild = IncompleteIngestRebuild()
             rebuild.failsListing = failsListing
             rebuild.fails = true
-            let migration = StoreMigrationService(skillStore: SkillStore(
-                fileService: fixture.files, baseDir: fixture.app + "/skills", storeRoot: fixture.app))
-            let launch = LaunchReconciler(rebuildService: rebuild, migrationService: migration,
+            let launch = LaunchReconciler(rebuildService: rebuild,
+                migrationService: StoreMigrationService(skillStore: SkillStore(
+                    fileService: fixture.files, baseDir: fixture.app + "/skills", storeRoot: fixture.app)),
                 root: fixture.app, lockPath: fixture.base + "/sync.lock", git: fixture.git)
             let outcome = launch.reconcileOnLaunch(context: context, alreadyMigrated: false)
-            XCTAssertTrue(outcome.rebuild.ingestIncomplete)
-            XCTAssertFalse(outcome.migrationRan)
-            XCTAssertNil(outcome.ingestedHeadStamp)
-            XCTAssertTrue(outcome.ingestionNeedsRetry, "No-remote launch must keep its local retry scheduled")
+            XCTAssertFalse(outcome.ingestionNeedsRetry)
             let before = try fixture.git.runOrThrow(["-C", fixture.app, "diff", "--binary", "HEAD"], in: nil).stdout
             let manifest = try fixture.manifest.read(fromRoot: fixture.app)
             let engine = fixture.engine(rebuild: rebuild)
             for fails in [true, false] {
                 rebuild.fails = fails
                 let calls = rebuild.calls
-                if recoversAtLaunch {
-                    let retry = launch.reconcileOnLaunch(context: context, alreadyMigrated: false)
-                    XCTAssertEqual(retry.ingestionNeedsRetry, fails)
-                    XCTAssertFalse(retry.migrationRan, "Recovery must defer a due migration to a later complete launch")
-                } else {
-                    XCTAssertEqual(try engine.sync(root: fixture.app, message: "no remote", credential: nil,
-                        context: context, prepare: { _ in
-                            XCTFail("Unconfigured sync must not run snapshot preparation")
-                        }), .noRemote)
-                }
+                XCTAssertEqual(try engine.sync(root: fixture.app, message: "no remote", credential: nil,
+                    context: context, prepare: { _ in
+                        XCTFail("Unconfigured sync must not run snapshot preparation")
+                    }), .noRemote)
                 XCTAssertEqual(rebuild.calls, calls + 1, "No-remote sync must retry pending library ingestion")
                 XCTAssertEqual(StoreIngestState.shared(for: container).needsRebuild, fails)
                 XCTAssertEqual(try fixture.manifest.read(fromRoot: fixture.app), manifest)
@@ -147,8 +175,48 @@ extension IngestPreflightTests {
             }
             XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Added", "Kept"])
             XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).map(\.directoryName), ["item"])
-            XCTAssertTrue(launch.reconcileOnLaunch(context: context, alreadyMigrated: false).migrationRan,
-                          "Migration remains due until a later complete launch")
+            XCTAssertTrue(launch.reconcileOnLaunch(context: context, alreadyMigrated: false).migrationRan)
+        }
+    }
+
+    private func assertCompleteLaunchRetryMigrates(busyLock: Bool) throws {
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        try NativeTestWork.run(container: container) { context in
+            let fixture = try IncompleteIngestFixture(base: self.tempDir + "/migration-retry-\(busyLock)")
+            _ = StoreRebuildService().rebuild(fromRoot: fixture.app, context: context)
+            try fixture.files.writeFile(at: fixture.app + "/skills/item/SKILL.md", content: "legacy body\n")
+            let lockPath = fixture.base + "/sync.lock"
+            let held = busyLock ? try XCTUnwrap(SyncLock.tryAcquire(at: lockPath)) : nil
+            defer { held?.release() }
+            var reads = 0
+            let launch = LaunchReconciler(migrationService: StoreMigrationService(skillStore: SkillStore(
+                fileService: fixture.files, baseDir: fixture.app + "/skills", storeRoot: fixture.app)),
+                root: fixture.app, lockPath: lockPath, git: fixture.git, headStampOverride: {
+                    reads += 1
+                    if !busyLock, reads == 3 {
+                        do {
+                            try fixture.changePeer()
+                            _ = try fixture.git.fastForwardOnly(at: fixture.app, credential: nil)
+                        } catch { XCTFail("HEAD advance failed: \(error)") }
+                    }
+                    return GitHeadStamp().read(root: fixture.app)
+                })
+            let first = launch.reconcileOnLaunch(context: context, alreadyMigrated: false)
+            XCTAssertFalse(first.rebuild.ingestIncomplete)
+            XCTAssertTrue(first.ingestionNeedsRetry, "A busy lock or moved HEAD must request a launch retry")
+            XCTAssertFalse(first.migrationRan)
+            XCTAssertTrue(StoreIngestState.shared(for: container).needsRebuild)
+            XCTAssertTrue(try fixture.manifest.read(fromRoot: fixture.app).skills.isEmpty)
+            held?.release()
+            let retry = launch.reconcileOnLaunch(context: context, alreadyMigrated: false)
+            XCTAssertFalse(retry.rebuild.ingestIncomplete)
+            XCTAssertFalse(retry.ingestionNeedsRetry)
+            XCTAssertTrue(retry.migrationRan, "A complete retry after a busy lock or moved HEAD must run due migration")
+            XCTAssertEqual(retry.ingestedHeadStamp, GitHeadStamp().read(root: fixture.app))
+            XCTAssertEqual(try fixture.manifest.read(fromRoot: fixture.app).skills.map(\.slug), ["item"])
+            XCTAssertTrue(SkillParser.parse(try fixture.files.readFile(at: fixture.app + "/skills/item/SKILL.md"))
+                .hasRequiredFrontmatter, "The retry must backfill legacy frontmatter")
+            XCTAssertFalse(launch.reconcileOnLaunch(context: context, alreadyMigrated: true).migrationRan)
         }
     }
 

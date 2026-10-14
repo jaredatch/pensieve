@@ -11,7 +11,8 @@ enum StoreReceiptError: LocalizedError {
         case let .invalidPath(path):
             let preview = path.unicodeScalars.prefix(100).map { scalar in
                 let category = scalar.properties.generalCategory
-                return category == .control || category == .lineSeparator || category == .paragraphSeparator
+                return category == .control || category == .format
+                    || category == .lineSeparator || category == .paragraphSeparator
                     ? " " : String(scalar)
             }.joined()
             let suffix = path.unicodeScalars.prefix(101).count > 100 ? "…" : ""

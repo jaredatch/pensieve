@@ -100,7 +100,7 @@ enum DeployIntentModelError: LocalizedError {
         case .syncInProgress:
             "Sync is running. Try again when it finishes."
         case .ingestPending:
-            "Deployment is blocked until sync updates this Mac's library. Sync again, then retry the deployment."
+            "Deployment couldn't update this Mac's library. Try deploying again."
         case .selectionChanged:
             "A selected skill was removed while the library updated. Choose the skills again."
         }
