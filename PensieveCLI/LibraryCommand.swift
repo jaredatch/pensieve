@@ -4,6 +4,7 @@ import Foundation
 struct ConfirmationOptions: ParsableArguments {
     @Flag(help: "Preview changes without applying them.") var dryRun = false
     @Flag(help: "Confirm this action without prompting.") var yes = false
+    @Option(help: "Apply only the exact plan carrying this confirmation token.") var confirmPlan: String?
 }
 
 struct InstallCommand: ReadCommand {
@@ -19,7 +20,8 @@ struct InstallCommand: ReadCommand {
     }
     var request: CLIRequest {
         CLIRequest(command: "install", arguments: [url], library: CLILibraryOptions(
-            dryRun: confirmation.dryRun, confirmed: confirmation.yes, skills: skill, rename: rename, skip: skip))
+            dryRun: confirmation.dryRun, confirmed: confirmation.yes,
+            confirmationToken: confirmation.confirmPlan, skills: skill, rename: rename, skip: skip))
     }
 }
 
@@ -37,7 +39,8 @@ struct SkillUpdateCommand: ReadCommand {
     @Flag(help: "Allow replacing local file edits; unsaved editor drafts still refuse.") var overwriteLocalChanges = false
     var request: CLIRequest {
         CLIRequest(command: "skill update", arguments: skills, library: CLILibraryOptions(
-            dryRun: confirmation.dryRun, confirmed: confirmation.yes, overwriteLocalChanges: overwriteLocalChanges))
+            dryRun: confirmation.dryRun, confirmed: confirmation.yes,
+            confirmationToken: confirmation.confirmPlan, overwriteLocalChanges: overwriteLocalChanges))
     }
 }
 
@@ -48,7 +51,8 @@ struct SkillDeleteCommand: ReadCommand {
     @Argument(help: "Skill slug from skill list.") var skill: String
     var request: CLIRequest {
         CLIRequest(command: "skill delete", arguments: [skill], library: CLILibraryOptions(
-            dryRun: confirmation.dryRun, confirmed: confirmation.yes))
+            dryRun: confirmation.dryRun, confirmed: confirmation.yes,
+            confirmationToken: confirmation.confirmPlan))
     }
 }
 
@@ -73,6 +77,7 @@ struct ProjectRemoveCommand: ReadCommand {
     var request: CLIRequest {
         CLIRequest(command: "project remove", arguments: [(project as NSString).expandingTildeInPath],
             library: CLILibraryOptions(dryRun: confirmation.dryRun, confirmed: confirmation.yes,
+            confirmationToken: confirmation.confirmPlan,
                 workingDirectory: FileService().realPath(at: ".")))
     }
 }

@@ -102,7 +102,8 @@ final class CLILibraryFixture {
     }
 
     func run(_ arguments: [String], exit: Int32 = 0, terminal: Bool = false,
-             environment extra: [String: String] = [:]) async throws -> CLIEnvelope {
+             environment extra: [String: String] = [:],
+             beforeConfirmation: (() async throws -> Void)? = nil) async throws -> CLIEnvelope {
         let process = Process()
         process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/pensieve")
         process.arguments = arguments + ["--json", "--app-support", paths.appSupportDir]
@@ -118,16 +119,23 @@ final class CLILibraryFixture {
         if terminal {
             guard openpty(&controllerFD, &terminalFD, nil, nil, nil) == 0 else { throw POSIXError(.EIO) }
             process.standardInput = FileHandle(fileDescriptor: terminalFD, closeOnDealloc: false)
-            _ = "yes\n".withCString { Darwin.write(controllerFD, $0, 4) }
+            if beforeConfirmation == nil { _ = "yes\n".withCString { Darwin.write(controllerFD, $0, 4) } }
         } else {
             process.standardInput = input
             input.fileHandleForWriting.write(Data("yes\n".utf8))
             try input.fileHandleForWriting.close()
         }
         defer { if controllerFD >= 0 { Darwin.close(controllerFD); Darwin.close(terminalFD) } }
-        let result = try await BlockingWork.run { try CLIProcessProbe.run(process, timeout: 40) }
+        async let running = BlockingWork.run { try CLIProcessProbe.run(process, timeout: 40) }
+        var prefix = Data()
+        if let beforeConfirmation {
+            prefix = try await BlockingWork.run { try Self.readPrompt(from: errors.fileHandleForReading) }
+            try await beforeConfirmation()
+            _ = "yes\n".withCString { Darwin.write(controllerFD, $0, 4) }
+        }
+        let result = try await running
         let bytes = try output.fileHandleForReading.readToEnd() ?? Data()
-        let diagnostics = try errors.fileHandleForReading.readToEnd() ?? Data()
+        let diagnostics = prefix + (try errors.fileHandleForReading.readToEnd() ?? Data())
         XCTAssertFalse(result.timedOut)
         XCTAssertEqual(result.status, exit, String(data: bytes + diagnostics, encoding: .utf8) ?? "Invalid UTF-8")
         if terminal, extra["PENSIEVE_NO_INPUT"] != "1", !arguments.contains("--no-input") {

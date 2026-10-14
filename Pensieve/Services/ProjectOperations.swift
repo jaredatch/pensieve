@@ -13,9 +13,12 @@ func registerProject(_ project: Project,
     let registrationContext = ModelContext(context.container)
     registrationContext.insert(project)
     try registrationContext.save()
+    guard let registered = context.model(for: project.persistentModelID) as? Project else {
+        throw CocoaError(.persistentStoreOperation)
+    }
     _ = intentReconciler?(context)
     notifier()
-    return project
+    return registered
 }
 
 /// Save and publish request withdrawal, remove prepared artifacts while the project is live,
@@ -32,7 +35,8 @@ func removeRegisteredProject(_ project: Project,
                              context: ModelContext,
                              notifier: SyncStateNotifying = SyncStateNotifier.suppressed,
                              logFailure: @escaping (String) -> Void = logProjectRemovalFailure,
-                             lockPath: String) -> BatchResult {
+                             lockPath: String,
+                             admitPlan: ((ProjectRemovalPlan) -> Bool)? = nil) -> BatchResult {
     let lock: SyncLock
     do {
         guard let acquired = try SyncLock.tryAcquireReportingErrors(at: lockPath) else {
@@ -64,7 +68,7 @@ func removeRegisteredProject(_ project: Project,
     }
     return ProjectRemovalExecution(reconciler: reconciler, manifestService: manifestService,
         manifestRoot: manifestRoot, stateFetcher: stateFetcher, platformVM: platformVM, localMachineID: localMachineID,
-        confirmedPreview: confirmedPreview, logFailure: logFailure).run(project: project, context: context)
+        confirmedPreview: confirmedPreview, admitPlan: admitPlan, logFailure: logFailure).run(project: project, context: context)
 }
 
 @MainActor
@@ -76,6 +80,7 @@ private struct ProjectRemovalExecution {
     let platformVM: PlatformViewModel
     let localMachineID: String?
     let confirmedPreview: ProjectRemovalPreview?
+    let admitPlan: ((ProjectRemovalPlan) -> Bool)?
     let logFailure: (String) -> Void
 
     func run(project: Project, context: ModelContext) -> BatchResult {
@@ -87,6 +92,7 @@ private struct ProjectRemovalExecution {
             intents = try stateFetcher.deployIntents(context: context)
             plan = try ProjectRemovalPlan.prepare(project: project, platformVM: platformVM,
                                                    context: context, stateFetcher: stateFetcher)
+            guard admitPlan?(plan) != false else { return changedPlanFailure() }
             if let failure = projectRemovalAdmissionFailure(project: project, plan: plan,
                 confirmedPreview: confirmedPreview, intents: intents, localMachineID: localMachineID) {
                 var result = BatchResult()
@@ -128,6 +134,12 @@ private struct ProjectRemovalExecution {
         result.append(completeProjectRemoval(project, intentRows: intentRows, cleanup: cleanup,
             priorFailed: result.hasFailures, context: context))
         return settleProjectWaitingCleanup(result, ids: waitingIDs, platformVM: platformVM)
+    }
+
+    private func changedPlanFailure() -> BatchResult {
+        var result = BatchResult()
+        result.operationFailures.append("The project removal plan changed. Confirm it again.")
+        return result
     }
 
 }

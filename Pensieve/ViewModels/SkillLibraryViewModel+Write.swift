@@ -35,3 +35,15 @@ extension SkillLibraryViewModel {
     }
 
 }
+
+extension SkillLibraryViewModel {
+    /// Filled when the synchronous deletion flow settles, before queued save callbacks can run.
+    final class DeletionPresentation {
+        var notice: DeletionNotice?
+        let presentsInWindow: Bool
+        init(presentsInWindow: Bool = true) { self.presentsInWindow = presentsInWindow }
+    }
+    func reportDeletionError(_ message: String?, to presentation: DeletionPresentation) {
+        if presentation.presentsInWindow { error = message }
+    }
+}

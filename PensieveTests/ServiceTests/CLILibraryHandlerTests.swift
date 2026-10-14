@@ -6,7 +6,8 @@ import XCTest
 @MainActor
 final class CLILibraryHandlerTests: XCTestCase {
     func testBuiltInstallPreviewSelectionPinsAndURLAdmission() async throws {
-        let h = try CLILibraryFixture()
+        let remote = CLILibraryRemoteGate(owner: self)
+        let h = try CLILibraryFixture(remoteGate: remote)
         defer { h.stop() }
         try await h.start()
         try h.files.createDirectory(at: h.repository + "/skills/bar")
@@ -33,6 +34,7 @@ final class CLILibraryHandlerTests: XCTestCase {
         let rejected = try await h.run(["install", "https://example.invalid/fixture/skills", "--yes"], exit: 1)
         XCTAssertFalse(rejected.ok)
         XCTAssertEqual(try h.tree(h.paths.storeRoot), stable)
+        try await h.assertNetworkDeadline(["install", h.sourceURL, "--skill", "foo", "--yes"], remote: remote)
     }
 
     func testBuiltInstallCollisionRenameSkipAndRepeat() async throws {
@@ -63,7 +65,8 @@ final class CLILibraryHandlerTests: XCTestCase {
     }
 
     func testBuiltOutdatedVerifiedUpdateDriftAndRepeat() async throws {
-        let h = try CLILibraryFixture()
+        let remote = CLILibraryRemoteGate(owner: self)
+        let h = try CLILibraryFixture(remoteGate: remote)
         defer { h.stop() }
         try await h.start()
         _ = try await h.run(["install", h.sourceURL, "--yes"])
@@ -82,12 +85,16 @@ final class CLILibraryHandlerTests: XCTestCase {
         let refused = try await h.run(["skill", "update", "foo", "--yes"], exit: 1)
         XCTAssertEqual(refused.error?.code, "local_changes")
         XCTAssertEqual(try h.files.readFile(at: h.paths.skillsDir + "/foo/asset.txt"), "local edit")
+        try await assertChangedUpdateConfirmation(h)
         let updated = try await h.run(["skill", "update", "foo", "--overwrite-local-changes", "--yes"])
         XCTAssertEqual(updated.changed, true)
         XCTAssertEqual(try h.files.readFile(at: h.paths.skillsDir + "/foo/asset.txt"), "upstream asset")
         XCTAssertEqual(try h.files.readFile(at: h.paths.skillsDir + "/foo/SKILL.md"), CLILibraryFixture.document("upstream"))
         let repeated = try await h.run(["skill", "update", "foo", "--yes"])
         XCTAssertEqual(repeated.changed, false)
+        try await assertUpdateRepairs(h)
+        try await h.assertNetworkDeadline(["skill", "outdated"], remote: remote)
+        try await assertUpdateDeadline()
     }
 
     func testBuiltUpdateAndDeleteRefuseUnsavedWindowDraft() async throws {
@@ -99,7 +106,7 @@ final class CLILibraryHandlerTests: XCTestCase {
         let body = h.runtime.library.editorBody(for: skill)
         h.runtime.library.noteEditorChanged(skill, body: body + "unsaved")
         let before = try h.tree(h.paths.storeRoot)
-        for arguments in [["skill", "update", "foo"], ["skill", "update", "foo", "--yes", "--overwrite-local-changes"],
+        for arguments in [["skill", "update", "foo"], ["skill", "update", "foo", "--yes"],
                           ["skill", "delete", "foo"], ["skill", "delete", "foo", "--yes"]] {
             let refused = try await h.run(arguments, exit: 5)
             XCTAssertEqual(refused.error?.code, "unsaved_draft")
@@ -121,7 +128,12 @@ final class CLILibraryHandlerTests: XCTestCase {
         XCTAssertEqual(preview.data?["deployments"]?.array?.first?["path"], .string(link))
         XCTAssertEqual(try h.tree(h.root + "/home"), before)
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Skill>()), 1)
+        try await assertChangedDeleteConfirmation(h)
+        let historyID = try h.skill().id
+        h.runtime.upstreamHistory.invalidateForManualCheck(skillID: historyID)
+        XCTAssertEqual(h.runtime.upstreamHistory.manualCheckCount(skillID: historyID), 1)
         let deleted = try await h.run(["skill", "delete", "foo", "--yes"])
+        XCTAssertEqual(h.runtime.upstreamHistory.manualCheckCount(skillID: historyID), 0, "CLI deletion retires history")
         XCTAssertEqual(deleted.changed, true)
         XCTAssertFalse(h.files.isSymlink(at: link))
         XCTAssertFalse(h.files.directoryExists(at: h.paths.skillsDir + "/foo"))
@@ -144,7 +156,10 @@ final class CLILibraryHandlerTests: XCTestCase {
         XCTAssertEqual(preview.data?["name"], .string("Work"))
         XCTAssertFalse(h.files.fileExists(at: folder + "/.pensieve-project"))
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 0)
+        _ = try await h.run(["install", h.sourceURL, "--yes"])
+        try seedPendingRegistration(h, folder: folder)
         let added = try await h.run(["project", "add", folder, "--name", "Work"])
+        XCTAssertTrue(h.files.isSymlink(at: folder + "/.claude/skills/foo"), "Registration realizes pending intent immediately")
         XCTAssertEqual(added.changed, true)
         XCTAssertTrue(h.files.fileExists(at: folder + "/.pensieve-project"))
         let visible = try h.context.fetch(FetchDescriptor<Project>())
@@ -171,6 +186,7 @@ final class CLILibraryHandlerTests: XCTestCase {
         XCTAssertEqual(busy.changed, false)
         XCTAssertEqual(try h.tree(folder), before)
         lock.release()
+        try await assertChangedRemovalConfirmation(h, folder: folder)
         let removed = try await h.run(["project", "remove", "Work", "--yes"])
         XCTAssertEqual(removed.changed, true)
         XCTAssertFalse(h.files.isSymlink(at: link))

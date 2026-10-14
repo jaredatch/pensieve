@@ -51,6 +51,7 @@ extension CLILibraryHandlerTests {
             XCTAssertTrue(reply.next?.first?.contains("--app-support " + h.paths.appSupportDir) == true)
             XCTAssertEqual(try h.tree(h.paths.storeRoot), before)
         }
+        try await assertChangedInstallConfirmation(h)
         let installed = try await h.run(["install", h.sourceURL], terminal: true)
         XCTAssertEqual(installed.changed, true)
         let folder = h.root + "/project with spaces"
@@ -117,6 +118,7 @@ extension CLILibraryHandlerTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: skillDirectory)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: skillDirectory) }
         let deleted = try await h.run(["skill", "delete", "foo", "--yes"], exit: 1)
+        XCTAssertNil(h.runtime.library.deletionNotice, "CLI failure belongs in its reply, not the window alert")
         XCTAssertEqual(deleted.error?.code, "partial")
         XCTAssertEqual(deleted.changed, true)
         XCTAssertEqual(deleted.data?["skillRetained"], .bool(true))
@@ -138,5 +140,6 @@ extension CLILibraryHandlerTests {
         XCTAssertEqual(removed.data?["withdrewRequests"], .bool(true), String(describing: removed))
         XCTAssertTrue(h.files.isSymlink(at: parent + "/foo"))
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Project>()), 1)
+        try await assertQueuedDeleteFailure()
     }
 }

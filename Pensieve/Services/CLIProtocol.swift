@@ -72,6 +72,7 @@ struct CLIEnvelope: Codable, Equatable {
     var changed: Bool?
     var data: CLIValue?
     var next: [String]?
+    var confirmationToken: String?
     var error: CLIError?
 }
 
@@ -125,6 +126,7 @@ struct CLIRequest: Codable {
 struct CLILibraryOptions: Codable {
     var dryRun = false
     var confirmed = false
+    var confirmationToken: String?
     var skills: [String] = []
     var rename = false
     var skip = false

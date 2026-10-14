@@ -38,14 +38,23 @@ extension CLILibraryHandler {
         let project = try resolver.project(name, cwd: options.workingDirectory)
         let plan = try ProjectRemovalPlan.prepare(project: project, platformVM: runtime.platformVM, context: context)
         let preview = plan.preview
-        let data: CLIValue = .object(["project": projectValue(project), "artifactCount": .number(preview.artifactCount),
-            "message": .string(preview.message), "waitingRemovals": .bool(preview.hasWaitingRemovals),
-            "artifacts": .array(plan.candidates.filter(\.isOwned).map { .string($0.path) })])
-        if let reply = previewOrConfirmation(data, options: options) { return reply }
+        let data = try removalValue(project, plan: plan)
+        if let reply = try previewOrConfirmation(data, options: options) { return reply }
+        var changedPlanReply: CLIReply?
         let result = removeRegisteredProject(project, reconciler: CategoryReconciler(platformVM: runtime.platformVM),
             manifestService: ManifestService(fileService: files), manifestRoot: runtime.paths.storeRoot,
             platformVM: runtime.platformVM, localMachineID: try runtime.machineObservability.identity.existingIdentifier(),
-            confirmedPreview: preview, context: context, notifier: runtime.syncStateNotifier, lockPath: runtime.syncLockPath)
+            confirmedPreview: preview, context: context, notifier: runtime.syncStateNotifier, lockPath: runtime.syncLockPath,
+            admitPlan: { current in
+                do {
+                    changedPlanReply = try previewOrConfirmation(removalValue(project, plan: current), options: options)
+                    return changedPlanReply == nil
+                } catch {
+                    changedPlanReply = failure(error)
+                    return false
+                }
+            })
+        if let changedPlanReply { return changedPlanReply }
         guard !result.hasFailures else {
             let changed = result.didWithdrawProjectRequests || result.didRemoveArtifacts || result.didRetireProjectEvidence
             let busy = result.syncLockUnavailable && !changed
@@ -60,5 +69,17 @@ extension CLILibraryHandler {
             return CLIReply(envelope: envelope, exitCode: 1)
         }
         return success(data, changed: true)
+    }
+    private func removalValue(_ project: Project, plan: ProjectRemovalPlan) throws -> CLIValue {
+        let preview = plan.preview
+        let intents = try context.fetch(FetchDescriptor<MachineDeployIntent>())
+            .filter { project.identityKey != nil && $0.projectKey == project.identityKey }.map(\.key).sorted()
+        return .object(["project": projectValue(project), "artifactCount": .number(preview.artifactCount),
+            "message": .string(preview.message), "waitingRemovals": .bool(preview.hasWaitingRemovals),
+            "intents": .array(intents.map(CLIValue.string)), "sharedIdentity": .bool(plan.hasIdentitySibling),
+            "artifacts": .array(plan.candidates.filter(\.isOwned).map { .string($0.path) }),
+            "retirements": .array(plan.candidates.map { .object(["path": .string($0.path),
+                "skill": .string($0.pair.skill.directoryName), "agent": .string($0.pair.platform.cliID),
+                "owned": .bool($0.isOwned)]) })])
     }
 }

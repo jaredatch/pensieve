@@ -27,6 +27,10 @@ extension CLILibraryHandler {
     }
 
     func update(_ slugs: [String], options: CLILibraryOptions) async throws -> CLIReply {
+        guard !runtime.library.libraryUnavailable else {
+            return .failure("store_unreadable", runtime.library.persistentFenceReason ?? "The library is unavailable.",
+                hint: "Relaunch Pensieve and try again.", exit: 1)
+        }
         let skills = try Array(Set(slugs)).sorted().map(resolver.skill)
         for skill in skills { try requireSavedDraft(skill) }
         let model = runtime.updates
@@ -39,19 +43,20 @@ extension CLILibraryHandler {
             try operations.updateCheckService.planUpdates(slugs: Set(slugs), context: ModelContext(container))
         }
         for skill in skills { try requireSavedDraft(skill) }
-        if plans.contains(where: { $0.drifted }), !options.overwriteLocalChanges {
-            throw SkillUpdateFlowError.localEditsRequireConfirmation
-        }
         let data: CLIValue = .object(["skills": .array(plans.map { plan in
             .object(["slug": .string(plan.slug), "action": .string(plan.update == nil ? "unchanged" : "update"),
-                "commit": plan.update.map { .string($0.source.headCommit) } ?? .null])
+                "commit": plan.update.map { .string($0.source.headCommit) } ?? .null,
+                "drifted": .bool(plan.drifted), "installedCommit": .string(plan.origin.installedCommit)])
         })])
         for plan in plans {
             if let update = plan.update {
                 _ = try await BlockingWork.run { try operations.skillInstallService.previewUpdate(update) }
             }
         }
-        if let reply = previewOrConfirmation(data, options: options) { return reply }
+        if let reply = try previewOrConfirmation(data, options: options) { return reply }
+        if plans.contains(where: { $0.update != nil && $0.drifted }), !options.overwriteLocalChanges {
+            throw SkillUpdateFlowError.localEditsRequireConfirmation
+        }
         return await applyPlans(plans, options: options, data: data)
     }
 
@@ -75,7 +80,11 @@ extension CLILibraryHandler {
                 runtime.syncStateNotifier()
                 applied.append(plan.slug)
             } catch {
-                if error is SyncedStateMutationError { runtime.syncStateNotifier() }
+                if error is SyncedStateMutationError {
+                    runtime.syncWriteEchoRegistrar([plan.slug])
+                    runtime.library.noteEditorBodyInvalidated()
+                    runtime.syncStateNotifier()
+                }
                 if let refusal = error as? CLICommandRefusal, applied.isEmpty { return refusal.reply }
                 return failure(error, changed: !applied.isEmpty,
                     data: .object(["plan": data, "updated": .array(applied.map(CLIValue.string))]))

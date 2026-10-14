@@ -53,6 +53,7 @@ final class AddProjectSheetHostTests: XCTestCase {
                             failureMessage: "Add must create the corrected project") { created.count == 1 }
         XCTAssertEqual(try container.mainContext.fetchCount(FetchDescriptor<Project>()), 1)
         XCTAssertEqual(created.first?.path, root + "/valid")
+        XCTAssertTrue(created.first?.modelContext === container.mainContext, "Registration returns the window context model")
         XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.path), [root + "/valid"])
         let listed = try await h.run(["project", "list"])
         XCTAssertEqual(listed.data?.array?.first?["path"], .string(root + "/valid"))

@@ -396,20 +396,24 @@ interpose_poll __attribute__((section("__DATA,__interpose"))) = { (void *)expire
         subprocess.run(["/usr/bin/clang", "-dynamiclib", str(source), "-o", str(library)],
                        check=True, capture_output=True, timeout=30)
         self.environment.update(DYLD_INSERT_LIBRARIES=str(library), PENSIEVE_POLL_RECEIPT=str(receipt))
-        for command, seconds, code in [("sync", 600, "sync_still_running"), ("skill", 30, "app_unavailable")]:
+        for args, seconds, code in [(("sync",), 600, "sync_still_running"),
+                                    (("install", "https://github.com/fixture/skills", "--yes"), 600, "command_still_running"),
+                                    (("skill", "outdated"), 600, "command_still_running"),
+                                    (("skill", "update", "foo", "--yes"), 600, "command_still_running"),
+                                    (("skill", "list"), 30, "app_unavailable"),
+                                    (("skill", "delete", "foo", "--yes"), 30, "app_unavailable")]:
             release = threading.Event()
             observed, finish = self.peer(commit=True, release_reply=release)
             try:
-                args = (command,) if command == "sync" else (command, "list")
                 result = self.run_cli(*args, code=3)
                 requested = int(receipt.read_text())
                 self.assertGreaterEqual(requested, seconds * 1000 - 100)
                 self.assertLessEqual(requested, seconds * 1000 + 1)
                 self.assertEqual(result["error"]["code"], code)
                 self.assertFalse(result["error"]["retryable"])
-                if command == "sync":
+                if seconds == 600:
                     self.assertIn("still running in Pensieve", result["error"]["message"])
-                    self.assertIn("pensieve status", result["error"]["hint"])
+                    self.assertIn("pensieve", result["error"]["hint"])
                     self.assertNotIn("failed", result["error"]["message"].lower())
                 self.assertEqual(len(observed), 1)
             finally:

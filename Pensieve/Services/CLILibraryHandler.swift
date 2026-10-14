@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SwiftData
 
@@ -39,12 +40,20 @@ struct CLILibraryHandler {
         }
     }
 
-    func previewOrConfirmation(_ data: CLIValue, options: CLILibraryOptions) -> CLIReply? {
-        if options.dryRun { return .success(data) }
-        guard !options.confirmed else { return nil }
+    func previewOrConfirmation(_ data: CLIValue, options: CLILibraryOptions) throws -> CLIReply? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let token = SHA256.hash(data: try encoder.encode(data)).map { String(format: "%02x", $0) }.joined()
+        if options.dryRun {
+            var envelope = CLIReply.success(data).envelope
+            envelope.confirmationToken = token
+            return CLIReply(envelope: envelope, exitCode: 0)
+        }
+        if options.confirmed, options.confirmationToken == nil || options.confirmationToken == token { return nil }
         var envelope = CLIReply.failure("confirmation_required", "Review this plan before applying it.",
             hint: "Confirm with --yes.", exit: 5).envelope
         envelope.data = data
+        envelope.confirmationToken = token
         envelope.changed = false
         return CLIReply(envelope: envelope, exitCode: 5)
     }
