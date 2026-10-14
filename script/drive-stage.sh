@@ -149,7 +149,7 @@ set -eu   # NOT pipefail (the kit's rule): every producer below is captured, the
 # spawns its own sandbox, e.g. xcodebuild → SwiftPM's sandbox-exec, cannot run inside Codex's Seatbelt and needs
 # danger-full-access on an isolated machine; a docs-only stage can run workspace-write). Env overrides exist for the
 # self-test and for a one-off; the file is the record.
-CODEX_MODEL="${DRIVE_STAGE_MODEL:-gpt-6.1-sol}"                     # the BUILDER's pin: stages, --bounded, --fix
+CODEX_MODEL="${DRIVE_STAGE_MODEL:-gpt-6-astra}"                     # the BUILDER's pin: stages, --bounded, --fix
 CODEX_REASONING="${DRIVE_STAGE_REASONING:-xhigh}"             # e.g. high
 CODEX_REVIEW_MODEL="${DRIVE_STAGE_REVIEW_MODEL:-gpt-6-astra}"       # the REVIEWER's pin: --review, --read (may be the builder's model; decided once, in DECISIONS.md)
 CODEX_REVIEW_REASONING="${DRIVE_STAGE_REVIEW_REASONING:-xhigh}"   # e.g. xhigh
