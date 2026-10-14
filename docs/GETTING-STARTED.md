@@ -165,6 +165,34 @@ pensieve-daemon deployed   # what this machine has deployed where
 The binary lives inside the app bundle at `Pensieve.app/Contents/MacOS/pensieve-daemon`.
 Running it with no command shows usage and exits 64. Use `pensieve-daemon run` to sync.
 
+## Read from a terminal
+
+The app includes `pensieve` at `/Applications/Pensieve.app/Contents/Helpers/pensieve`.
+Homebrew's cask links it onto your PATH. With other installations, use that full path.
+Keep the same app copy open for library reads:
+
+```sh
+pensieve skill list
+pensieve skill show review
+pensieve agent list --json
+pensieve machine list --json
+pensieve project list --json
+```
+
+`skill show` returns metadata. Add `--content` to include the skill's text, which may
+contain instructions from its author. `skill ls` and `skills` also list the library.
+
+Over SSH, `pensieve status`, `pensieve log --lines 40` and `pensieve deployment list`
+read recorded state even while the app is closed. `deployed` also lists deployments.
+Missing or unreadable state exits 2. Library reads with the app closed exit 3 and
+ask you to open it. If another copy answers, the command identifies that copy.
+
+For scripts, pass `--json` to get one result with `schema`, `ok` and `data` or
+`error`. Errors include a stable `code`, a `hint` and `retryable`. Human output
+stays human when piped. `commands --json` describes accepted commands and flags;
+`skill show --help --json` describes one command. `completion bash`, `completion zsh`
+and `completion fish` generate shell completions.
+
 ## Multi-machine notes
 
 - Point every machine at the **same** private remote. Each machine pulls the shared store and fans out to its own local agents.

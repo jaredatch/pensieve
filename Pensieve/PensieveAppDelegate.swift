@@ -38,7 +38,7 @@ final class PensieveAppDelegate: NSObject, NSApplicationDelegate {
             confirm: { then in self.runtime?.library.confirmLeavingAnyDraft(then: then) },
             reply: { sender.reply(toApplicationShouldTerminate: $0) },
             saves: runtime?.library.manifestSaves, saveTermination: pendingSaveTermination,
-            steps: runtime?.paths.syncSteps
+            steps: runtime?.paths.syncSteps, runtime: runtime
         )
     }
 
@@ -55,13 +55,20 @@ final class PensieveAppDelegate: NSObject, NSApplicationDelegate {
         reply: @escaping (Bool) -> Void,
         saves: ManifestSaveModel? = nil,
         saveTermination: PendingSaveTermination? = nil,
-        steps: SyncStepModel? = nil
+        steps: SyncStepModel? = nil,
+        runtime: AppRuntime? = nil
     ) -> NSApplication.TerminateReply {
+        let wasQuitting = runtime?.isQuitting ?? false
+        runtime?.isQuitting = true
+        let reply: (Bool) -> Void = { allowed in
+            if !allowed { runtime?.isQuitting = false }
+            reply(allowed)
+        }
         if saveTermination?.isWaiting == true {
             saveTermination?.requestQuestion()
             return .terminateCancel
         }
-        guard !questionOpen else { return .terminateCancel }
+        guard !questionOpen else { runtime?.isQuitting = wasQuitting; return .terminateCancel }
         let hasPendingWork = (saves?.pendingCount ?? 0) > 0 || (steps?.pendingCount ?? 0) > 0
         guard hasUnsavedChanges || hasPendingWork else { return .terminateNow }
         let finish: (Bool) -> Void = { allowed in
@@ -93,6 +100,7 @@ final class PensieveAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        runtime?.commandServer?.stop()
         NSApp.windows.forEach { $0.makeFirstResponder(nil) }
     }
 }

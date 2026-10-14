@@ -47,7 +47,7 @@ extension IngestPreflightTests {
         guard case .synced = await coordinator.runCycle() else { return XCTFail("healthy retry did not sync") }
         try NativeTestWork.run { try fixture.assertRemoteCategories() }
         let afterSuccess = rebuild.calls
-        guard case let .synced(_, _, _, advanced) = await coordinator.runCycle() else { return XCTFail("idle sync failed") }
+        guard case let .synced(_, _, _, advanced, _) = await coordinator.runCycle() else { return XCTFail("idle sync failed") }
         XCTAssertFalse(advanced)
         XCTAssertEqual(rebuild.calls, afterSuccess + 1, "healthy ingest records the head and skips the next preflight")
     }

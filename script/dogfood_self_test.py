@@ -8,6 +8,7 @@ default go to the stub, which fails or lies on purpose. The real login keychain 
 by default LaunchServices knows only the test app and nothing of it is running.
 """
 import os
+import json
 from pathlib import Path
 import plistlib
 import shutil
@@ -119,6 +120,55 @@ class DogfoodTestCase(unittest.TestCase):
         env = dict(self.env, STUB_MODE=mode, **stub_env)
         return subprocess.run(['/bin/bash', str(SCRIPT), *args, str(app or self.app)], env=env,
                               stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+
+
+class DogfoodCLITests(DogfoodTestCase):
+    def test_cli_uses_staged_tool_and_existing_fake_home_without_launch_setup(self):
+        missing = subprocess.run(['/bin/bash', str(SCRIPT), '--cli', str(self.app), 'skill', 'list'],
+                                 env=self.env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn('start this sandbox', missing.stderr)
+        self.fake_home.mkdir(parents=True)
+        marker = self.fake_home / '.pensieve-dogfood-home'
+        marker.write_text('created by test')
+        helpers = self.app / 'Contents/Helpers'; helpers.mkdir()
+        tool = helpers / 'pensieve'
+        tool.write_text('#!/usr/bin/python3\nimport json, os, sys\n'
+                        'print(json.dumps({"arguments":sys.argv[1:],"home":os.environ["HOME"],'
+                        '"fixed":os.environ["CFFIXED_USER_HOME"],"dogfood":os.environ["PENSIEVE_DOGFOOD"]}))\n')
+        tool.chmod(0o755)
+        for source in (self.app, self.root / 'Debug.app'):
+            if source != self.app:
+                make_app(source, 'com.fixture.debug')
+                shutil.copytree(self.app, self.root / 'sandbox/Pensieve.app')
+            for prefix in (['--cli', str(source)], [str(source), '--cli']):
+                result = subprocess.run(['/bin/bash', str(SCRIPT), *prefix, 'skill', 'show', 'two words', '--json'],
+                                        env=dict(self.env, STUB_LSREGISTER='fail'), capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout), {'arguments': ['skill', 'show', 'two words', '--json'],
+                    'home': str(self.fake_home), 'fixed': str(self.fake_home), 'dogfood': '1'})
+        refused = subprocess.run(['/bin/bash', str(SCRIPT), '--reset', '--cli', str(self.app), 'skill', 'list'],
+                                 env=self.env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(refused.returncode, 1)
+        self.assertEqual(marker.read_text(), 'created by test')
+
+    def test_background_argument_reaches_the_fenced_process(self):
+        executable = self.app / 'Contents/MacOS/Pensieve'
+        executable.write_text('#!/bin/sh\nprintf "received: %s\\n" "$@"\nsleep 1\n')
+        executable.chmod(0o755)
+        dry = self.run_script('clean', '--background', '--dry-run')
+        self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
+        self.assertIn("PENSIEVE_SOCKET_DIRECTORY='" + str(self.fake_home / '.s') + "'", dry.stdout)
+        result = self.run_script('clean', '--background', '--foreground')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('received: --background', result.stdout)
+        alias = self.fake_home / '.s'
+        self.assertEqual(alias.resolve(), self.fake_home / 'Library/Application Support/Pensieve')
+        alias.unlink()
+        alias.symlink_to(self.root)
+        refused = self.run_script('clean', '--background', '--foreground')
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn('socket alias is occupied', refused.stderr)
 
 
 class DogfoodKeychainTests(DogfoodTestCase):

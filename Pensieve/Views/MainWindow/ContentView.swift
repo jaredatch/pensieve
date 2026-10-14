@@ -22,7 +22,6 @@ struct ContentView: View {
     @State private var machineStates: [MachineState] = []
     @State private var localMachineID: String?
     @State private var remoteProjects = RemoteProjectsModel()
-    @State private var remoteRetractions = RemoteRetractionStore()
     private let notifier: SyncStateNotifying
     private let machineDependencies: MachineObservabilityDependencies
 
@@ -52,15 +51,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     var body: some View {
         @Bindable var library = runtime.library
-        let intentDependencies = DeployIntentDependencies.live(
-            identity: machineDependencies.identity,
-            stateService: machineDependencies.stateService,
-            root: machineDependencies.root,
-            lockPath: runtime.syncLockPath,
-            notifier: notifier,
-            reconcile: runtime.reconcileIntent,
-            remoteRetractions: remoteRetractions
-        )
+        let intentService = runtime.deployMutations
         let splitView = NavigationSplitView {
             SidebarView(
                 section: Binding(get: { section }, set: { section = $0 ?? section }),
@@ -109,7 +100,7 @@ struct ContentView: View {
                 remoteProjects: remoteProjects.projects,
                 localMachineID: localMachineID,
                 notifier: notifier,
-                intentDependencies: intentDependencies,
+                intentService: intentService,
                 now: machineDependencies.now,
                 onResolve: { showConflictResolution = true },
                 onConnectToRepository: presentRepositoryConnection,
@@ -158,7 +149,7 @@ struct ContentView: View {
             BulkDeploySheet(
                 skills: Array(selectedSkills),
                 platformVM: platformVM,
-                intentDependencies: intentDependencies
+                intentService: intentService
             )
         }
         .sheet(item: $addSheet, onDismiss: revealCreatedEntity) {
@@ -176,16 +167,6 @@ struct ContentView: View {
         let appearedView = sheetView
             .onAppear {
             Task { await runtime.mainWindowAppeared() }
-            let openMainWindow = openWindow
-            runtime.registerOpenMainWindowAction {
-                openMainWindow(id: "main")
-            }
-            Task {
-                await runtime.performLaunchWorkIfNeeded(
-                    context: modelContext,
-                    beforeStartingWatcher: runtime.checkForSkillUpdatesIfDue
-                )
-            }
             reloadMachineStates()
         }
         .onChange(of: runtime.launchWorkCompleted, initial: true) { _, completed in
@@ -367,6 +348,6 @@ private extension ContentView {
                 .warning("Local machine identity unavailable: \(error.localizedDescription, privacy: .public)")
         }
         machineStates = machineDependencies.stateService.readAll(fromRoot: machineDependencies.root)
-        remoteRetractions.observe(machineStates)
+        runtime.deployMutations.dependencies.remoteRetractions.observe(machineStates)
     }
 }

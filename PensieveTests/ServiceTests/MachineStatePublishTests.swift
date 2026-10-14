@@ -69,7 +69,7 @@ final class MachineStatePublishTests: XCTestCase {
         let remoteHeadBefore = try rawGitOutput(["-C", harness.remotePath, "rev-parse", "HEAD"])
 
         clock.value = Date(timeIntervalSince1970: 1_700_000_100)
-        guard case let .synced(pushed, _, _, headAdvanced) = await coordinator.runCycle() else {
+        guard case let .synced(pushed, _, _, headAdvanced, _) = await coordinator.runCycle() else {
             return XCTFail("second cycle failed")
         }
 
@@ -96,7 +96,7 @@ final class MachineStatePublishTests: XCTestCase {
 
         clock.value = Date(timeIntervalSince1970: 1_700_000_100)
         defaults.set("Renamed Mac", forKey: "machineDisplayName")
-        guard case let .synced(pushed, _, _, headAdvanced) = await coordinator.runCycle() else {
+        guard case let .synced(pushed, _, _, headAdvanced, _) = await coordinator.runCycle() else {
             return XCTFail("second cycle failed")
         }
 
@@ -128,7 +128,7 @@ extension MachineStatePublishTests {
         try fileService.deleteFile(at: statePath)
 
         clock.value = Date(timeIntervalSince1970: 1_700_000_100)
-        guard case let .synced(pushed, _, _, _) = await coordinator.runCycle() else {
+        guard case let .synced(pushed, _, _, _, _) = await coordinator.runCycle() else {
             return XCTFail("second cycle failed")
         }
 
@@ -156,7 +156,7 @@ extension MachineStatePublishTests {
         try fileService.writeFile(at: statePath, content: "not: [valid")
 
         clock.value = Date(timeIntervalSince1970: 1_700_000_100)
-        guard case let .synced(pushed, _, _, _) = await coordinator.runCycle() else {
+        guard case let .synced(pushed, _, _, _, _) = await coordinator.runCycle() else {
             return XCTFail("second cycle failed")
         }
 
@@ -178,7 +178,7 @@ extension MachineStatePublishTests {
             stateService: ThrowingMachineStateService()
         )
 
-        guard case let .synced(_, warnings, _, _) = await coordinator.runCycle() else {
+        guard case let .synced(_, warnings, _, _, _) = await coordinator.runCycle() else {
             return XCTFail("publication failure blocked sync")
         }
         XCTAssertTrue(warnings.contains { $0.contains("Machine state not published") })

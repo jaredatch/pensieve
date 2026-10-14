@@ -29,9 +29,11 @@ extension AppRuntimeTests {
 
     final class StubWatcher: FileWatchServiceProtocol {
         var onChange: (String) -> Void = { _ in }
+        var onStart: () -> Void = {}
         private(set) var startCount = 0
         private(set) var stopCount = 0
         func start() -> Bool {
+            onStart()
             startCount += 1
             return true
         }

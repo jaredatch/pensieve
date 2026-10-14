@@ -218,7 +218,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         await model.applyAndReport(container: context.container)
 
         XCTAssertEqual(model.phase, .done)
-        guard case let .synced(_, _, _, headAdvanced) = try XCTUnwrap(spy.results.first) else {
+        guard case let .synced(_, _, _, headAdvanced, _) = try XCTUnwrap(spy.results.first) else {
             return XCTFail("expected synced callback result")
         }
         XCTAssertTrue(headAdvanced)
@@ -242,7 +242,7 @@ final class ConflictResolutionModelTests: XCTestCase {
         await model.loadAndReport(container: context.container)
 
         XCTAssertEqual(model.phase, .empty)
-        guard case let .synced(_, _, _, headAdvanced) = try XCTUnwrap(spy.results.first) else {
+        guard case let .synced(_, _, _, headAdvanced, _) = try XCTUnwrap(spy.results.first) else {
             return XCTFail("expected synced callback result")
         }
         XCTAssertFalse(headAdvanced)

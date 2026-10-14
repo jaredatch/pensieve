@@ -142,7 +142,7 @@ final class PlatformViewModel {
             projectID: target.project?.id
         )
         context.insert(record)
-        try persist(context)
+        do { try persist(context) } catch { throw DeployArtifactSaveError(underlying: error) }
         recordDeployState(
             skill: skill,
             platform: platform,
@@ -291,16 +291,16 @@ final class PlatformViewModel {
             for platform in platforms {
                 do {
                     _ = try deployOne(skill: skill, platform: platform, target: target, context: context)
-                    result.outcomes.append(BatchPairOutcome(
-                        skillID: skill.id, skillName: skill.name, platform: platform,
-                        target: BatchPairTarget(target), error: nil
-                    ))
+                    var outcome = BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: platform,
+                        target: BatchPairTarget(target), error: nil)
+                    outcome.artifactApplied = true
+                    result.outcomes.append(outcome)
                 } catch {
-                    result.outcomes.append(BatchPairOutcome(
-                        skillID: skill.id, skillName: skill.name, platform: platform,
+                    var outcome = BatchPairOutcome(skillID: skill.id, skillName: skill.name, platform: platform,
                         target: BatchPairTarget(target), error: BatchPairOutcome.failureMessage(error, target: target),
-                        projectFolderError: error as? ProjectFolderError
-                    ))
+                        projectFolderError: error as? ProjectFolderError)
+                    outcome.artifactApplied = error is DeployArtifactSaveError
+                    result.outcomes.append(outcome)
                 }
             }
         }

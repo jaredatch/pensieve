@@ -129,7 +129,7 @@ extension SyncModelTests {
                 return
             }
             switch engine.outcome {
-            case let .synced(pushed, warnings, _):
+            case let .synced(pushed, warnings, _, _):
                 model.apply(.synced(pushed: pushed, warnings: warnings, completedAt: Date()))
             case let .conflicted(paths):
                 model.apply(.conflicted(paths))

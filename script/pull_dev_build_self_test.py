@@ -174,6 +174,7 @@ class PullDevSigningTests(unittest.TestCase):
         self.nested = [
             'Contents/MacOS/Pensieve',
             'Contents/MacOS/pensieve-daemon',
+            'Contents/Helpers/pensieve',
             'Contents/Frameworks/Fixture.framework/Versions/A/Fixture',
             'Contents/Frameworks/Fixture.framework/Versions/A/XPCServices/Worker.xpc/Contents/MacOS/Worker',
             'Contents/Helpers/Updater.app/Contents/MacOS/Updater',

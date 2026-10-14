@@ -260,7 +260,7 @@ private struct SkillDeploymentsTabResetHarness: View {
             projects: [],
             platformVM: platformVM,
             library: library,
-            intentDependencies: dependencies,
+            intentService: DeployMutationService(platformVM: platformVM, dependencies: dependencies),
             machineStates: [],
             localMachineID: InertMachineIdentity.value,
             hostedIntentModel: intentModel,

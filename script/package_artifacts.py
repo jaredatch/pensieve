@@ -12,7 +12,9 @@ import zipfile
 
 # Fixed tools, replaced only in the release tests' disposable checkout.
 TOOLS = ("/usr/bin/lipo", "/usr/bin/otool", "/usr/bin/nm", "/usr/bin/strip", "/usr/bin/dwarfdump")
-BINARIES = {"Pensieve": "Pensieve.app.dSYM", "pensieve-daemon": "pensieve-daemon.dSYM"}
+BINARIES = {"Pensieve": "Pensieve.app.dSYM", "pensieve-daemon": "pensieve-daemon.dSYM", "pensieve": "pensieve.dSYM"}
+BINARY_PATHS = {"Pensieve": "Contents/MacOS/Pensieve", "pensieve-daemon": "Contents/MacOS/pensieve-daemon",
+                "pensieve": "Contents/Helpers/pensieve"}
 ARCHITECTURES = {"arm64", "x86_64"}
 
 
@@ -55,12 +57,15 @@ def check_binary(binary):
 
 
 def check_app(app):
-    macos = app / "Contents/MacOS"
-    for path in sorted(macos.iterdir()):
-        if path.is_file() and path.stat().st_mode & 0o111:
-            require(path.name in BINARIES, f"{path.name}: unexpected executable in Contents/MacOS")
+    for folder in ("Contents/MacOS", "Contents/Helpers"):
+        directory = app / folder
+        require(directory.is_dir(), f"missing executable directory: {folder}")
+        for path in sorted(directory.iterdir()):
+            if path.is_file() and path.stat().st_mode & 0o111:
+                require(path.relative_to(app).as_posix() in BINARY_PATHS.values(),
+                        f"{path.name}: unexpected executable in {folder}")
     for name in BINARIES:
-        check_binary(macos / name)
+        check_binary(app / BINARY_PATHS[name])
 
 
 def uuids(path):
@@ -76,13 +81,13 @@ def check_symbols(app, archive):
         names = zipped.namelist()
         require(len(names) == len(set(names)), "dSYMs zip has duplicate entries")
         require({name.split('/')[0] for name in names} == set(BINARIES.values()),
-                "dSYMs zip must contain the app and daemon dSYMs alone")
+                "dSYMs zip must contain the app, daemon and CLI dSYMs alone")
         for name, bundle in BINARIES.items():
             member = f"{bundle}/Contents/Resources/DWARF/{name}"
             dwarf = Path(directory) / name
-            # Read only the two named files, never extract archive-controlled paths.
+            # Read only the named files, never extract archive-controlled paths.
             dwarf.write_bytes(zipped.read(member))
-            if uuids(dwarf) != uuids(app / "Contents/MacOS" / name):
+            if uuids(dwarf) != uuids(app / BINARY_PATHS[name]):
                 raise SymbolsMismatch(f"{name}: dSYMs UUIDs do not match packaged binary")
 
 

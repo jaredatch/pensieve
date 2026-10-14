@@ -2,6 +2,12 @@ import Foundation
 
 protocol MachineIdentityProviding {
     func identifier() throws -> String
+    func existingIdentifier() throws -> String?
+}
+
+extension MachineIdentityProviding {
+    /// A provider without a read-only lookup cannot identify this Mac to read commands.
+    func existingIdentifier() throws -> String? { nil }
 }
 
 struct MachineIdentity: MachineIdentityProviding {
@@ -20,6 +26,12 @@ struct MachineIdentity: MachineIdentityProviding {
         self.identityPath = appSupportDir + "/machine-id"
         self.makeUUID = makeUUID
         self.warn = warn
+    }
+
+    func existingIdentifier() throws -> String? {
+        guard !fileService.isSymlink(at: identityPath), fileService.fileExists(at: identityPath) else { return nil }
+        let raw = try fileService.readFile(at: identityPath).trimmingCharacters(in: .whitespacesAndNewlines)
+        return UUID(uuidString: raw)?.uuidString
     }
 
     func identifier() throws -> String {

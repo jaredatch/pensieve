@@ -21,6 +21,12 @@ struct NoticeInventory {
     }
     // Reviewed non-attribution candidates: package, checkout-relative path, reason and byte digest.
     static let licenseExemptions: [LicenseExemption] = [
+        LicenseExemption(package: "swift-argument-parser", path: ".licenseignore",
+                         reason: "License-checker exclusion patterns; no attribution or license terms.",
+                         sha256: "9ccded3a6f0616958d18dbd01906dcc037cd266f41630b008ab3e8c10c16e8f5"),
+        LicenseExemption(package: "swift-argument-parser", path: ".license_header_template",
+                         reason: "Source-header template with placeholders; LICENSE.txt supplies the license and exception.",
+                         sha256: "0f481dcdd5bacbde49a33882e0e268d542908b95a5e236cf7c843f2b5f05c3df"),
         LicenseExemption(package: "sparkle", path: "Tests/Resources/SparkleTestCodeSignApp.enc.nolicense.dmg",
                          reason: "Encrypted unarchiver test fixture; excluded from Sparkle's shipped binary target.",
                          sha256: "711fb28dad948d1141438aca642c65efb809322d1911ae28bf51d5382d396c1b")

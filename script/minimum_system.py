@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the macOS minimum of an app and its embedded daemon."""
+"""Validate the macOS minimum of an app and its embedded tools."""
 import argparse
 from pathlib import Path
 import plistlib
@@ -96,6 +96,7 @@ def check_app_binary_minimum(app, version=None, context="built DMG"):
 def check_app_minimum(app, version=None, context="built DMG"):
     minimum = check_app_binary_minimum(app, version, context)
     check_binary_minimum(app / "Contents/MacOS/pensieve-daemon", minimum)
+    check_binary_minimum(app / "Contents/Helpers/pensieve", minimum)
     return minimum
 
 

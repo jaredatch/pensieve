@@ -15,6 +15,12 @@ class MinimumSystemTests(unittest.TestCase):
         except MINIMUM_ERRORS as error:
             self.fail(str(error))
 
+    def test_embedded_cli_requires_macos_26(self):
+        try:
+            check_binary_minimum(APP / "Contents/Helpers/pensieve", required_minimum())
+        except MINIMUM_ERRORS as error:
+            self.fail(str(error))
+
     def test_embedded_daemon_requires_macos_26(self):
         try:
             check_binary_minimum(APP / "Contents/MacOS/pensieve-daemon", required_minimum())

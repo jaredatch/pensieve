@@ -14,7 +14,7 @@ final class PathSyntaxGuardTests: XCTestCase {
         let root = TestTemporaryDirectory.url.appendingPathComponent("PathGuard-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        for folder in ["Pensieve", "PensieveDaemon"] {
+        for folder in ["Pensieve", "PensieveDaemon", "PensieveCLI"] {
             let file = root.appendingPathComponent(folder + "/NewOwner.swift")
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             for (expression, line) in rejectedProbes {

@@ -781,18 +781,19 @@ class WorkflowTests < Minitest::Test
   }.freeze
   # Workflow/recovery: worst of three serial wall-time samples, rounded up to milliseconds.
   # Measured 2026-10-05 on Mac16,11 / Apple M4 Pro, macOS 26.6.2 (25G83).
-  # Recovery 481.623 s and workflow 8.951 s; ceil(2x) gives runner estimates 964/18 s.
+  # CLI release suite 696.103 s (2026-10-13), workflow 8.951 s; ceil(2x) estimates 1393/18 s.
   CI_LOCAL_WORST_SECONDS = {
     'Wrapper self-test' => 9.826, 'Hygiene added checks' => 0.731,
     'Workflow suite' => 8.951,
-    'Release recovery' => 481.623
+    'CLI contract' => 28.872,
+    'Release recovery' => 696.103
   }.freeze
   CI_WORST_SECONDS = {
     'Checkout' => 2, 'Select Xcode 26' => 1, 'Install tools' => 3,
     'Generate Xcode project' => 1, 'Compute replay range' => 0,
     'Test public hygiene guard' => 156 + (CI_LOCAL_WORST_SECONDS.fetch('Hygiene added checks') * CI_RUNNER_FACTOR).ceil, 'Test workflow contracts' => [3, (CI_LOCAL_WORST_SECONDS.fetch('Workflow suite') * CI_RUNNER_FACTOR).ceil].max,
     'Test release recovery' => (CI_LOCAL_WORST_SECONDS.fetch('Release recovery') * CI_RUNNER_FACTOR).ceil, 'Test development build host selection' => 0,
-    'Test' => 867 + (CI_LOCAL_WORST_SECONDS.fetch('Wrapper self-test') * CI_RUNNER_FACTOR).ceil, 'Upload failed test evidence' => 7, 'Headless smoke' => 14
+    'Test' => 867 + (CI_LOCAL_WORST_SECONDS.fetch('Wrapper self-test') * CI_RUNNER_FACTOR).ceil, 'Test CLI contract' => (CI_LOCAL_WORST_SECONDS.fetch('CLI contract') * CI_RUNNER_FACTOR).ceil, 'Upload failed test evidence' => 7, 'Headless smoke' => 14
   }.freeze
 
   def ci_worst_seconds(job)
@@ -940,6 +941,16 @@ class WorkflowTests < Minitest::Test
         end
       end
     end
+  end
+
+  def test_ci_runs_built_cli_contract_without_ignoring_failure
+    steps = @workflows.fetch('ci.yml').fetch('jobs').fetch('build-test').fetch('steps')
+    checks = steps.select { |step| step.fetch('name') == 'Test CLI contract' }
+    assert_equal 1, checks.length
+    assert_equal 'python3 -B script/cli_contract_test.py --binary DerivedData/Build/Products/Debug/Pensieve.app/Contents/Helpers/pensieve', checks.first.fetch('run')
+    refute checks.first.key?('if')
+    refute checks.first.fetch('continue-on-error', false)
+    assert_operator steps.index(checks.first), :>, steps.index { |step| step['id'] == 'tests' }
   end
 
   def test_triggers_stay_unchanged

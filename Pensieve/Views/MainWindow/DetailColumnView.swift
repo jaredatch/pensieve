@@ -16,7 +16,7 @@ struct DetailColumnView: View {
     let remoteProjects: [RemoteProjectModel]
     let localMachineID: String?
     let notifier: SyncStateNotifying
-    let intentDependencies: DeployIntentDependencies
+    let intentService: DeployMutationServicing
     let now: () -> Date
     let onResolve: () -> Void
     let onConnectToRepository: (Skill) -> Void
@@ -163,7 +163,7 @@ struct DetailColumnView: View {
                 platformVM: platformVM,
                 provenance: provenance,
                 upstreamHistory: upstreamHistory,
-                intentDependencies: intentDependencies,
+                intentService: intentService,
                 machineStates: machineStates,
                 localMachineID: localMachineID
             )

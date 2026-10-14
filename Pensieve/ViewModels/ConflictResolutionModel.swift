@@ -166,7 +166,7 @@ final class ConflictResolutionModel {
     }
 
     private func cycleResult(from outcome: SyncOutcome, previousHeadStamp: String?) -> SyncCycleResult {
-        guard case let .synced(pushed, warnings, ingestedHeadStamp) = outcome else {
+        guard case let .synced(pushed, warnings, ingestedHeadStamp, _) = outcome else {
             preconditionFailure("resolved conflict callback requires a synced outcome")
         }
         return .synced(

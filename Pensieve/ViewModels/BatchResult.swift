@@ -5,6 +5,12 @@ struct DeployOutcome {
     let targetPath: String
 }
 
+/// The artifact is already on disk when saving its local history fails.
+struct DeployArtifactSaveError: LocalizedError {
+    let underlying: Error
+    var errorDescription: String? { underlying.localizedDescription }
+}
+
 /// One (skill, platform) pair's target inside a batch.
 enum BatchPairTarget: Hashable {
     case userWide
@@ -41,6 +47,7 @@ struct BatchPairOutcome: Identifiable {
     let error: String?
     let projectFolderError: ProjectFolderError?
     var isSkipped = false
+    var artifactApplied = false
 
     init(
         skillID: UUID,

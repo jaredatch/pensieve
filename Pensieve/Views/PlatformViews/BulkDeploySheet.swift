@@ -33,14 +33,11 @@ struct BulkDeploySheet: View {
     init(
         skills: [Skill],
         platformVM: PlatformViewModel,
-        intentDependencies: DeployIntentDependencies
+        intentService: DeployMutationServicing
     ) {
         self.skills = skills
         self.platformVM = platformVM
-        _intentModel = State(initialValue: DeployIntentModel(
-            platformVM: platformVM,
-            dependencies: intentDependencies
-        ))
+        _intentModel = State(initialValue: DeployIntentModel(service: intentService))
     }
 
     var body: some View {

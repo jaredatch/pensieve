@@ -65,7 +65,7 @@ final class GitCredentialIsolationTests: XCTestCase {
             audit: CredentialAudit(), machine: (InertMachineIdentity(), InertMachineStateService()))
         try writeSkill(fixture, root: second, body: "Synced edit")
         let cycle = await coordinator.runCycle()
-        guard case let .synced(pushed, _, _, _) = cycle else {
+        guard case let .synced(pushed, _, _, _, _) = cycle else {
             return XCTFail("Expected a successful sync, got \(cycle)")
         }
         XCTAssertTrue(pushed)

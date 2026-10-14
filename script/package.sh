@@ -98,10 +98,11 @@ assemble_dmg_root() {
   mkdir -p "$DMG_ROOT"
   ditto "$built_app" "$APP_PATH"
   ln -s /Applications "$DMG_ROOT/Applications"
-  /usr/bin/strip -rSTx "$APP_PATH/Contents/MacOS/Pensieve" "$APP_PATH/Contents/MacOS/pensieve-daemon"
+  /usr/bin/strip -rSTx "$APP_PATH/Contents/MacOS/Pensieve" "$APP_PATH/Contents/MacOS/pensieve-daemon" "$APP_PATH/Contents/Helpers/pensieve"
   python3 -B "$REPO/script/package_artifacts.py" --app "$APP_PATH" --check
   python3 -B "$REPO/script/package_artifacts.py" --app "$APP_PATH" \
     --products "$DERIVED_DATA/Build/Products/Release" --zip-symbols "$DSYM_PATH"
+  codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_PATH/Contents/Helpers/pensieve"
   codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_PATH/Contents/MacOS/pensieve-daemon"
   codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_PATH"
 }

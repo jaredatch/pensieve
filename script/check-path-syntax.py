@@ -314,7 +314,7 @@ def main():
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
     args = parser.parse_args()
     failures = []
-    for folder in ("Pensieve", "PensieveDaemon"):
+    for folder in ("Pensieve", "PensieveDaemon", "PensieveCLI"):
         for path in sorted((args.root / folder).rglob("*.swift")):
             failures.extend(violations(path.read_text(), path.relative_to(args.root).as_posix()))
     print("\n".join(failures) if failures else "Path separator guard OK")

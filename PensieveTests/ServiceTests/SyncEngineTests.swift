@@ -154,7 +154,7 @@ final class SyncEngineTests: XCTestCase {
                 try ManifestService().read(fromRoot: tempDir).deployIntents.first?.projectKey,
                 "github.com/owner/project"
             )
-            XCTAssertEqual(outcome, .synced(pushed: true, warnings: []))
+            XCTAssertEqual(outcome, .synced(pushed: true, warnings: [], pulled: true))
         }
     }
 

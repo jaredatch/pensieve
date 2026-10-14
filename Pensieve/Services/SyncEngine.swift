@@ -1,31 +1,6 @@
 import Foundation
 import SwiftData
 
-// MARK: - Outcome
-
-/// The result of one `SyncEngine.sync`. `Equatable` so tests assert it directly and `SyncModel` maps it
-/// to UI state. `.synced(pushed:)` reports whether this sync created a local commit to publish; the push
-/// op runs regardless, so a merged history and the upstream ref are always published.
-enum SyncOutcome: Equatable {
-    case synced(pushed: Bool, warnings: [String], ingestedHeadStamp: String? = nil)
-    case conflicted([String])
-    case noRemote
-    case branchless
-
-    static func == (lhs: SyncOutcome, rhs: SyncOutcome) -> Bool {
-        switch (lhs, rhs) {
-        case let (.synced(leftPushed, leftWarnings, _), .synced(rightPushed, rightWarnings, _)):
-            return leftPushed == rightPushed && leftWarnings == rightWarnings
-        case let (.conflicted(left), .conflicted(right)):
-            return left == right
-        case (.noRemote, .noRemote), (.branchless, .branchless):
-            return true
-        default:
-            return false
-        }
-    }
-}
-
 /// A sync-level failure distinct from a git command failure. `.storeUnreadable` means the pulled manifest
 /// is a newer/unreadable schema this build could not ingest — we refuse to push our older snapshot over
 /// it (a downgrade) and tell the user to update. (PLAN-08 / 08.4 review)
@@ -159,9 +134,10 @@ struct SyncEngine: SyncEngineProtocol {
         // 4. Pull with rebase. A body/overlay conflict is NOT ours to resolve here: abort (restoring the
         //    exact pre-pull tree — nothing half-merged, nothing lost) and surface it. Do NOT rebuild, do
         //    NOT push, so the divergence is preserved for a later, resolvable sync (§D).
+        let pulled: Bool
         switch try pullRebase(root: root, credential: credential, incoming: incoming) {
-        case .upToDate, .merged:
-            break
+        case .upToDate: pulled = false
+        case .merged: pulled = true
         case let .conflicted(paths):
             try gitService.abortRebase(at: root)
             return .conflicted(paths)
@@ -175,7 +151,7 @@ struct SyncEngine: SyncEngineProtocol {
         return .synced(
             pushed: committed,
             warnings: rebuild.warnings,
-            ingestedHeadStamp: ingestedHeadStamp
+            ingestedHeadStamp: ingestedHeadStamp, pulled: pulled
         )
     }
 
@@ -202,8 +178,10 @@ struct SyncEngine: SyncEngineProtocol {
         // (the safe-resting-state invariant). Mirrors resolveConflicts' outer catch.
         do {
             switch try pullRebase(root: root, credential: credential, incoming: incoming) {
-            case .upToDate, .merged:
-                return .cleared(try finishSync(root: root, credential: credential, context: context))
+            case .upToDate:
+                return .cleared(try finishSync(root: root, credential: credential, context: context, pulled: false))
+            case .merged:
+                return .cleared(try finishSync(root: root, credential: credential, context: context, pulled: true))
             case let .conflicted(paths):
                 let items = try paths.map { path in
                     let this = try ConflictVersion { try gitService.conflictEntry(atStage: 3, path: path, in: root) }
@@ -240,14 +218,16 @@ struct SyncEngine: SyncEngineProtocol {
         _ = try prepareLocalHead(root: root, credential: credential, context: context, incoming: incoming)
         do {
             switch try pullRebase(root: root, credential: credential, incoming: incoming) {
-            case .upToDate, .merged:
-                return try finishSync(root: root, credential: credential, context: context)
+            case .upToDate:
+                return try finishSync(root: root, credential: credential, context: context, pulled: false)
+            case .merged:
+                return try finishSync(root: root, credential: credential, context: context, pulled: true)
             case let .conflicted(paths):
                 try resolveConflictedPaths(paths, picks: picks, root: root)
                 if case .conflicted = try gitService.continueRebase(at: root) {
                     throw SyncError.conflictsChanged
                 }
-                return try finishSync(root: root, credential: credential, context: context)
+                return try finishSync(root: root, credential: credential, context: context, pulled: true)
             }
         } catch {
             try? gitService.abortRebase(at: root)
@@ -292,7 +272,7 @@ struct SyncEngine: SyncEngineProtocol {
     }
 
     private func finishSync(root: String, credential: GitCredential?,
-                            context: ModelContext) throws -> SyncOutcome {
+                            context: ModelContext, pulled: Bool) throws -> SyncOutcome {
         let pushed = try gitService.hasCommitsToPush(at: root)
         let rebuild = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context)
         try gitService.push(at: root, credential: credential)
@@ -300,7 +280,7 @@ struct SyncEngine: SyncEngineProtocol {
         return .synced(
             pushed: pushed,
             warnings: rebuild.warnings,
-            ingestedHeadStamp: ingestedHeadStamp
+            ingestedHeadStamp: ingestedHeadStamp, pulled: pulled
         )
     }
 

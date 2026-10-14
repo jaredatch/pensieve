@@ -60,25 +60,47 @@ final class AppRuntimeLaunchCompletionTests: XCTestCase {
         XCTAssertFalse(helpers.contains("forceLaunchPreflight"))
     }
 
-    func testLaunchWorkCompletionFollowsCallbacksBeforeCoordinatorSignaling() async throws {
+    func testLaunchWorkStartsWithoutAWindowAndChecksUpdatesBeforeWatching() async throws {
         let paths = try AppRuntimePaths.temporary(named: "LaunchCompletion")
         defer { try? FileService().deleteDirectory(at: (paths.storeRoot as NSString).deletingLastPathComponent) }
         let defaults = try isolatedDefaults()
         defaults.set(false, forKey: AppRuntime.backgroundSyncEnabledKey)
+        defaults.set(UpdateCheckFrequency.daily.rawValue, forKey: UpdateCheckSchedule.frequencyKey)
+        let watcher = AppRuntimeTests.StubWatcher()
+        let library = SkillLibraryViewModel(skillStore: SkillStore(fileService: FileService(),
+            baseDir: paths.skillsDir, storeRoot: paths.storeRoot), fileWatchService: watcher, manifestRoot: paths.storeRoot)
+        let checks = Counter()
         var backfilled = false
-        let runtime = try AppRuntime(defaults: defaults,
+        let coordinatorGate = TestWait.Gate(owner: self)
+        defer { coordinatorGate.open() }
+        let runtime = try AppRuntime(library: library, defaults: defaults,
             launchReconcile: { _, _ in LaunchReconcileOutcome(rebuild: RebuildResult(), migrationRan: false) },
             launchBackfill: { _ in backfilled = true }, hasRemoteConfigured: { false }, paths: paths,
-            gitUsabilityProbe: { .usable })
+            updateCheckOperation: { _ in
+                checks.increment()
+                return RuntimeUpdateCheckResult(report: UpdateCheckReport(reachedRemote: false), skills: [:])
+            }, gitUsabilityProbe: { .usable }, coordinatorConfigure: { _ in
+                await BlockingWork.run { try? coordinatorGate.wait() }
+            })
         XCTAssertFalse(runtime.launchWorkCompleted)
-        var callbackRan = false
-        await runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext) {
+        watcher.onStart = { [weak runtime] in
             XCTAssertTrue(backfilled)
-            XCTAssertFalse(runtime.launchWorkCompleted, "launch callbacks are still running")
-            callbackRan = true
+            XCTAssertTrue(runtime?.updateCheckInFlight == true, "the due check must start before the watcher")
+            XCTAssertFalse(runtime?.launchWorkCompleted ?? true, "launch callbacks are still running")
         }
-        XCTAssertTrue(callbackRan)
-        XCTAssertTrue(runtime.launchWorkCompleted, "launch work finished before the asynchronous coordinator signal")
+        runtime.start()
+        await TestWait.until(failureMessage: "window-free launch never finished") { runtime.launchWorkCompleted }
+        XCTAssertFalse(runtime.commandsReady, "coordinator setup is separate from completed launch callbacks")
+        await TestWait.until(failureMessage: "due update check never finished") { !runtime.updateCheckInFlight }
+        XCTAssertEqual(checks.value, 1)
+        XCTAssertEqual(watcher.startCount, 1)
+        XCTAssertEqual(runtime.launchWorkInvocationCount, 1)
+        runtime.start()
+        await runtime.performLaunchWorkIfNeeded(context: runtime.container.mainContext)
+        XCTAssertEqual(runtime.launchWorkInvocationCount, 1)
+        XCTAssertEqual(checks.value, 1)
+        XCTAssertEqual(watcher.startCount, 1)
+        coordinatorGate.open()
         await runtime.bootstrapTask.value
     }
 }

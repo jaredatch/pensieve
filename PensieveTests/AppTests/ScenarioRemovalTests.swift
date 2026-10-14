@@ -19,7 +19,7 @@ final class ScenarioRemovalTests: XCTestCase {
                 + #"ScenarioDetailView|ScenarioDetailModel|ScenarioListView|ScenarioRecord|Scenario|ScenarioAssignment)\b"#
         )
         var scanned = 0
-        for folder in ["Pensieve", "PensieveDaemon"] {
+        for folder in ["Pensieve", "PensieveDaemon", "PensieveCLI"] {
             let files = try XCTUnwrap(FileManager.default.enumerator(
                 at: root.appendingPathComponent(folder), includingPropertiesForKeys: nil
             ))
@@ -57,6 +57,7 @@ final class ScenarioRemovalTests: XCTestCase {
         try runtime.container.mainContext.save()
         try FileService().writeFile(at: paths.skillsDir + "/launch/SKILL.md",
                                     content: "---\nname: Launch skill\ndescription: Description\n---\nBody")
+        runtime.start()
         var launchRendered = false
         let host = makeHost(runtime: runtime, paths: paths) { launchRendered = true }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1_000, height: 700),
@@ -67,7 +68,7 @@ final class ScenarioRemovalTests: XCTestCase {
         window.makeKeyAndOrderFront(nil)
         defer { window.close() }
         await runtime.bootstrapTask.value
-        await TestWait.until(failureMessage: "main window did not run its launch callbacks") {
+        await TestWait.until(failureMessage: "runtime startup did not run before the sidebar rendered") {
             host.layoutSubtreeIfNeeded()
             return runtime.launchWorkInvocationCount == 1 && self.sidebar(in: host) != nil
         }

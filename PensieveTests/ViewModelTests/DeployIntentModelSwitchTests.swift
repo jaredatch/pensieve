@@ -8,7 +8,7 @@ private struct UnreadableSwitchIdentity: MachineIdentityProviding {
 
 @MainActor
 extension DeployIntentModelTests {
-    func testLocalAndProjectSwitchesPersistBeforeDeployAndNudge() throws {
+    func testLocalAndProjectSwitchesPersistBeforeDeployAndNudge() async throws {
         var events: [String] = []
         var nudges = 0
         let harness = try makeHarness(
@@ -37,6 +37,14 @@ extension DeployIntentModelTests {
         XCTAssertEqual(rows.filter { $0.projectKey == nil }.count, 1)
         let manifest = try ManifestService(fileService: harness.manifestFileService).read(fromRoot: harness.root)
         XCTAssertEqual(manifest.deployIntents.count, 2)
+        try await assertRuntimeDeploymentNudges()
+        let identity = ReloadFailingIdentity(id: localID)
+        let remote = try makeHarness(identity: identity)
+        let remoteSkill = try insertSkill(context: remote.context)
+        XCTAssertNoThrow(try remote.model.setSelected(true, machineID: remoteID, skill: remoteSkill,
+            platform: .codex, context: remote.context), "A saved remote toggle succeeds even if refresh fails")
+        XCTAssertNil(remote.model.error)
+        XCTAssertEqual(try remote.context.fetch(FetchDescriptor<MachineDeployIntent>()).map(\.machineID), [remoteID])
     }
 
     func testTurningOffIntentAndManualDeploysAlwaysRemovesArtifactWithoutAdoption() throws {
@@ -122,6 +130,12 @@ extension DeployIntentModelTests {
         XCTAssertEqual(result.successes.count, 1)
         XCTAssertEqual(harness.linkService.linkCalls.map(\.projectPath), [project.path])
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
+
+        let cli = CLIDeployHandler(service: harness.model.service, files: harness.linkService.fileService).handle(
+            CLIRequest(command: "deploy", arguments: [skill.directoryName], deployment: CLIDeployOptions(
+                agents: ["codex"], project: project.name, workingDirectory: harness.root)), context: harness.context)
+        XCTAssertTrue(cli.envelope.ok, "The CLI's keyless local path also needs no machine identity")
+        XCTAssertEqual(cli.envelope.changed, false)
 
         let invalid = Project(name: "Invalid", path: "/tmp/invalid")
         invalid.identityKey = " leading-space"
@@ -213,6 +227,7 @@ extension DeployIntentModelTests {
         rows = try harness.context.fetch(FetchDescriptor<MachineDeployIntent>())
         XCTAssertTrue(rows.isEmpty)
         XCTAssertEqual(harness.linkService.unlinkCalls.map(\.projectPath), [project.path, project.path])
+        try assertDeploymentErrorsStayWithTheirWindow()
     }
 
     func testSwitchRefusesWhileSyncLockIsHeldBeforeChangingAnything() throws {
@@ -248,5 +263,16 @@ extension DeployIntentModelTests {
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<IntentAssignment>()), 0)
         XCTAssertEqual(harness.linkService.unlinkCalls.count, 1)
         XCTAssertEqual(nudges, 2)
+    }
+}
+
+private final class ReloadFailingIdentity: MachineIdentityProviding {
+    let id: String
+    private var reads = 0
+    init(id: String) { self.id = id }
+    func identifier() throws -> String {
+        reads += 1
+        guard reads == 1 else { throw DeployStubFailure() }
+        return id
     }
 }

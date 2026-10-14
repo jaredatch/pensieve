@@ -219,7 +219,8 @@ final class LibraryFenceFixture {
                 DetailColumnView(section: section, entitySelection: entity, selectedSkills: [], skills: [], skillsEmpty: true,
                 projects: [], platformVM: runtime.platformVM, syncModel: runtime.syncModel, library: runtime.library,
                 provenance: runtime.provenanceVM, upstreamHistory: runtime.upstreamHistory, machineStates: [],
-                remoteProjects: [], localMachineID: nil, notifier: {}, intentDependencies: dependencies,
+                remoteProjects: [], localMachineID: nil, notifier: {},
+                intentService: DeployMutationService(platformVM: runtime.platformVM, dependencies: dependencies),
                 now: Date.init, onResolve: {}, onConnectToRepository: { _ in }, onBulkDeploy: {}, onOpenUpdates: {},
                 updateRouting: UpdateReviewRouting(preview: runtime.viewChanges, updates: runtime.updates,
                     library: runtime.library, context: runtime.container.mainContext, openWindow: { _ in }),
@@ -235,7 +236,8 @@ final class LibraryFenceFixture {
             root: runtime.paths.storeRoot, writeManifest: { _ in }, notifier: {},
             lockPath: runtime.paths.syncLockPath, lockProvider: { _ in nil })
         host.rootView = AnyView(SkillDeploymentsTab(skill: skill, snapshot: DetailContentSnapshot(), statusIsCurrent: true,
-            projects: [], platformVM: runtime.platformVM, library: runtime.library, intentDependencies: dependencies,
+            projects: [], platformVM: runtime.platformVM, library: runtime.library,
+            intentService: DeployMutationService(platformVM: runtime.platformVM, dependencies: dependencies),
             machineStates: [], localMachineID: nil, homeDirectory: runtime.paths.homeDirectory, onAddProject: {})
             .modelContainer(runtime.container))
         host.layoutSubtreeIfNeeded()

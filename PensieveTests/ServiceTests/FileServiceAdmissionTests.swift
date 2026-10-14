@@ -120,17 +120,21 @@ final class FileServiceAdmissionTests: XCTestCase {
         XCTAssertTrue(admissions.regular.contains(path))
     }
 
-    func testAdmissionGuardScansDaemonMainInScratchCopy() throws {
+    func testAdmissionGuardScansToolMainInScratchCopy() throws {
         let scratch = try copyAdmissionSources()
-        let path = scratch.appendingPathComponent("PensieveDaemon/main.swift").path
-        try files.writeFile(at: path, content: files.readFile(at: path) + """
+        for relative in ["PensieveDaemon/main.swift", "PensieveCLI/main.swift"] {
+            let path = scratch.appendingPathComponent(relative).path
+            let original = try files.readFile(at: path)
+            try files.writeFile(at: path, content: original + """
 
-        func secondOpen(_ path: String) { _ = open(path, O_RDONLY | O_NOFOLLOW) } // PLAN43_C11_DAEMON_MUTATION
-        """)
-        XCTAssertEqual(try files.readFile(at: path).components(separatedBy: "PLAN43_C11_DAEMON_MUTATION").count - 1, 1)
-        let admissions = try noFollowAdmissions(in: scratch)
-        XCTAssertEqual(admissions.regular.count, 2, "The daemon open must fail the single-implementation guard")
-        XCTAssertTrue(admissions.regular.contains(path))
+            func secondOpen(_ path: String) { _ = open(path, O_RDONLY | O_NOFOLLOW) } // PLAN43_C11_TOOL_MUTATION
+            """)
+            XCTAssertEqual(try files.readFile(at: path).components(separatedBy: "PLAN43_C11_TOOL_MUTATION").count - 1, 1)
+            let admissions = try noFollowAdmissions(in: scratch)
+            XCTAssertEqual(admissions.regular.count, 2, "The tool open must fail the single-implementation guard")
+            XCTAssertTrue(admissions.regular.contains(path))
+            try files.writeFile(at: path, content: original)
+        }
     }
 
     func testCreatedTemporaryIsRemovedThroughHeldDirectoryWhenStatFails() throws {
@@ -177,7 +181,8 @@ final class FileServiceAdmissionTests: XCTestCase {
     private func copyAdmissionSources() throws -> URL {
         let scratch = URL(fileURLWithPath: root).appendingPathComponent("source-copy")
         for relative in ["Pensieve/Services/FileService+BoundedRead.swift",
-                         "Pensieve/Services/FileService+DescriptorCopy.swift", "PensieveDaemon/main.swift"] {
+                         "Pensieve/Services/FileService+DescriptorCopy.swift",
+                         "PensieveDaemon/main.swift", "PensieveCLI/main.swift"] {
             let destination = scratch.appendingPathComponent(relative)
             try files.createDirectory(at: destination.deletingLastPathComponent().path)
             try files.copyFile(at: sourceRoot.appendingPathComponent(relative).path, to: destination.path)
@@ -188,7 +193,7 @@ final class FileServiceAdmissionTests: XCTestCase {
     private func noFollowAdmissions(in sourceRoot: URL) throws -> (regular: [String], directories: [String]) {
         var matches: [String] = []
         var directoryMatches: [String] = []
-        let sources = try ["Pensieve", "PensieveDaemon"].flatMap {
+        let sources = try ["Pensieve", "PensieveDaemon", "PensieveCLI"].flatMap {
             try swiftSources(in: sourceRoot.appendingPathComponent($0).path)
         }
         for path in sources {

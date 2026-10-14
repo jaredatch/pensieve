@@ -1,190 +1,100 @@
-import Foundation
 import Observation
 import SwiftData
 
-struct DeployIntentMachine: Identifiable, Equatable {
-    let id: String
-    let name: String
-    let isLocal: Bool
-    let isUnseen: Bool
-}
-
-struct DeployIntentDependencies {
-    let identity: MachineIdentityProviding
-    let stateService: MachineStateServicing
-    let root: String
-    let manifestService: ManifestSnapshotting
-    let fetchIntents: (ModelContext) throws -> [MachineDeployIntent]
-    let writeManifest: (ModelContext) throws -> Void
-    let saveContext: (ModelContext) throws -> Void
-    let notifier: SyncStateNotifying
-    let reconcile: @MainActor (ModelContext) -> BatchResult
-    let lockPath: String
-    let lockProvider: (String) -> SyncLock?
-    let remoteRetractions: RemoteRetractionStore
-
-    init(
-        identity: MachineIdentityProviding,
-        stateService: MachineStateServicing,
-        root: String,
-        manifestService: ManifestSnapshotting = ManifestService(),
-        fetchIntents: @escaping (ModelContext) throws -> [MachineDeployIntent] = {
-            try $0.fetch(FetchDescriptor<MachineDeployIntent>())
-        },
-        writeManifest: @escaping (ModelContext) throws -> Void,
-        saveContext: @escaping (ModelContext) throws -> Void = { try $0.save() },
-        notifier: @escaping SyncStateNotifying,
-        reconcile: @escaping @MainActor (ModelContext) -> BatchResult = { _ in BatchResult() },
-        lockPath: String,
-        lockProvider: @escaping (String) -> SyncLock? = { SyncLock.tryAcquire(at: $0) },
-        remoteRetractions: RemoteRetractionStore = RemoteRetractionStore()
-    ) {
-        self.identity = identity
-        self.stateService = stateService
-        self.root = root
-        self.manifestService = manifestService
-        self.fetchIntents = fetchIntents
-        self.writeManifest = writeManifest
-        self.saveContext = saveContext
-        self.notifier = notifier
-        self.reconcile = reconcile
-        self.lockPath = lockPath
-        self.lockProvider = lockProvider
-        self.remoteRetractions = remoteRetractions
-    }
-
-    static func live(
-        identity: MachineIdentityProviding,
-        stateService: MachineStateServicing,
-        root: String,
-        lockPath: String,
-        notifier: @escaping SyncStateNotifying,
-        reconcile: @escaping @MainActor (ModelContext) -> BatchResult,
-        remoteRetractions: RemoteRetractionStore = RemoteRetractionStore()
-    ) -> Self {
-        let manifestService = ManifestService()
-        return Self(
-            identity: identity,
-            stateService: stateService,
-            root: root,
-            manifestService: manifestService,
-            writeManifest: { context in
-                try manifestService.write(try manifestService.snapshot(from: context), toRoot: root)
-            },
-            notifier: notifier,
-            reconcile: reconcile,
-            lockPath: lockPath,
-            remoteRetractions: remoteRetractions
-        )
-    }
-}
-
-enum DeployIntentApplyOutcome {
-    case intentOnly
-    case localDeploy(BatchResult)
-}
-
-enum DeployIntentModelError: LocalizedError {
-    case invalidComponent(String)
-    case remoteTargetIsThisMac
-    case syncInProgress
-    case selectionChanged
-    case ingestPending
-
-    var errorDescription: String? {
-        switch self {
-        case let .invalidComponent(value):
-            "Invalid deploy intent component: \(value)"
-        case .remoteTargetIsThisMac:
-            "This Mac must use its local deployment controls."
-        case .syncInProgress:
-            "Sync is running. Try again when it finishes."
-        case .ingestPending:
-            "Deployment couldn't update this Mac's library. Try deploying again."
-        case .selectionChanged:
-            "A selected skill was removed while the library updated. Choose the skills again."
-        }
-    }
-}
-
-enum DeployIntentPersistenceError: LocalizedError {
-    case manifestRestoreFailed(save: Error, restore: Error)
-
-    var errorDescription: String? {
-        switch self {
-        case let .manifestRestoreFailed(save, restore):
-            "Saving deployment intent failed (\(save.localizedDescription)), and the restore of its manifest failed "
-                + "(\(restore.localizedDescription))."
-        }
-    }
-}
-
+/// Window presentation delegates deployment decisions to the runtime's shared mutation service.
 @MainActor
 @Observable
 final class DeployIntentModel {
-    let platformVM: PlatformViewModel
-    let dependencies: DeployIntentDependencies
-
-    private(set) var machines: [DeployIntentMachine] = []
-    private(set) var availablePlatforms: [PlatformTarget] = []
+    let service: DeployMutationServicing
+    var platformVM: PlatformViewModel { service.platformVM }
+    var dependencies: DeployIntentDependencies { service.dependencies }
+    var machines: [DeployIntentMachine] { service.machines }
+    var availablePlatforms: [PlatformTarget] { service.availablePlatforms }
     var error: String?
 
-    init(platformVM: PlatformViewModel, dependencies: DeployIntentDependencies) {
-        self.platformVM = platformVM
-        self.dependencies = dependencies
+    init(service: DeployMutationServicing) { self.service = service }
+
+    convenience init(platformVM: PlatformViewModel, dependencies: DeployIntentDependencies) {
+        self.init(service: DeployMutationService(platformVM: platformVM, dependencies: dependencies))
     }
 
     func reload(context: ModelContext) {
         do {
-            let localID = try dependencies.identity.identifier()
-            let states = dependencies.stateService.readAll(fromRoot: dependencies.root)
-            let stateByID = Dictionary(states.map { ($0.machineID, $0) }, uniquingKeysWith: { first, _ in first })
-            let intents = try context.fetch(FetchDescriptor<MachineDeployIntent>())
-            let intentIDs = Set(intents.compactMap { $0.projectKey == nil ? $0.machineID : nil })
-            let allIDs = Set(stateByID.keys).union(intentIDs).union([localID])
-            machines = allIDs.map { machineID in
-                let state = stateByID[machineID]
-                return DeployIntentMachine(
-                    id: machineID,
-                    name: machineID == localID ? "This Mac" : state.map {
-                        PublishedStringSanitizer.name($0.name, fallback: "Mac")
-                    } ?? machineID,
-                    isLocal: machineID == localID,
-                    isUnseen: machineID != localID && state == nil
-                )
-            }.sorted {
-                if $0.isLocal != $1.isLocal { return $0.isLocal }
-                let nameOrder = $0.name.localizedStandardCompare($1.name)
-                if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
-                return $0.id < $1.id
-            }
-            let remoteRaws = states.flatMap(\.agents) + intents.filter { $0.projectKey == nil }.map(\.platformRaw)
-            let remotePlatforms = remoteRaws.compactMap(PlatformTarget.init(rawValue:))
-            let localPlatforms = platformVM.deployablePlatforms(forProject: false)
-            let admitted = Set(localPlatforms + remotePlatforms)
-            availablePlatforms = PlatformTarget.allCases.filter(admitted.contains)
+            try service.reload(context: context)
             error = nil
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    func selectedMachineIDs(
-        skills: [Skill],
-        platforms: Set<PlatformTarget>,
-        context: ModelContext
-    ) throws -> Set<String> {
-        let slugs = Set(skills.map(\.directoryName))
-        let platformRaws = Set(platforms.map(\.rawValue))
-        do {
-            let rows = try dependencies.fetchIntents(context)
-            return Set(rows.compactMap { row in
-                row.projectKey == nil && slugs.contains(row.skillSlug) && platformRaws.contains(row.platformRaw)
-                    ? row.machineID : nil
-            })
-        } catch {
+    func selectedMachineIDs(skills: [Skill], platforms: Set<PlatformTarget>, context: ModelContext) throws -> Set<String> {
+        do { return try service.selectedMachineIDs(skills: skills, platforms: platforms, context: context) } catch {
             self.error = "Deployment selection could not be read: \(error.localizedDescription)"
             throw error
         }
+    }
+
+    func setRemote(_ selected: Bool, machineID: String, projectKey: String?, skill: Skill,
+                   platform: PlatformTarget, context: ModelContext) throws {
+        try reportErrors {
+            try service.setRemote(selected, machineID: machineID, projectKey: projectKey,
+                                  skill: skill, platform: platform, context: context)
+        }
+    }
+
+    func set(_ selected: Bool, skill: Skill, platform: PlatformTarget, target: DeployTarget,
+             context: ModelContext) throws -> BatchResult {
+        let result = try reportErrors {
+            try service.set(selected, skill: skill, platform: platform, target: target, context: context)
+        }
+        presentFailures(result)
+        return result
+    }
+
+    func setProjectSelection(_ selected: Bool, skills: [Skill], platforms: Set<PlatformTarget>,
+                             project: Project, context: ModelContext) throws -> DeployIntentApplyOutcome {
+        let outcome = try reportErrors {
+            try service.setProjectSelection(selected, skills: skills, platforms: platforms, project: project, context: context)
+        }
+        if case let .localDeploy(result) = outcome { presentFailures(result) }
+        return outcome
+    }
+
+    @discardableResult
+    func setSelected(_ selected: Bool, machineID: String, skill: Skill, platform: PlatformTarget,
+                     context: ModelContext) throws -> BatchResult? {
+        try reportErrors {
+            try service.setSelected(selected, machineID: machineID, skill: skill, platform: platform, context: context)
+        }
+    }
+
+    func apply(skills: [Skill], platforms: Set<PlatformTarget>, selectedMachineIDs: Set<String>,
+               context: ModelContext) throws -> DeployIntentApplyOutcome {
+        try reportErrors {
+            try service.apply(skills: skills, platforms: platforms, selectedMachineIDs: selectedMachineIDs, context: context)
+        }
+    }
+
+    func retract(skills: [Skill], platforms: Set<PlatformTarget>, machineIDs: Set<String>,
+                 context: ModelContext) throws -> DeployIntentApplyOutcome {
+        try reportErrors {
+            try service.retract(skills: skills, platforms: platforms, machineIDs: machineIDs, context: context)
+        }
+    }
+
+    private func reportErrors<T>(_ operation: () throws -> T) throws -> T {
+        do {
+            let value = try operation()
+            error = nil
+            return value
+        } catch {
+            self.error = error.localizedDescription
+            throw error
+        }
+    }
+
+    private func presentFailures(_ result: BatchResult) {
+        let messages = result.readFailures.map(\.message) + result.failures.compactMap(\.error)
+        error = messages.isEmpty ? nil : messages.joined(separator: "\n")
     }
 }
