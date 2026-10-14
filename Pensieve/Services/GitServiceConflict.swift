@@ -18,6 +18,8 @@ struct UnavailableConflictSide: Error, Equatable {
     var canChoose: Bool { isGitlink && reason == .gitlink }
 }
 
+struct ConflictFolderMustMove: Error {}
+
 // Stage mapping during `git pull --rebase origin main` is OPPOSITE a plain merge:
 //   stage 2 (:2:) = origin/main = the OTHER machine
 //   stage 3 (:3:) = the replayed local commit = THIS machine
@@ -67,6 +69,10 @@ extension GitService {
     /// Git restores the selected entry's link type and executable mode without byte conversions.
     @_disfavoredOverload
     func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+        if try fileService.entryTypeWithoutFollowingLinks(at: root + "/" + path) == .directory {
+            guard stage == 3 else { throw ConflictFolderMustMove() }
+            try removeIncomingConflictFolder(path, at: root)
+        }
         let store = try storeOperation(at: root)
         try store.runOrThrow(["-c", "core.symlinks=true", "--literal-pathspecs", "checkout-index",
                              "--force", "--stage=\(stage)", "--", path])
@@ -180,5 +186,69 @@ extension GitService {
             return false
         }
         return (Int(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0) > 0
+    }
+}
+
+private struct ConflictTreeEntry {
+    let mode: String
+    let object: String
+}
+
+extension GitService {
+    /// During rebase HEAD is the incoming tree. Admit the entire folder before deleting any
+    /// entry. Gitlinks, extra empty folders, changed modes/bytes and unreadable entries refuse.
+    private func removeIncomingConflictFolder(_ path: String, at root: String) throws {
+        let args = ["--literal-pathspecs", "-C", root, "ls-tree", "-r", "-t", "-z", "--full-tree", "HEAD", "--", path]
+        let result = try runData(args, in: nil)
+        guard result.exit == 0 else { throw dataCommandError(result, args: args) }
+        var entries: [Data: ConflictTreeEntry] = [:]
+        for record in result.stdout.split(separator: 0) {
+            let parts = record.split(separator: 9, maxSplits: 1)
+            guard parts.count == 2 else { throw ConflictFolderMustMove() }
+            let header = parts[0].split(separator: 32)
+            guard header.count == 3, let mode = String(bytes: header[0], encoding: .ascii),
+                  let object = String(bytes: header[2], encoding: .ascii) else { throw ConflictFolderMustMove() }
+            entries[Data(parts[1])] = ConflictTreeEntry(mode: mode, object: object)
+        }
+        guard entries[Data(path.utf8)]?.mode == "040000" else { throw ConflictFolderMustMove() }
+        do {
+            try requireMatchingConflictEntry(path, root: root, entries: entries)
+        } catch let error as GitError {
+            throw error
+        } catch {
+            throw ConflictFolderMustMove()
+        }
+        try fileService.deleteDirectory(at: root + "/" + path)
+    }
+
+    private func requireMatchingConflictEntry(_ path: String, root: String,
+                                              entries: [Data: ConflictTreeEntry]) throws {
+        guard let entry = entries[Data(path.utf8)] else { throw ConflictFolderMustMove() }
+        let full = root + "/" + path
+        let type = try fileService.entryTypeWithoutFollowingLinks(at: full)
+        if entry.mode == "040000" {
+            guard type == .directory else { throw ConflictFolderMustMove() }
+            for name in try fileService.listDirectory(at: full) {
+                try requireMatchingConflictEntry(path + "/" + name, root: root, entries: entries)
+            }
+            return
+        }
+        guard ["100644", "100755", "120000"].contains(entry.mode) else { throw ConflictFolderMustMove() }
+        let args = ["-C", root, "cat-file", "blob", entry.object]
+        let blob = try runData(args, in: nil)
+        guard blob.exit == 0 else { throw dataCommandError(blob, args: args) }
+        let bytes: Data
+        if entry.mode == "120000" {
+            guard type == .symlink else { throw ConflictFolderMustMove() }
+            // Compare the link itself; neither its contents nor deletion may follow its target.
+            bytes = Data(try fileService.symlinkTarget(at: full).utf8)
+        } else {
+            guard type == .regular,
+                  fileService.isUserExecutableFile(at: full) == (entry.mode == "100755") else {
+                throw ConflictFolderMustMove()
+            }
+            bytes = try fileService.readRegularFileData(at: full, maximumBytes: blob.stdout.count, containedIn: root)
+        }
+        guard bytes == blob.stdout else { throw ConflictFolderMustMove() }
     }
 }

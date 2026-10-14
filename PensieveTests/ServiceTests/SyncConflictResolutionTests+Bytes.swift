@@ -31,7 +31,7 @@ extension SyncConflictResolutionTests {
             picks: [item.path: pick], credential: nil, context: fixture.contextB)) { error in
             XCTAssertEqual(error as? SyncError, .conflictFolderMustMove(path: item.path))
             XCTAssertEqual(error.localizedDescription,
-                "Move the folder at \(item.path), then choose this version again. You can also choose the other version.")
+                "Pensieve can’t replace the folder at \(item.path). Choose the other version to finish syncing.")
         }
         XCTAssertEqual(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout,
                        remoteBefore)
@@ -88,7 +88,7 @@ extension SyncConflictResolutionTests {
                 XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB, picks: [item.path: filePick],
                     credential: nil, context: fixture.contextB)) { error in
                     XCTAssertEqual(error.localizedDescription,
-                        "Move the folder at \(item.path), then choose this version again. You can also choose the other version.")
+                        "Pensieve can’t replace the folder at \(item.path). Choose the other version to finish syncing.")
                 }
                 XCTAssertEqual(try fixture.files.readFile(at: full + "/keep"), "local folder work")
                 try fixture.files.replaceItem(at: fixture.root + "/moved-folder", with: full)
@@ -243,6 +243,8 @@ extension SyncConflictResolutionTests {
         let item = try XCTUnwrap(items.first)
         XCTAssertNil(item.otherMachine, "The folder side deletes the former file entry")
         let remoteBefore = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout
+        // A pristine incoming folder can be replaced; a locally changed child must still refuse.
+        try fixture.files.writeFile(at: fixture.root + "/resolution-marker", content: "changed folder child")
         let refused = items.reduce(into: [String: ResolutionPick]()) { result, item in
             result[item.path] = ResolutionPick(side: .thisMachine, expectedThis: item.thisMachine,
                 expectedOther: item.otherMachine, expectedThisMode: item.thisMode, expectedOtherMode: item.otherMode)
@@ -251,11 +253,12 @@ extension SyncConflictResolutionTests {
             credential: nil, context: fixture.contextB)) { error in
             XCTAssertEqual(error as? SyncError, .conflictFolderMustMove(path: item.path))
             XCTAssertEqual(error.localizedDescription,
-                "Move the folder at \(item.path), then choose this version again. You can also choose the other version.")
+                "Pensieve can’t replace the folder at \(item.path). Choose the other version to finish syncing.")
         }
         XCTAssertEqual(try fixture.git.runOrThrow(["--git-dir", fixture.remote, "rev-parse", "main"], in: nil).stdout,
                        remoteBefore)
         XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
+        try fixture.files.deleteFile(at: fixture.root + "/resolution-marker")
         let picks = items.reduce(into: [String: ResolutionPick]()) { result, item in
             result[item.path] = ResolutionPick(side: .otherMachine, expectedThis: item.thisMachine,
                 expectedOther: item.otherMachine, expectedThisMode: item.thisMode, expectedOtherMode: item.otherMode)

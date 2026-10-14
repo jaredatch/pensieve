@@ -32,7 +32,7 @@ enum SyncError: LocalizedError, Equatable {
         case let .protectedGitlinkUnavailable(path):
             return "Pensieve can’t sync the nested repository at \(path). Choose the other version."
         case let .conflictFolderMustMove(path):
-            return "Move the folder at \(path), then choose this version again. You can also choose the other version."
+            return "Pensieve can’t replace the folder at \(path). Choose the other version to finish syncing."
         case .rejectedRemote:
             return "This store's git remote uses an unsupported form. Reconnect with an https:// URL "
                 + "or an ssh remote (git@host:path)."
@@ -73,10 +73,10 @@ extension SyncEngineProtocol {
 /// index from the merged files, and pushes. A body/overlay conflict is reported as a structured
 /// `.conflicted` result it does NOT resolve — the safe interim (§D); PLAN-09 adds the diff-and-pick sheet.
 struct SyncEngine: SyncEngineProtocol {
-    private let gitService: GitServiceProtocol
+    let gitService: GitServiceProtocol
     private let manifestService: ManifestSnapshotting
     private let storeRebuildService: StoreRebuildServiceProtocol
-    private let fileService: FileServiceProtocol
+    let fileService: FileServiceProtocol
     private let lockPath: String
     private let lockProvider: (String) -> SyncLock?
 
@@ -230,7 +230,7 @@ struct SyncEngine: SyncEngineProtocol {
                 return try finishSync(root: root, credential: credential, context: context, pulled: true)
             }
         } catch {
-            try? gitService.abortRebase(at: root)
+            try abortResolution(after: error, picks: picks, root: root)
             throw error
         }
     }
@@ -282,96 +282,6 @@ struct SyncEngine: SyncEngineProtocol {
             warnings: rebuild.warnings,
             ingestedHeadStamp: ingestedHeadStamp, pulled: pulled
         )
-    }
-
-    private func resolveConflictedPaths(_ paths: [String], picks: [String: ResolutionPick],
-                                        root: String) throws {
-        guard Set(paths) == Set(picks.keys) else { throw SyncError.conflictsChanged }
-        for path in paths {
-            let this = try ConflictVersion { try gitService.conflictEntry(atStage: 3, path: path, in: root) }
-            let other = try ConflictVersion { try gitService.conflictEntry(atStage: 2, path: path, in: root) }
-            guard let pick = picks[path],
-                  pick.expectedThis == this.bytes, pick.expectedOther == other.bytes,
-                  pick.expectedThisUnavailable == this.unavailable,
-                  pick.expectedOtherUnavailable == other.unavailable,
-                  pick.expectedThisMode == this.mode, pick.expectedOtherMode == other.mode else {
-                throw SyncError.conflictsChanged
-            }
-            guard let full = validatedWorktreePath(path, root: root) else {
-                throw SyncError.conflictsChanged
-            }
-            let chosen = pick.side == .thisMachine ? this : other
-            let unchosen = pick.side == .thisMachine ? other : this
-            if let error = ConflictItem.selectionError(path: path, chosen: chosen.unavailable,
-                                                      other: unchosen.unavailable) { throw error }
-            let hasGitlink = this.isGitlink || other.isGitlink
-            if StoreIgnoreRules.canRetire(path)
-                && (chosen.unavailable?.canChoose == true || (hasGitlink && chosen.mode == nil)) {
-                try gitService.retireConflictPath(path, at: root)
-                continue
-            }
-            try applyConflictVersion(chosen,
-                                     stage: pick.side == .thisMachine ? 3 : 2, path: path, full: full, root: root)
-        }
-    }
-
-    private func applyConflictVersion(_ chosen: ConflictVersion, stage: Int, path: String,
-                                      full: String, root: String) throws {
-        if try fileService.entryTypeWithoutFollowingLinks(at: full) == .directory {
-            guard chosen.entry == nil else { throw SyncError.conflictFolderMustMove(path: path) }
-            // The folder side removed the old file. Resolve that index entry without staging or
-            // deleting its children; their own conflict picks retain their native stages.
-            try gitService.removeConflictEntryFromIndex(path, at: root)
-            return
-        }
-        if let entry = chosen.entry {
-            if entry.mode == "120000" {
-                guard let target = String(data: entry.bytes, encoding: .utf8),
-                      !target.utf8.contains(0), symlinkTargetIsContained(target, at: full, root: root) else {
-                    throw SyncError.conflictsChanged
-                }
-            }
-            try gitService.restoreConflictEntry(entry, stage: stage, path: path, at: root)
-        } else if try fileService.entryExistsWithoutFollowingLinks(at: full) {
-            try fileService.deleteFile(at: full)
-        }
-        try gitService.stagePath(path, at: root)
-    }
-
-    /// Validate a git-relative path before writing/deleting through it. Reject: empty/absolute paths;
-    /// any `.`/`..`/empty/control-scalar component; any symlink at a directory/non-leaf component; and
-    /// a symlinked leaf whose target resolves outside `root`. Containment is boundary-aware.
-    private func validatedWorktreePath(_ path: String, root: String) -> String? {
-        guard !path.isEmpty, !PathSyntax.isAbsolute(path) else { return nil }
-        let components = PathSyntax.components(path, omittingEmptySubsequences: false)
-        for component in components {
-            if component.isEmpty || component == "." || component == ".." { return nil }
-            if component.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) {
-                return nil
-            }
-        }
-        let realRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
-        var current = realRoot
-        for (index, component) in components.enumerated() {
-            current += "/" + component
-            guard fileService.isSymlink(at: current) else { continue }
-            // C7: never write/delete THROUGH a symlinked DIRECTORY component. A symlinked `skills/<slug>`
-            // dir (even one whose target stays inside root) would redirect the atomic SKILL.md write into
-            // the link target. Reject any non-leaf symlink outright; a symlinked leaf is safe because
-            // `writeFile(atomically:)` replaces the link rather than following it (so keep the leaf's
-            // escape-only check below).
-            if index != components.count - 1 { return nil }
-            guard let target = try? fileService.symlinkTarget(at: current) else { return nil }
-            if !symlinkTargetIsContained(target, at: current, root: realRoot) { return nil }
-        }
-        return root + "/" + path
-    }
-
-    private func symlinkTargetIsContained(_ target: String, at path: String, root: String) -> Bool {
-        let realRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
-        let base = PathSyntax.isAbsolute(target) ? target : (path as NSString).deletingLastPathComponent + "/" + target
-        let resolved = URL(fileURLWithPath: base).resolvingSymlinksInPath().path
-        return resolved == realRoot || PathSyntax.hasPrefix(resolved, realRoot + "/")
     }
 
 }
