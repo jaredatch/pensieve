@@ -149,11 +149,16 @@ final class ImportViewModel {
         }
     }
 
+    private func ingestIfNeeded(context: ModelContext, saveContext: @escaping (ModelContext) throws -> Void) throws {
+        let rebuild = StoreRebuildService(manifestService: manifestService ?? ManifestService(), save: saveContext)
+        try StoreIngestState.rebuildIfNeeded(using: rebuild, root: manifestRoot, context: context)
+    }
+
     @discardableResult
     func importSelected(
         context: ModelContext,
         takenSlugs: (ModelContext) throws -> Set<String> = { Set(try $0.fetch(FetchDescriptor<Skill>()).map(\.directoryName)) },
-        saveContext: (ModelContext) throws -> Void = { try $0.save() }
+        saveContext: @escaping (ModelContext) throws -> Void = { try $0.save() }
     ) -> ImportOutcome {
         importNotices = []
         noticedError = nil
@@ -165,7 +170,7 @@ final class ImportViewModel {
 
         var taken: Set<String>
         do {
-            try StoreIngestState.rebuildIfNeeded(using: StoreRebuildService(), root: manifestRoot, context: context)
+            try ingestIfNeeded(context: context, saveContext: saveContext)
             taken = try takenSlugs(context).union(skillStore.prepareImport())
         } catch {
             self.error = "Failed to import: couldn't read the library (\(error.localizedDescription))"

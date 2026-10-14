@@ -3,33 +3,36 @@ import SwiftData
 extension DeployIntentModel {
     func persistAndReconcile(
         localMachineID: String,
+        skills: [Skill],
         context: ModelContext,
         mutation: () throws -> Bool
     ) throws -> IntentPersistence {
         try persist(
             reconcilesLocally: true, localMachineID: localMachineID,
-            context: context, mutation: mutation
+            skills: skills, context: context, mutation: mutation
         )
     }
 
     func persistIntentOnly(
         localMachineID: String,
+        skills: [Skill],
         context: ModelContext,
         mutation: () throws -> Bool
     ) throws {
         _ = try persist(
             reconcilesLocally: false, localMachineID: localMachineID,
-            context: context, mutation: mutation
+            skills: skills, context: context, mutation: mutation
         )
     }
 
     private func persist(
         reconcilesLocally: Bool,
         localMachineID: String,
+        skills: [Skill],
         context: ModelContext,
         mutation: () throws -> Bool
     ) throws -> IntentPersistence {
-        try StoreIngestState.rebuildIfNeeded(using: StoreRebuildService(), root: dependencies.root, context: context)
+        try prepareSelection(skills: skills, context: context)
         let before = try remoteIntentKeys(localMachineID: localMachineID, context: context)
         let mutated = try mutation()
         guard mutated else {
@@ -69,6 +72,16 @@ extension DeployIntentModel {
         let result = reconcilesLocally ? dependencies.reconcile(context) : BatchResult()
         dependencies.notifier()
         return IntentPersistence(mutated: true, reconciliation: result)
+    }
+
+    private func prepareSelection(skills: [Skill], context: ModelContext) throws {
+        let selectedIDs = Set(skills.map(\.id))
+        let pending = StoreIngestState.shared(for: context.container).needsRebuild
+        let rebuild = StoreRebuildService(manifestService: dependencies.manifestService, save: dependencies.saveContext)
+        try StoreIngestState.rebuildIfNeeded(using: rebuild, root: dependencies.root, context: context)
+        guard pending else { return }
+        let currentIDs = Set(try context.fetch(FetchDescriptor<Skill>()).map(\.id))
+        guard selectedIDs.isSubset(of: currentIDs) else { throw DeployIntentModelError.selectionChanged }
     }
 
     private func remoteIntentKeys(

@@ -34,7 +34,7 @@ struct IncompleteIngestFixture {
     let manifest = ManifestService()
     let files = FileService()
 
-    init(base: String) throws {
+    init(base: String, includingSurvivor: Bool = false) throws {
         self.base = base
         app = base + "/app"
         peer = base + "/peer"
@@ -48,6 +48,10 @@ struct IncompleteIngestFixture {
         try manifest.write(Self.snapshot(["Deleted", "Kept"]), toRoot: peer)
         try files.writeFile(at: peer + "/skills/item/SKILL.md",
                             content: "---\nname: Item\ndescription: Item\n---\nbody\n")
+        if includingSurvivor {
+            try files.writeFile(at: peer + "/skills/survivor/SKILL.md",
+                                content: "---\nname: Survivor\ndescription: Survivor\n---\nkept body\n")
+        }
         try StoreIgnoreRules.prepare(at: peer, files: files)
         _ = try git.stageAllAndCommit(at: peer, message: "seed")
         try git.push(at: peer, credential: nil)

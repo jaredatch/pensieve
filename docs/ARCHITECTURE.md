@@ -274,6 +274,8 @@ Own-write records, pending replacement brackets and sync baselines hold the whol
 
 Import and deploy-intent changes check the same requirement under `sync.lock`, before applying their local edit, preserving both the pulled categories and the new edit. `StoreIngestState.rebuild` clears the requirement after a complete ingest. Launch clears it only when a rebuild ran and its HEAD stayed valid through final validation; a skipped or unvalidated rebuild keeps the requirement.
 
+Writer preflight uses the writer's configured manifest reader and save closure. A failed preflight leaves the requirement pending and writes no edit. Deployment captures the selected skill IDs before rebuilding and checks that they still exist afterwards. If ingestion removed a selected skill, the action asks for a new selection before changing intents or deploying.
+
 Launch returns no ingested head after an incomplete rebuild and skips a due migration. The migration marker remains unset for a later complete launch. Connect reports the same failure reason when its rebuild is incomplete.
 
 On success, `PostSyncConvergence` runs deploy self-healing; when the cycle ingested a new HEAD it also runs category and intent reconciliation in order on a new main-actor context. A conflict runs none of those effects and remains in the existing resolution flow.

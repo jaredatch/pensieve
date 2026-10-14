@@ -13,6 +13,7 @@ struct DeployIntentDependencies {
     let identity: MachineIdentityProviding
     let stateService: MachineStateServicing
     let root: String
+    let manifestService: ManifestSnapshotting
     let fetchIntents: (ModelContext) throws -> [MachineDeployIntent]
     let writeManifest: (ModelContext) throws -> Void
     let saveContext: (ModelContext) throws -> Void
@@ -26,6 +27,7 @@ struct DeployIntentDependencies {
         identity: MachineIdentityProviding,
         stateService: MachineStateServicing,
         root: String,
+        manifestService: ManifestSnapshotting = ManifestService(),
         fetchIntents: @escaping (ModelContext) throws -> [MachineDeployIntent] = {
             try $0.fetch(FetchDescriptor<MachineDeployIntent>())
         },
@@ -40,6 +42,7 @@ struct DeployIntentDependencies {
         self.identity = identity
         self.stateService = stateService
         self.root = root
+        self.manifestService = manifestService
         self.fetchIntents = fetchIntents
         self.writeManifest = writeManifest
         self.saveContext = saveContext
@@ -64,6 +67,7 @@ struct DeployIntentDependencies {
             identity: identity,
             stateService: stateService,
             root: root,
+            manifestService: manifestService,
             writeManifest: { context in
                 try manifestService.write(try manifestService.snapshot(from: context), toRoot: root)
             },
@@ -84,6 +88,7 @@ enum DeployIntentModelError: LocalizedError {
     case invalidComponent(String)
     case remoteTargetIsThisMac
     case syncInProgress
+    case selectionChanged
 
     var errorDescription: String? {
         switch self {
@@ -93,6 +98,8 @@ enum DeployIntentModelError: LocalizedError {
             "This Mac must use its local deployment controls."
         case .syncInProgress:
             "Sync is running. Try again when it finishes."
+        case .selectionChanged:
+            "A selected skill was removed while the library updated. Choose the skills again."
         }
     }
 }

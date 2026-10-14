@@ -17,7 +17,7 @@ extension DeployIntentModel {
             try withIntentLock {
                 let localID = try dependencies.identity.identifier()
                 guard machineID != localID else { throw DeployIntentModelError.remoteTargetIsThisMac }
-                try persistIntentOnly(localMachineID: localID, context: context) {
+                try persistIntentOnly(localMachineID: localID, skills: [skill], context: context) {
                     try mutateOne(
                         selected, machineID: machineID, skill: skill, platform: platform,
                         projectKey: projectKey, context: context
@@ -43,7 +43,7 @@ extension DeployIntentModel {
                 let machineID = try dependencies.identity.identifier()
                 try Self.validate(machineID: machineID, slug: skill.directoryName, platformRaw: platform.rawValue)
                 let projectKey = target.project?.identityKey
-                let persistence = try persistAndReconcile(localMachineID: machineID, context: context) {
+                let persistence = try persistAndReconcile(localMachineID: machineID, skills: [skill], context: context) {
                     try mutateOne(
                         selected, machineID: machineID, skill: skill, platform: platform,
                         projectKey: projectKey, context: context
@@ -85,7 +85,7 @@ extension DeployIntentModel {
                     machineIDs: [machineID], slugs: Set(skills.map(\.directoryName)),
                     platformRaws: Set(platforms.map(\.rawValue))
                 )
-                let persistence = try persistAndReconcile(localMachineID: machineID, context: context) {
+                let persistence = try persistAndReconcile(localMachineID: machineID, skills: skills, context: context) {
                     try reconcileProjectRows(
                         selected, machineID: machineID, projectKey: projectKey,
                         skills: skills, platforms: platforms, context: context
@@ -117,7 +117,7 @@ extension DeployIntentModel {
             try Self.validate(machineID: machineID, slug: skill.directoryName, platformRaw: platform.rawValue)
             return try withIntentLock {
                 let localID = try dependencies.identity.identifier()
-                let persistence = try persistAndReconcile(localMachineID: localID, context: context) {
+                let persistence = try persistAndReconcile(localMachineID: localID, skills: [skill], context: context) {
                     try mutateOne(
                         selected, machineID: machineID, skill: skill, platform: platform,
                         projectKey: nil, context: context
@@ -153,7 +153,7 @@ extension DeployIntentModel {
                 try Self.validateSelection(
                     machineIDs: selectedMachineIDs, slugs: slugs, platformRaws: platformRaws
                 )
-                let persistence = try persistAndReconcile(localMachineID: localID, context: context) {
+                let persistence = try persistAndReconcile(localMachineID: localID, skills: skills, context: context) {
                     try reconcileRows(
                         skills: skills, platforms: platforms,
                         selectedMachineIDs: selectedMachineIDs, context: context
@@ -186,7 +186,7 @@ extension DeployIntentModel {
                 let slugs = Set(skills.map(\.directoryName))
                 let platformRaws = Set(platforms.map(\.rawValue))
                 try Self.validateSelection(machineIDs: machineIDs, slugs: slugs, platformRaws: platformRaws)
-                let persistence = try persistAndReconcile(localMachineID: localID, context: context) {
+                let persistence = try persistAndReconcile(localMachineID: localID, skills: skills, context: context) {
                     let rows = try context.fetch(FetchDescriptor<MachineDeployIntent>())
                     var mutated = false
                     for row in rows where row.projectKey == nil && machineIDs.contains(row.machineID)
