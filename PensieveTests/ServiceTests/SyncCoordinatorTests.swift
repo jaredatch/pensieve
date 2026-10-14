@@ -27,8 +27,9 @@ final class SyncCoordinatorTests: XCTestCase {
         let startupCompleted = expectation(description: "startup cycle")
         let tickCompleted = expectation(description: "tick cycle")
         var cycles = 0
+        var results: [SyncCycleResult] = []
         let scheduler = makeScheduler {
-            _ = await coordinator.runCycle()
+            results.append(await coordinator.runCycle())
             cycles += 1
             (cycles == 1 ? startupCompleted : tickCompleted).fulfill()
         }
@@ -57,6 +58,10 @@ final class SyncCoordinatorTests: XCTestCase {
         let fresh = ModelContext(harness.container)
         let categories = try fresh.fetch(FetchDescriptor<CoordinatorCategory>())
         XCTAssertEqual(categories.map(\.name), ["Remote"])
+        guard case let .synced(_, _, _, _, pulled) = results.last else { return XCTFail("Missing pull result") }
+        XCTAssertTrue(pulled)
+        guard case let .synced(_, _, _, _, firstPulled) = results.first else { return XCTFail("Missing startup result") }
+        XCTAssertFalse(firstPulled, "Publishing local machine state is not a pull")
     }
 
     func testNudgePublishesToBareRemote() async throws {

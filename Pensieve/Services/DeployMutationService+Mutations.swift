@@ -1,6 +1,6 @@
 import SwiftData
 
-extension DeployIntentModel {
+extension DeployMutationService {
     func setRemote(
         _ selected: Bool,
         machineID: String,
@@ -221,7 +221,7 @@ extension DeployIntentModel {
     }
 }
 
-private extension DeployIntentModel {
+extension DeployMutationService {
     func withSelectionLock<T>(skills: [Skill], context: ModelContext, _ operation: () throws -> T) throws -> T {
         guard let lock = dependencies.lockProvider(dependencies.lockPath) else {
             throw DeployIntentModelError.syncInProgress

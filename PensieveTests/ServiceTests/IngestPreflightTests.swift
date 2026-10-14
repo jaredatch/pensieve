@@ -149,14 +149,14 @@ final class IngestPreflightTests: XCTestCase {
         )
         await coordinator.seedLastIngestedHeadStamp(stamp)
 
-        guard case let .synced(_, _, _, firstHeadAdvanced) = await coordinator.runCycle() else {
+        guard case let .synced(_, _, _, firstHeadAdvanced, _) = await coordinator.runCycle() else {
             return XCTFail("first cycle did not sync")
         }
         XCTAssertFalse(firstHeadAdvanced)
         XCTAssertEqual(stampReads, 1, "HEAD is sampled only by prepare while the engine owns the lock")
 
         stamp = "after"
-        guard case let .synced(_, _, _, secondHeadAdvanced) = await coordinator.runCycle() else {
+        guard case let .synced(_, _, _, secondHeadAdvanced, _) = await coordinator.runCycle() else {
             return XCTFail("second cycle did not sync")
         }
         XCTAssertTrue(secondHeadAdvanced)

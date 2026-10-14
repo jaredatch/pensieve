@@ -2,6 +2,12 @@ import Foundation
 import Darwin
 import MachO
 
+// Ctrl-C ends only the client; an admitted app operation continues.
+signal(SIGINT, SIG_IGN)
+let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+interrupt.setEventHandler { exit(CLIEntry.interrupted(arguments: Array(CommandLine.arguments.dropFirst()))) }
+interrupt.resume()
+
 // argv[0] can be just a PATH name. dyld identifies the loaded executable; FileService resolves its links.
 var executableSize: UInt32 = 0
 _NSGetExecutablePath(nil, &executableSize)

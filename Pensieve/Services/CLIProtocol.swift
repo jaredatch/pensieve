@@ -94,10 +94,15 @@ struct CLIHandshake: Codable {
     var protocolVersion = CLIProtocol.version
     let appVersion: String
     var supportsReadiness: Bool?
+    var supportsCommit: Bool?
 }
 
 struct CLIReadinessAcknowledgement: Codable {
     let ready: Bool
+}
+
+struct CLICommandCommit: Codable {
+    let commit: Bool
 }
 
 struct CLIRequest: Codable {
@@ -106,4 +111,17 @@ struct CLIRequest: Codable {
     var arguments: [String] = []
     var content = false
     var acknowledgeReadiness: Bool?
+    var requiresCommit: Bool?
+    var deployment: CLIDeployOptions?
+
+    var isWrite: Bool { ["deploy", "undeploy", "sync"].contains(command) }
+}
+
+struct CLIDeployOptions: Codable {
+    var agents: [String] = []
+    var global = false
+    var project: String?
+    var machines: [String] = []
+    var dryRun = false
+    var workingDirectory: String = ""
 }

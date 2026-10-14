@@ -45,6 +45,8 @@ final class SyncModel {
     private var queuedRequest: SyncRequest?
     private var recoveredDuringCycle = false
     private var cycleFailed = false
+    private var lastCycleResult: SyncCycleResult?
+    private var commandWaiters: [CheckedContinuation<SyncCycleResult, Never>] = []
     private enum ManualRetry { case awaitingOutage, inOutage, ready, queued }
     private var manualRetry: ManualRetry?
 
@@ -183,6 +185,9 @@ final class SyncModel {
     func syncScheduledAndReport() async { await syncAndReport(.scheduled) }
 
     func syncRequestWasDiscarded(_ request: SyncRequest) {
+        if !isCycleInFlight {
+            finishCommandWaiters(with: commandRefusal ?? .failed("The queued sync could not start. Try Sync Now in Pensieve."))
+        }
         if request.contains(.manualRecovery), manualRetry == .queued { manualRetry = .ready }
     }
 
@@ -204,8 +209,11 @@ final class SyncModel {
             queuedRequest = queuedRequest.map { $0.absorbing(request) } ?? request
             return
         }
-        guard canSyncNow else { return }
+        guard canSyncNow else { finishCommandWaiters(with: commandRefusal ?? .failed("Sync is unavailable.")); return }
         guard let syncRequest else { pendingSyncRequest?(request); return }
+        let waiters = commandWaiters
+        commandWaiters = []
+        lastCycleResult = nil
         isCycleInFlight = true
         recoveredDuringCycle = false
         cycleFailed = false
@@ -214,6 +222,8 @@ final class SyncModel {
         state = .syncing
         onCycleStart?()
         await syncRequest()
+        let result = lastCycleResult ?? .failed("Sync finished without a result.")
+        for waiter in waiters { waiter.resume(returning: result) }
     }
 
     private func finishCycle(_ request: SyncRequest) {
@@ -231,11 +241,18 @@ final class SyncModel {
         queuedRequest = nil
         if let followUp, canSyncNow {
             if followUp.contains(.manualRecovery) { manualRetry = .queued }
-            pendingSyncRequest?(followUp)
+            if let pendingSyncRequest {
+                pendingSyncRequest(followUp)
+            } else if !commandWaiters.isEmpty {
+                Task { await self.syncAndReport(followUp) }
+            }
+        } else {
+            finishCommandWaiters(with: commandRefusal ?? lastCycleResult ?? .failed("The queued sync could not start."))
         }
     }
 
     func apply(_ result: SyncCycleResult) {
+        lastCycleResult = result
         if isCycleInFlight {
             if case .failed = result { cycleFailed = true }
         }
@@ -246,7 +263,7 @@ final class SyncModel {
             }
         }
         switch result {
-        case let .synced(_, warnings, completedAt, _):
+        case let .synced(_, warnings, completedAt, _, _):
             knownBranchless = false
             lastSyncedAt = completedAt
             lastWarnings = warnings
@@ -303,5 +320,37 @@ private extension SyncModel {
               gitState?.usability == .usable, let pendingSyncRequest else { return }
         manualRetry = .queued
         pendingSyncRequest(.manualRecovery)
+    }
+}
+
+@MainActor
+extension SyncModel {
+    /// Requests arriving during a cycle wait for its coalesced follow-up, never its old result.
+    func syncCycleForCommand() async -> SyncCycleResult {
+        if let refusal = commandRefusal { return refusal }
+        guard syncRequest != nil else { return .failed("Sync is still starting. Try Sync Now in Pensieve.") }
+        return await withCheckedContinuation { continuation in
+            commandWaiters.append(continuation)
+            if isCycleInFlight {
+                queuedRequest = queuedRequest.map { $0.absorbing(.manual) } ?? .manual
+            } else {
+                Task {
+                    guard !self.commandWaiters.isEmpty, !self.isCycleInFlight else { return }
+                    await self.syncAndReport(.manual)
+                }
+            }
+        }
+    }
+
+    private var commandRefusal: SyncCycleResult? {
+        if case let .conflicted(paths) = state { return .conflicted(paths) }
+        if !isConfigured || knownAbsent { return .noRemote }
+        return nil
+    }
+
+    private func finishCommandWaiters(with result: SyncCycleResult) {
+        let waiters = commandWaiters
+        commandWaiters = []
+        for waiter in waiters { waiter.resume(returning: result) }
     }
 }

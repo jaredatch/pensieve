@@ -54,11 +54,19 @@ struct IntentReconciler: IntentReconcilerProtocol {
         platformVM.reconcileWaitingRemovals(context: context, identity: machineIdentity)
     }
 
+    func reconcileSelection(_ pairs: [DeployMutationPair], context: ModelContext) -> BatchResult {
+        reconcileDeployments(context: context, selection: pairs)
+    }
+
     func reconcileDeployments(context: ModelContext) -> BatchResult {
+        reconcileDeployments(context: context, selection: nil)
+    }
+
+    private func reconcileDeployments(context: ModelContext, selection: [DeployMutationPair]?) -> BatchResult {
         guard let machineID = try? machineIdentity.identifier() else { return BatchResult() }
         let state: State
         do {
-            state = try fetchState(context: context)
+            state = try fetchState(context: context, selection: selection)
         } catch {
             return BatchResult.readFailure("deployment state", error: error)
         }
@@ -76,12 +84,25 @@ struct IntentReconciler: IntentReconcilerProtocol {
         return aggregate
     }
 
-    private func fetchState(context: ModelContext) throws -> State {
-        let intents = try stateFetcher.deployIntents(context: context)
+    private func fetchState(context: ModelContext, selection: [DeployMutationPair]?) throws -> State {
+        let selectedKeys = selection.map { pairs in Set(pairs.filter(\.isLocal).map {
+            MachineDeployIntent.makeKey(machineID: $0.machineID, skillSlug: $0.skill.directoryName,
+                platformRaw: $0.platform.rawValue, projectKey: $0.target.project?.identityKey)
+        }) }
+        let selectedPairs = selection.map { pairs in Set(pairs.filter(\.isLocal).map {
+            BatchPairKey(skillID: $0.skill.id, platform: $0.platform, target: BatchPairTarget($0.target))
+        }) }
+        let intents = try stateFetcher.deployIntents(context: context).filter { selectedKeys?.contains($0.key) ?? true }
         let skills = try stateFetcher.skills(context: context)
-        let ledger = try stateFetcher.intentAssignments(context: context)
+        let ledger = try stateFetcher.intentAssignments(context: context).filter { row in
+            guard let selectedPairs else { return true }
+            guard let platform = PlatformTarget(rawValue: row.platformRaw) else { return false }
+            return selectedPairs.contains(BatchPairKey(skillID: row.skillID, platform: platform,
+                target: row.projectID.map(BatchPairTarget.project) ?? .userWide))
+        }
         let categoryLedger = try stateFetcher.categoryAssignments(context: context)
-        let projects = try stateFetcher.projects(context: context)
+        let projectIDs = selection.map { Set($0.compactMap { $0.target.project?.id }) }
+        let projects = try stateFetcher.projects(context: context).filter { projectIDs?.contains($0.id) ?? true }
         var projectsByKey: [String: [Project]] = [:]
         for project in projects {
             guard let key = project.identityKey else { continue }

@@ -22,6 +22,7 @@ final class AppRuntime {
     let provenanceVM: SkillProvenanceViewModel
     let updatesViewModelOperations: UpdatesViewModel.DefaultOperations
     let machineObservability: MachineObservabilityDependencies
+    @ObservationIgnored private(set) lazy var deployMutations: DeployMutationServicing = makeDeployMutations()
     let reconcileIntent: @MainActor (ModelContext) -> BatchResult
 
     private(set) var coordinator: SyncCoordinator?
@@ -63,6 +64,7 @@ final class AppRuntime {
     @ObservationIgnored private var openMainWindowAction: (() -> Void)?
     @ObservationIgnored var commandServer: AppSocketServing?
     var commandServerError: String?
+    var isQuitting = false
     @ObservationIgnored private(set) lazy var viewChanges = makeViewChangesModel()
     @ObservationIgnored private(set) lazy var updates = makeUpdatesModel()
     @ObservationIgnored private(set) lazy var conflictResolution = makeConflictResolutionModel()

@@ -12,7 +12,9 @@ extension AppRuntime {
 
     func waitForCommandReadiness(timeout: TimeInterval = CLIProtocol.readyTimeout) async -> CLIReply? {
         let deadline = SocketTransport.deadline(after: timeout)
+        if isQuitting { return quittingCommandReply }
         while !commandsReady {
+            if isQuitting { return quittingCommandReply }
             guard ProcessInfo.processInfo.systemUptime < deadline else {
                 return .failure("app_starting", library.addFenceReason ?? "Pensieve is still starting.",
                     hint: "Wait a moment, then run this command again.", exit: 3, retryable: true)
@@ -23,6 +25,19 @@ extension AppRuntime {
             }
         }
         return nil
+    }
+
+    var quittingCommandReply: CLIReply {
+        .failure("app_quitting", "Pensieve is quitting.", hint: "Wait for it to quit, then retry.", exit: 3, retryable: true)
+    }
+
+    func makeDeployMutations() -> DeployMutationServicing {
+        let reconciler = Self.makeLaunchIntentReconciler(platformVM: platformVM, paths: paths)
+        return DeployMutationService(platformVM: platformVM, dependencies: .live(
+            identity: machineObservability.identity, stateService: machineObservability.stateService,
+            root: paths.storeRoot, lockPath: paths.syncLockPath,
+            notifier: { [weak scheduler] in scheduler?.nudge() }, reconcile: reconcileIntent,
+            reconcileSelection: { reconciler.reconcileSelection($0, context: $1) }))
     }
 
     func startCommandServer() {
@@ -42,10 +57,23 @@ extension AppRuntime {
                     }
                     if let refusal = await self.waitForCommandReadiness() { return refusal }
                     return nil
+                }, admit: { [weak self] request in
+                    guard let self else { return .init(refusal: .failure("app_unavailable", "Pensieve is unavailable",
+                        hint: "Open Pensieve.", exit: 3)) }
+                    guard !self.isQuitting else { return .init(refusal: self.quittingCommandReply) }
+                    guard request.isWrite else { return .init() }
+                    let steps = self.paths.syncSteps
+                    let work = steps.begin()
+                    return .init(finish: { steps.finish(work) })
                 }, handler: { [weak self] request in
                     guard let self else {
                         return .failure("app_unavailable", "Pensieve is unavailable", hint: "Open Pensieve.", exit: 3)
                     }
+                    if ["deploy", "undeploy"].contains(request.command) {
+                        return CLIDeployHandler(service: self.deployMutations, files: files)
+                            .handle(request, context: self.container.mainContext)
+                    }
+                    if request.command == "sync" { return await CLISyncHandler(model: self.syncModel).handle() }
                     return handler.handle(request, context: self.container.mainContext)
                 })
         } catch {

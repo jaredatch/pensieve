@@ -33,7 +33,7 @@ extension PathGuardTests {
             }, .synced(pushed: true, warnings: []))
             XCTAssertEqual(try NativeTestWork.run(container: contextB.container) { [self] jobContext in
                 try engine.sync(root: storeB, message: "pull", credential: nil, context: jobContext)
-            }, .synced(pushed: false, warnings: []))
+            }, .synced(pushed: false, warnings: [], pulled: true))
             XCTAssertEqual(try files.readData(at: storeA + "/skills/" + name + "/SKILL.md"),
                            try files.readData(at: storeB + "/skills/" + name + "/SKILL.md"))
             XCTAssertEqual(try contextB.fetch(FetchDescriptor<Skill>()).map(\.directoryName), [name])
@@ -49,7 +49,7 @@ extension PathGuardTests {
             }, .synced(pushed: true, warnings: []))
             XCTAssertEqual(try NativeTestWork.run(container: contextB.container) { [self] jobContext in
                 try engine.sync(root: storeB, message: "pull removal", credential: nil, context: jobContext)
-            }, .synced(pushed: false, warnings: []))
+            }, .synced(pushed: false, warnings: [], pulled: true))
             XCTAssertFalse(files.directoryExists(at: storeB + "/skills/" + name))
             XCTAssertTrue(try contextB.fetch(FetchDescriptor<Skill>()).isEmpty)
         }

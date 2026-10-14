@@ -1,15 +1,16 @@
 import Foundation
 import SwiftData
 
-extension DeployIntentModel {
+extension DeployMutationService {
     func persistAndReconcile(
         localMachineID: String,
         context: ModelContext,
+        reconcile: ((ModelContext) -> BatchResult)? = nil,
         mutation: () throws -> Bool
     ) throws -> IntentPersistence {
         try persist(
             reconcilesLocally: true, localMachineID: localMachineID,
-            context: context, mutation: mutation
+            context: context, reconcile: reconcile, mutation: mutation
         )
     }
 
@@ -28,6 +29,7 @@ extension DeployIntentModel {
         reconcilesLocally: Bool,
         localMachineID: String,
         context: ModelContext,
+        reconcile: ((ModelContext) -> BatchResult)? = nil,
         mutation: () throws -> Bool
     ) throws -> IntentPersistence {
         let before = try remoteIntentKeys(localMachineID: localMachineID, context: context)
@@ -66,7 +68,7 @@ extension DeployIntentModel {
         for key in after.subtracting(before) {
             recordRemoteChange(selected: true, key: key)
         }
-        let result = reconcilesLocally ? dependencies.reconcile(context) : BatchResult()
+        let result = reconcilesLocally ? (reconcile ?? dependencies.reconcile)(context) : BatchResult()
         dependencies.notifier()
         return IntentPersistence(mutated: true, reconciliation: result)
     }

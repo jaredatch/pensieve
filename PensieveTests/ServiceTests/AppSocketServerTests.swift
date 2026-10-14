@@ -142,6 +142,7 @@ final class AppSocketServerTests: XCTestCase {
         let server = try server(at: path) { _ in
             accepted.fulfill()
             try? await Task.sleep(for: .milliseconds(100))
+            try? directory.files.writeFile(at: directory.path + "/applied", content: "finished")
             completed.fulfill()
             return .success(.null)
         }
@@ -149,12 +150,42 @@ final class AppSocketServerTests: XCTestCase {
         let client = try SocketTransport.connect(to: path)
         try await BlockingWork.run {
             _ = try SocketTransport.readFrame(client, limit: 1_024, timeout: TestWait.hostedActionTimeoutSeconds)
-            try SocketTransport.writeFrame(CLIRequest(command: "accepted"), to: client,
+            try SocketTransport.writeFrame(CLIRequest(command: "deploy", acknowledgeReadiness: true, requiresCommit: true),
+                to: client, timeout: TestWait.hostedActionTimeoutSeconds)
+            _ = try SocketTransport.readFrame(client, limit: 1_024, timeout: TestWait.hostedActionTimeoutSeconds)
+            try SocketTransport.writeFrame(CLICommandCommit(commit: true), to: client,
                 timeout: TestWait.hostedActionTimeoutSeconds)
         }
         await fulfillment(of: [accepted], timeout: TestWait.hostedActionTimeoutSeconds)
         close(client)
         await fulfillment(of: [completed], timeout: TestWait.hostedActionTimeoutSeconds)
+        XCTAssertEqual(try directory.files.readFile(at: directory.path + "/applied"), "finished")
+    }
+
+    func testUncommittedCommandNeverRunsAfterReadiness() async throws {
+        let directory = try SocketTestDirectory()
+        let path = directory.path + "/s"
+        var applied = 0
+        let server = try AppSocketServer(path: path,
+            handshake: CLIHandshake(bundlePath: "/fixture/Pensieve.app", appVersion: "1"),
+            fileService: FileService(), timeouts: .init(request: 0.2, reply: 0.2),
+            readiness: { nil }, handler: { _ in applied += 1; return .success(.null) })
+        defer { server.stop() }
+        try await BlockingWork.run {
+            let client = try SocketTransport.connect(to: path)
+            defer { close(client) }
+            _ = try SocketTransport.readFrame(client, limit: 1_024, timeout: TestWait.hostedActionTimeoutSeconds)
+            try SocketTransport.writeFrame(CLIValue.object([
+                "protocolVersion": .number(1), "command": .string("deploy"),
+                "arguments": .array([]), "content": .bool(false),
+                "acknowledgeReadiness": .bool(true), "requiresCommit": .bool(true)
+            ]), to: client, timeout: TestWait.hostedActionTimeoutSeconds)
+            let ready = try SocketTransport.readFrame(client, limit: 1_024, timeout: TestWait.hostedActionTimeoutSeconds)
+            XCTAssertTrue(try JSONDecoder().decode(CLIReadinessAcknowledgement.self, from: ready).ready)
+            // A client that expires its startup budget never authorizes the write.
+        }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(applied, 0, "Readiness alone must never accept a write")
     }
 
     private func server(at path: String, credentials: SocketPeerCredentialReading = SocketPeerCredentials(),

@@ -20,7 +20,7 @@ struct DetailView: View {
     @Bindable var platformVM: PlatformViewModel
     @Bindable var provenance: SkillProvenanceViewModel
     @Bindable var upstreamHistory: UpstreamHistoryViewModel
-    let intentDependencies: DeployIntentDependencies
+    let intentService: DeployMutationServicing
     let machineStates: [MachineState]
     let localMachineID: String?
 
@@ -157,7 +157,7 @@ struct DetailView: View {
         case .deployments:
             SkillDeploymentsTab(skill: skill, snapshot: snapshot, statusIsCurrent: statusIsCurrent, projects: projects,
                                 platformVM: platformVM, library: library,
-                                intentDependencies: intentDependencies,
+                                intentService: intentService,
                                 machineStates: machineStates,
                                 localMachineID: localMachineID,
                                 homeDirectory: runtime.paths.homeDirectory,

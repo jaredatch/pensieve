@@ -123,6 +123,12 @@ extension DeployIntentModelTests {
         XCTAssertEqual(harness.linkService.linkCalls.map(\.projectPath), [project.path])
         XCTAssertEqual(try harness.context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
 
+        let cli = CLIDeployHandler(service: harness.model.service, files: harness.linkService.fileService).handle(
+            CLIRequest(command: "deploy", arguments: [skill.directoryName], deployment: CLIDeployOptions(
+                agents: ["codex"], project: project.name, workingDirectory: harness.root)), context: harness.context)
+        XCTAssertTrue(cli.envelope.ok, "The CLI's keyless local path also needs no machine identity")
+        XCTAssertEqual(cli.envelope.changed, false)
+
         let invalid = Project(name: "Invalid", path: "/tmp/invalid")
         invalid.identityKey = " leading-space"
         harness.context.insert(invalid)

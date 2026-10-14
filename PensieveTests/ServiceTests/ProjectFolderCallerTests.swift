@@ -91,6 +91,11 @@ final class ProjectFolderCallerTests: XCTestCase {
                                                        projectID: harness.project.id, platform: .cursor))
         let rule = try harness.addCategory()
         let model = harness.model()
+        let cli = CLIDeployHandler(service: model.service, files: harness.mapped).handle(
+            CLIRequest(command: "undeploy", arguments: [harness.skill.directoryName], deployment: CLIDeployOptions(
+                agents: ["codex"], project: harness.project.name, workingDirectory: harness.root)), context: harness.context)
+        XCTAssertEqual(cli.exitCode, 0, "CLI unselection must withdraw intent while unavailable cleanup waits")
+        XCTAssertEqual(cli.envelope.changed, true)
         let result = try model.set(
             false, skill: harness.skill, platform: .codex, target: .project(harness.project), context: harness.context
         )

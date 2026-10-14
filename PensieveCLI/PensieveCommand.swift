@@ -13,7 +13,8 @@ protocol ReadCommand: ParsableCommand {
 struct PensieveCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "pensieve",
         abstract: "Manage AI skills through Pensieve.",
-        subcommands: [SkillCommand.self, SkillsCommand.self, AgentCommand.self, MachineCommand.self,
+        subcommands: [DeployCommand.self, UndeployCommand.self, SyncCommand.self,
+                      SkillCommand.self, SkillsCommand.self, AgentCommand.self, MachineCommand.self,
                       ProjectCommand.self, DeploymentCommand.self, DeployedCommand.self, StatusCommand.self,
                       LogCommand.self, CommandsCommand.self, CompletionCommand.self, VersionCommand.self])
     @OptionGroup var output: OutputOptions

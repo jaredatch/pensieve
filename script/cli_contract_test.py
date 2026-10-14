@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import pty
+import signal
 import socket
 import subprocess
 import tempfile
@@ -60,7 +62,7 @@ class CLIContractTests(unittest.TestCase):
             self.assertIsInstance(envelope["error"]["retryable"], bool)
         return envelope
 
-    def peer(self, *, reply=None, bundle=None, protocol=1):
+    def peer(self, *, reply=None, bundle=None, protocol=1, commit=False, drop_reply=False):
         listener = socket.socket(socket.AF_UNIX)
         self.addCleanup(listener.close)
         listener.bind(str(self.endpoint))
@@ -74,10 +76,18 @@ class CLIContractTests(unittest.TestCase):
                 with connection:
                     connection.settimeout(10)
                     connection.sendall(json.dumps({"bundlePath": str(bundle or self.app),
-                        "protocolVersion": protocol, "appVersion": self.info["CFBundleShortVersionString"]}).encode() + b"\n")
-                    line = connection.makefile("rb").readline(65537)
+                        "protocolVersion": protocol, "appVersion": self.info["CFBundleShortVersionString"],
+                        "supportsReadiness": commit, "supportsCommit": commit}).encode() + b"\n")
+                    reader = connection.makefile("rb")
+                    line = reader.readline(65537)
                     if line:
                         observed.append(json.loads(line))
+                        if commit:
+                            connection.sendall(b'{"ready":true}\n')
+                            self.assertTrue(observed[-1]["requiresCommit"])
+                            self.assertEqual(json.loads(reader.readline(65537)), {"commit": True})
+                        if drop_reply:
+                            return
                         response = reply or {"envelope": {"schema": 1, "ok": True, "changed": False,
                             "data": [{"slug": "review", "name": "Review"}], "next": []}, "exitCode": 0}
                         connection.sendall(json.dumps(response).encode() + b"\n")
@@ -143,6 +153,109 @@ class CLIContractTests(unittest.TestCase):
         finally:
             finish()
         self.assertTrue(observed[0]["content"])
+
+    def test_write_commands_carry_targets_json_and_app_support(self):
+        cases = [("deploy", "review", "other", "-a", "claude-code", "-a", "codex", "-g", "-m", "Mini", "-m", "Laptop"),
+                 ("undeploy", "review", "-a", "*", "-p", ".", "--dry-run"), ("sync",)]
+        for command in cases:
+            with self.subTest(command=command):
+                observed, finish = self.peer(commit=True)
+                try:
+                    result = self.run_cli(*command)
+                finally:
+                    finish()
+                self.assertTrue(result["ok"])
+                self.assertEqual(observed[0]["command"], command[0])
+                if command[0] != "sync":
+                    targets = observed[0]["deployment"]
+                    self.assertEqual(targets["workingDirectory"], str(self.root.resolve()))
+                    if command[0] == "deploy":
+                        self.assertEqual(observed[0]["arguments"], ["review", "other"])
+                        self.assertEqual(targets["agents"], ["claude-code", "codex"])
+                        self.assertTrue(targets["global"])
+                        self.assertEqual(targets["machines"], ["Mini", "Laptop"])
+                    else:
+                        self.assertEqual(targets["project"], ".")
+                        self.assertTrue(targets["dryRun"])
+
+    def test_lost_reply_after_commit_never_reports_retryable_refusal(self):
+        observed, finish = self.peer(commit=True, drop_reply=True)
+        try:
+            result = self.run_cli("deploy", "review", "-a", "claude", "-g", code=3)
+        finally:
+            finish()
+        self.assertEqual(len(observed), 1)
+        self.assertFalse(result["error"]["retryable"])
+        self.assertIn("Check", result["error"]["hint"])
+
+    def test_interrupt_after_commit_exits_130(self):
+        listener = socket.socket(socket.AF_UNIX)
+        self.addCleanup(listener.close)
+        listener.bind(str(self.endpoint))
+        listener.listen(1)
+        listener.settimeout(10)
+        accepted, release = threading.Event(), threading.Event()
+        failures = []
+
+        def serve():
+            try:
+                connection, _ = listener.accept()
+                with connection:
+                    connection.settimeout(10)
+                    connection.sendall(json.dumps({"bundlePath": str(self.app), "protocolVersion": 1,
+                        "appVersion": "fixture", "supportsCommit": True}).encode() + b"\n")
+                    reader = connection.makefile("rb")
+                    self.assertEqual(json.loads(reader.readline())["command"], "sync")
+                    connection.sendall(b'{"ready":true}\n')
+                    self.assertEqual(json.loads(reader.readline()), {"commit": True})
+                    accepted.set()
+                    self.assertTrue(release.wait(10), "Test did not release its accepted peer")
+            except Exception as error:
+                failures.append(error)
+
+        worker = threading.Thread(target=serve, daemon=True)
+        worker.start()
+        client = subprocess.Popen([str(BINARY), "sync", "--json", "--app-support", str(self.root)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=self.environment)
+        try:
+            self.assertTrue(accepted.wait(10), "Client never committed its command")
+            client.send_signal(signal.SIGINT)
+            stdout, stderr = client.communicate(timeout=5)
+            self.assertEqual(client.returncode, 130, stdout + stderr)
+            envelope = json.loads(stdout)
+            self.assertEqual(envelope["error"]["code"], "interrupted")
+            self.assertFalse(envelope["error"]["retryable"])
+        finally:
+            release.set()
+            if client.poll() is None:
+                client.kill()
+                client.communicate(timeout=5)
+            worker.join(10)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(failures, [])
+
+    def test_missing_scope_and_invalid_machine_scope_refuse_without_sending(self):
+        for command in ("deploy", "undeploy"):
+            for options in ((), ("-m", "Mini"), ("-p", ".", "-m", "Mini")):
+                with self.subTest(command=command, options=options):
+                    result = self.run_cli(command, "review", "-a", "claude", *options, code=64)
+                    self.assertEqual(result["error"]["code"], "usage")
+                    self.assertIn("-g", result["error"]["message"])
+            for no_input in ("flag", "environment"):
+                master, slave = pty.openpty()
+                try:
+                    environment = self.environment.copy()
+                    args = [str(BINARY), command, "review", "-a", "claude", "--json", "--app-support", str(self.root)]
+                    if no_input == "flag":
+                        args.append("--no-input")
+                    else:
+                        environment["PENSIEVE_NO_INPUT"] = "1"
+                    result = subprocess.run(args, stdin=slave, text=True, capture_output=True, env=environment, timeout=5)
+                    self.assertEqual(result.returncode, 64, result.stdout + result.stderr)
+                    self.assertEqual(json.loads(result.stdout)["error"]["code"], "usage")
+                finally:
+                    os.close(slave)
+                    os.close(master)
 
     def test_wrong_copy_and_protocol_are_refused_before_sending_a_command(self):
         cases = [(self.root / "Other.app", 1, "wrong_app", invocation)
@@ -219,7 +332,7 @@ class CLIContractTests(unittest.TestCase):
         root = self.run_cli("commands")["data"]["command"]
         commands = {command["commandName"]: command for command in root["subcommands"]}
         expected = {"skill", "skills", "agent", "machine", "project", "deployment", "deployed", "status", "log",
-                    "commands", "completion", "version", "help"}
+                    "commands", "completion", "version", "help", "deploy", "undeploy", "sync"}
         self.assertEqual(set(commands), expected)
         skill_commands = {command["commandName"]: command for command in commands["skill"]["subcommands"]}
         self.assertIn("ls", skill_commands["list"]["aliases"])

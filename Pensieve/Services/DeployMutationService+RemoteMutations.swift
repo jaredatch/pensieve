@@ -1,6 +1,6 @@
 import SwiftData
 
-extension DeployIntentModel {
+extension DeployMutationService {
     func recordRemoteChange(selected: Bool, key: RemoteDeployKey) {
         if selected {
             dependencies.remoteRetractions.recordIntent(key)

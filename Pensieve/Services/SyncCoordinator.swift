@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 enum SyncCycleResult: Equatable {
-    case synced(pushed: Bool, warnings: [String], completedAt: Date, headAdvanced: Bool = false)
+    case synced(pushed: Bool, warnings: [String], completedAt: Date, headAdvanced: Bool = false, pulled: Bool = false)
     case conflicted([String])
     case noRemote
     case branchless
@@ -20,7 +20,7 @@ enum SyncCycleResult: Equatable {
 
     var auditFields: (category: String, detail: String) {
         switch self {
-        case let .synced(pushed, _, _, _):
+        case let .synced(pushed, _, _, _, _):
             return ("synced", pushed ? "pushed" : "upToDate")
         case .conflicted:
             return ("skipped", "conflicted")
@@ -162,7 +162,7 @@ actor SyncCoordinator {
         preflightAdvanced: Bool
     ) -> SyncCycleResult {
         switch outcome {
-        case let .synced(pushed, warnings, engineIngestedHeadStamp):
+        case let .synced(pushed, warnings, engineIngestedHeadStamp, pulled):
             let engineAdvanced = engineIngestedHeadStamp != nil
                 && preparedHeadStamp != nil
                 && engineIngestedHeadStamp != preparedHeadStamp
@@ -173,7 +173,8 @@ actor SyncCoordinator {
                 pushed: pushed,
                 warnings: preflightWarnings + warnings,
                 completedAt: now(),
-                headAdvanced: preflightAdvanced || engineAdvanced
+                headAdvanced: preflightAdvanced || engineAdvanced,
+                pulled: pulled
             )
         case let .conflicted(paths):
             return .conflicted(paths)

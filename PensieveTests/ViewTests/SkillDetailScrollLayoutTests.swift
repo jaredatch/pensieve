@@ -170,7 +170,7 @@ extension SkillDetailScrollLayoutTests {
             projects: [],
             platformVM: platformVM,
             library: library,
-            intentDependencies: dependencies,
+            intentService: DeployMutationService(platformVM: platformVM, dependencies: dependencies),
             machineStates: [],
             localMachineID: InertMachineIdentity.value,
             homeDirectory: TestPaths.homeDirectory,

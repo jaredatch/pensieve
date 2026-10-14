@@ -11,22 +11,16 @@ struct CLIClient {
     func send(_ request: CLIRequest) -> CLIReply {
         let deadline = SocketTransport.deadline(after: CLIProtocol.readyTimeout)
         var waitingForStartup = true
+        var mayHaveApplied = false
         do {
             let descriptor = try connect(deadline: deadline)
             defer { close(descriptor) }
             let bytes = try SocketTransport.readFrame(descriptor, limit: CLIProtocol.requestLimit,
                 timeout: max(0, deadline - ProcessInfo.processInfo.systemUptime))
-            let handshake = try JSONDecoder().decode(CLIHandshake.self, from: bytes)
-            guard handshake.protocolVersion == CLIProtocol.version else {
-                return .failure("protocol_mismatch", "The app uses a different command protocol.",
-                    hint: "Use the command bundled with this app.", exit: 3)
-            }
-            guard fileService.realPath(at: handshake.bundlePath) == appPath else {
-                return .failure("wrong_app", "Another Pensieve copy answered: \(handshake.bundlePath)",
-                    hint: "Quit that copy and open \(appPath).", exit: 3)
-            }
+            let handshake = try validatedHandshake(bytes, isWrite: request.isWrite)
             var request = request
-            request.acknowledgeReadiness = handshake.supportsReadiness == true
+            request.acknowledgeReadiness = handshake.supportsReadiness == true || handshake.supportsCommit == true
+            request.requiresCommit = handshake.supportsCommit == true
             try SocketTransport.writeFrame(request, to: descriptor, timeout: 5)
             var response: Data
             if request.acknowledgeReadiness == true {
@@ -37,6 +31,10 @@ struct CLIClient {
                 }
             }
             waitingForStartup = false
+            if request.requiresCommit == true {
+                mayHaveApplied = request.isWrite
+                try SocketTransport.writeFrame(CLICommandCommit(commit: true), to: descriptor, timeout: 5)
+            }
             response = try SocketTransport.readFrame(descriptor, limit: CLIProtocol.replyLimit,
                 timeout: CLIProtocol.commandReplyTimeout)
             return try validatedReply(response)
@@ -52,9 +50,27 @@ struct CLIClient {
                 hint: "Wait a moment, then run this command again.", exit: 3, retryable: true)
         } catch {
             return .failure("app_unavailable", "\(socketPath): \(error.localizedDescription)",
-                hint: launcher.launchRefusal(appPath: appPath, bundleID: bundleID)?.envelope.error?.hint
-                    ?? "Open \(appPath), then run this command again.", exit: 3, retryable: true)
+                hint: mayHaveApplied ? "Check Pensieve before running this command again. Its result could not be received."
+                    : launcher.launchRefusal(appPath: appPath, bundleID: bundleID)?.envelope.error?.hint
+                        ?? "Open \(appPath), then run this command again.", exit: 3, retryable: !mayHaveApplied)
         }
+    }
+
+    private func validatedHandshake(_ bytes: Data, isWrite: Bool) throws -> CLIHandshake {
+        let handshake = try JSONDecoder().decode(CLIHandshake.self, from: bytes)
+        guard handshake.protocolVersion == CLIProtocol.version else {
+            throw LaunchRefusal(reply: .failure("protocol_mismatch", "The app uses a different command protocol.",
+                hint: "Use the command bundled with this app.", exit: 3))
+        }
+        guard fileService.realPath(at: handshake.bundlePath) == appPath else {
+            throw LaunchRefusal(reply: .failure("wrong_app", "Another Pensieve copy answered: \(handshake.bundlePath)",
+                hint: "Quit that copy and open \(appPath).", exit: 3))
+        }
+        guard !isWrite || handshake.supportsCommit == true else {
+            throw LaunchRefusal(reply: .failure("protocol_mismatch", "The app does not support command admission.",
+                hint: "Use the command bundled with this app.", exit: 3))
+        }
+        return handshake
     }
 
     private func validatedReply(_ response: Data) throws -> CLIReply {

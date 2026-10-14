@@ -47,7 +47,7 @@ final class SyncConflictResolutionTests: XCTestCase {
                 credential: nil,
                 context: fixture.contextB
             )
-            XCTAssertEqual(outcome, .synced(pushed: false, warnings: []))
+            XCTAssertEqual(outcome, .synced(pushed: false, warnings: [], pulled: true))
             _ = try fixture.engine.sync(root: fixture.cloneA, message: "A pulls resolved other",
                                         credential: nil, context: fixture.contextA)
             XCTAssertEqual(try readSkill(root: fixture.cloneA), fixture.otherText)
@@ -66,7 +66,7 @@ final class SyncConflictResolutionTests: XCTestCase {
                 credential: nil,
                 context: fixture.contextB
             )
-            XCTAssertEqual(outcome, .synced(pushed: true, warnings: []))
+            XCTAssertEqual(outcome, .synced(pushed: true, warnings: [], pulled: true))
             _ = try fixture.engine.sync(root: fixture.cloneA, message: "A pulls resolved this",
                                         credential: nil, context: fixture.contextA)
             XCTAssertEqual(try readSkill(root: fixture.cloneA), fixture.thisText)
@@ -128,7 +128,7 @@ final class SyncConflictResolutionTests: XCTestCase {
                 credential: nil,
                 context: fixture.contextB
             )
-            XCTAssertEqual(outcome, .synced(pushed: true, warnings: []))
+            XCTAssertEqual(outcome, .synced(pushed: true, warnings: [], pulled: true))
             _ = try fixture.engine.sync(root: fixture.cloneA, message: "A pulls collapsed resolution",
                                         credential: nil, context: fixture.contextA)
             XCTAssertEqual(try readSkill(root: fixture.cloneA), finalThis)
@@ -142,7 +142,7 @@ final class SyncConflictResolutionTests: XCTestCase {
             let inspection = try fixture.engine.inspectConflicts(root: fixture.cloneB, credential: nil,
                                                                  context: fixture.contextB)
             guard case let .cleared(outcome) = inspection else { return XCTFail("expected cleared") }
-            XCTAssertEqual(outcome, .synced(pushed: false, warnings: []))
+            XCTAssertEqual(outcome, .synced(pushed: false, warnings: [], pulled: true))
             XCTAssertEqual(try readSkill(root: fixture.cloneB), fixture.otherText)
         }
     }

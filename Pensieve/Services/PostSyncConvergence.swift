@@ -42,7 +42,7 @@ final class PostSyncConvergence: PostSyncConverging {
     }
 
     func run(after result: SyncCycleResult) {
-        guard case let .synced(_, _, _, headAdvanced) = result else { return }
+        guard case let .synced(_, _, _, headAdvanced, _) = result else { return }
         runSuccessfulCycle(runLedgerReconcilers: headAdvanced)
     }
 

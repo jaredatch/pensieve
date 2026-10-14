@@ -3,6 +3,15 @@ import Darwin
 import Foundation
 
 enum CLIEntry {
+    private static let outputLock = NSLock()
+    private static var didPrint = false
+
+    static func interrupted(arguments: [String]) -> Int32 {
+        printReply(.failure("interrupted", "Interrupted. Pensieve finishes any command it already accepted.",
+            hint: "Check Pensieve before trying again.", exit: 130),
+            json: arguments.prefix { $0 != "--" }.contains("--json"))
+    }
+
     static func run(arguments: [String], appSupport: String, executable: String) -> Int32 {
         let files = FileService()
         let app = URL(fileURLWithPath: files.realPath(at: executable))
@@ -47,13 +56,19 @@ enum CLIEntry {
                                 files: FileServiceProtocol) throws -> (reply: CLIReply, human: String?) {
         let version = info["CFBundleShortVersionString"] as? String ?? "unknown"
         let bundleID = info["CFBundleIdentifier"] as? String ?? "com.jaredatch.Pensieve"
-        if let command = command as? ReadCommand {
+        let request: CLIRequest?
+        if let command = command as? DeployCommand {
+            request = try command.targets.request(command: "deploy", output: command.output)
+        } else if let command = command as? UndeployCommand {
+            request = try command.targets.request(command: "undeploy", output: command.output)
+        } else { request = (command as? ReadCommand)?.request }
+        if let request {
             let client = CLIClient(appPath: app,
                 socketPath: CLIProtocol.socketPath(appSupport: appSupport, bundleID: bundleID), fileService: files,
                 launcher: CLIAppLauncher(fileService: files,
                     usesAlternateAppSupport: files.realPath(at: appSupport) != files.realPath(at: defaultAppSupport)),
                 bundleID: bundleID)
-            return (client.send(command.request), nil)
+            return (client.send(request), nil)
         }
         if command is VersionCommand {
             return (.success(.object(["version": .string(version)])), "pensieve \(version)\n")
@@ -88,6 +103,10 @@ enum CLIEntry {
     }
 
     private static func printReply(_ reply: CLIReply, json: Bool, human: String? = nil) -> Int32 {
+        outputLock.lock()
+        defer { outputLock.unlock() }
+        guard !didPrint else { return reply.exitCode }
+        didPrint = true
         if json {
             do {
                 let encoder = JSONEncoder()
@@ -180,3 +199,7 @@ extension LogCommand: OutputCommand {}
 extension CommandsCommand: OutputCommand {}
 extension CompletionCommand: OutputCommand {}
 extension VersionCommand: OutputCommand {}
+
+extension DeployCommand: OutputCommand {}
+extension UndeployCommand: OutputCommand {}
+extension SyncCommand: OutputCommand {}

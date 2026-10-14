@@ -45,7 +45,7 @@ struct SkillDeploymentsTab: View {
         projects: [Project],
         platformVM: PlatformViewModel,
         library: SkillLibraryViewModel,
-        intentDependencies: DeployIntentDependencies,
+        intentService: DeployMutationServicing,
         machineStates: [MachineState],
         localMachineID: String?,
         hostedIntentModel: DeployIntentModel? = nil,
@@ -68,10 +68,7 @@ struct SkillDeploymentsTab: View {
         _intentRows = Query(filter: #Predicate<MachineDeployIntent> { row in
             row.skillSlug == skillSlug
         })
-        _intentModel = State(initialValue: hostedIntentModel ?? DeployIntentModel(
-            platformVM: platformVM,
-            dependencies: intentDependencies
-        ))
+        _intentModel = State(initialValue: hostedIntentModel ?? DeployIntentModel(service: intentService))
     }
 
     var body: some View {

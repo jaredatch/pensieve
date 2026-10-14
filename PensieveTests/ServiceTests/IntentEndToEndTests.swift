@@ -35,11 +35,12 @@ final class IntentEndToEndTests: XCTestCase {
         let harness = try makeHarness()
         let managed = try skill("managed", context: harness.contextA)
 
-        let outcome = try harness.modelA.apply(
-            skills: [managed], platforms: [.claudeCode, .codex],
-            selectedMachineIDs: [machineB], context: harness.contextA
-        )
-        guard case .intentOnly = outcome else { return XCTFail("expected remote intent") }
+        let request = CLIRequest(command: "deploy", arguments: [managed.directoryName],
+            deployment: CLIDeployOptions(agents: ["claude", "codex"], global: true, machines: [machineB]))
+        let outcome = CLIDeployHandler(service: harness.modelA.service, files: FileService())
+            .handle(request, context: harness.contextA)
+        XCTAssertTrue(outcome.envelope.ok)
+        XCTAssertEqual(outcome.envelope.next, ["pensieve sync"])
         try syncIntentToTarget(harness)
 
         XCTAssertEqual(Set(harness.linkService.linkCalls), Set([
@@ -222,7 +223,9 @@ private extension IntentEndToEndTests {
             platformVM: platformVM,
             dependencies: DeployIntentDependencies(
                 identity: identity,
-                stateService: IntentEndToEndStateService(),
+                stateService: DeployIntentStateStub(states: [MachineState(schemaVersion: 1,
+                    machineID: machineB, name: "Target", appVersion: "fixture", publishedAt: Date(),
+                    agents: ["claudeCode", "codex"], projects: [], userDeploys: [], projectDeploys: [])]),
                 root: root,
                 writeManifest: { context in
                     try manifest.write(try manifest.snapshot(from: context), toRoot: root)
