@@ -19,7 +19,7 @@ struct ProjectRemovalWithdrawal {
         // The project-removal entry point holds sync.lock through this save and any repair.
         guard !StoreIngestState.shared(for: context.container).needsRebuild else {
             throw ProjectRemovalWithdrawalFailure(
-                message: "Project removal is blocked until sync updates this Mac's library. Sync again, then retry.",
+                message: "Pensieve couldn't update this Mac's library. Try removing the project again.",
                 didWithdrawRequests: false)
         }
         let withdrawing = intentsToWithdraw(project: project, request: request)

@@ -47,6 +47,7 @@ struct LaunchReconciler {
         var ingestionNeedsRetry: Bool
         var didRebuild: Bool
         var migrationRan = false
+        var ingestionWasPending = false
     }
 
     private let rebuildService: StoreRebuildServiceProtocol
@@ -104,6 +105,7 @@ struct LaunchReconciler {
         // preserving it). An empty/absent or half-written manifest is NOT an authoritative empty state —
         // rebuilding off it would delete every category + reset overlay fields, and the migration below
         // would bake that loss in — so it is skipped. (PLAN-12 / 12.3 review + Layer-2 rounds.)
+        let ingestionWasPending = StoreIngestState.shared(for: context.container).needsRebuild
         var observedHead = headStamp()
         var ingestedHeadStamp: String? = observedHead
         var ingestionNeedsRetry = false
@@ -144,7 +146,8 @@ struct LaunchReconciler {
             observedHead: observedHead,
             ingestedHeadStamp: ingestedHeadStamp,
             ingestionNeedsRetry: ingestionNeedsRetry,
-            didRebuild: didRebuild
+            didRebuild: didRebuild,
+            ingestionWasPending: ingestionWasPending
         ), alreadyMigrated: alreadyMigrated, externallyHeldLock: externallyHeldLock, context: context)
         return LaunchReconcileOutcome(
             rebuild: validation.rebuild,
@@ -182,7 +185,10 @@ struct LaunchReconciler {
         guard !result.rebuild.storeUnreadable, !result.rebuild.ingestIncomplete else {
             ingest.invalidate()
             result.ingestedHeadStamp = nil
-            result.ingestionNeedsRetry = false
+            // A remote-backed store hands recovery to sync preflight. With no remote, keep
+            // the existing launch retry alive so a transient failure cannot strand the index.
+            result.ingestionNeedsRetry = !result.rebuild.storeUnreadable
+                && (try? git.hasRemoteOriginConfigured(at: root)) == false
             return result
         }
         guard !result.ingestionNeedsRetry else {
@@ -213,7 +219,8 @@ struct LaunchReconciler {
             result.ingestedHeadStamp = nil
             return result
         }
-        if !alreadyMigrated {
+        // A recovery retry updates the library only. The due migration waits for a complete launch.
+        if !alreadyMigrated, !initial.ingestionWasPending {
             let migration = migrationService.migrateIfNeeded(fromRoot: root, context: context)
             result.migrationRan = migration.manifestWritten && migration.warnings.isEmpty
         }

@@ -272,20 +272,6 @@ final class SkillPreviewFrontmatterTests: XCTestCase {
 
 extension SkillPreviewFrontmatterTests {
     func testRenderedTableAdmitsLiteralPunctuationAndRefusesYAMLAnchors() async throws {
-        let literalRows: [String: (key: String, value: String)] = [
-            "plain star": ("allowed-tools", "Bash(npm run *)"),
-            "plain ampersand": ("company", "A &partner"),
-            "double quoted star": ("patterns", "*.md files"),
-            "double quoted ampersand": ("patterns", "A &partner"),
-            "single quoted star": ("patterns", "*.md files"),
-            "single quoted ampersand": ("patterns", "A &partner"),
-            "comment star": ("license", "MIT"),
-            "comment ampersand": ("license", "MIT"),
-            "flow star": ("tools", "{commands: [Bash(npm run *), '*.md']}"),
-            "flow ampersand": ("tools", "{names: [\"A &partner\"]}"),
-            "block scalar star": ("notes", "Use *.md"),
-            "block scalar ampersand": ("notes", "Use A &partner")
-        ]
         for syntax in FrontmatterRewriteFixture.syntaxCases {
             let fixture = try host(syntax.document(name: "Example"))
             defer { fixture.close() }
@@ -293,9 +279,19 @@ extension SkillPreviewFrontmatterTests {
             if syntax.trusted {
                 _ = try await text("description", in: fixture.host)
                 _ = try await text("Use for *.md files", in: fixture.host)
-                let expected = try XCTUnwrap(literalRows[syntax.label], syntax.label)
-                _ = try await text(expected.key, in: fixture.host)
-                _ = try await text(expected.value, in: fixture.host)
+                let key = try XCTUnwrap(syntax.expectedKey, syntax.label)
+                let value = try XCTUnwrap(syntax.expectedValue, syntax.label)
+                for (key, value) in [("description", "Use for *.md files"), (key, value)] {
+                    let keyFrame = try await text(key, in: fixture.host).accessibilityFrame()
+                    let valueFrame = try await text(value, in: fixture.host).accessibilityFrame()
+                    XCTAssertLessThan(abs(keyFrame.maxY - valueFrame.maxY), 4,
+                                      "Rendered key and value must share a row: \(syntax.label), \(key)")
+                }
+                for excluded in syntax.excludedText {
+                    XCTAssertFalse(elements(in: fixture.host).contains {
+                        ($0.accessibilityValue() as? String)?.contains(excluded) == true
+                    }, "Comments must stay out of the table: \(syntax.label)")
+                }
             } else {
                 XCTAssertTrue(fixture.snapshot.frontmatterRows.isEmpty, syntax.label)
                 XCTAssertFalse(elements(in: fixture.host).contains {

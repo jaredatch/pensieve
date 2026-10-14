@@ -270,18 +270,15 @@ struct ConflictFileComparison: View {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 if let gitResolutionPath {
                     Text(ViewChangesPresentation.styledText(
-                        "Pensieve can’t resolve this conflict. Resolve it in git: " + gitResolutionPath, filename: true))
+                        SyncError.conflictRequiresGitResolution(path: gitResolutionPath).localizedDescription, filename: true))
                         .foregroundStyle(.secondary).textSelection(.enabled)
                 } else if hasProtectedGitlink {
                     Text("The nested repository can’t be chosen at this path.").foregroundStyle(.secondary)
-                    if this.keepsFile || other.keepsFile {
-                        Text("Choosing a file or link keeps it in sync.").foregroundStyle(.secondary)
-                    }
+                }
+                if (hasProtectedGitlink || retiresGitlink) && (this.keepsFile || other.keepsFile) {
+                    Text("Choosing a file or link keeps it in sync.").foregroundStyle(.secondary)
                 }
                 if retiresGitlink {
-                    if this.keepsFile || other.keepsFile {
-                        Text("Choosing a file or link keeps it in sync.").foregroundStyle(.secondary)
-                    }
                     if this.canRetire || other.canRetire {
                         Text("Choosing a nested repository or a deletion stops syncing this path. "
                             + "Whatever is at this path on this Mac stays where it is.")

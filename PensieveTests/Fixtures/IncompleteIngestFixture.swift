@@ -8,6 +8,7 @@ import XCTest
 final class IncompleteIngestRebuild: StoreRebuildServiceProtocol {
     var fails = false
     var failsCategories = false
+    var failsListing = false
     var failWhenAddedCategoryExists = false
     private(set) var calls = 0
 
@@ -16,8 +17,9 @@ final class IncompleteIngestRebuild: StoreRebuildServiceProtocol {
         let shouldFail = fails || (failWhenAddedCategoryExists
             && ((try? ManifestService().read(fromRoot: root).categories.contains { $0.name == "Added" }) == true))
         if shouldFail && failsCategories { return RebuildResult(categoryReadFailed: true) }
-        return StoreRebuildService(save: { context in
-            if shouldFail { throw CocoaError(.fileWriteUnknown) }
+        return StoreRebuildService(fileService: FaultyFileService(wrapped: FileService(),
+            failListPath: shouldFail && failsListing ? root + "/skills" : nil), save: { context in
+            if shouldFail && !self.failsListing { throw CocoaError(.fileWriteUnknown) }
             try context.save()
         }).rebuild(fromRoot: root, context: context)
     }

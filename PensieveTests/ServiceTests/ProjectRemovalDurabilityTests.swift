@@ -283,9 +283,12 @@ private extension ProjectRemovalDurabilityTests {
         }
         XCTAssertTrue(launch.rebuild.saveFailed)
         XCTAssertNil(launch.ingestedHeadStamp)
-        XCTAssertFalse(launch.ingestionNeedsRetry)
+        XCTAssertTrue(launch.ingestionNeedsRetry, "An incomplete local launch keeps its retry scheduled")
         let sync = try NativeTestWork.run(container: container) { context in
-            try SyncEngine(gitService: git, manifestService: service, lockPath: lockPath)
+            try SyncEngine(gitService: git, manifestService: service,
+                storeRebuildService: StoreRebuildService(manifestService: service, save: { _ in
+                    throw CocoaError(.fileWriteUnknown)
+                }), lockPath: lockPath)
                 .sync(root: root, message: "Local-only retry", credential: nil, context: context)
         }
         XCTAssertEqual(sync, .noRemote)

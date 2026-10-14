@@ -36,8 +36,14 @@ struct ConflictItem: Equatable {
 
     func selectionError(for side: ConflictSide) -> SyncError? {
         let unavailable = side == .thisMachine ? thisUnavailable : otherUnavailable
-        guard let unavailable, !unavailable.canChoose else { return nil }
-        if requiresGitResolution { return .conflictRequiresGitResolution(path: path) }
+        let other = side == .thisMachine ? otherUnavailable : thisUnavailable
+        return Self.selectionError(path: path, chosen: unavailable, other: other)
+    }
+
+    static func selectionError(path: String, chosen: UnavailableConflictSide?,
+                               other: UnavailableConflictSide?) -> SyncError? {
+        guard let unavailable = chosen, !unavailable.canChoose else { return nil }
+        if other?.canChoose == false { return .conflictRequiresGitResolution(path: path) }
         if unavailable.reason == .unsafeRetirement { return .protectedGitlinkUnavailable(path: path) }
         return .conflictSideUnavailable(path: path)
     }

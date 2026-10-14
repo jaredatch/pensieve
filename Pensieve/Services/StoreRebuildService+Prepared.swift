@@ -61,8 +61,6 @@ extension StoreRebuildService {
                                     removingOnlyIDs: prepared.scannedCategoryIDs) != nil else {
                 throw CategoryReadFailure(message: result.warnings.joined(separator: "\n"))
             }
-        }
-        if prepared.manifestIsAuthoritative {
             rebuildDeployIntents(snapshot: snapshot, context: context, result: &result)
         }
         try save(context)

@@ -8,7 +8,14 @@ enum StoreReceiptError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case let .unreadable(path): return "Sync stopped because retirement receipts at \(path) cannot be read exactly."
-        case let .invalidPath(path): return "Sync stopped because a retirement receipt names an unsafe store path: \(path)."
+        case let .invalidPath(path):
+            let preview = path.unicodeScalars.prefix(100).map { scalar in
+                let category = scalar.properties.generalCategory
+                return category == .control || category == .lineSeparator || category == .paragraphSeparator
+                    ? " " : String(scalar)
+            }.joined()
+            let suffix = path.unicodeScalars.prefix(101).count > 100 ? "…" : ""
+            return "Sync stopped because a retirement receipt names an unsafe store path: \(preview)\(suffix)."
         }
     }
 }

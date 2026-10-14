@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 
 extension DeployIntentModel {
@@ -71,13 +72,16 @@ extension DeployIntentModel {
     }
 
     func prepareSelection(skills: [Skill], context: ModelContext) throws {
-        let selectedIDs = Set(skills.map(\.persistentModelID))
+        let selectedIDs = skills.map(\.persistentModelID)
         let rebuild = StoreRebuildService(manifestService: dependencies.manifestService, save: dependencies.saveContext)
         do {
             try StoreIngestState.rebuildIfNeeded(using: rebuild, root: dependencies.root, context: context)
+        } catch SyncError.storeUnreadable(let warnings) {
+            throw SyncError.storeUnreadable(warnings)
         } catch { throw DeployIntentModelError.ingestPending }
-        let currentIDs = Set(try context.fetch(FetchDescriptor<Skill>()).map(\.persistentModelID))
-        guard selectedIDs.isSubset(of: currentIDs) else { throw DeployIntentModelError.selectionChanged }
+        let selectedRows = FetchDescriptor<Skill>(predicate: #Predicate { selectedIDs.contains($0.persistentModelID) })
+        let currentIDs = Set(try context.fetchIdentifiers(selectedRows))
+        guard Set(selectedIDs).isSubset(of: currentIDs) else { throw DeployIntentModelError.selectionChanged }
     }
 
     private func remoteIntentKeys(

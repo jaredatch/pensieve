@@ -27,25 +27,41 @@ struct FrontmatterRewriteFixture {
         let label: String
         let fields: String
         let trusted: Bool
+        var expectedKey: String?
+        var expectedValue: String?
+        var excludedText: [String] = []
+        var rootPrefix = ""
 
         func document(name: String) -> String {
-            "---\nname: \(name)\ndescription: Use for *.md files\n\(fields)\n---\n\nOriginal body\n"
+            "---\n\(rootPrefix)name: \(name)\ndescription: Use for *.md files\n\(fields)\n---\n\nOriginal body\n"
         }
     }
 
     static let syntaxCases: [Syntax] = [
-        Syntax(label: "plain star", fields: "allowed-tools: Bash(npm run *)", trusted: true),
-        Syntax(label: "plain ampersand", fields: "company: A &partner", trusted: true),
-        Syntax(label: "double quoted star", fields: "patterns: \"*.md files\"", trusted: true),
-        Syntax(label: "double quoted ampersand", fields: "patterns: \"A &partner\"", trusted: true),
-        Syntax(label: "single quoted star", fields: "patterns: '*.md files'", trusted: true),
-        Syntax(label: "single quoted ampersand", fields: "patterns: 'A &partner'", trusted: true),
-        Syntax(label: "comment star", fields: "# see *.md\nlicense: MIT", trusted: true),
-        Syntax(label: "comment ampersand", fields: "# see &notes\nlicense: MIT", trusted: true),
-        Syntax(label: "flow star", fields: "tools: {commands: [Bash(npm run *), '*.md']}", trusted: true),
-        Syntax(label: "flow ampersand", fields: "tools: {names: [\"A &partner\"]}", trusted: true),
-        Syntax(label: "block scalar star", fields: "notes: |-\n  Use *.md", trusted: true),
-        Syntax(label: "block scalar ampersand", fields: "notes: |-\n  Use A &partner", trusted: true),
+        Syntax(label: "plain star", fields: "allowed-tools: Bash(npm run *)", trusted: true,
+               expectedKey: "allowed-tools", expectedValue: "Bash(npm run *)"),
+        Syntax(label: "plain ampersand", fields: "company: A &partner", trusted: true,
+               expectedKey: "company", expectedValue: "A &partner"),
+        Syntax(label: "double quoted star", fields: "patterns: \"*.md files\"", trusted: true,
+               expectedKey: "patterns", expectedValue: "*.md files"),
+        Syntax(label: "double quoted ampersand", fields: "patterns: \"A &partner\"", trusted: true,
+               expectedKey: "patterns", expectedValue: "A &partner"),
+        Syntax(label: "single quoted star", fields: "patterns: '*.md files'", trusted: true,
+               expectedKey: "patterns", expectedValue: "*.md files"),
+        Syntax(label: "single quoted ampersand", fields: "patterns: 'A &partner'", trusted: true,
+               expectedKey: "patterns", expectedValue: "A &partner"),
+        Syntax(label: "comment star", fields: "# see *.md\nlicense: MIT", trusted: true,
+               expectedKey: "license", expectedValue: "MIT", excludedText: ["# see *.md"]),
+        Syntax(label: "comment ampersand", fields: "# see &notes\nlicense: MIT", trusted: true,
+               expectedKey: "license", expectedValue: "MIT", excludedText: ["# see &notes"]),
+        Syntax(label: "flow star", fields: "tools: {commands: [Bash(npm run *), '*.md']}", trusted: true,
+               expectedKey: "tools", expectedValue: "{commands: [Bash(npm run *), '*.md']}"),
+        Syntax(label: "flow ampersand", fields: "tools: {names: [\"A &partner\"]}", trusted: true,
+               expectedKey: "tools", expectedValue: "{names: [\"A &partner\"]}"),
+        Syntax(label: "block scalar star", fields: "notes: |-\n  Use *.md", trusted: true,
+               expectedKey: "notes", expectedValue: "Use *.md"),
+        Syntax(label: "block scalar ampersand", fields: "notes: |-\n  Use A &partner", trusted: true,
+               expectedKey: "notes", expectedValue: "Use A &partner"),
         Syntax(label: "mapping scalar anchor", fields: "metadata: &details value\ncopy: *details", trusted: false),
         Syntax(label: "mapping container anchor", fields: "metadata: &details\n  owner: upstream\ncopy: *details",
                trusted: false),
@@ -56,7 +72,11 @@ struct FrontmatterRewriteFixture {
         Syntax(label: "alias key", fields: "key-name: &key extra\n*key: value", trusted: false),
         Syntax(label: "anchor without alias", fields: "metadata: &details value", trusted: false),
         Syntax(label: "sequence anchor without alias", fields: "tools: &tools [Read]", trusted: false),
-        Syntax(label: "mapping anchor without alias", fields: "metadata: &details {owner: upstream}", trusted: false)
+        Syntax(label: "mapping anchor without alias", fields: "metadata: &details {owner: upstream}", trusted: false),
+        Syntax(label: "block mapping anchor without alias", fields: "metadata: &details\n  owner: upstream", trusted: false),
+        Syntax(label: "block sequence anchor without alias", fields: "tools: &tools\n  - Read", trusted: false),
+        Syntax(label: "root anchor without alias", fields: "license: MIT", trusted: false, rootPrefix: "&root\n"),
+        Syntax(label: "key anchor without alias", fields: "&key license: MIT", trusted: false)
     ]
 
     struct HeaderRewrite {
@@ -74,7 +94,7 @@ struct FrontmatterRewriteFixture {
         syntaxCases.flatMap { syntax in
             ["LF", "CRLF", "mixed"].flatMap { style in
                 ["complete", "empty", "missing fence", "missing final newline", "malformed section"].map { shape in
-                    let yaml = "name: A\ndescription: D\n" + syntax.fields
+                    let yaml = syntax.rootPrefix + "name: A\ndescription: D\n" + syntax.fields
                     let body = "Original body" + (shape == "missing final newline" ? "" : "\n")
                     let header: String
                     switch shape {

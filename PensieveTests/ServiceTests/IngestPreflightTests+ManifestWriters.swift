@@ -58,6 +58,9 @@ extension IngestPreflightTests {
     ) throws {
         let manifest = ControlledWriterManifest()
         manifest.failsRead = fault == .read
+        if fault == .newerSchema {
+            try fixture.files.writeFile(at: fixture.app + "/manifest/manifest.yaml", content: "schema_version: 999\n")
+        }
         var failsSave = fault == .save
         let save: (ModelContext) throws -> Void = { context in
             if failsSave { throw CocoaError(.fileWriteUnknown) }
@@ -75,20 +78,16 @@ extension IngestPreflightTests {
         } else {
             let model = intentModel(fixture: fixture, manifest: manifest, saveContext: save)
             let skill = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
-            attempt = {
-                do {
-                    try model.setRemote(true, machineID: "22222222-2222-4222-8222-222222222222",
-                        projectKey: "github.com/owner/project", skill: skill, platform: .codex, context: context)
-                    return false
-                } catch { return true }
-            }
+            attempt = { self.attemptIntentChange(model: model, skill: skill, context: context, fault: fault) }
             reportedError = { model.error }
         }
         for _ in 0..<2 {
             XCTAssertTrue(attempt(), "\(importsSkill ? "import" : "intent") must refuse a repeated \(fault) failure")
-            XCTAssertEqual(reportedError(), importsSkill
+            let expected = fault == .save ? (importsSkill
                 ? "Import is blocked until sync updates this Mac's library. Sync again, then retry the import."
                 : "Deployment is blocked until sync updates this Mac's library. Sync again, then retry the deployment.")
+                : SyncError.storeUnreadable([]).localizedDescription
+            XCTAssertEqual(reportedError(), expected)
             XCTAssertTrue(StoreIngestState.shared(for: context.container).needsRebuild)
             XCTAssertEqual(manifest.writes, 0, "refused ingestion must not reach the manifest writer")
             XCTAssertEqual(try context.fetchCount(FetchDescriptor<MachineDeployIntent>()), 0)
@@ -97,9 +96,31 @@ extension IngestPreflightTests {
         }
         failsSave = false
         manifest.failsRead = false
+        if fault == .newerSchema {
+            try fixture.files.writeFile(at: fixture.app + "/manifest/manifest.yaml",
+                content: "schema_version: \(ManifestService.currentSchemaVersion)\n")
+        }
         XCTAssertFalse(attempt(), "the same selection must recover after its dependency does")
         XCTAssertNil(reportedError())
         XCTAssertEqual(manifest.writes, 1)
+    }
+
+    private func attemptIntentChange(model: DeployIntentModel, skill: Skill,
+                                     context: ModelContext, fault: WriterFault) -> Bool {
+        do {
+            try model.setRemote(true, machineID: "22222222-2222-4222-8222-222222222222",
+                projectKey: "github.com/owner/project", skill: skill, platform: .codex, context: context)
+            return false
+        } catch {
+            if fault != .save {
+                guard case let SyncError.storeUnreadable(warnings) = error else {
+                    XCTFail("Expected the unreadable-store explanation, got \(error)")
+                    return true
+                }
+                XCTAssertFalse(warnings.isEmpty, "Retain the rebuild's diagnostic detail")
+            }
+            return true
+        }
     }
 
     private func assertRemovedDeploySelections() async throws {
@@ -205,7 +226,7 @@ extension IngestPreflightTests {
     }
 }
 
-private enum WriterFault: CaseIterable { case save, read }
+private enum WriterFault: CaseIterable { case save, read, newerSchema }
 
 /// Real manifest I/O with a controllable read refusal and a count of writes reaching the boundary.
 private final class ControlledWriterManifest: ManifestSnapshotting {

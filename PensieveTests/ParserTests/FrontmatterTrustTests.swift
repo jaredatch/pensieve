@@ -93,7 +93,7 @@ final class FrontmatterTrustTests: XCTestCase {
 
     func testGeneratedHeaderAndIdentityChangesAcrossPunctuationAndDocumentShapes() throws {
         let fixtures = FrontmatterRewriteFixture.headerSweep
-        XCTAssertEqual(fixtures.count, 330)
+        XCTAssertEqual(fixtures.count, 390)
         for fixture in fixtures {
             if fixture.trusted {
                 let rewritten = try SkillDocumentEditing.rewrite(draft: fixture.draft, original: fixture.original,

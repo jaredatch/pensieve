@@ -56,6 +56,11 @@ extension IngestPreflightTests {
         for failsCategories in [false, true] {
             try await assertIncompleteLaunch(failsCategories: failsCategories)
         }
+        for fault in [false, true] {
+            for recoversAtLaunch in [false, true] {
+                try assertNoRemoteLaunchRecovery(failsListing: fault, recoversAtLaunch: recoversAtLaunch)
+            }
+        }
     }
 
     private func assertIncompleteLaunch(failsCategories: Bool) async throws {
@@ -94,6 +99,57 @@ extension IngestPreflightTests {
                 .reconcileOnLaunch(context: context, alreadyMigrated: false)
         }
         XCTAssertTrue(later.migrationRan, "a later complete launch still performs the due migration")
+    }
+
+    private func assertNoRemoteLaunchRecovery(failsListing: Bool, recoversAtLaunch: Bool) throws {
+        let fixture = try NativeTestWork.run {
+            try IncompleteIngestFixture(base: self.tempDir + "/launch-no-remote-\(failsListing)-\(recoversAtLaunch)")
+        }
+        try NativeTestWork.run {
+            try fixture.git.removeRemote(at: fixture.app)
+            try fixture.manifest.write(IncompleteIngestFixture.snapshot(["Added", "Kept"]), toRoot: fixture.app)
+        }
+        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        try NativeTestWork.run(container: container) { context in
+            let rebuild = IncompleteIngestRebuild()
+            rebuild.failsListing = failsListing
+            rebuild.fails = true
+            let migration = StoreMigrationService(skillStore: SkillStore(
+                fileService: fixture.files, baseDir: fixture.app + "/skills", storeRoot: fixture.app))
+            let launch = LaunchReconciler(rebuildService: rebuild, migrationService: migration,
+                root: fixture.app, lockPath: fixture.base + "/sync.lock", git: fixture.git)
+            let outcome = launch.reconcileOnLaunch(context: context, alreadyMigrated: false)
+            XCTAssertTrue(outcome.rebuild.ingestIncomplete)
+            XCTAssertFalse(outcome.migrationRan)
+            XCTAssertNil(outcome.ingestedHeadStamp)
+            XCTAssertTrue(outcome.ingestionNeedsRetry, "No-remote launch must keep its local retry scheduled")
+            let before = try fixture.git.runOrThrow(["-C", fixture.app, "diff", "--binary", "HEAD"], in: nil).stdout
+            let manifest = try fixture.manifest.read(fromRoot: fixture.app)
+            let engine = fixture.engine(rebuild: rebuild)
+            for fails in [true, false] {
+                rebuild.fails = fails
+                let calls = rebuild.calls
+                if recoversAtLaunch {
+                    let retry = launch.reconcileOnLaunch(context: context, alreadyMigrated: false)
+                    XCTAssertEqual(retry.ingestionNeedsRetry, fails)
+                    XCTAssertFalse(retry.migrationRan, "Recovery must defer a due migration to a later complete launch")
+                } else {
+                    XCTAssertEqual(try engine.sync(root: fixture.app, message: "no remote", credential: nil,
+                        context: context, prepare: { _ in
+                            XCTFail("Unconfigured sync must not run snapshot preparation")
+                        }), .noRemote)
+                }
+                XCTAssertEqual(rebuild.calls, calls + 1, "No-remote sync must retry pending library ingestion")
+                XCTAssertEqual(StoreIngestState.shared(for: container).needsRebuild, fails)
+                XCTAssertEqual(try fixture.manifest.read(fromRoot: fixture.app), manifest)
+                XCTAssertEqual(
+                    try fixture.git.runOrThrow(["-C", fixture.app, "diff", "--binary", "HEAD"], in: nil).stdout, before)
+            }
+            XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Added", "Kept"])
+            XCTAssertEqual(try context.fetch(FetchDescriptor<Skill>()).map(\.directoryName), ["item"])
+            XCTAssertTrue(launch.reconcileOnLaunch(context: context, alreadyMigrated: false).migrationRan,
+                          "Migration remains due until a later complete launch")
+        }
     }
 
     func testFailedConnectAndSameHeadReconnectInvalidateIngestCache() async throws {

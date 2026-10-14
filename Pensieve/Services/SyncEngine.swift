@@ -125,7 +125,11 @@ struct SyncEngine: SyncEngineProtocol {
         defer { lock.release() }
         try gitService.probeUsability().requireUsable()
         // Ask about the remote before any write, so an unconfigured store is never changed.
-        guard try gitService.remoteURL(at: root) != nil else { return .noRemote }
+        guard try gitService.remoteURL(at: root) != nil else {
+            // Repair only this Mac's index. An unconfigured store still gets no writes or sync error.
+            try? StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context)
+            return .noRemote
+        }
         guard try gitService.hasLocalBranches(at: root) else { return .branchless }
         try requireAcceptableRemote(at: root)
 
@@ -142,9 +146,7 @@ struct SyncEngine: SyncEngineProtocol {
         let headStamp = GitHeadStamp(fileService: fileService)
         let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
         try prepare?(context)
-        if StoreIngestState.shared(for: context.container).needsRebuild {
-            _ = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context)
-        }
+        try StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context)
 
         // 1. SwiftData → manifest files (the portable, mergeable source of truth).
         try manifestService.write(manifestService.snapshot(from: context), toRoot: root)
@@ -318,12 +320,10 @@ struct SyncEngine: SyncEngineProtocol {
             guard let full = validatedWorktreePath(path, root: root) else {
                 throw SyncError.conflictsChanged
             }
-            let item = ConflictItem(path: path, kind: Self.kind(for: path),
-                                    thisMachine: this.bytes, otherMachine: other.bytes,
-                                    thisUnavailable: this.unavailable, otherUnavailable: other.unavailable,
-                                    thisMode: this.mode, otherMode: other.mode)
-            if let error = item.selectionError(for: pick.side) { throw error }
             let chosen = pick.side == .thisMachine ? this : other
+            let unchosen = pick.side == .thisMachine ? other : this
+            if let error = ConflictItem.selectionError(path: path, chosen: chosen.unavailable,
+                                                      other: unchosen.unavailable) { throw error }
             let hasGitlink = this.isGitlink || other.isGitlink
             if StoreIgnoreRules.canRetire(path)
                 && (chosen.unavailable?.canChoose == true || (hasGitlink && chosen.mode == nil)) {
@@ -337,7 +337,6 @@ struct SyncEngine: SyncEngineProtocol {
 
     private func applyConflictVersion(_ chosen: ConflictVersion, stage: Int, path: String,
                                       full: String, root: String) throws {
-        guard chosen.unavailable == nil else { throw SyncError.conflictSideUnavailable(path: path) }
         if try fileService.entryTypeWithoutFollowingLinks(at: full) == .directory {
             guard chosen.entry == nil else { throw SyncError.conflictFolderMustMove(path: path) }
             // The folder side removed the old file. Resolve that index entry without staging or
