@@ -125,6 +125,19 @@ extension IngestPreflightTests {
         try await setup.perform(spec: RemoteSpec(url: fixture.remote, host: "fixture.test", transport: .ssh),
                                 credential: .sshAgent)
         XCTAssertEqual(GitHeadStamp().read(root: fixture.app), stamp, "reconnect must not advance HEAD")
+        let pendingManifest = try fixture.manifest.read(fromRoot: fixture.app)
+        try fixture.files.deleteDirectory(at: fixture.app + "/manifest")
+        let skipped = try NativeTestWork.run(container: container) { context in
+            LaunchReconciler(rebuildService: rebuild,
+                migrationService: StoreMigrationService(skillStore: SkillStore(
+                    fileService: fixture.files, baseDir: fixture.app + "/skills", storeRoot: fixture.app)),
+                root: fixture.app, lockPath: fixture.base + "/sync.lock", git: fixture.git)
+                .reconcileOnLaunch(context: context, alreadyMigrated: true)
+        }
+        XCTAssertEqual(skipped.rebuild, RebuildResult(), "a content-free manifest skips launch rebuilding")
+        XCTAssertNil(skipped.ingestedHeadStamp, "skipping a rebuild cannot admit Connect's pending head")
+        XCTAssertFalse(skipped.ingestionNeedsRetry, "a skipped rebuild hands off to the required sync preflight")
+        try fixture.manifest.write(pendingManifest, toRoot: fixture.app)
         let calls = rebuild.calls
         guard case .synced = await coordinator.runCycle() else { return XCTFail("reconnected cycle failed") }
         XCTAssertEqual(rebuild.calls, calls + 2, "Connect invalidates a cached head even when HEAD does not move")
@@ -134,9 +147,9 @@ extension IngestPreflightTests {
         try NativeTestWork.run { try fixture.assertRemoteCategories() }
     }
 
-    private func makeIncompleteCoordinator(container: ModelContainer, fixture: IncompleteIngestFixture,
-                                           rebuild: IncompleteIngestRebuild,
-                                           manifest: ManifestSnapshotting = ManifestService()) async -> SyncCoordinator {
+    func makeIncompleteCoordinator(container: ModelContainer, fixture: IncompleteIngestFixture,
+                                   rebuild: IncompleteIngestRebuild,
+                                   manifest: ManifestSnapshotting = ManifestService()) async -> SyncCoordinator {
         let coordinator = await Task.detached { SyncCoordinator(modelContainer: container) }.value
         await coordinator.configure(engine: fixture.engine(rebuild: rebuild, manifestService: manifest), git: fixture.git,
             credentials: IngestEmptyCredentials(), rebuildService: rebuild, root: fixture.app,

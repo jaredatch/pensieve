@@ -41,12 +41,14 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
             result.warnings.append(
                 "Manifest was unreadable (a newer schema version, or corrupt); skipped the rebuild to " +
                 "avoid destroying local metadata. Update Pensieve to read this store.")
-            StoreIngestState.shared(for: context.container).record(result)
+            StoreIngestState.shared(for: context.container).invalidate()
             return result
         }
 
         result = rebuild(snapshot: snapshot, fromRoot: root, context: context)
-        StoreIngestState.shared(for: context.container).record(result)
+        // A successful read is admitted by the caller after its HEAD validation. Launch may
+        // discover that the files moved during this rebuild, so this service cannot clear it.
+        if result.ingestIncomplete { StoreIngestState.shared(for: context.container).invalidate() }
         if !result.saveFailed, let read = result.categoryRead { CategorySaveWindow.didRebuild(read) }
         return result
     }

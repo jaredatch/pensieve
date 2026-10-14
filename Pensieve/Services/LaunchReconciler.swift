@@ -45,6 +45,7 @@ struct LaunchReconciler {
         var observedHead: String?
         var ingestedHeadStamp: String?
         var ingestionNeedsRetry: Bool
+        var didRebuild: Bool
         var migrationRan = false
     }
 
@@ -107,7 +108,9 @@ struct LaunchReconciler {
         var ingestedHeadStamp: String? = observedHead
         var ingestionNeedsRetry = false
         var rebuild = RebuildResult()
+        var didRebuild = false
         if shouldRebuildOnLaunch(root: root, context: context) {
+            didRebuild = true
             let before = observedHead
             rebuild = rebuildService.rebuild(fromRoot: root, context: context)
             observedHead = headStamp()
@@ -140,7 +143,8 @@ struct LaunchReconciler {
             rebuild: rebuild,
             observedHead: observedHead,
             ingestedHeadStamp: ingestedHeadStamp,
-            ingestionNeedsRetry: ingestionNeedsRetry
+            ingestionNeedsRetry: ingestionNeedsRetry,
+            didRebuild: didRebuild
         ), alreadyMigrated: alreadyMigrated, externallyHeldLock: externallyHeldLock, context: context)
         return LaunchReconcileOutcome(
             rebuild: validation.rebuild,
@@ -174,15 +178,21 @@ struct LaunchReconciler {
         context: ModelContext
     ) -> FinalHeadValidation {
         var result = initial
-        StoreIngestState.shared(for: context.container).record(result.rebuild)
+        let ingest = StoreIngestState.shared(for: context.container)
         guard !result.rebuild.storeUnreadable, !result.rebuild.ingestIncomplete else {
+            ingest.invalidate()
             result.ingestedHeadStamp = nil
             result.ingestionNeedsRetry = false
+            return result
+        }
+        guard !result.ingestionNeedsRetry else {
+            ingest.invalidate()
             return result
         }
         var ownedLock: SyncLock?
         if !externallyHeldLock {
             guard let lock = SyncLock.tryAcquire(at: lockPath) else {
+                ingest.invalidate()
                 result.ingestedHeadStamp = nil
                 result.ingestionNeedsRetry = true
                 return result
@@ -191,8 +201,16 @@ struct LaunchReconciler {
         }
         defer { ownedLock?.release() }
         guard headStamp() == result.observedHead else {
+            ingest.invalidate()
             result.ingestedHeadStamp = nil
             result.ingestionNeedsRetry = true
+            return result
+        }
+        if result.didRebuild { ingest.record(result.rebuild) }
+        guard !ingest.needsRebuild else {
+            // No launch rebuild ran. A nil head hands this pending work to the coordinator's
+            // required preflight rather than making the launch retry wait for a manifest.
+            result.ingestedHeadStamp = nil
             return result
         }
         if !alreadyMigrated {

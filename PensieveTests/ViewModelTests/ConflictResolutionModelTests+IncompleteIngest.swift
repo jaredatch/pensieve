@@ -22,8 +22,19 @@ extension ConflictResolutionModelTests {
         sync.apply(.conflicted(["skills/item/SKILL.md"]))
         let model = ConflictResolutionModel(engine: engine, git: fixture.git, credentials: IngestEmptyCredentials(),
             root: fixture.app, steps: SyncStepModel(), onResolutionStarted: { { sync.apply($0) } })
+        // A saved window edit can outlive a failed manifest write. Healthy conflict inspection
+        // must publish it before rebuilding from the merged files.
+        try NativeTestWork.run(container: container) { context in
+            let skill = try XCTUnwrap(try context.fetch(FetchDescriptor<Skill>()).first)
+            skill.cursorConfig = CursorAdapterConfig(globs: ["*.swift"], alwaysApply: false)
+            skill.importedFrom = "cursor"
+            try context.save()
+        }
         await model.loadAndReport(container: container)
         let groups = try readyGroups(from: model.phase)
+        let inspected = try XCTUnwrap(try fixture.manifest.read(fromRoot: fixture.app).skills.first { $0.slug == "item" })
+        XCTAssertEqual(inspected.cursor, CursorAdapterConfig(globs: ["*.swift"], alwaysApply: false))
+        XCTAssertEqual(inspected.origin, .imported(from: "cursor"))
         XCTAssertEqual(groups.flatMap(\.items).map(\.path), ["skills/item/SKILL.md"])
         model.choose("skill:item", .thisMachine)
         rebuild.failWhenAddedCategoryExists = true
@@ -39,6 +50,9 @@ extension ConflictResolutionModelTests {
         XCTAssertEqual(model.phase, .empty, "retry inspection finishes the already resolved rebase")
         XCTAssertFalse(sync.isConflicted)
         try NativeTestWork.run { try fixture.assertRemoteCategories() }
+        let retried = try XCTUnwrap(try fixture.manifest.read(fromRoot: fixture.app).skills.first { $0.slug == "item" })
+        XCTAssertEqual(retried.cursor, CursorAdapterConfig(globs: ["*.swift"], alwaysApply: false))
+        XCTAssertEqual(retried.origin, .imported(from: "cursor"))
         try NativeTestWork.run(container: container) { context in
             guard case .synced = try engine.sync(root: fixture.app, message: "ordinary", credential: nil,
                                                  context: context) else { return XCTFail("ordinary sync stayed blocked") }

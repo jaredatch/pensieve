@@ -29,6 +29,7 @@ extension DeployIntentModel {
         context: ModelContext,
         mutation: () throws -> Bool
     ) throws -> IntentPersistence {
+        try StoreIngestState.rebuildIfNeeded(using: StoreRebuildService(), root: dependencies.root, context: context)
         let before = try remoteIntentKeys(localMachineID: localMachineID, context: context)
         let mutated = try mutation()
         guard mutated else {

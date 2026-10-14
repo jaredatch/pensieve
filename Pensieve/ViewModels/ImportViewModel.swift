@@ -165,6 +165,7 @@ final class ImportViewModel {
 
         var taken: Set<String>
         do {
+            try StoreIngestState.rebuildIfNeeded(using: StoreRebuildService(), root: manifestRoot, context: context)
             taken = try takenSlugs(context).union(skillStore.prepareImport())
         } catch {
             self.error = "Failed to import: couldn't read the library (\(error.localizedDescription))"

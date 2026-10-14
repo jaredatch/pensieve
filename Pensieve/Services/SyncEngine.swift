@@ -280,8 +280,9 @@ struct SyncEngine: SyncEngineProtocol {
     @discardableResult
     private func prepareLocalHead(root: String, credential: GitCredential?,
                                   context: ModelContext, incoming: FetchedStoreRevision?) throws -> Bool {
-        // A retry owns a fresh context, including after a completed rebase whose local save failed.
-        _ = try StoreIngestState.rebuild(using: storeRebuildService, root: root, context: context)
+        // A failed finish requires ingestion in the retry's fresh context. Healthy conflict
+        // preparation still publishes saved window edits that have not reached the manifest.
+        try StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context)
         try manifestService.write(manifestService.snapshot(from: context), toRoot: root)
         try ensureSyncAttributes(root: root)
         return try gitService.collapseToSingleCommit(at: root, message: Self.resolveMessage,

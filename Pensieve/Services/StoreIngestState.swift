@@ -38,6 +38,14 @@ final class StoreIngestState {
         pending = result.storeUnreadable || result.ingestIncomplete
     }
 
+    /// Writers call this under sync.lock, before applying their local edit. Rebuilding after
+    /// the edit could replace it with the still-pending disk snapshot.
+    static func rebuildIfNeeded(using service: StoreRebuildServiceProtocol, root: String,
+                                context: ModelContext) throws {
+        guard shared(for: context.container).needsRebuild else { return }
+        _ = try rebuild(using: service, root: root, context: context)
+    }
+
     /// All sync writers use the same failure admission, including protocol-based rebuild services.
     static func rebuild(using service: StoreRebuildServiceProtocol, root: String,
                         context: ModelContext) throws -> RebuildResult {

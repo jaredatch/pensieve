@@ -356,6 +356,8 @@ If Pensieve cannot save pulled changes into this Mac's library, or cannot read i
 
 Conflict resolution and Connect show the same reason when their rebuild cannot complete. A conflict retry rebuilds before writing, and the first sync after Connect also rebuilds, even when HEAD has not changed. A launch with an incomplete rebuild skips the one-time store migration until a later complete launch.
 
+If ingestion is pending, import and deploy-intent changes rebuild before applying their edit. They keep the imported skill or intent change without replacing the other Mac's categories with stale window state. Healthy conflict preparation still publishes saved window edits.
+
 Each installation has a canonical UUID in app support. Its single-writer `machines/<id>.yaml` snapshot reports the machine name, app version, snapshot update time, detected agents, stable project identities, and realized user/project deploys. The snapshot is republished only when its content changes, with content compared across parsed known fields while ignoring the timestamp. An absent or unreadable snapshot takes the rewrite arm for self-heal; if publication fails, sync continues and reports a warning. Healthy sync cycles still pull and push; only the commit is content-gated, so an idle sync cycle creates no commit. The read-only Machines section appears in the sidebar when sync is configured or machine files exist; its machines are listed in the middle column. Selecting a machine shows when its known state was last updated, app version, agents, local-project overlap, remote-only projects, and realized deploys. Remote project state never registers a project locally.
 
 ---
