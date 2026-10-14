@@ -279,7 +279,8 @@ struct ConflictFileComparison: View {
                     } else {
                         Text("Choosing the other version removes the nested repository from sync. "
                             + "A folder and its contents stay on this Mac. A file or link at this path is deleted. "
-                            + "New files here can still sync.")
+                            + "A nested repository kept after deletion stays local, including new files. "
+                            + "New files in an ordinary folder can sync.")
                             .foregroundStyle(.secondary)
                     }
                 }
