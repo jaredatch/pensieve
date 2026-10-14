@@ -5,6 +5,7 @@ import XCTest
 struct DeployIntentIdentityStub: MachineIdentityProviding {
     let id: String
     func identifier() throws -> String { id }
+    func existingIdentifier() throws -> String? { id }
 }
 
 struct DeployIntentStateStub: MachineStateServicing {

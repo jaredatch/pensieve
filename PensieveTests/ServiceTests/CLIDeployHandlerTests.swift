@@ -37,7 +37,10 @@ final class CLIDeployHandlerTests: XCTestCase {
             XCTAssertEqual(intent?.projectKey, target.project?.identityKey)
             XCTAssertEqual(try h.platform.deployStateStore.read().records.count, 1)
             let stable = try h.tree()
-            XCTAssertEqual(h.handler.handle(request, context: h.context).envelope.changed, false)
+            let repeated = h.handler.handle(request, context: h.context)
+            XCTAssertTrue(repeated.envelope.ok)
+            XCTAssertEqual(repeated.exitCode, 0)
+            XCTAssertEqual(repeated.envelope.changed, false)
             XCTAssertEqual(try h.tree(), stable)
             try assertRemoval(h, project: project, target: target, stable: stable, rows: rows)
         }
@@ -58,7 +61,10 @@ final class CLIDeployHandlerTests: XCTestCase {
         XCTAssertEqual(try h.intents(), rows)
         XCTAssertTrue(try h.platform.deployStateStore.read().records.isEmpty)
         let empty = try h.tree()
-        XCTAssertEqual(h.handler.handle(removal, context: h.context).envelope.changed, false)
+        let repeated = h.handler.handle(removal, context: h.context)
+        XCTAssertTrue(repeated.envelope.ok)
+        XCTAssertEqual(repeated.exitCode, 0)
+        XCTAssertEqual(repeated.envelope.changed, false)
         XCTAssertEqual(try h.tree(), empty)
     }
 
@@ -181,7 +187,7 @@ final class CLIDeployHandlerTests: XCTestCase {
         let applied = h.handler.handle(h.request(machines: [otherID]), context: h.context)
         XCTAssertTrue(applied.envelope.ok)
         XCTAssertEqual(try h.intents(), [otherID + "|" + h.skill.directoryName + "|claudeCode"])
-        try assertPublishedMachineAliasesRemainAmbiguous()
+        try assertMachineLookupPrecedence()
     }
 
     func testSharedWindowAndCommandLockAndSaveRollback() throws {
@@ -206,63 +212,7 @@ final class CLIDeployHandlerTests: XCTestCase {
         }
     }
 
-    func testSavedIntentWithFailedReconcileReportsPartialAsTheWindowDoes() throws {
-        let h = try CLIDeployFixture(reconcile: { context in
-            var result = BatchResult()
-            for skill in (try? context.fetch(FetchDescriptor<Skill>())) ?? [] {
-                result.outcomes.append(BatchPairOutcome(skillID: skill.id, skillName: skill.name,
-                    platform: .claudeCode, target: .userWide, error: "fixture reconcile failure"))
-            }
-            return result
-        })
-        let result = h.handler.handle(h.request(), context: h.context)
-        XCTAssertEqual(result.exitCode, 1)
-        XCTAssertEqual(result.envelope.error?.code, "partial")
-        XCTAssertEqual(result.envelope.changed, true)
-        XCTAssertEqual(fields(result)["intentSaved"], .bool(true))
-        XCTAssertFalse(h.platform.isDeployed(skill: h.skill, platform: .claudeCode))
-        XCTAssertEqual(try h.intents().count, 1)
-        let window = DeployIntentModel(service: h.service)
-        let batch = try window.set(true, skill: h.other, platform: .claudeCode, target: .userWide, context: h.context)
-        XCTAssertEqual(batch.failures.first?.error, "fixture reconcile failure")
-        XCTAssertNotNil(window.error)
-        XCTAssertFalse(h.platform.isDeployed(skill: h.other, platform: .claudeCode))
-    }
-
-    func testKeylessArtifactWrittenBeforeSaveFailureReportsPartial() throws {
-        let h = try CLIDeployFixture(platformSave: { _ in throw DeployStubFailure() })
-        let result = h.handler.handle(h.request(project: "Local"), context: h.context)
-        XCTAssertTrue(h.platform.isDeployed(skill: h.skill, platform: .claudeCode, target: .project(h.keyless)))
-        XCTAssertEqual(result.exitCode, 1)
-        XCTAssertEqual(result.envelope.error?.code, "partial")
-        XCTAssertEqual(result.envelope.changed, true)
-        XCTAssertEqual(fields(result)["intentSaved"], .bool(false))
-        guard case let .array(results) = fields(result)["results"], case let .object(pair) = results.first else {
-            return XCTFail("Missing partial result")
-        }
-        XCTAssertEqual(pair["artifactWritten"], .bool(true))
-        XCTAssertEqual(pair["applied"], .bool(false), "The pair's metadata save failed")
-        XCTAssertTrue(try h.intents().isEmpty)
-    }
-
-    func testFailedManifestRestoreNamesTheDiskChangeAsPartial() throws {
-        var writes = 0
-        let h = try CLIDeployFixture(save: { _ in throw DeployStubFailure() }, beforeManifestWrite: {
-            writes += 1
-            if writes > 1 { throw DeployStubFailure() }
-        })
-        let result = h.handler.handle(h.request(), context: h.context)
-        XCTAssertEqual(result.exitCode, 1)
-        XCTAssertEqual(result.envelope.error?.code, "partial")
-        XCTAssertEqual(result.envelope.changed, true)
-        XCTAssertEqual(fields(result)["manifestMayHaveChanged"], .bool(true))
-        XCTAssertTrue(try h.intents().isEmpty)
-        let manifest = try NativeTestWork.run { try h.manifest.read(fromRoot: h.root) }
-        XCTAssertEqual(manifest.deployIntents.count, 1, "The first manifest was published before its restore failed")
-        XCTAssertFalse(h.platform.isDeployed(skill: h.skill, platform: .claudeCode))
-    }
-
-    private func fields(_ reply: CLIReply) -> [String: CLIValue] {
+    func fields(_ reply: CLIReply) -> [String: CLIValue] {
         guard case let .object(fields) = reply.envelope.data else { XCTFail("Missing command data"); return [:] }
         return fields
     }

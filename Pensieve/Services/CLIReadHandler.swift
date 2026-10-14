@@ -7,7 +7,6 @@ protocol CLIReadHandling {
 
 struct CLIReadHandler: CLIReadHandling {
     let store: SkillStoreProtocol
-    let installedAgents: () -> [PlatformTarget]
     let deployments: DeployMutationServicing
 
     @MainActor
@@ -29,17 +28,19 @@ struct CLIReadHandler: CLIReadHandling {
             case "agent list":
                 return .success(.array(PlatformTarget.allCases.map {
                     .object(["id": .string($0.cliID), "name": .string($0.displayName),
-                             "installed": .bool(installedAgents().contains($0)),
+                             "installed": .bool(deployments.platformVM.installedPlatforms().contains($0)),
                              "projectScope": .bool($0.supportsProjectScope)])
                 }))
             case "machine list":
                 let catalog = try deployments.targetCatalog(context: context,
-                    localID: deployments.dependencies.identity.identifier())
+                    localID: try? deployments.dependencies.identity.existingIdentifier())
                 return .success(.array(catalog.machines.map { machine in
                     let state = catalog.states.first { $0.machineID == machine.id }
-                    let agents = state?.agents ?? (machine.isLocal ? installedAgents().map(\.rawValue) : [])
+                    let agents = machine.isLocal ? deployments.platformVM.installedPlatforms().map(\.rawValue)
+                        : state?.agents ?? []
                     return .object(["id": .string(machine.id), "name": .string(machine.name),
-                             "agents": .array(agents.map { .string(PlatformTarget.cliID(for: $0)) })])
+                             "agents": .array(agents.map { .string(PlatformTarget.cliID(for: $0)) }),
+                             "isLocal": .bool(machine.isLocal), "isUnseen": .bool(machine.isUnseen)])
                 }))
             case "project list":
                 let projects = try context.fetch(FetchDescriptor<Project>()).sorted { ($0.name, $0.path) < ($1.name, $1.path) }

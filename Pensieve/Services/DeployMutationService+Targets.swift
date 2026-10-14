@@ -8,25 +8,29 @@ struct DeployTargetCatalog {
 
     var publishedNamesByID: [String: [String]] {
         Dictionary(states.map {
-            ($0.machineID, [$0.name, PublishedStringSanitizer.name($0.name, fallback: "Mac")])
+            let visible = PublishedStringSanitizer.name($0.name, fallback: "")
+            return ($0.machineID, visible.isEmpty ? [] : [$0.name, visible])
         }, uniquingKeysWith: { first, _ in first })
     }
 }
 
 extension DeployMutationService {
-    func targetCatalog(context: ModelContext, localID: String) throws -> DeployTargetCatalog {
+    func targetCatalog(context: ModelContext, localID: String?) throws -> DeployTargetCatalog {
         let states = dependencies.stateService.readAll(fromRoot: dependencies.root)
         let stateByID = Dictionary(states.map { ($0.machineID, $0) }, uniquingKeysWith: { first, _ in first })
         let intents = try context.fetch(FetchDescriptor<MachineDeployIntent>())
         let intentIDs = Set(intents.compactMap { $0.projectKey == nil ? $0.machineID : nil })
-        let allIDs = Set(stateByID.keys).union(intentIDs).union([localID])
+        let allIDs = Set(stateByID.keys).union(intentIDs).union(localID.map { [$0] } ?? [])
         let machines = allIDs.map { machineID in
             let state = stateByID[machineID]
+            var name = machineID == localID ? "This Mac" : state.map {
+                PublishedStringSanitizer.name($0.name, fallback: "Mac")
+            } ?? machineID
+            if allIDs.contains(where: { $0 != machineID && $0.caseInsensitiveCompare(name) == .orderedSame }) {
+                name += " (" + machineID + ")"
+            }
             return DeployIntentMachine(
-                id: machineID,
-                name: machineID == localID ? "This Mac" : state.map {
-                    PublishedStringSanitizer.name($0.name, fallback: "Mac")
-                } ?? machineID,
+                id: machineID, name: name,
                 isLocal: machineID == localID,
                 isUnseen: machineID != localID && state == nil
             )

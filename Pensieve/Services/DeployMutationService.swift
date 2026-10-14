@@ -131,7 +131,7 @@ protocol DeployMutationServicing: AnyObject {
     var machines: [DeployIntentMachine] { get }
     var availablePlatforms: [PlatformTarget] { get }
     func reload(context: ModelContext) throws
-    func targetCatalog(context: ModelContext, localID: String) throws -> DeployTargetCatalog
+    func targetCatalog(context: ModelContext, localID: String?) throws -> DeployTargetCatalog
     func selectedMachineIDs(skills: [Skill], platforms: Set<PlatformTarget>, context: ModelContext) throws -> Set<String>
     func setRemote(_ selected: Bool, machineID: String, projectKey: String?, skill: Skill,
                    platform: PlatformTarget, context: ModelContext) throws

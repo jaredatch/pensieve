@@ -20,7 +20,7 @@ final class CLIReadHandlerTests: XCTestCase {
         let deployments = DeployMutationService(platformVM: paths.makePlatformViewModel(), dependencies: .live(
             identity: DeployIntentIdentityStub(id: CLIDeployFixture.localID), stateService: machines,
             root: paths.storeRoot, lockPath: paths.syncLockPath, notifier: {}, reconcile: { _ in BatchResult() }))
-        let handler = CLIReadHandler(store: store, installedAgents: { [] }, deployments: deployments)
+        let handler = CLIReadHandler(store: store, deployments: deployments)
         let shown = handler.handle(CLIRequest(command: "skill show", arguments: ["review"]), context: context)
         XCTAssertTrue(shown.envelope.ok, "Metadata succeeds even when content is missing")
         XCTAssertEqual(shown.envelope.data, .object([
@@ -37,6 +37,7 @@ final class CLIReadHandlerTests: XCTestCase {
             return XCTFail("Missing library rows")
         }
         XCTAssertEqual(row["name"], .string("Changed in window"))
+        try assertMachineCatalogReads()
         try assertLists(handler: handler, context: context, project: project, machines: machines, paths: paths)
         let missing = handler.handle(CLIRequest(command: "skill show", arguments: ["absent"]), context: context)
         XCTAssertEqual(missing.exitCode, 4)
@@ -57,13 +58,16 @@ final class CLIReadHandlerTests: XCTestCase {
             guard case let .object(fields) = value else { return false }
             return fields["id"] == .string("claude") && fields["installed"] == .bool(false)
         })
-        let machine = MachineState(schemaVersion: 1, machineID: UUID().uuidString, name: "Mini", appVersion: "1.2.3",
+        let machine = MachineState(schemaVersion: 1, machineID: UUID().uuidString,
+            name: " \nMi\u{200E}ni\t ", appVersion: "1.2.3",
             publishedAt: Date(), agents: ["claudeCode"], projects: [], userDeploys: [], projectDeploys: [])
         try machines.write(machine, toRoot: paths.storeRoot)
         let machineList = handler.handle(CLIRequest(command: "machine list"), context: context)
         XCTAssertEqual(machineList.envelope.data, .array([.object([
-            "id": .string(CLIDeployFixture.localID), "name": .string("This Mac"), "agents": .array([])]), .object([
-            "id": .string(machine.machineID), "name": .string("Mini"), "agents": .array([.string("claude")])])]))
+            "id": .string(CLIDeployFixture.localID), "name": .string("This Mac"), "agents": .array([]),
+            "isLocal": .bool(true), "isUnseen": .bool(false)]), .object([
+            "id": .string(machine.machineID), "name": .string("Mini"), "agents": .array([.string("claude")]),
+            "isLocal": .bool(false), "isUnseen": .bool(false)])]))
     }
 
     func testRuntimeListensBeforeLaunchWorkAndOverlongPathKeepsRuntimeAlive() async throws {

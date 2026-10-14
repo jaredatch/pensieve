@@ -45,7 +45,7 @@ struct CLIClient {
             if !waitingForStartup {
                 if request.command == "sync" {
                     return .failure("sync_still_running", "Sync is still running in Pensieve.",
-                        hint: "Run pensieve status to check its progress. Avoid starting another sync.", exit: 3)
+                        hint: "Run pensieve status to see the result once sync finishes. Avoid starting another sync.", exit: 3)
                 }
                 let seconds = Int(replyTimeout)
                 return .failure("app_unavailable", "Pensieve did not reply to the command within \(seconds) seconds.",

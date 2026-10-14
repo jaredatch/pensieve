@@ -91,6 +91,7 @@ extension DeployMutationService {
                 : directSet(selected, skills: [pair.skill], platforms: [pair.platform],
                                  target: pair.target, context: context)
             report.results.append(result)
+            if pair.hasIntent { reconciliation.readFailures.removeAll() }
             report.applied = report.applied || !result.successes.isEmpty || result.didRemoveArtifacts
                 || result.outcomes.contains(where: \.artifactApplied)
         }

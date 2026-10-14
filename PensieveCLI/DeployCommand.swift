@@ -3,7 +3,8 @@ import Darwin
 import Foundation
 
 struct DeployOptions: ParsableArguments {
-    @Option(name: [.short, .long], help: "Agent ID; repeat for more. '*' includes intent-bearing agents on undeploy.")
+    @Option(name: [.short, .long],
+        help: "Agent ID; repeat for more. '*' deploys to installed agents; undeploys from installed or intent-bearing agents.")
     var agent: [String] = []
     @Flag(name: [.customShort("g"), .long], help: "Deploy user-wide.") var global = false
     @Option(name: [.short, .long], help: "Registered project name or path; '.' uses this folder.") var project: String?
@@ -30,7 +31,8 @@ struct DeployOptions: ParsableArguments {
             if scope == "g" { global = true } else { project = scope }
         }
         return CLIRequest(command: command, arguments: skills, deployment: CLIDeployOptions(
-            agents: agent, global: global, project: project, machines: machine, dryRun: dryRun,
+            agents: agent, global: global, project: project.map { ($0 as NSString).expandingTildeInPath },
+            machines: machine, dryRun: dryRun,
             workingDirectory: FileService().realPath(at: ".")))
     }
 }

@@ -22,7 +22,7 @@ final class CLIDeployFixture {
     let lock: String
     var handler: CLIDeployHandler { CLIDeployHandler(service: service, files: directory.files) }
     var readHandler: CLIReadHandler {
-        CLIReadHandler(store: store, installedAgents: platform.installedPlatforms, deployments: service)
+        CLIReadHandler(store: store, deployments: service)
     }
 
     init(installed: [PlatformTarget] = [.claudeCode, .codex, .cursor, .hermes],

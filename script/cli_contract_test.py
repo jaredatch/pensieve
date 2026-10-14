@@ -192,6 +192,27 @@ class CLIContractTests(unittest.TestCase):
                         self.assertEqual(targets["project"], ".")
                         self.assertTrue(targets["dryRun"])
 
+        for prompted in (False, True):
+            with self.subTest(project="tilde", prompted=prompted):
+                observed, finish = self.peer(commit=True)
+                try:
+                    if not prompted:
+                        self.run_cli("deploy", "review", "-a", "claude", "--project=~/code/app")
+                    else:
+                        master, slave = pty.openpty()
+                        try:
+                            os.write(master, b"~/code/app\n")
+                            result = subprocess.run([str(BINARY), "deploy", "review", "-a", "claude", "--json",
+                                "--app-support", str(self.root)], stdin=slave, text=True, capture_output=True,
+                                env=self.environment, cwd=self.root, timeout=10)
+                            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                        finally:
+                            os.close(slave)
+                            os.close(master)
+                    self.assertEqual(observed[0]["deployment"]["project"], str(self.root / "code/app"))
+                finally:
+                    finish()
+
     def test_lost_reply_after_commit_never_reports_retryable_refusal(self):
         observed, finish = self.peer(commit=True, drop_reply=True)
         try:
@@ -247,6 +268,63 @@ class CLIContractTests(unittest.TestCase):
             worker.join(10)
             self.assertFalse(worker.is_alive())
             self.assertEqual(failures, [])
+
+        listener.close()
+        self.endpoint.unlink()
+        self.assert_reply_wins_after_print()
+
+    def assert_reply_wins_after_print(self):
+        # Pause only the CLI worker's final libc exit. SIGINT then reaches the main signal
+        # handler after a complete reply, without adding a production timing hook.
+        source = self.root / "exit.c"
+        library = self.root / "exit.dylib"
+        receipt, release = self.root / "exit-entered", self.root / "exit-release"
+        source.write_text(r'''
+#include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+static _Atomic int held_exit = 0;
+static void wait_worker_exit(int status) {
+    if (!atomic_exchange(&held_exit, 1)) {
+        FILE *receipt = fopen(getenv("PENSIEVE_EXIT_RECEIPT"), "w");
+        if (receipt) { fprintf(receipt, "%d", status); fclose(receipt); }
+        for (int i = 0; i < 10000 && access(getenv("PENSIEVE_EXIT_RELEASE"), F_OK); i++) usleep(1000);
+    }
+    exit(status);
+}
+__attribute__((used)) static struct { const void *replacement; const void *original; }
+interpose_exit __attribute__((section("__DATA,__interpose"))) = { (void *)wait_worker_exit, (void *)exit };
+''')
+        subprocess.run(["/usr/bin/clang", "-dynamiclib", str(source), "-o", str(library)],
+                       check=True, capture_output=True, timeout=30)
+        environment = dict(self.environment, DYLD_INSERT_LIBRARIES=str(library),
+            PENSIEVE_EXIT_RECEIPT=str(receipt), PENSIEVE_EXIT_RELEASE=str(release))
+        for code in (0, 4):
+            receipt.unlink(missing_ok=True)
+            release.unlink(missing_ok=True)
+            envelope = {"schema": 1, "ok": code == 0, "changed": False, "data": {"result": "own reply"}}
+            if code:
+                envelope["error"] = {"code": "skill_not_found", "message": "Missing", "hint": "List skills", "retryable": False}
+            observed, finish = self.peer(commit=True, reply={"envelope": envelope, "exitCode": code})
+            client = subprocess.Popen([str(BINARY), "sync", "--json", "--app-support", str(self.root)],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=environment)
+            try:
+                deadline = time.monotonic() + 10
+                while not receipt.exists() and client.poll() is None and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertTrue(receipt.exists(), "Worker never reached exit after printing its reply")
+                self.assertEqual(int(receipt.read_text()), code)
+                client.send_signal(signal.SIGINT)
+                stdout, stderr = client.communicate(timeout=5)
+                self.assertEqual(json.loads(stdout), envelope)
+                self.assertEqual(client.returncode, code, "A printed reply owns the exit code after SIGINT: " + stderr)
+            finally:
+                release.touch()
+                if client.poll() is None:
+                    client.kill()
+                    client.communicate(timeout=5)
+                finish()
 
     def test_missing_scope_and_invalid_machine_scope_refuse_without_sending(self):
         for command in ("deploy", "undeploy"):

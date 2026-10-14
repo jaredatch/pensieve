@@ -4,7 +4,7 @@ import Foundation
 
 enum CLIEntry {
     private static let outputLock = NSLock()
-    private static var didPrint = false
+    private static var printedExitCode: Int32?
 
     static func interrupted(arguments: [String]) -> Int32 {
         printReply(.failure("interrupted", "Interrupted. Pensieve finishes any command it already accepted.",
@@ -105,8 +105,8 @@ enum CLIEntry {
     private static func printReply(_ reply: CLIReply, json: Bool, human: String? = nil) -> Int32 {
         outputLock.lock()
         defer { outputLock.unlock() }
-        guard !didPrint else { return reply.exitCode }
-        didPrint = true
+        if let printedExitCode { return printedExitCode }
+        printedExitCode = reply.exitCode
         if json {
             do {
                 let encoder = JSONEncoder()
@@ -115,6 +115,7 @@ enum CLIEntry {
                 FileHandle.standardOutput.write(bytes + Data([10]))
             } catch {
                 FileHandle.standardError.write(Data("Unable to encode command result\n".utf8))
+                printedExitCode = 1
                 return 1
             }
         } else {

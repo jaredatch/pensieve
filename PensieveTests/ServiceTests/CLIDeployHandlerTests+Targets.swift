@@ -34,19 +34,47 @@ extension CLIDeployHandlerTests {
         }
     }
 
-    func assertPublishedMachineAliasesRemainAmbiguous() throws {
+    func assertMachineLookupPrecedence() throws {
         let states = [CLIDeployFixture.localID, CLIDeployFixture.remoteID].map { id in
             MachineState(schemaVersion: 1, machineID: id, name: "Mini", appVersion: "fixture", publishedAt: Date(),
                 agents: ["claudeCode"], projects: [], userDeploys: [], projectDeploys: [])
         }
         let h = try CLIDeployFixture(states: states)
         let reply = h.handler.handle(h.request(machines: ["Mini"]), context: h.context)
-        XCTAssertEqual(reply.exitCode, 5, "A local published alias must not silently select a remote Mac")
-        XCTAssertEqual(reply.envelope.error?.code, "ambiguous")
-        for id in [CLIDeployFixture.localID, CLIDeployFixture.remoteID] {
-            XCTAssertTrue(reply.envelope.error?.message.contains(id) == true)
+        XCTAssertEqual(reply.exitCode, 0, "A listed name wins over this Mac's published alias")
+        XCTAssertEqual(try h.intents(), [CLIDeployFixture.remoteID + "|review|claudeCode"])
+        let collisionStates = [(CLIDeployFixture.localID, "kramer"),
+            (CLIDeployFixture.remoteID, CLIDeployFixture.localID)].map { id, name in
+            MachineState(schemaVersion: 1, machineID: id, name: name, appVersion: "fixture", publishedAt: Date(),
+                agents: ["claudeCode"], projects: [], userDeploys: [], projectDeploys: [])
         }
-        XCTAssertTrue(try h.intents().isEmpty)
+        let collision = try CLIDeployFixture(states: collisionStates)
+        let byID = collision.handler.handle(collision.request(machines: [CLIDeployFixture.localID]), context: collision.context)
+        XCTAssertEqual(byID.exitCode, 0, "An exact machine ID wins over another machine's name")
+        XCTAssertEqual(try collision.intents(), [CLIDeployFixture.localID + "|review|claudeCode"])
+        let listedName = CLIDeployFixture.localID + " (" + CLIDeployFixture.remoteID + ")"
+        let list = collision.readHandler.handle(CLIRequest(command: "machine list"), context: collision.context)
+        guard case let .array(rows) = list.envelope.data else { return XCTFail("Missing machines") }
+        XCTAssertTrue(rows.contains { row in
+            guard case let .object(fields) = row else { return false }
+            return fields["id"] == .string(CLIDeployFixture.remoteID) && fields["name"] == .string(listedName)
+        }, "A displayed name must not masquerade as another machine's ID")
+        let byListedName = collision.handler.handle(collision.request(machines: [listedName]), context: collision.context)
+        XCTAssertEqual(byListedName.exitCode, 0)
+        XCTAssertTrue(try collision.intents().contains(CLIDeployFixture.remoteID + "|review|claudeCode"))
+        let byAlias = collision.handler.handle(collision.request(machines: ["kramer"]), context: collision.context)
+        XCTAssertEqual(byAlias.exitCode, 0, "Published names remain a fallback after IDs and listed names")
+        for invisible in ["", " \n\u{200E}\t", "\u{2800}", "\u{0301}"] {
+            let state = MachineState(schemaVersion: 1, machineID: CLIDeployFixture.localID, name: invisible,
+                appVersion: "fixture", publishedAt: Date(), agents: ["claudeCode"],
+                projects: [], userDeploys: [], projectDeploys: [])
+            let empty = try CLIDeployFixture(states: [state])
+            for name in [invisible, "Mac"] {
+                let refused = empty.handler.handle(empty.request(machines: [name]), context: empty.context)
+                XCTAssertEqual(refused.exitCode, 4, "Invisible published names cannot create aliases")
+                XCTAssertTrue(try empty.intents().isEmpty)
+            }
+        }
     }
 
     func assertKeylessWildcardIgnoresUserWideIntents() throws {

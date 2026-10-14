@@ -141,9 +141,14 @@ final class AppSocketServerTests: XCTestCase {
         let completed = expectation(description: "handler finished")
         let server = try server(at: path) { _ in
             accepted.fulfill()
-            try? await Task.sleep(for: .milliseconds(100))
-            try? directory.files.writeFile(at: directory.path + "/applied", content: "finished")
-            completed.fulfill()
+            defer { completed.fulfill() }
+            do {
+                try await Task.sleep(for: .milliseconds(100))
+                try Task.checkCancellation()
+                try directory.files.writeFile(at: directory.path + "/applied", content: "finished")
+            } catch {
+                XCTFail("Accepted handler must finish without cancellation: \(error)")
+            }
             return .success(.null)
         }
         defer { server.stop() }
