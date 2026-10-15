@@ -214,7 +214,8 @@ extension GitService {
     func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
                                 fetchedRevision: FetchedStoreRevision?) throws -> Bool {
         try ensureCommitIdentity(at: root)
-        if fetchedRevision == nil && storeState?.fetched == nil {
+        let state = storeState.flatMap { $0.root == root ? $0 : nil }
+        if fetchedRevision == nil && state?.fetched == nil {
             let fetch = try run(["-C", root, "fetch", "origin", "main"], in: nil, credential: credential)
             if fetch.exit != 0 {
                 let failure = commandError(fetch, args: ["-C", root, "fetch", "origin", "main"],
@@ -230,7 +231,7 @@ extension GitService {
         }
         let store = try storeOperation(at: root)
         try store.stage()
-        let upstream = fetchedRevision?.commit ?? storeState?.fetched?.commit ?? "origin/main"
+        let upstream = fetchedRevision?.commit ?? state?.fetched?.commit ?? "origin/main"
         guard let baseR = try runBestEffort(["-C", root, "merge-base", "HEAD", upstream], in: nil),
               baseR.exit == 0 else {
             return try store.commitStagedChanges(message: message)

@@ -3,6 +3,37 @@ import XCTest
 @testable import Pensieve
 
 extension SyncBytePreservationTests {
+    func assertOperationCacheBoundaries() throws {
+        let first = try ExcludedFileCollisionFixture(path: "skills/x/.env", hidden: true, localCommit: false)
+        let second = try ExcludedFileCollisionFixture(path: "skills/x/.env", hidden: true, localCommit: true)
+        defer { try? files.deleteDirectory(at: first.root); try? files.deleteDirectory(at: second.root) }
+        let scoped = try XCTUnwrap(first.git.scopedToStore(first.storeB) as? GitService)
+        _ = try scoped.fetchStoreRevision(at: first.storeB, credential: nil)
+        try files.writeFile(at: second.storeB + "/skills/x/another", content: "second local change")
+        try second.git.stageAllAndCommit(at: second.storeB, message: "another local commit")
+        _ = try scoped.collapseToSingleCommit(at: second.storeB, message: "collapse own history",
+                                             credential: nil, fetchedRevision: nil)
+        let count = try second.git.runOrThrow(["-C", second.storeB, "rev-list", "--count", "origin/main..HEAD"], in: nil)
+        XCTAssertEqual(count.stdout.trimmingCharacters(in: .whitespacesAndNewlines), "1",
+                       "Collapse must fetch and use the requested repository's revision")
+        let conflict = try SyncConflictByteFixture(name: "cache.bin", this: Data([1]), other: Data([2]))
+        defer { try? files.deleteDirectory(at: conflict.root) }
+        let operation = try XCTUnwrap(conflict.git.scopedToStore(conflict.storeB) as? GitService)
+        _ = try operation.pullRebase(at: conflict.storeB, credential: nil)
+        XCTAssertTrue(operation.isRebaseInProgress(at: conflict.storeB))
+        let recovered = "skills/conflict/recovered"
+        try files.writeFile(at: conflict.storeB + "/.gitattributes",
+                            content: "# Pensieve retired path: " + Data(recovered.utf8).base64EncodedString() + "\n")
+        _ = try operation.storeOperation(at: conflict.storeB)
+        try operation.abortRebase(at: conflict.storeB)
+        XCTAssertFalse(operation.isRebaseInProgress(at: conflict.storeB))
+        try operation.prepareStoreRules(at: conflict.storeB, files: files)
+        try files.writeFile(at: conflict.storeB + "/" + recovered, content: "ordinary after abort")
+        try operation.stageAllAndCommit(at: conflict.storeB, message: "after abort")
+        let tracked = try conflict.git.runOrThrow(["-C", conflict.storeB, "ls-files", "--", recovered], in: nil)
+        XCTAssertEqual(tracked.stdout, recovered + "\n", "Aborted receipts must not hide later ordinary files")
+    }
+
     func testUnreadableRetirementSourcesStopBeforeWrites() throws {
         try NativeTestWork.run { [self] in
             try files.writeFile(at: base + "/outside", content: "outside bytes")
@@ -140,7 +171,13 @@ extension SyncBytePreservationTests {
 /// It does not intercept Git's own metadata writes or pretend to simulate process termination.
 final class RetirementFileService: FileServiceProtocol {
     let wrapped = FileService()
-    func cleanStoreIntermediates(at root: String) throws { try wrapped.cleanStoreIntermediates(at: root) }
+    var cleanupCalls = 0
+    var cleanupFails = false
+    func cleanStoreIntermediates(at root: String) throws {
+        cleanupCalls += 1
+        if cleanupFails { throw NSError(domain: NSPOSIXErrorDomain, code: Int(EPERM)) }
+        try wrapped.cleanStoreIntermediates(at: root)
+    }
     var readFailure: String?
     var writes: [String] = []
     var afterRead: ((String) throws -> Void)?

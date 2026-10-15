@@ -117,8 +117,8 @@ struct SyncEngine: SyncEngineProtocol {
         try gitService.probeUsability().requireUsable()
         // Ask about the remote before store writes. Reclaim only abandoned intermediates before returning.
         let remote = try gitService.remoteURL(at: root)
-        try fileService.cleanStoreIntermediates(at: root)
         guard remote != nil else {
+            try? fileService.cleanStoreIntermediates(at: root)
             // Repair only this Mac's index. An unconfigured store still gets no writes or sync error.
             try? StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context)
             return .noRemote

@@ -7,7 +7,11 @@ enum StoreReceiptError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case let .unreadable(path): return "Sync stopped because retirement receipts at \(path) cannot be read exactly."
+        case let .unreadable(path):
+            if (path as NSString).lastPathComponent == ".gitignore" {
+                return "Sync stopped because \(path) is a symbolic link. Move the link, then sync again."
+            }
+            return "Sync stopped because retirement receipts at \(path) cannot be read exactly."
         case let .invalidPath(path):
             let preview = path.unicodeScalars.prefix(100).map { scalar in
                 let category = scalar.properties.generalCategory
@@ -108,7 +112,7 @@ enum StoreIgnoreRules {
             guard canRetire(path) else { throw StoreReceiptError.invalidPath(path) }
             receipts.safe.insert(path)
         }
-        try files.cleanStoreIntermediates(at: root)
+        try? files.cleanStoreIntermediates(at: root)
         // Keep an empty tracked file after dropping its last receipt: concurrent additions must
         // remain ordinary union-merged content edits rather than modify/delete conflicts.
         if receipts.sources[receiptFile] != nil || !receipts.safe.isEmpty || !receipts.unsafe.isEmpty {

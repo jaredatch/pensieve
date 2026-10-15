@@ -759,6 +759,7 @@ extension GitService {
 
     private func abortRebase(at path: String, permittedFolder: String?) throws {
         guard isRebaseInProgress(at: path) else { return }
+        defer { if storeState?.root == path { storeState?.receipts = nil } }
         var localized = self
         localized.commandLocale = "C"
         let store = try StoreGitOperation(git: localized, root: path, aborting: true)

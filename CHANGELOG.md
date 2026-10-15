@@ -48,12 +48,9 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 - An interrupted conflict resolution preserves untracked files that block a later abort and explains how to move the folder before retrying. Conflicted parents and children must choose the same Mac.
 
 - File/folder conflicts use the original filenames on both sides. Incompatible parent and child choices now explain the mismatch, and failed recovery keeps the original refusal visible.
-
-- Sync protects excluded files created during preparation, even when there is nothing to commit. Skill saves work with an unwritable store parent, and the next write or sync removes abandoned write files.
-
+- Sync protects excluded files created during preparation, even when there is nothing to commit. Skill saves preserve file permissions, and cleanup failures no longer block saves or sync.
 - Temporary files left by an interrupted skill save or sync no longer enter the next sync. Sync also preserves folders placed at its control-file paths and refuses existing links there.
-- Sync avoids repeated file inventories and git commands, and leaves unchanged rule files alone.
-
+- Sync avoids duplicate staging work and unnecessary Git commands, and leaves unchanged rule files alone. It rechecks excluded files immediately before pulling.
 - Keeping This Mac during a sync conflict can now replace the other Mac's folder with your file or link when the folder holds only unchanged synced entries.
 
 - If sync can't update this Mac's library, it now stops before pushing and retries from the pulled files, so stale local categories can't undo another Mac's additions or deletions. Import, deploy and project removal catch the library up first, and ask you to try again if they can't.

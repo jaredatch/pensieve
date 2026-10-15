@@ -324,8 +324,7 @@ struct StoreGitOperation {
                 for candidate in containingPaths[key(prefix)] ?? [] {
                     // A shared parent alone is harmless: either the incoming path or the protected
                     // receipt must end at the shared component (a file/directory replacement).
-                    guard prefix == path || candidate.prefix == candidate.path,
-                          key(prefix) == key(candidate.prefix) else { continue }
+                    guard prefix == path || candidate.prefix == candidate.path else { continue }
                     let collision = candidate.path
                     let displayPath = String(bytes: collision, encoding: .utf8)
                         ?? collision.map { String(format: "%%%02X", $0) }.joined()
