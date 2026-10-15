@@ -93,6 +93,8 @@ struct BatchResult {
     var didWithdrawProjectRequests = false
     /// Saved retirement of this project's deployment evidence keeps its waiting cleanup on failure.
     var didRetireProjectEvidence = false
+    /// The shared project operation refused before mutation because sync owns its lock.
+    var syncLockUnavailable = false
 
     var successes: [BatchPairOutcome] { outcomes.filter { $0.isSuccess } }
     var failures: [BatchPairOutcome] { outcomes.filter { !$0.isSuccess && !$0.isSkipped } }
@@ -158,6 +160,7 @@ struct BatchResult {
     }
 
     mutating func append(_ other: BatchResult) {
+        syncLockUnavailable = syncLockUnavailable || other.syncLockUnavailable
         outcomes.append(contentsOf: other.outcomes)
         readFailures.append(contentsOf: other.readFailures)
         operationFailures.append(contentsOf: other.operationFailures)

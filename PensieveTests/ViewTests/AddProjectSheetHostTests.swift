@@ -8,11 +8,10 @@ import XCTest
 @MainActor
 final class AddProjectSheetHostTests: XCTestCase {
     func testSheetRefusesMissingPathAndAddsCorrectedDirectoryWithoutRemounting() async throws {
-        let root = TestTemporaryDirectory.path + "AddProjectSheetHost-\(UUID().uuidString)"
-        let files = FileService()
-        defer { try? files.deleteDirectory(at: root) }
-        try files.createDirectory(at: root)
-        let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
+        let h = try CLILibraryFixture()
+        defer { h.stop() }
+        try await h.start()
+        let root = h.root, files = h.files, container = h.context.container
         let model = AddProjectModel(fileService: files)
         model.name = "Hosted Project"
         model.path = root + "/missing/parent/project"
@@ -54,6 +53,10 @@ final class AddProjectSheetHostTests: XCTestCase {
                             failureMessage: "Add must create the corrected project") { created.count == 1 }
         XCTAssertEqual(try container.mainContext.fetchCount(FetchDescriptor<Project>()), 1)
         XCTAssertEqual(created.first?.path, root + "/valid")
+        XCTAssertTrue(created.first?.modelContext === container.mainContext, "Registration returns the window context model")
+        XCTAssertEqual(try h.context.fetch(FetchDescriptor<Project>()).map(\.path), [root + "/valid"])
+        let listed = try await h.run(["project", "list"])
+        XCTAssertEqual(listed.data?.array?.first?["path"], .string(root + "/valid"))
         XCTAssertTrue(files.fileExists(at: root + "/valid/.pensieve-project"))
         XCTAssertFalse(try files.entryExistsWithoutFollowingLinks(at: root + "/missing"))
     }
@@ -160,14 +163,7 @@ final class AddProjectSheetHostTests: XCTestCase {
             }
             let sheet = try XCTUnwrap(window.attachedSheet)
             sheet.animationBehavior = .none
-            let content = try XCTUnwrap(sheet.contentView)
-            let value = inPath ? model.path : model.name
-            let field = try XCTUnwrap(textFields(in: content).first { $0.stringValue == value })
-            sheet.makeFirstResponder(field)
-            let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-                windowNumber: sheet.windowNumber, context: nil, characters: "\r", charactersIgnoringModifiers: "\r",
-                isARepeat: false, keyCode: 36))
-            sheet.sendEvent(event)
+            try pressReturn(in: sheet, fieldValue: inPath ? model.path : model.name)
             XCTAssertTrue(created.isEmpty)
             await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                                 failureMessage: "Injected debounce scheduled") { delay.scheduled == 1 }
@@ -187,7 +183,17 @@ final class AddProjectSheetHostTests: XCTestCase {
         }
     }
 
-    private func mount(_ host: NSView) -> NSWindow {
+    private func pressReturn(in sheet: NSWindow, fieldValue: String) throws {
+        let content = try XCTUnwrap(sheet.contentView)
+        let field = try XCTUnwrap(textFields(in: content).first { $0.stringValue == fieldValue })
+        sheet.makeFirstResponder(field)
+        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: sheet.windowNumber, context: nil, characters: "\r", charactersIgnoringModifiers: "\r",
+            isARepeat: false, keyCode: 36))
+        sheet.sendEvent(event)
+    }
+
+    fileprivate func mount(_ host: NSView) -> NSWindow {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 450, height: 350),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -207,7 +213,7 @@ final class AddProjectSheetHostTests: XCTestCase {
     // the actual live render, then send mouse events at Add's rendered position.
     // Recognize a 2x render whatever the display's backing scale. On the CI runner's 1x display,
     // recognition misread the status caption ("Marker will he created on Addi").
-    private func renderedText(in host: NSView) throws -> [(text: String, bounds: CGRect)] {
+    fileprivate func renderedText(in host: NSView) throws -> [(text: String, bounds: CGRect)] {
         host.layoutSubtreeIfNeeded()
         let bounds = host.bounds
         let bitmap = try XCTUnwrap(NSBitmapImageRep(
@@ -235,14 +241,14 @@ final class AddProjectSheetHostTests: XCTestCase {
     }
 
     // Names what the wait saw, for a run where the caption never appears (the CI runner).
-    private func sheetDiagnostics(_ host: NSView, _ model: AddProjectModel) -> String {
+    fileprivate func sheetDiagnostics(_ host: NSView, _ model: AddProjectModel) -> String {
         let recognized = ((try? renderedText(in: host)) ?? []).map(\.text).joined(separator: " | ")
         return "model: checking=\(model.isCheckingIdentity) message=\(model.identityMessage ?? "nil") "
             + "error=\(model.hasIdentityError) directory=\(model.hasProjectDirectory) path=\(model.path); "
             + "host=\(host.bounds.size) scale=\(host.window?.backingScaleFactor ?? 0); recognized=[\(recognized)]"
     }
 
-    private func clickAdd(in host: NSView, window: NSWindow) throws {
+    fileprivate func clickAdd(in host: NSView, window: NSWindow) throws {
         let add = try XCTUnwrap(renderedText(in: host).filter { $0.text == "Add" }
             .min { $0.bounds.midY < $1.bounds.midY })
         let bounds = host.bounds
@@ -257,8 +263,12 @@ final class AddProjectSheetHostTests: XCTestCase {
         }
     }
 
-    private func textFields(in root: NSView) -> [NSTextField] {
-        [root].compactMap { $0 as? NSTextField } + root.subviews.flatMap(textFields(in:))
+    fileprivate func textFields(in root: NSView) -> [NSTextField] {
+        views(in: root).compactMap { $0 as? NSTextField }
+    }
+
+    fileprivate func views(in root: NSView) -> [NSView] {
+        [root] + root.subviews.flatMap(views(in:))
     }
 }
 
@@ -273,4 +283,101 @@ private struct QueuedProjectSheetHost<Content: View>: View {
     var body: some View {
         Text("Projects").sheet(isPresented: $presentation.presented) { sheet }
     }
+}
+
+extension AddProjectSheetHostTests {
+    func testFailedSaveShowsAlertAndKeepsProjectSheetOpen() async throws {
+        let windows = NSHashTable<NSWindow>.weakObjects()
+        addTeardownBlock { @MainActor in
+            let deadline = ContinuousClock.now.advanced(by: .seconds(TestWait.hostedActionTimeoutSeconds))
+            while !windows.allObjects.isEmpty && ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            let survivors = windows.allObjects.map {
+                "\(type(of: $0)): visible=\($0.isVisible), content=\(String(describing: $0.contentView))"
+            }
+            XCTAssertTrue(survivors.isEmpty, "Failed-save windows survived teardown: " + survivors.joined(separator: "; "))
+        }
+        try await exerciseFailedSaveSheet(tracking: windows)
+        do {
+            try await exerciseFailedSaveSheet(tracking: windows, failsBeforeDismissal: true)
+            XCTFail("The failure-path probe must throw before dismissing the alert")
+        } catch is FailedSaveProbeError { }
+    }
+
+    private enum FailedSaveProbeError: Error { case beforeDismissal }
+
+    private func exerciseFailedSaveSheet(tracking windows: NSHashTable<NSWindow>,
+                                         failsBeforeDismissal: Bool = false) async throws {
+        let h = try CLILibraryFixture(readOnly: true)
+        defer { h.stop() }
+        let folder = h.root + "/project"
+        try h.files.createDirectory(at: folder)
+        let model = AddProjectModel(fileService: h.files)
+        model.name = "Unsaved project"
+        model.path = folder
+        var created: [Project] = []
+        let presentation = QueuedProjectSheetPresentation()
+        let host = NSHostingView(rootView: QueuedProjectSheetHost(presentation: presentation,
+            sheet: AddProjectSheet(model: model, onCreated: { created.append($0) })
+                .modelContainer(h.context.container)))
+        let window = mount(host)
+        windows.add(window)
+        defer { window.close() }
+        var failure: Error?
+        do {
+            await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                                failureMessage: "Add Project sheet presents") {
+                window.attachedSheet?.contentView != nil && model.isValid
+            }
+            try await checkAndDismissFailedSave(in: window, model: model, tracking: windows) {
+                XCTAssertTrue(presentation.presented)
+                XCTAssertTrue(created.isEmpty)
+                XCTAssertTrue(try h.context.fetch(FetchDescriptor<Project>()).isEmpty)
+                if failsBeforeDismissal { throw FailedSaveProbeError.beforeDismissal }
+            }
+        } catch { failure = error }
+        // On any thrown failure, detach AppKit presentations without relying on finding OK.
+        if let sheet = window.attachedSheet, let alert = sheet.attachedSheet { sheet.endSheet(alert) }
+        presentation.presented = false
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                            failureMessage: "Failed-save sheet must detach before its host closes") {
+            !presentation.presented && window.attachedSheet == nil
+        }
+        if let failure { throw failure }
+    }
+
+    private func checkAndDismissFailedSave(
+        in window: NSWindow, model: AddProjectModel, tracking windows: NSHashTable<NSWindow>,
+        whilePresented: () throws -> Void
+    ) async throws {
+        let sheet = try XCTUnwrap(window.attachedSheet)
+        windows.add(sheet)
+        sheet.animationBehavior = .none
+        try pressReturn(in: sheet, fieldValue: model.name)
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                            failureMessage: "Failed save must present its error alert") {
+            sheet.attachedSheet?.contentView != nil
+        }
+        let alert = try XCTUnwrap(sheet.attachedSheet)
+        windows.add(alert)
+        alert.animationBehavior = .none
+        let labels = textFields(in: try XCTUnwrap(alert.contentView)).map(\.stringValue)
+        XCTAssertTrue(labels.contains("Couldn’t Add Project"), labels.joined(separator: " | "))
+        XCTAssertTrue(labels.contains { $0.contains("operation couldn’t be completed") || $0.contains("save") },
+                      labels.joined(separator: " | "))
+        try whilePresented()
+        try await dismissSaveAlert(alert, from: sheet)
+    }
+
+    private func dismissSaveAlert(_ alert: NSWindow, from sheet: NSWindow) async throws {
+        let buttons = views(in: try XCTUnwrap(alert.contentView)).compactMap { $0 as? NSButton }
+        let ok = try XCTUnwrap(buttons.first { $0.title == "OK" })
+        ok.performClick(nil)
+        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                            failureMessage: "OK must dismiss the failed-save alert") {
+            sheet.attachedSheet == nil
+        }
+    }
+
 }

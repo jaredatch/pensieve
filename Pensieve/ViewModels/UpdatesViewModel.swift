@@ -18,6 +18,7 @@ final class UpdatesViewModel {
     var loadPhase: UpdatesLoadPhase = .idle
     var isLoading: Bool { loadPhase == .loading }
     var isApplying = false
+    var commandApplyInFlight = false
     var recheckingSkillID: UUID?
     var isPresented = false
     var initialSelection: Set<UUID>?
@@ -69,12 +70,12 @@ final class UpdatesViewModel {
     var selectedCount: Int { selectedSkillIDs.intersection(selectableSkillIDs).count }
     var canApply: Bool {
         let selection = selectedSkillIDs.intersection(selectableSkillIDs)
-        return loadPhase == .loaded && !isApplying && recheckingSkillID == nil && !selection.isEmpty
+        return loadPhase == .loaded && !commandApplyInFlight && !isApplying && recheckingSkillID == nil && !selection.isEmpty
             && selection.allSatisfy { viewChanges?.isBusy(affecting: $0) != true }
     }
 
     func canRecheck(_ row: UpdatesRow) -> Bool {
-        !isApplying && recheckingSkillID == nil && viewChanges?.isBusy(affecting: row.id) != true
+        !commandApplyInFlight && !isApplying && recheckingSkillID == nil && viewChanges?.isBusy(affecting: row.id) != true
     }
 
     private var canLoad: Bool {

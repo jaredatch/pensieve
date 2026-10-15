@@ -12,7 +12,9 @@ struct CLIClient {
         let deadline = SocketTransport.deadline(after: CLIProtocol.readyTimeout)
         var waitingForStartup = true
         var mayHaveApplied = false
-        let replyTimeout = request.command == "sync" ? CLIProtocol.syncReplyTimeout : CLIProtocol.commandReplyTimeout
+        let networkCommand = ["install", "skill outdated", "skill update"].contains(request.command)
+        let replyTimeout = request.command == "sync" || networkCommand
+            ? CLIProtocol.syncReplyTimeout : CLIProtocol.commandReplyTimeout
         do {
             let descriptor = try connect(deadline: deadline)
             defer { close(descriptor) }
@@ -42,10 +44,27 @@ struct CLIClient {
         } catch let refusal as LaunchRefusal {
             return refusal.reply
         } catch SocketError.timeout {
-            if !waitingForStartup {
+            return timeoutReply(request: request, startup: waitingForStartup,
+                networkCommand: networkCommand, replyTimeout: replyTimeout)
+        } catch {
+            return .failure("app_unavailable", "\(socketPath): \(error.localizedDescription)",
+                hint: mayHaveApplied ? "Check Pensieve before running this command again. Its result could not be received."
+                    : launcher.launchRefusal(appPath: appPath, bundleID: bundleID)?.envelope.error?.hint
+                        ?? "Open \(appPath), then run this command again.", exit: 3, retryable: !mayHaveApplied)
+        }
+    }
+
+    private func timeoutReply(request: CLIRequest, startup: Bool, networkCommand: Bool,
+                              replyTimeout: TimeInterval) -> CLIReply {
+            if !startup {
                 if request.command == "sync" {
                     return .failure("sync_still_running", "Sync is still running in Pensieve.",
                         hint: "Run pensieve status to see the result once sync finishes. Avoid starting another sync.", exit: 3)
+                }
+                if networkCommand {
+                    return .failure("command_still_running", "The work is still running in Pensieve.",
+                        hint: "Check the result in Pensieve, or run pensieve skill list and pensieve skill show <skill>. "
+                            + "Avoid starting the command again while it finishes.", exit: 3)
                 }
                 let seconds = Int(replyTimeout)
                 return .failure("app_unavailable", "Pensieve did not reply to the command within \(seconds) seconds.",
@@ -53,12 +72,6 @@ struct CLIClient {
             }
             return .failure("app_starting", "Pensieve has not finished starting.",
                 hint: "Wait a moment, then run this command again.", exit: 3, retryable: true)
-        } catch {
-            return .failure("app_unavailable", "\(socketPath): \(error.localizedDescription)",
-                hint: mayHaveApplied ? "Check Pensieve before running this command again. Its result could not be received."
-                    : launcher.launchRefusal(appPath: appPath, bundleID: bundleID)?.envelope.error?.hint
-                        ?? "Open \(appPath), then run this command again.", exit: 3, retryable: !mayHaveApplied)
-        }
     }
 
     private func validatedHandshake(_ bytes: Data, isWrite: Bool) throws -> CLIHandshake {

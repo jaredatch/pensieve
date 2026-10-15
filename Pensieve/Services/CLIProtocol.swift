@@ -72,6 +72,7 @@ struct CLIEnvelope: Codable, Equatable {
     var changed: Bool?
     var data: CLIValue?
     var next: [String]?
+    var confirmationToken: String?
     var error: CLIError?
 }
 
@@ -114,8 +115,24 @@ struct CLIRequest: Codable {
     var acknowledgeReadiness: Bool?
     var requiresCommit: Bool?
     var deployment: CLIDeployOptions?
+    var library: CLILibraryOptions?
 
-    var isWrite: Bool { ["deploy", "undeploy", "sync"].contains(command) }
+    var isWrite: Bool {
+        ["deploy", "undeploy", "sync", "install", "skill outdated", "skill update", "skill delete",
+         "project add", "project remove"].contains(command)
+    }
+}
+
+struct CLILibraryOptions: Codable {
+    var dryRun = false
+    var confirmed = false
+    var confirmationToken: String?
+    var skills: [String] = []
+    var rename = false
+    var skip = false
+    var overwriteLocalChanges = false
+    var name: String?
+    var workingDirectory = ""
 }
 
 struct CLIDeployOptions: Codable {

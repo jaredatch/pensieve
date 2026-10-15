@@ -124,6 +124,8 @@ final class AddProjectModel {
         onCreated(project)
     }
 
+    func allowSubmissionRetry() { didSubmit = false }
+
     func cancelSubmission() { queuedSubmission = nil }
 
     func makeProject() -> Project? {

@@ -20,11 +20,12 @@ extension SkillInstallService {
     /// The preview verifies coordinates without discovery's whole SKILL.md/frontmatter read.
     /// The unchanged install/apply path still performs its normal candidate admission above.
     func withPinnedCheckout<Result>(candidate: SkillCandidate, source: SkillFetchResult,
-                                    credential: GitCredential?, body: (String) throws -> Result) throws -> Result {
+                                    credential: GitCredential?, checkout: String? = nil,
+                                    body: (String) throws -> Result) throws -> Result {
         guard InstallRelativePathPolicy.isValid(candidate.path) else {
             throw SkillInstallError.invalidRepositoryPath(candidate.path)
         }
-        return try withCheckout(source: source, credential: credential, preview: true) { checkoutPath in
+        func verify(_ checkoutPath: String) throws -> Result {
             var directory = checkoutPath
             var relative = ""
             for component in PathSyntax.components(candidate.path) {
@@ -40,6 +41,13 @@ extension SkillInstallService {
             }
             return try body(checkoutPath)
         }
+        if let checkout {
+            guard try gitService.commitSHA(at: checkout) == source.headCommit else {
+                throw SkillInstallError.repositoryChanged
+            }
+            return try verify(checkout)
+        }
+        return try withCheckout(source: source, credential: credential, preview: true, body: verify)
     }
 
     /// Checks required nonempty name/description frontmatter and UTF-8 in the bounded prefix.

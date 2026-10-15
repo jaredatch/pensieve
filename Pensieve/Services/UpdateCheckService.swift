@@ -230,7 +230,7 @@ extension UpdateCheckService {
         if !pending.isEmpty {
             do {
                 let (commitDate, trees) = try readMovedHead(key: key, head: head, snapshots: pending,
-                                                          credential: credential, diagnostics: diagnostics)
+                                                  credential: credential, diagnostics: diagnostics)
                 try evaluateSkills(trees, head: head, commitDate: commitDate, checkedAt: checkedAt, context: context)
             } catch {
                 let failure = diagnostics.classify(error)
@@ -247,12 +247,14 @@ extension UpdateCheckService {
         }
     }
 
-    private func readMovedHead(key: BatchKey, head: String, snapshots: [Snapshot], credential: GitCredential?,
-                               diagnostics: UpdateBatchDiagnostics) throws -> (Date, [(Snapshot, Result<String, Error>)]) {
+    func readMovedHead(key: BatchKey, head: String, snapshots: [Snapshot], credential: GitCredential?,
+                       diagnostics: UpdateBatchDiagnostics,
+                       retainingCheckout: ((String) -> Void)? = nil) throws -> (Date, [(Snapshot, Result<String, Error>)]) {
         try prepareScratchRoot()
         let sessionRoot = scratchRoot + "/" + UUID().uuidString
         try fileService.createDirectory(at: sessionRoot)
-        defer { try? fileService.deleteDirectory(at: sessionRoot) }
+        var retained = false
+        defer { if !retained { try? fileService.deleteDirectory(at: sessionRoot) } }
         let checkout = sessionRoot + "/repository"
         diagnostics.beginNextGitOperation()
         try gitService.cloneShallow(remote: key.cloneRemote, branch: key.ref,
@@ -271,6 +273,7 @@ extension UpdateCheckService {
             }
             return (snapshot, tree)
         }
+        if let retainingCheckout { retainingCheckout(checkout); retained = true }
         return (commitDate, trees)
     }
 

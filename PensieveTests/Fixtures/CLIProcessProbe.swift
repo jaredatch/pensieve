@@ -17,11 +17,12 @@ enum CLIProcessProbe {
     }
 
     static func run(_ process: Process, timeout: TimeInterval = 160, readyAt: String? = nil,
-                    beforeCleanup: () -> Void = {},
+                    afterLaunch: () -> Void = {}, beforeCleanup: () -> Void = {},
                     recordTimeout: (String) -> Void = { TestTimeoutDiagnostics.note($0) }) throws -> Outcome {
         let exited = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in exited.signal() }
         try process.run()
+        afterLaunch()
         let pid = process.processIdentifier
         let group = getpgid(pid)
         let files = FileService()

@@ -11,7 +11,7 @@ extension PlatformViewModel {
     /// Local evidence selects deferred pairs. Shared category
     /// membership and another machine's intent alone cannot authorize cleanup on this Mac.
     func localSkillProjectDeployEvidence(
-        skill: Skill, projects: [Project], context: ModelContext
+        skill: Skill, projects: [Project], context: ModelContext, readOnly: Bool = false
     ) throws -> SkillProjectDeployEvidence {
         var paths: Set<String> = []
         let byID = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -30,8 +30,9 @@ extension PlatformViewModel {
             $0.skillSlug == skill.directoryName && $0.projectKey != nil
         }
         if !intents.isEmpty {
-            let machineID = try MachineIdentity(fileService: deployStateStore.fileService,
-                appSupportDir: deployStateStore.appSupportDir).identifier()
+            let identity = MachineIdentity(fileService: deployStateStore.fileService,
+                appSupportDir: deployStateStore.appSupportDir)
+            let machineID = try readOnly ? identity.existingIdentifier() : identity.identifier()
             for intent in intents where intent.machineID == machineID {
                 for project in projects where project.identityKey == intent.projectKey {
                     admit(project.id, PlatformTarget(rawValue: intent.platformRaw))

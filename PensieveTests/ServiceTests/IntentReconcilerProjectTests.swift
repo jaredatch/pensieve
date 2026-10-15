@@ -132,7 +132,7 @@ final class IntentReconcilerProjectTests: XCTestCase {
         let project = Project(name: "Registered", path: "/projects/registered")
         harness.fileService.directories.insert(project.path)
         project.identityKey = "register-key"
-        registerProject(
+        try registerProject(
             project,
             context: harness.context,
             intentReconciler: harness.reconciler.reconcile
