@@ -80,6 +80,7 @@ extension DeployMutationService {
             try StoreIngestState.rebuildIfNeeded(using: rebuild, root: dependencies.root, context: context)
         } catch {
             if let syncError = error as? SyncError, case .storeUnreadable = syncError { throw error }
+            if case ManifestError.damaged = error { throw error }
             throw DeployIntentModelError.ingestPending
         }
         let selectedRows = FetchDescriptor<Skill>(predicate: #Predicate { selectedIDs.contains($0.persistentModelID) })

@@ -12,6 +12,7 @@ struct CategorySaveEdit {
     private let window: CategorySaveWindow
 
     var wasRebuilt: Bool { window.wasRebuilt }
+    var windowID: UUID { window.id }
 
     func save(in context: ModelContext) throws { try window.save(in: context) }
 
@@ -116,7 +117,9 @@ final class CategorySaveWindow {
     struct ReadReceipt {
         let containerID: ObjectIdentifier
         let order: UInt64
+        var retainedWindows: Set<UUID> = []
     }
+    let id = UUID()
     private static let rebuilt = Notification.Name("Pensieve.categoryWindowRebuilt")
     private static let ordering = NSLock()
     private static var order: UInt64 = 0
@@ -163,7 +166,7 @@ final class CategorySaveWindow {
     private func recordRebuild(_ read: ReadReceipt) {
         Self.ordering.lock()
         defer { Self.ordering.unlock() }
-        if let savedAt, savedAt < read.order { rebuilt = true }
+        if let savedAt, savedAt < read.order { rebuilt = !read.retainedWindows.contains(id) }
     }
 
     static func didRebuild(_ read: ReadReceipt) {

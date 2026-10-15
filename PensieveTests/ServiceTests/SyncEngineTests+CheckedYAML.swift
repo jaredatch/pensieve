@@ -19,8 +19,8 @@ extension SyncEngineTests {
             XCTAssertThrowsError(try makeEngine(git: git).sync(
                 root: tempDir, message: "m", credential: nil, context: context
             )) { error in
-                guard case SyncError.storeUnreadable = error else {
-                    return XCTFail("expected storeUnreadable, got \(error)")
+                guard case ManifestError.damaged = error else {
+                    return XCTFail("expected damaged library, got \(error)")
                 }
             }
             XCTAssertEqual(git.calls, ["abort"], "Recover a leftover rebase before refusing commit, pull, or push")

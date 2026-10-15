@@ -128,6 +128,7 @@ final class SkillLibraryViewModel {
         manifestSaves?.submit(change, context: context) { [weak self] failure in
             guard let self else { completion?(failure); return }
             if let failure {
+                if case ManifestError.damaged = failure { completion?(failure); return }
                 guard showsFailure else { completion?(failure); return }
                 let message: String
                 if case ManifestSaveError.rebuildFailed = failure {

@@ -22,6 +22,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Changed
 
+- A damaged synced library now keeps your edits waiting and offers an explicit repair. Choose Repair in the sidebar, then confirm replacing the damaged file with this Mac's library. A readable file pulled from another Mac also lets the waiting edits save.
+
 - HTTPS sync ignores git credential helpers and other askpass programs. If you relied on one, add an access token in Settings › Sync. You can replace a refused or expired token there, even while a conflict is open.
 - Pensieve's access token now goes only to your sync remote's own host over HTTPS. A remote that redirects somewhere else gets no token, so Connect now uses `github.com` when you enter `www.github.com`. If your sync remote already starts with `https://www.github.com/`, disconnect and connect again.
 - The app is about half its old size, with crash symbols saved separately for troubleshooting.

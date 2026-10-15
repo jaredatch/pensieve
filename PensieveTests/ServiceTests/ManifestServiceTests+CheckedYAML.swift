@@ -7,6 +7,8 @@ extension ManifestServiceTests {
         let snapshot = checkedYAMLSnapshot(machineID: machineID)
 
         for kind in ManifestFileKind.allCases {
+            let tree = tempDir + "/manifest"
+            if fileService.directoryExists(at: tree) { try fileService.deleteDirectory(at: tree) }
             try service.write(snapshot, toRoot: tempDir)
             let relativePath = try manifestPath(for: kind, machineID: machineID)
             let path = tempDir + "/manifest/" + relativePath
@@ -76,6 +78,8 @@ extension ManifestServiceTests {
         let snapshot = checkedYAMLSnapshot(machineID: machineID)
 
         for kind in ManifestFileKind.allCases {
+            let tree = tempDir + "/manifest"
+            if fileService.directoryExists(at: tree) { try fileService.deleteDirectory(at: tree) }
             try service.write(snapshot, toRoot: tempDir)
             let relativePath = try manifestPath(for: kind, machineID: machineID)
             let path = tempDir + "/manifest/" + relativePath

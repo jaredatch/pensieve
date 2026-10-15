@@ -86,7 +86,8 @@ extension IngestPreflightTests {
             let expected = fault == .save ? (importsSkill
                 ? "Import couldn't update this Mac's library. Try importing again."
                 : "Deployment couldn't update this Mac's library. Try deploying again.")
-                : SyncError.storeUnreadable([]).localizedDescription
+                : (fault == .read ? ManifestError.damaged.localizedDescription
+                    : SyncError.storeUnreadable([]).localizedDescription)
             XCTAssertEqual(reportedError(), expected)
             XCTAssertTrue(StoreIngestState.shared(for: context.container).needsRebuild)
             XCTAssertEqual(manifest.writes, 0, "refused ingestion must not reach the manifest writer")
@@ -112,7 +113,12 @@ extension IngestPreflightTests {
                 projectKey: "github.com/owner/project", skill: skill, platform: .codex, context: context)
             return false
         } catch {
-            if fault != .save {
+            if fault == .read {
+                guard case ManifestError.damaged = error else {
+                    XCTFail("Expected damaged library, got \(error)")
+                    return true
+                }
+            } else if fault != .save {
                 guard case let SyncError.storeUnreadable(warnings) = error else {
                     XCTFail("Expected the unreadable-store explanation, got \(error)")
                     return true

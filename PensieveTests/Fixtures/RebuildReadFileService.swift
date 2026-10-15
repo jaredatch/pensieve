@@ -3,8 +3,13 @@ import Foundation
 
 /// Holds sampled SKILL.md reads at the real filesystem boundary. Main-thread reads are recorded
 /// without blocking, so the owner can diagnose an actor regression without wedging its test host.
+/// Optional manifest-build and skill-listing refusals exercise publication and scan failures.
 /// Other I/O delegates to FileService; the double supplies no rebuild or merge result.
 final class RebuildReadFileService: FileServiceProtocol {
+    var refuseReplacement = false
+    var refuseSkillListing = false
+    private var refusedListings = 0
+    var skillListingRefusals: Int { lock.withLock { refusedListings } }
     private let wrapped = FileService()
     private let lock = NSLock()
     private var gates: [TestWait.Gate] = []
@@ -35,7 +40,10 @@ final class RebuildReadFileService: FileServiceProtocol {
     func readRegularFileData(at path: String, maximumBytes: Int, containedIn directory: String) throws -> Data {
         try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes, containedIn: directory)
     }
-    func writeFile(at path: String, content: String) throws { try wrapped.writeFile(at: path, content: content) }
+    func writeFile(at path: String, content: String) throws {
+        if refuseReplacement && path.contains(".manifest-build-") { throw CocoaError(.fileWriteNoPermission) }
+        try wrapped.writeFile(at: path, content: content)
+    }
     func writeData(at path: String, data: Data) throws { try wrapped.writeData(at: path, data: data) }
     func writeExecutableFile(at path: String, content: String) throws {
         try wrapped.writeExecutableFile(at: path, content: content)
@@ -69,7 +77,13 @@ final class RebuildReadFileService: FileServiceProtocol {
     }
     func symlinkTarget(at path: String) throws -> String { try wrapped.symlinkTarget(at: path) }
     func isRegularFile(at path: String) -> Bool { wrapped.isRegularFile(at: path) }
-    func listDirectory(at path: String) throws -> [String] { try wrapped.listDirectory(at: path) }
+    func listDirectory(at path: String) throws -> [String] {
+        if refuseSkillListing, path.hasSuffix("/skills") {
+            lock.withLock { refusedListings += 1 }
+            throw CocoaError(.fileReadNoPermission)
+        }
+        return try wrapped.listDirectory(at: path)
+    }
     func contentsHash(at path: String) throws -> String { try wrapped.contentsHash(at: path) }
     func fileIdentity(at path: String, followingLinks: Bool) -> FileIdentity? {
         wrapped.fileIdentity(at: path, followingLinks: followingLinks)

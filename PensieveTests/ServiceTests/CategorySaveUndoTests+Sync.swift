@@ -53,7 +53,7 @@ extension CategorySaveUndoTests {
         try requireCategorySync(await coordinator.runCycle())
         let saved = try h.manifest.read(fromRoot: h.root)
         XCTAssertEqual(saved.categories.first { $0.name == peerName }?.projectKeys, ["peer-project"], scenario)
-        if !normal, !scenario.hasSuffix("-schema-gone") {
+        if !normal, !scenario.hasSuffix("-schema-gone"), scenario != "delete", scenario != "rename-plain" {
             XCTAssertTrue(saved.categories.contains { $0.name == "Local" }, scenario)
         }
         try await refuseAfterCategorySync(scenario, lock: lock, h: h)
@@ -124,7 +124,7 @@ extension CategorySaveUndoTests {
     }
 
     private func assertCategorySyncNotice(_ scenario: String, h: ManifestSaveFixture) throws {
-        if scenario == "rename-normal" {
+        if scenario == "rename-normal" || scenario == "rename-plain" {
             XCTAssertNil(h.saves.categoryNotice, "Sync already published the rename; its turn skips the absent old name")
             XCTAssertTrue(h.recording.writes.isEmpty)
             return
@@ -136,12 +136,13 @@ extension CategorySaveUndoTests {
             XCTAssertTrue(burst.messages[0].contains("so it was undone."))
             XCTAssertEqual(burst.title, "Category changes couldn't be saved")
         }
-        let gone = scenario.hasSuffix("-schema-gone") && !scenario.hasPrefix("delete")
+        let gone = scenario == "rename-schema-gone"
         let kept = scenario.hasSuffix("-normal") || scenario.hasSuffix("-published-lock")
-            || ["skill-schema", "project-schema", "delete-schema-gone"].contains(scenario)
+            || ["skill-schema", "project-schema", "delete-schema-gone", "delete"].contains(scenario)
         XCTAssertEqual(notice.contains("already saved"), kept, scenario + ": " + notice)
-        XCTAssertEqual(notice.contains("It now shows what's saved."), !kept && !gone, scenario + ": " + notice)
-        XCTAssertFalse(notice.contains("undone"), scenario + ": " + notice)
+        let undone = scenario == "create-schema-gone"
+        XCTAssertEqual(notice.contains("It now shows what's saved."), !kept && !gone && !undone, scenario + ": " + notice)
+        XCTAssertEqual(notice.contains("undone"), undone, scenario + ": " + notice)
         XCTAssertEqual(notice.contains("gone"), gone, scenario + ": " + notice)
         XCTAssertTrue(notice.contains(scenario.hasPrefix("create") ? "Writing" : "Local"), notice)
         XCTAssertTrue(notice.contains(scenario.contains("schema") ? "Update Pensieve"

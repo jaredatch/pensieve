@@ -218,7 +218,12 @@ final class RecordingDeletionSkillStore: SkillStoreProtocol {
     }
 }
 
+/// Records snapshot publication and, when supplied, its header presence in the fixture filesystem.
+/// It never writes to host paths. The injected store keeps missing-file admission consistent with
+/// successful publication while native read/save fault counters remain independent.
 final class RecordingDeletionManifest: ManifestSnapshotting {
+    private let files: FileServiceProtocol?
+    init(files: FileServiceProtocol? = nil) { self.files = files }
     var failingWrites: Set<Int> = []
     var failingRebuildSnapshots = 0
     private(set) var snapshots: [ManifestSnapshot] = []
@@ -250,6 +255,7 @@ final class RecordingDeletionManifest: ManifestSnapshotting {
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
         writeNumber += 1
         if failingWrites.contains(writeNumber) { throw DeletionTestError() }
+        try files?.writeFile(at: root + "/manifest/manifest.yaml", content: "schema_version: 5\n")
         snapshots.append(snapshot)
     }
 

@@ -233,6 +233,7 @@ struct ContentView: View {
         } message: {
             Text(library.manifestSaves?.categoryNotice?.message ?? "")
         }
+        .modifier(ManifestRepairAlerts(saves: library.manifestSaves))
         .focusedSceneValue(\.addSkillFromGitHub, presentGitHubInstall)
     }
 }

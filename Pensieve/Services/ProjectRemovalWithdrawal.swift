@@ -91,7 +91,7 @@ struct ProjectRemovalWithdrawal {
                 ? try manifestService.read(fromRoot: manifestRoot) : local
         } catch {
             if case ManifestError.unsupportedSchema = error { throw error }
-            snapshot = local
+            throw ManifestError.damaged
         }
         if !request.keepingSharedKey, let key = project.identityKey {
             snapshot.deployIntents.removeAll { $0.machineID == request.localMachineID && $0.projectKey == key }

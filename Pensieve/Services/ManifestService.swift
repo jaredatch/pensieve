@@ -24,13 +24,22 @@ struct ManifestService: ManifestReadWriting {
     // MARK: Write (idempotent, prunes stale)
 
     func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {
+        _ = try publish(snapshot, root: root, replacing: nil)
+    }
+
+    /// Only the confirmed repair calls this, while holding sync.lock.
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
+        try publish(snapshot, root: root, replacing: damage)
+    }
+
+    private func publish(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage?) throws -> Bool {
         let acquired = Self.writeLock.try()
         // Reports contention before waiting; write checkpoints independently prove exclusion.
         writeLockAttempted(acquired)
         if !acquired { Self.writeLock.lock() }
         defer { Self.writeLock.unlock() }
         let manifestDir = root + "/manifest"
-        try refuseNewerExistingManifest(at: manifestDir)
+        guard try admitsWrite(root: root, replacing: damage) else { return false }
         try validateSnapshotForWrite(snapshot)
 
         // Whole tree built in a SIBLING temp OUTSIDE the repo (sync's `git add -A` can't push a partial build;
@@ -71,10 +80,25 @@ struct ManifestService: ManifestReadWriting {
                 try fileService.createDirectory(at: root)
             }
             try fileService.replaceItem(at: manifestDir, with: tmpDir)
+            return true
         } catch {
             try? fileService.deleteDirectory(at: tmpDir)
             throw error
         }
+    }
+
+    private func admitsWrite(root: String, replacing damage: ManifestDamage?) throws -> Bool {
+        if let damage {
+            guard try ManifestDamage.capture(root: root, files: fileService) == damage,
+                  damage.missing || (try? read(fromRoot: root)) == nil else { return false }
+            try refuseNewerExistingManifest(at: root + "/manifest")
+        } else {
+            do { _ = try read(fromRoot: root) } catch {
+                if case ManifestError.unsupportedSchema = error { throw error }
+                throw ManifestError.damaged
+            }
+        }
+        return true
     }
 
     private func validateSnapshotForWrite(_ snapshot: ManifestSnapshot) throws {
@@ -86,7 +110,7 @@ struct ManifestService: ManifestReadWriting {
         }
     }
 
-    /// Write-side downgrade guard: refuse iff the tree PARSES newer; absent/unreadable proceeds (heals corrupt).
+    /// A confirmed repair still cannot replace a newer schema.
     private func refuseNewerExistingManifest(at manifestDir: String) throws {
         guard let schema = try? readSchema(from: manifestDir), schema > supportedSchemaVersion else { return }
         throw ManifestError.unsupportedSchema(found: schema, supported: supportedSchemaVersion)

@@ -131,11 +131,7 @@ struct SyncEngine: SyncEngineProtocol {
         // written by a newer Pensieve), refuse. The after-pull storeUnreadable guard CANNOT catch this —
         // step 1 below would already have clobbered the newer manifest with our snapshot, so we'd push a
         // downgrade. Reading it here (before the write) fails fast instead. (PLAN-08 review)
-        do {
-            _ = try manifestService.read(fromRoot: root)
-        } catch {
-            throw SyncError.storeUnreadable([])
-        }
+        try requireReadableManifest(root: root)
 
         let headStamp = GitHeadStamp(fileService: fileService)
         let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
@@ -197,11 +193,7 @@ struct SyncEngine: SyncEngineProtocol {
         }
         try requireAcceptableRemote(at: root)
         try gitService.abortRebase(at: root)
-        do {
-            _ = try manifestService.read(fromRoot: root)
-        } catch {
-            throw SyncError.storeUnreadable([])
-        }
+        try requireReadableManifest(root: root)
         let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
         _ = try prepareLocalHead(root: root, credential: credential, context: context, incoming: incoming)
         // Once prepareLocalHead succeeds, pullRebase may START a rebase; if it (or finishSync) then
@@ -249,11 +241,7 @@ struct SyncEngine: SyncEngineProtocol {
         guard try gitService.hasLocalBranches(at: root) else { return .branchless }
         try requireAcceptableRemote(at: root)
         try gitService.abortRebase(at: root)
-        do {
-            _ = try manifestService.read(fromRoot: root)
-        } catch {
-            throw SyncError.storeUnreadable([])
-        }
+        try requireReadableManifest(root: root)
         let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
         _ = try prepareLocalHead(root: root, credential: credential, context: context, incoming: incoming)
         do {
@@ -278,6 +266,15 @@ struct SyncEngine: SyncEngineProtocol {
             }
             try abortResolution(after: error, root: root, refusedFolder: refusedFolder)
             throw error
+        }
+    }
+
+    private func requireReadableManifest(root: String) throws {
+        do {
+            _ = try manifestService.read(fromRoot: root)
+        } catch {
+            if case ManifestError.unsupportedSchema = error { throw SyncError.storeUnreadable([]) }
+            throw ManifestError.damaged
         }
     }
 

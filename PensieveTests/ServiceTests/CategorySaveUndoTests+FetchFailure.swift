@@ -49,9 +49,10 @@ final class CategoryFetchFault {
     private let original: IMP
     private var replacement: IMP?
     private let lock = NSLock()
-    private weak var target: NSManagedObjectContext?
+    private(set) weak var target: NSManagedObjectContext?
     private let installingThread = Thread.current
     private var priming = true
+    private let entityName: String
     private var refusals = 0
     var refusedReads: Int {
         lock.lock()
@@ -59,7 +60,8 @@ final class CategoryFetchFault {
         return refusals
     }
 
-    init(in modelContext: ModelContext) throws {
+    init(in modelContext: ModelContext, entityName: String = "Category") throws {
+        self.entityName = entityName
         let selector = NSSelectorFromString("executeFetchRequest:error:")
         method = try XCTUnwrap(class_getInstanceMethod(NSManagedObjectContext.self, selector))
         original = method_getImplementation(method)
@@ -91,12 +93,11 @@ final class CategoryFetchFault {
                               request: NSFetchRequest<NSFetchRequestResult>) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard request.entityName?.hasSuffix("Category") == true else { return false }
         if priming {
             if Thread.current === installingThread { target = context }
             return false
         }
-        guard context === target, refusals == 0 else { return false }
+        guard request.entityName?.hasSuffix(entityName) == true, context === target, refusals == 0 else { return false }
         refusals += 1
         return true
     }

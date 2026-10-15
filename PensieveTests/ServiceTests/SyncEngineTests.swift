@@ -256,19 +256,25 @@ final class SyncEngineTests: XCTestCase {
 
     func testUnreadablePulledStoreDoesNotPushOrReportSynced() throws {
         try NativeTestWork.run { [self] in
-            let git = StubGit()
-            git.pullResult = .merged
-            // Simulate the pull delivering a newer-schema manifest this build can't read.
-            git.pullSideEffect = { root in
-                try? "schema_version: 999\n".write(toFile: root + "/manifest/manifest.yaml",
-                                                   atomically: true, encoding: .utf8)
+            for header in ["schema_version: 999\n", "damaged"] {
+                try? FileService().deleteDirectory(at: tempDir + "/manifest")
+                let git = StubGit()
+                git.pullResult = .merged
+                git.pullSideEffect = { root in
+                    try? header.write(toFile: root + "/manifest/manifest.yaml", atomically: true, encoding: .utf8)
+                }
+                let context = try makeContext()
+                XCTAssertThrowsError(try makeEngine(git: git).sync(root: tempDir, message: "m",
+                    credential: nil, context: context)) { error in
+                    if header == "damaged" {
+                        guard case ManifestError.damaged = error else { return XCTFail("Expected damage, got \(error)") }
+                        XCTAssertFalse(error.localizedDescription.contains("newer"))
+                    } else {
+                        guard case SyncError.storeUnreadable = error else { return XCTFail("Expected newer schema") }
+                    }
+                }
+                XCTAssertFalse(git.calls.contains("push"), "Never push over an unreadable pulled store")
             }
-            let context = try makeContext()
-            XCTAssertThrowsError(try makeEngine(git: git).sync(root: tempDir, message: "m",
-                                                               credential: nil, context: context)) { error in
-                guard case SyncError.storeUnreadable = error else { return XCTFail("expected .storeUnreadable") }
-            }
-            XCTAssertFalse(git.calls.contains("push"), "must NOT push our older snapshot over an unreadable store")
         }
     }
 }

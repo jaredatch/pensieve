@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // MARK: - Records
@@ -62,11 +63,14 @@ struct ManifestSnapshot: Equatable {
 }
 
 enum ManifestError: LocalizedError, Equatable {
+    case damaged
     case unsupportedSchema(found: Int, supported: Int)
     case corruptManifestFile(String)   // present-but-unparseable → read throws, rebuild bails; never silently dropped
 
     var errorDescription: String? {
         switch self {
+        case .damaged:
+            "The synced library file is damaged"
         case .unsupportedSchema:
             "Another Mac synced with a newer version of Pensieve. Update Pensieve on this Mac to change this library."
         case .corruptManifestFile(let path):
@@ -220,5 +224,35 @@ extension ManifestService {
 
     private static func parseDateValue(_ value: Any?) -> Date? {
         (value as? String).flatMap(parseDate) ?? value as? Date
+    }
+}
+
+/// The exact tree the user was offered to replace. A failed inventory grants no replacement authority.
+/// Reads go through FileService without following links; digests keep the retained token small.
+struct ManifestDamage: Equatable {
+    let missing: Bool
+    private let entries: [String: Data]
+
+    static func capture(root: String, files: FileServiceProtocol) throws -> ManifestDamage {
+        var entries: [String: Data] = [:]
+        func walk(_ path: String) throws {
+            switch try files.entryTypeWithoutFollowingLinks(at: root + "/manifest" + path) {
+            case nil: return
+            case .directory:
+                entries[path] = Data()
+                for name in try files.listDirectory(at: root + "/manifest" + path).sorted() {
+                    try walk(path + "/" + name)
+                }
+            case .regular:
+                let data = try files.readRegularFileData(at: root + "/manifest" + path,
+                                                         maximumBytes: Int.max)
+                entries[path] = Data([1]) + Data(SHA256.hash(data: data))
+            case .symlink:
+                entries[path] = Data([2]) + Data(try files.symlinkTarget(at: root + "/manifest" + path).utf8)
+            default: throw ManifestError.damaged
+            }
+        }
+        try walk("")
+        return ManifestDamage(missing: !files.fileExists(at: root + "/manifest/manifest.yaml"), entries: entries)
     }
 }

@@ -9,6 +9,7 @@ struct SyncFooterPresentation: Equatable {
         case none
         case sync
         case resolve
+        case repair
     }
 
     /// SF Symbol name. Ignored while `showsSpinner`.
@@ -22,7 +23,12 @@ struct SyncFooterPresentation: Equatable {
     var help: String?
 
     /// `nil` when sync is unconfigured: the footer is absent, not empty.
-    static func make(state: SyncModel.SyncState, canResolve: Bool, hovering: Bool, now: Date) -> SyncFooterPresentation? {
+    static func make(state: SyncModel.SyncState, canResolve: Bool, hovering: Bool,
+                     now: Date, libraryDamaged: Bool = false) -> SyncFooterPresentation? {
+        if libraryDamaged {
+            return SyncFooterPresentation(symbol: "exclamationmark.triangle", showsSpinner: false,
+                label: hovering ? "Repair…" : "Library file damaged", emphasized: hovering, action: .repair, help: nil)
+        }
         switch state {
         case .unconfigured:
             return nil

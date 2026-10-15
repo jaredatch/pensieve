@@ -20,7 +20,7 @@ struct SyncStatusView: View {
                         .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.sm)
                 }
                 if let line = SyncFooterPresentation.make(state: model.state, canResolve: model.canResolve,
-                    hovering: isHovering, now: context.date) {
+                    hovering: isHovering, now: context.date, libraryDamaged: saves?.libraryDamaged == true) {
                     Button(action: { perform(line.action) }, label: {
                         HStack(spacing: Spacing.xs) {
                             if line.showsSpinner {
@@ -47,6 +47,7 @@ struct SyncStatusView: View {
                 }
             }
         }
+        .task(id: model.state) { await saves?.refreshAndRetry() }
     }
 
     private func perform(_ action: SyncFooterPresentation.Action) {
@@ -54,6 +55,7 @@ struct SyncStatusView: View {
         case .none: break
         case .sync: model.syncNow(context: modelContext)
         case .resolve: onResolve()
+        case .repair: saves?.requestRepair()
         }
     }
 }

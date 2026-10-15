@@ -10,6 +10,12 @@ final class StoreIngestState {
         keyOptions: [.weakMemory, .objectPointerPersonality], valueOptions: .strongMemory)
     private let lock = NSLock()
     private var pending = false
+    private struct QueuedEdit {
+        let id: UUID
+        let change: ManifestChange
+        let categoryWindow: UUID?
+    }
+    private var edits: [QueuedEdit] = []
 
     static func shared(for container: ModelContainer) -> StoreIngestState {
         registryLock.lock()
@@ -24,6 +30,35 @@ final class StoreIngestState {
         lock.lock()
         defer { lock.unlock() }
         return pending
+    }
+
+    func enqueue(_ change: ManifestChange, id: UUID, categoryWindow: UUID?) {
+        lock.lock()
+        defer { lock.unlock() }
+        edits.append(QueuedEdit(id: id, change: change, categoryWindow: categoryWindow))
+    }
+
+    func finish(_ id: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        edits.removeAll { $0.id == id }
+    }
+
+    /// Plain edits cross contexts; SwiftData objects remain on their owning executor.
+    func projectingEdits(onto snapshot: ManifestSnapshot) -> (snapshot: ManifestSnapshot, retainedWindows: Set<UUID>) {
+        lock.lock()
+        let changes = edits
+        lock.unlock()
+        var projected = snapshot
+        var retained: Set<UUID> = []
+        for edit in changes {
+            let change = edit.change
+            do { try change.validate(in: projected) } catch { continue }
+            let before = projected.categories
+            change.apply(to: &projected)
+            if let window = edit.categoryWindow, before != projected.categories { retained.insert(window) }
+        }
+        return (projected, retained)
     }
 
     func invalidate() {
@@ -51,6 +86,7 @@ final class StoreIngestState {
                         context: ModelContext) throws -> RebuildResult {
         let result = service.rebuild(fromRoot: root, context: context)
         shared(for: context.container).record(result)
+        if result.manifestDamaged { throw ManifestError.damaged }
         if result.storeUnreadable { throw SyncError.storeUnreadable(result.warnings) }
         if result.ingestIncomplete { throw SyncError.ingestIncomplete }
         return result

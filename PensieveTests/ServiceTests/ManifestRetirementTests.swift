@@ -53,7 +53,7 @@ final class ManifestRetirementTests: XCTestCase {
         XCTAssertEqual(try files.readFile(at: outside + "/keep"), "untouched")
     }
 
-    func testWriteRefusesNewerSchemaTreeAndHealsCorruptTree() throws {
+    func testWriteRefusesNewerAndDamagedTreesUntilExplicitRepair() throws {
         try files.writeFile(at: root + "/manifest/manifest.yaml", content: "schema_version: 6\n")
         try files.writeFile(at: root + "/manifest/scenarios/keep.yaml", content: "keep: bytes\n")
         let before = try treeBytes(at: root + "/manifest")
@@ -62,7 +62,13 @@ final class ManifestRetirementTests: XCTestCase {
         }
         XCTAssertEqual(try treeBytes(at: root + "/manifest"), before)
         try files.writeFile(at: root + "/manifest/manifest.yaml", content: "schema_version: nope\n")
-        try manifest.write(empty, toRoot: root)
+        let damaged = try treeBytes(at: root + "/manifest")
+        XCTAssertThrowsError(try manifest.write(empty, toRoot: root)) {
+            XCTAssertEqual($0 as? ManifestError, .damaged)
+        }
+        XCTAssertEqual(try treeBytes(at: root + "/manifest"), damaged)
+        let token = try ManifestDamage.capture(root: root, files: files)
+        XCTAssertTrue(try manifest.repair(empty, root: root, replacing: token))
         XCTAssertEqual(try manifest.read(fromRoot: root), empty)
         XCTAssertFalse(files.directoryExists(at: root + "/manifest/scenarios"))
     }

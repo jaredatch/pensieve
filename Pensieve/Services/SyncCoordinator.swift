@@ -197,6 +197,8 @@ actor SyncCoordinator {
         switch error {
         case SyncError.syncInProgress:
             return .locked
+        case ManifestError.damaged:
+            return .storeUnreadable(ManifestError.damaged.localizedDescription)
         case let SyncError.storeUnreadable(warnings):
             return .storeUnreadable(SyncError.storeUnreadable(warnings).errorDescription ?? "Sync failed.")
         case let error as LocalizedError:
