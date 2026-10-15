@@ -37,6 +37,19 @@ extension GitService {
 
     @_disfavoredOverload
     func conflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
+        if let entry = try indexConflictEntry(atStage: stage, path: path, in: workingDir) { return entry }
+        for folder in try relocatedFolderConflicts(at: workingDir) {
+            if path == folder.path {
+                return stage == 3 ? try indexConflictEntry(atStage: 3, path: folder.auxiliary, in: workingDir) : nil
+            }
+            if folder.children.contains(path) {
+                return stage == 2 ? try indexConflictEntry(atStage: 0, path: path, in: workingDir) : nil
+            }
+        }
+        return nil
+    }
+
+    private func indexConflictEntry(atStage stage: Int, path: String, in workingDir: String) throws -> ConflictEntry? {
         let indexArgs = ["--literal-pathspecs", "-C", workingDir, "ls-files", "--stage", "-z", "--", path]
         let index = try runData(indexArgs, in: nil)
         guard index.exit == 0 else { throw dataCommandError(index, args: indexArgs) }
@@ -69,20 +82,35 @@ extension GitService {
     /// Git restores the selected entry's link type and executable mode without byte conversions.
     @_disfavoredOverload
     func restoreConflictEntry(_ entry: ConflictEntry, stage: Int, path: String, at root: String) throws {
+        let folder = try relocatedFolderConflicts(at: root).first { $0.path == path }
         if try fileService.entryTypeWithoutFollowingLinks(at: root + "/" + path) == .directory {
             guard stage == 3 else { throw ConflictFolderMustMove() }
             try removeIncomingConflictFolder(path, at: root)
         }
         let store = try storeOperation(at: root)
-        try store.runOrThrow(["-c", "core.symlinks=true", "--literal-pathspecs", "checkout-index",
-                             "--force", "--stage=\(stage)", "--", path])
+        if let folder {
+            for child in folder.children {
+                try store.runOrThrow(["--literal-pathspecs", "update-index", "--force-remove", "--", child])
+            }
+            try removeRelocatedConflict(folder, at: root)
+            try store.runOrThrow(["--literal-pathspecs", "update-index", "--add", "--cacheinfo",
+                                 entry.mode + "," + entry.objectID + "," + path])
+        }
+        let atStageZero = try indexConflictEntry(atStage: 0, path: path, in: root)
+        let stages = atStageZero?.objectID == entry.objectID && atStageZero?.mode == entry.mode ? [] : ["--stage=\(stage)"]
+        try store.runOrThrow(["-c", "core.symlinks=true", "--literal-pathspecs", "checkout-index", "--force"]
+                             + stages + ["--", path])
         try store.runOrThrow(["--literal-pathspecs", "update-index", "--add", "--cacheinfo",
                              entry.mode + "," + entry.objectID + "," + path])
     }
 
-    /// Remove only the index entry, leaving the worktree path and its children in place.
+    /// Resolve the logical index entry, keeping its worktree path and children. A verified
+    /// relocation also removes Git's auxiliary worktree file beside that path.
     @_disfavoredOverload
     func removeConflictEntryFromIndex(_ path: String, at root: String) throws {
+        if let folder = try relocatedFolderConflicts(at: root).first(where: { $0.path == path }) {
+            try removeRelocatedConflict(folder, at: root)
+        }
         try storeOperation(at: root).runOrThrow(["--literal-pathspecs", "update-index", "--force-remove", "--", path])
     }
 

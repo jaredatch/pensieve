@@ -2,10 +2,10 @@ import XCTest
 @testable import Pensieve
 
 extension SyncConflictByteFixture {
-    /// Runs real git through the existing native-index fixture. Only an armed resolve changes
+    /// Runs native git without rewriting its index. Only an armed resolve changes
     /// the worktree after rebase; snapshots bracket Pensieve's resolution before git aborts.
     /// Neither wrapper supplies conflict versions, comparison answers or resolution results.
-    func folderObservationEngine(change: String) throws -> SyncEngine {
+    func folderObservationEngine(change: String, lockAbort: Bool = false) throws -> SyncEngine {
         let executable = root + "/folder-observer-git"
         try writeFolderSnapshotScript()
         try files.writeExecutableFile(at: executable, content: """
@@ -15,13 +15,14 @@ extension SyncConflictByteFixture {
                 if [ "$1" = rebase ] && [ "$2" = --abort ] && [ -f '\(root)/folder-armed' ] && \
                    /usr/bin/git -C '\(storeB)' rev-parse --verify REBASE_HEAD >/dev/null 2>&1; then
                     observed_abort=1
+                    \(lockAbort ? "touch '\(storeB)/.git/index.lock'" : ":")
                     if [ ! -f '\(root)/before-abort.json' ]; then
                         /usr/bin/python3 '\(root)/snapshot.py' '\(storeB)/\(path)' > '\(root)/before-abort.json' || exit 1
                     fi
                 fi
             }
             before "$@"
-            '\(root)/index-merge-git' "$@"
+            /usr/bin/git "$@"
             result=$?
             if [ "$observed_abort" = 1 ]; then printf '%s\\n' "$result" >> '\(root)/abort-results'; fi
             after() {

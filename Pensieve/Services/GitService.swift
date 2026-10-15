@@ -389,6 +389,8 @@ struct GitService: GitServiceProtocol {
         try GitCancellation.check()
         var environment = try childEnvironment(credential: credential)
         if storeRules { environment["GIT_ATTR_NOSYSTEM"] = "1" }
+        // Abort recovery recognizes one diagnostic; keep its wording deterministic.
+        if args.suffix(2) == ["rebase", "--abort"] { environment["LC_ALL"] = "C" }
         let configuredArguments = storeRules ? Self.storeConfigurationArgs + args : args
         // Reset the configured helper chain for reads and writes: no get, store or erase.
         // Sanitized prompts keep userinfo delimiters escaped until after host parsing.
@@ -743,7 +745,7 @@ extension GitService {
     @_disfavoredOverload
     func abortRebase(at path: String) throws {
         let store = try StoreGitOperation(git: self, root: path, aborting: true)
-        try store.runOrThrow(["rebase", "--abort"])
+        try store.runOrThrow(["-c", "core.quotePath=false", "rebase", "--abort"])
         if let repairFailure = store.repairFailure { throw repairFailure }
     }
 
@@ -753,7 +755,11 @@ extension GitService {
               r.exit == 0 else {
             return []
         }
-        return r.stdout.split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
+        let paths = r.stdout.split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
+        guard paths.contains(where: { $0.utf8.contains(126) }) else { return paths }
+        let folders = try relocatedFolderConflicts(at: path)
+        let auxiliary = Set(folders.map(\.auxiliary))
+        return (paths.filter { !auxiliary.contains($0) } + folders.flatMap { [$0.path] + $0.children }).sorted()
     }
 }
 
@@ -777,4 +783,80 @@ extension GitService {
         }
     }
 
+}
+
+/// ort moves a local file aside when the incoming tree has a directory at its path.
+/// This projection leaves Git's native index intact until the user applies a choice.
+struct RelocatedFolderConflict {
+    let path: String
+    let auxiliary: String
+    let children: [String]
+}
+
+private struct ConflictIndexRecord {
+    let mode: String
+    let object: String
+    let stage: String
+    let path: String
+}
+
+extension GitService {
+    func relocatedFolderConflicts(at root: String) throws -> [RelocatedFolderConflict] {
+        let index = try runOrThrow(["-C", root, "ls-files", "--stage", "-z"], in: nil).stdout
+        let records = index.split(separator: "\0").compactMap { record -> ConflictIndexRecord? in
+            let parts = record.split(separator: "\t", maxSplits: 1)
+            guard parts.count == 2 else { return nil }
+            let fields = parts[0].split(separator: " ").map(String.init)
+            guard fields.count == 3 else { return nil }
+            return ConflictIndexRecord(mode: fields[0], object: fields[1], stage: fields[2], path: String(parts[1]))
+        }
+        let candidates = records.filter {
+            $0.stage == "3" && $0.path.utf8.contains(126) && ["100644", "100755", "120000"].contains($0.mode)
+        }
+        guard !candidates.isEmpty, isRebaseInProgress(at: root) else { return [] }
+        var folders: [RelocatedFolderConflict] = []
+        for candidate in candidates {
+            let auxiliary = candidate.path
+            guard try conflictTreeEntry(auxiliary, revision: "REBASE_HEAD", root: root) == nil,
+                  try conflictTreeEntry(auxiliary, revision: "HEAD", root: root) == nil,
+                  !records.contains(where: { $0.path == auxiliary && $0.stage == "2" }) else { continue }
+            var matches: [RelocatedFolderConflict] = []
+            for offset in auxiliary.unicodeScalars.indices where auxiliary.unicodeScalars[offset].value == 126 {
+                let original = String(auxiliary.unicodeScalars[..<offset])
+                let parent = (original as NSString).deletingLastPathComponent
+                let identity = candidate.mode + " " + candidate.object
+                guard parent == (auxiliary as NSString).deletingLastPathComponent,
+                      try conflictTreeEntry(original, revision: "REBASE_HEAD", root: root) == identity,
+                      try conflictTreeEntry(original, revision: "HEAD", root: root)?.hasPrefix("040000 ") == true
+                else { continue }
+                let children = records.filter {
+                    $0.stage == "0" && PathSyntax.hasPrefix($0.path, original + "/")
+                }.map(\.path)
+                guard !children.isEmpty else { continue }
+                matches.append(RelocatedFolderConflict(path: original, auxiliary: auxiliary, children: children))
+            }
+            // Ambiguous identities never authorize removal at a guessed path.
+            if matches.count == 1 { folders.append(contentsOf: matches) }
+        }
+        return folders
+    }
+
+    private func conflictTreeEntry(_ path: String, revision: String, root: String) throws -> String? {
+        let result = try runOrThrow(["--literal-pathspecs", "-C", root, "ls-tree", "-z", revision, "--", path], in: nil)
+        for record in result.stdout.split(separator: "\0") {
+            let parts = record.split(separator: "\t", maxSplits: 1)
+            guard parts.count == 2, parts[1] == path else { continue }
+            let fields = parts[0].split(separator: " ")
+            if fields.count == 3 { return fields[0] + " " + fields[2] }
+        }
+        return nil
+    }
+
+    func removeRelocatedConflict(_ folder: RelocatedFolderConflict, at root: String) throws {
+        let full = root + "/" + folder.auxiliary
+        let type = try fileService.entryTypeWithoutFollowingLinks(at: full)
+        guard type == nil || type == .regular || type == .symlink else { throw ConflictFolderMustMove() }
+        if type != nil { try fileService.deleteFile(at: full) }
+        try storeOperation(at: root).runOrThrow(["--literal-pathspecs", "update-index", "--force-remove", "--", folder.auxiliary])
+    }
 }

@@ -26,6 +26,7 @@ final class ConflictFolderResolutionTests: XCTestCase {
 
     func testRefusedFilePickPreservesTopLevelEntriesUntilAbort() async throws {
         try await assertRefusals(link: false, nested: false)
+        for extra in [false, true] { try await assertUnrelatedAbortFailure(extra: extra) }
     }
 
     func testRefusedFilePickPreservesNestedEntriesUntilAbort() async throws {
@@ -47,6 +48,7 @@ final class ConflictFolderResolutionTests: XCTestCase {
             let model = try await choose(fixture, side: .otherMachine)
             XCTAssertEqual(model.phase, .done)
             for store in try [fixture.storeB, fixture.freshClone()] {
+                try assertNoAuxiliary(fixture, store: store)
                 let folder = store + "/" + fixture.path
                 XCTAssertEqual(try fixture.files.entryTypeWithoutFollowingLinks(at: folder), .directory)
                 XCTAssertEqual(try fixture.files.readData(at: folder + "/keep"), Data("other bytes".utf8))
@@ -85,7 +87,7 @@ final class ConflictFolderResolutionTests: XCTestCase {
         }
         return try NativeTestWork.run {
             try SyncConflictByteFixture(name: "file-folder", initial: .file(Data("base".utf8)),
-                                        this: this, other: .folderWith(children), indexMerge: true)
+                                        this: this, other: .folderWith(children))
         }
     }
 
@@ -102,8 +104,14 @@ final class ConflictFolderResolutionTests: XCTestCase {
         return model
     }
 
+    private func assertNoAuxiliary(_ fixture: SyncConflictByteFixture, store: String) throws {
+        let names = try fixture.files.listDirectory(at: store + "/skills/conflict/assets")
+        XCTAssertEqual(names, ["file-folder"], "Git's auxiliary conflict file must leave no residue")
+    }
+
     private func assertChosen(_ fixture: SyncConflictByteFixture, link: Bool, stores: [String]) throws {
         for store in stores {
+            try assertNoAuxiliary(fixture, store: store)
             let full = store + "/" + fixture.path
             if link {
                 XCTAssertEqual(try fixture.files.entryTypeWithoutFollowingLinks(at: full), .symlink)
@@ -155,6 +163,36 @@ final class ConflictFolderResolutionTests: XCTestCase {
         XCTAssertEqual(try fixture.files.readFile(at: fixture.storeB + "/unrelated/keep"), "sibling", fault)
         XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB), "Abort must finish after \(fault)")
         try assertChosen(fixture, link: link, stores: [fixture.storeB])
+    }
+
+    private func assertUnrelatedAbortFailure(extra: Bool) async throws {
+        let fixture = try makeFixture(link: false, links: true)
+        defer { try? fixture.files.deleteDirectory(at: fixture.root) }
+        let folder = fixture.storeB + "/" + fixture.path
+        let change = "printf changed > '\(folder)/keep'" + (extra ? "; printf extra > '\(folder)/extra'" : "")
+        let engine = try fixture.folderObservationEngine(change: change, lockAbort: true)
+        let model = ConflictResolutionModel(engine: engine, git: fixture.git,
+            credentials: InMemoryCredentialStore(), root: fixture.storeB, steps: SyncStepModel())
+        await model.loadAndReport(container: fixture.contextB.container)
+        guard case let .ready(groups) = model.phase else { return XCTFail("Conflict must load before locked abort") }
+        for group in groups { model.choose(group.id, .thisMachine) }
+        try fixture.files.writeFile(at: fixture.root + "/folder-armed", content: "locked abort")
+        await model.applyAndReport(container: fixture.contextB.container)
+        XCTAssertEqual(try fixture.files.entryTypeWithoutFollowingLinks(at: folder), .directory,
+                       "An unrelated index lock must not authorize deleting the refused folder")
+        XCTAssertEqual(try fixture.files.readFile(at: folder + "/keep"), "changed")
+        if extra { XCTAssertEqual(try fixture.files.readFile(at: folder + "/extra"), "extra") }
+        XCTAssertEqual(try fixture.files.readData(at: fixture.root + "/before-abort.json"),
+                       try fixture.files.readData(at: fixture.root + "/after-change.json"))
+        XCTAssertEqual(try fixture.files.readFile(at: fixture.root + "/abort-results"), "128\n",
+                       "A lock failure must not cause destructive cleanup or another abort")
+        // Release the external obstruction so the fixture can return to rest through real Git.
+        try fixture.files.deleteFile(at: fixture.storeB + "/.git/index.lock")
+        if extra, try fixture.files.entryTypeWithoutFollowingLinks(at: folder) == .directory {
+            try fixture.files.deleteFile(at: folder + "/extra")
+        }
+        try NativeTestWork.run { try fixture.git.abortRebase(at: fixture.storeB) }
+        try assertChosen(fixture, link: false, stores: [fixture.storeB])
     }
 
     private func mutation(_ fault: String, directory: String) -> String {

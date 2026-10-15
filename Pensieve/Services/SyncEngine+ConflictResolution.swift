@@ -120,14 +120,26 @@ extension SyncEngine {
         return resolved == realRoot || PathSyntax.hasPrefix(resolved, realRoot + "/")
     }
 
+    private func abortWasBlockedByFolder(_ error: Error, path: String) -> Bool {
+        guard case let GitError.commandFailed(args, exitCode, stderr, _) = error,
+              exitCode == 128, args.suffix(2) == ["rebase", "--abort"] else { return false }
+        let lines = stderr.components(separatedBy: "\n")
+        guard lines.first == "error: Updating the following directories would lose untracked files in them:" else { return false }
+        let paths = lines.dropFirst().prefix { $0.hasPrefix("\t") }
+        return paths.contains("\t" + path)
+    }
+
     /// Give Git the intact refused folder first. If abort cannot replace it, discard only that
     /// obstruction and retry. Stage 3 still proves the local file/link that abort must restore.
     func abortResolution(after failure: Error, picks: [String: ResolutionPick], root: String) throws {
         do {
             try gitService.abortRebase(at: root)
         } catch {
-            guard case let SyncError.conflictFolderMustMove(path) = failure,
-                  let pick = picks[path], pick.side == .thisMachine,
+            guard case let SyncError.conflictFolderMustMove(path) = failure else { return }
+            // Only Git's explicit untracked-directory obstruction authorizes discarding it.
+            // A lock, permission error, or unknown diagnostic leaves the folder untouched.
+            guard abortWasBlockedByFolder(error, path: path) else { throw error }
+            guard let pick = picks[path], pick.side == .thisMachine,
                   let entry = try gitService.conflictEntry(atStage: 3, path: path, in: root),
                   ["100644", "100755", "120000"].contains(entry.mode),
                   entry.mode == pick.expectedThisMode, entry.bytes == pick.expectedThis,
