@@ -3,7 +3,7 @@ import Foundation
 extension AppRuntime {
     func checkForSkillUpdatesAndReport() async -> String? {
         startUpdateCheck(showsFailureAlert: false)
-        while updateCheckInFlight { try? await Task.sleep(for: .milliseconds(10)) }
+        await updateCheckTask?.value
         return updateCheckError
     }
 

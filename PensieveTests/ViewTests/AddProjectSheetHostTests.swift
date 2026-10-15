@@ -264,7 +264,11 @@ final class AddProjectSheetHostTests: XCTestCase {
     }
 
     fileprivate func textFields(in root: NSView) -> [NSTextField] {
-        [root].compactMap { $0 as? NSTextField } + root.subviews.flatMap(textFields(in:))
+        views(in: root).compactMap { $0 as? NSTextField }
+    }
+
+    fileprivate func views(in root: NSView) -> [NSView] {
+        [root] + root.subviews.flatMap(views(in:))
     }
 }
 
@@ -295,9 +299,16 @@ extension AddProjectSheetHostTests {
             XCTAssertTrue(survivors.isEmpty, "Failed-save windows survived teardown: " + survivors.joined(separator: "; "))
         }
         try await exerciseFailedSaveSheet(tracking: windows)
+        do {
+            try await exerciseFailedSaveSheet(tracking: windows, failsBeforeDismissal: true)
+            XCTFail("The failure-path probe must throw before dismissing the alert")
+        } catch is FailedSaveProbeError { }
     }
 
-    private func exerciseFailedSaveSheet(tracking windows: NSHashTable<NSWindow>) async throws {
+    private enum FailedSaveProbeError: Error { case beforeDismissal }
+
+    private func exerciseFailedSaveSheet(tracking windows: NSHashTable<NSWindow>,
+                                         failsBeforeDismissal: Bool = false) async throws {
         let h = try CLILibraryFixture(readOnly: true)
         defer { h.stop() }
         let folder = h.root + "/project"
@@ -313,20 +324,27 @@ extension AddProjectSheetHostTests {
         let window = mount(host)
         windows.add(window)
         defer { window.close() }
-        await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
-                            failureMessage: "Add Project sheet presents") {
-            window.attachedSheet?.contentView != nil && model.isValid
-        }
-        try await checkAndDismissFailedSave(in: window, model: model, tracking: windows) {
-            XCTAssertTrue(presentation.presented)
-            XCTAssertTrue(created.isEmpty)
-            XCTAssertTrue(try h.context.fetch(FetchDescriptor<Project>()).isEmpty)
-        }
+        var failure: Error?
+        do {
+            await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
+                                failureMessage: "Add Project sheet presents") {
+                window.attachedSheet?.contentView != nil && model.isValid
+            }
+            try await checkAndDismissFailedSave(in: window, model: model, tracking: windows) {
+                XCTAssertTrue(presentation.presented)
+                XCTAssertTrue(created.isEmpty)
+                XCTAssertTrue(try h.context.fetch(FetchDescriptor<Project>()).isEmpty)
+                if failsBeforeDismissal { throw FailedSaveProbeError.beforeDismissal }
+            }
+        } catch { failure = error }
+        // On any thrown failure, detach AppKit presentations without relying on finding OK.
+        if let sheet = window.attachedSheet, let alert = sheet.attachedSheet { sheet.endSheet(alert) }
         presentation.presented = false
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "Failed-save sheet must detach before its host closes") {
             !presentation.presented && window.attachedSheet == nil
         }
+        if let failure { throw failure }
     }
 
     private func checkAndDismissFailedSave(
@@ -353,10 +371,8 @@ extension AddProjectSheetHostTests {
     }
 
     private func dismissSaveAlert(_ alert: NSWindow, from sheet: NSWindow) async throws {
-        let buttons = PendingSaveTerminationTests.views(try XCTUnwrap(alert.contentView)).compactMap { $0 as? NSButton }
+        let buttons = views(in: try XCTUnwrap(alert.contentView)).compactMap { $0 as? NSButton }
         let ok = try XCTUnwrap(buttons.first { $0.title == "OK" })
-        // Keep failure cleanup on the alert's own action too, after the wait records the failure.
-        defer { if sheet.attachedSheet != nil { ok.performClick(nil) } }
         ok.performClick(nil)
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "OK must dismiss the failed-save alert") {

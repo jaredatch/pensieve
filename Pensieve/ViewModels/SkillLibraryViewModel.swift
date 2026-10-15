@@ -126,9 +126,9 @@ final class SkillLibraryViewModel {
     func regenerateManifest(_ change: ManifestChange, context: ModelContext,
                             showsFailure: Bool = true, completion: ((Error?) -> Void)? = nil) {
         manifestSaves?.submit(change, context: context) { [weak self] failure in
-            guard showsFailure else { completion?(failure); return }
-            guard let self else { return }
+            guard let self else { completion?(failure); return }
             if let failure {
+                guard showsFailure else { completion?(failure); return }
                 let message: String
                 if case ManifestSaveError.rebuildFailed = failure {
                     message = failure.localizedDescription

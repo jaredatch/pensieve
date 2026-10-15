@@ -12,8 +12,7 @@ extension CLILibraryHandler {
         }
         try requireAddsAllowed()
         let data = installValue(plan)
-        if options.dryRun, let reply = try previewOrConfirmation(data, options: options) { return reply }
-        if plan.entries.contains(where: { $0.action == "collision" }) {
+        if !options.dryRun, plan.entries.contains(where: { $0.action == "collision" }) {
             var envelope = CLIReply.failure("slug_collision", "A selected skill's slug is already taken.",
                 hint: "Use --rename to choose a free slug, or --skip to leave collisions alone.", exit: 5).envelope
             envelope.data = data

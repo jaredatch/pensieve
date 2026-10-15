@@ -48,7 +48,9 @@ enum SkillDeletionFlow {
             library.regenerateManifest(.retireSkill(skill.directoryName), context: context,
                 showsFailure: presentation.presentsInWindow) { failure in
                 if !presentation.presentsInWindow, let failure {
-                    presentation.notice = .failed("Couldn't publish retired deploy records: " + failure.localizedDescription)
+                    let earlier = presentation.notice.map { $0.message + " " } ?? ""
+                    presentation.notice = .failed(earlier + "Couldn't publish retired deploy records: "
+                        + failure.localizedDescription)
                 }
             }
         } catch {

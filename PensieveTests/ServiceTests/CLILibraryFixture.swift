@@ -18,7 +18,7 @@ final class CLILibraryFixture {
     let sourceURL = "https://github.com/fixture/skills"
     var context: ModelContext { runtime.container.mainContext }
 
-    init(readOnly: Bool = false, remoteGate: CLILibraryRemoteGate? = nil) throws {
+    init(readOnly: Bool = false, diskBacked: Bool = false, remoteGate: CLILibraryRemoteGate? = nil) throws {
         endpoint = try SocketTestDirectory()
         root = TestTemporaryDirectory.path + "CLILibrary-" + UUID().uuidString
         repository = root + "/upstream"
@@ -60,6 +60,9 @@ final class CLILibraryFixture {
                 try seed.mainContext.save()
             }
             container = try AppRuntime.makeContainer(configuration: ModelConfiguration(url: url, allowsSave: false))
+        } else if diskBacked {
+            container = try AppRuntime.makeContainer(configuration: ModelConfiguration(
+                url: URL(fileURLWithPath: root + "/library.sqlite")))
         } else { container = nil }
         runtime = try AppRuntime(container: container, platformVM: platform, defaults: defaults, paths: paths,
             updateCheckOperation: paths.makeUpdateCheckOperation(service: checker),
@@ -104,6 +107,7 @@ final class CLILibraryFixture {
     func run(_ arguments: [String], exit: Int32 = 0, terminal: Bool = false,
              environment extra: [String: String] = [:], expectsPrompt: Bool? = nil,
              beforeConfirmation: (() async throws -> Void)? = nil) async throws -> CLIEnvelope {
+        guard beforeConfirmation == nil || terminal else { throw POSIXError(.EINVAL) }
         let process = Process()
         process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/pensieve")
         process.arguments = arguments + ["--json", "--app-support", paths.appSupportDir]
@@ -126,12 +130,23 @@ final class CLILibraryFixture {
             try input.fileHandleForWriting.close()
         }
         defer { if controllerFD >= 0 { Darwin.close(controllerFD); Darwin.close(terminalFD) } }
-        async let running = BlockingWork.run { try CLIProcessProbe.run(process, timeout: 40) }
+        async let running = BlockingWork.run {
+            try CLIProcessProbe.run(process, timeout: 40, afterLaunch: {
+                errors.fileHandleForWriting.closeFile()
+                output.fileHandleForWriting.closeFile()
+            })
+        }
         var prefix = Data()
         if let beforeConfirmation {
-            prefix = try await BlockingWork.run { try Self.readPrompt(from: errors.fileHandleForReading) }
-            try await beforeConfirmation()
-            _ = "yes\n".withCString { Darwin.write(controllerFD, $0, 4) }
+            do {
+                prefix = try await BlockingWork.run { try Self.readPrompt(from: errors.fileHandleForReading) }
+                try await beforeConfirmation()
+                _ = "yes\n".withCString { Darwin.write(controllerFD, $0, 4) }
+            } catch {
+                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+                _ = try await running
+                throw error
+            }
         }
         let result = try await running
         let bytes = try output.fileHandleForReading.readToEnd() ?? Data()
@@ -162,11 +177,14 @@ final class CLILibraryFixture {
 final class CLILibraryRemoteGate {
     private let lock = NSLock()
     private var armed = false
+    private var calls = 0
+    var callCount: Int { lock.lock(); defer { lock.unlock() }; return calls }
     let gate: TestWait.Gate
     init(owner: XCTestCase) { gate = TestWait.Gate(owner: owner) }
     func arm() { lock.lock(); armed = true; lock.unlock() }
     func waitIfArmed() {
         lock.lock()
+        calls += 1
         let shouldWait = armed
         armed = false
         lock.unlock()

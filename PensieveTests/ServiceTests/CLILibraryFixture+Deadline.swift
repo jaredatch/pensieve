@@ -10,7 +10,9 @@ extension CLILibraryFixture {
         while ProcessInfo.processInfo.systemUptime < deadline {
             var descriptor = pollfd(fd: handle.fileDescriptor, events: Int16(POLLIN), revents: 0)
             if poll(&descriptor, 1, 100) > 0 {
-                bytes.append(handle.availableData)
+                let chunk = handle.availableData
+                guard !chunk.isEmpty else { throw CocoaError(.fileReadUnknown) }
+                bytes.append(chunk)
                 if (String(data: bytes, encoding: .utf8) ?? "").contains("Apply this plan?") { return bytes }
             }
         }

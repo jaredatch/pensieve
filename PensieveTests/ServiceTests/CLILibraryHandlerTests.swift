@@ -73,12 +73,22 @@ final class CLILibraryHandlerTests: XCTestCase {
         try h.files.writeFile(at: h.repository + "/skills/foo/SKILL.md", content: CLILibraryFixture.document("upstream"))
         try h.files.writeFile(at: h.repository + "/skills/foo/asset.txt", content: "upstream asset")
         try await h.commit()
-        let outdated = try await h.run(["skill", "outdated"])
+        remote.arm()
+        h.runtime.checkForSkillUpdatesNow()
+        await TestWait.until(failureMessage: "Window check reaches the real remote boundary") { remote.gate.waiterCount == 1 }
+        let checks = remote.callCount
+        async let checking = h.run(["skill", "outdated"])
+        await TestWait.until(failureMessage: "CLI outdated waits for the window's check") { h.paths.syncSteps.pendingCount == 1 }
+        remote.gate.open()
+        let outdated = try await checking
+        XCTAssertEqual(remote.callCount, checks, "CLI outdated joins the window's check instead of starting another")
         XCTAssertEqual(outdated.data?["skills"]?.array?.first?["slug"], .string("foo"))
         let head = try await BlockingWork.run { try h.git.commitSHA(at: h.repository) }
         XCTAssertEqual(outdated.data?["skills"]?.array?.first?["commit"], .string(head))
         let before = try h.tree(h.paths.storeRoot)
+        let networkCalls = remote.callCount
         let preview = try await h.run(["skill", "update", "foo", "--dry-run"])
+        XCTAssertEqual(remote.callCount - networkCalls, 1, "Update planning reuses its first checkout for verification")
         XCTAssertEqual(preview.data?["skills"]?.array?.first?["action"], .string("update"))
         XCTAssertEqual(try h.tree(h.paths.storeRoot), before)
         try h.files.writeFile(at: h.paths.skillsDir + "/foo/asset.txt", content: "local edit")
@@ -119,15 +129,22 @@ final class CLILibraryHandlerTests: XCTestCase {
     }
 
     func testBuiltDeletePreviewRemovesDeploysAndWaitsForManifest() async throws {
-        let h = try CLILibraryFixture()
+        let h = try CLILibraryFixture(diskBacked: true)
         defer { h.stop() }
         try await h.start()
         _ = try await h.run(["install", h.sourceURL, "--yes"])
         _ = try await h.run(["deploy", "foo", "-a", "claude", "-g"])
         let link = h.root + "/home/.claude/skills/foo"
         XCTAssertTrue(h.files.isSymlink(at: link))
+        let assigned = Category(name: "Assigned"), unrelated = Category(name: "Unrelated")
+        assigned.skillSlugs = ["foo"]
+        unrelated.skillSlugs = ["other"]
+        h.context.insert(assigned)
+        h.context.insert(unrelated)
+        try h.context.save()
         let before = try h.tree(h.root + "/home")
         let preview = try await h.run(["skill", "delete", "foo", "--dry-run"])
+        XCTAssertEqual(preview.data?["categories"]?.array, [.string(assigned.id.uuidString)])
         XCTAssertEqual(preview.data?["deployments"]?.array?.first?["path"], .string(link))
         XCTAssertEqual(try h.tree(h.root + "/home"), before)
         XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Skill>()), 1)
@@ -135,7 +152,9 @@ final class CLILibraryHandlerTests: XCTestCase {
         let historyID = try h.skill().id
         h.runtime.upstreamHistory.invalidateForManualCheck(skillID: historyID)
         XCTAssertEqual(h.runtime.upstreamHistory.manualCheckCount(skillID: historyID), 1)
+        try await seedStaleManifestError(h)
         let deleted = try await h.run(["skill", "delete", "foo", "--yes"])
+        XCTAssertNil(h.runtime.library.error, "A successful CLI manifest save clears the stale window error")
         XCTAssertEqual(h.runtime.upstreamHistory.manualCheckCount(skillID: historyID), 0, "CLI deletion retires history")
         XCTAssertEqual(deleted.changed, true)
         XCTAssertFalse(h.files.isSymlink(at: link))

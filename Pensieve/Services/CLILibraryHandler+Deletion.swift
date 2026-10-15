@@ -20,7 +20,8 @@ extension CLILibraryHandler {
         let preview = platform.removeAllDeploys(skill: skill, projects: projects, dryRun: true) {
             try platform.localSkillProjectDeployEvidence(skill: skill, projects: projects, context: context, readOnly: true)
         }
-        let data = try deletionValue(skill, preview: preview)
+        var fields = try deletionValue(skill, preview: preview)
+        let data = CLIValue.object(fields)
         if preview.batch.hasFailures {
             var envelope = CLIReply.failure("deletion_refused", preview.batch.readFailures.map(\.message).joined(separator: " "),
                 hint: "Resolve the deployment record problem in Pensieve and retry.", exit: 1).envelope
@@ -47,25 +48,22 @@ extension CLILibraryHandler {
                 "remainingDeployments": .array(remainingPaths.map(CLIValue.string))])
             return CLIReply(envelope: envelope, exitCode: 1)
         }
-        if case .object(var fields) = data {
-            fields["warnings"] = .array(presentation.notice.map { [.string($0.message)] } ?? [])
-            return success(.object(fields), changed: true)
-        }
-        return success(data, changed: true)
+        fields["warnings"] = .array(presentation.notice.map { [.string($0.message)] } ?? [])
+        return success(.object(fields), changed: true)
     }
-    private func deletionValue(_ skill: Skill, preview: SkillCleanupResult) throws -> CLIValue {
+    private func deletionValue(_ skill: Skill, preview: SkillCleanupResult) throws -> [String: CLIValue] {
         let slug = skill.directoryName
-        let intents = try context.fetch(FetchDescriptor<MachineDeployIntent>())
-            .filter { $0.skillSlug == slug }.map(\.key).sorted()
+        let intents = try context.fetch(FetchDescriptor<MachineDeployIntent>(
+            predicate: #Predicate { $0.skillSlug == slug })).map(\.key).sorted()
         let categories = try context.fetch(FetchDescriptor<Category>())
             .filter { $0.skillSlugs.contains(slug) }.map { $0.id.uuidString }.sorted()
-        return .object(["slug": .string(slug), "id": .string(skill.id.uuidString),
+        return ["slug": .string(slug), "id": .string(skill.id.uuidString),
             "installedCommit": skill.installedOrigin.map { .string($0.installedCommit) } ?? .null,
             "intents": .array(intents.map(CLIValue.string)), "categories": .array(categories.map(CLIValue.string)),
             "deployments": .array(preview.plannedRemovals.sorted { $0.artifactPath < $1.artifactPath }.map {
             .object(["agent": .string($0.platform.cliID), "path": .string($0.artifactPath),
                 "project": $0.projectPath.map(CLIValue.string) ?? .null])
-        })])
+        })]
     }
 
 }

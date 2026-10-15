@@ -43,6 +43,8 @@ extension CLILibraryHandlerTests {
         let preview = try await h.run(["skill", "update", "foo", "--dry-run"])
         XCTAssertEqual(preview.data?["skills"]?.array?.first?["action"], .string("update"))
         XCTAssertEqual(preview.data?["skills"]?.array?.first?["drifted"], .bool(true))
+        XCTAssertTrue(String(describing: preview.data?["hint"]).contains("--overwrite-local-changes"),
+            "A drifted dry run explains how to apply its plan")
         for terminal in [false, true] {
             let refused = try await h.run(["skill", "update", "foo"], exit: 1,
                 terminal: terminal, expectsPrompt: false)
@@ -51,6 +53,14 @@ extension CLILibraryHandlerTests {
             XCTAssertNil(refused.next, "A refused update must not print a confirmation rerun")
             XCTAssertEqual(try h.tree(h.paths.storeRoot), before)
         }
+        let upstream = h.repository + "/skills/foo/SKILL.md"
+        let valid = try h.files.readFile(at: upstream)
+        try h.files.writeFile(at: upstream, content: "invalid upstream frontmatter")
+        try await h.commit()
+        let refusal = try await h.run(["skill", "update", "foo"], exit: 1)
+        XCTAssertEqual(refusal.error?.code, "local_changes", "Drift refuses before reading the per-plan preview")
+        try h.files.writeFile(at: upstream, content: valid)
+        try await h.commit()
     }
 
     func assertChangedUpdateConfirmation(_ h: CLILibraryFixture) async throws {
@@ -90,15 +100,58 @@ extension CLILibraryHandlerTests {
         XCTAssertEqual(try h.tree(folder), before, "Changed removal plan removes nothing")
     }
 
+    func assertPromptFailureCleanup(_ h: CLILibraryFixture) async throws {
+        var called = false
+        let start = ContinuousClock.now
+        do {
+            _ = try await h.run(["skill", "list"], beforeConfirmation: { called = true })
+            XCTFail("A confirmation callback requires a terminal")
+        } catch {
+            XCTAssertEqual((error as? POSIXError)?.code, .EINVAL)
+        }
+        XCTAssertFalse(called)
+        XCTAssertLessThan(start.duration(to: .now), .seconds(5), "Invalid terminal setup refuses immediately")
+        let eof = ContinuousClock.now
+        do {
+            _ = try await h.run(["skill", "list"], terminal: true, beforeConfirmation: { called = true })
+            XCTFail("A completed command cannot deliver a confirmation prompt")
+        } catch { XCTAssertFalse(called) }
+        XCTAssertLessThan(eof.duration(to: .now), .seconds(5), "A closed prompt pipe stops immediately")
+        let interrupted = ContinuousClock.now
+        do {
+            _ = try await h.run(["skill", "delete", "foo"], terminal: true,
+                beforeConfirmation: { throw POSIXError(.ECANCELED) })
+            XCTFail("The prompt callback must throw")
+        } catch { XCTAssertEqual((error as? POSIXError)?.code, .ECANCELED) }
+        XCTAssertLessThan(interrupted.duration(to: .now), .seconds(5), "A failed prompt callback reaps its CLI child")
+    }
+
+    func seedStaleManifestError(_ h: CLILibraryFixture) async throws {
+        let root = h.paths.storeRoot
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root) }
+        h.runtime.library.regenerateManifest(.skillMetadata("foo", nil, nil), context: h.context)
+        await h.runtime.library.manifestSaves?.waitUntilIdle()
+        XCTAssertNotNil(h.runtime.library.error, "The window displays the real failed manifest save")
+    }
+
     func assertQueuedDeleteFailure() async throws {
         let h = try CLILibraryFixture()
         defer { h.stop() }
         try await h.start()
         _ = try await h.run(["install", h.sourceURL, "--yes"])
+        let folder = h.root + "/waiting project"
+        try h.files.createDirectory(at: folder)
+        _ = try await h.run(["project", "add", folder])
+        _ = try await h.run(["deploy", "foo", "-a", "claude", "-p", folder])
+        try h.files.deleteDirectory(at: folder)
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: h.paths.storeRoot)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: h.paths.storeRoot) }
         let deleted = try await h.run(["skill", "delete", "foo", "--yes"], exit: 1)
         XCTAssertEqual(deleted.error?.code, "partial", "Queued manifest failure is returned to the CLI")
+        XCTAssertTrue(deleted.error?.message.contains("will be removed when the folder is back") == true,
+            "A later manifest failure preserves the pending project-cleanup warning")
+        XCTAssertTrue(deleted.error?.message.contains("Couldn't publish retired deploy records") == true)
         XCTAssertNil(h.runtime.library.deletionNotice, "Queued deletion failure raises no window alert")
         XCTAssertNil(h.runtime.library.error, "CLI failure does not replace the window's error")
         XCTAssertFalse(h.files.directoryExists(at: h.paths.skillsDir + "/foo"))

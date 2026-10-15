@@ -40,23 +40,29 @@ extension CLILibraryHandler {
         defer { model.commandApplyInFlight = false }
         let operations = runtime.updatesViewModelOperations, container = runtime.container
         let plans = try await BlockingWork.run {
-            try operations.updateCheckService.planUpdates(slugs: Set(slugs), context: ModelContext(container))
+            try operations.updateCheckService.planUpdates(
+                slugs: Set(slugs), context: ModelContext(container)) { plans, checkouts in
+                if !options.dryRun, !options.overwriteLocalChanges,
+                   plans.contains(where: { $0.update != nil && $0.drifted }) {
+                    throw SkillUpdateFlowError.localEditsRequireConfirmation
+                }
+                for plan in plans {
+                    if let update = plan.update {
+                        _ = try operations.skillInstallService.previewUpdate(update, checkout: checkouts[update.skillID])
+                    }
+                }
+            }
         }
         for skill in skills { try requireSavedDraft(skill) }
-        let data: CLIValue = .object(["skills": .array(plans.map { plan in
+        var fields: [String: CLIValue] = ["skills": .array(plans.map { plan in
             .object(["slug": .string(plan.slug), "action": .string(plan.update == nil ? "unchanged" : "update"),
                 "commit": plan.update.map { .string($0.source.headCommit) } ?? .null,
                 "drifted": .bool(plan.drifted), "installedCommit": .string(plan.origin.installedCommit)])
-        })])
-        for plan in plans {
-            if let update = plan.update {
-                _ = try await BlockingWork.run { try operations.skillInstallService.previewUpdate(update) }
-            }
+        })]
+        if plans.contains(where: { $0.update != nil && $0.drifted }) {
+            fields["hint"] = .string("Review the edits, then pass --overwrite-local-changes to replace them.")
         }
-        if options.dryRun, let reply = try previewOrConfirmation(data, options: options) { return reply }
-        if plans.contains(where: { $0.update != nil && $0.drifted }), !options.overwriteLocalChanges {
-            throw SkillUpdateFlowError.localEditsRequireConfirmation
-        }
+        let data = CLIValue.object(fields)
         if let reply = try previewOrConfirmation(data, options: options) { return reply }
         return await applyPlans(plans, options: options, data: data)
     }

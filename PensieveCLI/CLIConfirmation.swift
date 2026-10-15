@@ -7,8 +7,7 @@ enum CLIConfirmation {
         guard reply.envelope.error?.code == "confirmation_required" else { return reply }
         let rerun = (["pensieve"] + confirmingArguments(arguments, token: reply.envelope.confirmationToken))
             .map(quote).joined(separator: " ")
-        guard request.library?.confirmationToken == nil, isatty(STDIN_FILENO) != 0, !options.noInput,
-              ProcessInfo.processInfo.environment["PENSIEVE_NO_INPUT"] != "1" else {
+        guard request.library?.confirmationToken == nil, options.canPrompt else {
             return confirmationReply(reply, command: rerun)
         }
         if let data = reply.envelope.data, let bytes = try? JSONEncoder().encode(data),

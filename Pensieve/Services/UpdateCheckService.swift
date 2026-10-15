@@ -248,11 +248,13 @@ extension UpdateCheckService {
     }
 
     func readMovedHead(key: BatchKey, head: String, snapshots: [Snapshot], credential: GitCredential?,
-                       diagnostics: UpdateBatchDiagnostics) throws -> (Date, [(Snapshot, Result<String, Error>)]) {
+                       diagnostics: UpdateBatchDiagnostics,
+                       retainingCheckout: ((String) -> Void)? = nil) throws -> (Date, [(Snapshot, Result<String, Error>)]) {
         try prepareScratchRoot()
         let sessionRoot = scratchRoot + "/" + UUID().uuidString
         try fileService.createDirectory(at: sessionRoot)
-        defer { try? fileService.deleteDirectory(at: sessionRoot) }
+        var retained = false
+        defer { if !retained { try? fileService.deleteDirectory(at: sessionRoot) } }
         let checkout = sessionRoot + "/repository"
         diagnostics.beginNextGitOperation()
         try gitService.cloneShallow(remote: key.cloneRemote, branch: key.ref,
@@ -271,6 +273,7 @@ extension UpdateCheckService {
             }
             return (snapshot, tree)
         }
+        if let retainingCheckout { retainingCheckout(checkout); retained = true }
         return (commitDate, trees)
     }
 

@@ -172,7 +172,7 @@ __attribute__((used, section("__DATA,__interpose"))) static struct {
         finally:
             finish()
         state = self.wait_for_state(self.app)
-        self.assertEqual(state['path'], str(self.app))
+        self.assertEqual(Path(state['path']).resolve(), self.app.resolve())
         self.assertEqual(state['arguments'][1:], ['--background'])
         self.assertEqual(state['windows'], 0)
         self.assertFalse(state['active'])
@@ -185,7 +185,7 @@ __attribute__((used, section("__DATA,__interpose"))) static struct {
         self.assertEqual(error['code'], 'app_starting')
         self.assertTrue(error['retryable'])
         endpoint = self.root / (self.bundle_id + '.sock')
-        self.assertIn(str(endpoint), error['message'])
+        self.assertEqual(Path(error['message'].split('starting. ', 1)[1].split(': ', 1)[0]).resolve(), endpoint.resolve())
         self.assertIn(os.strerror(errno.ENOENT), error['message'])
         self.assertLess(time.monotonic() - start, 5)
         self.wait_for_state(self.app)
@@ -194,7 +194,7 @@ __attribute__((used, section("__DATA,__interpose"))) static struct {
         error = self.run_cli('skill', 'list', code=3)['error']
         self.assertEqual(error['code'], 'app_starting')
         self.assertTrue(error['retryable'])
-        self.assertIn(str(endpoint), error['message'])
+        self.assertEqual(Path(error['message'].split('starting. ', 1)[1].split(': ', 1)[0]).resolve(), endpoint.resolve())
         self.assertIn(os.strerror(errno.ECONNREFUSED), error['message'])
         self.assertEqual(self.state()['reopens'], 0, 'an already starting app must not receive a reopen')
         requests, finish = self.peer_after_launch(bundle=self.root / 'Wrong.app')
@@ -359,6 +359,6 @@ __attribute__((used, section("__DATA,__interpose"))) static struct {
         self.wait_for_state(other)
         error = self.run_cli('skill', 'list', code=3)['error']
         self.assertEqual(error['code'], 'wrong_app')
-        self.assertIn(str(other), error['message'])
+        self.assertEqual(Path(error['message'].split(': ', 1)[1]).resolve(), other.resolve())
         self.assertIsNone(self.state(self.app))
         self.assertEqual(self.state(other)['reopens'], 0)

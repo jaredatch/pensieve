@@ -182,7 +182,7 @@ class CLIContractTests(unittest.TestCase):
                 self.assertEqual(observed[0]["command"], command[0])
                 if command[0] != "sync":
                     targets = observed[0]["deployment"]
-                    self.assertEqual(targets["workingDirectory"], str(self.root.resolve()))
+                    self.assertEqual(Path(targets["workingDirectory"]).resolve(), self.root.resolve())
                     if command[0] == "deploy":
                         self.assertEqual(observed[0]["arguments"], ["review", "other"])
                         self.assertEqual(targets["agents"], ["claude-code", "codex"])
@@ -209,7 +209,7 @@ class CLIContractTests(unittest.TestCase):
                         finally:
                             os.close(slave)
                             os.close(master)
-                    self.assertEqual(observed[0]["deployment"]["project"], str(self.root / "code/app"))
+                    self.assertEqual(Path(observed[0]["deployment"]["project"]).resolve(), (self.root / "code/app").resolve())
                 finally:
                     finish()
 

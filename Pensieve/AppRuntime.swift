@@ -34,6 +34,7 @@ final class AppRuntime {
     private(set) var launchWorkCompleted = false
     private(set) var storeQuarantined = false
     private(set) var updateCheckInFlight = false
+    @ObservationIgnored private(set) var updateCheckTask: Task<Void, Never>?
     private(set) var updateCheckError: String?
     private(set) var updateCheckAlertError: String?
     private var automaticUpdateRetryDeferred = false
@@ -369,10 +370,9 @@ extension AppRuntime {
         updateCheckInFlight = true
         updateCheckError = nil
         if showsFailureAlert { updateCheckAlertError = nil }
-
         let container = container
         let operation = updateCheckOperation
-        Task { [weak self] in
+        updateCheckTask = Task { [weak self] in
             guard let self else { return }
             let completed = await executeUpdateCheck(operation, container: container,
                 classifyFailure: gitState.failureClassifier(), apply: updateCheckApply)
@@ -389,9 +389,9 @@ extension AppRuntime {
                 recordUpdateCheckFailure(error, showsAlert: showsFailureAlert)
             }
             updateCheckInFlight = false
+            updateCheckTask = nil
         }
     }
-
     private func recordUpdateCheckFailure(_ error: Error, showsAlert: Bool) {
         let message = DisplayTextSanitizer.singleLine(SkillProvenanceViewModel.readable(error))
         updateCheckError = message

@@ -66,6 +66,7 @@ extension CLILibraryHandlerTests {
         }
         let removal = try await h.run(["project", "remove", folder], exit: 5)
         XCTAssertTrue(removal.next?.first?.contains("'" + folder + "'") == true)
+        try await assertPromptFailureCleanup(h)
     }
 
     func testBuiltProjectSaveFailureUsesRealReadOnlyStore() async throws {

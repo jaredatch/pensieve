@@ -10,7 +10,14 @@ struct SkillUpdatePlan {
 
 extension UpdateCheckService {
     /// Check the same remote heads and trees as Check Now without persisting check flags or cursors.
-    func planUpdates(slugs: Set<String>, context: ModelContext) throws -> [SkillUpdatePlan] {
+    func planUpdates(slugs: Set<String>, context: ModelContext,
+                     verify: ([SkillUpdatePlan], [UUID: String]) throws -> Void) throws -> [SkillUpdatePlan] {
+        var checkouts: [UUID: String] = [:]
+        defer {
+            for checkout in Set(checkouts.values) {
+                try? fileService.deleteDirectory(at: (checkout as NSString).deletingLastPathComponent)
+            }
+        }
         let skills = try context.fetch(FetchDescriptor<Skill>()).filter { slugs.contains($0.directoryName) }
         var batches: [BatchKey: [Snapshot]] = [:]
         for skill in skills {
@@ -30,7 +37,9 @@ extension UpdateCheckService {
             }
             let diagnostics = UpdateBatchDiagnostics(probe: { try gitService.probeUsability() })
             let (date, trees) = try readMovedHead(key: key, head: head, snapshots: snapshots,
-                credential: credential, diagnostics: diagnostics)
+                credential: credential, diagnostics: diagnostics, retainingCheckout: { checkout in
+                    for snapshot in snapshots { checkouts[snapshot.id] = checkout }
+                })
             for (snapshot, treeResult) in trees {
                 let tree = try treeResult.get()
                 guard let skill = skills.first(where: { $0.id == snapshot.id }) else {
@@ -49,7 +58,9 @@ extension UpdateCheckService {
                     update: tree == snapshot.origin.installedTree ? nil : try PinnedSkillUpdate(skill: proposed)))
             }
         }
-        return plans.sorted { $0.slug < $1.slug }
+        let sorted = plans.sorted { $0.slug < $1.slug }
+        try verify(sorted, checkouts)
+        return sorted
     }
 }
 

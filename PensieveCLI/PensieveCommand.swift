@@ -1,9 +1,15 @@
 import ArgumentParser
+import Darwin
+import Foundation
 
 struct OutputOptions: ParsableArguments {
     @Flag(help: "Print one versioned JSON envelope.") var json = false
     @Flag(help: "Disable interactive prompts (also PENSIEVE_NO_INPUT=1).") var noInput = false
     @Option(help: "Read state and connect in an alternate App Support folder.") var appSupport: String?
+
+    var canPrompt: Bool {
+        isatty(STDIN_FILENO) != 0 && !noInput && ProcessInfo.processInfo.environment["PENSIEVE_NO_INPUT"] != "1"
+    }
 }
 
 protocol ReadCommand: ParsableCommand {

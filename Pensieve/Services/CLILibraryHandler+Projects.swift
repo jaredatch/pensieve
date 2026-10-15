@@ -72,8 +72,11 @@ extension CLILibraryHandler {
     }
     private func removalValue(_ project: Project, plan: ProjectRemovalPlan) throws -> CLIValue {
         let preview = plan.preview
-        let intents = try context.fetch(FetchDescriptor<MachineDeployIntent>())
-            .filter { project.identityKey != nil && $0.projectKey == project.identityKey }.map(\.key).sorted()
+        let intents: [String]
+        if let key = project.identityKey {
+            intents = try context.fetch(FetchDescriptor<MachineDeployIntent>(
+                predicate: #Predicate { $0.projectKey == key })).map(\.key).sorted()
+        } else { intents = [] }
         return .object(["project": projectValue(project), "artifactCount": .number(preview.artifactCount),
             "message": .string(preview.message), "waitingRemovals": .bool(preview.hasWaitingRemovals),
             "intents": .array(intents.map(CLIValue.string)), "sharedIdentity": .bool(plan.hasIdentitySibling),
