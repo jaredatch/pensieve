@@ -494,7 +494,7 @@ interpose_poll __attribute__((section("__DATA,__interpose"))) = { (void *)expire
         root = self.run_cli("commands")["data"]["command"]
         commands = {command["commandName"]: command for command in root["subcommands"]}
         expected = {"skill", "skills", "agent", "machine", "project", "deployment", "deployed", "status", "log",
-                    "commands", "completion", "version", "help", "deploy", "undeploy", "sync", "install"}
+                    "commands", "completion", "version", "help", "deploy", "undeploy", "sync", "install", "doctor"}
         self.assertEqual(set(commands), expected)
         skill_commands = {command["commandName"]: command for command in commands["skill"]["subcommands"]}
         self.assertIn("ls", skill_commands["list"]["aliases"])

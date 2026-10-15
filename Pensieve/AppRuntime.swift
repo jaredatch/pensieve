@@ -24,10 +24,8 @@ final class AppRuntime {
     let machineObservability: MachineObservabilityDependencies
     @ObservationIgnored private(set) lazy var deployMutations: DeployMutationServicing = makeDeployMutations()
     let reconcileIntent: @MainActor (ModelContext) -> BatchResult
-
     private(set) var coordinator: SyncCoordinator?
     private(set) var launchWorkInvocationCount = 0
-
     /// True after the launch attempt reaches a terminal outcome, including unreadable/quarantined stores,
     /// and initial callbacks and watcher startup finish. A deferred ingest waits for its retry.
     /// Coordinator signaling and any backfill deferred to a later sync cycle are separate.
@@ -50,6 +48,8 @@ final class AppRuntime {
     private let now: () -> Date
     private let launchIngestRetryNanoseconds: UInt64
     private let launchIngestLockPath: String
+    @ObservationIgnored private(set) lazy var commandLineSettings = paths.makeCommandLineSettings()
+    @ObservationIgnored private(set) lazy var bundledSkill = makeBundledSkillModel()
     /// Where the store and App Support live; every collaborator built here is pointed at them (`AppRuntime+Paths.swift`).
     let paths: AppRuntimePaths
     private var didAskLaunchImportWizard = false

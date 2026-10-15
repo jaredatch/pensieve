@@ -9,6 +9,7 @@ extension AppRuntime {
 
     /// Starts process work independently of scene presentation. Repeated starts join the one launch.
     func start() {
+        Task { await commandLineSettings.repairAtLaunch() }
         Task { await performLaunchWorkIfNeeded(context: container.mainContext) }
     }
 

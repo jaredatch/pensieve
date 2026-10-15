@@ -2,6 +2,10 @@ import Foundation
 import Darwin
 import MachO
 
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--manage-command-link" {
+    exit(CommandLinkHelper.run(CommandLine.arguments[2], files: FileService()))
+}
+
 // Ctrl-C ends only the client; an admitted app operation continues.
 signal(SIGINT, SIG_IGN)
 let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
@@ -18,7 +22,8 @@ guard _NSGetExecutablePath(&executablePath, &executableSize) == 0 else {
 }
 Thread {
     exit(CLIEntry.run(arguments: Array(CommandLine.arguments.dropFirst()),
-        appSupport: PathConstants.pensieveAppSupportDir, executable: String(cString: executablePath)))
+        appSupport: PathConstants.pensieveAppSupportDir, executable: String(cString: executablePath),
+        home: PathConstants.homeDirectory))
 }.start()
 // NSWorkspace delivers launch callbacks while the CLI worker waits for readiness.
 dispatchMain()

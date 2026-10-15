@@ -141,6 +141,8 @@ targets:
       - path: Pensieve/Services/GitServiceHistory.swift
       - path: Pensieve/Services/GitServiceConflict.swift
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+CommandLink.swift
+      - path: Pensieve/Services/FileService+Types.swift
       - path: Pensieve/Services/FileService+Socket.swift
       - path: Pensieve/Services/SocketTransport.swift
       - path: Pensieve/Services/FileService+Publication.swift
@@ -177,6 +179,8 @@ targets:
     sources:
       - path: PensieveDaemon
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+CommandLink.swift
+      - path: Pensieve/Services/FileService+Types.swift
       - path: Pensieve/Services/FileService+Socket.swift
       - path: Pensieve/Services/SocketTransport.swift
       - path: Pensieve/Services/FileService+Publication.swift
@@ -259,6 +263,8 @@ targets:
       - path: Pensieve/Services/CLIAppLauncher.swift
       - path: Pensieve/Services/CLIDesktopSession.swift
       - path: Pensieve/Services/FileService.swift
+      - path: Pensieve/Services/FileService+CommandLink.swift
+      - path: Pensieve/Services/FileService+Types.swift
       - path: Pensieve/Services/FileService+Socket.swift
       - path: Pensieve/Services/FileService+Publication.swift
       - path: Pensieve/Services/VendorTemporaryDirectory.swift

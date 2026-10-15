@@ -22,7 +22,7 @@ struct PensieveCommand: ParsableCommand {
         subcommands: [DeployCommand.self, UndeployCommand.self, SyncCommand.self, InstallCommand.self,
                       SkillCommand.self, SkillsCommand.self, AgentCommand.self, MachineCommand.self,
                       ProjectCommand.self, DeploymentCommand.self, DeployedCommand.self, StatusCommand.self,
-                      LogCommand.self, CommandsCommand.self, CompletionCommand.self, VersionCommand.self])
+                      LogCommand.self, DoctorCommand.self, CommandsCommand.self, CompletionCommand.self, VersionCommand.self])
     @OptionGroup var output: OutputOptions
 }
 

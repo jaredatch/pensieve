@@ -94,6 +94,20 @@ final class FileServiceAdmissionTests: XCTestCase {
         XCTAssertEqual(try files.listDirectory(at: root), ["source"])
     }
 
+    func testDirectoryAdmissionClosesAbsoluteAndRelativeDescriptorsOnExec() throws {
+        try files.createDirectory(at: root + "/child")
+        let parent = try FileService.openDirectory(at: root)
+        defer { close(parent) }
+        let child = try FileService.openDirectory(at: "child", relativeTo: parent,
+                                                 reportingPath: root + "/child", operation: "openat")
+        defer { close(child) }
+        for descriptor in [parent, child] {
+            let flags = fcntl(descriptor, F_GETFD)
+            XCTAssertGreaterThanOrEqual(flags, 0)
+            XCTAssertNotEqual(flags & FD_CLOEXEC, 0, "Directory handles must not survive exec in a child")
+        }
+    }
+
     /// Audit every direct no-follow open/openat in app and daemon sources, including nested argument calls.
     /// Only flags containing O_DIRECTORY exempt an open from regular-file admission. Standalone
     /// comments are ignored; aliases and computed flags remain outside this textual audit.

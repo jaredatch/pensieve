@@ -366,7 +366,7 @@ Each installation has a canonical UUID in app support. Its single-writer `machin
 
 ---
 
-## Command line reads
+## Command line
 
 The app bundles `pensieve` in `Contents/Helpers`. The Homebrew cask links that binary
 onto PATH. It accepts `skill list` (`skill ls`, `skills`), `skill show <slug> [--content]`,
@@ -374,9 +374,20 @@ onto PATH. It accepts `skill list` (`skill ls`, `skills`), `skill show <slug> [-
 `log [--lines <n>]`, `commands`, `completion <bash|zsh|fish>` and `version` (`--version`).
 A bare noun shows help. Commands require their full names.
 
+`deploy`, `undeploy`, `sync`, `install`, `skill outdated`, `skill update`, `skill delete`,
+`project add` and `project remove` use the app’s library and deployment services.
+Writes that change the library, deployments or projects support `--dry-run`.
+Install, update, delete and project removal ask for confirmation; off a terminal
+those commands require `--yes`.
+
+`doctor` checks the reachable app and its identity, socket, command entries on PATH,
+git availability and the six agents’ folders. It reports each check with a hint,
+returns JSON with `--json`, and exits 1 if a check fails. It does not launch the app.
+
 Library reads query the running app through its per-user, bundle-specific socket.
 The client refuses a different app path or protocol before sending a command.
-An unavailable app exits 3. Status, log and deployments share the daemon's disk
+The CLI starts its containing app in the background when needed. If it cannot
+reach that app, it exits 3. Status, log and deployments share the daemon's disk
 readers and work without the app; absent or unreadable state exits 2.
 `skill show` omits content unless `--content` is explicit.
 
@@ -444,6 +455,23 @@ Add Skill from GitHub…, Check All Skills for Updates, and Check for Updates…
 - Machine display name
 - Launch at login, background sync, and beta-update toggles
 - **Skill Updates:** Off, Daily, or Weekly (default Weekly) schedules detection on launch/foreground. Check Now runs against every installed skill immediately, even when the schedule is Off; File › Check All Skills for Updates does the same. Detection never applies an update.
+
+The Command Line section sits below Skill Updates. Install… links this app’s
+command into `/usr/local/bin/pensieve` after an administrator prompt, creating
+`/usr/local/bin` if needed. It refuses foreign files and links, and checks the
+parent folders before asking for permission. The authorized operation rechecks
+the destination before changing it. Uninstall… removes only the inspected
+Pensieve link. Cancelling the prompt leaves it alone.
+
+Settings recognizes Homebrew’s installed link and offers no second install.
+A launch repairs a link into a removed app when ordinary permissions allow it.
+Otherwise Settings shows the broken link and offers Repair…, which asks for
+administrator permission and replaces only that dangling Pensieve link.
+
+Add to Library imports the bundled `pensieve` skill. It deploys from the library
+like any other skill. When the bundle changes, Update replaces an unedited copy;
+Replace… asks before discarding saved edits. An unsaved editor draft must be
+saved or discarded first.
 
 **Platforms tab:**
 - One skill-size budget, default 5,000 tokens, for the `SKILL.md` body. Overview warnings apply only to local deployments and never block a deploy.

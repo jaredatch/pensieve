@@ -84,6 +84,7 @@ struct GeneralSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
+            CommandLineSettingsSection()
         }
         .formStyle(.grouped)
         .padding()

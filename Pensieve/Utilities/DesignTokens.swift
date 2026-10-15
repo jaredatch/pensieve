@@ -3,6 +3,9 @@ import SwiftUI
 /// Measured values from the Skills detail frames and rendered Markdown reference. Keep surfaces on these role tokens
 /// instead of mapping Sketch style names back to SwiftUI's fixed text styles.
 enum DesignTokens {
+    /// Signed-off General rows are 52 pt including the grouped Form’s vertical insets.
+    static let commandLineRowContentHeight: CGFloat = 36
+
     // MARK: - Rendered Markdown
 
     /// Primer Markdown CSS at a 13 pt body (#111). Pixel lengths scale by 13/16; lengths within

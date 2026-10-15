@@ -13,6 +13,14 @@ import unittest
 class CLISkillTests(unittest.TestCase):
     binary = None
 
+    def test_public_docs_explain_command_and_installation(self):
+        root = Path(__file__).resolve().parent.parent
+        for name in ["README.md", "CHANGELOG.md", "docs/SPEC.md"]:
+            with self.subTest(document=name):
+                prose = (root / name).read_text().lower()
+                for term in ["pensieve", "doctor", "settings", "install", "homebrew"]:
+                    self.assertIn(term, prose, f"{name} must describe command setup ({term})")
+
     def test_eval_commands_and_flags_exist_in_built_cli(self):
         source = Path(__file__).resolve().parent.parent / "skills/pensieve-evals.json"
         evals = json.loads(source.read_text())["evals"]
