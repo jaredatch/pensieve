@@ -34,7 +34,7 @@ targets:
         SUPublicEDKey: HibOcVcc/1MTA9UQHp4cIb7qMewKaA0elSCSQ0DY8Ns=
     sources:
       - path: Pensieve
-      - path: skills
+      - path: skills/pensieve
         type: folder
         buildPhase: resources
     postBuildScripts:

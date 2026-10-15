@@ -980,7 +980,6 @@
 		D67F5767C09EAFC043A780CC /* SyncAuthentication.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1D372AD73E3F5A9FE5198B0 /* SyncAuthentication.swift */; };
 		D690EC48C314F6DC5AD9A554 /* SyncModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16E690AD0D896E2742EC44CC /* SyncModelTests.swift */; };
 		D6A4DAF20EBCE81F15E59380 /* MachineListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFBB404F459408401D3DE217 /* MachineListView.swift */; };
-		D6B8F6486BC3954E1C096FCE /* skills in Resources */ = {isa = PBXBuildFile; fileRef = 3C2101194E99C2821B3D1B1B /* skills */; };
 		D6D31CEBD306A5426D98D448 /* GitService+ThreadGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1F9534F1CE5A282537C4BD /* GitService+ThreadGuard.swift */; };
 		D73554882376579F7535A194 /* PlatformMarkTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD56DE83E167F6DF78924E39 /* PlatformMarkTile.swift */; };
 		D7408CB15F45E3FE2812C48A /* UpstreamHistorySequenceFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57124D76980CBAAEC47EA0BB /* UpstreamHistorySequenceFixture.swift */; };
@@ -1158,6 +1157,7 @@
 		FA97AB17D47C1B0BAE83EEE5 /* ManifestDeployIntentWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CA8D283F6493072A5AC35FF /* ManifestDeployIntentWriterTests.swift */; };
 		FAB403900F77F6CCE657A376 /* SkillPreviewBudgetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1FDE32CB9A748D8B54D49C5 /* SkillPreviewBudgetTests.swift */; };
 		FAEC04B14375FB2176C3C989 /* ViewChangesFileHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = F13E836C9D575CD092268A18 /* ViewChangesFileHeader.swift */; };
+		FB32EB4B8CC75861140BBB51 /* pensieve in Resources */ = {isa = PBXBuildFile; fileRef = 4E09038F62E99D70E826779E /* pensieve */; };
 		FBB3B8D483E1482A75782F44 /* VendorTemporaryDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 281D38DC513CA0C26676E423 /* VendorTemporaryDirectory.swift */; };
 		FBED5D50EDD290BCFAB27CBE /* TestWait+Signal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47857C236BFF248451D992AA /* TestWait+Signal.swift */; };
 		FC0846A1F2F109D17EBC2ED9 /* TokenCounterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05EBB77387B8F038939B931F /* TokenCounterTests.swift */; };
@@ -1486,7 +1486,6 @@
 		3BE51FD03086ED95DE2D0304 /* GitService+UpstreamHistoryLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GitService+UpstreamHistoryLog.swift"; sourceTree = "<group>"; };
 		3BEC96AF3395906E9777F094 /* CLILibraryHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLILibraryHandlerTests.swift; sourceTree = "<group>"; };
 		3C18C81019A07587ACB012D2 /* ProjectRemovalLocalityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectRemovalLocalityTests.swift; sourceTree = "<group>"; };
-		3C2101194E99C2821B3D1B1B /* skills */ = {isa = PBXFileReference; lastKnownFileType = folder; path = skills; sourceTree = SOURCE_ROOT; };
 		3C2480E9AC6E955A398EEA9D /* SkillInstallServiceCredentialTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallServiceCredentialTests.swift; sourceTree = "<group>"; };
 		3C2B6E0FD30553B42684CBC0 /* libyaml-license.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "libyaml-license.txt"; sourceTree = "<group>"; };
 		3C35CBA9DB9C93C5BE7E6AF4 /* UpdateCheckServiceTests+Environment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UpdateCheckServiceTests+Environment.swift"; sourceTree = "<group>"; };
@@ -1569,6 +1568,7 @@
 		4D5F8450BBA6424B3D571951 /* EditorNavigationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorNavigationPolicy.swift; sourceTree = "<group>"; };
 		4D7784CFBC990F26032A7D34 /* SkillLibraryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillLibraryViewModel.swift; sourceTree = "<group>"; };
 		4DADB85D81F03E7F83732AD0 /* GitHubCredentialSettingsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubCredentialSettingsModel.swift; sourceTree = "<group>"; };
+		4E09038F62E99D70E826779E /* pensieve */ = {isa = PBXFileReference; lastKnownFileType = folder; name = pensieve; path = skills/pensieve; sourceTree = SOURCE_ROOT; };
 		4E3167373710EA541733F04D /* SkillFrontmatterTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillFrontmatterTable.swift; sourceTree = "<group>"; };
 		4E4A3890EA648513D5D3C460 /* SkillDetailTabResetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDetailTabResetTests.swift; sourceTree = "<group>"; };
 		4E5D618B7956A6FE43E6A93E /* SkillInstallCrashWindowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillInstallCrashWindowTests.swift; sourceTree = "<group>"; };
@@ -2556,7 +2556,7 @@
 				2847A91E0A737DEE7EBA5FBF /* PensieveCLI */,
 				BAE86446D4D5AAD496B5462F /* PensieveDaemon */,
 				BF9C0E4105F21D12D8FD02DB /* PensieveTests */,
-				3C2101194E99C2821B3D1B1B /* skills */,
+				4E09038F62E99D70E826779E /* pensieve */,
 				17A2CA5FF5EB3D12537A1AB7 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -3772,7 +3772,7 @@
 				AF083D1AF0A409449913472B /* Pensieve.icon in Resources */,
 				E43BB3B9FAE657A16E0CFE58 /* editor.bundle.js in Resources */,
 				A2B698960EEBD5C4F87BF455 /* index.html in Resources */,
-				D6B8F6486BC3954E1C096FCE /* skills in Resources */,
+				FB32EB4B8CC75861140BBB51 /* pensieve in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

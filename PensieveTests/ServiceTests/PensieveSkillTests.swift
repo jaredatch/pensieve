@@ -14,28 +14,24 @@ final class PensieveSkillTests: XCTestCase {
         XCTAssertTrue(parsed.hasRequiredFrontmatter)
         XCTAssertEqual(parsed.name, "pensieve")
         let description = try XCTUnwrap(parsed.description)
-        for trigger in ["deploying", "installing", "removing", "skills", "Claude Code", "Grok", "Cursor",
+        for trigger in ["deploying", "installing", "updating", "removing", "skills", "Claude Code", "Grok", "Cursor",
                         "Codex", "OpenClaw", "Hermes", "projects", "another Mac"] {
             XCTAssertTrue(description.contains(trigger), "Missing discovery trigger: \(trigger)")
         }
 
-        // These are the shipped prompt's policy clauses, not a CLI inventory. Removing a clause
-        // must fail even when the same flag still appears in an example or another rule.
+        // Short policy phrases allow surrounding prose to change. A manual eval owns
+        // meaning; this guard catches a dropped rule without pinning whole sentences.
         let body = parsed.body.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         let rules = [
-            "Start with `pensieve commands --json`; use `pensieve <command> --help --json`",
-            "Always pass `--json`. Read `ok`, `changed`, `error.code` and the exit code.",
-            "Look names up before using them with `skill list`, `agent list`, `machine list` and `project list`",
-            "Never guess a name or choose between ambiguous matches.",
-            "Never write into `~/.claude/skills` or any other agent's folder directly.",
-            "Run `--dry-run` before a broad change. Use `-a '*'` only when the person says \"all\".",
-            "Before `install`, `skill update`, `skill delete` or `project remove`, show the person the dry run "
-                + "and ask for approval. Pass `--yes` only after they agree.",
-            "Keep that preview's `confirmationToken` in `--confirm-plan` when applying it.",
-            "Retry only when `error.retryable` is true.",
-            "Report what changed.",
-            "it lands on that Mac's next sync after this Mac pushes.",
-            "If `pensieve` isn't on the PATH, use the absolute path inside the intended app:",
+            "For a known command", "`pensieve <command> --help --json`",
+            "`pensieve commands --json` only to find an unfamiliar command",
+            "Always pass `--json`", "Look names up", "Never guess",
+            "Never write into `~/.claude/skills`",
+            "`--dry-run` before a broad change", "`-a '*'` only when the person says \"all\"",
+            "ask for approval", "`--yes` only after they agree",
+            "`confirmationToken` in `--confirm-plan`",
+            "Retry only when `error.retryable` is true", "Report what changed",
+            "next sync after this Mac pushes", "absolute path inside the intended app",
             "`/Applications/Pensieve.app/Contents/Helpers/pensieve`"
         ]
         for rule in rules {
@@ -45,14 +41,14 @@ final class PensieveSkillTests: XCTestCase {
 
     func testBuiltAppContainsTheDistributableSkillAndEvals() throws {
         let resources = try XCTUnwrap(Bundle.main.resourceURL)
-        let bundled = resources.appendingPathComponent("skills/pensieve")
+        let bundled = resources.appendingPathComponent("pensieve")
         let files = FileService()
-        for name in ["SKILL.md", "evals.json"] {
-            let path = bundled.appendingPathComponent(name).path
-            XCTAssertTrue(files.fileExists(at: path), "Built app is missing skills/pensieve/\(name)")
-            XCTAssertEqual(try files.readData(at: path),
-                           try files.readData(at: skillDirectory.appendingPathComponent(name).path),
-                           "Bundled \(name) must match the distributed skill")
-        }
+        let path = bundled.appendingPathComponent("SKILL.md").path
+        XCTAssertTrue(files.fileExists(at: path), "Built app is missing pensieve/SKILL.md")
+        XCTAssertEqual(try files.listDirectory(at: bundled.path).sorted(), ["SKILL.md"],
+                       "Bundled skill folder must contain only SKILL.md")
+        XCTAssertEqual(try files.readData(at: path),
+                       try files.readData(at: skillDirectory.appendingPathComponent("SKILL.md").path),
+                       "Bundled SKILL.md must match the distributed skill")
     }
 }
