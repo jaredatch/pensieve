@@ -1,4 +1,4 @@
-"""Check shipped eval commands against the built CLI's own discovery response."""
+"""Check shipped eval commands against the built CLI's discovery and validation."""
 import json
 import os
 from pathlib import Path
@@ -17,8 +17,7 @@ class CLISkillTests(unittest.TestCase):
         self.assertTrue(evals, "The skill must ship nonempty evals")
         self.assertEqual(len({case["id"] for case in evals}), len(evals), "Eval IDs must be unique")
         with tempfile.TemporaryDirectory(prefix="skill-evals-") as home:
-            # Only discovery runs. Expected writes are parsed as data, never executed. A fake
-            # home also prevents auto-launch if a future change accidentally requests app data.
+            # Discovery needs no app. Command acceptance below also isolates App Support.
             result = subprocess.run([str(self.binary), "commands", "--json"],
                 env=dict(os.environ, HOME=home, CFFIXED_USER_HOME=home), cwd=home,
                 text=True, capture_output=True, timeout=15)
@@ -34,11 +33,22 @@ class CLISkillTests(unittest.TestCase):
                 with self.subTest(eval=case["id"], command=step["run"]):
                     self.check_command(step["run"], catalog)
 
+        # Known commands and flags can still violate the CLI's validation rules.
+        for command in [
+            "pensieve deploy review -m {mini_id} --json",
+            "pensieve deploy review -a claude -g -p . --json",
+            "pensieve install {repository_url} --rename --skip --json",
+        ]:
+            with self.subTest(rejected_command=command):
+                with self.assertRaisesRegex(AssertionError,
+                                            "Built CLI rejected eval command.*exit=64, error=usage"):
+                    self.check_command(command, catalog)
+
     def check_command(self, command, catalog):
-        """Validate eval syntax from discovery, without a second command/flag inventory.
+        """Use discovery for diagnostics, then require the binary to accept the command.
 
         Eval examples use separate option values and canonical command-first spelling.
-        This is not a shell runner or a replacement for the CLI's semantic validation.
+        The CLI's parser and validation run, but no app is available to handle requests.
         """
         tokens = shlex.split(command)
         self.assertTrue(tokens, "Empty eval command")
@@ -85,3 +95,32 @@ class CLISkillTests(unittest.TestCase):
         self.assertGreaterEqual(len(values), minimum, "Missing eval positional argument")
         if not any(item.get("isRepeating", False) for item in positionals):
             self.assertLessEqual(len(values), len(positionals), "Unexpected eval positional argument")
+
+        with tempfile.TemporaryDirectory(prefix="skill-eval-") as home:
+            support = Path(home) / "support"
+            support.mkdir()
+            project = Path(home) / "Demo project"
+            project.mkdir()
+            placeholders = {
+                "mini_id": "11111111-2222-4333-8444-555555555555",
+                "repository_url": "https://github.com/example/skills",
+                "confirmation_token": "0123456789abcdef" * 4,
+                "project_path": str(project),
+            }
+            # Substitute after tokenizing so a quoted path remains one argument. Unknown
+            # placeholders fail here instead of silently testing a literal brace string.
+            arguments = [token.format_map(placeholders) for token in shlex.split(command)[1:]]
+            self.assertNotIn("--app-support", arguments, "Evals cannot override the isolated App Support")
+            end = arguments.index("--") if "--" in arguments else len(arguments)
+            arguments[end:end] = ["--app-support", str(support)]
+            # An empty, unique support folder has no socket. Its explicit override disables
+            # auto-launch, so even accepted install/deploy commands cannot reach an app.
+            result = subprocess.run([str(self.binary), *arguments],
+                env=dict(os.environ, HOME=home, CFFIXED_USER_HOME=home, PENSIEVE_NO_INPUT="1"),
+                cwd=project, stdin=subprocess.DEVNULL, text=True, capture_output=True, timeout=15)
+        envelope = json.loads(result.stdout)
+        error = (envelope.get("error") or {}).get("code")
+        self.assertEqual((result.returncode, error), (3, "app_unavailable"),
+                         f"Built CLI rejected eval command {command!r}: exit={result.returncode}, "
+                         f"error={error}; stdout={result.stdout!r}; stderr={result.stderr!r}")
+        self.assertFalse(envelope["ok"], envelope)
