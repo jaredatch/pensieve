@@ -103,10 +103,6 @@ final class SkillLibraryViewModel {
     private(set) var launchIngestPending = false
     var deletionNotice: DeletionNotice?
 
-    /// Filled when the synchronous deletion flow settles, before queued save callbacks can run.
-    final class DeletionPresentation {
-        var notice: DeletionNotice?
-    }
     init(
         skillStore: SkillStoreProtocol,
         fileService: FileServiceProtocol? = nil,
@@ -128,10 +124,11 @@ final class SkillLibraryViewModel {
     }
     // MARK: - CRUD
     func regenerateManifest(_ change: ManifestChange, context: ModelContext,
-                            completion: ((Error?) -> Void)? = nil) {
+                            showsFailure: Bool = true, completion: ((Error?) -> Void)? = nil) {
         manifestSaves?.submit(change, context: context) { [weak self] failure in
-            guard let self else { return }
+            guard let self else { completion?(failure); return }
             if let failure {
+                guard showsFailure else { completion?(failure); return }
                 let message: String
                 if case ManifestSaveError.rebuildFailed = failure {
                     message = failure.localizedDescription
@@ -217,7 +214,7 @@ extension SkillLibraryViewModel {
                 if readable { pendingRowCleanup.remove(skill.id) }
                 let detail = readable ? "the skill's files are present"
                     : (entryPresent == true ? "the skill's entry is still present" : "couldn't verify the entry is gone")
-                self.error = "Failed to delete skill: \(detail)"
+                reportDeletionError("Failed to delete skill: \(detail)", to: presentation)
                 return .retainedDirectoryDeleteFailed(detail)
             }
         }
@@ -234,7 +231,7 @@ extension SkillLibraryViewModel {
             if !filesGone {
                 if readable { pendingRowCleanup.remove(skill.id) }
                 let detail = error.localizedDescription
-                self.error = "Failed to delete skill: \(detail)"
+                reportDeletionError("Failed to delete skill: \(detail)", to: presentation)
                 return .retainedDirectoryDeleteFailed(detail)
             }
         }
@@ -242,7 +239,7 @@ extension SkillLibraryViewModel {
             let reappeared = hasReadableSkillFile(skill.directoryName)
             if reappeared || (try? skillStore.slugEntryExists(skill.directoryName)) != false {
                 if reappeared { pendingRowCleanup.remove(skill.id) }   // a readable regular file always lifts
-                self.error = "Failed to delete skill: the skill's files reappeared"
+                reportDeletionError("Failed to delete skill: the skill's files reappeared", to: presentation)
                 return .retainedDirectoryDeleteFailed("the skill's files reappeared")
             }
         }
@@ -259,17 +256,18 @@ extension SkillLibraryViewModel {
             let detail = error.localizedDescription
             pendingRowCleanup.insert(skill.id)
             reloadToken &+= 1
-            self.error = "Removed the skill's files, but couldn't save the library change: \(detail)"
+            reportDeletionError("Removed the skill's files, but couldn't save the library change: \(detail)", to: presentation)
             return .directoryDeletedRowRetained(detail)
         }
         pendingRowCleanup.remove(skill.id)
-        self.error = nil
+        reportDeletionError(nil, to: presentation)
         return queueDeletedSkill(slug: deletedSlug, name: deletedName, context: context, presentation: presentation)
     }
 
     private func queueDeletedSkill(slug: String, name: String, context: ModelContext,
                                    presentation: DeletionPresentation) -> SkillDeletionResult {
-        regenerateManifest(.deleteSkill(slug), context: context) { [weak self] failure in
+        regenerateManifest(.deleteSkill(slug), context: context,
+            showsFailure: presentation.presentsInWindow) { [weak self] failure in
             guard let self, let failure else { return }
             let detail: String
             let title: String
@@ -281,7 +279,8 @@ extension SkillLibraryViewModel {
                 title = "Skill deleted, but sync wasn't updated"
             }
             let notice = presentation.notice?.message ?? "Deleted “\(name)”."
-            self.deletionNotice = .failed(notice + " " + detail, title: title)
+            presentation.notice = .failed(notice + " " + detail, title: title)
+            if presentation.presentsInWindow { self.deletionNotice = presentation.notice }
         }
         return .deleted
     }

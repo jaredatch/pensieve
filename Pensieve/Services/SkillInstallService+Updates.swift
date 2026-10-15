@@ -84,13 +84,14 @@ enum SkillUpdateFlowError: LocalizedError, Equatable {
 extension SkillInstallService {
     /// Reads both diff sides only after the fresh checkout matches the pinned commit and tree.
     /// The operation writes scratch clone data only; it never touches the store, manifest, or flags.
-    func previewUpdate(_ update: PinnedSkillUpdate) throws -> PinnedSkillDiff {
+    func previewUpdate(_ update: PinnedSkillUpdate, checkout: String? = nil) throws -> PinnedSkillDiff {
         var upstreamRoot: String?
         do {
             return try withPinnedCheckout(
                 candidate: update.candidate,
                 source: update.source,
-                credential: nil
+                credential: nil,
+                checkout: checkout
             ) { checkout in
                 guard let localDirectory = SkillStore.safeSkillDirectory(
                     slug: update.existingSlug,

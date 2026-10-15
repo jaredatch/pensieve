@@ -180,7 +180,7 @@ final class AddProjectModelTests: XCTestCase {
         XCTAssertEqual(model.identityMessage, "Marker will be created on Add")
         XCTAssertFalse(files.fileExists(at: valid + "/.pensieve-project"))
         let project = try XCTUnwrap(model.makeProject())
-        registerProject(project, context: context)
+        try registerProject(project, context: context)
         XCTAssertEqual(try context.fetchCount(FetchDescriptor<Project>()), 1)
         XCTAssertEqual(project.path, valid)
         XCTAssertEqual(project.identityKind, "marker")

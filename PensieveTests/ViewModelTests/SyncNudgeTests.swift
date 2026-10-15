@@ -90,7 +90,7 @@ final class SyncNudgeTests: XCTestCase {
     func testProjectRegistrationNudges() throws {
         let context = try makeContext()
         let counter = Counter()
-        _ = registerProject(
+        _ = try registerProject(
             Project(name: "App", path: tempDir + "/app"),
             context: context,
             notifier: counter.notify
@@ -211,7 +211,7 @@ final class SyncNudgeTests: XCTestCase {
         let store = CategoryStore( notifier: counter.notify)
         let project = Project(name: "App", path: tempDir + "/app")
         project.identityKey = "github.com/example/app"
-        registerProject(project, context: context, notifier: counter.notify)
+        try registerProject(project, context: context, notifier: counter.notify)
         let category = try XCTUnwrap(store.create(name: "Rules", context: context))
         store.setProject(project, inCategory: category, member: true, context: context)
         counter.reset()
@@ -270,7 +270,7 @@ extension SyncNudgeTests {
         let store = CategoryStore( notifier: counter.notify)
         let project = Project(name: "App", path: tempDir + "/app")
         project.identityKey = "github.com/example/app"
-        registerProject(project, context: context, notifier: counter.notify)
+        try registerProject(project, context: context, notifier: counter.notify)
         let category = try XCTUnwrap(store.create(name: "Rules", context: context))
         store.setProject(project, inCategory: category, member: true, context: context)
         context.insert(MachineDeployIntent(machineID: ProjectIntentHarness.localID,

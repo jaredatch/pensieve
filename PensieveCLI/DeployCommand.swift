@@ -22,8 +22,7 @@ struct DeployOptions: ParsableArguments {
         var project = project
         var global = global
         if !global && project == nil {
-            guard isatty(STDIN_FILENO) != 0, !output.noInput,
-                  ProcessInfo.processInfo.environment["PENSIEVE_NO_INPUT"] != "1" else {
+            guard output.canPrompt else {
                 throw ValidationError("Choose an explicit scope: -g for this Mac, or -p <project>.")
             }
             FileHandle.standardError.write(Data("Scope: enter g for user-wide, or a registered project name/path: ".utf8))

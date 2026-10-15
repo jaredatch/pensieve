@@ -8,10 +8,13 @@ enum SkillDeletionFlow {
         platformVM: PlatformViewModel,
         projects: [Project],
         context: ModelContext,
-        persist: (ModelContext) throws -> Void = { try $0.save() }
+        persist: (ModelContext) throws -> Void = { try $0.save() },
+        reportChanges: (Bool) -> Void = { _ in },
+        presentation: SkillLibraryViewModel.DeletionPresentation = .init()
     ) -> Bool {
+        defer { if presentation.presentsInWindow { library.deletionNotice = presentation.notice } }
         guard !library.libraryUnavailable else {
-            library.deletionNotice = .failed(
+            presentation.notice = .failed(
                 "Pensieve couldn't read the skill library, so nothing was changed. Relaunch and try again.")
             return false
         }
@@ -20,38 +23,39 @@ enum SkillDeletionFlow {
             try platformVM.localSkillProjectDeployEvidence(skill: skill, projects: projects, context: context)
         })
         var retirementSaved = false
+        var retiredRecords = false
         var deletionOutcome: SkillLibraryViewModel.SkillDeletionResult?
-        let presentation = SkillLibraryViewModel.DeletionPresentation()
         defer {
             settleWaitingCleanup(cleanupResult, retirementSaved: retirementSaved,
-                outcome: deletionOutcome, skill: skill, library: library, platformVM: platformVM)
-            presentation.notice = library.deletionNotice
+                outcome: deletionOutcome, skill: skill, presentation: presentation, platformVM: platformVM)
+            let removedFiles: Bool
+            switch deletionOutcome {
+            case .deleted, .directoryDeletedRowRetained: removedFiles = true
+            case .retainedDirectoryDeleteFailed, nil: removedFiles = false
+            }
+            reportChanges(cleanupResult.didChangeDeploys || (retirementSaved && retiredRecords) || removedFiles)
         }
         let cleanup = cleanupResult.batch
         if cleanup.hasFailures {
-            var messages = cleanup.readFailures.map(\.message)
-            if !cleanup.failures.isEmpty {
-                let details = cleanup.failures
-                    .map { "\($0.platform.displayName): \($0.error ?? "unknown error")" }
-                    .joined(separator: "; ")
-                messages.insert(
-                    "Couldn't remove agent links and rules for “\(skill.name)”: \(details).",
-                    at: 0
-                )
-            }
-            messages.append(retainedSkillMessage(didChangeDeploys: cleanupResult.didChangeDeploys))
-            library.deletionNotice = .failed(messages.joined(separator: " "))
+            presentation.notice = .failed(cleanupFailureMessage(cleanupResult, name: skill.name))
             return false
         }
 
         do {
-            try retire(skill: skill, context: context)
+            retiredRecords = try retire(skill: skill, context: context)
             try persist(context)
             retirementSaved = true
-            library.regenerateManifest(.retireSkill(skill.directoryName), context: context)
+            library.regenerateManifest(.retireSkill(skill.directoryName), context: context,
+                showsFailure: presentation.presentsInWindow) { failure in
+                if !presentation.presentsInWindow, let failure {
+                    let earlier = presentation.notice.map { $0.message + " " } ?? ""
+                    presentation.notice = .failed(earlier + "Couldn't publish retired deploy records: "
+                        + failure.localizedDescription)
+                }
+            }
         } catch {
             context.rollback()
-            library.deletionNotice = .failed(
+            presentation.notice = .failed(
                 "Couldn't retire deploy records for “\(skill.name)”: \(error.localizedDescription). "
                     + retainedSkillMessage(didChangeDeploys: cleanupResult.didChangeDeploys))
             return false
@@ -60,7 +64,19 @@ enum SkillDeletionFlow {
         let outcome = library.deleteSkillEntry(skill, context: context, presentation: presentation, persist: persist)
         deletionOutcome = outcome
         let manifestNote = waitingCleanupNote(library: library, waitingProjects: cleanupResult.waitingProjects)
-        return present(outcome, skill: skill, manifestNote: manifestNote, library: library)
+        return present(outcome, skill: skill, manifestNote: manifestNote, presentation: presentation)
+    }
+
+    private static func cleanupFailureMessage(_ result: SkillCleanupResult, name: String) -> String {
+        let cleanup = result.batch
+        var messages = cleanup.readFailures.map(\.message)
+        if !cleanup.failures.isEmpty {
+            let details = cleanup.failures
+                .map { "\($0.platform.displayName): \($0.error ?? "unknown error")" }.joined(separator: "; ")
+            messages.insert("Couldn't remove agent links and rules for “\(name)”: \(details).", at: 0)
+        }
+        messages.append(retainedSkillMessage(didChangeDeploys: result.didChangeDeploys))
+        return messages.joined(separator: " ")
     }
 
     private static func waitingCleanupNote(
@@ -78,10 +94,11 @@ enum SkillDeletionFlow {
 
     private static func settleWaitingCleanup(_ cleanup: SkillCleanupResult, retirementSaved: Bool,
                                              outcome: SkillLibraryViewModel.SkillDeletionResult?, skill: Skill,
-                                             library: SkillLibraryViewModel, platformVM: PlatformViewModel) {
+                                             presentation: SkillLibraryViewModel.DeletionPresentation,
+                                             platformVM: PlatformViewModel) {
         if retirementSaved {
             if let error = platformVM.finishWaitingSkillCleanup(cleanup) {
-                let message = library.deletionNotice?.message ?? ""
+                let message = presentation.notice?.message ?? ""
                 let namedMessage: String
                 switch outcome {
                 case .deleted:
@@ -93,16 +110,16 @@ enum SkillDeletionFlow {
                 }
                 let warning = namedMessage + " Waiting cleanup was saved, "
                     + "but its deployment records couldn't be retired: \(error)."
-                switch library.deletionNotice {
-                case .failed: library.deletionNotice = .failed(warning)
-                case .pending: library.deletionNotice = .pending(warning)
-                case .warning, nil: library.deletionNotice = .warning(warning)
+                switch presentation.notice {
+                case .failed: presentation.notice = .failed(warning)
+                case .pending: presentation.notice = .pending(warning)
+                case .warning, nil: presentation.notice = .warning(warning)
                 }
             }
         } else {
             do { try platformVM.abandonWaitingSkillCleanup(cleanup) } catch {
-                let message = library.deletionNotice?.message ?? "The skill was kept."
-                library.deletionNotice = .failed(message + " Couldn't withdraw this attempt's waiting cleanup: "
+                let message = presentation.notice?.message ?? "The skill was kept."
+                presentation.notice = .failed(message + " Couldn't withdraw this attempt's waiting cleanup: "
                     + error.localizedDescription)
             }
         }
@@ -114,41 +131,44 @@ enum SkillDeletionFlow {
             : "The skill was kept so you can retry."
     }
 
-    private static func retire(skill: Skill, context: ModelContext) throws {
+    private static func retire(skill: Skill, context: ModelContext) throws -> Bool {
+        var changed = false
         let intents = try context.fetch(FetchDescriptor<MachineDeployIntent>())
-        for intent in intents where intent.skillSlug == skill.directoryName { context.delete(intent) }
+        for intent in intents where intent.skillSlug == skill.directoryName { context.delete(intent); changed = true }
         let ledger = try context.fetch(FetchDescriptor<IntentAssignment>())
-        for row in ledger where row.skillID == skill.id { context.delete(row) }
+        for row in ledger where row.skillID == skill.id { context.delete(row); changed = true }
         let categoryLedger = try context.fetch(FetchDescriptor<SkillProjectAssignment>())
-        for row in categoryLedger where row.skillID == skill.id { context.delete(row) }
+        for row in categoryLedger where row.skillID == skill.id { context.delete(row); changed = true }
         for category in try context.fetch(FetchDescriptor<Category>())
             where category.skillSlugs.contains(skill.directoryName) {
             category.skillSlugs.removeAll { $0 == skill.directoryName }
+            changed = true
         }
+        return changed
     }
 
     private static func present(
         _ outcome: SkillLibraryViewModel.SkillDeletionResult,
         skill: Skill,
         manifestNote: String,
-        library: SkillLibraryViewModel
+        presentation: SkillLibraryViewModel.DeletionPresentation
     ) -> Bool {
         switch outcome {
         case .deleted:
             if manifestNote.isEmpty {
-                library.deletionNotice = nil
+                presentation.notice = nil
             } else {
-                library.deletionNotice = .warning("Deleted “\(skill.name)”." + manifestNote)
+                presentation.notice = .warning("Deleted “\(skill.name)”." + manifestNote)
             }
             return true
         case .directoryDeletedRowRetained(let detail):
-            library.deletionNotice = .pending(
+            presentation.notice = .pending(
                 "Removed “\(skill.name)”'s files, but the library couldn't save the change. "
                     + "The entry stays listed but can't be edited; delete it again from the list, "
                     + "or relaunch Pensieve and the library rebuild drops it. (\(detail))" + manifestNote)
             return false
-        case .retainedDirectoryDeleteFailed:
-            library.deletionNotice = .failed((library.error ?? "Couldn't delete the skill.") + manifestNote)
+        case .retainedDirectoryDeleteFailed(let detail):
+            presentation.notice = .failed("Failed to delete skill: " + detail + manifestNote)
             return false
         }
     }

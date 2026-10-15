@@ -253,7 +253,7 @@ final class ManifestMaintenanceTests: XCTestCase {
         let lock = try XCTUnwrap(SyncLock.tryAcquire(at: tempDir + "/sync.lock"))
         defer { lock.release() }
         let projectFile = try fileService.readData(at: tempDir + "/manifest/projects.yaml")
-        registerProject(project, context: context)
+        try registerProject(project, context: context)
         XCTAssertEqual(try ModelContext(context.container).fetch(FetchDescriptor<Project>()).map(\.id), [project.id])
         XCTAssertEqual(try manifest.read(fromRoot: tempDir), before)
         XCTAssertEqual(try ManifestSaveFixture.manifestBytes(root: tempDir, files: fileService), beforeBytes)

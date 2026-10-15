@@ -167,8 +167,8 @@ extension UpdatesViewModel {
         backgroundCancel = nil
     }
 
-    private func applyCompletion(_ completion: SkillUpdateCompletion,
-                                 context: ModelContext) {
+    func applyCompletion(_ completion: SkillUpdateCompletion,
+                         context: ModelContext) {
         guard let skill = try? Self.findSkill(completion.skillID, context: context) else { return }
         skill.name = completion.name
         skill.skillDescription = completion.skillDescription

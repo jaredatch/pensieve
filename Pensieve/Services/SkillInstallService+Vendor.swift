@@ -274,7 +274,7 @@ extension SkillInstallService {
         try context.save()
     }
 
-    private func collision(for slug: String, context: ModelContext) throws -> SkillCollision? {
+    func collision(for slug: String, context: ModelContext) throws -> SkillCollision? {
         let path = storeRoot + "/skills/" + slug
         let hasDirectory = fileService.directoryExists(at: path)
             || fileService.fileExists(at: path)
