@@ -96,7 +96,7 @@ extension SyncConflictResolutionTests {
                 XCTAssertThrowsError(try fixture.engine.resolveConflicts(root: fixture.storeB, picks: [item.path: filePick],
                     credential: nil, context: fixture.contextB)) { error in
                     XCTAssertEqual(error.localizedDescription,
-                        "Pensieve can’t replace the folder at \(item.path). Choose the other version to finish syncing.")
+                        "Move the folder at \(item.path), then choose Other Mac again. You can also keep This Mac.")
                 }
                 XCTAssertEqual(try fixture.files.readFile(at: full + "/keep"), "local folder work")
                 try fixture.files.replaceItem(at: fixture.root + "/moved-folder", with: full)

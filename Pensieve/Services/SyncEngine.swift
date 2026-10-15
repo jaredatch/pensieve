@@ -12,6 +12,9 @@ enum SyncError: LocalizedError, Equatable {
     case conflictRequiresGitResolution(path: String)
     case protectedGitlinkUnavailable(path: String)
     case conflictFolderMustMove(path: String)
+    case localConflictFolderMustMove(path: String)
+    case incompatibleConflictPicks(path: String)
+    case returnToRestFailed(reason: String, detail: String)
     case rejectedRemote(String)
     case syncInProgress
 
@@ -33,6 +36,12 @@ enum SyncError: LocalizedError, Equatable {
             return "Pensieve can’t sync the nested repository at \(path). Choose the other version."
         case let .conflictFolderMustMove(path):
             return "Pensieve can’t replace the folder at \(path). Choose the other version to finish syncing."
+        case let .localConflictFolderMustMove(path):
+            return "Move the folder at \(path), then choose Other Mac again. You can also keep This Mac."
+        case let .incompatibleConflictPicks(path):
+            return "These picks don’t fit together. Choose the same Mac for \(path) and its contents."
+        case let .returnToRestFailed(reason, detail):
+            return reason + " Pensieve couldn’t return the store to rest. Resolve this problem, then sync again: " + detail
         case .rejectedRemote:
             return "This store's git remote uses an unsupported form. Reconnect with an https:// URL "
                 + "or an ssh remote (git@host:path)."
@@ -116,6 +125,7 @@ struct SyncEngine: SyncEngineProtocol {
         }
         guard try gitService.hasLocalBranches(at: root) else { return .branchless }
         try requireAcceptableRemote(at: root)
+        if gitService.isRebaseInProgress(at: root) { try gitService.abortRebase(at: root) }
 
         // Guard BEFORE any write: if the on-disk manifest is newer/unreadable (e.g. a clone of a remote
         // written by a newer Pensieve), refuse. The after-pull storeUnreadable guard CANNOT catch this —
@@ -144,7 +154,12 @@ struct SyncEngine: SyncEngineProtocol {
         //    exact pre-pull tree — nothing half-merged, nothing lost) and surface it. Do NOT rebuild, do
         //    NOT push, so the divergence is preserved for a later, resolvable sync (§D).
         let pulled: Bool
-        switch try pullRebase(root: root, credential: credential, incoming: incoming) {
+        let result: PullResult
+        do { result = try pullRebase(root: root, credential: credential, incoming: incoming) } catch {
+            try abortResolution(after: error, root: root)
+            throw error
+        }
+        switch result {
         case .upToDate: pulled = false
         case .merged: pulled = true
         case let .conflicted(paths):
@@ -181,7 +196,7 @@ struct SyncEngine: SyncEngineProtocol {
             return .conflicts(ConflictSet(items: []))
         }
         try requireAcceptableRemote(at: root)
-        try GitError.preservingUnusability { try gitService.abortRebase(at: root) }
+        try gitService.abortRebase(at: root)
         do {
             _ = try manifestService.read(fromRoot: root)
         } catch {
@@ -211,7 +226,7 @@ struct SyncEngine: SyncEngineProtocol {
                 return .conflicts(ConflictSet(items: items))
             }
         } catch {
-            try? gitService.abortRebase(at: root)
+            try abortResolution(after: error, root: root)
             throw error
         }
     }
@@ -231,7 +246,7 @@ struct SyncEngine: SyncEngineProtocol {
         guard try gitService.remoteURL(at: root) != nil else { return .noRemote }
         guard try gitService.hasLocalBranches(at: root) else { return .branchless }
         try requireAcceptableRemote(at: root)
-        try GitError.preservingUnusability { try gitService.abortRebase(at: root) }
+        try gitService.abortRebase(at: root)
         do {
             _ = try manifestService.read(fromRoot: root)
         } catch {
@@ -253,7 +268,7 @@ struct SyncEngine: SyncEngineProtocol {
                 return try finishSync(root: root, credential: credential, context: context, pulled: true)
             }
         } catch {
-            try abortResolution(after: error, picks: picks, root: root)
+            try abortResolution(after: error, root: root)
             throw error
         }
     }

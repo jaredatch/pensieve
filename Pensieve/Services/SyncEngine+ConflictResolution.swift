@@ -34,11 +34,17 @@ extension SyncEngine {
         guard Set(paths) == Set(picks.keys) else { throw SyncError.conflictsChanged }
         // Read and validate all index versions before restoring a parent can clear child stages.
         let selections = try conflictSelections(paths, picks: picks, root: root)
+        for parent in selections where parent.chosen.entry != nil {
+            let children = selections.filter { $0.path.utf8.starts(with: (parent.path + "/").utf8) }
+            guard children.allSatisfy({ $0.chosen.entry == nil && $0.chosen.unavailable == nil }) else {
+                throw SyncError.incompatibleConflictPicks(path: parent.path)
+            }
+        }
         var replacements: [String] = []
         for selection in selections {
             let path = selection.path
             let chosen = selection.chosen
-            if replacements.contains(where: { PathSyntax.hasPrefix(path, $0 + "/") }) {
+            if replacements.contains(where: { path.utf8.starts(with: ($0 + "/").utf8) }) {
                 try gitService.removeConflictEntryFromIndex(path, at: root)
                 continue
             }
@@ -48,16 +54,15 @@ extension SyncEngine {
                 try gitService.retireConflictPath(path, at: root)
                 continue
             }
-            let replacesFolder = try fileService.entryTypeWithoutFollowingLinks(at: full) == .directory
-                && chosen.entry != nil
-            if replacesFolder {
-                guard selections.filter({ PathSyntax.hasPrefix($0.path, path + "/") }).allSatisfy({
-                    $0.chosen.entry == nil && $0.chosen.unavailable == nil
-                }) else { throw SyncError.conflictsChanged }
+            let replacesFolder = chosen.entry != nil && selections.contains {
+                $0.path.utf8.starts(with: (path + "/").utf8)
             }
             do {
                 try applyConflictVersion(chosen, stage: selection.stage, path: path, full: full, root: root)
-            } catch is ConflictFolderMustMove { throw SyncError.conflictFolderMustMove(path: path) }
+            } catch is ConflictFolderMustMove {
+                throw selection.stage == 3 ? SyncError.conflictFolderMustMove(path: path)
+                    : SyncError.localConflictFolderMustMove(path: path)
+            }
             if replacesFolder { replacements.append(path) }
         }
     }
@@ -120,33 +125,9 @@ extension SyncEngine {
         return resolved == realRoot || PathSyntax.hasPrefix(resolved, realRoot + "/")
     }
 
-    private func abortWasBlockedByFolder(_ error: Error, path: String) -> Bool {
-        guard case let GitError.commandFailed(args, exitCode, stderr, _) = error,
-              exitCode == 128, args.suffix(2) == ["rebase", "--abort"] else { return false }
-        let lines = stderr.components(separatedBy: "\n")
-        guard lines.first == "error: Updating the following directories would lose untracked files in them:" else { return false }
-        let paths = lines.dropFirst().prefix { $0.hasPrefix("\t") }
-        return paths.contains("\t" + path)
-    }
-
-    /// Give Git the intact refused folder first. If abort cannot replace it, discard only that
-    /// obstruction and retry. Stage 3 still proves the local file/link that abort must restore.
-    func abortResolution(after failure: Error, picks: [String: ResolutionPick], root: String) throws {
-        do {
-            try gitService.abortRebase(at: root)
-        } catch {
-            guard case let SyncError.conflictFolderMustMove(path) = failure else { return }
-            // Only Git's explicit untracked-directory obstruction authorizes discarding it.
-            // A lock, permission error, or unknown diagnostic leaves the folder untouched.
-            guard abortWasBlockedByFolder(error, path: path) else { throw error }
-            guard let pick = picks[path], pick.side == .thisMachine,
-                  let entry = try gitService.conflictEntry(atStage: 3, path: path, in: root),
-                  ["100644", "100755", "120000"].contains(entry.mode),
-                  entry.mode == pick.expectedThisMode, entry.bytes == pick.expectedThis,
-                  let full = validatedWorktreePath(path, root: root),
-                  try fileService.entryTypeWithoutFollowingLinks(at: full) == .directory else { return }
-            try fileService.deleteDirectory(at: full)
-            try gitService.abortRebase(at: root)
+    func abortResolution(after failure: Error, root: String) throws {
+        do { try gitService.abortRebase(at: root) } catch {
+            throw SyncError.returnToRestFailed(reason: failure.localizedDescription, detail: error.localizedDescription)
         }
     }
 

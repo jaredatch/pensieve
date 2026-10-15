@@ -5,7 +5,9 @@ extension SyncConflictByteFixture {
     /// Runs native git without rewriting its index. Only an armed resolve changes
     /// the worktree after rebase; snapshots bracket Pensieve's resolution before git aborts.
     /// Neither wrapper supplies conflict versions, comparison answers or resolution results.
-    func folderObservationEngine(change: String, lockAbort: Bool = false) throws -> SyncEngine {
+    func folderObservationEngine(change: String, lockAbort: Bool = false,
+                                 warnOnAbort: Bool = false, failIndexRemoval: Bool = false,
+                                 afterRemovalChange: String? = nil) throws -> SyncEngine {
         let executable = root + "/folder-observer-git"
         try writeFolderSnapshotScript()
         try files.writeExecutableFile(at: executable, content: """
@@ -15,6 +17,7 @@ extension SyncConflictByteFixture {
                 if [ "$1" = rebase ] && [ "$2" = --abort ] && [ -f '\(root)/folder-armed' ] && \
                    /usr/bin/git -C '\(storeB)' rev-parse --verify REBASE_HEAD >/dev/null 2>&1; then
                     observed_abort=1
+                    \(warnOnAbort ? "echo 'warning: fixture diagnostic before native abort' >&2" : ":")
                     \(lockAbort ? "touch '\(storeB)/.git/index.lock'" : ":")
                     if [ ! -f '\(root)/before-abort.json' ]; then
                         /usr/bin/python3 '\(root)/snapshot.py' '\(storeB)/\(path)' > '\(root)/before-abort.json' || exit 1
@@ -27,6 +30,16 @@ extension SyncConflictByteFixture {
             if [ "$observed_abort" = 1 ]; then printf '%s\\n' "$result" >> '\(root)/abort-results'; fi
             after() {
                 \(FakeGitScript.skipGlobalOptions)
+                if [ "$1" = update-index ] && [ "$2" = --force-remove ] && \
+                   [ -f '\(root)/folder-armed' ] && [ ! -f '\(root)/index-changed' ]; then
+                    \(afterRemovalChange ?? ":")
+                    touch '\(root)/index-changed'
+                fi
+                if [ "$1" = update-index ] && [ "$2" = --force-remove ] && \
+                   [ -f '\(root)/folder-armed' ] && [ \(failIndexRemoval ? "1" : "0") = 1 ]; then
+                    echo 'fixture failure after native index removal' >&2
+                    result=1
+                fi
                 if [ "$1" = rebase ] && [ "$2" != --abort ] && [ "$2" != --continue ] && \
                    [ -f '\(root)/folder-armed' ] && \
                    /usr/bin/git -C '\(storeB)' rev-parse --verify REBASE_HEAD >/dev/null 2>&1; then
@@ -52,7 +65,11 @@ extension SyncConflictByteFixture {
             import base64, json, os, stat, sys
             result = {}
             def visit(path, relative):
-                info = os.lstat(path)
+                try:
+                    info = os.lstat(path)
+                except FileNotFoundError:
+                    result[relative] = {'missing': True}
+                    return
                 record = {'mode': stat.S_IMODE(info.st_mode)}
                 if stat.S_ISLNK(info.st_mode):
                     record['link'] = os.readlink(path)

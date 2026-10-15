@@ -45,14 +45,15 @@ struct SyncConflictByteFixture {
                       this: this.map(Entry.file) ?? .deleted, other: other.map(Entry.file) ?? .deleted)
     }
 
-    init(name: String, initial: Entry, this: Entry, other: Entry, indexMerge: Bool = false, skillRoot: Bool = false) throws {
+    init(name: String, initial: Entry, this: Entry, other: Entry, indexMerge: Bool = false,
+         skillRoot: Bool = false, rootPath: Bool = false) throws {
         root = TestTemporaryDirectory.path + "ConflictBytes-" + UUID().uuidString
         remote = root + "/remote.git"
         storeA = root + "/A"
         storeB = root + "/B"
-        path = skillRoot ? "skills/" + name : "skills/conflict/assets/" + name
+        path = rootPath ? name : (skillRoot ? "skills/" + name : "skills/conflict/assets/" + name)
         switch (this, other) {
-        case let (_, .folderWith(entries)):
+        case let (_, .folderWith(entries)), let (.folderWith(entries), _):
             let parent = path
             expectedPaths = ([parent] + entries.keys.map { parent + "/" + $0 }).sorted()
         case (.folder, _), (_, .folder): expectedPaths = [path, path + "/keep"]

@@ -57,10 +57,12 @@ final class StoreOperationState {
     var receipts: StoreIgnoreRules.Receipts?
     var infoDirectory: String?
     var fetched: FetchedStoreRevision?
+    var folderConflicts: [RelocatedFolderConflict]?
     init(root: String) { self.root = root }
 }
 
 extension GitServiceProtocol {
+    func isRebaseInProgress(at path: String) -> Bool { false }
     func scopedToStore(_ root: String) -> GitServiceProtocol { self }
     func prepareStoreRules(at root: String, files: FileServiceProtocol) throws {
         try StoreIgnoreRules.prepare(at: root, files: files)

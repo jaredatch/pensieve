@@ -3,10 +3,12 @@ import XCTest
 
 @MainActor
 final class ConflictFolderResolutionTests: XCTestCase {
-    private let pickedBytes = Data([0, 255, 13, 10, 42])
-    private let pickedLink = "../kept-link"
+    let pickedBytes = Data([0, 255, 13, 10, 42])
+    let pickedLink = "../kept-link"
 
     func testThisMacFileReplacesTrackedFolderAndPushesToFreshClone() async throws {
+        try await assertRootTildeConflict()
+        try await assertIncompatiblePicks()
         let fixture = try makeFixture(link: false)
         defer { try? fixture.files.deleteDirectory(at: fixture.root) }
         let model = try await choose(fixture, side: .thisMachine)
@@ -25,6 +27,8 @@ final class ConflictFolderResolutionTests: XCTestCase {
     }
 
     func testRefusedFilePickPreservesTopLevelEntriesUntilAbort() async throws {
+        try await assertAuxiliaryAdmission()
+        try await assertPartialIndexFailure()
         try await assertRefusals(link: false, nested: false)
         for extra in [false, true] { try await assertUnrelatedAbortFailure(extra: extra) }
     }
@@ -42,6 +46,9 @@ final class ConflictFolderResolutionTests: XCTestCase {
     }
 
     func testOtherMacPickKeepsFolderAndItsTrackedEntries() async throws {
+        try await assertMirrorLayout()
+        try await assertAmbiguousLayout()
+        try await assertFolderRestoreThroughFile()
         for link in [false, true] {
             let fixture = try makeFixture(link: link)
             defer { try? fixture.files.deleteDirectory(at: fixture.root) }
@@ -72,7 +79,7 @@ final class ConflictFolderResolutionTests: XCTestCase {
         }
     }
 
-    private func makeFixture(link: Bool, links: Bool = false, kind: String = "file") throws -> SyncConflictByteFixture {
+    func makeFixture(link: Bool, links: Bool = false, kind: String = "file") throws -> SyncConflictByteFixture {
         let this: SyncConflictByteFixture.Entry = link ? .symlink(pickedLink) : .file(pickedBytes)
         var children: [String: SyncConflictByteFixture.Entry] = [
             "keep": .file(Data("other bytes".utf8)), "nested/keep": .file(Data("nested bytes".utf8))
@@ -91,7 +98,7 @@ final class ConflictFolderResolutionTests: XCTestCase {
         }
     }
 
-    private func choose(_ fixture: SyncConflictByteFixture, side: ConflictSide) async throws -> ConflictResolutionModel {
+    func choose(_ fixture: SyncConflictByteFixture, side: ConflictSide) async throws -> ConflictResolutionModel {
         let model = ConflictResolutionModel(engine: fixture.engine, git: fixture.git,
             credentials: InMemoryCredentialStore(), root: fixture.storeB, steps: SyncStepModel())
         await model.loadAndReport(container: fixture.contextB.container)
@@ -104,12 +111,12 @@ final class ConflictFolderResolutionTests: XCTestCase {
         return model
     }
 
-    private func assertNoAuxiliary(_ fixture: SyncConflictByteFixture, store: String) throws {
+    func assertNoAuxiliary(_ fixture: SyncConflictByteFixture, store: String) throws {
         let names = try fixture.files.listDirectory(at: store + "/skills/conflict/assets")
         XCTAssertEqual(names, ["file-folder"], "Git's auxiliary conflict file must leave no residue")
     }
 
-    private func assertChosen(_ fixture: SyncConflictByteFixture, link: Bool, stores: [String]) throws {
+    func assertChosen(_ fixture: SyncConflictByteFixture, link: Bool, stores: [String]) throws {
         for store in stores {
             try assertNoAuxiliary(fixture, store: store)
             let full = store + "/" + fixture.path
@@ -124,7 +131,7 @@ final class ConflictFolderResolutionTests: XCTestCase {
         XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
     }
 
-    private func assertRefusals(link: Bool, nested: Bool) async throws {
+    func assertRefusals(link: Bool, nested: Bool) async throws {
         let types = ["file", "executable", "symlink"]
         let cases = ["extra-file", "empty-folder", "changed-bytes", "unreadable"]
             + types.flatMap { from in types.filter { $0 != from }.map { from + "-to-" + $0 } }
@@ -133,7 +140,7 @@ final class ConflictFolderResolutionTests: XCTestCase {
         }
     }
 
-    private func assertRefusal(link: Bool, nested: Bool, fault: String) async throws {
+    func assertRefusal(link: Bool, nested: Bool, fault: String) async throws {
         let kind = fault.components(separatedBy: "-to-").first ?? "file"
         let fixture = try makeFixture(link: link, links: true, kind: kind)
         defer { try? fixture.files.deleteDirectory(at: fixture.root) }
@@ -142,7 +149,7 @@ final class ConflictFolderResolutionTests: XCTestCase {
             + "; printf outside > '\(fixture.root)/outside'"
             + "; printf inside > '\(fixture.storeB)/skills/conflict/inside'"
             + "; mkdir '\(fixture.storeB)/unrelated'; printf sibling > '\(fixture.storeB)/unrelated/keep'"
-        let engine = try fixture.folderObservationEngine(change: change)
+        let engine = try fixture.folderObservationEngine(change: change, warnOnAbort: fault == "extra-file")
         let model = ConflictResolutionModel(engine: engine, git: fixture.git,
             credentials: InMemoryCredentialStore(), root: fixture.storeB, steps: SyncStepModel())
         await model.loadAndReport(container: fixture.contextB.container)
@@ -165,7 +172,7 @@ final class ConflictFolderResolutionTests: XCTestCase {
         try assertChosen(fixture, link: link, stores: [fixture.storeB])
     }
 
-    private func assertUnrelatedAbortFailure(extra: Bool) async throws {
+    func assertUnrelatedAbortFailure(extra: Bool) async throws {
         let fixture = try makeFixture(link: false, links: true)
         defer { try? fixture.files.deleteDirectory(at: fixture.root) }
         let folder = fixture.storeB + "/" + fixture.path
@@ -186,16 +193,25 @@ final class ConflictFolderResolutionTests: XCTestCase {
                        try fixture.files.readData(at: fixture.root + "/after-change.json"))
         XCTAssertEqual(try fixture.files.readFile(at: fixture.root + "/abort-results"), "128\n",
                        "A lock failure must not cause destructive cleanup or another abort")
-        // Release the external obstruction so the fixture can return to rest through real Git.
+        guard case let .error(message) = model.phase else { return XCTFail("Abort failure must be reported") }
+        XCTAssertTrue(message.contains("can’t replace the folder"), "Keep the original refusal")
+        XCTAssertTrue(message.contains("couldn’t return the store to rest"), "Report the unfinished abort")
+        // Release only the external lock; the next inspection must recover the leftover rebase.
         try fixture.files.deleteFile(at: fixture.storeB + "/.git/index.lock")
-        if extra, try fixture.files.entryTypeWithoutFollowingLinks(at: folder) == .directory {
-            try fixture.files.deleteFile(at: folder + "/extra")
+        try fixture.files.deleteFile(at: fixture.root + "/folder-armed")
+        if extra {
+            let outcome = try NativeTestWork.run(container: fixture.contextB.container) { context in
+                try fixture.engine.sync(root: fixture.storeB, message: "retry interrupted sync",
+                                        credential: nil, context: context)
+            }
+            XCTAssertEqual(outcome, .conflicted(fixture.expectedPaths), "Sync must recover the leftover rebase first")
         }
-        try NativeTestWork.run { try fixture.git.abortRebase(at: fixture.storeB) }
+        await model.loadAndReport(container: fixture.contextB.container)
+        guard case .ready = model.phase else { return XCTFail("Next inspection must recover without deleting extra by hand") }
         try assertChosen(fixture, link: false, stores: [fixture.storeB])
     }
 
-    private func mutation(_ fault: String, directory: String) -> String {
+    func mutation(_ fault: String, directory: String) -> String {
         switch fault {
         case "extra-file": return "printf extra > '\(directory)/extra'"
         case "empty-folder": return "mkdir '\(directory)/empty'"
@@ -205,7 +221,7 @@ final class ConflictFolderResolutionTests: XCTestCase {
             let target = fault.components(separatedBy: "-to-")[1]
             if target == "symlink" { return "rm '\(directory)/keep'; ln -s ../kept-link '\(directory)/keep'" }
             if fault.hasPrefix("symlink-to-") {
-                return "rm '\(directory)/keep'; printf 'other bytes' > '\(directory)/keep'; "
+                return "rm '\(directory)/keep'; printf '../kept-link' > '\(directory)/keep'; "
                     + "chmod \(target == "file" ? "644" : "755") '\(directory)/keep'"
             }
             return "chmod \(target == "file" ? "644" : "755") '\(directory)/keep'"

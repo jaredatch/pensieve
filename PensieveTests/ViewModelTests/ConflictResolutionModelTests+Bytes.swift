@@ -222,7 +222,7 @@ extension ConflictResolutionModelTests {
         await model.applyAndReport(container: fixture.contextB.container)
         guard case .ready = model.phase else { return XCTFail("A refused folder replacement must keep choices available") }
         XCTAssertEqual(model.selectionError,
-            "Pensieve can’t replace the folder at \(fixture.path). Choose the other version to finish syncing.")
+            "Move the folder at \(fixture.path), then choose Other Mac again. You can also keep This Mac.")
         XCTAssertEqual(try fixture.files.readFile(at: full + "/keep"), "local folder work")
         model.choose(group.id, .thisMachine)
         await model.applyAndReport(container: fixture.contextB.container)
