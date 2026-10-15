@@ -41,6 +41,7 @@ final class CommandLineSetupTests: XCTestCase {
         let healthy = try checks(await fixture.run(["doctor"], environment: ["PATH": bin]))
         XCTAssertEqual(Set(healthy.keys), Set(["socket", "app", "path", "git"] + agents.map { "agent:" + $0 }))
         for (name, row) in healthy { XCTAssertEqual(row["ok"], .bool(true), name) }
+        try await checkOptionalAgent(fixture, bin: bin)
         try fixture.files.deleteFile(at: bin + "/git")
         try fixture.files.deleteDirectory(at: fixture.root + "/home/.codex/skills")
         try fixture.files.deleteFile(at: bin + "/pensieve")
@@ -68,6 +69,23 @@ final class CommandLineSetupTests: XCTestCase {
         let wrong = try checks(await fixture.run(["doctor"], exit: 1, environment: ["PATH": bin]))
         XCTAssertEqual(wrong["app"]?["ok"], .bool(false))
         XCTAssertEqual(wrong["socket"]?["ok"], .bool(true))
+    }
+
+    private func checkOptionalAgent(_ fixture: CLILibraryFixture, bin: String) async throws {
+        try fixture.files.deleteDirectory(at: fixture.root + "/home/.hermes")
+        let uninstalled = try checks(await fixture.run(["doctor"], environment: ["PATH": bin]))
+        XCTAssertEqual(uninstalled["agent:hermes"]?["ok"], .bool(true), "An uninstalled agent must not fail doctor")
+        XCTAssertEqual(uninstalled["agent:hermes"]?["message"], .string("Not installed"))
+        try fixture.files.createSymlink(at: bin + "/hermes", pointingTo: "/usr/bin/true")
+        let cliInstalled = try checks(await fixture.run(["doctor"], exit: 1, environment: ["PATH": bin]))
+        XCTAssertEqual(cliInstalled["agent:hermes"]?["ok"], .bool(false), "A detected CLI requires an accessible skills folder")
+        let skills = fixture.root + "/home/.hermes/skills"
+        try fixture.files.createDirectory(at: skills)
+        XCTAssertEqual(chmod(skills, 0), 0)
+        defer { _ = chmod(skills, 0o755) }
+        let unreadable = try checks(await fixture.run(["doctor"], exit: 1, environment: ["PATH": bin]))
+        XCTAssertEqual(unreadable["agent:hermes"]?["ok"], .bool(false), "An unreadable installed agent folder must fail")
+        XCTAssertEqual(chmod(skills, 0o755), 0)
     }
 
     private func checks(_ envelope: CLIEnvelope) throws -> [String: [String: CLIValue]] {

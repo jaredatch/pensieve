@@ -11,10 +11,16 @@ final class CommandLinkInstallerTests: XCTestCase {
         model.refresh()
         XCTAssertEqual(model.status, .absent)
         await model.perform(.install)
+        XCTAssertTrue(fixture.authorization.commands.allSatisfy { $0.hasPrefix("'/bin/sh' ") },
+                      "Root must start the protected system shell, never the bundle helper")
+        XCTAssertEqual(fixture.authorization.promptThreads, [true], "The administrator prompt must run on the main thread")
+
         XCTAssertNil(model.error)
         XCTAssertEqual(model.status, .installed(fixture.path))
         XCTAssertEqual(try fixture.files.symlinkTarget(at: fixture.path), fixture.executable)
         XCTAssertEqual(fixture.authorization.calls, 1)
+        let folderMode = try CommandLinkFixture.run("/usr/bin/stat", arguments: ["-f", "%Lp:%u", fixture.directory])
+        XCTAssertEqual(folderMode.1, "755:\(getuid())\n", "New bin must have mode 0755 despite the runner's restrictive umask")
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = fixture.directory
         environment["HOME"] = fixture.root
@@ -29,6 +35,16 @@ final class CommandLinkInstallerTests: XCTestCase {
         XCTAssertNil(model.error)
         XCTAssertEqual(model.status, .absent)
         XCTAssertFalse(try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path))
+        let hiddenRequest = CommandLinkRequest(action: .install, directory: fixture.directory,
+            executable: "/bin/sh", user: getuid(), expected: nil)
+        let encoded = try JSONEncoder().encode(hiddenRequest).base64EncodedString()
+        let hidden = try await BlockingWork.run {
+            try CommandLinkFixture.run(fixture.executable, arguments: ["--manage-command-link", encoded],
+                                       environment: environment)
+        }
+        XCTAssertEqual(hidden.0, 64, "The CLI must reject the retired link-changing entry point")
+        XCTAssertFalse(try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path),
+                       "CLI arguments must never create links")
     }
 
     func testCancelledInstallChangesNothingAndFailedCreationKeepsNewFolder() async throws {
@@ -119,6 +135,10 @@ final class CommandLinkInstallerTests: XCTestCase {
             XCTAssertEqual(fixture.authorization.calls, 0)
             XCTAssertNotNil(model.error)
             XCTAssertEqual(try fixture.files.listDirectory(at: actual), [])
+            let request = CommandLinkRequest(action: .install, directory: fixture.directory,
+                executable: fixture.executable, user: getuid(), expected: nil)
+            XCTAssertThrowsError(try FixtureCommandAuthorization().run(request))
+            XCTAssertEqual(try fixture.files.listDirectory(at: actual), [], "Privileged parent admission must refuse symlinks")
         }
         let fixture = try CommandLinkFixture()
         defer { fixture.clean() }

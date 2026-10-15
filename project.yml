@@ -260,6 +260,7 @@ targets:
     platform: macOS
     sources:
       - path: PensieveCLI
+      - path: Pensieve/Services/AgentDetectionService.swift
       - path: Pensieve/Services/CLIAppLauncher.swift
       - path: Pensieve/Services/CLIDesktopSession.swift
       - path: Pensieve/Services/FileService.swift

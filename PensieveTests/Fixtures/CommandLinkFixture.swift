@@ -3,11 +3,11 @@ import Foundation
 import XCTest
 @testable import Pensieve
 
-/// Replaces only authorization: invokes the shipped helper without elevation against owned folders.
+/// Replaces only the elevation wrapper: executes the production command unelevated in owned folders.
 /// Its pre-run callback models changes while the real admin dialog would be open. No host paths change.
 final class CommandLinkFixture {
     let files = FileService()
-    let root = TestTemporaryDirectory.path + "CommandLink-" + UUID().uuidString
+    let root = TestTemporaryDirectory.path + "CommandLink space ' \" $(false)-" + UUID().uuidString
     let authorization = FixtureCommandAuthorization()
     var directory: String { root + "/local/bin" }
     var path: String { directory + "/pensieve" }
@@ -19,7 +19,8 @@ final class CommandLinkFixture {
 
     func installer(user: UInt32 = getuid(), homebrew: [String] = [], executable: String? = nil) -> CommandLinkInstaller {
         CommandLinkInstaller(files: files, directory: directory, executable: executable ?? self.executable,
-                             user: user, homebrewDirectories: homebrew, authorization: authorization)
+                             user: user, homebrewDirectories: homebrew,
+                             authorization: AdminCommandLinkAuthorization(prompt: authorization))
     }
 
     func link(to target: String) throws { try files.createSymlink(at: path, pointingTo: target) }
@@ -38,18 +39,25 @@ final class CommandLinkFixture {
     }
 }
 
-final class FixtureCommandAuthorization: CommandLinkAuthorizing {
+final class FixtureCommandAuthorization: AdministratorPromptRunning {
     var beforeRun: (() throws -> Void)?
     var cancelled = false
     private(set) var calls = 0
 
+    private(set) var commands: [String] = []
+    private(set) var promptThreads: [Bool] = []
+
     func run(_ request: CommandLinkRequest) throws {
+        try AdminCommandLinkAuthorization(prompt: self).run(request)
+    }
+
+    func run(shellCommand: String) throws {
         calls += 1
-        if cancelled { throw AdminCommandLinkAuthorization.Cancelled() }
+        commands.append(shellCommand)
+        promptThreads.append(Thread.isMainThread)
+        if cancelled { throw NSError(domain: "Fixture.AdministratorPrompt", code: -128) }
         try beforeRun?()
-        let encoded = try JSONEncoder().encode(request).base64EncodedString()
-        let result = try CommandLinkFixture.run(Bundle.main.bundlePath + "/Contents/Helpers/pensieve",
-                                                arguments: ["--manage-command-link", encoded])
+        let result = try CommandLinkFixture.run("/bin/sh", arguments: ["-c", "umask 077\n" + shellCommand])
         guard result.0 == 0 else { throw CommandLinkError(message: result.1) }
     }
 }

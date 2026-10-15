@@ -62,9 +62,16 @@ struct CLIDoctor {
                             hint: "Follow the hint for each failed check.", retryable: false)), exitCode: 1)
     }
     private func checkAgents(record: (String, Bool, String, String) -> Void) {
-        let agents = [("claude", ".claude/skills"), ("grok", ".grok/skills"), ("cursor", ".cursor/rules"),
-                      ("codex", ".codex/skills"), ("openclaw", ".openclaw/skills"), ("hermes", ".hermes/skills")]
-        for (agent, relative) in agents {
+        let probe = SystemEnvironmentProbe(fileService: files,
+            pathEntries: searchPath.components(separatedBy: ":").filter { PathSyntax.isAbsolute($0) })
+        let detection = AgentDetectionService(probe: probe, homeDirectory: home)
+        for platform in PlatformTarget.allCases {
+            let agent = platform.cliID
+            guard detection.isInstalled(platform) else {
+                record("agent:" + agent, true, "Not installed", "Install \(platform.displayName) if you want to use it.")
+                continue
+            }
+            let relative = "." + agent + (platform == .cursor ? "/rules" : "/skills")
             let path = home + "/" + relative
             do {
                 let accessible = try files.directoryExistsFollowingLinks(at: path)

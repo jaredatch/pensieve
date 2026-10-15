@@ -111,19 +111,18 @@ struct CommandLinkInstaller: CommandLinkInstalling {
 struct AdminCommandLinkAuthorization: CommandLinkAuthorizing {
     struct Cancelled: Error {}
 
-    func run(_ request: CommandLinkRequest) throws {
-        let encoded = try JSONEncoder().encode(request).base64EncodedString()
-        let shell = Self.quote(request.executable) + " --manage-command-link " + Self.quote(encoded)
-        let literal = shell.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-        var error: NSDictionary?
-        let script = NSAppleScript(source: "do shell script \"\(literal)\" with administrator privileges")
-        _ = script?.executeAndReturnError(&error)
-        if let error {
-            if error[NSAppleScript.errorNumber] as? Int == -128 { throw Cancelled() }
-            throw CommandLinkError(message: error[NSAppleScript.errorMessage] as? String ?? "The link wasn't changed.")
-        }
-        guard script != nil else { throw CommandLinkError(message: "The administrator prompt couldn't be opened.") }
-    }
+    var prompt: AdministratorPromptRunning = AppleScriptAdministratorPrompt()
 
-    private static func quote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+    func run(_ request: CommandLinkRequest) throws {
+        let shell = try PrivilegedCommandLink.command(for: request)
+        do {
+            if Thread.isMainThread {
+                try prompt.run(shellCommand: shell)
+            } else {
+                try DispatchQueue.main.sync { try prompt.run(shellCommand: shell) }
+            }
+        } catch let error as NSError where error.code == -128 {
+            throw Cancelled()
+        }
+    }
 }
