@@ -154,6 +154,7 @@ private final class UnlistableDirFileService: FileServiceProtocol {
 /// honestly files-authoritative: a daemon-advanced store is ingested and never clobbered, a newer-schema
 /// store is not downgraded, and the one-time migration runs once, not per launch.
 final class LaunchReconcilerTests: XCTestCase {
+    private var directory: TestStoreDirectory!
     private var tempDir: String!
     private var fileService: FileService!
     private var manifest: ManifestService!
@@ -164,7 +165,8 @@ final class LaunchReconcilerTests: XCTestCase {
 
     override func setUpWithError() throws {
         try NativeTestWork.run { [self] in
-            tempDir = TestTemporaryDirectory.path + "PensieveLaunchReconcilerTests-\(UUID().uuidString)"
+            directory = TestStoreDirectory(named: "PensieveLaunchReconcilerTests")
+            tempDir = directory.storeRoot
             try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
             fileService = FileService()
             manifest = ManifestService(fileService: fileService)
@@ -185,8 +187,8 @@ final class LaunchReconcilerTests: XCTestCase {
 
     override func tearDownWithError() throws {
         try NativeTestWork.run { [self] in
-            if let tempDir, FileManager.default.fileExists(atPath: tempDir) {
-                try FileManager.default.removeItem(atPath: tempDir)
+            if let directory, FileService().directoryExists(at: directory.root) {
+                try FileService().deleteDirectory(at: directory.root)
             }
         }
     }

@@ -241,7 +241,8 @@ final class SyncSetupModelTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    private let root = TestTemporaryDirectory.path + "pensieve-sync-setup-test-\(UUID().uuidString)"
+    private let directory = TestStoreDirectory(named: "pensieve-sync-setup-test")
+    private var root: String { directory.storeRoot }
 
     private final class HostedWindow {
         weak var window: NSWindow?
@@ -259,8 +260,8 @@ final class SyncSetupModelTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        for path in [root, root + "-fixtures"] where FileManager.default.fileExists(atPath: path) {
-            try FileManager.default.removeItem(atPath: path)
+        if FileService().directoryExists(at: directory.root) {
+            try FileService().deleteDirectory(at: directory.root)
         }
     }
 

@@ -6,6 +6,7 @@ import XCTest
 @MainActor
 final class ManifestSaveFixture {
     final class Messages { var lines: [String] = [] }
+    private let directory = TestStoreDirectory(named: "manifest-save")
     let root: String
     let lockPath: String
     let files = FileService()
@@ -23,7 +24,7 @@ final class ManifestSaveFixture {
     let project: Project
 
     init(unopenableLock: Bool = false, waitSeconds: TimeInterval = 0.01, rebuildFiles: FileServiceProtocol? = nil) throws {
-        root = TestTemporaryDirectory.path + "manifest-save-" + UUID().uuidString
+        root = directory.storeRoot
         lockPath = root + "/support/sync.lock"
         context = ModelContext(try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true)))
         recording = RecordingSaveManifest()
@@ -79,7 +80,7 @@ final class ManifestSaveFixture {
         return result
     }
 
-    func cleanup() { try? files.deleteDirectory(at: root) }
+    func cleanup() { try? files.deleteDirectory(at: directory.root) }
 }
 
 /// Records the real full-snapshot writes, preserving their thread order; it does not implement merging.
