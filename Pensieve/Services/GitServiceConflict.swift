@@ -90,13 +90,20 @@ extension GitService {
     /// ignore rules from them; older builds preserve the receipts but do not enforce them.
     @_disfavoredOverload
     func retireConflictPath(_ path: String, at root: String) throws {
-        try StoreIgnoreRules.prepare(at: root, files: fileService, retiring: path)
-        try removeConflictEntryFromIndex(path, at: root)
-        try stagePath(StoreIgnoreRules.receiptFile, at: root)
-        try stagePath(".gitattributes", at: root)
+        var scoped = self
+        scoped.storeState = StoreOperationState(root: root)
+        let receipts = try StoreIgnoreRules.readReceipts(at: root, files: fileService)
+        scoped.storeState?.receipts = try StoreIgnoreRules.publish(receipts, at: root, files: fileService, retiring: path)
+        if storeState?.root == root { storeState?.receipts = scoped.storeState?.receipts }
+        let store = try scoped.storeOperation(at: root)
+        try store.runOrThrow(["--literal-pathspecs", "update-index", "--force-remove", "--", path])
+        try store.stagePath(StoreIgnoreRules.receiptFile)
+        try store.stagePath(".gitattributes")
         if try fileService.entryTypeWithoutFollowingLinks(at: root + "/.gitignore") == .regular {
-            try stagePath(".gitignore", at: root)
-        } else { try removeConflictEntryFromIndex(".gitignore", at: root) }
+            try store.stagePath(".gitignore")
+        } else {
+            try store.runOrThrow(["--literal-pathspecs", "update-index", "--force-remove", "--", ".gitignore"])
+        }
     }
 
     /// True iff a rebase is mid-flight. Git owns `.git`; this structural probe stays inside GitService.
@@ -147,6 +154,9 @@ extension GitService {
     /// `git add -- <path>` — stage a resolved path. The `--` guards a leading-dash path.
     @_disfavoredOverload
     func stagePath(_ path: String, at root: String) throws {
+        if path == StoreIgnoreRules.receiptFile || path == ".gitattributes", storeState?.root == root {
+            storeState?.receipts = nil
+        }
         try storeOperation(at: root).stagePath(path)
     }
 
@@ -155,7 +165,7 @@ extension GitService {
     func collapseToSingleCommit(at root: String, message: String, credential: GitCredential?,
                                 fetchedRevision: FetchedStoreRevision?) throws -> Bool {
         try ensureCommitIdentity(at: root)
-        if fetchedRevision == nil {
+        if fetchedRevision == nil && storeState?.fetched == nil {
             let fetch = try run(["-C", root, "fetch", "origin", "main"], in: nil, credential: credential)
             if fetch.exit != 0 {
                 let failure = commandError(fetch, args: ["-C", root, "fetch", "origin", "main"],
@@ -163,10 +173,15 @@ extension GitService {
                 if case .authenticationFailed = failure { throw failure }
                 return try stageAllAndCommit(at: root, message: message)
             }
+            if storeState?.root == root {
+                let commit = try runOrThrow(["-C", root, "rev-parse", "--verify", "FETCH_HEAD^{commit}"], in: nil)
+                    .stdout.trimmingCharacters(in: .newlines)
+                storeState?.fetched = FetchedStoreRevision(commit: commit)
+            }
         }
         let store = try storeOperation(at: root)
         try store.stage()
-        let upstream = fetchedRevision?.commit ?? "origin/main"
+        let upstream = fetchedRevision?.commit ?? storeState?.fetched?.commit ?? "origin/main"
         guard let baseR = try runBestEffort(["-C", root, "merge-base", "HEAD", upstream], in: nil),
               baseR.exit == 0 else {
             return try store.commitStagedChanges(message: message)

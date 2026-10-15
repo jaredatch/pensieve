@@ -90,8 +90,9 @@ final class SkillStore: SkillStoreProtocol {
         let dirName = Self.availableDirectoryName(for: name, occupied: try occupiedDirectoryNames().union(avoiding))
         try fileService.createDirectory(at: baseDir + "/" + dirName)
         let path = try validatedSkillDirectory(dirName) + "/SKILL.md"
-        try fileService.writeFile(at: path,
-            content: SkillSerializer.serialize(name: name, description: description, body: body))
+        try fileService.writeStoreFile(at: path,
+            content: SkillSerializer.serialize(name: name, description: description, body: body),
+            root: storeRoot, control: false)
         return dirName
     }
 
@@ -161,13 +162,13 @@ final class SkillStore: SkillStoreProtocol {
             fallbackDescription: fallbackDescription
         )
         guard result.didChange else { return result }
-        try fileService.writeFile(at: path, content: result.content)
+        try fileService.writeStoreFile(at: path, content: result.content, root: storeRoot, control: false)
         return result
     }
 
     func writeBody(directoryName: String, body: String) throws {
         let path = try validatedSkillDirectory(directoryName) + "/SKILL.md"
-        try fileService.writeFile(at: path, content: body)
+        try fileService.writeStoreFile(at: path, content: body, root: storeRoot, control: false)
     }
 
     func deleteSkill(directoryName: String) throws {
@@ -274,7 +275,7 @@ final class SkillStore: SkillStoreProtocol {
     /// Reject a symlinked `<baseDir>/<dirName>` (or one that realpaths outside baseDir) so a malicious
     /// pulled tree committing `skills/<slug>` as a symlinked DIRECTORY can't redirect an atomic SKILL.md
     /// write into the symlink target (C7). A symlinked LEAF is already neutralized by
-    /// `writeFile(atomically:)` (it replaces the link, not its target); the dir case is the escape this
+    /// `writeStoreFile` (its rename replaces the link, not its target); the dir case is the escape this
     /// closes. `dirName` is a single slug component - reject any separator, `.`/`..`, or empty too.
     private func validatedSkillDirectory(_ dirName: String) throws -> String {
         guard let path = Self.safeSkillDirectory(slug: dirName, base: baseDir, fileService: fileService) else {

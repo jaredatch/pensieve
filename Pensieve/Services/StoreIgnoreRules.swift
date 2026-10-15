@@ -30,7 +30,7 @@ enum StoreIgnoreRules {
     private static let attributes = "manifest/categories/*.yaml merge=union\n"
         + "manifest/projects.yaml merge=union\n"
 
-    private struct Receipts {
+    struct Receipts {
         var safe: Set<String> = []
         var unsafe: Set<String> = []
         var sources: [String: String] = [:]
@@ -40,7 +40,7 @@ enum StoreIgnoreRules {
         try readReceipts(at: root, files: files).safe.sorted()
     }
 
-    private static func readReceipts(at root: String, files: FileServiceProtocol) throws -> Receipts {
+    static func readReceipts(at root: String, files: FileServiceProtocol) throws -> Receipts {
         var receipts = Receipts()
         // Read both sources completely before writes or logging. Malformed input remains a stop.
         for source in [".gitattributes", receiptFile] {
@@ -86,7 +86,7 @@ enum StoreIgnoreRules {
     }
 
     static func ignoreText(paths: [String]) -> String {
-        ".DS_Store\n" + paths.map { path in
+        ".DS_Store\n.pensieve-ignore-*\n" + paths.map { path in
             "/" + path.unicodeScalars.map { scalar in
                 let text = String(scalar)
                 return "\\*?[]!# ".unicodeScalars.contains(scalar) ? "\\" + text : text
@@ -96,7 +96,14 @@ enum StoreIgnoreRules {
 
     static func prepare(at root: String, files: FileServiceProtocol, retiring path: String? = nil,
                         log: (String) -> Void = logDroppedPath) throws {
-        var receipts = try readReceipts(at: root, files: files)
+        let receipts = try readReceipts(at: root, files: files)
+        _ = try publish(receipts, at: root, files: files, retiring: path, log: log)
+    }
+
+    @discardableResult
+    static func publish(_ original: Receipts, at root: String, files: FileServiceProtocol,
+                        retiring path: String? = nil, log: (String) -> Void = logDroppedPath) throws -> Receipts {
+        var receipts = original
         if let path {
             guard canRetire(path) else { throw StoreReceiptError.invalidPath(path) }
             receipts.safe.insert(path)
@@ -106,26 +113,32 @@ enum StoreIgnoreRules {
         if receipts.sources[receiptFile] != nil || !receipts.safe.isEmpty || !receipts.unsafe.isEmpty {
             let text = receipts.safe.sorted().map { marker + Data($0.utf8).base64EncodedString() + "\n" }.joined()
             if receipts.sources[receiptFile] != text {
-                try files.writeFile(at: root + "/" + receiptFile, content: text)
+                try files.writeStoreFile(at: root + "/" + receiptFile, content: text, root: root, control: true)
+                receipts.sources[receiptFile] = text
             }
         }
         if receipts.sources[".gitattributes"] != attributes {
-            try files.writeFile(at: root + "/.gitattributes", content: attributes)
+            try files.writeStoreFile(at: root + "/.gitattributes", content: attributes, root: root, control: true)
+            receipts.sources[".gitattributes"] = attributes
         }
         for path in receipts.unsafe.sorted() { log(path) }
+        try publishIgnore(at: root, files: files)
+        return receipts
+    }
+
+    private static func publishIgnore(at root: String, files: FileServiceProtocol) throws {
         // A folder is user data. Keep it in place; staging uses generated rules in metadata.
         let ignore = root + "/.gitignore"
-        let type = try? files.entryTypeWithoutFollowingLinks(at: ignore)
-        if type == .regular {
-            if let data = try? files.readRegularFileData(at: ignore, maximumBytes: 1_048_576, containedIn: root),
-               data == Data(".DS_Store\n".utf8) { return }
-            // A fresh file restores readable permissions even if the remote file had mode 000.
-            let temporary = root + "/.pensieve-ignore-" + UUID().uuidString
-            defer { try? files.deleteFile(at: temporary) }
-            try files.writeFile(at: temporary, content: ".DS_Store\n")
-            try files.replaceItem(at: ignore, with: temporary)
-        } else if type != .directory {
-            try files.writeFile(at: ignore, content: ".DS_Store\n")
+        let type = try files.entryTypeWithoutFollowingLinks(at: ignore)
+        if type == .directory { return }
+        guard type != .symlink else { throw StoreReceiptError.unreadable(ignore) }
+        if let data = try? files.readRegularFileData(at: ignore, maximumBytes: 1_048_576, containedIn: root),
+           data == Data(".DS_Store\n".utf8) { return }
+        do {
+            try files.writeStoreFile(at: ignore, content: ".DS_Store\n", root: root, control: true)
+        } catch {
+            // rename itself refuses a folder that arrived after the final type check.
+            guard (try? files.entryTypeWithoutFollowingLinks(at: ignore)) == .directory else { throw error }
         }
     }
 

@@ -99,6 +99,8 @@ struct GitRemoteReferences: Equatable {
 }
 
 protocol GitServiceProtocol: GitUsabilityProbing, GitRemoteReading {
+    func scopedToStore(_ root: String) -> GitServiceProtocol
+    func prepareStoreRules(at root: String, files: FileServiceProtocol) throws
 
     @_disfavoredOverload
     func initRepository(at path: String) throws
@@ -190,6 +192,7 @@ struct GitService: GitServiceProtocol {
     #endif
     private let gitPath: String
     let fileService: FileServiceProtocol
+    var storeState: StoreOperationState?
     let askpassHelperPath: String
     typealias UpstreamHistoryNetworkRunner = ([String], GitCredential?) throws -> GitOutput
     private let upstreamHistoryNetworkRunner: UpstreamHistoryNetworkRunner?
@@ -716,6 +719,8 @@ extension GitService {
         let before = try headSHA(at: path)
         let args = ["-C", path] + (try store.pullArguments(for: fetchedRevision))
         let r = try store.run(Array(args.dropFirst(2)))
+        // Rebase can install incoming receipts even when it stops at a conflict.
+        if storeState?.root == path { storeState?.receipts = nil }
         if r.exit == 0 {
             let after = try headSHA(at: path)
             return before == after ? .upToDate : .merged

@@ -59,10 +59,18 @@ extension SyncConflictResolutionTests {
             let engine = try fixture.ignoreFaultEngine(kind)
             let full = fixture.storeB + "/" + item.path
             try fixture.files.writeFile(at: full + "/keep", content: "local folder work")
-            _ = try engine.resolveConflicts(root: fixture.storeB,
-                picks: [item.path: ResolutionPick(side: .thisMachine, expectedThis: item.thisMachine,
-                    expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
-                    expectedOtherUnavailable: item.otherUnavailable)], credential: nil, context: fixture.contextB)
+            let resolve = {
+                try engine.resolveConflicts(root: fixture.storeB,
+                    picks: [item.path: ResolutionPick(side: .thisMachine, expectedThis: item.thisMachine,
+                        expectedOther: item.otherMachine, expectedThisUnavailable: item.thisUnavailable,
+                        expectedOtherUnavailable: item.otherUnavailable)], credential: nil, context: fixture.contextB)
+            }
+            if kind == "link" {
+                XCTAssertThrowsError(try resolve()) { error in
+                    guard case StoreReceiptError.unreadable = error else { return XCTFail("Expected link refusal") }
+                }
+                XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
+            } else { _ = try resolve() }
             XCTAssertEqual(try fixture.files.readFile(at: full + "/keep"), "local folder work")
             XCTAssertEqual(try fixture.files.readFile(at: fixture.root + "/outside-key"), "outside sentinel")
             let ignore = try fixture.git.runData(["--git-dir", fixture.remote, "show", "main:.gitignore"], in: nil)

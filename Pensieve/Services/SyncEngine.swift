@@ -73,7 +73,7 @@ extension SyncEngineProtocol {
 /// index from the merged files, and pushes. A body/overlay conflict is reported as a structured
 /// `.conflicted` result it does NOT resolve — the safe interim (§D); PLAN-09 adds the diff-and-pick sheet.
 struct SyncEngine: SyncEngineProtocol {
-    let gitService: GitServiceProtocol
+    var gitService: GitServiceProtocol
     private let manifestService: ManifestSnapshotting
     private let storeRebuildService: StoreRebuildServiceProtocol
     let fileService: FileServiceProtocol
@@ -96,6 +96,13 @@ struct SyncEngine: SyncEngineProtocol {
 
     func sync(root: String, message: String, credential: GitCredential?,
               context: ModelContext, prepare: ((ModelContext) throws -> Void)?) throws -> SyncOutcome {
+        var operation = self
+        operation.gitService = gitService.scopedToStore(root)
+        return try operation.performSync(root: root, message: message, credential: credential, context: context, prepare: prepare)
+    }
+
+    private func performSync(root: String, message: String, credential: GitCredential?,
+                             context: ModelContext, prepare: ((ModelContext) throws -> Void)?) throws -> SyncOutcome {
         guard let lock = lockProvider(lockPath) else { throw SyncError.syncInProgress }
         defer { lock.release() }
         try gitService.probeUsability().requireUsable()
@@ -157,6 +164,13 @@ struct SyncEngine: SyncEngineProtocol {
 
     func inspectConflicts(root: String, credential: GitCredential?,
                           context: ModelContext) throws -> ConflictInspection {
+        var operation = self
+        operation.gitService = gitService.scopedToStore(root)
+        return try operation.performInspectConflicts(root: root, credential: credential, context: context)
+    }
+
+    private func performInspectConflicts(root: String, credential: GitCredential?,
+                                         context: ModelContext) throws -> ConflictInspection {
         guard let lock = lockProvider(lockPath) else { throw SyncError.syncInProgress }
         defer { lock.release() }
         try gitService.probeUsability().requireUsable()
@@ -202,6 +216,13 @@ struct SyncEngine: SyncEngineProtocol {
 
     func resolveConflicts(root: String, picks: [String: ResolutionPick],
                           credential: GitCredential?, context: ModelContext) throws -> SyncOutcome {
+        var operation = self
+        operation.gitService = gitService.scopedToStore(root)
+        return try operation.performResolveConflicts(root: root, picks: picks, credential: credential, context: context)
+    }
+
+    private func performResolveConflicts(root: String, picks: [String: ResolutionPick],
+                                         credential: GitCredential?, context: ModelContext) throws -> SyncOutcome {
         guard let lock = lockProvider(lockPath) else { throw SyncError.syncInProgress }
         defer { lock.release() }
         try gitService.probeUsability().requireUsable()
@@ -238,7 +259,7 @@ struct SyncEngine: SyncEngineProtocol {
     /// Install union merge for list-shaped category/project manifests plus ignore rules.
     /// Skill overlays contain scalars: union would produce duplicate keys and corrupt YAML.
     private func ensureSyncAttributes(root: String) throws {
-        try StoreIgnoreRules.prepare(at: root, files: fileService)
+        try gitService.prepareStoreRules(at: root, files: fileService)
     }
 
     private static let resolveMessage = "Pensieve sync (resolve)"

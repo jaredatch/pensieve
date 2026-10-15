@@ -15,6 +15,14 @@ final class AllowlistedRemoteGit: GitServiceProtocol {
         self.acceptedRemote = acceptedRemote
     }
 
+    func scopedToStore(_ root: String) -> GitServiceProtocol {
+        AllowlistedRemoteGit(wrapping: wrapped.scopedToStore(root), acceptedRemote: acceptedRemote)
+    }
+
+    func prepareStoreRules(at root: String, files: FileServiceProtocol) throws {
+        try wrapped.prepareStoreRules(at: root, files: files)
+    }
+
     func probeUsability() throws -> GitUsability { try wrapped.probeUsability() }
 
     /// The ONLY override: report an accepted URL when the wrapped service has an origin (preserving the

@@ -28,6 +28,19 @@ extension GitService {
         "-c", "core.autocrlf=false", "-c", "core.eol=lf"
     ]
 
+    func scopedToStore(_ root: String) -> GitServiceProtocol {
+        var scoped = self
+        scoped.storeState = StoreOperationState(root: root)
+        return scoped
+    }
+
+    func prepareStoreRules(at root: String, files: FileServiceProtocol) throws {
+        let state = storeState.flatMap { $0.root == root ? $0 : nil }
+        let receipts = try state?.receipts ?? StoreIgnoreRules.readReceipts(at: root, files: files)
+        let published = try StoreIgnoreRules.publish(receipts, at: root, files: files)
+        state?.receipts = published
+    }
+
     func storeOperation(at root: String) throws -> StoreGitOperation {
         try StoreGitOperation(git: self, root: root)
     }
@@ -45,10 +58,13 @@ extension GitService {
     }
 
     func fetchStoreRevision(at path: String, credential: GitCredential?) throws -> FetchedStoreRevision {
+        if let state = storeState, state.root == path, let revision = state.fetched { return revision }
         try fetch(at: path, credential: credential)
         let commit = try runOrThrow(["-C", path, "rev-parse", "--verify", "FETCH_HEAD^{commit}"], in: nil)
             .stdout.trimmingCharacters(in: .newlines)
-        return FetchedStoreRevision(commit: commit)
+        let revision = FetchedStoreRevision(commit: commit)
+        if storeState?.root == path { storeState?.fetched = revision }
+        return revision
     }
 
     /// `git -C <path> fetch origin main`. Advances FETCH_HEAD and (opportunistically) the `origin/main`
@@ -105,18 +121,25 @@ struct StoreGitOperation {
          file: StaticString = #fileID, line: UInt = #line) throws {
         self.git = git
         self.root = root
-        let retired = aborting ? [] : try StoreIgnoreRules.retiredPaths(at: root, files: git.fileService)
+        let state = git.storeState.flatMap { $0.root == root ? $0 : nil }
+        let receipts = aborting ? nil : try state?.receipts ?? StoreIgnoreRules.readReceipts(at: root, files: git.fileService)
+        if let receipts { state?.receipts = receipts }
+        let retired = receipts?.safe.sorted() ?? []
         var resolved = ""
         var failure: Error?
         do {
-            let result = try GitThreadGuard.withCallSite(file: file, line: line) {
-                try git.runOrThrow(["-C", root, "rev-parse", "--path-format=absolute", "--git-path", "info"], in: nil)
+            let info: String
+            if let cached = state?.infoDirectory { info = cached } else {
+                let result = try GitThreadGuard.withCallSite(file: file, line: line) {
+                    try git.runOrThrow(["-C", root, "rev-parse", "--path-format=absolute", "--git-path", "info"], in: nil)
+                }
+                info = result.stdout.trimmingCharacters(in: .newlines)
             }
-            let info = result.stdout.trimmingCharacters(in: .newlines)
             guard info.utf8.first == 0x2F else {
                 throw GitError.repositoryUnreadable(path: root, detail: "git returned no metadata path.")
             }
             resolved = info
+            state?.infoDirectory = info
             let attributes = "* -text -eol -ident -filter -working-tree-encoding\nskills/** !merge\n"
                 + StoreIgnoreRules.receiptFile + " merge=union\n"
             let path = info + "/attributes"
@@ -131,7 +154,10 @@ struct StoreGitOperation {
         repairFailure = failure
         if !aborting {
             let rules = StoreIgnoreRules.ignoreText(paths: retired)
-            try git.fileService.writeFile(at: resolved + "/pensieve-ignore", content: rules)
+            let path = resolved + "/pensieve-ignore"
+            if (try? git.fileService.readFile(at: path)) != rules {
+                try git.fileService.writeFile(at: path, content: rules)
+            }
         }
     }
 
@@ -157,6 +183,12 @@ struct StoreGitOperation {
             throw git.commandError(staged, args: ["-C", root] + args)
         }
         try runOrThrow(["commit", "-m", message])
+        // Staging can expose children hidden by an indexed file that was replaced by a folder.
+        // Recheck against the new index; an unchanged sync keeps its earlier inventory and proof.
+        if git.storeState?.root == root {
+            git.storeState?.excluded = nil
+            git.storeState?.checkedRevisions.removeAll()
+        }
         return true
     }
 
@@ -172,10 +204,6 @@ struct StoreGitOperation {
             throw git.commandError(refusal, args: ["-C", root] + args)
         }
         return ["rebase", "--fork-point", "--onto", revision.commit, upstream]
-    }
-
-    func unstagedSkillPaths() throws -> Data {
-        try untrackedPaths("skills")
     }
 
     private func untrackedPaths(_ path: String) throws -> Data {
@@ -212,6 +240,8 @@ struct StoreGitOperation {
     /// Native receipts collapse wholly untracked subtrees, including those within partly tracked
     /// excluded folders. Indexed-file replacements retain their exact individual new paths.
     func excludedUntrackedPaths() throws -> [Data] {
+        let state = git.storeState.flatMap { $0.root == root ? $0 : nil }
+        if let inventory = state?.excluded { return inventory }
         let fileArgs = ["ls-files", "--others", "-z"] + StoreExclusions.directoryArguments
         let files = try runData(fileArgs)
         guard files.exit == 0 else { throw git.dataCommandError(files, args: ["-C", root] + fileArgs) }
@@ -231,6 +261,7 @@ struct StoreGitOperation {
         guard replaced.exit == 0 else { throw git.dataCommandError(replaced, args: ["-C", root] + replacedArgs) }
         paths += directories.stdout.split(separator: 0).map { Data($0) }
         paths += try excludedFiles(beneath: replaced.stdout.split(separator: 0).map { Data($0) })
+        state?.excluded = paths
         return paths
     }
 
@@ -273,8 +304,20 @@ struct StoreGitOperation {
     /// Refuse both exact paths and file/directory replacements that would remove protected children.
     /// Native inventories avoid following links or opening secret bytes; no extra filesystem walk.
     func requireNoExcludedCollision(with revision: String, localPaths: [Data]? = nil) throws {
+        let state = git.storeState.flatMap { $0.root == root ? $0 : nil }
+        if state?.checkedRevisions.contains(revision) == true { return }
         let inventory = try localPaths ?? excludedUntrackedPaths()
-        guard !inventory.isEmpty else { return }
+        guard !inventory.isEmpty else {
+            state?.checkedRevisions.insert(revision)
+            return
+        }
+        var keys: [Data: Data] = [:]
+        func key(_ path: Data) -> Data {
+            if let cached = keys[path] { return cached }
+            let value = collisionKey(path)
+            keys[path] = value
+            return value
+        }
         let folders = Set(inventory.filter { $0.last == 0x2F }.map { Data($0.dropLast()) })
         let local = inventory.map { $0.last == 0x2F ? Data($0.dropLast()) : $0 }
         let args = ["ls-tree", "-r", "--name-only", "-z", revision]
@@ -285,16 +328,16 @@ struct StoreGitOperation {
         var containingPaths: [Data: [(prefix: Data, path: Data)]] = [:]
         for path in local {
             for prefix in pathPrefixes(path) {
-                containingPaths[collisionKey(prefix), default: []].append((prefix, path))
+                containingPaths[key(prefix), default: []].append((prefix, path))
             }
         }
         for path in incoming.stdout.split(separator: UInt8(0)).map({ Data($0) }) {
             for prefix in pathPrefixes(path) {
-                for candidate in containingPaths[collisionKey(prefix)] ?? [] {
+                for candidate in containingPaths[key(prefix)] ?? [] {
                     // A shared parent alone is harmless: either the incoming path or the protected
                     // receipt must end at the shared component (a file/directory replacement).
                     guard prefix == path || candidate.prefix == candidate.path,
-                          sameDestination(prefix, candidate.prefix) else { continue }
+                          key(prefix) == key(candidate.prefix) else { continue }
                     let collision = candidate.path
                     let displayPath = String(bytes: collision, encoding: .utf8)
                         ?? collision.map { String(format: "%%%02X", $0) }.joined()
@@ -303,19 +346,13 @@ struct StoreGitOperation {
                 }
             }
         }
+        state?.checkedRevisions.insert(revision)
     }
 
     private func collisionKey(_ path: Data) -> Data {
         guard let text = String(data: path, encoding: .utf8),
               let entry = git.fileService.directoryEntryIdentity(at: root + "/" + text) else { return path }
         return Data([0]) + entry
-    }
-
-    private func sameDestination(_ first: Data, _ second: Data) -> Bool {
-        if first == second { return true }
-        guard let first = String(data: first, encoding: .utf8), let second = String(data: second, encoding: .utf8),
-              let entry = git.fileService.directoryEntryIdentity(at: root + "/" + first) else { return false }
-        return entry == git.fileService.directoryEntryIdentity(at: root + "/" + second)
     }
 
     private func pathPrefixes(_ path: Data) -> [Data] {
@@ -333,7 +370,6 @@ struct StoreGitOperation {
     func stage() throws {
         try runOrThrow(["--literal-pathspecs", "add", "--update"])
         try stage(ordinaryUntrackedPaths())
-        try stage(unstagedSkillPaths())
     }
 
     func stagePath(_ path: String) throws {

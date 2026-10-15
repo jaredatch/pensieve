@@ -24,8 +24,7 @@ extension GitService {
     func isWorktreeClean(at path: String) -> Bool {
         guard let store = try? storeOperation(at: path),
               let r = try? store.run(["status", "--porcelain", "--untracked-files=no"]), r.exit == 0,
-              let ordinary = try? store.ordinaryUntrackedPaths(), ordinary.isEmpty,
-              let unstaged = try? store.unstagedSkillPaths(), unstaged.isEmpty else { return false }
+              let ordinary = try? store.ordinaryUntrackedPaths(), ordinary.isEmpty else { return false }
         return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -49,5 +48,23 @@ extension GitService {
             return .fastForwarded(from: before, to: after)
         }
         return .upToDate
+    }
+}
+
+/// Owned by a single synchronous sync or retirement, never by the long-lived service.
+final class StoreOperationState {
+    let root: String
+    var receipts: StoreIgnoreRules.Receipts?
+    var infoDirectory: String?
+    var excluded: [Data]?
+    var checkedRevisions: Set<String> = []
+    var fetched: FetchedStoreRevision?
+    init(root: String) { self.root = root }
+}
+
+extension GitServiceProtocol {
+    func scopedToStore(_ root: String) -> GitServiceProtocol { self }
+    func prepareStoreRules(at root: String, files: FileServiceProtocol) throws {
+        try StoreIgnoreRules.prepare(at: root, files: files)
     }
 }

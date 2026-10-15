@@ -32,6 +32,7 @@ extension SyncBytePreservationTests {
             }
             let missing = base + "/missing"
             try files.createDirectory(at: missing)
+            try TestPaths.git.initRepository(at: missing)
             XCTAssertNoThrow(try StoreIgnoreRules.prepare(at: missing, files: files), "Absence means no receipts")
         }
     }
@@ -98,10 +99,9 @@ extension SyncBytePreservationTests {
         try NativeTestWork.run { [self] in
             for source in [".gitattributes", ".pensieve-retired-paths", ".gitignore"] {
                 for arrivesAfterRead in [false, true] {
-                    // Root ignore input is not read; its folder needs just one shape.
-                    if source == ".gitignore" && arrivesAfterRead { continue }
                     let store = base + "/control-folder-" + UUID().uuidString
                     try files.createDirectory(at: store)
+                    try TestPaths.git.initRepository(at: store)
                     let path = store + "/" + source
                     if source == ".gitignore" {
                         let receipt = "# Pensieve retired path: " + Data("skills/x/assets/old".utf8).base64EncodedString() + "\n"
@@ -154,8 +154,19 @@ final class RetirementFileService: FileServiceProtocol {
         writes.append(path)
         try wrapped.writeFile(at: path, content: content)
     }
+    func writeStoreFile(at path: String, content: String, root: String, control: Bool) throws {
+        writes.append(path)
+        try wrapped.writeStoreFile(at: path, content: content, root: root, control: control)
+    }
+    func writeData(at path: String, data: Data) throws { try wrapped.writeData(at: path, data: data) }
+    func directoryEntryIdentity(at path: String) -> Data? {
+        return wrapped.directoryEntryIdentity(at: path)
+    }
     func deleteFile(at path: String) throws { try wrapped.deleteFile(at: path) }
     func fileExists(at path: String) -> Bool { wrapped.fileExists(at: path) }
+    func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {
+        try wrapped.entryExistsWithoutFollowingLinks(at: path)
+    }
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
         try wrapped.entryTypeWithoutFollowingLinks(at: path)
     }

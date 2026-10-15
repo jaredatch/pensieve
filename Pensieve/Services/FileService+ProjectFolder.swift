@@ -230,3 +230,77 @@ final class ProjectDirectoryProbes: @unchecked Sendable {
                 userInfo: [NSFilePathErrorKey: path, NSLocalizedDescriptionKey: reason])
     }
 }
+
+extension FileServiceProtocol {
+    /// Forward modeled writes without introducing filesystem access in existing collaborators.
+    /// Concrete FileService supplies crash-safe publication outside the worktree.
+    func writeStoreFile(at path: String, content: String, root: String, control: Bool) throws {
+        try writeFile(at: path, content: content)
+    }
+}
+
+extension FileService {
+    /// Control files use Git's directory. Skills also work before Git is configured, using a
+    /// sibling of the store. No fallback writes an intermediate into the worktree.
+    func writeStoreFile(at path: String, content: String, root: String, control: Bool) throws {
+        let directory: String
+        if control {
+            let metadata = root + "/.git"
+            if try entryTypeWithoutFollowingLinks(at: metadata) == .regular {
+                let text = try readFile(at: metadata).trimmingCharacters(in: .newlines)
+                guard text.hasPrefix("gitdir: ") else { throw CocoaError(.fileWriteUnknown) }
+                let target = String(text.dropFirst(8))
+                directory = PathSyntax.isAbsolute(target) ? target : root + "/" + target
+            } else {
+                directory = metadata
+            }
+            guard directoryExists(at: directory) else { throw CocoaError(.fileNoSuchFile) }
+            let resolved = try resolveRealPath(at: directory)
+            let store = try resolveRealPath(at: root)
+            guard resolved != store, resolved == store + "/.git" || !PathSyntax.hasPrefix(resolved, store + "/") else {
+                throw CocoaError(.fileWriteInvalidFileName)
+            }
+        } else {
+            try createDirectory(at: (path as NSString).deletingLastPathComponent)
+            let store = try resolveRealPath(at: root)
+            directory = (store as NSString).deletingLastPathComponent
+            guard directory != store else { throw CocoaError(.fileWriteInvalidFileName) }
+        }
+        let temporary = directory + "/.pensieve-write-" + UUID().uuidString
+        defer { try? deleteFile(at: temporary) }
+        // The intermediate itself is exclusive and written directly: no Foundation sibling temp.
+        try writeStoreIntermediate(content, at: temporary)
+        if control, let type = try entryTypeWithoutFollowingLinks(at: path), type == .directory || type == .symlink {
+            let code = type == .directory ? EISDIR : ELOOP
+            throw storePublicationError(at: path, code: code)
+        }
+        guard Darwin.rename(temporary, path) == 0 else {
+            let code = errno
+            throw storePublicationError(at: path, code: code)
+        }
+    }
+
+    private func storePublicationError(at path: String, code: Int32) -> NSError {
+        // Keep the existing regular-file admission message when an occupant arrives during preparation.
+        let description = code == EISDIR ? "not a regular file: \(path)"
+            : "open(\(path)): " + String(cString: strerror(code))
+        return NSError(domain: NSPOSIXErrorDomain, code: Int(code),
+                       userInfo: [NSFilePathErrorKey: path, NSLocalizedDescriptionKey: description])
+    }
+
+    private func writeStoreIntermediate(_ content: String, at path: String) throws {
+        let (descriptor, _) = try Self.openRegularFile(at: path, creatingWithPermissions: 0o644)
+        defer { close(descriptor) }
+        try Data(content.utf8).withUnsafeBytes { bytes in
+            var offset = 0
+            while offset < bytes.count {
+                let written = Darwin.write(descriptor, bytes.baseAddress! + offset, bytes.count - offset)
+                if written < 0 && errno == EINTR { continue }
+                guard written > 0 else {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [NSFilePathErrorKey: path])
+                }
+                offset += written
+            }
+        }
+    }
+}

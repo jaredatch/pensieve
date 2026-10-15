@@ -42,6 +42,35 @@ extension SyncBytePreservationTests {
             }
             XCTAssertEqual(cases, 240)
             try assertReceiptRecordBoundaries()
+            try assertEmptyReceiptLinesAndIgnoreText()
+        }
+    }
+
+    private func assertEmptyReceiptLinesAndIgnoreText() throws {
+        let path = "skills/x/assets/legacy"
+        let line = "# Pensieve retired path: " + Data(path.utf8).base64EncodedString()
+        for ending in ["\n", "\r\n", "mixed"] {
+            for finalNewline in [false, true] {
+                for source in [".gitattributes", ".pensieve-retired-paths"] {
+                    let sample = ReceiptSweepCase(source: source,
+                        text: sweepText(["", line, "", line, ""], ending: ending, finalNewline: finalNewline),
+                        safe: [path], unsafe: [], malformed: false)
+                    try assertReceiptRewrite(sample, at: base + "/empty-lines-" + UUID().uuidString)
+                }
+                for input in ["", "\n\n", line, "*.bin\n!keep", String(repeating: "x", count: 1_048_577)] {
+                    let root = base + "/ignore-text-" + UUID().uuidString
+                    try files.createDirectory(at: root)
+                    try TestPaths.git.initRepository(at: root)
+                    let text = sweepText(input.components(separatedBy: "\n"), ending: ending, finalNewline: finalNewline)
+                    try files.writeFile(at: root + "/.gitignore", content: text)
+                    let spy = RetirementFileService()
+                    try StoreIgnoreRules.prepare(at: root, files: spy)
+                    XCTAssertEqual(try files.readFile(at: root + "/.gitignore"), ".DS_Store\n")
+                    spy.writes.removeAll()
+                    try StoreIgnoreRules.prepare(at: root, files: spy)
+                    XCTAssertTrue(spy.writes.isEmpty)
+                }
+            }
         }
     }
 
@@ -76,6 +105,8 @@ extension SyncBytePreservationTests {
     }
 
     private func assertReceiptRewrite(_ sample: ReceiptSweepCase, at store: String) throws {
+        try files.createDirectory(at: store)
+        try TestPaths.git.initRepository(at: store)
         try files.writeFile(at: store + "/" + sample.source, content: sample.text)
         let spy = RetirementFileService()
         var dropped: [String] = []

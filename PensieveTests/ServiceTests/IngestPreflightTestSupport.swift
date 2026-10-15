@@ -16,6 +16,11 @@ final class IngestRecordingGit: GitServiceProtocol {
         if let remoteRead { return try remoteRead() }
         return remote
     }
+    func prepareStoreRules(at root: String, files: FileServiceProtocol) throws {
+        // This stub reports an initialized store; supply metadata for the real publisher.
+        try files.createDirectory(at: root + "/.git")
+        try StoreIgnoreRules.prepare(at: root, files: files)
+    }
     func initRepository(at path: String) throws {}
     func setRemote(_ url: String, at path: String) throws {}
     func removeRemote(at path: String) throws {}
