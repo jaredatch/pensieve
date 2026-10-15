@@ -171,6 +171,14 @@ extension GitServiceProtocol {
         }
     }
 
+    func abortRebase(at path: String, refusedFolder: String,
+                     file: StaticString = #fileID, line: UInt = #line) throws {
+        try GitThreadGuard.withCallSite(file: file, line: line) {
+            let operation: (String, String) throws -> Void = self.abortRebase
+            return try operation(path, refusedFolder)
+        }
+    }
+
     func conflictedFiles(at path: String,
                          file: StaticString = #fileID, line: UInt = #line) throws -> [String] {
         try GitThreadGuard.withCallSite(file: file, line: line) {

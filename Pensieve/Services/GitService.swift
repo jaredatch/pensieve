@@ -150,7 +150,8 @@ protocol GitServiceProtocol: GitUsabilityProbing, GitRemoteReading {
     func push(at path: String, credential: GitCredential?) throws
     @_disfavoredOverload
     func abortRebase(at path: String) throws
-    func isRebaseInProgress(at path: String) -> Bool
+    @_disfavoredOverload
+    func abortRebase(at path: String, refusedFolder: String) throws
     @_disfavoredOverload
     func conflictedFiles(at path: String) throws -> [String]
     @_disfavoredOverload
@@ -747,6 +748,16 @@ extension GitService {
 
     @_disfavoredOverload
     func abortRebase(at path: String) throws {
+        try abortRebase(at: path, permittedFolder: nil)
+    }
+
+    /// Only the resolve that just refused this folder may authorize the finishing step.
+    @_disfavoredOverload
+    func abortRebase(at path: String, refusedFolder: String) throws {
+        try abortRebase(at: path, permittedFolder: refusedFolder)
+    }
+
+    private func abortRebase(at path: String, permittedFolder: String?) throws {
         guard isRebaseInProgress(at: path) else { return }
         var localized = self
         localized.commandLocale = "C"
@@ -754,36 +765,63 @@ extension GitService {
         do {
             try store.runOrThrow(["rebase", "--abort"])
         } catch {
-            try finishRefusedAbort(error, root: path)
+            let paths = abortBlockingFolders(error)
+            guard let permittedFolder else {
+                guard !paths.isEmpty else { throw error }
+                throw ConflictAbortBlocked(paths: paths, underlying: error)
+            }
+            try finishRefusedAbort(error, paths: paths, permittedFolder: permittedFolder, root: path)
             try store.runOrThrow(["rebase", "--abort"])
         }
         if storeState?.root == path { storeState?.folderConflicts = nil }
         if let repairFailure = store.repairFailure { throw repairFailure }
     }
 
-    /// Git always gets the intact worktree first. Only its named untracked-directory
-    /// obstruction can be discarded, and only where abort restores a file or link.
-    private func finishRefusedAbort(_ failure: Error, root: String) throws {
+    private func abortBlockingFolders(_ failure: Error) -> [String] {
         guard case let GitError.commandFailed(args, exitCode, stderr, _) = failure,
-              exitCode != 0, args.suffix(2) == ["rebase", "--abort"] else { throw failure }
+              exitCode != 0, args.suffix(2) == ["rebase", "--abort"] else { return [] }
         let lines = stderr.components(separatedBy: "\n")
-        var paths: [String] = []
-        for index in lines.indices where lines[index] ==
-            "error: Updating the following directories would lose untracked files in them:" {
-            paths += lines.dropFirst(index + 1).prefix { $0.hasPrefix("\t") }.map { String($0.dropFirst()) }
+        return lines.indices.filter {
+            lines[$0] == "error: Updating the following directories would lose untracked files in them:"
+        }.flatMap { index in
+            lines.dropFirst(index + 1).prefix { $0.hasPrefix("\t") }.map { String($0.dropFirst()) }
         }
-        guard !paths.isEmpty else { throw failure }
-        let original = try conflictTree(revision: "ORIG_HEAD", root: root)
-        let incoming = try conflictTree(revision: "HEAD", root: root)
-        // Validate the entire set before deleting. Neither index mutations nor a stale sheet
-        // can erase the proof: these are the two commits that native abort is restoring from/to.
-        for path in paths {
-            guard let entry = original[Data(path.utf8)], ["100644", "100755", "120000"].contains(entry.mode),
-                  incoming[Data(path.utf8)]?.mode == "040000",
-                  try abortPathWasConflicted(path, root: root),
-                  try abortFolderIsContained(path, root: root) else { throw failure }
+    }
+
+    /// Native abort runs first. Validate its exact obstruction before discarding anything.
+    private func finishRefusedAbort(_ failure: Error, paths: [String], permittedFolder: String, root: String) throws {
+        guard !paths.isEmpty, paths.allSatisfy({ $0.utf8.elementsEqual(permittedFolder.utf8) }) else { throw failure }
+        do {
+            let original = try conflictTree(revision: rebaseOriginalCommit(at: root), root: root)
+            let incoming = try conflictTree(revision: "HEAD", root: root)
+            // These are the commits native abort restores from/to, even if ORIG_HEAD moved.
+            for path in paths {
+                guard let entry = original[Data(path.utf8)], ["100644", "100755", "120000"].contains(entry.mode),
+                      incoming[Data(path.utf8)]?.mode == "040000",
+                      try abortPathWasConflicted(path, root: root),
+                      try abortFolderIsContained(path, root: root) else { throw failure }
+            }
+        } catch {
+            // A failed proof must not hide the native refusal that stopped recovery.
+            throw failure
         }
-        for path in paths { try fileService.deleteDirectory(at: root + "/" + path) }
+        try fileService.deleteDirectory(at: root + "/" + permittedFolder)
+    }
+
+    private func rebaseOriginalCommit(at root: String) throws -> String {
+        for backend in ["rebase-merge", "rebase-apply"] {
+            let result = try runOrThrow(["-C", root, "rev-parse", "--path-format=absolute",
+                                         "--git-path", backend + "/orig-head"], in: nil)
+            let path = result.stdout.trimmingCharacters(in: .newlines)
+            if try fileService.entryExistsWithoutFollowingLinks(at: path) {
+                let commit = try fileService.readFile(at: path).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard [40, 64].contains(commit.utf8.count), commit.utf8.allSatisfy({
+                    (48...57).contains($0) || (97...102).contains($0)
+                }) else { break }
+                return commit
+            }
+        }
+        throw GitError.repositoryUnreadable(path: root, detail: "The rebase’s original commit is unavailable.")
     }
 
     private func abortFolderIsContained(_ path: String, root: String) throws -> Bool {
@@ -800,9 +838,9 @@ extension GitService {
     }
 
     private func abortPathWasConflicted(_ path: String, root: String) throws -> Bool {
-        if try relocatedFolderConflicts(at: root).contains(where: {
+        if storeState?.root == root, storeState?.folderConflicts?.contains(where: {
             $0.fileStage == 3 && $0.path.utf8.elementsEqual(path.utf8)
-        }) { return true }
+        }) == true { return true }
         let args = ["--literal-pathspecs", "-C", root, "ls-files", "--unmerged", "-z", "--", path]
         let index = try runData(args, in: nil)
         guard index.exit == 0 else { throw dataCommandError(index, args: args) }
@@ -943,8 +981,9 @@ extension GitService {
         return result
     }
 
-    func conflictTree(revision: String, root: String) throws -> [Data: ConflictTreeEntry] {
-        let args = ["-C", root, "ls-tree", "-r", "-t", "-z", "--full-tree", revision]
+    func conflictTree(revision: String, root: String, path: String? = nil) throws -> [Data: ConflictTreeEntry] {
+        let args = ["--literal-pathspecs", "-C", root, "ls-tree", "-r", "-t", "-z", "--full-tree", revision]
+            + (path.map { ["--", $0] } ?? [])
         let result = try runData(args, in: nil)
         guard result.exit == 0 else { throw dataCommandError(result, args: args) }
         var entries: [Data: ConflictTreeEntry] = [:]

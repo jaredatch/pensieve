@@ -20,6 +20,15 @@ struct UnavailableConflictSide: Error, Equatable {
 
 struct ConflictFolderMustMove: Error {}
 
+struct ConflictAbortBlocked: LocalizedError {
+    let paths: [String]
+    let underlying: Error
+    var errorDescription: String? {
+        underlying.localizedDescription + " Move the folder at " + paths.joined(separator: ", ")
+            + " out of the store, then sync again."
+    }
+}
+
 // Stage mapping during `git pull --rebase origin main` is OPPOSITE a plain merge:
 //   stage 2 (:2:) = origin/main = the OTHER machine
 //   stage 3 (:3:) = the replayed local commit = THIS machine
@@ -253,18 +262,7 @@ extension GitService {
     /// During rebase HEAD is the incoming tree. Admit the entire folder before deleting any
     /// entry. Gitlinks, extra empty folders, changed modes/bytes and unreadable entries refuse.
     private func requireIncomingConflictFolder(_ path: String, at root: String) throws {
-        let args = ["--literal-pathspecs", "-C", root, "ls-tree", "-r", "-t", "-z", "--full-tree", "HEAD", "--", path]
-        let result = try runData(args, in: nil)
-        guard result.exit == 0 else { throw dataCommandError(result, args: args) }
-        var entries: [Data: ConflictTreeEntry] = [:]
-        for record in result.stdout.split(separator: 0) {
-            let parts = record.split(separator: 9, maxSplits: 1)
-            guard parts.count == 2 else { throw ConflictFolderMustMove() }
-            let header = parts[0].split(separator: 32)
-            guard header.count == 3, let mode = String(bytes: header[0], encoding: .ascii),
-                  let object = String(bytes: header[2], encoding: .ascii) else { throw ConflictFolderMustMove() }
-            entries[Data(parts[1])] = ConflictTreeEntry(mode: mode, object: object)
-        }
+        let entries = try conflictTree(revision: "HEAD", root: root, path: path)
         guard entries[Data(path.utf8)]?.mode == "040000" else { throw ConflictFolderMustMove() }
         do {
             try requireMatchingConflictEntry(path, root: root, entries: entries)

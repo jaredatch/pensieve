@@ -7,7 +7,7 @@ extension SyncConflictByteFixture {
     /// Neither wrapper supplies conflict versions, comparison answers or resolution results.
     func folderObservationEngine(change: String, lockAbort: Bool = false,
                                  warnOnAbort: Bool = false, failIndexRemoval: Bool = false,
-                                 afterRemovalChange: String? = nil) throws -> SyncEngine {
+                                 afterRemovalChange: String? = nil, afterAbortFailure: String? = nil) throws -> SyncEngine {
         let executable = root + "/folder-observer-git"
         try writeFolderSnapshotScript()
         try files.writeExecutableFile(at: executable, content: """
@@ -27,6 +27,9 @@ extension SyncConflictByteFixture {
             before "$@"
             /usr/bin/git "$@"
             result=$?
+            if [ "$observed_abort" = 1 ] && [ "$result" != 0 ]; then
+                \(afterAbortFailure ?? ":")
+            fi
             if [ "$observed_abort" = 1 ]; then printf '%s\\n' "$result" >> '\(root)/abort-results'; fi
             after() {
                 \(FakeGitScript.skipGlobalOptions)

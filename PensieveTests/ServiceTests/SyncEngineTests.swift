@@ -152,7 +152,7 @@ final class SyncEngineTests: XCTestCase {
             try seedProjectIntent(in: context)
             try seedDiskOnlySkill("alpha")
             let outcome = try makeEngine(git: git).sync(root: tempDir, message: "m", credential: nil, context: context)
-            XCTAssertEqual(git.calls, ["commit", "pull", "push"])
+            XCTAssertEqual(git.calls, ["abort", "commit", "pull", "push"])
             XCTAssertTrue(FileManager.default.fileExists(atPath: tempDir + "/manifest/manifest.yaml"))
             XCTAssertTrue(slugs(in: context).contains("alpha"), "rebuild should import the on-disk skill")
             XCTAssertEqual(
@@ -185,7 +185,7 @@ final class SyncEngineTests: XCTestCase {
             let context = try makeContext()
             try seedDiskOnlySkill("gamma")
             let outcome = try makeEngine(git: git).sync(root: tempDir, message: "m", credential: nil, context: context)
-            XCTAssertEqual(git.calls, ["commit", "pull", "abort"])
+            XCTAssertEqual(git.calls, ["abort", "commit", "pull", "abort"])
             XCTAssertFalse(git.calls.contains("push"), "must NOT push a conflicted pull")
             XCTAssertFalse(slugs(in: context).contains("gamma"), "must NOT rebuild on conflict")
             XCTAssertEqual(outcome, .conflicted(["skills/x/SKILL.md"]))
@@ -216,7 +216,7 @@ final class SyncEngineTests: XCTestCase {
                                                                credential: nil, context: makeContext())) { error in
                 guard case SyncError.storeUnreadable = error else { return XCTFail("expected storeUnreadable") }
             }
-            XCTAssertTrue(git.calls.isEmpty, "must abort before commit/pull/push")
+            XCTAssertEqual(git.calls, ["abort"], "Recover a leftover rebase before refusing manifest writes")
             XCTAssertTrue(try String(contentsOfFile: manifestPath, encoding: .utf8).contains("999"))
         }
     }
@@ -247,7 +247,7 @@ final class SyncEngineTests: XCTestCase {
                                     storeRebuildService: StoreRebuildService(), fileService: FileService(), lockPath: lockPath)
             let context = try makeContext()
             XCTAssertThrowsError(try engine.sync(root: tempDir, message: "m", credential: nil, context: context))
-            XCTAssertTrue(git.calls.isEmpty, "a fetch failure must abort before commit/pull/push (no destructive write)")
+            XCTAssertEqual(git.calls, ["abort"], "A fetch failure must stop before commit/pull/push")
             XCTAssertFalse(FileManager.default.fileExists(atPath: tempDir + "/manifest/manifest.yaml"))
         }
     }

@@ -62,7 +62,8 @@ final class StoreOperationState {
 }
 
 extension GitServiceProtocol {
-    func isRebaseInProgress(at path: String) -> Bool { false }
+    @_disfavoredOverload
+    func abortRebase(at path: String, refusedFolder: String) throws { try abortRebase(at: path) }
     func scopedToStore(_ root: String) -> GitServiceProtocol { self }
     func prepareStoreRules(at root: String, files: FileServiceProtocol) throws {
         try StoreIgnoreRules.prepare(at: root, files: files)

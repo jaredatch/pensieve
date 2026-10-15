@@ -27,10 +27,12 @@ final class ConflictFolderResolutionTests: XCTestCase {
     }
 
     func testRefusedFilePickPreservesTopLevelEntriesUntilAbort() async throws {
+        for extra in [false, true] { try await assertUnrelatedAbortFailure(extra: extra) }
         try await assertAuxiliaryAdmission()
         try await assertPartialIndexFailure()
+        try await assertInspectionAbortRefusal()
+        try await assertAbortProofFailure()
         try await assertRefusals(link: false, nested: false)
-        for extra in [false, true] { try await assertUnrelatedAbortFailure(extra: extra) }
     }
 
     func testRefusedFilePickPreservesNestedEntriesUntilAbort() async throws {
@@ -145,7 +147,9 @@ final class ConflictFolderResolutionTests: XCTestCase {
         let fixture = try makeFixture(link: link, links: true, kind: kind)
         defer { try? fixture.files.deleteDirectory(at: fixture.root) }
         let directory = fixture.storeB + "/" + fixture.path + (nested ? "/nested" : "")
-        let change = mutation(fault, directory: directory)
+        let change = (fault == "extra-file"
+            ? "/usr/bin/git -C '\(fixture.storeB)' update-ref ORIG_HEAD HEAD; " : "")
+            + mutation(fault, directory: directory)
             + "; printf outside > '\(fixture.root)/outside'"
             + "; printf inside > '\(fixture.storeB)/skills/conflict/inside'"
             + "; mkdir '\(fixture.storeB)/unrelated'; printf sibling > '\(fixture.storeB)/unrelated/keep'"
@@ -157,7 +161,9 @@ final class ConflictFolderResolutionTests: XCTestCase {
         for group in groups { model.choose(group.id, .thisMachine) }
         try fixture.files.writeFile(at: fixture.root + "/folder-armed", content: fault)
         await model.applyAndReport(container: fixture.contextB.container)
-        guard case .ready = model.phase else { return XCTFail("Must refuse \(fault), link=\(link), nested=\(nested)") }
+        guard case .ready = model.phase else {
+            return XCTFail("Must refuse \(fault), link=\(link), nested=\(nested): \(model.phase)")
+        }
         XCTAssertEqual(model.selectionError,
             "Pensieve can’t replace the folder at \(fixture.path). Choose the other version to finish syncing.", fault)
         let before = try fixture.files.readData(at: fixture.root + "/after-change.json")
@@ -196,18 +202,12 @@ final class ConflictFolderResolutionTests: XCTestCase {
         guard case let .error(message) = model.phase else { return XCTFail("Abort failure must be reported") }
         XCTAssertTrue(message.contains("can’t replace the folder"), "Keep the original refusal")
         XCTAssertTrue(message.contains("couldn’t return the store to rest"), "Report the unfinished abort")
-        // Release only the external lock; the next inspection must recover the leftover rebase.
+        // A later operation must preserve files added after the refused resolve.
         try fixture.files.deleteFile(at: fixture.storeB + "/.git/index.lock")
         try fixture.files.deleteFile(at: fixture.root + "/folder-armed")
-        if extra {
-            let outcome = try NativeTestWork.run(container: fixture.contextB.container) { context in
-                try fixture.engine.sync(root: fixture.storeB, message: "retry interrupted sync",
-                                        credential: nil, context: context)
-            }
-            XCTAssertEqual(outcome, .conflicted(fixture.expectedPaths), "Sync must recover the leftover rebase first")
-        }
+        if extra { try await assertLaterAbortPreservesFolder(fixture, model: model) }
         await model.loadAndReport(container: fixture.contextB.container)
-        guard case .ready = model.phase else { return XCTFail("Next inspection must recover without deleting extra by hand") }
+        guard case .ready = model.phase else { return XCTFail("Next inspection must recover after the blocking folder is moved") }
         try assertChosen(fixture, link: false, stores: [fixture.storeB])
     }
 

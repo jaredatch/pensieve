@@ -111,7 +111,7 @@ final class IngestPreflightTests: XCTestCase {
                             context: context()) { _ in throw IngestPreflightBoom.expected }
         )
         XCTAssertEqual(manifest.events, ["read"])
-        XCTAssertTrue(git.calls.isEmpty)
+        XCTAssertEqual(git.calls, ["abort"], "Recover a leftover rebase before preparing local writes")
         XCTAssertFalse(FileManager.default.fileExists(atPath: tempDir + "/.gitattributes"))
         let released = try XCTUnwrap(SyncLock.tryAcquire(at: lockPath))
         released.release()

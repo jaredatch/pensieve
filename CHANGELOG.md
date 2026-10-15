@@ -45,6 +45,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- An interrupted conflict resolution preserves untracked files that block a later abort and explains how to move the folder before retrying. Conflicted parents and children must choose the same Mac.
+
 - File/folder conflicts use the original filenames on both sides. Incompatible parent and child choices now explain the mismatch, and failed recovery keeps the original refusal visible.
 
 - Sync protects excluded files created during preparation, even when there is nothing to commit. Skill saves work with an unwritable store parent, and the next write or sync removes abandoned write files.

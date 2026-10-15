@@ -34,9 +34,9 @@ extension SyncEngine {
         guard Set(paths) == Set(picks.keys) else { throw SyncError.conflictsChanged }
         // Read and validate all index versions before restoring a parent can clear child stages.
         let selections = try conflictSelections(paths, picks: picks, root: root)
-        for parent in selections where parent.chosen.entry != nil {
+        for parent in selections {
             let children = selections.filter { $0.path.utf8.starts(with: (parent.path + "/").utf8) }
-            guard children.allSatisfy({ $0.chosen.entry == nil && $0.chosen.unavailable == nil }) else {
+            guard children.allSatisfy({ $0.stage == parent.stage }) else {
                 throw SyncError.incompatibleConflictPicks(path: parent.path)
             }
         }
@@ -125,8 +125,14 @@ extension SyncEngine {
         return resolved == realRoot || PathSyntax.hasPrefix(resolved, realRoot + "/")
     }
 
-    func abortResolution(after failure: Error, root: String) throws {
-        do { try gitService.abortRebase(at: root) } catch {
+    func abortResolution(after failure: Error, root: String, refusedFolder: String? = nil) throws {
+        do {
+            if let refusedFolder {
+                try gitService.abortRebase(at: root, refusedFolder: refusedFolder)
+            } else {
+                try gitService.abortRebase(at: root)
+            }
+        } catch {
             throw SyncError.returnToRestFailed(reason: failure.localizedDescription, detail: error.localizedDescription)
         }
     }

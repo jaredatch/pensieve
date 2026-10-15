@@ -14,6 +14,12 @@ extension ConflictFolderResolutionTests {
     }
 
     func assertIncompatiblePicks() async throws {
+        for parentSide in [ConflictSide.thisMachine, .otherMachine] {
+            try await assertIncompatiblePicks(parentSide: parentSide)
+        }
+    }
+
+    private func assertIncompatiblePicks(parentSide: ConflictSide) async throws {
         let fixture = try NativeTestWork.run {
             try SyncConflictByteFixture(name: "separate", initial: .file(Data("base".utf8)),
                 this: .file(Data("local".utf8)), other: .folderWith([
@@ -27,13 +33,16 @@ extension ConflictFolderResolutionTests {
         guard case let .ready(groups) = model.phase else { return XCTFail("Conflict must load") }
         XCTAssertGreaterThan(groups.count, 1, "The parent and child must be independently selectable")
         for group in groups {
-            model.choose(group.id, group.items.contains { $0.path == fixture.path } ? .thisMachine : .otherMachine)
+            model.choose(group.id, group.items.contains { $0.path == fixture.path }
+                ? parentSide : (parentSide == .thisMachine ? .otherMachine : .thisMachine))
         }
         await model.applyAndReport(container: fixture.contextB.container)
         guard case .ready = model.phase else { return XCTFail("Keep the picks visible after refusing") }
         XCTAssertEqual(model.selectionError,
             "These picks don’t fit together. Choose the same Mac for \(fixture.path) and its contents.")
         XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
+        XCTAssertEqual(try fixture.files.readFile(at: fixture.storeB + "/" + fixture.path), "local",
+                       "Incompatible picks must not commit either deletion, parent=\(parentSide)")
     }
 
     func assertMirrorLayout() async throws {
@@ -101,7 +110,13 @@ extension ConflictFolderResolutionTests {
         XCTAssertEqual(try fixture.files.readData(at: fixture.root + "/before-abort.json"),
                        try fixture.files.readData(at: fixture.root + "/after-change.json"),
                        "An index failure must hand the intact folder to abort")
-        XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB), "Partial resolution must still abort")
+        XCTAssertTrue(message.contains("out of the store"), "A write error cannot authorize forced cleanup: " + message)
+        XCTAssertTrue(fixture.git.isRebaseInProgress(at: fixture.storeB))
+        try fixture.files.publishDirectory(at: fixture.storeB + "/" + fixture.path, to: fixture.root + "/saved-folder")
+        try fixture.files.deleteFile(at: fixture.root + "/folder-armed")
+        await model.loadAndReport(container: fixture.contextB.container)
+        guard case .ready = model.phase else { return XCTFail("Recover after moving the partial-write obstruction") }
+        XCTAssertEqual(try fixture.files.readFile(at: fixture.root + "/saved-folder/keep"), "other bytes")
         try assertChosen(fixture, link: false, stores: [fixture.storeB])
     }
 

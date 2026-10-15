@@ -125,7 +125,7 @@ struct SyncEngine: SyncEngineProtocol {
         }
         guard try gitService.hasLocalBranches(at: root) else { return .branchless }
         try requireAcceptableRemote(at: root)
-        if gitService.isRebaseInProgress(at: root) { try gitService.abortRebase(at: root) }
+        try gitService.abortRebase(at: root)
 
         // Guard BEFORE any write: if the on-disk manifest is newer/unreadable (e.g. a clone of a remote
         // written by a newer Pensieve), refuse. The after-pull storeUnreadable guard CANNOT catch this —
@@ -205,8 +205,9 @@ struct SyncEngine: SyncEngineProtocol {
         let incoming = try gitService.preflightStoreUpdate(at: root, credential: credential)
         _ = try prepareLocalHead(root: root, credential: credential, context: context, incoming: incoming)
         // Once prepareLocalHead succeeds, pullRebase may START a rebase; if it (or finishSync) then
-        // throws for a non-conflict reason, abort so inspect NEVER leaves a mid-rebase tree at rest
-        // (the safe-resting-state invariant). Mirrors resolveConflicts' outer catch.
+        // throws for a non-conflict reason, attempt abort and report any obstruction to returning
+        // to rest. An abort failure itself must propagate without another attempt.
+        let conflicts: ConflictSet
         do {
             switch try pullRebase(root: root, credential: credential, incoming: incoming) {
             case .upToDate:
@@ -222,13 +223,14 @@ struct SyncEngine: SyncEngineProtocol {
                                         thisUnavailable: this.unavailable, otherUnavailable: other.unavailable,
                                         thisMode: this.mode, otherMode: other.mode)
                 }
-                try gitService.abortRebase(at: root)
-                return .conflicts(ConflictSet(items: items))
+                conflicts = ConflictSet(items: items)
             }
         } catch {
             try abortResolution(after: error, root: root)
             throw error
         }
+        try gitService.abortRebase(at: root)
+        return .conflicts(conflicts)
     }
 
     func resolveConflicts(root: String, picks: [String: ResolutionPick],
@@ -268,7 +270,13 @@ struct SyncEngine: SyncEngineProtocol {
                 return try finishSync(root: root, credential: credential, context: context, pulled: true)
             }
         } catch {
-            try abortResolution(after: error, root: root)
+            let refusedFolder: String?
+            if case let SyncError.conflictFolderMustMove(path) = error {
+                refusedFolder = path
+            } else {
+                refusedFolder = nil
+            }
+            try abortResolution(after: error, root: root, refusedFolder: refusedFolder)
             throw error
         }
     }
