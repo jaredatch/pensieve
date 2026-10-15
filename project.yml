@@ -34,6 +34,9 @@ targets:
         SUPublicEDKey: HibOcVcc/1MTA9UQHp4cIb7qMewKaA0elSCSQ0DY8Ns=
     sources:
       - path: Pensieve
+      - path: skills
+        type: folder
+        buildPhase: resources
     postBuildScripts:
       - name: Generate About credits
         script: |

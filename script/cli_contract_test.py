@@ -608,4 +608,6 @@ if __name__ == "__main__":
     BINARY = args.binary.resolve(strict=True)
     from cli_launch_tests import CLILaunchTests
     CLILaunchTests.binary = BINARY
+    from cli_skill_tests import CLISkillTests
+    CLISkillTests.binary = BINARY
     unittest.main(argv=[__file__, *remaining])
