@@ -38,6 +38,21 @@ extension CLILibraryHandlerTests {
         try await h.assertNetworkDeadline(["skill", "update", "foo", "--yes"], remote: remote)
     }
 
+    func assertDriftRefusalBeforeConfirmation(_ h: CLILibraryFixture) async throws {
+        let before = try h.tree(h.paths.storeRoot)
+        let preview = try await h.run(["skill", "update", "foo", "--dry-run"])
+        XCTAssertEqual(preview.data?["skills"]?.array?.first?["action"], .string("update"))
+        XCTAssertEqual(preview.data?["skills"]?.array?.first?["drifted"], .bool(true))
+        for terminal in [false, true] {
+            let refused = try await h.run(["skill", "update", "foo"], exit: 1,
+                terminal: terminal, expectsPrompt: false)
+            XCTAssertEqual(refused.error?.code, "local_changes", "Drift is refused before confirmation")
+            XCTAssertTrue(refused.error?.hint.contains("--overwrite-local-changes") == true)
+            XCTAssertNil(refused.next, "A refused update must not print a confirmation rerun")
+            XCTAssertEqual(try h.tree(h.paths.storeRoot), before)
+        }
+    }
+
     func assertChangedUpdateConfirmation(_ h: CLILibraryFixture) async throws {
         let shown = try await h.run(["skill", "update", "foo", "--overwrite-local-changes"], exit: 5)
         try h.files.writeFile(at: h.repository + "/skills/foo/new.txt", content: "new upstream plan")

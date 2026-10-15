@@ -102,7 +102,7 @@ final class CLILibraryFixture {
     }
 
     func run(_ arguments: [String], exit: Int32 = 0, terminal: Bool = false,
-             environment extra: [String: String] = [:],
+             environment extra: [String: String] = [:], expectsPrompt: Bool? = nil,
              beforeConfirmation: (() async throws -> Void)? = nil) async throws -> CLIEnvelope {
         let process = Process()
         process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/pensieve")
@@ -138,7 +138,7 @@ final class CLILibraryFixture {
         let diagnostics = prefix + (try errors.fileHandleForReading.readToEnd() ?? Data())
         XCTAssertFalse(result.timedOut)
         XCTAssertEqual(result.status, exit, String(data: bytes + diagnostics, encoding: .utf8) ?? "Invalid UTF-8")
-        if terminal, extra["PENSIEVE_NO_INPUT"] != "1", !arguments.contains("--no-input") {
+        if expectsPrompt ?? (terminal && extra["PENSIEVE_NO_INPUT"] != "1" && !arguments.contains("--no-input")) {
             XCTAssertTrue((String(data: diagnostics, encoding: .utf8) ?? "").contains("Apply this plan?"))
         } else { XCTAssertFalse((String(data: diagnostics, encoding: .utf8) ?? "").contains("Apply this plan?")) }
         return try JSONDecoder().decode(CLIEnvelope.self, from: bytes)

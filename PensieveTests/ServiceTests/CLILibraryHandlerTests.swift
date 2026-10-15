@@ -85,6 +85,7 @@ final class CLILibraryHandlerTests: XCTestCase {
         let refused = try await h.run(["skill", "update", "foo", "--yes"], exit: 1)
         XCTAssertEqual(refused.error?.code, "local_changes")
         XCTAssertEqual(try h.files.readFile(at: h.paths.skillsDir + "/foo/asset.txt"), "local edit")
+        try await assertDriftRefusalBeforeConfirmation(h)
         try await assertChangedUpdateConfirmation(h)
         let updated = try await h.run(["skill", "update", "foo", "--overwrite-local-changes", "--yes"])
         XCTAssertEqual(updated.changed, true)
@@ -107,6 +108,8 @@ final class CLILibraryHandlerTests: XCTestCase {
         h.runtime.library.noteEditorChanged(skill, body: body + "unsaved")
         let before = try h.tree(h.paths.storeRoot)
         for arguments in [["skill", "update", "foo"], ["skill", "update", "foo", "--yes"],
+                          ["skill", "update", "foo", "--overwrite-local-changes"],
+                          ["skill", "update", "foo", "--yes", "--overwrite-local-changes"],
                           ["skill", "delete", "foo"], ["skill", "delete", "foo", "--yes"]] {
             let refused = try await h.run(arguments, exit: 5)
             XCTAssertEqual(refused.error?.code, "unsaved_draft")

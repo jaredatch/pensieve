@@ -53,10 +53,11 @@ extension CLILibraryHandler {
                 _ = try await BlockingWork.run { try operations.skillInstallService.previewUpdate(update) }
             }
         }
-        if let reply = try previewOrConfirmation(data, options: options) { return reply }
+        if options.dryRun, let reply = try previewOrConfirmation(data, options: options) { return reply }
         if plans.contains(where: { $0.update != nil && $0.drifted }), !options.overwriteLocalChanges {
             throw SkillUpdateFlowError.localEditsRequireConfirmation
         }
+        if let reply = try previewOrConfirmation(data, options: options) { return reply }
         return await applyPlans(plans, options: options, data: data)
     }
 
