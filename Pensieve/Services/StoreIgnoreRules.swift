@@ -108,6 +108,7 @@ enum StoreIgnoreRules {
             guard canRetire(path) else { throw StoreReceiptError.invalidPath(path) }
             receipts.safe.insert(path)
         }
+        try files.cleanStoreIntermediates(at: root)
         // Keep an empty tracked file after dropping its last receipt: concurrent additions must
         // remain ordinary union-merged content edits rather than modify/delete conflicts.
         if receipts.sources[receiptFile] != nil || !receipts.safe.isEmpty || !receipts.unsafe.isEmpty {

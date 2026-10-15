@@ -140,6 +140,7 @@ extension SyncBytePreservationTests {
 /// It does not intercept Git's own metadata writes or pretend to simulate process termination.
 final class RetirementFileService: FileServiceProtocol {
     let wrapped = FileService()
+    func cleanStoreIntermediates(at root: String) throws { try wrapped.cleanStoreIntermediates(at: root) }
     var readFailure: String?
     var writes: [String] = []
     var afterRead: ((String) throws -> Void)?

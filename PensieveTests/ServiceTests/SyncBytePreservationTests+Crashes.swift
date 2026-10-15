@@ -17,7 +17,9 @@ extension SyncBytePreservationTests {
                     try files.writeFile(at: path, content: input)
                     XCTAssertEqual(try probe.run(root: fixture.root, writer: "control", point: point), SIGKILL,
                                    "The real \(source) writer must reach \(point)")
+                    try assertIntermediateOutsideWorktree(probe, root: fixture.root)
                     try assertCrashRecovery(fixture, label: source + ":" + point)
+                    XCTAssertFalse(files.fileExists(at: try probe.intermediate()), "Sync must clean the killed control write")
                 }
             }
         }
@@ -26,13 +28,60 @@ extension SyncBytePreservationTests {
     func testSkillWriterCrashPointsNeverStageIntermediates() throws {
         try NativeTestWork.run { [self] in
             let probe = try StoreWriteCrashProbe(directory: base + "/probe")
+            try assertSkillWritesWithUnwritableParent(probe: probe)
             for writer in ["create", "body", "rewrite"] {
                 for point in ["before-write", "partial-write", "after-write", "before-rename", "after-rename"] {
                     let fixture = try crashStore(name: UUID().uuidString)
                     XCTAssertEqual(try probe.run(root: fixture.root, writer: writer, point: point), SIGKILL,
                                    "The real \(writer) writer must reach \(point)")
+                    try assertIntermediateOutsideWorktree(probe, root: fixture.root)
                     try assertCrashRecovery(fixture, label: writer + ":" + point)
+                    XCTAssertFalse(files.fileExists(at: try probe.intermediate()), "Sync must clean the killed skill write")
                 }
+            }
+        }
+    }
+
+    private func assertIntermediateOutsideWorktree(_ probe: StoreWriteCrashProbe, root: String) throws {
+        let path = try probe.intermediate()
+        let resolved = try files.resolveRealPath(at: root)
+        XCTAssertTrue(!path.hasPrefix(resolved + "/") || path.hasPrefix(resolved + "/.git/"),
+                      "A production intermediate must never be inside the worktree: \(path)")
+    }
+
+    private func assertSkillWritesWithUnwritableParent(probe: StoreWriteCrashProbe) throws {
+        for initialized in [false, true] {
+            let parent = base + "/readonly-" + String(initialized)
+            let resolved = parent + "/store"
+            let root = base + "/linked-" + String(initialized)
+            try files.writeFile(at: resolved + "/skills/existing/SKILL.md",
+                                content: "---\nname: Existing\ndescription: Existing skill\n---\noriginal")
+            if initialized { try TestPaths.git.initRepository(at: resolved) }
+            try files.createSymlink(at: root, pointingTo: resolved)
+            XCTAssertEqual(chmod(parent, 0o555), 0)
+            defer { _ = chmod(parent, 0o755) }
+            XCTAssertNotEqual(access(parent, W_OK), 0, "Fixture parent must actually refuse writes")
+            for writer in ["create", "body", "rewrite"] {
+                XCTAssertEqual(try probe.run(root: root, writer: writer, point: "complete"), 0,
+                               "\(writer) must save with an unwritable resolved parent, git=\(initialized)")
+            }
+            XCTAssertTrue(try files.readFile(at: root + "/skills/existing/SKILL.md").contains("rewritten body"))
+            XCTAssertTrue(files.fileExists(at: root + "/skills/new/SKILL.md"))
+            // The next real writer must also reclaim an intermediate left by a killed predecessor.
+            XCTAssertEqual(try probe.run(root: root, writer: "body", point: "partial-write"), SIGKILL)
+            let abandoned = try probe.intermediate()
+            let unrelated = base + "/unrelated-" + String(initialized)
+            XCTAssertEqual(try probe.run(root: unrelated, writer: "create", point: "complete"), 0)
+            XCTAssertTrue(files.fileExists(at: abandoned), "Another store must not consume this store's abandoned write")
+            XCTAssertEqual(try probe.run(root: root, writer: "body", point: "complete"), 0)
+            XCTAssertFalse(files.fileExists(at: abandoned), "The next skill save must clean the abandoned write")
+            if !initialized {
+                XCTAssertEqual(try probe.run(root: root, writer: "body", point: "partial-write"), SIGKILL)
+                let beforeSetup = try probe.intermediate()
+                let sync = SyncEngine(gitService: TestPaths.git, fileService: files, lockPath: base + "/unconfigured.lock")
+                XCTAssertEqual(try sync.sync(root: root, message: "unconfigured", credential: nil,
+                                             context: makeContext()), .noRemote)
+                XCTAssertFalse(files.fileExists(at: beforeSetup), "An unconfigured sync must also reclaim its killed write")
             }
         }
     }

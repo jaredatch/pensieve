@@ -56,8 +56,6 @@ final class StoreOperationState {
     let root: String
     var receipts: StoreIgnoreRules.Receipts?
     var infoDirectory: String?
-    var excluded: [Data]?
-    var checkedRevisions: Set<String> = []
     var fetched: FetchedStoreRevision?
     init(root: String) { self.root = root }
 }

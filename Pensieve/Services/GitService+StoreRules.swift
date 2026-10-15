@@ -183,12 +183,6 @@ struct StoreGitOperation {
             throw git.commandError(staged, args: ["-C", root] + args)
         }
         try runOrThrow(["commit", "-m", message])
-        // Staging can expose children hidden by an indexed file that was replaced by a folder.
-        // Recheck against the new index; an unchanged sync keeps its earlier inventory and proof.
-        if git.storeState?.root == root {
-            git.storeState?.excluded = nil
-            git.storeState?.checkedRevisions.removeAll()
-        }
         return true
     }
 
@@ -240,8 +234,6 @@ struct StoreGitOperation {
     /// Native receipts collapse wholly untracked subtrees, including those within partly tracked
     /// excluded folders. Indexed-file replacements retain their exact individual new paths.
     func excludedUntrackedPaths() throws -> [Data] {
-        let state = git.storeState.flatMap { $0.root == root ? $0 : nil }
-        if let inventory = state?.excluded { return inventory }
         let fileArgs = ["ls-files", "--others", "-z"] + StoreExclusions.directoryArguments
         let files = try runData(fileArgs)
         guard files.exit == 0 else { throw git.dataCommandError(files, args: ["-C", root] + fileArgs) }
@@ -261,7 +253,6 @@ struct StoreGitOperation {
         guard replaced.exit == 0 else { throw git.dataCommandError(replaced, args: ["-C", root] + replacedArgs) }
         paths += directories.stdout.split(separator: 0).map { Data($0) }
         paths += try excludedFiles(beneath: replaced.stdout.split(separator: 0).map { Data($0) })
-        state?.excluded = paths
         return paths
     }
 
@@ -304,13 +295,10 @@ struct StoreGitOperation {
     /// Refuse both exact paths and file/directory replacements that would remove protected children.
     /// Native inventories avoid following links or opening secret bytes; no extra filesystem walk.
     func requireNoExcludedCollision(with revision: String, localPaths: [Data]? = nil) throws {
-        let state = git.storeState.flatMap { $0.root == root ? $0 : nil }
-        if state?.checkedRevisions.contains(revision) == true { return }
+        // A caller-supplied preflight inventory is valid only for that check. Pull must observe
+        // protected files created during preparation, even when staging makes no commit.
         let inventory = try localPaths ?? excludedUntrackedPaths()
-        guard !inventory.isEmpty else {
-            state?.checkedRevisions.insert(revision)
-            return
-        }
+        guard !inventory.isEmpty else { return }
         var keys: [Data: Data] = [:]
         func key(_ path: Data) -> Data {
             if let cached = keys[path] { return cached }
@@ -346,7 +334,6 @@ struct StoreGitOperation {
                 }
             }
         }
-        state?.checkedRevisions.insert(revision)
     }
 
     private func collisionKey(_ path: Data) -> Data {

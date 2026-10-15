@@ -198,6 +198,7 @@ extension SyncBytePreservationTests {
 
     func testIncomingTrackedExcludedFilesPauseBeforeAppWritesAndResumeAfterMovingThem() throws {
         try NativeTestWork.run { [self] in
+            try assertProtectedFileArrivingAfterPreflight()
             try assertFilesystemEquivalentIncomingNames()
             try assertHardLinksRemainDistinctEntries()
             try assertIndexedNestedRepositoryReplacementIsProtected()
@@ -211,6 +212,35 @@ extension SyncBytePreservationTests {
                     }
                 }
             }
+        }
+    }
+
+    private func assertProtectedFileArrivingAfterPreflight() throws {
+        for initiallyProtected in [false, true] {
+            let fixture = try ExcludedFileCollisionFixture(path: "skills/x/.env", hidden: true, localCommit: false)
+            defer { try? files.deleteDirectory(at: fixture.root) }
+            try files.deleteFile(at: fixture.storeB + "/" + fixture.path)
+            if initiallyProtected {
+                try files.writeFile(at: fixture.storeB + "/skills/x/.env.other", content: "unrelated local secret")
+            }
+            // Canonical controls must already be committed: this sync has no ordinary local changes.
+            try StoreIgnoreRules.prepare(at: fixture.storeB, files: files)
+            try fixture.git.stageAllAndCommit(at: fixture.storeB, message: "canonical controls")
+            let before = try fixture.git.headSHA(at: fixture.storeB)
+            let engine = SyncEngine(gitService: AllowlistedRemoteGit(wrapping: fixture.git),
+                                    lockPath: fixture.root + "/sync.lock")
+            var prepared = false
+            XCTAssertThrowsError(try engine.sync(root: fixture.storeB, message: "must not commit", credential: nil,
+                                                 context: fixture.context, prepare: { _ in
+                prepared = true
+                try self.files.writeData(at: fixture.storeB + "/" + fixture.path, data: fixture.localBytes)
+            })) { error in
+                XCTAssertEqual(error as? StoreUpdateError, .excludedLocalFile(path: fixture.path))
+            }
+            XCTAssertTrue(prepared)
+            XCTAssertEqual(try fixture.git.headSHA(at: fixture.storeB), before, "No commit or pull may move HEAD")
+            XCTAssertEqual(try files.readData(at: fixture.storeB + "/" + fixture.path), fixture.localBytes)
+            XCTAssertFalse(fixture.git.isRebaseInProgress(at: fixture.storeB))
         }
     }
 

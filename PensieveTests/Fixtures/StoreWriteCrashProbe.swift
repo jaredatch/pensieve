@@ -8,6 +8,8 @@ import XCTest
 struct StoreWriteCrashProbe {
     let library: String
 
+    func intermediate() throws -> String { try FileService().readFile(at: library + ".path") }
+
     init(directory: String) throws {
         library = directory + "/crash.dylib"
         let source = directory + "/crash.c"
@@ -28,6 +30,7 @@ struct StoreWriteCrashProbe {
         var environment = ProcessInfo.processInfo.environment
         environment["DYLD_INSERT_LIBRARIES"] = library
         environment["STORE_CRASH_POINT"] = point
+        environment["STORE_CRASH_TRACE"] = library + ".path"
         environment["STORE_CRASH_DESTINATION"] = destination
         process.environment = environment
         try process.run()
@@ -68,6 +71,12 @@ struct StoreWriteCrashProbe {
     static ssize_t writing(int fd, const void *bytes, size_t count) {
         char path[MAXPATHLEN];
         int watched = !fcntl(fd, F_GETPATH, path) && temporary(path);
+        if (watched) {
+            const char *report = getenv("STORE_CRASH_TRACE");
+            int out = open(report, O_CREAT|O_TRUNC|O_WRONLY, 0600);
+            if (out < 0 || write(out, path, strlen(path)) != strlen(path)) _exit(94);
+            close(out);
+        }
         if (watched && point("before-write")) die();
         if (watched && point("partial-write")) { write(fd, bytes, count > 7 ? 7 : count); die(); }
         ssize_t result = write(fd, bytes, count);

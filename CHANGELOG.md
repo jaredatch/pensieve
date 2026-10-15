@@ -45,6 +45,8 @@ All notable changes to Pensieve are recorded here. The format follows [Keep a Ch
 
 ### Fixed
 
+- Sync protects excluded files created during preparation, even when there is nothing to commit. Skill saves work with an unwritable store parent, and the next write or sync removes abandoned write files.
+
 - Temporary files left by an interrupted skill save or sync no longer enter the next sync. Sync also preserves folders placed at its control-file paths and refuses existing links there.
 - Sync avoids repeated file inventories and git commands, and leaves unchanged rule files alone.
 

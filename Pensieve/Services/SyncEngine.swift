@@ -106,8 +106,10 @@ struct SyncEngine: SyncEngineProtocol {
         guard let lock = lockProvider(lockPath) else { throw SyncError.syncInProgress }
         defer { lock.release() }
         try gitService.probeUsability().requireUsable()
-        // Ask about the remote before any write, so an unconfigured store is never changed.
-        guard try gitService.remoteURL(at: root) != nil else {
+        // Ask about the remote before store writes. Reclaim only abandoned intermediates before returning.
+        let remote = try gitService.remoteURL(at: root)
+        try fileService.cleanStoreIntermediates(at: root)
+        guard remote != nil else {
             // Repair only this Mac's index. An unconfigured store still gets no writes or sync error.
             try? StoreIngestState.rebuildIfNeeded(using: storeRebuildService, root: root, context: context)
             return .noRemote
