@@ -13,14 +13,14 @@
 #   drive-stage.sh PLAN-NN NN.X --resume [<prompt-file>] [flags]                      a fresh session, only when the record is gone
 #   drive-stage.sh PLAN-NN NN.X --wait [--heavy] | --peek | --abandon                 reattach (sends nothing) · look · settle
 #   drive-stage.sh --bounded <slug> [same flags]                                      a small change with no plan (in Herdr: its own tab)
-#   drive-stage.sh --fix PLAN-NN <prompt-file> [--again] [--dry-run]                  a fresh build session for a fix batch
+#   drive-stage.sh --fix PLAN-NN <prompt-file> [--again] [--dry-run]                  a fresh build session for a fix batch (always 7200 s)
 #   drive-stage.sh PLAN-NN fix --wait | --peek | --abandon                            recover the last fix batch
 #   drive-stage.sh --review PLAN-NN NN.X [--base <sha>] [--head <sha>] [--again] [--dry-run]   review a committed range
 #   drive-stage.sh --read PLAN-NN <prompt-file> [--again] [--dry-run]                 a read-only read: premise read, plan read
 #   drive-stage.sh --preflight | --self-test
 #
 # Flags
-#   --heavy           timeout 7200 s instead of 3600 s, for a build-heavy Stage
+#   --heavy           timeout 7200 s instead of 3600 s, for a build-heavy Stage. A --fix batch always gets 7200 s.
 #   --sandbox <mode>  override the invocation block's sandbox for one Stage (e.g. workspace-write for a docs-only Stage).
 #                     Under workspace-write the launcher adds --add-dir for the worktree's git dir and common dir
 #                     (git rev-parse --git-dir / --git-common-dir; a linked worktree needs both) so the Executor can
@@ -149,8 +149,8 @@ set -eu   # NOT pipefail (the kit's rule): every producer below is captured, the
 # spawns its own sandbox, e.g. xcodebuild → SwiftPM's sandbox-exec, cannot run inside Codex's Seatbelt and needs
 # danger-full-access on an isolated machine; a docs-only stage can run workspace-write). Env overrides exist for the
 # self-test and for a one-off; the file is the record.
-CODEX_MODEL="${DRIVE_STAGE_MODEL:-gpt-6.1-sol}"                     # the BUILDER's pin: stages, --bounded, --fix
-CODEX_REASONING="${DRIVE_STAGE_REASONING:-xhigh}"             # e.g. high
+CODEX_MODEL="${DRIVE_STAGE_MODEL:-gpt-6-astra}"                     # the BUILDER's pin: stages, --bounded, --fix
+CODEX_REASONING="${DRIVE_STAGE_REASONING:-high}"             # e.g. high
 CODEX_REVIEW_MODEL="${DRIVE_STAGE_REVIEW_MODEL:-gpt-6-astra}"       # the REVIEWER's pin: --review, --read (may be the builder's model; decided once, in DECISIONS.md)
 CODEX_REVIEW_REASONING="${DRIVE_STAGE_REVIEW_REASONING:-xhigh}"   # e.g. xhigh
 CODEX_SANDBOX="${DRIVE_STAGE_SANDBOX:-danger-full-access}"                 # the builder's sandbox (a review and a read are always read-only)
@@ -727,6 +727,7 @@ drive() {   # $1 root, $2 plan, $3 stage (`fix` for --fix), $4 heavy, $5 resume,
   local tb secs paths prompt log before bfull rc started prompt_text grants g dir bindf="" attempt=1 tag catpart sq="'" note rbfull="" rhdr=""
   tb="$(timeout_bin)" || { echo "drive-stage: no timeout/gtimeout on PATH (brew install coreutils)" >&2; return 1; }
   secs="$TIMEOUT_NORMAL"; [ "$heavy" -eq 1 ] && secs="$TIMEOUT_HEAVY"
+  [ "$fix" -eq 0 ] || secs="$TIMEOUT_HEAVY"   # a fix batch is several Stages' worth of work and runs the full suite: always the heavy budget
   paths="$(resolve_paths "$root" "$plan" "$stage" "$resume" "$rp" "$again" "$fix")" || return 1
   prompt="${paths%	*}"; log="${paths#*	}"
   dir="tmp/$plan"; [ "$plan" = bounded ] && dir="tmp/bounded"
@@ -1932,7 +1933,8 @@ FAKE
   set +e; "$BASH" "$0" --root "$R" --read PLAN-07 --dry-run >/dev/null 2>&1; rc=$?; set -e; [ "$rc" -eq 64 ] || fail "--read with no prompt file should be refused with 64 (got $rc)"
   # --fix: a fresh build session under the BUILD pin and sandbox, log fix-run.log under the stage header; the result line reads `PLAN-NN fix …`
   out="$("$BASH" "$0" --root "$R" --fix PLAN-07 tmp/PLAN-07/fix-prompt.md --dry-run)" || fail "--fix dry-run exit non-zero"
-  [ "$out" = "env -u RATCHET_ALLOW_PUSH TMPDIR='$sr/repo-scratch/tmp/PLAN-07/' $tb $TIMEOUT_NORMAL codex exec -m 'fake-model-1' -c 'model_reasoning_effort=high' -s 'danger-full-access' -C '$R' \"\$(printf '%s\\n' '[planner fix-c1]'; cat 'tmp/PLAN-07/fix-prompt.md')\" < /dev/null >> 'tmp/PLAN-07/fix-run.log' 2>&1$label" ] || fail "--fix dry-run differs: $out"
+  [ "$out" = "env -u RATCHET_ALLOW_PUSH TMPDIR='$sr/repo-scratch/tmp/PLAN-07/' $tb $TIMEOUT_HEAVY codex exec -m 'fake-model-1' -c 'model_reasoning_effort=high' -s 'danger-full-access' -C '$R' \"\$(printf '%s\\n' '[planner fix-c1]'; cat 'tmp/PLAN-07/fix-prompt.md')\" < /dev/null >> 'tmp/PLAN-07/fix-run.log' 2>&1$label" ] || fail "--fix dry-run differs: $out"
+  out="$("$BASH" "$0" --root "$R" --fix PLAN-07 tmp/PLAN-07/fix-prompt.md --heavy --dry-run)" && grep -Fq "$tb $TIMEOUT_HEAVY codex exec" <<< "$out" || fail "--fix --heavy should still be accepted, at the heavy timeout: $out"
   set +e; out="$(PATH="$d/bin:$PATH" FAKE_ARGV="$d/argvF" FAKE_SMOKE_ARGV="$d/smk4" "$BASH" "$0" --root "$R" --fix PLAN-07 tmp/PLAN-07/fix-prompt.md 2>&1)"; rc=$?; set -e
   [ "$rc" -eq 3 ] && grep -Eq "^PLAN-07 fix exit=3 log=tmp/PLAN-07/fix-run\.log head=[0-9a-f]+ changed=[0-9]+ commit=[^ ]+ session=none rollout=none\$" <<< "$out" || fail "--fix result line differs (rc=$rc): $out"
   [ "$(cat "$d/argvF")" = "$(printf 'exec\n-m\nfake-model-1\n-c\nmodel_reasoning_effort=high\n-s\ndanger-full-access\n-C\n%s\n[planner fix-c1]\nfix across stages' "$R")" ] || fail "--fix argv differs: $(cat "$d/argvF")"

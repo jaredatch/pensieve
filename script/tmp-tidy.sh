@@ -72,7 +72,8 @@
 # exists: it is tracked from the plan's start, so the tidy reads it and never moves, archives or rewrites it), the LOG (which must
 # exist) and its rotated months (<LOG's dir>/log/*.md). A cite resolves if the path is on
 # disk, tracked, or an archive member (exact, or a folder or prefix match). A pattern cite (.X, .N, .., a * glob, a {a,b}
-# brace set, including an empty alternative like L1{,-r2}.log) needs at least one member and matches whole names only.
+# brace set, including an empty alternative like L1{,-r2}.log or a glob inside it like {m-*.patch,x.log}) needs at least one
+# member and matches whole names only.
 # Not cites: another plan's tmp/PLAN-MM/ path, the placeholder tmp/PLAN-NN/… itself, wildcards alone (tmp/**, tmp/*),
 # and a legacy bare tmp/x cite in the LOG that doesn't resolve here. A cite with a comma outside braces is refused
 # (exit 2): write a brace set or two cites. So is a cite of this plan's holding a <placeholder> (`NN.X-<letter>-green.log`),
@@ -311,8 +312,8 @@ base_category() {   # $1 = lowercased base name, $2 = size → the category a fi
 # the cite) when a producer fails or a cite carries a comma outside braces or a <placeholder> — a syntax the converter cannot hold
 # as one path
 cites_in() {   # $1 = file
-  local hits bad rc=0 pat='(^|[^/A-Za-z0-9_])tmp/([A-Za-z0-9._/@+*-]|\{[A-Za-z0-9._,-]+\})+'
-  hits="$(grep -oE -e "$pat" -- "$1")" || rc=$?   # `*` and `{a,b}` ride along: a glob or brace set is a pattern cite
+  local hits bad rc=0 pat='(^|[^/A-Za-z0-9_])tmp/([A-Za-z0-9._/@+*-]|\{[A-Za-z0-9._,*-]+\})+'
+  hits="$(grep -oE -e "$pat" -- "$1")" || rc=$?   # `*` and `{a,b}` ride along, a `*` inside the braces too (`{m-*.patch,x.log}`): a pattern cite
   case "$rc" in 0) ;; 1) return 0 ;; *) echo "tmp-tidy: grep failed (exit $rc) reading the cites in $1" >&2; return 2 ;; esac
   rc=0; bad="$(grep -oE -e "$pat,[A-Za-z0-9._/@+*{-]" -- "$1")" || rc=$?   # a comma INSIDE the path, outside braces (`a,b.log`): the cite would be cut at the comma
   case "$rc" in
@@ -1202,6 +1203,23 @@ Also `tmp/PLAN-17/17.1-<letter>-c5-green.log`.
 ' >> "$d/p/docs/LOG.md"
   set +e; outP="$("$BASH" "$0" --root "$d/p" --plan PLAN-17 --dry-run 2>&1)"; rcP=$?; set -e
   [ "$rcP" -eq 2 ] && grep -Fq 'cites `tmp/PLAN-17/17.1-<letter>-c5-green.log` — a <placeholder> is not a path' <<< "$outP" || fail "fixture P: a placeholder cite must be refused by name (rc=$rcP): $outP"
+  # fixture Q (PLAN-49): a `*` glob inside a brace set is one pattern cite — `fix-c12-{mutation-*.patch,red-causes.txt}` was cut at the `{`
+  # and read as the prefix `fix-c12-`, MISSING, beside a seven-member set that shares the prefix and resolved
+  mkdir -p "$d/q/docs/plans" "$d/q/tmp/PLAN-18"
+  for f in recount smoke daemon probe briefing hygiene whitespace; do printf 'x\n' > "$d/q/tmp/PLAN-18/fix-c12-$f.log"; done
+  printf 'p\n' > "$d/q/tmp/PLAN-18/fix-c12-mutation-a.patch"; printf 'p\n' > "$d/q/tmp/PLAN-18/fix-c12-mutation-b.patch"; printf 'c\n' > "$d/q/tmp/PLAN-18/fix-c12-red-causes.txt"
+  printf '# PLAN-18\n\nRuns: `tmp/PLAN-18/fix-c12-{recount,smoke,daemon,probe,briefing,hygiene,whitespace}.log`.\n' > "$d/q/docs/plans/PLAN-18-x.md"
+  printf '## log\n\nProofs: `tmp/PLAN-18/fix-c12-{mutation-*.patch,red-causes.txt}`.\n' > "$d/q/docs/LOG.md"
+  set +e; outQ="$("$BASH" "$0" --root "$d/q" --plan PLAN-18 --dry-run 2>&1)"; rcQ=$?; set -e
+  [ "$rcQ" -eq 0 ] && ! grep -q '^UNRESOLVED ' <<< "$outQ" || fail "fixture Q: a glob inside a brace set should resolve (rc=$rcQ): $outQ"
+  grep -Fq '| `tmp/PLAN-18/fix-c12-{mutation-*.patch,red-causes.txt}` | pattern citation — 3 matching members' <<< "$outQ" || fail "fixture Q: the glob-in-braces row should match 3 members: $outQ"
+  grep -Fq '| `tmp/PLAN-18/fix-c12-{recount,smoke,daemon,probe,briefing,hygiene,whitespace}.log` | pattern citation — 7 matching members' <<< "$outQ" || fail "fixture Q: the seven-member row should match 7: $outQ"
+  # … and the other way: the same shape over near-matches only (another suffix, a longer name, no dash) stays UNRESOLVED, named whole
+  mkdir -p "$d/q2/docs/plans" "$d/q2/tmp/PLAN-19"
+  for f in fix-c3-mutation-a.diff fix-c3-mutation-a.patch.orig fix-c3-mutation.patch fix-c3-red-causes.txt.bak; do printf 'x\n' > "$d/q2/tmp/PLAN-19/$f"; done
+  printf '# PLAN-19\n\nProofs: `tmp/PLAN-19/fix-c3-{mutation-*.patch,red-causes.txt}`.\n' > "$d/q2/docs/plans/PLAN-19-x.md"; printf '## log\n' > "$d/q2/docs/LOG.md"
+  set +e; outQ2="$("$BASH" "$0" --root "$d/q2" --plan PLAN-19 --dry-run 2>&1)"; rcQ2=$?; set -e
+  [ "$rcQ2" -eq 1 ] && grep -Fxq 'UNRESOLVED tmp/PLAN-19/fix-c3-{mutation-*.patch,red-causes.txt}' <<< "$outQ2" || fail "fixture Q: a glob inside a brace set over near-matches only must stay UNRESOLVED, named whole (rc=$rcQ2): $outQ2"
   # --check: each scan captured — a failing find (the listing, the bounded scan, an entry's age) is exit 2, never "tmp/ clean"
   mkdir -p "$d/ck/tmp/PLAN-01" "$d/ck/tmp/bounded"; printf 'x\n' > "$d/ck/tmp/bounded/a.log"; printf 'x\n' > "$d/ck/tmp/young.log"
   "$BASH" "$0" --root "$d/ck" --check >/dev/null 2>&1 || fail "--check fixture should be clean with no fault"

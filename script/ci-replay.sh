@@ -129,7 +129,7 @@ replay_commit() {   # $1 = commit, $2 = 1 to exempt the MESSAGE rule only (a PR-
   # a merge: a cite is new only if it is new against every parent (the lines a closed plan's branch wrote while open are inherited)
   local others=() op ops d f ps_; ps_="$(git rev-list --parents -n 1 "$c")" || return 2; ops="$(cut -s -d' ' -f3- <<< "$ps_")" || return 2
   for op in $ops; do d="$(git diff-tree --unified=0 --no-prefix -p "$op" "$c")" || return 2; f="$(fresh_cites <<< "$d")" || return 2; others+=("$f"); done
-  tmp_cite_guard "$planmd" ${others[@]+"${others[@]}"} <<< "$whole" || { echo "ci-replay: $c adds a docs line citing tmp/ scratch outside an open plan's tmp/PLAN-NN/" >&2; return 1; }
+  tmp_cite_guard "$planmd" ${others[@]+"${others[@]}"} <<< "$whole" || { echo "ci-replay: $c adds a docs line citing tmp/ scratch outside an open plan's tmp/PLAN-NN/, or with a <placeholder>" >&2; return 1; }
   # acceptance hashes from the COMMIT's ledger, plans, and extractor; then the refreeze trace against the parent's ledger
   # (split-repo mode's code side skips this leg and the criteria leg below, as its hook does: the plans and their ledger are the records
   # repo's, so a ledger in the code repo — or its deletion, when a one-repo project moves its records out — is no freeze record)

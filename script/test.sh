@@ -11,6 +11,13 @@ keep_failed_bundle() {
   printf '%s\n' "$kept"
 }
 
+# Waits, asleep, for an exclusive flock on descriptor $1, which the calling shell opened and keeps: the lock lasts
+# until that shell exits. lockf's descriptor mode busy-polls flock on macOS, a full core per queued run, so the wait
+# is Python's blocking flock. SIGINT keeps its default, as it did under lockf.
+wait_lock() {
+  python3 -c 'import fcntl, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL); fcntl.flock(int(sys.argv[1]), fcntl.LOCK_EX)' "$1"
+}
+
 if [ "${1:-}" = "--self-test" ]; then
   st="$(mktemp -d "${TMPDIR:-/tmp}/pensieve-test-selftest.XXXXXX")"; trap 'rm -rf "$st"' EXIT
   fail() { echo "test.sh --self-test: FAIL: $1" >&2; exit 1; }
@@ -24,6 +31,20 @@ if [ "${1:-}" = "--self-test" ]; then
   [ -e "$st/kept/20200103T000000Z-1.xcresult" ] || fail "a bundle inside the newest five was pruned"
   if keep_failed_bundle "$st/missing.xcresult" "$st/kept" >/dev/null 2>&1; then fail "a missing bundle reported kept"; fi
   [ "$(ls -1d "$st/kept"/*.xcresult | wc -l | tr -d ' ')" -eq 5 ] || fail "a missing bundle changed the kept dir"
+  # A queued run waits asleep, gets the lock once the holder exits, and its shell keeps the lock after wait_lock returns.
+  ( exec 7>"$st/w.lock"; wait_lock 7; sleep 3 ) & holder=$!
+  sleep 0.5
+  ( exec 7>"$st/w.lock"; wait_lock 7; : > "$st/w.got"; sleep 2 ) & waiter=$!
+  sleep 2
+  cpu="$(ps -axo ppid=,%cpu= | awk -v p="$waiter" '$1 == p { print int($2) }')"
+  [ -n "$cpu" ] || fail "the queued run isn't waiting for the lock"
+  [ "$cpu" -lt 50 ] || fail "waiting for the test lock spins at ${cpu}% CPU"
+  [ ! -e "$st/w.got" ] || fail "the queued run got the lock while another run held it"
+  wait "$holder"
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -e "$st/w.got" ] && break; sleep 0.2; done
+  [ -e "$st/w.got" ] || fail "the queued run didn't get the lock once the holder exited"
+  if /usr/bin/lockf -s -t 0 "$st/w.lock" true; then fail "the lock wasn't kept after wait_lock returned"; fi
+  wait "$waiter"
   unset TEST_RUNNER_PENSIEVE_TEST_WINDOW_SAMPLE_DIR
   python3 -B "$(dirname "$0")/test_lifecycle_self_test.py" || fail "test lifecycle regressions"
   python3 -B "$(dirname "$0")/test_display_self_test.py" || fail "display lifecycle regressions"
@@ -33,7 +54,7 @@ fi
 
 # One test run per machine (the playbook's modules/macos-swift.md § Wrapper scripts): take the machine's test lock
 # before anything else, so a second run from any checkout waits in line. The wrapper owns the locked descriptors,
-# so INT/TERM reaches its cleanup before the kernel drops the lock. lockf's descriptor mode retains the lock here.
+# so INT/TERM reaches its cleanup before the kernel drops the lock. wait_lock (above) waits on those descriptors.
 # Two lanes: a full suite first queues behind any other full suite on test-full.lock, and a --filter run skips that
 # line, so a focused proof never waits behind every queued suite. The holder line and the wait go to stderr.
 if [ -z "${XP_TEST_LOCK_HELD:-}" ]; then
@@ -43,12 +64,12 @@ if [ -z "${XP_TEST_LOCK_HELD:-}" ]; then
     if [ -z "${XP_TEST_FULL_HELD:-}" ]; then
       exec 8>"$dir/test-full.lock"
       /usr/bin/lockf -s -t 0 8 || echo "test.sh: waiting behind another full suite" >&2
-      /usr/bin/lockf 8
+      wait_lock 8
       export XP_TEST_FULL_HELD=1
     fi ;; esac
   exec 9>"$dir/test.lock"
   /usr/bin/lockf -s -t 0 9 || echo "test.sh: waiting for this machine's test lock, held by: $(cat "$dir/test.lock.holder" 2>/dev/null)" >&2
-  /usr/bin/lockf 9
+  wait_lock 9
   export XP_TEST_LOCK_HELD=1
 fi
 if [ -n "${XP_TEST_T0:-}" ]; then   # this run took the lock itself (a caller holding it, like the self-test, skips this)
