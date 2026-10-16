@@ -68,20 +68,14 @@ final class BundledSkillModel {
         let store = library.skillStore
         let files = files
         let directory = bundledDirectory
-        let receipt = receiptPath
         return try await BlockingWork.run {
-            guard files.fileExists(at: receipt) else { return Snapshot() }
-            let saved = try JSONDecoder().decode(Receipt.self, from: files.readData(at: receipt))
-            let id = saved.skillID
             let context = ModelContext(container)
-            guard let skill = try context.fetch(FetchDescriptor<Skill>(predicate: #Predicate { $0.id == id })).first else {
-                return Snapshot()
-            }
+            guard let skill = try Self.findSkill(context, store: store) else { return Snapshot() }
             let current = try store.readData(directoryName: skill.directoryName)
             let bundled = try files.readData(at: directory + "/SKILL.md")
             let state: State = current == bundled || BundledSkillContent.version(current) == BundledSkillContent.version(bundled)
                 ? .installed : (BundledSkillContent.isUnedited(current) ? .update : .edited)
-            return Snapshot(state: state, skillID: id, current: current, bundled: bundled)
+            return Snapshot(state: state, skillID: skill.id, current: current, bundled: bundled)
         }
     }
 
@@ -102,13 +96,11 @@ final class BundledSkillModel {
             state = snapshot.state
             try requireAddsAllowed()
             guard snapshot.skillID == nil else { return }
-            let before = Set(try context.fetch(FetchDescriptor<Skill>()).map(\.id))
             guard case .found = importer.scanFolder(bundledDirectory) else {
                 throw CommandLinkError(message: "The bundled pensieve skill couldn't be read.")
             }
             _ = importer.importSelected(context: context)
-            let added = try context.fetch(FetchDescriptor<Skill>()).filter { !before.contains($0.id) }
-            guard importer.importedSkillCount == 1, added.count == 1, let skill = added.first else {
+            guard importer.importedSkillCount > 0, let skill = try Self.findSkill(context, store: library.skillStore) else {
                 throw CommandLinkError(message: importer.error ?? "The skill wasn't added.")
             }
             try await saveReceipt(skill)
@@ -158,6 +150,14 @@ final class BundledSkillModel {
             error = nil
             state = try await readState(context: context).state
         } catch { self.error = error.localizedDescription }
+    }
+
+    nonisolated private static func findSkill(_ context: ModelContext, store: SkillStoreProtocol) throws -> Skill? {
+        for skill in try context.fetch(FetchDescriptor<Skill>()) {
+            guard let bytes = try? store.readData(directoryName: skill.directoryName) else { continue }
+            if BundledSkillContent.version(bytes) != nil { return skill }
+        }
+        return nil
     }
 
     private func requireAddsAllowed() throws {

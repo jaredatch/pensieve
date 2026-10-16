@@ -11,7 +11,6 @@ struct CLINameResolver {
     let files: FileServiceProtocol
 
     func skill(_ slug: String) throws -> Skill {
-        try checkLength(slug, limit: 64)
         let skills = try context.fetch(FetchDescriptor<Skill>())
         guard let skill = skills.first(where: { $0.directoryName == slug }) else {
             throw missing("skill", slug, choices: skills.map(\.directoryName), hint: "Run pensieve skill list.")
@@ -20,7 +19,6 @@ struct CLINameResolver {
     }
 
     func agent(_ name: String) throws -> PlatformTarget {
-        try checkLength(name, limit: PublishedStringSanitizer.nameLimit)
         let aliases: [String: PlatformTarget] = ["claude-code": .claudeCode, "grok-cli": .grok,
             "xai": .grok, "hermes-agent": .hermes]
         if let agent = aliases[name.lowercased()] ?? PlatformTarget.allCases.first(where: { $0.cliID == name.lowercased() }) {
@@ -31,7 +29,6 @@ struct CLINameResolver {
 
     func project(_ name: String, cwd: String) async throws -> Project {
         let pathLike = name == "." || PathSyntax.hasSeparator(name)
-        if !pathLike { try checkLength(name, limit: PublishedStringSanitizer.nameLimit) }
         let projects = try context.fetch(FetchDescriptor<Project>())
         let snapshots = projects.map { (id: $0.id, name: $0.name, path: $0.path) }
         let files = files
@@ -66,8 +63,6 @@ struct CLINameResolver {
     }
 
     func machine(_ name: String, catalog: DeployTargetCatalog) throws -> DeployIntentMachine {
-        // A listed collision name may include a space, parentheses and its 36-character UUID.
-        try checkLength(name, limit: PublishedStringSanitizer.nameLimit + 39)
         let machines = catalog.machines
         let aliases = catalog.publishedNamesByID
         let byID = machines.filter { $0.id.caseInsensitiveCompare(name) == .orderedSame }
@@ -102,13 +97,6 @@ struct CLINameResolver {
         }.prefix(3).map { $0.name }
         let advice = closest.isEmpty ? hint : "Closest names: " + closest.joined(separator: ", ") + ". " + hint
         return CLICommandRefusal(reply: .failure(kind + "_not_found", "No \(kind) named \(name).", hint: advice, exit: 4))
-    }
-
-    private func checkLength(_ name: String, limit: Int) throws {
-        guard name.unicodeScalars.count <= PublishedStringSanitizer.nameScalarLimit, name.count <= limit else {
-            throw CLICommandRefusal(reply: .failure("usage", "The name exceeds the \(limit)-character limit.",
-                hint: "Use a slug or name from pensieve skill, agent, project or machine list.", exit: 64))
-        }
     }
 
     private static func distance(_ left: String, _ right: String) -> Int {

@@ -137,10 +137,6 @@ final class CLIDeployHandlerTests: XCTestCase {
         }
         try h.context.save()
         let cases: [(CLIRequest, (String, Int32))] = [
-            (h.request(skills: [String(repeating: "x", count: 60_000)]), ("usage", 64)),
-            (h.request(agents: [String(repeating: "x", count: 81)]), ("usage", 64)),
-            (h.request(project: String(repeating: "x", count: 81)), ("usage", 64)),
-            (h.request(machines: [String(repeating: "x", count: 120)]), ("usage", 64)),
             (h.request(skills: ["revie"]), ("skill_not_found", 4)),
             (h.request(agents: ["claud"]), ("agent_not_found", 4)),
             (h.request(project: "Ap"), ("project_not_found", 4)),

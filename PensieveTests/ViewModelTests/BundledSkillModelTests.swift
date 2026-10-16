@@ -49,6 +49,8 @@ final class BundledSkillModelTests: XCTestCase {
         XCTAssertNil(model.error)
         let skill = try XCTUnwrap(fixture.context.fetch(FetchDescriptor<Skill>()).first)
         let path = fixture.paths.skillsDir + "/pensieve/SKILL.md"
+        // A synced copy has its content but no receipt on this Mac.
+        try fixture.files.deleteFile(at: fixture.paths.appSupportDir + "/bundled-receipt.json")
         let updated = Self.version(original, adding: "Bundled update one.")
         try fixture.files.writeFile(at: source + "/SKILL.md", content: updated)
         await model.refresh(context: fixture.context)
@@ -104,7 +106,7 @@ final class BundledSkillModelTests: XCTestCase {
         let fixture = try CLILibraryFixture()
         defer { fixture.stop() }
         try await fixture.start()
-        let own = try fixture.files.readFile(at: Bundle.main.bundlePath + "/Contents/Resources/pensieve/SKILL.md")
+        let own = "---\nname: pensieve\ndescription: My own skill\n---\nMy private instructions.\n"
         let directory = try fixture.runtime.library.skillStore.createSkill(name: "pensieve", content: own, avoiding: [])
         fixture.context.insert(Skill(name: "pensieve", directoryName: directory))
         try fixture.context.save()
@@ -118,14 +120,6 @@ final class BundledSkillModelTests: XCTestCase {
         XCTAssertEqual(try fixture.context.fetchCount(FetchDescriptor<Skill>()), 2)
         await model.add(context: fixture.context)
         XCTAssertEqual(try fixture.context.fetchCount(FetchDescriptor<Skill>()), 2, "Retry must not duplicate an imported skill")
-        let receipt = fixture.paths.appSupportDir + "/pensieve-skill-receipt.json"
-        XCTAssertTrue(fixture.files.fileExists(at: receipt))
-        let added = try XCTUnwrap(fixture.context.fetch(FetchDescriptor<Skill>()).first { $0.directoryName != directory })
-        fixture.context.delete(added)
-        try fixture.context.save()
-        await model.refresh(context: fixture.context)
-        XCTAssertEqual(model.state, .absent, "A missing receipt skill offers Add despite a user copy with the marker")
-        await model.update(context: fixture.context, replaceEdits: true)
-        XCTAssertEqual(try fixture.files.readFile(at: fixture.paths.skillsDir + "/pensieve/SKILL.md"), own)
+        XCTAssertTrue(fixture.files.fileExists(at: fixture.paths.appSupportDir + "/pensieve-skill-receipt.json"))
     }
 }

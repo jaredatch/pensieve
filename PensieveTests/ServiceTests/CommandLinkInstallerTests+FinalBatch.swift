@@ -90,6 +90,7 @@ extension CommandLinkInstallerTests {
                            fixture.root + "/AppTranslocation/token/d/Pensieve.app/Contents/Helpers/pensieve"] {
             let installer = fixture.installer(executable: executable)
             let model = CommandLineSettingsModel(installer: installer)
+            await model.perform(.install)
             await model.repairAtLaunch()
             await model.refresh()
             XCTAssertEqual(model.error, "Move Pensieve to your Applications folder first.")

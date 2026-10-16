@@ -142,7 +142,30 @@ final class CLILibraryHandlerTests: XCTestCase {
         XCTAssertTrue(h.runtime.library.hasUnsavedChanges(for: skill))
     }
 
+    private func assertLongSlugResolvesForDeleteAndDeployPreviews() async throws {
+        let h = try CLILibraryFixture()
+        defer { h.stop() }
+        try await h.start()
+        let slug = String(repeating: "a", count: 70)
+        let skill = try XCTUnwrap(h.runtime.library.createSkill(name: slug, description: "Long name",
+            body: "Instructions", tags: [], context: h.context))
+        XCTAssertEqual(skill.directoryName, slug)
+        await h.runtime.library.manifestSaves?.waitUntilIdle()
+        let folder = h.root + "/local-project"
+        try h.files.createDirectory(at: folder)
+        h.context.insert(Project(name: "Local", path: folder))
+        try h.context.save()
+        let before = try h.tree(h.paths.storeRoot)
+        let deletion = try await h.run(["skill", "delete", slug, "--dry-run"])
+        XCTAssertTrue(deletion.ok, "A real 70-character slug must resolve for delete")
+        let deployment = try await h.run(["deploy", slug, "-a", "claude", "-p", folder, "--dry-run"])
+        XCTAssertTrue(deployment.ok, "A real 70-character slug must resolve for deploy")
+        XCTAssertEqual(try h.tree(h.paths.storeRoot), before)
+        XCTAssertEqual(try h.context.fetchCount(FetchDescriptor<Skill>()), 1)
+    }
+
     func testBuiltDeletePreviewRemovesDeploysAndWaitsForManifest() async throws {
+        try await assertLongSlugResolvesForDeleteAndDeployPreviews()
         let h = try CLILibraryFixture(diskBacked: true)
         defer { h.stop() }
         try await h.start()
