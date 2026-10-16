@@ -93,6 +93,14 @@ extension CommandLinkInstallerTests {
     func assertUnreadablePlistIsOccupied() async throws {
         let fixture = try CommandLinkFixture()
         defer { fixture.clean() }
+        try fixture.link(to: fixture.root + "/Other.app/Contents/Helpers/pensieve")
+        let before = try fixture.files.commandLinkEntry(at: fixture.path)
+        for action in [CommandLinkAction.install, .uninstall, .repair] {
+            XCTAssertThrowsError(try fixture.installer().perform(action))
+            XCTAssertEqual(try fixture.files.commandLinkEntry(at: fixture.path), before)
+        }
+        XCTAssertEqual(fixture.authorization.calls, 0, "A foreign dangling app link must refuse before authorization")
+        try fixture.files.deleteFile(at: fixture.path)
         let app = fixture.root + "/PensieveNoInfo.app"
         try fixture.files.createDirectory(at: app + "/Contents")
         try fixture.link(to: app + "/Contents/Helpers/pensieve")
@@ -138,6 +146,62 @@ extension CommandLinkInstallerTests {
             XCTAssertEqual(process.currentDirectoryURL?.path, "/", "The prompt child must start at the filesystem root")
             XCTAssertEqual((process.standardInput as? FileHandle)?.fileDescriptor, FileHandle.nullDevice.fileDescriptor,
                            "The prompt child must not inherit stdin")
+        }
+    }
+}
+
+extension CommandLinkInstallerTests {
+    func assertReplacementAfterLeafReadSurvives() throws {
+        for action in [CommandLinkAction.install, .uninstall, .repair] {
+            for launch in [false, true] where !launch || action == .repair {
+                let fixture = try CommandLinkFixture()
+                defer { fixture.clean() }
+                if action != .install {
+                    try fixture.link(to: action == .repair ? fixture.removedExecutable : fixture.executable)
+                }
+                var replacement: CommandLinkEntry?
+                let files = LeafReadSwappingFileService(path: fixture.path) {
+                    if try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path) {
+                        try fixture.files.deleteFile(at: fixture.path)
+                    }
+                    let name = action == .repair ? "PensieveReplacement" : "Other"
+                    try fixture.link(to: fixture.root + "/" + name + ".app/Contents/Helpers/pensieve")
+                    replacement = try fixture.files.commandLinkEntry(at: fixture.path)
+                }
+                let installer = fixture.installer(files: files)
+                if launch { XCTAssertThrowsError(try installer.repairAtLaunch()) } else {
+                    XCTAssertThrowsError(try installer.perform(action), "A replacement after the check must refuse")
+                }
+                XCTAssertNotNil(replacement, "The fixture must swap immediately after the first leaf read")
+                XCTAssertEqual(try fixture.files.commandLinkEntry(at: fixture.path), replacement,
+                               "A replacement after the check must survive \(action), launch=\(launch)")
+            }
+        }
+    }
+
+    func assertRenamedAppsCanBeUninstalled() async throws {
+        for identifier in ["com.jaredatch.Pensieve", "com.jaredatch.Pensieve.debug",
+                           "com.jaredatch.Pensieve.dogfood", "own-helper"] {
+            let fixture = try CommandLinkFixture()
+            defer { fixture.clean() }
+            let app = fixture.root + "/Work.app"
+            let helper = app + "/Contents/Helpers/pensieve"
+            try fixture.files.writeExecutableFile(at: helper, content: "#!/bin/sh\nexit 0\n")
+            if identifier != "own-helper" {
+                let data = try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": identifier],
+                                                              format: .xml, options: 0)
+                try fixture.files.writeData(at: app + "/Contents/Info.plist", data: data)
+            }
+            let installed = CommandLineSettingsModel(installer: fixture.installer(executable: helper))
+            await installed.perform(.install)
+            XCTAssertNil(installed.error)
+            XCTAssertEqual(installed.status, .installed(fixture.path), "A renamed running app owns its helper")
+            let model = identifier == "own-helper" ? installed : CommandLineSettingsModel(installer: fixture.installer())
+            await model.refresh()
+            XCTAssertEqual(model.status, .installed(fixture.path), "Bundle identity must admit a renamed Pensieve app")
+            await model.perform(.uninstall)
+            XCTAssertNil(model.error, "A renamed Pensieve app must be uninstallable")
+            XCTAssertFalse(try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path))
         }
     }
 }

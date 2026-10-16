@@ -5,6 +5,7 @@ import XCTest
 @MainActor
 final class CommandLinkInstallerTests: XCTestCase {
     func testInstallCreatesFolderAndNewShellRunsBundledVersionThenUninstalls() async throws {
+        try await assertRenamedAppsCanBeUninstalled()
         try assertPromptConfiguration()
         try await assertPromptRejectsInheritedEnvironment()
         try await assertUnicodeArgumentsAndMissingParents()
@@ -115,6 +116,7 @@ final class CommandLinkInstallerTests: XCTestCase {
     }
 
     func testChangesDuringAuthorizationPreserveTheReplacementForEachAction() async throws {
+        try assertReplacementAfterLeafReadSurvives()
         for action in [CommandLinkAction.install, .uninstall, .repair] {
             for replacement in ["file", "foreign-link", "owned-link"] {
                 let fixture = try CommandLinkFixture()

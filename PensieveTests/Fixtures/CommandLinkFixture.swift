@@ -17,8 +17,9 @@ final class CommandLinkFixture {
     init() throws { try files.createDirectory(at: root + "/local") }
     func clean() { try? files.deleteDirectory(at: root) }
 
-    func installer(user: UInt32 = getuid(), homebrew: [String] = [], executable: String? = nil) -> CommandLinkInstaller {
-        CommandLinkInstaller(files: files, directory: directory, executable: executable ?? self.executable,
+    func installer(user: UInt32 = getuid(), homebrew: [String] = [], executable: String? = nil,
+                   files: FileServiceProtocol? = nil) -> CommandLinkInstaller {
+        CommandLinkInstaller(files: files ?? self.files, directory: directory, executable: executable ?? self.executable,
                              user: user, homebrewDirectories: homebrew,
                              authorization: AdminCommandLinkAuthorization(prompt: authorization))
     }
@@ -65,4 +66,51 @@ final class FixtureCommandAuthorization: AdministratorPromptRunning {
         try AppleScriptAdministratorPrompt(requiresAdministratorPrivileges: false)
             .run(shellCommand: "umask 077\n" + shellCommand, action: action)
     }
+}
+
+/// Forwards filesystem behavior, swapping the fixture leaf once after capturing its inspected entry.
+final class LeafReadSwappingFileService: FileServiceProtocol {
+    private let base = FileService()
+    let path: String
+    var afterRead: (() throws -> Void)?
+
+    init(path: String, afterRead: @escaping () throws -> Void) {
+        self.path = path
+        self.afterRead = afterRead
+    }
+
+    func commandLinkEntry(at path: String) throws -> CommandLinkEntry? {
+        let entry = try base.commandLinkEntry(at: path)
+        if path == self.path, let callback = afterRead {
+            afterRead = nil
+            try callback()
+        }
+        return entry
+    }
+    func changeCommandLink(_ request: CommandLinkRequest) throws { try base.changeCommandLink(request) }
+    func realPath(at path: String) -> String { base.realPath(at: path) }
+    func entryExistsWithoutFollowingLinks(at path: String) throws -> Bool {
+        try base.entryExistsWithoutFollowingLinks(at: path)
+    }
+    func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
+        try base.readRegularFileData(at: path, maximumBytes: maximumBytes)
+    }
+
+    func listDirectory(at path: String) throws -> [String] { try base.listDirectory(at: path) }
+    func readFile(at path: String) throws -> String { try base.readFile(at: path) }
+    func readData(at path: String) throws -> Data { try base.readData(at: path) }
+    func writeFile(at path: String, content: String) throws { try base.writeFile(at: path, content: content) }
+    func deleteFile(at path: String) throws { try base.deleteFile(at: path) }
+    func fileExists(at path: String) -> Bool { base.fileExists(at: path) }
+    func isExecutableFile(at path: String) -> Bool { base.isExecutableFile(at: path) }
+    func directoryExists(at path: String) -> Bool { base.directoryExists(at: path) }
+    func createDirectory(at path: String) throws { try base.createDirectory(at: path) }
+    func deleteDirectory(at path: String) throws { try base.deleteDirectory(at: path) }
+    func createSymlink(at linkPath: String, pointingTo targetPath: String) throws {
+        try base.createSymlink(at: linkPath, pointingTo: targetPath)
+    }
+    func symlinkTarget(at path: String) throws -> String { try base.symlinkTarget(at: path) }
+    func isSymlink(at path: String) -> Bool { base.isSymlink(at: path) }
+    func isRegularFile(at path: String) -> Bool { base.isRegularFile(at: path) }
+    func contentsHash(at path: String) throws -> String { try base.contentsHash(at: path) }
 }

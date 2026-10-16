@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 @testable import Pensieve
 
@@ -28,6 +29,7 @@ final class PensieveSkillTests: XCTestCase {
             "Always pass `--json`", "Look names up", "Never guess",
             "Never write into `~/.claude/skills`",
             "`--dry-run` before a broad change", "`-a '*'` only when the person says \"all\"",
+            "names skills to install from a repository", "each as `--skill <slug>` in both the dry run and the apply",
             "ask for approval", "`--yes` only after they agree",
             "`confirmationToken` in `--confirm-plan`",
             "Retry only when `error.retryable` is true", "Report what changed",
@@ -47,6 +49,14 @@ final class PensieveSkillTests: XCTestCase {
         XCTAssertTrue(files.fileExists(at: path), "Built app is missing pensieve/SKILL.md")
         XCTAssertEqual(try files.listDirectory(at: bundled.path).sorted(), ["SKILL.md"],
                        "Bundled skill folder must contain only SKILL.md")
+        let text = try files.readFile(at: path)
+        let lines = text.components(separatedBy: "\n")
+        let markers = lines.filter { $0.hasPrefix("pensieve-bundled: ") }
+        XCTAssertEqual(markers.count, 1, "The shipped skill must carry one version marker")
+        let content = lines.filter { !$0.hasPrefix("pensieve-bundled: ") }.joined(separator: "\n")
+        let digest = SHA256.hash(data: Data(content.utf8)).map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(markers.first, "pensieve-bundled: " + digest,
+                       "The shipped marker must match the document so unedited copies can update")
         XCTAssertEqual(try files.readData(at: path),
                        try files.readData(at: skillDirectory.appendingPathComponent("SKILL.md").path),
                        "Bundled SKILL.md must match the distributed skill")

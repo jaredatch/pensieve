@@ -53,7 +53,11 @@ struct CommandLinkInstaller: CommandLinkInstalling {
     let authorization: CommandLinkAuthorizing
 
     func status() throws -> CommandLinkStatus {
-        let local = try localStatus()
+        try status(entry: files.commandLinkEntry(at: directory + "/pensieve"))
+    }
+
+    private func status(entry: CommandLinkEntry?) throws -> CommandLinkStatus {
+        let local = try localStatus(entry: entry)
         for bin in homebrewDirectories {
             let prefix = URL(fileURLWithPath: bin).deletingLastPathComponent().path
             if try files.entryExistsWithoutFollowingLinks(at: prefix + "/Caskroom/pensieve"),
@@ -67,10 +71,10 @@ struct CommandLinkInstaller: CommandLinkInstalling {
         return local
     }
 
-    private func localStatus() throws -> CommandLinkStatus {
+    private func localStatus(entry: CommandLinkEntry?) throws -> CommandLinkStatus {
         let path = directory + "/pensieve"
-        guard let entry = try files.commandLinkEntry(at: path) else { return .absent }
-        if let target = entry.target, try CommandLinkOwnership.isPensieve(target, files: files) {
+        guard let entry else { return .absent }
+        if let target = entry.target, try target == executable || CommandLinkOwnership.isPensieve(target, files: files) {
             return files.isExecutableFile(at: path) ? .installed(path) : .broken
         }
         return .occupied(entry.target.map { "\(path) is taken by a link to \($0)" }
@@ -80,7 +84,8 @@ struct CommandLinkInstaller: CommandLinkInstalling {
     func perform(_ action: CommandLinkAction) throws {
         try checkParents()
         if action != .uninstall { try checkAppLocation() }
-        var state = try status()
+        let entry = try files.commandLinkEntry(at: directory + "/pensieve")
+        var state = try status(entry: entry)
         if case .alongsideHomebrew(let local, _) = state { state = local }
         if case .homebrew = state { return }
         switch (action, state) {
@@ -88,7 +93,7 @@ struct CommandLinkInstaller: CommandLinkInstalling {
         case (.install, .installed): return
         default: throw CommandLinkError(message: state.message)
         }
-        let request = try makeRequest(action)
+        let request = makeRequest(action, expected: entry)
         if action == .repair {
             guard let target = request.expected?.target,
                   try CommandLinkOwnership.isMissingApp(target, files: files) else {
@@ -101,9 +106,10 @@ struct CommandLinkInstaller: CommandLinkInstalling {
     /// Launch never asks for authorization. A permission failure leaves the broken link visible.
     func repairAtLaunch() throws {
         try checkAppLocation()
-        guard try localStatus() == .broken else { return }
+        let entry = try files.commandLinkEntry(at: directory + "/pensieve")
+        guard try localStatus(entry: entry) == .broken else { return }
         try checkParents()
-        let request = try makeRequest(.repair)
+        let request = makeRequest(.repair, expected: entry)
         guard let target = request.expected?.target,
               try CommandLinkOwnership.isMissingApp(target, files: files) else { return }
         try files.changeCommandLink(request)
@@ -116,9 +122,9 @@ struct CommandLinkInstaller: CommandLinkInstalling {
         }
     }
 
-    private func makeRequest(_ action: CommandLinkAction) throws -> CommandLinkRequest {
+    private func makeRequest(_ action: CommandLinkAction, expected: CommandLinkEntry?) -> CommandLinkRequest {
         CommandLinkRequest(action: action, directory: directory, executable: executable, user: user,
-                           expected: try files.commandLinkEntry(at: directory + "/pensieve"))
+                           expected: expected)
     }
 
     private func checkParents() throws {

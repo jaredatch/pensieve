@@ -125,13 +125,15 @@ enum CommandLinkOwnership {
         let app = contents.deletingLastPathComponent()
         guard url.lastPathComponent == "pensieve", helpers.lastPathComponent == "Helpers",
               contents.lastPathComponent == "Contents", app.pathExtension == "app",
-              app.lastPathComponent.hasPrefix("Pensieve"), url.standardized.path == target else { return nil }
+              url.standardized.path == target else { return nil }
         return app.path
     }
 
     static func isPensieve(_ target: String, files: FileServiceProtocol) throws -> Bool {
         guard let app = appPath(target) else { return false }
-        guard try files.entryExistsWithoutFollowingLinks(at: app) else { return true }
+        guard try files.entryExistsWithoutFollowingLinks(at: app) else {
+            return URL(fileURLWithPath: app).lastPathComponent.hasPrefix("Pensieve")
+        }
         guard let bytes = try? files.readRegularFileData(at: app + "/Contents/Info.plist", maximumBytes: 1_048_576),
               let info = try? PropertyListSerialization.propertyList(from: bytes, format: nil) as? [String: Any] else {
             return false
