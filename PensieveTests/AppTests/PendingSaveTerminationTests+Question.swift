@@ -3,6 +3,32 @@ import XCTest
 @testable import Pensieve
 
 extension PendingSaveTerminationTests {
+    func pressDefault(in sheet: NSWindow) throws {
+        let button = try XCTUnwrap(sheet.defaultButtonCell?.controlView as? NSButton)
+        XCTAssertEqual(button.title, "Quit")
+        button.performClick(nil)
+    }
+
+    func assertQuestionText(_ question: PendingSaveTermination.Question, in rendered: [NSView]) {
+        let expected: [String]
+        switch question {
+        case .saving:
+            expected = ["Pensieve is still saving a change.",
+                "It's waiting for sync to finish. If you quit now, the change won't be saved."]
+        case .syncing:
+            expected = ["Pensieve is still finishing a sync step.", "If you quit now, it stops partway."]
+        case .savingAndSyncing:
+            expected = ["Pensieve is still finishing a sync step and saving a change.",
+                "If you quit now, the sync step stops partway and the change won't be saved."]
+        case .waitingForRepair:
+            expected = ["A change is waiting for the library file to be repaired.",
+                "It's kept on this Mac and saves when you repair the file here. "
+                    + "If another Mac repairs the file first, its version replaces your change."]
+        }
+        let strings = rendered.compactMap { ($0 as? NSTextField)?.stringValue }
+        for text in expected { XCTAssertTrue(strings.contains(text), "Missing native alert text: \(text)") }
+    }
+
     func testShownQuitQuestionTracksPendingSaveAndSyncStep() async throws {
         for startsWithStep in [true, false] {
             let h = try ManifestSaveFixture()
@@ -61,6 +87,8 @@ extension PendingSaveTerminationTests {
         sheet.contentView?.layoutSubtreeIfNeeded()
         let strings = sheet.contentView.map { views($0).compactMap { ($0 as? NSTextField)?.stringValue } } ?? []
         switch question {
+        case .waitingForRepair:
+            return strings.contains("A change is waiting for the library file to be repaired.")
         case .saving:
             return strings.contains("Pensieve is still saving a change.") && strings.contains(
                 "It's waiting for sync to finish. If you quit now, the change won't be saved.")

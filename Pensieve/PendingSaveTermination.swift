@@ -5,14 +5,15 @@ import Observation
 @MainActor
 final class PendingSaveTermination {
     enum Question: Equatable {
-        case saving, syncing, savingAndSyncing
+        case saving, syncing, savingAndSyncing, waitingForRepair
 
         func covers(_ current: Question) -> Bool {
-            self == .savingAndSyncing || self == current
+            self == current || (self == .savingAndSyncing && current != .waitingForRepair)
         }
 
         var message: String {
             switch self {
+            case .waitingForRepair: return "A change is waiting for the library file to be repaired."
             case .saving: return "Pensieve is still saving a change."
             case .syncing: return "Pensieve is still finishing a sync step."
             case .savingAndSyncing: return "Pensieve is still finishing a sync step and saving a change."
@@ -21,6 +22,9 @@ final class PendingSaveTermination {
 
         var detail: String {
             switch self {
+            case .waitingForRepair:
+                return "It's kept on this Mac and saves when you repair the file here. "
+                    + "If another Mac repairs the file first, its version replaces your change."
             case .saving: return "It's waiting for sync to finish. If you quit now, the change won't be saved."
             case .syncing: return "If you quit now, it stops partway."
             case .savingAndSyncing: return "If you quit now, the sync step stops partway and the change won't be saved."
@@ -72,7 +76,7 @@ final class PendingSaveTermination {
         case (true, true): return .savingAndSyncing
         case (true, false): return .saving
         case (false, true): return .syncing
-        case (false, false): return nil
+        case (false, false): return (saves?.pendingCount ?? 0) > 0 ? .waitingForRepair : nil
         }
     }
 
@@ -85,7 +89,9 @@ final class PendingSaveTermination {
             Task { @MainActor in self?.observePending(saves, steps, request: request, reply: reply) }
         }
         guard let question else { finish(true, reply: reply); return }
-        updateQuestion(question)
+        if question == .waitingForRepair, questionID == nil {
+            showQuestion(for: saves, steps: steps, request: request, reply: reply)
+        } else { updateQuestion(question) }
     }
 
     private func updateQuestion(_ question: Question) {
@@ -109,7 +115,9 @@ final class PendingSaveTermination {
                 self.showQuestion(for: saves, steps: steps, request: request, reply: reply)
                 return
             }
-            if quitAnyway { self.finish(true, reply: reply) } else { self.dismissQuestion() }
+            if quitAnyway { self.finish(true, reply: reply) } else if self.shownQuestion == .waitingForRepair {
+                self.finish(false, reply: reply)
+            } else { self.dismissQuestion() }
         }
         if generation == request, questionID == id { presented = presentation } else { presentation.dismiss() }
     }
@@ -132,12 +140,13 @@ final class PendingSaveTermination {
     }
 
     static func present(_ question: Question, resolve: @escaping (Bool) -> Void) -> Presentation {
+        var current = question
         let alert = NSAlert()
         alert.messageText = question.message
         alert.informativeText = question.detail
         NSApp.activate(ignoringOtherApps: true)
-        alert.addButton(withTitle: "Wait")
-        alert.addButton(withTitle: "Quit Anyway")
+        alert.addButton(withTitle: question == .waitingForRepair ? "Quit" : "Wait")
+        alert.addButton(withTitle: question == .waitingForRepair ? "Cancel" : "Quit Anyway")
         // AppKit owns this native quit question; a sheet allows the save's main-actor completion.
         var parent = NSApp.keyWindow ?? NSApp.windows.first { $0.isVisible }
         while let sheet = parent?.attachedSheet { parent = sheet }
@@ -156,11 +165,14 @@ final class PendingSaveTermination {
             if let willClose { NotificationCenter.default.removeObserver(willClose) }
             DispatchQueue.main.async {
                 if temporary { host.close() }
-                resolve(response == .alertSecondButtonReturn)
+                resolve(response == (current == .waitingForRepair ? .alertFirstButtonReturn : .alertSecondButtonReturn))
             }
         }
         return Presentation(update: { question in
             guard alert.window.sheetParent != nil else { return false }
+            current = question
+            alert.buttons[0].title = question == .waitingForRepair ? "Quit" : "Wait"
+            alert.buttons[1].title = question == .waitingForRepair ? "Cancel" : "Quit Anyway"
             alert.messageText = question.message
             alert.informativeText = question.detail
             alert.layout()

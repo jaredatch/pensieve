@@ -89,7 +89,7 @@ struct ManifestService: ManifestReadWriting {
 
     private func admitsWrite(root: String, replacing damage: ManifestDamage?) throws -> Bool {
         if let damage {
-            guard try ManifestDamage.capture(root: root, files: fileService) == damage,
+            guard ManifestDamage.capture(root: root, files: fileService) == damage,
                   damage.missing || (try? read(fromRoot: root)) == nil else { return false }
             try refuseNewerExistingManifest(at: root + "/manifest")
         } else {
@@ -120,6 +120,7 @@ struct ManifestService: ManifestReadWriting {
 
     func read(fromRoot root: String) throws -> ManifestSnapshot {
         let manifestDir = root + "/manifest"
+        _ = try manifestDirectoryExists(at: manifestDir)
         let schema = try readSchema(from: manifestDir)
         if schema > supportedSchemaVersion {
             throw ManifestError.unsupportedSchema(found: schema, supported: supportedSchemaVersion)
@@ -136,16 +137,21 @@ struct ManifestService: ManifestReadWriting {
         )
     }
 
-    private func readManifestText(at path: String) throws -> String {
-        guard try fileService.entryTypeWithoutFollowingLinks(at: path) != .other else {
-            throw ManifestError.damaged
-        }
-        return try fileService.readFile(at: path)
+    func readManifestText(at path: String) throws -> String {
+        let data = try fileService.readRegularFileData(at: path, maximumBytes: Int.max)
+        guard let text = String(data: data, encoding: .utf8) else { throw ManifestError.damaged }
+        return text
+    }
+
+    private func manifestDirectoryExists(at path: String) throws -> Bool {
+        guard let type = try fileService.entryTypeWithoutFollowingLinks(at: path) else { return false }
+        guard type != .symlink, type != .other else { throw ManifestError.damaged }
+        return type == .directory
     }
 
     private func readSchema(from manifestDir: String) throws -> Int {
         let path = manifestDir + "/manifest.yaml"
-        guard fileService.fileExists(at: path) else { return supportedSchemaVersion }
+        guard try fileService.entryTypeWithoutFollowingLinks(at: path) != nil else { return supportedSchemaVersion }
         guard let top = try? readManifestText(at: path),
               let obj = (try? CheckedYAMLLoader.load(yaml: top)) as? [String: Any],
               let schema = obj["schema_version"] as? Int else {
@@ -157,7 +163,7 @@ struct ManifestService: ManifestReadWriting {
     private func readCategories(from manifestDir: String) throws -> [CategoryRecord] {
         var categories: [CategoryRecord] = []
         let categoriesDir = manifestDir + "/categories"
-        guard fileService.directoryExists(at: categoriesDir) else { return [] }
+        guard try manifestDirectoryExists(at: categoriesDir) else { return [] }
         for entry in try fileService.listDirectory(at: categoriesDir) where entry.hasSuffix(".yaml") {
             guard let content = try? readManifestText(at: categoriesDir + "/" + entry),
                   let obj = (try? CheckedYAMLLoader.load(yaml: content)) as? [String: Any],
@@ -176,7 +182,7 @@ struct ManifestService: ManifestReadWriting {
     private func readSkills(from manifestDir: String) throws -> [SkillOverlay] {
         var skills: [SkillOverlay] = []
         let skillsDir = manifestDir + "/skills"
-        if fileService.directoryExists(at: skillsDir) {
+        if try manifestDirectoryExists(at: skillsDir) {
             for entry in try fileService.listDirectory(at: skillsDir) where entry.hasSuffix(".yaml") {
                 guard let content = try? readManifestText(at: skillsDir + "/" + entry),
                       let obj = (try? CheckedYAMLLoader.load(yaml: content)) as? [String: Any],
@@ -223,7 +229,7 @@ struct ManifestService: ManifestReadWriting {
 
     private func readProjects(from manifestDir: String) throws -> [ProjectIdentityRecord] {
         let path = manifestDir + "/projects.yaml"
-        guard fileService.fileExists(at: path) else { return [] }
+        guard try fileService.entryTypeWithoutFollowingLinks(at: path) != nil else { return [] }
         guard let content = try? readManifestText(at: path) else {
             throw ManifestError.corruptManifestFile("projects.yaml")
         }

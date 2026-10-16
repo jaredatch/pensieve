@@ -156,8 +156,9 @@ extension SkillLibraryViewModel {
 
     // MARK: - Library change fence
 
-    /// Adds wait for launch ingestion; existing category rules also wait for a readable library.
+    /// The newer-schema fence. The save model's current disk verdict overrides the reported verdict.
     var storeUnreadable: Bool { manifestSaves?.requiresNewerVersion ?? reportedStoreUnreadable }
+    /// Adds wait for launch ingestion and for an unavailable, damaged or newer-schema library.
     var addsFenced: Bool { addFenceReason != nil }
     var categoryEditsFenced: Bool { libraryUnavailable || storeUnreadable }
 

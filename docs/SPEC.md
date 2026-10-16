@@ -360,7 +360,7 @@ If ingestion is pending, import and deploy-intent changes rebuild before applyin
 
 If that rebuild can't finish, import and intent-backed deployment ask the user to try again; a library they can't read keeps its own explanation. Intent-backed deployment checks for removed selections on each attempt and asks for a new selection before changing intents or deploying. Project removal retries pending ingestion before preparing cleanup, even without a sync remote. It refuses if that rebuild still fails. Healthy conflict preparation still publishes saved window edits.
 
-Direct deployment to a local project without a shared identity writes no manifest and runs no preflight. A failed writer preflight leaves any unsaved rebuild changes in the window's context. Whole-window fallback while ingestion is pending, queued or refused edits replaced by a writer rebuild, and these unsaved partial changes remain open under #161.
+Direct deployment to a local project without a shared identity writes no manifest and runs no preflight. A queued save waits instead of writing the window while a rebuild is pending. Rebuilds keep queued edits. After a failed rebuild, its unsaved partial changes stay in the window; Pensieve does not roll them back.
 
 Saving a category or skill edit over a damaged synced library leaves the file untouched and keeps the edit on this Mac. The alert says "The synced library file is damaged" and offers "Replace with This Mac's Library…". The sidebar says "Library file damaged" and shows "Repair…" under the pointer. Both open the same confirmation, explaining that replacing the file loses changes from other Macs that this Mac has not read. Cancel leaves disk unchanged.
 

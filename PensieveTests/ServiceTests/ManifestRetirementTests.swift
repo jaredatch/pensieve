@@ -67,7 +67,7 @@ final class ManifestRetirementTests: XCTestCase {
             XCTAssertEqual($0 as? ManifestError, .damaged)
         }
         XCTAssertEqual(try treeBytes(at: root + "/manifest"), damaged)
-        let token = try ManifestDamage.capture(root: root, files: files)
+        let token = ManifestDamage.capture(root: root, files: files)
         XCTAssertTrue(try manifest.repair(empty, root: root, replacing: token))
         XCTAssertEqual(try manifest.read(fromRoot: root), empty)
         XCTAssertFalse(files.directoryExists(at: root + "/manifest/scenarios"))

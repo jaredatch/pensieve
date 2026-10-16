@@ -233,14 +233,15 @@ struct ManifestDamage: Equatable {
     let missing: Bool
     private let entries: [String: Data]
 
-    static func capture(root: String, files: FileServiceProtocol) throws -> ManifestDamage {
+    static func capture(root: String, files: FileServiceProtocol) -> ManifestDamage {
         var entries: [String: Data] = [:]
         func walk(_ path: String) {
             let absolute = root + "/manifest" + path
-            var observation = files.manifestEntryObservation(at: absolute)
+            let entry = files.manifestEntryObservation(at: absolute)
+            var observation = entry.metadata
             defer { entries[path] = observation }
             do {
-                let type = try files.entryTypeWithoutFollowingLinks(at: absolute)
+                let type = entry.type
                 observation += Data(":\(String(describing: type)):".utf8)
                 switch type {
                 case nil: break

@@ -287,16 +287,13 @@ private extension AppRuntime {
         let outcome = result.outcome
         if outcome.migrationRan { defaults.set(true, forKey: Self.migrationDefaultsKey) }
         storeQuarantined = outcome.quarantined
-        applyLibraryLaunchOutcome(outcome.rebuild)
-        if !outcome.rebuild.storeUnreadable, !outcome.ingestionNeedsRetry {
-            if result.backfilled {
-                platformVM.refreshDeployIndex()
-                convergence.runAfterLaunchIngest()
-            } else {
-                needsLaunchBackfillAfterCoordinator = true
-                forceLaunchPreflight = true
-            }
+        applyLibraryLaunchOutcome(outcome.rebuild) { [weak self] in
+            self?.performDeferredLaunchBackfillIfNeeded(afterRepair: true)
         }
+        needsLaunchBackfillAfterCoordinator = outcome.rebuild.manifestDamaged
+            || (!outcome.rebuild.storeUnreadable && !outcome.ingestionNeedsRetry && !result.backfilled)
+        if needsLaunchBackfillAfterCoordinator, !outcome.rebuild.manifestDamaged { forceLaunchPreflight = true }
+        if result.backfilled { platformVM.refreshDeployIndex(); convergence.runAfterLaunchIngest() }
         launchIngestHeadStamp = outcome.ingestedHeadStamp
         didCompleteLaunchIngest = outcome.rebuild.storeUnreadable
             || !outcome.ingestionNeedsRetry
@@ -325,11 +322,13 @@ private extension AppRuntime {
 }
 
 extension AppRuntime {
-    private func performDeferredLaunchBackfillIfNeeded() {
-        guard needsLaunchBackfillAfterCoordinator else { return }
+    private func performDeferredLaunchBackfillIfNeeded(afterRepair: Bool = false) {
+        guard needsLaunchBackfillAfterCoordinator, library.manifestSaves?.libraryDamaged != true,
+              library.manifestSaves?.requiresNewerVersion != true else { return }
+        needsLaunchBackfillAfterCoordinator = false
         launchBackfill(ModelContext(container))
         platformVM.refreshDeployIndex()
-        needsLaunchBackfillAfterCoordinator = false
+        if afterRepair { convergence.runAfterLaunchIngest() }
     }
 
     /// The model excludes cycles until conflict resolution finishes. Git evidence remains ordered.

@@ -36,16 +36,36 @@ extension PendingSaveTerminationTests {
                 }
                 steps.finish(step)
             }
-            await TestWait.until(failureMessage: "Quit must finish when only paused edits remain") { replies == [true] }
+            do {
+                await TestWait.until(failureMessage: "Paused edits need their own Quit or Cancel question") {
+                    questions.last?.message == "A change is waiting for the library file to be repaired."
+                }
+                XCTAssertEqual(questions.last?.detail, "It's kept on this Mac and saves when you repair the file here. "
+                    + "If another Mac repairs the file first, its version replaces your change.")
+                try XCTUnwrap(choose)(true)
+            }
+            await TestWait.until(failureMessage: "Answered quit must finish") { replies == [true] }
             XCTAssertEqual(h.saves.pendingCount, 1, "Quit did not discard the waiting edit")
-            let freshQuit = PendingSaveTermination(delay: 0)
-            XCTAssertEqual(PensieveAppDelegate.terminationReply(hasUnsavedChanges: false, questionOpen: false,
-                confirm: { _ in XCTFail("No draft") }, reply: { _ in XCTFail("Immediate quit needs no reply") },
-                saves: h.saves, saveTermination: freshQuit), .terminateNow)
+            try await assertPausedQuitCanCancel(h)
             // Release the waiting observer even on the regression's failing path.
             h.saves.requestRepair()
             await h.saves.replaceWithThisMac(context: h.context)
             await h.saves.waitUntilIdle()
         }
+    }
+
+    private func assertPausedQuitCanCancel(_ h: ManifestSaveFixture) async throws {
+    var cancel: ((Bool) -> Void)?
+    var cancelled: [Bool] = []
+    let freshQuit = PendingSaveTermination(delay: 0) { _, answer in
+        cancel = answer
+        return .init(update: { _ in true }, dismiss: {})
+    }
+    XCTAssertEqual(PensieveAppDelegate.terminationReply(hasUnsavedChanges: false, questionOpen: false,
+        confirm: { _ in XCTFail("No draft") }, reply: { cancelled.append($0) },
+        saves: h.saves, saveTermination: freshQuit), .terminateLater)
+    await TestWait.until(failureMessage: "Paused Quit must offer Cancel") { cancel != nil }
+    try XCTUnwrap(cancel)(false)
+    XCTAssertEqual(cancelled, [false], "Cancel ends this quit request without waiting for repair")
     }
 }

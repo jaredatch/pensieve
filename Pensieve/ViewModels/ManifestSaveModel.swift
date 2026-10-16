@@ -27,6 +27,8 @@ final class ManifestSaveModel {
     var libraryDamaged = false
     /// Nil until a disk read or an accepted launch/sync verdict supplies the current state.
     var requiresNewerVersion: Bool?
+    @ObservationIgnored var damageObservationOrder = 0
+    @ObservationIgnored var didReadRepairedLibrary: () -> Void = {}
     var repairError: String?
     @ObservationIgnored var damage: ManifestDamage?
     @ObservationIgnored var confirmedDamage: ManifestDamage?
@@ -155,9 +157,6 @@ final class ManifestSaveModel {
         let healedItems = disk == nil ? Set(items.filter {
             $0.presentation.context === item.presentation.context
         }.map(\.id)) : []
-        if disk == nil, StoreIngestState.shared(for: item.presentation.context.container).needsRebuild {
-            throw ManifestError.damaged
-        }
         if disk != nil, !item.wasHealed { try item.change.validate(in: saved) }
         if disk != nil, !item.wasHealed, !item.change.apply(to: &saved) {
             if refused.contains(where: { $0.suppliesTarget(for: item.presentation) }) {

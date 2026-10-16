@@ -151,8 +151,10 @@ final class PendingSaveTerminationTests: XCTestCase {
         unrelated.animationBehavior = .none
         unrelated.title = "Unrelated visible test host"
         defer { unrelated.close() }
-        for (step, choice) in [false, true].flatMap({ step in
-            ["Wait", "Quit Anyway", "Close host"].map { (step, $0) }
+        let questions: [PendingSaveTermination.Question] = [.saving, .syncing, .waitingForRepair]
+        for (question, choice) in questions.flatMap({ question in
+            (question == .waitingForRepair ? ["Quit", "Cancel", "Default", "Close host"] : ["Wait", "Quit Anyway", "Close host"])
+                .map { (question, $0) }
         }) {
             unrelated.orderFront(nil)
             XCTAssertTrue(unrelated.isVisible)
@@ -163,7 +165,7 @@ final class PendingSaveTerminationTests: XCTestCase {
             defer { window.close() }
             window.makeKeyAndOrderFront(nil)
             var answers: [Bool] = []
-            let presentation = PendingSaveTermination.present(step ? .syncing : .saving) { answers.append($0) }
+            let presentation = PendingSaveTermination.present(question) { answers.append($0) }
             defer { presentation.dismiss() }
             let parent = try XCTUnwrap(NSApp.windows.first { $0.attachedSheet != nil })
             let sheet = try XCTUnwrap(parent.attachedSheet)
@@ -173,18 +175,18 @@ final class PendingSaveTerminationTests: XCTestCase {
                 return sheet.contentView.map { Self.views($0).compactMap { $0 as? NSButton }.count == 2 } ?? false
             }
             let rendered = Self.views(try XCTUnwrap(sheet.contentView))
-            let strings = rendered.compactMap { ($0 as? NSTextField)?.stringValue }
-            XCTAssertTrue(strings.contains(step ? "Pensieve is still finishing a sync step."
-                : "Pensieve is still saving a change."))
-            XCTAssertTrue(strings.contains(step ? "If you quit now, it stops partway."
-                : "It's waiting for sync to finish. If you quit now, the change won't be saved."))
+            assertQuestionText(question, in: rendered)
             let buttons = rendered.compactMap { $0 as? NSButton }
-            XCTAssertEqual(Set(buttons.map(\.title)), ["Wait", "Quit Anyway"])
-            if choice == "Close host" { parent.close() } else {
+            XCTAssertEqual(Set(buttons.map(\.title)),
+                question == .waitingForRepair ? ["Quit", "Cancel"] : ["Wait", "Quit Anyway"])
+            if question == .waitingForRepair {
+                XCTAssertEqual(sheet.defaultButtonCell?.title, "Quit", "Quit is the native default")
+            }
+            if choice == "Close host" { parent.close() } else if choice == "Default" { try pressDefault(in: sheet) } else {
                 try XCTUnwrap(buttons.first { $0.title == choice }).performClick(nil)
             }
             await TestWait.until(failureMessage: "The native quit choice did not resolve") { !answers.isEmpty }
-            XCTAssertEqual(answers, [choice == "Quit Anyway"])
+            XCTAssertEqual(answers, [choice == "Quit Anyway" || choice == "Quit" || choice == "Default"])
             XCTAssertNil(parent.attachedSheet)
             XCTAssertFalse(presentation.update(.savingAndSyncing), "A detached question cannot show another warning")
         }

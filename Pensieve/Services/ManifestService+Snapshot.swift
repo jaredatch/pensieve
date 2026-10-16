@@ -8,6 +8,13 @@ protocol ManifestSnapshotting: ManifestReadWriting {
     /// Project the SwiftData store into a portable snapshot. Throws on a SwiftData fetch failure so a
     /// read error is never silently written out as an empty, overlay-pruning manifest (08.4 review).
     func snapshot(from context: ModelContext) throws -> ManifestSnapshot
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool
+}
+
+extension ManifestSnapshotting {
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
+        throw ManifestError.damaged
+    }
 }
 
 extension ManifestService: ManifestSnapshotting {

@@ -23,32 +23,38 @@ extension ManifestSaveModel {
 
     private enum LibraryRead { case readable, damaged, newer }
 
-    /// Launch, cycle completion and the sidebar refresh derive damage from disk, including after relaunch.
+    func acceptLibraryVerdict(newer: Bool) {
+        damageObservationOrder += 1
+        requiresNewerVersion = newer
+    }
+
+    /// Later-started reads and accepted launch/sync verdicts supersede this observation.
     @MainActor
     func refreshDamage() async {
+        damageObservationOrder += 1
+        let order = damageObservationOrder
+        let pending = items.contains {
+            StoreIngestState.shared(for: $0.presentation.context.container).needsRebuild
+        }
         let root = root, files = files, manifest = manifest
         let observation = await BlockingWork.run { () -> (LibraryRead, ManifestDamage?) in
             do {
                 _ = try manifest.read(fromRoot: root)
+                if pending, !files.fileExists(at: root + "/manifest/manifest.yaml") {
+                    return (.damaged, ManifestDamage.capture(root: root, files: files))
+                }
                 return (.readable, nil)
             } catch {
                 if case ManifestError.unsupportedSchema = error { return (.newer, nil) }
-                return (.damaged, try? ManifestDamage.capture(root: root, files: files))
+                return (.damaged, ManifestDamage.capture(root: root, files: files))
             }
         }
+        guard order == damageObservationOrder else { return }
+        let wasDamaged = libraryDamaged
         libraryDamaged = observation.0 == .damaged
         requiresNewerVersion = observation.0 == .newer
         if !showsDamageAlert, !showsRepairConfirmation { damage = observation.1 }
-        if !libraryDamaged, !items.isEmpty {
-            let pendingMissing = items.contains {
-                StoreIngestState.shared(for: $0.presentation.context.container).needsRebuild
-            }
-            let token = await BlockingWork.run { try? ManifestDamage.capture(root: root, files: files) }
-            if pendingMissing, token?.missing == true {
-                libraryDamaged = true
-                if !showsDamageAlert, !showsRepairConfirmation { damage = token }
-            }
-        }
+        if wasDamaged, observation.0 == .readable { didReadRepairedLibrary() }
     }
 
     @MainActor
@@ -85,9 +91,9 @@ extension ManifestSaveModel {
             held = try await takeLock()
             let snapshot = try manifest.snapshot(from: context)
             let captured = Set(items.filter { $0.presentation.context === context }.map(\.id))
-            let root = root, files = files
+            let root = root, manifest = manifest
             let wrote = try await BlockingWork.run {
-                try ManifestService(fileService: files).repair(snapshot, root: root, replacing: expected)
+                try manifest.repair(snapshot, root: root, replacing: expected)
             }
             if wrote {
                 for index in items.indices where captured.contains(items[index].id) { items[index].wasHealed = true }

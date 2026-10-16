@@ -45,7 +45,8 @@ extension CLILibraryHandler {
         if !completed || deletionFailed(presentation.notice) || waiting {
             var envelope = CLIReply.failure(changed ? "partial" : "deletion_refused",
                 message.isEmpty ? "Deletion did not complete." : message,
-                hint: "Inspect the remaining skill and deployments in Pensieve before retrying.", exit: 1).envelope
+                hint: waiting ? "Repair the library file in Pensieve."
+                    : "Inspect the remaining skill and deployments in Pensieve before retrying.", exit: 1).envelope
             envelope.changed = changed
             envelope.data = .object(["plan": data, "skillRetained": .bool(remaining != nil),
                 "remainingDeployments": .array(remainingPaths.map(CLIValue.string))])

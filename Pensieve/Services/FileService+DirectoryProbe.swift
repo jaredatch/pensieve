@@ -42,33 +42,46 @@ extension FileService {
 
 /// Optional native entry observations for repair confirmation. The base filesystem protocol stays
 /// unchanged; adapters without this capability still expose their type, identity and regular size.
+struct FileEntryObservation {
+    let type: FileEntryType?
+    let metadata: Data
+}
+
 protocol FileEntryObserving {
-    func entryObservation(at path: String) throws -> Data
+    func entryObservation(at path: String) throws -> FileEntryObservation
 }
 
 extension FileService: FileEntryObserving {
-    func entryObservation(at path: String) throws -> Data {
+    func entryObservation(at path: String) throws -> FileEntryObservation {
         var info = stat()
         guard lstat(path, &info) == 0 else {
             throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
         }
+        let type: FileEntryType
+        switch info.st_mode & S_IFMT {
+        case S_IFDIR: type = .directory
+        case S_IFLNK: type = .symlink
+        case S_IFREG: type = .regular
+        default: type = .other
+        }
         // Access time changes while taking the token. Modification/change times and identity do not.
-        return Data("\(info.st_mode):\(info.st_dev):\(info.st_ino):\(info.st_size):"
+        return FileEntryObservation(type: type, metadata: Data("\(info.st_mode):\(info.st_dev):\(info.st_ino):\(info.st_size):"
             .appending("\(info.st_mtimespec.tv_sec):\(info.st_mtimespec.tv_nsec):")
-            .appending("\(info.st_ctimespec.tv_sec):\(info.st_ctimespec.tv_nsec):\(info.st_flags)").utf8)
+            .appending("\(info.st_ctimespec.tv_sec):\(info.st_ctimespec.tv_nsec):\(info.st_flags)").utf8))
     }
 }
 
 extension FileServiceProtocol {
-    func manifestEntryObservation(at path: String) -> Data {
+    func manifestEntryObservation(at path: String) -> FileEntryObservation {
         if let observer = self as? FileEntryObserving {
             do { return try observer.entryObservation(at: path) } catch {
                 let failure = error as NSError
-                return Data("unobserved:\(failure.domain):\(failure.code)".utf8)
+                return FileEntryObservation(type: nil, metadata: Data("unobserved:\(failure.domain):\(failure.code)".utf8))
             }
         }
         let identity = fileIdentity(at: path, followingLinks: false)
         let metadata = regularFileMetadata(at: path)
-        return Data("\(String(describing: identity)):\(String(describing: metadata))".utf8)
+        return FileEntryObservation(type: try? entryTypeWithoutFollowingLinks(at: path),
+            metadata: Data("\(String(describing: identity)):\(String(describing: metadata))".utf8))
     }
 }

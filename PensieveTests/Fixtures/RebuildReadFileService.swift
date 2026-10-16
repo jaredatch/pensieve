@@ -5,7 +5,13 @@ import Foundation
 /// without blocking, so the owner can diagnose an actor regression without wedging its test host.
 /// Optional manifest-build and skill-listing refusals exercise publication and scan failures.
 /// Other I/O delegates to FileService; the double supplies no rebuild or merge result.
-final class RebuildReadFileService: FileServiceProtocol {
+final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
+    let entryObservations = Counter()
+    let separateTypeReads = Counter()
+    func entryObservation(at path: String) throws -> FileEntryObservation {
+        entryObservations.increment()
+        return try wrapped.entryObservation(at: path)
+    }
     var refuseReplacement = false
     var refuseSkillListing = false
     private var refusedListings = 0
@@ -32,7 +38,7 @@ final class RebuildReadFileService: FileServiceProtocol {
     func isSymlink(at path: String) -> Bool { wrapped.isSymlink(at: path) }
     func readData(at path: String) throws -> Data { try wrapped.readData(at: path) }
     func readRegularFileData(at path: String, maximumBytes: Int) throws -> Data {
-        try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes)
+        return try wrapped.readRegularFileData(at: path, maximumBytes: maximumBytes)
     }
     func readRegularFileHeader(at path: String, maximumBytes: Int) throws -> Data {
         try wrapped.readRegularFileHeader(at: path, maximumBytes: maximumBytes)
@@ -57,7 +63,8 @@ final class RebuildReadFileService: FileServiceProtocol {
         try wrapped.entryExistsWithoutFollowingLinks(at: path)
     }
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
-        try wrapped.entryTypeWithoutFollowingLinks(at: path)
+        separateTypeReads.increment()
+        return try wrapped.entryTypeWithoutFollowingLinks(at: path)
     }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func isUserExecutableFile(at path: String) -> Bool { wrapped.isUserExecutableFile(at: path) }

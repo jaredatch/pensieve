@@ -311,7 +311,7 @@ extension SkillLibraryViewModel {
     /// A rising fence closes the create sheet here; the view closes its own sheets on `addsFenced`.
     private func applyFence(_ unreadable: Bool) {
         reportedStoreUnreadable = unreadable
-        manifestSaves?.requiresNewerVersion = unreadable
+        manifestSaves?.acceptLibraryVerdict(newer: unreadable)
         if unreadable { showCreateSheet = false }
     }
 
