@@ -30,7 +30,6 @@ final class PensieveSkillTests: XCTestCase {
             "Never write into `~/.claude/skills`", "or any other agent's folder",
             "or choose between ambiguous matches", "`ok`, `changed`, `error.code` and the exit code",
             "Before `install`, `skill update`, `skill delete` or `project remove`",
-            "`pensieve install <url> --dry-run --json` without `--skill`",
             "`--dry-run` before a broad change", "`-a '*'` only when the person says \"all\"",
             "names skills to install from a repository", "each as `--skill <slug>` in both the dry run and the apply",
             "ask for approval", "`--yes` only after they agree",
