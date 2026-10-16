@@ -38,7 +38,8 @@ enum PrivilegedCommandLink {
         /bin/test "$owner" = 0 || /bin/test "$owner" = "$user" || fail 'The command folder has a foreign owner.'
     }
     enter "$parent"
-    if ! exists ./bin; then /bin/mkdir -m 755 ./bin || exit 1; fi
+    umask 022
+    if ! exists ./bin; then /bin/mkdir ./bin || exit 1; fi
     enter ./bin
     /bin/test ! -L "$parent" && /bin/test ! -L "$parent/bin" || fail 'The command folder changed.'
     /bin/test "$(identity "$parent/bin")" = "$(identity .)" || fail 'The command folder changed.'
@@ -56,12 +57,6 @@ enum PrivilegedCommandLink {
         /bin/test "$actual_target" = "$target." || fail 'The link target changed.'
         if /bin/test "$action" = repair; then
             ! exists "$app" || fail 'The app still exists. The link was not repaired.'
-        elif exists "$app"; then
-            bundle=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist") || exit 1
-            case "$bundle" in
-                com.jaredatch.Pensieve|com.jaredatch.Pensieve.debug|com.jaredatch.Pensieve.dogfood) ;;
-                *) fail 'The link is not a Pensieve command.' ;;
-            esac
         fi
         /bin/test "$(identity ./pensieve)" = "$expected" || fail 'The inspected link changed.'
         /bin/rm -- ./pensieve || exit 1

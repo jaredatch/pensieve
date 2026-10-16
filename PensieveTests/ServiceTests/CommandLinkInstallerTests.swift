@@ -5,6 +5,7 @@ import XCTest
 @MainActor
 final class CommandLinkInstallerTests: XCTestCase {
     func testInstallCreatesFolderAndNewShellRunsBundledVersionThenUninstalls() async throws {
+        try await assertPromptRejectsInheritedEnvironment()
         let fixture = try CommandLinkFixture()
         defer { fixture.clean() }
         let model = CommandLineSettingsModel(installer: fixture.installer())
@@ -13,8 +14,10 @@ final class CommandLinkInstallerTests: XCTestCase {
         await model.perform(.install)
         XCTAssertTrue(fixture.authorization.commands.allSatisfy { $0.hasPrefix("'/bin/sh' ") },
                       "Root must start the protected system shell, never the bundle helper")
-        XCTAssertEqual(fixture.authorization.promptThreads, [true], "The administrator prompt must run on the main thread")
+        XCTAssertFalse(fixture.authorization.commands.contains { $0.contains("/bin/mkdir -m") },
+                       "Atomic directory creation must never chmod a pathname after mkdir")
 
+        XCTAssertEqual(fixture.authorization.promptThreads, [false], "The prompt child must run off the main thread")
         XCTAssertNil(model.error)
         XCTAssertEqual(model.status, .installed(fixture.path))
         XCTAssertEqual(try fixture.files.symlinkTarget(at: fixture.path), fixture.executable)
@@ -57,6 +60,7 @@ final class CommandLinkInstallerTests: XCTestCase {
         XCTAssertEqual(model.status, .absent)
         XCTAssertNil(model.error)
         XCTAssertFalse(fixture.files.directoryExists(at: fixture.directory))
+        try await assertPromptPreservesOtherErrors()
         fixture.authorization.cancelled = false
         let failure = CommandLineSettingsModel(installer: fixture.installer(executable: String(repeating: "a", count: 5000)))
         await failure.perform(.install)
@@ -204,5 +208,6 @@ final class CommandLinkInstallerTests: XCTestCase {
             executable: fixture.executable, user: getuid(), expected: before)
         XCTAssertThrowsError(try FixtureCommandAuthorization().run(request))
         XCTAssertEqual(try fixture.files.commandLinkEntry(at: fixture.path), before)
+        try await assertUninstallDoesNotReadChangedPlist()
     }
 }

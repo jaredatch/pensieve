@@ -116,12 +116,8 @@ struct AdminCommandLinkAuthorization: CommandLinkAuthorizing {
     func run(_ request: CommandLinkRequest) throws {
         let shell = try PrivilegedCommandLink.command(for: request)
         do {
-            if Thread.isMainThread {
-                try prompt.run(shellCommand: shell)
-            } else {
-                try DispatchQueue.main.sync { try prompt.run(shellCommand: shell) }
-            }
-        } catch let error as NSError where error.code == -128 {
+            try prompt.run(shellCommand: shell)
+        } catch let error as NSError where error.domain == AppleScriptAdministratorPrompt.errorDomain && error.code == -128 {
             throw Cancelled()
         }
     }

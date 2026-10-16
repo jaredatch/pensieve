@@ -55,9 +55,12 @@ final class FixtureCommandAuthorization: AdministratorPromptRunning {
         calls += 1
         commands.append(shellCommand)
         promptThreads.append(Thread.isMainThread)
-        if cancelled { throw NSError(domain: "Fixture.AdministratorPrompt", code: -128) }
+        if cancelled {
+            let result = try CommandLinkFixture.run("/usr/bin/osascript", arguments: ["-e", "error number -128"])
+            throw AppleScriptAdministratorPrompt.failure(status: result.0 ?? -1, message: result.1)
+        }
         try beforeRun?()
-        let result = try CommandLinkFixture.run("/bin/sh", arguments: ["-c", "umask 077\n" + shellCommand])
-        guard result.0 == 0 else { throw CommandLinkError(message: result.1) }
+        try AppleScriptAdministratorPrompt(requiresAdministratorPrivileges: false)
+            .run(shellCommand: "umask 077\n" + shellCommand)
     }
 }
