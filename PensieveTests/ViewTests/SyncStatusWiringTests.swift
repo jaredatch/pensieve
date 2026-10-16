@@ -1,10 +1,20 @@
 import XCTest
 @testable import Pensieve
 
-/// Architecture contract: both Resolve controls consume SyncModel.canResolve, which additionally
-/// fences an in-flight cycle. The model's transition tests own the predicate's behavior. The XCTest
-/// host exposes these SwiftUI controls as AXUnknown, so this check owns their actual bindings.
+/// Architecture contract: Resolve controls and the sidebar footer mount consume SyncModel's decisions.
+/// Model and save-queue tests own those decisions' behavior. The XCTest host exposes these SwiftUI
+/// controls as AXUnknown, so these checks own their actual bindings.
 final class SyncStatusWiringTests: XCTestCase {
+    func testSidebarFooterMountReadsCentralDamageAwareDecision() throws {
+        let content = try source("Pensieve/Views/MainWindow/ContentView.swift")
+        let owner = #"[A-Za-z_][A-Za-z0-9_]*"#
+        let binding = #"\.safeAreaInset\s*\([^{}]*\)\s*\{\s*if\s+("# + owner
+            + #")\.showsFooter\s*\(\s*saves\s*:\s*("# + owner
+            + #"\.manifestSaves)\s*\)\s*\{\s*SyncStatusView\s*\(\s*model\s*:\s*\1\s*,\s*saves\s*:\s*\2\s*,"#
+        XCTAssertEqual(matches(binding, in: content), 1,
+                       "The sidebar footer must mount from its live sync model's damage-aware decision and save queue")
+    }
+
     func testResolveControlsReadCentralEligibility() throws {
         let footer = try source("Pensieve/Views/SyncViews/SyncStatusView.swift")
         let header = try source("Pensieve/Views/SkillViews/Detail/SkillDetailHeader.swift")
