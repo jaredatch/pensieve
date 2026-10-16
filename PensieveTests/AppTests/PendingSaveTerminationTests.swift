@@ -153,7 +153,8 @@ final class PendingSaveTerminationTests: XCTestCase {
         defer { unrelated.close() }
         let questions: [PendingSaveTermination.Question] = [.saving, .syncing, .waitingForRepair]
         for (question, choice) in questions.flatMap({ question in
-            (question == .waitingForRepair ? ["Quit", "Cancel", "Default", "Close host"] : ["Wait", "Quit Anyway", "Close host"])
+            (question == .waitingForRepair ? ["Quit", "Cancel", "Default", "Escape", "Command-period", "Close host"]
+                : ["Wait", "Quit Anyway", "Escape", "Command-period", "Close host"])
                 .map { (question, $0) }
         }) {
             unrelated.orderFront(nil)
@@ -176,16 +177,13 @@ final class PendingSaveTerminationTests: XCTestCase {
             }
             let rendered = Self.views(try XCTUnwrap(sheet.contentView))
             assertQuestionText(question, in: rendered)
+            try assertQuitKeyboardBindings(question, in: sheet)
             let buttons = rendered.compactMap { $0 as? NSButton }
             XCTAssertEqual(Set(buttons.map(\.title)),
                 question == .waitingForRepair ? ["Quit", "Cancel"] : ["Wait", "Quit Anyway"])
-            if question == .waitingForRepair {
-                XCTAssertEqual(sheet.defaultButtonCell?.title, "Quit", "Quit is the native default")
-            }
-            if choice == "Close host" { parent.close() } else if choice == "Default" { try pressDefault(in: sheet) } else {
-                try XCTUnwrap(buttons.first { $0.title == choice }).performClick(nil)
-            }
+            try chooseNativeQuit(choice, sheet: sheet, parent: parent, buttons: buttons)
             await TestWait.until(failureMessage: "The native quit choice did not resolve") { !answers.isEmpty }
+            _ = try XCTUnwrap(answers.first)
             XCTAssertEqual(answers, [choice == "Quit Anyway" || choice == "Quit" || choice == "Default"])
             XCTAssertNil(parent.attachedSheet)
             XCTAssertFalse(presentation.update(.savingAndSyncing), "A detached question cannot show another warning")
@@ -224,6 +222,7 @@ final class PendingSaveTerminationTests: XCTestCase {
             return sheet.contentView.map { Self.views($0).compactMap { $0 as? NSButton }.count == 2 } ?? false
         }
         let rendered = Self.views(try XCTUnwrap(sheet.contentView))
+        try assertQuitKeyboardBindings(.savingAndSyncing, in: sheet)
         let strings = rendered.compactMap { ($0 as? NSTextField)?.stringValue }
         XCTAssertTrue(strings.contains("Pensieve is still finishing a sync step and saving a change."))
         XCTAssertTrue(strings.contains("If you quit now, the sync step stops partway and the change won't be saved."))

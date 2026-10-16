@@ -139,6 +139,30 @@ final class PendingSaveTermination {
         reply(quit)
     }
 
+    private static func configureKeys(_ alert: NSAlert, for question: Question) {
+        for button in alert.buttons {
+            button.keyEquivalent = ""
+            button.keyEquivalentModifierMask = []
+        }
+        alert.buttons[0].keyEquivalent = "\r"
+        alert.buttons[1].keyEquivalent = question == .waitingForRepair ? "\u{1b}" : ""
+    }
+
+    private static func monitorCancelKeys(_ alert: NSAlert, question: @escaping () -> Question) -> () -> Void {
+        // Wait is both the default and the safe choice. A button has only one key equivalent.
+        var keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.window === alert.window else { return event }
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock)
+            let key = event.charactersIgnoringModifiers
+            guard (key == "\u{1b}" && modifiers.isEmpty) || (key == "." && modifiers == .command) else { return event }
+            alert.buttons[question() == .waitingForRepair ? 1 : 0].performClick(nil)
+            return nil
+        }
+        return {
+            if let monitor = keyMonitor { NSEvent.removeMonitor(monitor); keyMonitor = nil }
+        }
+    }
+
     static func present(_ question: Question, resolve: @escaping (Bool) -> Void) -> Presentation {
         var current = question
         let alert = NSAlert()
@@ -161,13 +185,16 @@ final class PendingSaveTermination {
         ) { _ in
             if host.attachedSheet === alert.window { host.endSheet(alert.window, returnCode: .cancel) }
         }
+        let stopKeys = monitorCancelKeys(alert) { current }
         alert.beginSheetModal(for: host) { response in
+            stopKeys()
             if let willClose { NotificationCenter.default.removeObserver(willClose) }
             DispatchQueue.main.async {
                 if temporary { host.close() }
                 resolve(response == (current == .waitingForRepair ? .alertFirstButtonReturn : .alertSecondButtonReturn))
             }
         }
+        configureKeys(alert, for: question)
         return Presentation(update: { question in
             guard alert.window.sheetParent != nil else { return false }
             current = question
@@ -176,8 +203,10 @@ final class PendingSaveTermination {
             alert.messageText = question.message
             alert.informativeText = question.detail
             alert.layout()
+            configureKeys(alert, for: question)
             return true
         }, dismiss: {
+            stopKeys()
             host.endSheet(alert.window)
             alert.window.orderOut(nil)
             if temporary { host.close() }

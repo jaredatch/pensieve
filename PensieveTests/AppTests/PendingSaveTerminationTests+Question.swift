@@ -29,6 +29,78 @@ extension PendingSaveTerminationTests {
         for text in expected { XCTAssertTrue(strings.contains(text), "Missing native alert text: \(text)") }
     }
 
+    func assertQuitKeyboardBindings(_ question: PendingSaveTermination.Question, in sheet: NSWindow) throws {
+        let buttons = Self.views(try XCTUnwrap(sheet.contentView)).compactMap { $0 as? NSButton }
+        let firstTitle = question == .waitingForRepair ? "Quit" : "Wait"
+        let secondTitle = question == .waitingForRepair ? "Cancel" : "Quit Anyway"
+        let first = try XCTUnwrap(buttons.first { $0.title == firstTitle })
+        let second = try XCTUnwrap(buttons.first { $0.title == secondTitle })
+        XCTAssertEqual(sheet.defaultButtonCell?.title, firstTitle, "Return must choose the current default")
+        XCTAssertTrue(["", "\r"].contains(first.keyEquivalent), "The default button keeps Return")
+        XCTAssertEqual(second.keyEquivalent, question == .waitingForRepair ? "\u{1b}" : "",
+            "Only Cancel may have the native Escape equivalent")
+        XCTAssertTrue(first.keyEquivalentModifierMask.isEmpty)
+        XCTAssertTrue(second.keyEquivalentModifierMask.isEmpty)
+    }
+
+    func testNativeQuitKeyboardChoicesFollowRetitledQuestions() async throws {
+        let questions: [PendingSaveTermination.Question] = [.saving, .syncing, .savingAndSyncing, .waitingForRepair]
+        for initial in questions {
+            for updated in questions {
+                for key in ["Escape", "Command-period", "Return"] {
+                    try await assertRetitledQuit(initial, updated: updated, key: key)
+                }
+            }
+        }
+    }
+
+    private func assertRetitledQuit(_ initial: PendingSaveTermination.Question,
+                                    updated: PendingSaveTermination.Question, key: String) async throws {
+        let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        host.isReleasedWhenClosed = false
+        host.animationBehavior = .none
+        host.makeKeyAndOrderFront(nil)
+        defer { host.close() }
+        var answers: [Bool] = []
+        let presentation = PendingSaveTermination.present(initial) { answers.append($0) }
+        defer { presentation.dismiss() }
+        let parent = try XCTUnwrap(NSApp.windows.first { $0.attachedSheet != nil })
+        let sheet = try XCTUnwrap(parent.attachedSheet)
+        sheet.animationBehavior = .none
+        XCTAssertTrue(presentation.update(updated))
+        sheet.contentView?.layoutSubtreeIfNeeded()
+        try assertQuitKeyboardBindings(updated, in: sheet)
+        assertQuestionText(updated, in: Self.views(try XCTUnwrap(sheet.contentView)))
+        try sendQuitKey(key, to: sheet)
+        await TestWait.until(failureMessage: "Native \(key) choice did not resolve") { !answers.isEmpty }
+        _ = try XCTUnwrap(answers.first, "Native key routing must deliver a response")
+        XCTAssertEqual(answers, [key == "Return" && updated == .waitingForRepair],
+            "\(initial) → \(updated): \(key) must answer the button now shown")
+        XCTAssertNil(parent.attachedSheet)
+    }
+
+    func chooseNativeQuit(_ choice: String, sheet: NSWindow, parent: NSWindow, buttons: [NSButton]) throws {
+        switch choice {
+        case "Escape", "Command-period": try sendQuitKey(choice, to: sheet)
+        case "Close host": parent.close()
+        case "Default": try pressDefault(in: sheet)
+        default: try XCTUnwrap(buttons.first { $0.title == choice }).performClick(nil)
+        }
+    }
+
+    func sendQuitKey(_ key: String, to sheet: NSWindow) throws {
+        let characters = key == "Escape" ? "\u{1b}" : key == "Return" ? "\r" : "."
+        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+            modifierFlags: key == "Command-period" ? .command : [], timestamp: 0,
+            windowNumber: sheet.windowNumber, context: nil, characters: characters,
+            charactersIgnoringModifiers: characters, isARepeat: false,
+            keyCode: key == "Escape" ? 53 : key == "Return" ? 36 : 47))
+        if key == "Return" {
+            if !sheet.performKeyEquivalent(with: event) { sheet.keyDown(with: event) }
+        } else { NSApp.sendEvent(event) }
+    }
+
     func testShownQuitQuestionTracksPendingSaveAndSyncStep() async throws {
         for startsWithStep in [true, false] {
             let h = try ManifestSaveFixture()
