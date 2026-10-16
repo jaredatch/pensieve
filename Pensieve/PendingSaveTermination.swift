@@ -7,6 +7,15 @@ final class PendingSaveTermination {
     enum Question: Equatable {
         case saving, syncing, savingAndSyncing, waitingForRepair
 
+        var buttons: [(title: String, quits: Bool)] {
+            self == .waitingForRepair ? [("Quit", true), ("Cancel", false)] : [("Wait", false), ("Quit Anyway", true)]
+        }
+
+        func quits(for response: NSApplication.ModalResponse) -> Bool {
+            let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+            return buttons.indices.contains(index) && buttons[index].quits
+        }
+
         func covers(_ current: Question) -> Bool {
             self == current || (self == .savingAndSyncing && current != .waitingForRepair)
         }
@@ -117,7 +126,12 @@ final class PendingSaveTermination {
             }
             if quitAnyway { self.finish(true, reply: reply) } else if self.shownQuestion == .waitingForRepair {
                 self.finish(false, reply: reply)
-            } else { self.dismissQuestion() }
+            } else {
+                self.dismissQuestion()
+                if Self.question(saves, steps) == .waitingForRepair {
+                    self.showQuestion(for: saves, steps: steps, request: request, reply: reply)
+                }
+            }
         }
         if generation == request, questionID == id { presented = presentation } else { presentation.dismiss() }
     }
@@ -139,28 +153,12 @@ final class PendingSaveTermination {
         reply(quit)
     }
 
-    private static func configureKeys(_ alert: NSAlert, for question: Question) {
+    private static func configureKeys(_ alert: NSAlert) {
         for button in alert.buttons {
             button.keyEquivalent = ""
             button.keyEquivalentModifierMask = []
         }
         alert.buttons[0].keyEquivalent = "\r"
-        alert.buttons[1].keyEquivalent = question == .waitingForRepair ? "\u{1b}" : ""
-    }
-
-    private static func monitorCancelKeys(_ alert: NSAlert, question: @escaping () -> Question) -> () -> Void {
-        // Wait is both the default and the safe choice. A button has only one key equivalent.
-        var keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard event.window === alert.window else { return event }
-            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock)
-            let key = event.charactersIgnoringModifiers
-            guard (key == "\u{1b}" && modifiers.isEmpty) || (key == "." && modifiers == .command) else { return event }
-            alert.buttons[question() == .waitingForRepair ? 1 : 0].performClick(nil)
-            return nil
-        }
-        return {
-            if let monitor = keyMonitor { NSEvent.removeMonitor(monitor); keyMonitor = nil }
-        }
     }
 
     static func present(_ question: Question, resolve: @escaping (Bool) -> Void) -> Presentation {
@@ -170,8 +168,7 @@ final class PendingSaveTermination {
         alert.messageText = question.message
         alert.informativeText = question.detail
         NSApp.activate(ignoringOtherApps: true)
-        alert.addButton(withTitle: question == .waitingForRepair ? "Quit" : "Wait")
-        alert.addButton(withTitle: question == .waitingForRepair ? "Cancel" : "Quit Anyway")
+        for button in question.buttons { alert.addButton(withTitle: button.title) }
         // AppKit owns this native quit question; a sheet allows the save's main-actor completion.
         var parent = NSApp.keyWindow ?? NSApp.windows.first { $0.isVisible }
         while let sheet = parent?.attachedSheet { parent = sheet }
@@ -180,39 +177,95 @@ final class PendingSaveTermination {
         let host = parent ?? NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
         if temporary { host.isReleasedWhenClosed = false; host.center() }
         host.makeKeyAndOrderFront(nil)
-        var willClose: NSObjectProtocol?
-        willClose = NotificationCenter.default.addObserver(
-            forName: NSWindow.willCloseNotification, object: host, queue: .main
-        ) { _ in
-            if host.attachedSheet === alert.window { host.endSheet(alert.window, returnCode: .cancel) }
-        }
-        let stopKeys = monitorCancelKeys(alert) { current }
-        alert.beginSheetModal(for: host) { response in
+        let lifetime = QuitSheetLifetime(host: host, alert: alert) { current }
+        alert.beginSheetModal(for: host) { [weak host] response in
             responseRecorded = true
-            let quit = response == (current == .waitingForRepair ? .alertFirstButtonReturn : .alertSecondButtonReturn)
-            stopKeys()
-            if let willClose { NotificationCenter.default.removeObserver(willClose) }
+            let quit = current.quits(for: response)
+            lifetime.stop()
             DispatchQueue.main.async {
-                if temporary { host.close() }
+                if temporary { host?.close() }
                 resolve(quit)
             }
         }
-        configureKeys(alert, for: question)
+        configureKeys(alert)
         return Presentation(update: { question in
             guard !responseRecorded, alert.window.sheetParent != nil else { return false }
             current = question
-            alert.buttons[0].title = question == .waitingForRepair ? "Quit" : "Wait"
-            alert.buttons[1].title = question == .waitingForRepair ? "Cancel" : "Quit Anyway"
+            for (button, choice) in zip(alert.buttons, question.buttons) { button.title = choice.title }
             alert.messageText = question.message
             alert.informativeText = question.detail
             alert.layout()
-            configureKeys(alert, for: question)
+            configureKeys(alert)
             return true
-        }, dismiss: {
-            stopKeys()
-            host.endSheet(alert.window)
+        }, dismiss: { [weak host] in
+            lifetime.stop()
+            host?.endSheet(alert.window)
             alert.window.orderOut(nil)
-            if temporary { host.close() }
+            if temporary { host?.close() }
         })
+    }
+}
+
+/// Observers must not retain the host: its teardown can itself be what ends the sheet.
+@MainActor
+private final class QuitSheetLifetime {
+    private let keys: QuitCancelKeyMonitor
+    private var observers: [NSObjectProtocol] = []
+
+    init(host: NSWindow, alert: NSAlert, question: @escaping () -> PendingSaveTermination.Question) {
+        keys = QuitCancelKeyMonitor(alert: alert, question: question)
+        observers.append(NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: host, queue: .main
+        ) { [weak host, weak alert] _ in
+            guard let alert, host?.attachedSheet === alert.window else { return }
+            host?.endSheet(alert.window, returnCode: .cancel)
+        })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: NSWindow.didEndSheetNotification, object: host, queue: .main
+        ) { [weak self] _ in self?.stop() })
+    }
+
+    func stop() {
+        keys.stop()
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        observers = []
+    }
+
+    deinit {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+    }
+}
+
+/// The native token cannot retain its owner, and removal is deferred when a key caused completion.
+@MainActor
+private final class QuitCancelKeyMonitor {
+    private var token: Any?
+    private var handling = false
+    private var stopped = false
+
+    init(alert: NSAlert, question: @escaping () -> PendingSaveTermination.Question) {
+        token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak alert] event in
+            guard let self, let alert, !self.stopped, event.window === alert.window else { return event }
+            self.handling = true
+            defer { self.handling = false }
+            let modifiers = event.modifierFlags.intersection([.command, .option, .control])
+            let key = event.charactersIgnoringModifiers
+            guard (key == "\u{1b}" && modifiers.isEmpty) || (key == "." && modifiers == .command) else { return event }
+            if let index = question().buttons.firstIndex(where: { !$0.quits }) { alert.buttons[index].performClick(nil) }
+            return nil
+        }
+    }
+
+    func stop() {
+        stopped = true
+        if handling { DispatchQueue.main.async { self.remove() } } else { remove() }
+    }
+
+    private func remove() {
+        if let token { NSEvent.removeMonitor(token); self.token = nil }
+    }
+
+    deinit {
+        if let token { DispatchQueue.main.async { NSEvent.removeMonitor(token) } }
     }
 }

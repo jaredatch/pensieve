@@ -1,6 +1,9 @@
 import Foundation
 
-extension SyncEngine {
+struct SyncConflictOperation {
+    let gitService: GitServiceProtocol
+    let fileService: FileServiceProtocol
+
     private struct Selection {
         let path: String
         let chosen: ConflictVersion
@@ -93,14 +96,7 @@ extension SyncEngine {
     /// any `.`/`..`/empty/control-scalar component; any symlink at a directory/non-leaf component; and
     /// a symlinked leaf whose target resolves outside `root`. Containment is boundary-aware.
     private func validatedWorktreePath(_ path: String, root: String) -> String? {
-        guard !path.isEmpty, !PathSyntax.isAbsolute(path) else { return nil }
-        let components = PathSyntax.components(path, omittingEmptySubsequences: false)
-        for component in components {
-            if component.isEmpty || component == "." || component == ".." { return nil }
-            if component.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) {
-                return nil
-            }
-        }
+        guard let components = PathSyntax.conflictWorktreeComponents(path) else { return nil }
         let realRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
         var current = realRoot
         for (index, component) in components.enumerated() {

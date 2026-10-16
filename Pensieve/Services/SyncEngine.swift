@@ -24,8 +24,8 @@ enum SyncError: LocalizedError, Equatable {
             return "Couldn't read the synced store — it may have been written by a newer version of "
                 + "Pensieve. Update Pensieve, then sync again."
         case .ingestIncomplete:
-            return "Sync stopped because Pensieve couldn't update this Mac's library from the synced changes. "
-                + "It will try again on the next sync."
+            return "The store changed while Pensieve was rebuilding this Mac's library. "
+                + "Wait for the other git operation to finish, then try again."
         case .conflictsChanged:
             return "The conflict changed while you were resolving it — reopen to see the latest."
         case let .conflictSideUnavailable(path):
@@ -82,10 +82,10 @@ extension SyncEngineProtocol {
 /// index from the merged files, and pushes. A body/overlay conflict is reported as a structured
 /// `.conflicted` result it does NOT resolve — the safe interim (§D); PLAN-09 adds the diff-and-pick sheet.
 struct SyncEngine: SyncEngineProtocol {
-    var gitService: GitServiceProtocol
+    private let gitService: GitServiceProtocol
     private let manifestService: ManifestSnapshotting
     private let storeRebuildService: StoreRebuildServiceProtocol
-    let fileService: FileServiceProtocol
+    private let fileService: FileServiceProtocol
     private let lockPath: String
     private let lockProvider: (String) -> SyncLock?
 
@@ -103,10 +103,19 @@ struct SyncEngine: SyncEngineProtocol {
         self.lockProvider = lockProvider
     }
 
+    private func scoped(to root: String) -> SyncEngine {
+        SyncEngine(gitService: gitService.scopedToStore(root), manifestService: manifestService,
+            storeRebuildService: storeRebuildService, fileService: fileService,
+            lockPath: lockPath, lockProvider: lockProvider)
+    }
+
+    private var conflictOperation: SyncConflictOperation {
+        SyncConflictOperation(gitService: gitService, fileService: fileService)
+    }
+
     func sync(root: String, message: String, credential: GitCredential?,
               context: ModelContext, prepare: ((ModelContext) throws -> Void)?) throws -> SyncOutcome {
-        var operation = self
-        operation.gitService = gitService.scopedToStore(root)
+        let operation = scoped(to: root)
         return try operation.performSync(root: root, message: message, credential: credential, context: context, prepare: prepare)
     }
 
@@ -155,7 +164,7 @@ struct SyncEngine: SyncEngineProtocol {
         let pulled: Bool
         let result: PullResult
         do { result = try pullRebase(root: root, credential: credential, incoming: incoming) } catch {
-            try abortResolution(after: error, root: root)
+            try conflictOperation.abortResolution(after: error, root: root)
             throw error
         }
         switch result {
@@ -180,8 +189,7 @@ struct SyncEngine: SyncEngineProtocol {
 
     func inspectConflicts(root: String, credential: GitCredential?,
                           context: ModelContext) throws -> ConflictInspection {
-        var operation = self
-        operation.gitService = gitService.scopedToStore(root)
+        let operation = scoped(to: root)
         return try operation.performInspectConflicts(root: root, credential: credential, context: context)
     }
 
@@ -221,17 +229,19 @@ struct SyncEngine: SyncEngineProtocol {
                 conflicts = ConflictSet(items: items)
             }
         } catch {
-            try abortResolution(after: error, root: root)
+            try conflictOperation.abortResolution(after: error, root: root)
             throw error
         }
-        try gitService.abortRebase(at: root)
+        do { try gitService.abortRebase(at: root) } catch {
+            throw SyncError.returnToRestFailed(reason: "Pensieve couldn't finish inspecting conflicts.",
+                                              detail: error.localizedDescription)
+        }
         return .conflicts(conflicts)
     }
 
     func resolveConflicts(root: String, picks: [String: ResolutionPick],
                           credential: GitCredential?, context: ModelContext) throws -> SyncOutcome {
-        var operation = self
-        operation.gitService = gitService.scopedToStore(root)
+        let operation = scoped(to: root)
         return try operation.performResolveConflicts(root: root, picks: picks, credential: credential, context: context)
     }
 
@@ -254,7 +264,7 @@ struct SyncEngine: SyncEngineProtocol {
             case .merged:
                 return try finishSync(root: root, credential: credential, context: context, pulled: true)
             case let .conflicted(paths):
-                try resolveConflictedPaths(paths, picks: picks, root: root)
+                try conflictOperation.resolveConflictedPaths(paths, picks: picks, root: root)
                 if case .conflicted = try gitService.continueRebase(at: root) {
                     throw SyncError.conflictsChanged
                 }
@@ -267,17 +277,17 @@ struct SyncEngine: SyncEngineProtocol {
             } else {
                 refusedFolder = nil
             }
-            try abortResolution(after: error, root: root, refusedFolder: refusedFolder)
+            try conflictOperation.abortResolution(after: error, root: root, refusedFolder: refusedFolder)
             throw error
         }
     }
 
     private func requireReadableManifest(root: String) throws {
         do {
-            _ = try manifestService.read(fromRoot: root)
+            _ = try ManifestService.classifiedRead(using: manifestService, root: root, files: fileService)
         } catch {
             if case ManifestError.unsupportedSchema = error { throw SyncError.storeUnreadable([]) }
-            throw ManifestError.damaged
+            throw error
         }
     }
 

@@ -22,7 +22,7 @@ struct SyncFooterPresentation: Equatable {
     /// Tooltip text, when there is more to say than the label (an error message).
     var help: String?
 
-    /// `nil` when sync is unconfigured: the footer is absent, not empty.
+    /// `nil` when sync is unconfigured and the library is readable; damage still returns the repair line.
     static func make(state: SyncModel.SyncState, canResolve: Bool, hovering: Bool,
                      now: Date, libraryDamaged: Bool = false) -> SyncFooterPresentation? {
         if libraryDamaged {

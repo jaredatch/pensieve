@@ -93,10 +93,7 @@ struct ManifestService: ManifestReadWriting {
                   damage.missing || (try? read(fromRoot: root)) == nil else { return false }
             try refuseNewerExistingManifest(at: root + "/manifest")
         } else {
-            do { _ = try read(fromRoot: root) } catch {
-                if case ManifestError.unsupportedSchema = error { throw error }
-                throw ManifestError.damaged
-            }
+            _ = try Self.classifiedRead(using: self, root: root, files: fileService)
         }
         return true
     }
@@ -145,8 +142,8 @@ struct ManifestService: ManifestReadWriting {
 
     private func manifestDirectoryExists(at path: String) throws -> Bool {
         guard let type = try fileService.entryTypeWithoutFollowingLinks(at: path) else { return false }
-        guard type != .symlink, type != .other else { throw ManifestError.damaged }
-        return type == .directory
+        guard type == .directory else { throw ManifestError.damaged }
+        return true
     }
 
     private func readSchema(from manifestDir: String) throws -> Int {

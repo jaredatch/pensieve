@@ -4,6 +4,24 @@ import XCTest
 @testable import Pensieve
 
 extension SyncBytePreservationTests {
+    func testControlPreparationRefusesMetadataOnAnotherVolumeBeforeWriting() throws {
+        try NativeTestWork.run { [self] in
+            let probe = try StoreWriteCrashProbe(directory: base + "/cross-volume-probe")
+            try probe.withVolume { volume in
+                let root = base + "/cross-volume-store"
+                _ = try TestPaths.git.runOrThrow(["init", "--separate-git-dir", volume + "/metadata", root], in: nil)
+                let before = try files.listDirectory(at: volume + "/metadata").sorted()
+                XCTAssertThrowsError(try TestPaths.git.prepareStoreRules(at: root, files: files)) { error in
+                    XCTAssertTrue(error.localizedDescription.contains("git's folder is on another volume"),
+                                  error.localizedDescription)
+                }
+                XCTAssertEqual(try files.listDirectory(at: root), [".git"], "No control file is written before admission")
+                XCTAssertEqual(try files.listDirectory(at: volume + "/metadata").sorted(), before)
+                XCTAssertEqual(GitHeadStamp(fileService: files).state(root: root), .unreadable)
+            }
+        }
+    }
+
     func testControlWriterCrashPointsNeverStageIntermediates() throws {
         try NativeTestWork.run { [self] in
             let probe = try StoreWriteCrashProbe(directory: base + "/probe")
@@ -214,7 +232,11 @@ extension SyncBytePreservationTests {
             let fixture = try crashStore(name: "legacy")
             let name = ".pensieve-ignore-" + UUID().uuidString
             try files.writeFile(at: fixture.root + "/" + name, content: "old writer intermediate")
+            let nested = "skills/existing/.pensieve-ignore-notes"
+            try files.writeFile(at: fixture.root + "/" + nested, content: "skill notes")
             try assertCrashRecovery(fixture, label: name)
+            XCTAssertEqual(try fixture.git.show(sha: "HEAD", path: nested, at: fixture.root), "skill notes",
+                           "Only root legacy intermediates are excluded")
             XCTAssertEqual(try files.readFile(at: fixture.root + "/" + name), "old writer intermediate")
         }
     }
@@ -367,7 +389,7 @@ extension SyncBytePreservationTests {
         let paths = try fixture.git.runOrThrow(["--git-dir", fixture.remote, "ls-tree", "-r", "--name-only", "main"],
                                                in: nil).stdout
         XCTAssertFalse(paths.contains(".pensieve-write-"), label)
-        XCTAssertFalse(paths.contains(".pensieve-ignore-"), label)
+        XCTAssertFalse(paths.split(separator: "\n").contains { $0.hasPrefix(".pensieve-ignore-") }, label)
         XCTAssertTrue(fixture.git.isWorktreeClean(at: fixture.root), label)
     }
 }

@@ -100,8 +100,6 @@ final class AppRuntime {
                     await self.refreshGitConfiguration(probingGit: !result.provesGitUsable)
                     if publishesAfterRead { self.syncModel.apply(result) }
                     await self.applyLibrarySyncOutcome(result)
-                    if case .synced = result { self.performDeferredLaunchBackfillIfNeeded() }
-                    self.convergence.run(after: result)
                 }
                 self.scheduler.coordinatorBecameReady()
                 self.signalLaunchIngestIfPossible()
@@ -288,7 +286,7 @@ private extension AppRuntime {
         if outcome.migrationRan { defaults.set(true, forKey: Self.migrationDefaultsKey) }
         storeQuarantined = outcome.quarantined
         applyLibraryLaunchOutcome(outcome.rebuild) { [weak self] in
-            self?.performDeferredLaunchBackfillIfNeeded(afterRepair: true)
+            await self?.performDeferredLaunchBackfillIfNeeded(afterRepair: true)
         }
         needsLaunchBackfillAfterCoordinator = outcome.rebuild.manifestDamaged
             || (!outcome.rebuild.storeUnreadable && !outcome.ingestionNeedsRetry && !result.backfilled)
@@ -322,11 +320,13 @@ private extension AppRuntime {
 }
 
 extension AppRuntime {
-    private func performDeferredLaunchBackfillIfNeeded(afterRepair: Bool = false) {
+    func performDeferredLaunchBackfillIfNeeded(afterRepair: Bool = false, afterSync: SyncCycleResult? = nil) async {
+        defer { if let afterSync { convergence.run(after: afterSync) } }
+        if let afterSync { guard case .synced = afterSync else { return } }
         guard needsLaunchBackfillAfterCoordinator, library.manifestSaves?.libraryDamaged != true,
               library.manifestSaves?.requiresNewerVersion != true else { return }
         needsLaunchBackfillAfterCoordinator = false
-        launchBackfill(ModelContext(container))
+        await BlockingWork.run { [container, launchBackfill] in launchBackfill(ModelContext(container)) }
         platformVM.refreshDeployIndex()
         if afterRepair { convergence.runAfterLaunchIngest() }
     }
@@ -340,9 +340,7 @@ extension AppRuntime {
             let change = result.provesGitUsable ? gitState.accept(.usable, order: evidence, model: syncModel) : nil
             syncModel.apply(result)
             handleGitChange(change)
-            library.applySyncCycleOutcome(result)
-            performDeferredLaunchBackfillIfNeeded()
-            convergence.run(after: result)
+            scheduleLibrarySyncOutcome(result)
         }
     }
 

@@ -1198,8 +1198,13 @@ extension SyncSetupModelTests {
         let fixture = try makeBareFixture(collisionShapes: true)
         try writeRealScaffold()
         try "local ds\n".write(toFile: root + "/.DS_Store", atomically: true, encoding: .utf8)
-        let (model, _) = try makeRealModel()
-        try await performReal(model, remote: fixture.remote)
+        let (model, context) = try makeRealModel()
+        // A regular file in a manifest directory slot is damaged, even after valid adoption.
+        await XCTAssertThrowsErrorAsync(try await performReal(model, remote: fixture.remote)) { error in
+            XCTAssertEqual(error as? ManifestError, .damaged)
+        }
+        XCTAssertTrue(StoreIngestState.shared(for: context.container).needsRebuild)
+        XCTAssertEqual(try skillCount(context), 0, "A damaged manifest must not partially rebuild the library")
         XCTAssertEqual(try String(contentsOfFile: root + "/manifest/categories", encoding: .utf8),
                        "remote category collision\n")
         XCTAssertEqual(try String(contentsOfFile: root + "/.DS_Store", encoding: .utf8), "remote ds\n")

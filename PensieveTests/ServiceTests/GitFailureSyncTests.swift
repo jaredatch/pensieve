@@ -312,6 +312,9 @@ private final class GitFailureEngineSpy: SyncEngineProtocol {
 }
 
 private final class GitFailureManifest: ManifestSnapshotting {
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
+        throw CocoaError(.featureUnsupported)
+    }
     let fixture: GitFailureFixture
     var didWrite = false
     init(fixture: GitFailureFixture) { self.fixture = fixture }

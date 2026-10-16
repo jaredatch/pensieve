@@ -90,7 +90,7 @@ enum StoreIgnoreRules {
     }
 
     static func ignoreText(paths: [String]) -> String {
-        ".DS_Store\n.pensieve-ignore-*\n" + paths.map { path in
+        ".DS_Store\n/.pensieve-ignore-*\n" + paths.map { path in
             "/" + path.unicodeScalars.map { scalar in
                 let text = String(scalar)
                 return "\\*?[]!# ".unicodeScalars.contains(scalar) ? "\\" + text : text

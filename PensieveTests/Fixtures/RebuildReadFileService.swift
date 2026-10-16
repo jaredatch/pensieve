@@ -7,6 +7,8 @@ import Foundation
 /// Other I/O delegates to FileService; the double supplies no rebuild or merge result.
 final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     let entryObservations = Counter()
+    let headReads = Counter()
+    let skillListings = Counter()
     let separateTypeReads = Counter()
     func entryObservation(at path: String) throws -> FileEntryObservation {
         entryObservations.increment()
@@ -25,6 +27,7 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     func hold(_ gates: [TestWait.Gate]) { lock.withLock { self.gates = gates } }
 
     func readFile(at path: String) throws -> String {
+        if path.hasSuffix("/HEAD") { headReads.increment() }
         let value = try wrapped.readFile(at: path)
         guard path.hasSuffix("/alpha/SKILL.md") else { return value }
         let gate: TestWait.Gate? = lock.withLock {
@@ -85,6 +88,7 @@ final class RebuildReadFileService: FileServiceProtocol, FileEntryObserving {
     func symlinkTarget(at path: String) throws -> String { try wrapped.symlinkTarget(at: path) }
     func isRegularFile(at path: String) -> Bool { wrapped.isRegularFile(at: path) }
     func listDirectory(at path: String) throws -> [String] {
+        if path.hasSuffix("/skills") { skillListings.increment() }
         if refuseSkillListing, path.hasSuffix("/skills") {
             lock.withLock { refusedListings += 1 }
             throw CocoaError(.fileReadNoPermission)

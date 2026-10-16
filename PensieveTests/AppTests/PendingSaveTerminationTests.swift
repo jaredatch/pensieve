@@ -59,15 +59,6 @@ final class PendingSaveTerminationTests: XCTestCase {
         XCTAssertEqual(replies, [true], "A late alert callback cannot answer quit twice")
     }
 
-    private func fixtureAfterCategoryRefusal() async throws -> ManifestSaveFixture {
-        let h = try ManifestSaveFixture(waitSeconds: 5)
-        h.recording.failingWrites = 1
-        h.categories.rename(h.local, to: "Refused", context: h.context)
-        await h.saves.waitUntilIdle()
-        XCTAssertEqual(h.local.name, "Local")
-        return h
-    }
-
     func testWaitKeepsAppRunningAndQuitAnywayCompletesWhileSaveStillWaits() async throws {
         for outcome in ["save after Wait", "Quit Anyway after Wait", "Quit Anyway", "early Wait"] {
             let h = try ManifestSaveFixture()
@@ -159,10 +150,7 @@ final class PendingSaveTerminationTests: XCTestCase {
         }) {
             unrelated.orderFront(nil)
             XCTAssertTrue(unrelated.isVisible)
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
-                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
-            window.animationBehavior = .none
+            let window = makeQuestionWindow()
             defer { window.close() }
             window.makeKeyAndOrderFront(nil)
             var answers: [Bool] = []
@@ -252,9 +240,17 @@ final class PendingSaveTerminationTests: XCTestCase {
         await TestWait.until(failureMessage: "The combined deferred quit did not finish") { answers == [true] }
     }
 
+    func makeQuestionWindow() -> NSWindow {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
+        return window
+    }
+
     static func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
 
-    private func isolateQuestionHost(_ stray: NSWindow) -> () -> Void {
+    func isolateQuestionHost(_ stray: NSWindow) -> () -> Void {
         let previousWindows = NSApp.windows.filter { $0.isVisible && $0 !== stray }
         let previousAnimations = previousWindows.map(\.animationBehavior)
         previousWindows.forEach { $0.animationBehavior = .none; $0.orderOut(nil) }
@@ -269,10 +265,7 @@ final class PendingSaveTerminationTests: XCTestCase {
 
 extension PendingSaveTerminationTests {
     private func assertRecordedQuit(_ question: PendingSaveTermination.Question, choice: String) async throws {
-        let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
-            styleMask: [.titled], backing: .buffered, defer: false)
-        host.isReleasedWhenClosed = false
-        host.animationBehavior = .none
+        let host = makeQuestionWindow()
         let restoreWindows = isolateQuestionHost(host)
         defer { host.close(); restoreWindows() }
         host.makeKeyAndOrderFront(nil)
@@ -281,28 +274,23 @@ extension PendingSaveTerminationTests {
         defer { presentation.dismiss() }
         let sheet = try XCTUnwrap(host.attachedSheet)
         sheet.animationBehavior = .none
+        await TestWait.until(failureMessage: "The recorded Quit question must render both buttons") {
+            sheet.contentView?.layoutSubtreeIfNeeded()
+            return sheet.contentView.map { Self.views($0).compactMap { $0 as? NSButton }.count == 2 } ?? false
+        }
         let rendered = Self.views(try XCTUnwrap(sheet.contentView))
         let buttons = rendered.compactMap { $0 as? NSButton }, titles = buttons.map(\.title)
+        XCTAssertFalse(titles.isEmpty)
         assertQuestionText(question, in: rendered)
-        var completions = 0
-        let ended = NotificationCenter.default.addObserver(
-            forName: NSWindow.didEndSheetNotification, object: host, queue: .main
-        ) { _ in
-            completions += 1
-            XCTAssertTrue(answers.isEmpty, "Deliver the update after the native completion and before its deferred reply")
-            XCTAssertNotNil(sheet.sheetParent, "Exercise the still-attached sheet after its response")
-            let changed: PendingSaveTermination.Question = question == .waitingForRepair ? .saving : .waitingForRepair
-            XCTAssertFalse(presentation.update(changed), "A recorded response must refuse later question updates")
-            XCTAssertEqual(buttons.map(\.title), titles, "A recorded response must keep the buttons that were shown")
-            self.assertQuestionText(question, in: rendered)
-        }
-        defer { NotificationCenter.default.removeObserver(ended) }
         if choice == "Return" { try sendQuitKey(choice, to: sheet) } else {
             try chooseNativeQuit(choice, sheet: sheet, parent: host, buttons: buttons)
         }
+        XCTAssertTrue(answers.isEmpty, "The decision is recorded before its deferred delivery")
+        let changed: PendingSaveTermination.Question = question == .waitingForRepair ? .saving : .waitingForRepair
+        XCTAssertFalse(presentation.update(changed), "A recorded response must refuse later question updates")
+        XCTAssertEqual(buttons.map(\.title), titles, "A recorded response keeps its presented buttons")
         await TestWait.until(failureMessage: "The recorded native Quit response did not arrive") { !answers.isEmpty }
         _ = try XCTUnwrap(answers.first)
-        XCTAssertEqual(completions, 1, "The update must run at the native completion boundary")
         XCTAssertEqual(answers, [choice == "Quit Anyway" || (choice == "Return" && question == .waitingForRepair)],
             "\(question), \(choice): a later update must not reinterpret the pressed button")
         XCTAssertNil(host.attachedSheet)

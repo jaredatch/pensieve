@@ -88,6 +88,7 @@ final class ManifestSaveFixture {
 final class RecordingSaveManifest: ManifestSnapshotting {
     var base = ManifestService()
     var afterRead: (() throws -> Void)?
+    var afterReadFailure: (() throws -> Void)?
     private let lock = NSLock()
     private var snapshots: [ManifestSnapshot] = []
     var failingWrites = 0
@@ -117,9 +118,14 @@ final class RecordingSaveManifest: ManifestSnapshotting {
         return value
     }
     func read(fromRoot root: String) throws -> ManifestSnapshot {
-        let value = try base.read(fromRoot: root)
-        try afterRead?()
-        return value
+        do {
+            let value = try base.read(fromRoot: root)
+            try afterRead?()
+            return value
+        } catch {
+            try afterReadFailure?()
+            throw error
+        }
     }
     func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
         try base.repair(snapshot, root: root, replacing: damage)

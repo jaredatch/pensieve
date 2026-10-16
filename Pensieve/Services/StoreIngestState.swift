@@ -102,6 +102,24 @@ final class StoreIngestState {
         ingestedHead = pending ? nil : head
     }
 
+    struct Observation<Value> {
+        let value: Value
+        let before: String?
+        let after: String?
+        var stable: Bool { before == after }
+    }
+
+    /// Own both samples, including callers that prepare values for a different executor.
+    static func observe<Value>(head: () -> String?, rebuild: () throws -> Value) rethrows -> Observation<Value> {
+        let before = head()
+        let value = try rebuild()
+        return Observation(value: value, before: before, after: head())
+    }
+
+    func accept<Value>(_ observation: Observation<Value>, result: RebuildResult) {
+        if observation.stable { record(result, head: observation.after) } else { invalidate() }
+    }
+
     /// Writers call this under sync.lock, before applying their local edit. Rebuilding after
     /// the edit could replace it with the still-pending disk snapshot.
     static func rebuildIfNeeded(using service: StoreRebuildServiceProtocol, root: String,
@@ -117,17 +135,35 @@ final class StoreIngestState {
                         context: ModelContext, files: FileServiceProtocol = FileService(),
                         headStamp: (() -> String?)? = nil) throws -> RebuildResult {
         let readHead = headStamp ?? { GitHeadStamp(fileService: files).read(root: root) }
-        let before = readHead()
-        let result = service.rebuild(fromRoot: root, context: context)
-        let state = shared(for: context.container)
-        state.record(result, head: before)
-        if readHead() != before {
-            state.invalidate()
-            throw SyncError.ingestIncomplete
-        }
+        let observation = observe(head: readHead) { service.rebuild(fromRoot: root, context: context) }
+        let result = observation.value
+        shared(for: context.container).accept(observation, result: result)
+        guard observation.stable else { throw SyncError.ingestIncomplete }
         if result.manifestDamaged { throw ManifestError.damaged }
         if result.storeUnreadable { throw SyncError.storeUnreadable(result.warnings) }
-        if result.ingestIncomplete { throw SyncError.ingestIncomplete }
+        if result.ingestIncomplete { throw StoreIngestFailure(result) }
         return result
     }
+}
+
+/// Carries the rebuild's actual cause through every writer, including non-sync operations.
+struct StoreIngestFailure: LocalizedError {
+    let cause: String
+    init(_ result: RebuildResult) {
+        let details = result.ingestFailureDetails.isEmpty ? result.warnings : result.ingestFailureDetails
+        if !details.isEmpty {
+            cause = details.joined(separator: "\n")
+        } else if result.categoryReadFailed {
+            cause = "Couldn't read this Mac's categories."
+        } else if result.skillReadFailed {
+            cause = "Couldn't read this Mac's skills."
+        } else if result.deployIntentReadFailed {
+            cause = "Couldn't read this Mac's deployment requests."
+        } else if result.skillListFailed {
+            cause = "Couldn't list the skills directory."
+        } else {
+            cause = "Couldn't save this Mac's library."
+        }
+    }
+    var errorDescription: String? { "Rebuilding the local store failed: " + cause }
 }

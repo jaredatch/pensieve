@@ -304,6 +304,9 @@ struct RemovalCheckpointReconciler: CategoryReconcilerProtocol {
 }
 
 struct RemovalPublicationCheckpointManifest: ManifestSnapshotting {
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
+        try base.repair(snapshot, root: root, replacing: damage)
+    }
     let base: ManifestService
     let didPublish: () -> Void
 

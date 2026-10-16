@@ -22,9 +22,8 @@ struct GitHeadStamp {
     func read(root: String) -> String? { state(root: root).oid }
 
     func state(root: String) -> State {
-        let git = root + "/.git"
         do {
-            guard try fileService.entryExistsWithoutFollowingLinks(at: git) else { return .noRepository }
+            guard let git = try fileService.storeMetadataDirectory(root: root) else { return .noRepository }
             let head = try fileService.readFile(at: git + "/HEAD").trimmingCharacters(in: .whitespacesAndNewlines)
             guard head.hasPrefix("ref: ") else { return Self.oid(from: head).map(State.resolved) ?? .unreadable }
             let ref = String(head.dropFirst(5))

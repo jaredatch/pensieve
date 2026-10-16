@@ -245,9 +245,10 @@ final class DeployIntentModelTests: XCTestCase {
     }
 
     func testExistingStoreOpensUnderExtendedSchema() throws {
-        let directory = TestTemporaryDirectory.path + "PensieveSchemaMigration-" + UUID().uuidString
-        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(atPath: directory) }
+        let fixture = TestStoreDirectory(named: "PensieveSchemaMigration")
+        let directory = fixture.storeRoot
+        try FileService().createDirectory(at: directory)
+        defer { try? FileService().deleteDirectory(at: fixture.root) }
         let url = URL(fileURLWithPath: directory + "/default.store")
         let oldSchema = Schema([
             Skill.self, Project.self, SkillProjectAssignment.self,

@@ -30,7 +30,7 @@ extension StoreRebuildService {
         let preview = StoreRebuildService(fileService: fileService, manifestService: manifest, save: { _ in })
         let result = preview.rebuild(snapshot: snapshot, fromRoot: root, context: context,
                             manifestIsAuthoritative: authoritative)
-        guard !result.ingestIncomplete else { throw SyncError.ingestIncomplete }
+        guard !result.ingestIncomplete else { throw StoreIngestFailure(result) }
         return PreparedStoreRebuild(scanStartedAt: scanStartedAt, snapshot: try manifest.snapshot(from: context),
             skills: try context.fetch(FetchDescriptor<Skill>()).map {
                 PreparedStoreRebuild.SkillIdentity(slug: $0.directoryName, name: $0.name, description: $0.skillDescription)
@@ -63,7 +63,7 @@ extension StoreRebuildService {
                 throw CategoryReadFailure(message: result.warnings.joined(separator: "\n"))
             }
             rebuildDeployIntents(snapshot: snapshot, context: context, result: &result)
-            guard !result.deployIntentReadFailed else { throw SyncError.ingestIncomplete }
+            guard !result.deployIntentReadFailed else { throw StoreIngestFailure(result) }
         }
         try save(context)
     }

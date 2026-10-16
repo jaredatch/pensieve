@@ -35,6 +35,7 @@ extension GitService {
     }
 
     func prepareStoreRules(at root: String, files: FileServiceProtocol) throws {
+        guard try fileService.storeMetadataDirectory(root: root) != nil else { throw CocoaError(.fileNoSuchFile) }
         let state = storeState.flatMap { $0.root == root ? $0 : nil }
         let receipts = try state?.receipts ?? StoreIgnoreRules.readReceipts(at: root, files: files)
         let published = try StoreIgnoreRules.publish(receipts, at: root, files: files)

@@ -3,6 +3,64 @@ import XCTest
 @testable import Pensieve
 
 extension IngestPreflightTests {
+    func testHeadEditRefusalReportsOnceWhenAcceptingPulledStateFails() async throws {
+        try await checkHeadRefusal(categoryUndo: true, acceptanceFails: true)
+    }
+
+    func testHeadEditRefusalReportsItemsWithoutCategoryUndo() async throws {
+        try await checkHeadRefusal(categoryUndo: false, acceptanceFails: false)
+    }
+
+    func testHeadEditUndoReconcilesAfterAcceptingPulledState() async throws {
+        try await checkHeadRefusal(categoryUndo: true, acceptanceFails: false)
+    }
+
+    private func checkHeadRefusal(categoryUndo: Bool, acceptanceFails: Bool) async throws {
+        let f = try NativeTestWork.run {
+            try IncompleteIngestFixture(base: self.tempDir + "/head-refusal")
+        }
+        let context = try damageContext(f)
+        try NativeTestWork.run {
+            try f.changePeer()
+            guard case .fastForwarded = try f.git.fastForwardOnly(at: f.app, credential: nil) else {
+                return XCTFail("Fixture must pull the conflicting category")
+            }
+        }
+        let manifest = RecordingSaveManifest()
+        let gate = TestWait.Gate(owner: self)
+        defer { gate.open() }
+        manifest.afterRebuildSnapshot = { try gate.wait() }
+        let saves = ManifestSaveModel(manifest: manifest, root: f.app, lockPath: f.base + "/sync.lock")
+        let category = try XCTUnwrap(context.fetch(FetchDescriptor<Pensieve.Category>()).first { $0.name == "Kept" })
+        let change = ManifestChange.renameCategory("Kept", "Added")
+        let undo = CategorySaveEdit(category: category, context: context, change: change)
+        category.name = "Added"
+        try undo.save(in: context)
+        var reports: [Error?] = []
+        var reconciled: [[String]] = []
+        saves.submit(change, context: context, categoryEdit: categoryUndo ? undo : nil, reconcile: {
+            reconciled.append((try? context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted()) ?? [])
+            return BatchResult()
+        }, report: { reports.append($0) })
+        await TestWait.until(failureMessage: "Pre-save ingest must reach its acceptance boundary") { gate.waiterCount == 1 }
+        let fault = acceptanceFails ? try CategoryFetchFault(in: context, entityName: "Skill") : nil
+        defer { fault?.stop() }
+        gate.open()
+        await saves.waitUntilIdle()
+        fault?.stop()
+        XCTAssertEqual(reports.count, 1, "Every refused queue item reports exactly once")
+        XCTAssertNotNil(reports.first.flatMap { $0 })
+        XCTAssertTrue(manifest.writes.isEmpty)
+        XCTAssertEqual(saves.pendingCount, 0)
+        if categoryUndo {
+            XCTAssertEqual(saves.categoryNotice?.entries.count, 1, "An acceptance error must not undo the head twice")
+            XCTAssertEqual(reconciled.count, 1)
+            if !acceptanceFails {
+                XCTAssertEqual(reconciled, [["Added", "Kept"]], "Undo convergence must see the accepted pull")
+            }
+        }
+    }
+
     func testQueueRebuildFailuresKeepUnrelatedEditsAndRequireImportOrDeployIngest() async throws {
         for writer in ["import", "deploy"] {
             for failure in ["Skill", "Category", "MachineDeployIntent", "save", "scan"] {

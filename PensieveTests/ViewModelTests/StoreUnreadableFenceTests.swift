@@ -4,11 +4,13 @@ import XCTest
 
 @MainActor
 final class StoreUnreadableFenceTests: XCTestCase {
+    private var directory: TestStoreDirectory!
     private var tempDir: String!
     private var library: SkillLibraryViewModel!
 
     override func setUpWithError() throws {
-        tempDir = TestTemporaryDirectory.path + "PensieveFenceTests-" + UUID().uuidString
+        directory = TestStoreDirectory(named: "PensieveFenceTests")
+        tempDir = directory.storeRoot
         try FileService().createDirectory(at: tempDir)
         library = SkillLibraryViewModel(
             skillStore: SkillStore(fileService: FileService(), baseDir: tempDir, storeRoot: tempDir),
@@ -18,7 +20,7 @@ final class StoreUnreadableFenceTests: XCTestCase {
 
     override func tearDownWithError() throws {
         if let tempDir, FileService().directoryExists(at: tempDir) {
-            try FileService().deleteDirectory(at: tempDir)
+            try FileService().deleteDirectory(at: directory.root)
         }
     }
 

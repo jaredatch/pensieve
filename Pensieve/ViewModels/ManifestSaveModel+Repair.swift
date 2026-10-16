@@ -26,6 +26,13 @@ extension ManifestSaveModel {
     func acceptLibraryVerdict(newer: Bool) {
         damageObservationOrder += 1
         requiresNewerVersion = newer
+        guard damageRefreshOrder != nil else { return }
+        let order = damageObservationOrder
+        damageRefreshOrder = order
+        Task { @MainActor in
+            guard self.damageObservationOrder == order else { return }
+            await self.refreshAndRetry()
+        }
     }
 
     /// Later-started reads and accepted launch/sync verdicts supersede this observation.
@@ -33,14 +40,16 @@ extension ManifestSaveModel {
     func refreshDamage() async {
         damageObservationOrder += 1
         let order = damageObservationOrder
+        damageRefreshOrder = order
+        defer { if damageRefreshOrder == order { damageRefreshOrder = nil } }
         let pending = items.contains {
             StoreIngestState.shared(for: $0.presentation.context.container).needsRebuild
         }
         let root = root, files = files, manifest = manifest
         let observation = await BlockingWork.run { () -> (LibraryRead, ManifestDamage?) in
             do {
-                _ = try manifest.read(fromRoot: root)
-                if pending, !files.fileExists(at: root + "/manifest/manifest.yaml") {
+                let read = try ManifestService.classifiedRead(using: manifest, root: root, files: files)
+                if pending, read.missing {
                     return (.damaged, ManifestDamage.capture(root: root, files: files))
                 }
                 return (.readable, nil)
@@ -53,15 +62,15 @@ extension ManifestSaveModel {
         let wasDamaged = libraryDamaged
         libraryDamaged = observation.0 == .damaged
         requiresNewerVersion = observation.0 == .newer
+        if !libraryDamaged { pausedForRepair = false; showsDamageAlert = false }
         if !showsDamageAlert, !showsRepairConfirmation { damage = observation.1 }
-        if wasDamaged, observation.0 == .readable { didReadRepairedLibrary() }
+        if wasDamaged, observation.0 == .readable { await didReadRepairedLibrary() }
+        if !libraryDamaged { retryWaitingEdits() }
     }
 
     @MainActor
     func refreshAndRetry() async {
         await refreshDamage()
-        guard !libraryDamaged else { return }
-        retryWaitingEdits()
     }
 
     @MainActor

@@ -61,9 +61,7 @@ func removeRegisteredProject(_ project: Project,
         }
     } catch {
         var result = BatchResult()
-        result.operationFailures.append(error as? SyncError == .ingestIncomplete
-            ? "Project removal couldn't update this Mac's library. Try removing the project again."
-            : error.localizedDescription)
+        result.operationFailures.append(error.localizedDescription)
         return result
     }
     return ProjectRemovalExecution(reconciler: reconciler, manifestService: manifestService,

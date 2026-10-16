@@ -176,7 +176,10 @@ struct ContentView: View {
         }
         let selectionView = appearedView
             .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active { runtime.checkForSkillUpdatesIfDue() }
+            if newPhase == .active {
+                runtime.checkForSkillUpdatesIfDue()
+                Task { await runtime.library.manifestSaves?.refreshAndRetry() }
+            }
         }
         .onChange(of: skills.map(\.id)) { _, currentIDs in
             let ids = Set(currentIDs)

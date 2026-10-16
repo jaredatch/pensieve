@@ -119,6 +119,9 @@ final class SyncEngineTests: XCTestCase {
 
     /// ManifestService whose `snapshot` throws, proving sync aborts before any write/git op.
     private struct ThrowingSnapshotManifest: ManifestSnapshotting {
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
+        throw CocoaError(.featureUnsupported)
+    }
         func write(_ snapshot: ManifestSnapshot, toRoot root: String) throws {}
         func read(fromRoot root: String) throws -> ManifestSnapshot {
             ManifestSnapshot(schemaVersion: 1, categories: [], projects: [], skills: [])

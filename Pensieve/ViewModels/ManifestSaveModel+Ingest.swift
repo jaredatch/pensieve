@@ -2,60 +2,91 @@ import Foundation
 import SwiftData
 
 extension ManifestSaveModel {
+    enum HeadEditVerdict { case ready(PreparedStoreRebuild), refused(Error) }
+    struct PreSaveIngest {
+        let durable: ManifestSnapshot
+        let verdict: HeadEditVerdict
+    }
+
     @MainActor
-    func rebuild(_ item: Item, durable: ManifestSnapshot, published: Bool) async {
-        // FIFO retains sync.lock until this result is accepted. The scan's context never commits;
-        // a later UI save must not be overwritten while this job reads disk.
+    func rebuild(_ item: Item, durable: ManifestSnapshot, published: Bool,
+                 prepared: PreparedStoreRebuild? = nil) async {
         do {
-            _ = try await acceptRebuild(item, durable: durable)
+            if let prepared {
+                var accepted = durable
+                let overlays = Dictionary(durable.skills.map { ($0.slug, $0) }, uniquingKeysWith: { first, _ in first })
+                accepted.skills = prepared.snapshot.skills.map { overlays[$0.slug] ?? $0 }
+                _ = try acceptRebuild(item, prepared: prepared, durable: accepted, includingHeadEdit: false)
+            } else {
+                let observation = try await prepareRebuild(item, durable: durable)
+                guard observation.stable else { throw SyncError.ingestIncomplete }
+                _ = try acceptRebuild(item, prepared: observation.value, durable: observation.value.snapshot,
+                                      includingHeadEdit: false)
+                StoreIngestState.shared(for: item.presentation.context.container).accept(observation, result: RebuildResult())
+            }
             item.report(nil)
         } catch {
             StoreIngestState.shared(for: item.presentation.context.container).invalidate()
-            item.report(ManifestSaveError.rebuildFailed(error.localizedDescription, manifestSaved: published))
+            let cause = (error as? StoreIngestFailure)?.cause ?? error.localizedDescription
+            item.report(ManifestSaveError.rebuildFailed(cause, manifestSaved: published))
         }
     }
 
     @MainActor
-    func ingestBeforeSave(_ item: Item, disk: ManifestSnapshot?) async throws -> Bool {
+    func ingestBeforeSave(_ item: Item, disk: ManifestSnapshot?) async throws -> PreSaveIngest {
         do {
-            return try await acceptRebuild(item, durable: disk ?? item.fallback(), includingHeadEdit: true)
+            var durable = try disk ?? item.fallback()
+            for attempt in 0..<3 {
+                let observation = try await prepareRebuild(item, durable: durable)
+                if observation.stable {
+                    let verdict = try acceptRebuild(item, prepared: observation.value,
+                                                    durable: observation.value.snapshot, includingHeadEdit: true)
+                    StoreIngestState.shared(for: item.presentation.context.container).accept(observation, result: RebuildResult())
+                    return PreSaveIngest(durable: durable, verdict: verdict)
+                }
+                guard attempt < 2 else { throw SyncError.ingestIncomplete }
+                guard let current = try await readCurrentManifest() else { throw ManifestError.damaged }
+                durable = current
+            }
+            throw SyncError.ingestIncomplete
         } catch {
             StoreIngestState.shared(for: item.presentation.context.container).invalidate()
-            throw ManifestSaveError.rebuildFailed(error.localizedDescription, manifestSaved: item.wasHealed)
+            if case ManifestError.damaged = error { throw error }
+            let cause = (error as? StoreIngestFailure)?.cause ?? error.localizedDescription
+            throw ManifestSaveError.rebuildFailed(cause, manifestSaved: item.wasHealed)
         }
     }
 
     @MainActor
-    func acceptRebuild(_ item: Item, durable: ManifestSnapshot, includingHeadEdit: Bool = false) async throws -> Bool {
+    private func prepareRebuild(_ item: Item, durable: ManifestSnapshot) async throws
+        -> StoreIngestState.Observation<PreparedStoreRebuild> {
         let container = item.presentation.context.container, files = files, manifest = manifest, root = root
-        let (prepared, head) = try await BlockingWork.run {
-            let head = GitHeadStamp(fileService: files).read(root: root)
-            let prepared = try StoreRebuildService(fileService: files, manifestService: manifest)
-                .prepare(snapshot: durable, fromRoot: root, container: container, manifest: manifest)
-            guard GitHeadStamp(fileService: files).read(root: root) == head else { throw SyncError.ingestIncomplete }
-            return (prepared, head)
+        return try await BlockingWork.run {
+            try StoreIngestState.observe(head: { GitHeadStamp(fileService: files).read(root: root) }, rebuild: {
+                try StoreRebuildService(fileService: files, manifestService: manifest)
+                    .prepare(snapshot: durable, fromRoot: root, container: container, manifest: manifest)
+            })
         }
-        var displayed = prepared.snapshot
+    }
+
+    @MainActor
+    private func acceptRebuild(_ item: Item, prepared: PreparedStoreRebuild, durable: ManifestSnapshot,
+                               includingHeadEdit: Bool) throws -> HeadEditVerdict {
+        var displayed = durable
         for edit in refused where edit.context === item.presentation.context { edit.project(onto: &displayed) }
-        // Publication is permanent, even after a peer changes the manifest. Only edits still
-        // awaiting publication and still shown locally need an overlay. An authoritative sync
-        // rebuild already replaced older category edits with saved state.
-        var mayPublish = true
+        var verdict = HeadEditVerdict.ready(prepared)
         if includingHeadEdit, !item.wasHealed {
             do {
                 try item.change.validate(in: displayed)
                 item.change.apply(to: &displayed)
             } catch {
-                // Undo before name-based acceptance can reuse this edit's row for the peer's
-                // category. A refused edit does not prevent accepting the completed ingest.
-                refuseCategory(item, durable: durable, error: error)
-                mayPublish = false
+                // Restore identity before name-based acceptance; report and reconcile afterwards.
+                stageCategoryRefusal(item, durable: durable, error: error)
+                verdict = .refused(error)
             }
         }
         try projectPending(in: item.presentation.context, onto: &displayed)
         try item.accept(prepared, displayed)
-        StoreIngestState.shared(for: container).record(RebuildResult(), head: head)
-        return mayPublish
+        return verdict
     }
-
 }

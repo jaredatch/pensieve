@@ -11,6 +11,7 @@ extension IngestPreflightTests {
     }
 
     private func assertFailedPulledRebuild(failsCategories: Bool) async throws {
+        let expected = failsCategories ? IncompleteIngestFixture.categoryMessage : IncompleteIngestFixture.message
         let fixture = try NativeTestWork.run { try IncompleteIngestFixture(base: self.tempDir + "/pull-\(failsCategories)") }
         let container = try AppRuntime.makeContainer(configuration: ModelConfiguration(isStoredInMemoryOnly: true))
         try NativeTestWork.run(container: container) { context in
@@ -29,17 +30,17 @@ extension IngestPreflightTests {
         await coordinator.seedLastIngestedHeadStamp(initial)
 
         let failedCycle = await coordinator.runCycle()
-        XCTAssertEqual(failedCycle, .failed(IncompleteIngestFixture.message))
+        XCTAssertEqual(failedCycle, .failed(expected))
         let model = SyncModel(git: fixture.git, root: fixture.app)
         model.apply(failedCycle)
-        XCTAssertEqual(model.state, .error(IncompleteIngestFixture.message))
+        XCTAssertEqual(model.state, .error(expected))
         XCTAssertEqual(try NativeTestWork.run { try fixture.remoteHead() }, remoteBefore, "failed ingest must not push")
         XCTAssertNotEqual(GitHeadStamp().read(root: fixture.app), initial, "the failure must occur after the pull")
         let pulledBytes = try fixture.manifest.read(fromRoot: fixture.app)
         XCTAssertEqual(pulledBytes.categories.map(\.name).sorted(), ["Added", "Kept"])
         let calls = rebuild.calls
         let failedRetry = await coordinator.runCycle()
-        XCTAssertEqual(failedRetry, .failed(IncompleteIngestFixture.message))
+        XCTAssertEqual(failedRetry, .failed(expected))
         XCTAssertGreaterThan(rebuild.calls, calls, "the failed head must be retried before any snapshot write")
         XCTAssertEqual(try fixture.manifest.read(fromRoot: fixture.app), pulledBytes)
 

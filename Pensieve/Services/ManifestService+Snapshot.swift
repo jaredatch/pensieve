@@ -11,12 +11,6 @@ protocol ManifestSnapshotting: ManifestReadWriting {
     func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool
 }
 
-extension ManifestSnapshotting {
-    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
-        throw ManifestError.damaged
-    }
-}
-
 extension ManifestService: ManifestSnapshotting {
     func snapshot(from context: ModelContext) throws -> ManifestSnapshot {
         // NOT `try?`: a fetch failure must not collapse to an empty snapshot that gets committed + PUSHED

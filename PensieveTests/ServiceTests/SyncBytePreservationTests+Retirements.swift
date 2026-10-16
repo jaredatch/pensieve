@@ -208,6 +208,7 @@ final class RetirementFileService: FileServiceProtocol {
     func entryTypeWithoutFollowingLinks(at path: String) throws -> FileEntryType? {
         try wrapped.entryTypeWithoutFollowingLinks(at: path)
     }
+    func resolveRealPath(at path: String) throws -> String { try wrapped.resolveRealPath(at: path) }
     func isExecutableFile(at path: String) -> Bool { wrapped.isExecutableFile(at: path) }
     func directoryExists(at path: String) -> Bool { wrapped.directoryExists(at: path) }
     func createDirectory(at path: String) throws { try wrapped.createDirectory(at: path) }

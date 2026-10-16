@@ -192,6 +192,9 @@ private enum ExternalWriter: CaseIterable { case importSkill, windowDeploy, cliD
 /// The queue's prepare snapshot must occur before its first publication. Immediate writers use
 /// read count to prove the unchanged-HEAD path performs no rebuild.
 final class WriterIngestManifest: ManifestSnapshotting {
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
+        try manifest.repair(snapshot, root: root, replacing: damage)
+    }
     private let manifest = ManifestService()
     var beforeWrite: (() throws -> Void)?
     private(set) var reads = 0

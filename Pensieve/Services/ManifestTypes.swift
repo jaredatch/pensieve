@@ -263,3 +263,24 @@ struct ManifestDamage: Equatable {
         return ManifestDamage(missing: !files.fileExists(at: root + "/manifest/manifest.yaml"), entries: entries)
     }
 }
+
+extension ManifestService {
+    struct ClassifiedRead {
+        let snapshot: ManifestSnapshot
+        let missing: Bool
+    }
+
+    /// Every caller shares the damaged/newer distinction; missing-file policy stays with the caller.
+    static func classifiedRead(using manifest: ManifestReadWriting, root: String,
+                               files: FileServiceProtocol) throws -> ClassifiedRead {
+        do {
+            let snapshot = try manifest.read(fromRoot: root)
+            let missing = try files.entryTypeWithoutFollowingLinks(at: root + "/manifest/manifest.yaml") == nil
+            return ClassifiedRead(snapshot: snapshot, missing: missing)
+        } catch {
+            if case ManifestError.unsupportedSchema = error { throw error }
+            throw ManifestError.damaged
+        }
+    }
+
+}

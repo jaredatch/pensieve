@@ -109,6 +109,9 @@ final class IngestRecordingGit: GitServiceProtocol {
 }
 
 final class IngestRecordingManifest: ManifestSnapshotting {
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
+        throw CocoaError(.featureUnsupported)
+    }
     var events: [String] = []
     var readError: Error?
 

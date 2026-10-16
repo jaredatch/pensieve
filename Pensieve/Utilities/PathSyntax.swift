@@ -51,6 +51,17 @@ enum PathSyntax {
         return includingRoot || !relative.isEmpty
     }
 
+    /// Component admission shared by conflict writes and destructive abort recovery.
+    static func conflictWorktreeComponents(_ path: String) -> [String]? {
+        guard !path.isEmpty, !isAbsolute(path) else { return nil }
+        let parts = components(path, omittingEmptySubsequences: false)
+        guard parts.allSatisfy({ part in
+            !part.isEmpty && part != "." && part != ".." && part != ".git"
+                && !part.unicodeScalars.contains { $0.properties.generalCategory == .control }
+        }) else { return nil }
+        return parts
+    }
+
     private static func equalComponent(_ lhs: String, _ rhs: String) -> Bool {
         normalized(lhs).elementsEqual(normalized(rhs))
     }

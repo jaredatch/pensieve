@@ -8,6 +8,14 @@ extension IngestPreflightTests {
         for fault in LibraryReadFault.allCases { try await assertFailedLibraryRead(fault) }
     }
 
+    private func assertReadFailure(_ cycle: SyncCycleResult, fault: LibraryReadFault, attempt: Int) {
+            guard case .failed(let message) = cycle else { return XCTFail("A failed read must stop sync") }
+            XCTAssertTrue(message.hasPrefix("Rebuilding the local store failed: "), "\(fault), attempt \(attempt)")
+            let cause = fault == .skills ? "Couldn't read local skills" : fault == .intents
+                ? "Couldn't read local deploy intents" : "Couldn't list the skills directory"
+            XCTAssertTrue(message.contains(cause), message)
+    }
+
     private func assertFailedLibraryRead(_ fault: LibraryReadFault) async throws {
         let fixture = try NativeTestWork.run {
             try IncompleteIngestFixture(base: self.tempDir + "/read-\(fault)")
@@ -39,7 +47,7 @@ extension IngestPreflightTests {
         await coordinator.seedLastIngestedHeadStamp(head)
         for attempt in 0..<2 {
             let cycle = await coordinator.runCycle()
-            XCTAssertEqual(cycle, .failed(IncompleteIngestFixture.message), "\(fault), attempt \(attempt)")
+            assertReadFailure(cycle, fault: fault, attempt: attempt)
             XCTAssertTrue(StoreIngestState.shared(for: container).needsRebuild)
             XCTAssertEqual(try NativeTestWork.run { try fixture.remoteHead() }, remote, "failed reads must not push")
             XCTAssertEqual(try fixture.manifest.read(fromRoot: fixture.app).categories.map(\.name).sorted(),

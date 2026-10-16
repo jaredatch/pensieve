@@ -54,7 +54,7 @@ extension FileService {
             metadata = try? storeMetadataDirectory(root: root)
         }
         let directory: String
-        if let metadata, control || (sameStoreDevice(metadata, root) && access(metadata, W_OK | X_OK) == 0) {
+        if let metadata {
             directory = metadata
         } else {
             guard !control else { throw CocoaError(.fileNoSuchFile) }
@@ -96,8 +96,7 @@ extension FileService {
         let system = FileManager.default.temporaryDirectory.path
         if sameStoreDevice(system, root) {
             parent = try? resolveRealPath(at: system)
-        } else if metadata == nil || !sameStoreDevice(metadata ?? "", root)
-                    || access(metadata ?? "", W_OK | X_OK) != 0 {
+        } else if metadata == nil {
             parent = try? skillTemporaryParent(root: root)
         } else { parent = nil }
         guard let parent, let candidates = try? skillNamespaces(root: root, parent: parent) else { return }
@@ -117,25 +116,6 @@ extension FileService {
     private func sameStoreDevice(_ first: String, _ second: String) -> Bool {
         guard let device = fileIdentity(at: first, followingLinks: true)?.device else { return false }
         return device == fileIdentity(at: second, followingLinks: true)?.device
-    }
-
-    private func storeMetadataDirectory(root: String) throws -> String? {
-        let metadata = root + "/.git"
-        guard let type = try entryTypeWithoutFollowingLinks(at: metadata) else { return nil }
-        let directory: String
-        if type == .regular {
-            let text = try readFile(at: metadata).trimmingCharacters(in: .newlines)
-            guard text.hasPrefix("gitdir: ") else { throw CocoaError(.fileWriteUnknown) }
-            let target = String(text.dropFirst(8))
-            directory = PathSyntax.isAbsolute(target) ? target : root + "/" + target
-        } else { directory = metadata }
-        guard directoryExists(at: directory) else { throw CocoaError(.fileNoSuchFile) }
-        let resolved = try resolveRealPath(at: directory)
-        let store = try resolveRealPath(at: root)
-        guard resolved != store, resolved == store + "/.git" || !PathSyntax.hasPrefix(resolved, store + "/") else {
-            throw CocoaError(.fileWriteInvalidFileName)
-        }
-        return resolved
     }
 
     private func skillTemporaryParent(root: String) throws -> String {
@@ -222,6 +202,45 @@ extension FileService {
         if let mode, fchmod(descriptor, mode) != 0 { throw storePublicationError(at: name, code: errno) }
         while fsync(descriptor) != 0 {
             if errno != EINTR { throw storePublicationError(at: name, code: errno) }
+        }
+    }
+}
+
+extension FileServiceProtocol {
+    func storeMetadataDirectory(root: String) throws -> String? {
+        let metadata = root + "/.git"
+        guard let type = try entryTypeWithoutFollowingLinks(at: metadata) else { return nil }
+        let directory: String
+        if type == .regular {
+            let text = try readFile(at: metadata).trimmingCharacters(in: .newlines)
+            guard text.hasPrefix("gitdir: ") else { throw CocoaError(.fileWriteUnknown) }
+            let target = String(text.dropFirst(8))
+            directory = PathSyntax.isAbsolute(target) ? target : root + "/" + target
+        } else {
+            guard type == .directory else { throw CocoaError(.fileReadUnknown) }
+            directory = metadata
+        }
+        guard directoryExists(at: directory) else { throw CocoaError(.fileNoSuchFile) }
+        let resolved = try resolveRealPath(at: directory)
+        let store = try resolveRealPath(at: root)
+        guard resolved != store, resolved == store + "/.git" || !PathSyntax.hasPrefix(resolved, store + "/") else {
+            throw CocoaError(.fileWriteInvalidFileName)
+        }
+        try FileService().requireStoreMetadataAccess(resolved, root: root)
+        return resolved
+    }
+
+}
+
+extension FileService {
+    fileprivate func requireStoreMetadataAccess(_ metadata: String, root: String) throws {
+        guard sameStoreDevice(metadata, root) else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(EXDEV), userInfo: [
+                NSLocalizedDescriptionKey: "Pensieve can't sync because git's folder is on another volume."
+            ])
+        }
+        guard access(metadata, W_OK | X_OK) == 0 else {
+            throw storePublicationError(at: metadata, code: errno)
         }
     }
 }

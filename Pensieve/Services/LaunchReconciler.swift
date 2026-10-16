@@ -46,6 +46,7 @@ struct LaunchReconciler {
         var ingestedHeadStamp: String?
         var ingestionNeedsRetry: Bool
         var didRebuild: Bool
+        var observation: StoreIngestState.Observation<RebuildResult>?
         var migrationRan = false
     }
 
@@ -104,33 +105,23 @@ struct LaunchReconciler {
         // preserving it). An empty/absent or half-written manifest is NOT an authoritative empty state —
         // rebuilding off it would delete every category + reset overlay fields, and the migration below
         // would bake that loss in — so it is skipped. (PLAN-12 / 12.3 review + Layer-2 rounds.)
-        var observedHead = headStamp()
-        var ingestedHeadStamp: String? = observedHead
-        var ingestionNeedsRetry = false
-        var rebuild = RebuildResult()
-        var didRebuild = false
-        if shouldRebuildOnLaunch(root: root, context: context) {
-            didRebuild = true
-            let before = observedHead
-            rebuild = rebuildService.rebuild(fromRoot: root, context: context)
-            observedHead = headStamp()
-            if observedHead != before {
-                // The daemon fast-forwarded mid-rebuild — this rebuild may have read a torn manifest.
-                // One bounded retry converges on the post-pull state without coupling launch to the
-                // sync lock (PLAN-12 Decision Log 12.6 residual; user-decided hardening, 12.10).
-                let retryHead = observedHead
-                rebuild = rebuildService.rebuild(fromRoot: root, context: context)
-                observedHead = headStamp()
-                if !rebuild.storeUnreadable, !rebuild.ingestIncomplete, observedHead == retryHead {
-                    ingestedHeadStamp = retryHead
-                } else {
-                    ingestedHeadStamp = nil
-                    ingestionNeedsRetry = !rebuild.storeUnreadable
+        var observation: StoreIngestState.Observation<RebuildResult>?
+        let didRebuild = shouldRebuildOnLaunch(root: root, context: context)
+        if didRebuild {
+            observation = StoreIngestState.observe(head: headStamp) {
+                rebuildService.rebuild(fromRoot: root, context: context)
+            }
+            if observation?.stable == false {
+                observation = StoreIngestState.observe(head: headStamp) {
+                    rebuildService.rebuild(fromRoot: root, context: context)
                 }
-            } else {
-                ingestedHeadStamp = rebuild.storeUnreadable || rebuild.ingestIncomplete ? nil : before
             }
         }
+        let rebuild = observation?.value ?? RebuildResult()
+        let observedHead = observation.map(\.after) ?? headStamp()
+        let ingestionNeedsRetry = observation?.stable == false && !rebuild.storeUnreadable
+        let ingestedHeadStamp = rebuild.storeUnreadable || rebuild.ingestIncomplete || ingestionNeedsRetry
+            ? nil : observedHead
         // One-time PLAN-07 migration: skipped ENTIRELY on an unreadable (newer/corrupt) store — never
         // downgrade-clobber it — and skipped once the persisted marker records the backfill already
         // happened. Report `migrationRan` only on an ALL-CLEAR backfill — the baseline manifest was
@@ -144,7 +135,7 @@ struct LaunchReconciler {
             observedHead: observedHead,
             ingestedHeadStamp: ingestedHeadStamp,
             ingestionNeedsRetry: ingestionNeedsRetry,
-            didRebuild: didRebuild
+            didRebuild: didRebuild, observation: observation
         ), alreadyMigrated: alreadyMigrated, externallyHeldLock: externallyHeldLock, context: context)
         return LaunchReconcileOutcome(
             rebuild: validation.rebuild,
@@ -206,7 +197,7 @@ struct LaunchReconciler {
             result.ingestionNeedsRetry = true
             return result
         }
-        if result.didRebuild { ingest.record(result.rebuild, head: result.ingestedHeadStamp) }
+        if let observation = result.observation { ingest.accept(observation, result: result.rebuild) }
         guard !ingest.needsRebuild else {
             // No launch rebuild ran. A nil head hands this pending work to the coordinator's
             // required preflight rather than making the launch retry wait for a manifest.

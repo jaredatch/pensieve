@@ -791,20 +791,21 @@ extension GitService {
 
     /// Native abort runs first. Validate its exact obstruction before discarding anything.
     private func finishRefusedAbort(_ failure: Error, paths: [String], permittedFolder: String, root: String) throws {
-        guard !paths.isEmpty, paths.allSatisfy({ $0.utf8.elementsEqual(permittedFolder.utf8) }) else { throw failure }
+        let blocked = ConflictAbortBlocked(paths: paths.isEmpty ? [permittedFolder] : paths, underlying: failure)
+        guard !paths.isEmpty, paths.allSatisfy({ $0.utf8.elementsEqual(permittedFolder.utf8) }) else { throw blocked }
         do {
-            let original = try conflictTree(revision: rebaseOriginalCommit(at: root), root: root)
-            let incoming = try conflictTree(revision: "HEAD", root: root)
+            let original = try conflictTree(revision: rebaseOriginalCommit(at: root), root: root, path: permittedFolder)
+            let incoming = try conflictTree(revision: "HEAD", root: root, path: permittedFolder)
             // These are the commits native abort restores from/to, even if ORIG_HEAD moved.
             for path in paths {
                 guard let entry = original[Data(path.utf8)], ["100644", "100755", "120000"].contains(entry.mode),
                       incoming[Data(path.utf8)]?.mode == "040000",
                       try abortPathWasConflicted(path, root: root),
-                      try abortFolderIsContained(path, root: root) else { throw failure }
+                      try abortFolderIsContained(path, root: root) else { throw blocked }
             }
         } catch {
             // A failed proof must not hide the native refusal that stopped recovery.
-            throw failure
+            throw blocked
         }
         try fileService.deleteDirectory(at: root + "/" + permittedFolder)
     }
@@ -826,12 +827,9 @@ extension GitService {
     }
 
     private func abortFolderIsContained(_ path: String, root: String) throws -> Bool {
-        guard !path.isEmpty, !PathSyntax.isAbsolute(path) else { return false }
-        let parts = PathSyntax.components(path, omittingEmptySubsequences: false)
+        guard let parts = PathSyntax.conflictWorktreeComponents(path) else { return false }
         var current = root
         for part in parts {
-            guard !part.isEmpty, part != ".", part != "..", part != ".git",
-                  !part.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else { return false }
             current += "/" + part
             guard try fileService.entryTypeWithoutFollowingLinks(at: current) == .directory else { return false }
         }

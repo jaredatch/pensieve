@@ -25,7 +25,7 @@ extension SyncEngineTests {
                                 try fixture.git.push(at: fixture.peer, credential: nil)
                                 _ = try fixture.git.fastForwardOnly(at: fixture.app, credential: nil)
                             }
-                            if headReads == 3 {
+                            if headReads == (movesDuringRetry ? 4 : 3) {
                                 try fixture.changePeer()
                                 _ = try fixture.git.fastForwardOnly(at: fixture.app, credential: nil)
                             }

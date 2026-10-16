@@ -43,6 +43,7 @@ extension ConflictFolderResolutionTests {
         await model.loadAndReport(container: fixture.contextB.container)
         guard case let .error(message) = model.phase else { return XCTFail("Inspect must report its failed abort") }
         assertMoveFolderMessage(message, path: fixture.path)
+        XCTAssertTrue(message.contains("couldn’t return the store to rest"), message)
         XCTAssertEqual(message.components(separatedBy: "would lose untracked files").count - 1, 1,
                        "Do not repeat the native refusal in the error")
         XCTAssertEqual(try fixture.files.readFile(at: fixture.root + "/abort-results"), "128\n",
@@ -65,6 +66,8 @@ extension ConflictFolderResolutionTests {
         await model.applyAndReport(container: fixture.contextB.container)
         guard case let .error(message) = model.phase else { return XCTFail("Report the refused abort") }
         XCTAssertTrue(message.contains("can’t replace the folder"), message)
+        assertMoveFolderMessage(message, path: fixture.path)
+        XCTAssertTrue(message.contains("couldn’t return the store to rest"), message)
         XCTAssertTrue(message.contains("would lose untracked files"), "Keep Git’s refusal when the proof fails: " + message)
         XCTAssertEqual(try fixture.files.readFile(at: folder + "/extra"), "extra")
         XCTAssertEqual(try fixture.files.readFile(at: fixture.root + "/abort-results"), "128\n")

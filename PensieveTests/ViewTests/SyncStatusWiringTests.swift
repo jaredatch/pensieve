@@ -11,8 +11,21 @@ final class SyncStatusWiringTests: XCTestCase {
         let binding = #"\.safeAreaInset\s*\([^{}]*\)\s*\{\s*if\s+("# + owner
             + #")\.showsFooter\s*\(\s*saves\s*:\s*("# + owner
             + #"\.manifestSaves)\s*\)\s*\{\s*SyncStatusView\s*\(\s*model\s*:\s*\1\s*,\s*saves\s*:\s*\2\s*,"#
+            + #"\s*onResolve\s*:\s*\{\s*showConflictResolution\s*=\s*true\s*\}"#
         XCTAssertEqual(matches(binding, in: content), 1,
                        "The sidebar footer must mount from its live sync model's damage-aware decision and save queue")
+    }
+
+    func testFooterRepairDispatchesToItsLiveSaveQueue() throws {
+        let footer = try source("Pensieve/Views/SyncViews/SyncStatusView.swift")
+        let saves = try XCTUnwrap(capture(#"(?:let|var)\s+(\w+)\s*:\s*ManifestSaveModel\?"#, in: footer))
+        let line = try XCTUnwrap(capture(#"if\s+let\s+(\w+)\s*=\s*SyncFooterPresentation\.make"#, in: footer))
+        let dispatch = try XCTUnwrap(capture(#"Button\s*\(\s*action\s*:\s*\{\s*(\w+)\("#
+            + line + #"\.action\)\s*\}"#, in: footer))
+        XCTAssertEqual(matches(#"func\s+"# + dispatch + #"\s*\([^)]*SyncFooterPresentation\.Action\)"#,
+                               in: footer), 1, "The live button dispatches its rendered action")
+        XCTAssertEqual(matches(#"case\s+\.repair\s*:\s*"# + saves + #"\?\.requestRepair\s*\(\s*\)"#,
+                               in: footer), 1, "The rendered Repair action must open the live queue's confirmation")
     }
 
     func testResolveControlsReadCentralEligibility() throws {

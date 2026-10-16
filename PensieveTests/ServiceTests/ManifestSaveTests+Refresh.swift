@@ -3,6 +3,46 @@ import XCTest
 @testable import Pensieve
 
 extension ManifestSaveTests {
+    func testDamageRefusalRetriesWhenRefreshFindsPeerRepair() async throws {
+        let h = try ManifestSaveFixture()
+        defer { h.cleanup() }
+        let path = h.root + "/manifest/manifest.yaml"
+        let healthy = try h.files.readFile(at: path)
+        try h.files.writeFile(at: path, content: "damaged")
+        h.recording.afterReadFailure = {
+            h.recording.afterReadFailure = nil
+            try h.files.writeFile(at: path, content: healthy)
+        }
+        h.categories.rename(h.local, to: "Retained", context: h.context)
+        await h.saves.waitUntilIdle()
+        XCTAssertEqual(h.saves.pendingCount, 0, "Readable refresh must retry the refused head without another event")
+        XCTAssertFalse(h.saves.pausedForRepair)
+        XCTAssertFalse(h.saves.showsDamageAlert)
+        XCTAssertEqual(try h.manifest.read(fromRoot: h.root).categories.first { $0.name == "Retained" }?.name, "Retained")
+    }
+
+    func testVerdictSupersedingDamageReadSchedulesCurrentDiskObservation() async throws {
+        for newer in [false, true] {
+            let h = try ManifestSaveFixture()
+            defer { h.cleanup() }
+            let gate = TestWait.Gate(owner: self)
+            defer { gate.open() }
+            h.recording.afterRead = { try gate.wait() }
+            let old = Task { await h.saves.refreshDamage() }
+            await TestWait.until(failureMessage: "Old refresh must be in flight") { gate.waiterCount == 1 }
+            h.recording.afterRead = nil
+            try h.files.writeFile(at: h.root + "/manifest/manifest.yaml", content: "damaged")
+            h.saves.acceptLibraryVerdict(newer: newer)
+            gate.open()
+            await old.value
+            await TestWait.until(failureMessage: "A verdict must replace the invalidated damage observation") {
+                h.saves.libraryDamaged && h.saves.requiresNewerVersion == false
+            }
+            h.saves.requestRepair()
+            XCTAssertTrue(h.saves.showsRepairConfirmation)
+        }
+    }
+
     func testOlderDamageRefreshCannotReplaceLaterVerdictOrRead() async throws {
         for laterRead in [false, true] {
             let h = try ManifestSaveFixture()

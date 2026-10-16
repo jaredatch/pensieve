@@ -32,7 +32,6 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
     @discardableResult
     func rebuild(fromRoot root: String, context: ModelContext) -> RebuildResult {
         var result = RebuildResult()
-        let head = GitHeadStamp(fileService: fileService).read(root: root)
 
         // Read the manifest once. A newer schema or corrupt file must stop reconciliation:
         // an empty fallback would reset skills' scope/tags/cursor/origin and delete categories.
@@ -46,15 +45,11 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
                 result.manifestDamaged = true
                 result.warnings.append(ManifestError.damaged.localizedDescription)
             }
-            StoreIngestState.shared(for: context.container).invalidate()
             return result
         }
 
         let displayed = StoreIngestState.shared(for: context.container).projectingEdits(onto: snapshot)
         result = rebuild(snapshot: displayed.snapshot, fromRoot: root, context: context)
-        let ingest = StoreIngestState.shared(for: context.container)
-        ingest.record(result, head: head)
-        if GitHeadStamp(fileService: fileService).read(root: root) != head { ingest.invalidate() }
         if !result.ingestIncomplete, var read = result.categoryRead {
             read.retainedWindows = displayed.retainedWindows
             CategorySaveWindow.didRebuild(read)
@@ -87,7 +82,7 @@ struct StoreRebuildService: StoreRebuildServiceProtocol {
             try save(context)
         } catch {
             result.saveFailed = true
-            result.warnings.append(
+            result.reportIngestFailure(
                 "Rebuild computed changes but saving the local store failed: \(error.localizedDescription)")
         }
         return result
@@ -123,7 +118,7 @@ extension StoreRebuildService {
         let existingSkills: [Skill]
         do { existingSkills = try context.fetch(FetchDescriptor<Skill>()) } catch {
             result.skillReadFailed = true
-            result.warnings.append("Couldn't read local skills; skipped the skill reconcile: " + error.localizedDescription)
+            result.reportIngestFailure("Couldn't read local skills; skipped the skill reconcile: " + error.localizedDescription)
             return []
         }
         let existingBySlug = Dictionary(existingSkills.map { ($0.directoryName, $0) },
@@ -187,7 +182,7 @@ extension StoreRebuildService {
         guard fileService.directoryExists(at: skillsDir) else { return [] }
         guard let entries = try? fileService.listDirectory(at: skillsDir) else {
             result.skillListFailed = true
-            result.warnings.append(
+            result.reportIngestFailure(
                 "Couldn't list the skills directory; skipped the skill reconcile to avoid deleting rows.")
             return nil
         }
@@ -327,7 +322,7 @@ extension StoreRebuildService {
         let read: (rows: [Category], receipt: CategorySaveWindow.ReadReceipt)
         do { read = try CategorySaveWindow.fetchCategories(in: context) } catch {
             result.categoryReadFailed = true
-            result.warnings.append(
+            result.reportIngestFailure(
                 "Couldn't read local categories; skipped the category reconcile: " + error.localizedDescription)
             return nil
         }

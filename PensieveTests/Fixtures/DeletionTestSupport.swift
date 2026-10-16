@@ -225,6 +225,9 @@ final class RecordingDeletionSkillStore: SkillStoreProtocol {
 /// It never writes to host paths. The injected store keeps missing-file admission consistent with
 /// successful publication while native read/save fault counters remain independent.
 final class RecordingDeletionManifest: ManifestSnapshotting {
+    func repair(_ snapshot: ManifestSnapshot, root: String, replacing damage: ManifestDamage) throws -> Bool {
+        throw CocoaError(.featureUnsupported)
+    }
     private let files: FileServiceProtocol?
     init(files: FileServiceProtocol? = nil) { self.files = files }
     var failingWrites: Set<Int> = []
