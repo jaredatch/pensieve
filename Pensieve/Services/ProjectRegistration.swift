@@ -1,6 +1,10 @@
 import Foundation
 
 enum ProjectRegistration {
+    static func submissionPath(_ path: String) -> String {
+        (path.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath
+    }
+
     static func makeProject(
         name: String,
         path: String,

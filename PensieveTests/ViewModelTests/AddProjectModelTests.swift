@@ -209,7 +209,7 @@ final class AddProjectModelTests: XCTestCase {
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                              failureMessage: "Linked preview") { !model.isCheckingIdentity }
         XCTAssertTrue(model.isValid)
-        XCTAssertNotNil(model.makeProject())
+        XCTAssertEqual(try XCTUnwrap(model.makeProject()).path, root + "/linked")
         XCTAssertTrue(files.fileExists(at: root + "/directory/.pensieve-project"))
     }
 

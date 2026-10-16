@@ -206,6 +206,7 @@ final class CLILibraryHandlerTests: XCTestCase {
     }
 
     func testBuiltProjectPreviewRegistrationRepeatAndRemoval() async throws {
+        try await assertProjectPathSpellings()
         let h = try CLILibraryFixture()
         defer { h.stop() }
         try await h.start()

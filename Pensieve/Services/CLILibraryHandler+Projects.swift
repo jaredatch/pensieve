@@ -7,9 +7,11 @@ extension CLILibraryHandler {
         let files = files
         let snapshots = try context.fetch(FetchDescriptor<Project>()).map { (id: $0.id, path: $0.path) }
         let (path, existingIDs) = await BlockingWork.run {
-            let path = files.realPath(at: URL(fileURLWithPath: suppliedPath,
-                relativeTo: URL(fileURLWithPath: options.workingDirectory)).path)
-            return (path, Set(snapshots.filter { files.realPath(at: $0.path) == path }.map { $0.id }))
+            let supplied = ProjectRegistration.submissionPath(suppliedPath)
+            let path = PathSyntax.isAbsolute(supplied) ? supplied : URL(fileURLWithPath: supplied,
+                relativeTo: URL(fileURLWithPath: options.workingDirectory)).path
+            let resolved = files.realPath(at: path)
+            return (path, Set(snapshots.filter { files.realPath(at: $0.path) == resolved }.map { $0.id }))
         }
         try requireAddsAllowed()
         try requireUnchangedProjects(snapshots)
