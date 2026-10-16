@@ -11,11 +11,12 @@ enum PrivilegedCommandLink {
         }
         let expected = request.expected
         let identity = expected.map { entry in
-            "\(entry.kind == .symlink ? "Symbolic Link" : "Other"):\(entry.owner):\(entry.device):\(entry.inode)"
+            let kind = entry.kind == .symlink ? "Symbolic Link" : "Other"
+            return "\(kind):\(entry.owner):\(UInt32(bitPattern: entry.device)):\(entry.inode)"
         } ?? ""
         let arguments = [folder.deletingLastPathComponent().path, request.executable, String(request.user),
-                         request.action.rawValue, identity, expected?.target ?? "",
-                         expected?.target.flatMap(CommandLinkOwnership.appPath) ?? ""]
+                         request.action.rawValue, identity, expected?.target ?? ""]
+            .map { Data($0.utf8).base64EncodedString() }
         return (["/bin/sh", "-c", program, "pensieve-command-link"] + arguments).map(quote).joined(separator: " ")
     }
 
@@ -25,7 +26,13 @@ enum PrivilegedCommandLink {
     set -eu
     PATH=/usr/bin:/bin:/usr/sbin:/sbin
     export PATH
-    parent=$1 executable=$2 user=$3 action=$4 expected=$5 target=$6 app=$7
+    decode() { printf '%s' "$1" | /usr/bin/base64 -D; printf '.'; }
+    parent=$(decode "$1"); parent=${parent%.}
+    executable=$(decode "$2"); executable=${executable%.}
+    user=$(decode "$3"); user=${user%.}
+    action=$(decode "$4"); action=${action%.}
+    expected=$(decode "$5"); expected=${expected%.}
+    target=$(decode "$6"); target=${target%.}
     fail() { printf '%s\n' "$1" >&2; exit 1; }
     exists() { /bin/test -e "$1" || /bin/test -L "$1"; }
     identity() { /usr/bin/stat -f '%HT:%u:%d:%i' "$1"; }
@@ -37,8 +44,18 @@ enum PrivilegedCommandLink {
         owner=$(/usr/bin/stat -f '%u' .) || exit 1
         /bin/test "$owner" = 0 || /bin/test "$owner" = "$user" || fail 'The command folder has a foreign owner.'
     }
-    enter "$parent"
+    case "$action" in install|uninstall|repair) ;; *) fail 'Invalid command link action.' ;; esac
+    case "$executable" in /*.app/Contents/Helpers/pensieve) ;; *) fail 'The executable must be an absolute app helper.' ;; esac
+    app=''
+    case "$target" in /*.app/Contents/Helpers/pensieve) app=${target%/Contents/Helpers/pensieve} ;; esac
     umask 022
+    ancestor=${parent%/*}
+    enter "$ancestor"
+    /bin/test "$(/usr/bin/stat -f '%u' .)" = "$(/usr/bin/id -u)" || fail 'The ancestor must be owned by the administrator.'
+    if ! exists "$parent"; then
+        /bin/mkdir "./${parent##*/}" || exit 1
+    fi
+    enter "$parent"
     if ! exists ./bin; then /bin/mkdir ./bin || exit 1; fi
     enter ./bin
     /bin/test ! -L "$parent" && /bin/test ! -L "$parent/bin" || fail 'The command folder changed.'

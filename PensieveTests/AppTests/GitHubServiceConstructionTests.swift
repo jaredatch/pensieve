@@ -82,7 +82,7 @@ final class GitHubServiceConstructionTests: XCTestCase {
             let store = SkillStore(fileService: files, baseDir: root, storeRoot: root)
             let paths = AppRuntimePaths(storeRoot: root, appSupportDir: root)
             let engine = paths.makeSyncEngine()
-            let detection = AgentDetectionService(homeDirectory: root)
+            let detection = AgentDetectionService(homeDirectory: root, applicationsDirectory: root + "/Applications")
             let link = LinkService(fileService: files, paths: paths.deployPaths)
             let cursor = CursorCompiler(fileService: files, skillStore: store, userRulesDirectory: root)
             let state = DeployStateStore(fileService: files, appSupportDir: root)

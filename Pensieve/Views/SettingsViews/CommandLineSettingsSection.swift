@@ -16,10 +16,9 @@ struct CommandLineSettingsSection: View {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text("Command line tool")
                     HStack(spacing: Spacing.xs) {
-                        switch links.status {
-                        case .installed, .homebrew: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                        case .broken, .occupied: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                        case .absent: EmptyView()
+                        if links.status != .absent {
+                            Image(systemName: links.status.hasProblem ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                                .foregroundStyle(links.status.hasProblem ? .orange : .green)
                         }
                         Text(links.error ?? links.status.message).foregroundStyle(.secondary)
                     }
@@ -63,8 +62,8 @@ struct CommandLineSettingsSection: View {
             Text("Install links pensieve into /usr/local/bin so you and your agents can run it in any terminal. "
                 + "macOS asks for your password. The skill teaches agents how to use it.")
         }
-        .onAppear { refresh() }
-        .onChange(of: activeState) { _, _ in refresh() }
+        .task { await refresh() }
+        .onChange(of: activeState) { _, _ in Task { await refresh() } }
         .alert("Replace your pensieve skill?", isPresented: $confirmsReplacement) {
             Button("Cancel", role: .cancel) {}
             Button("Replace", role: .destructive) { skill.update(context: context, replaceEdits: true) }
@@ -73,7 +72,7 @@ struct CommandLineSettingsSection: View {
         }
     }
 
-    private var isOccupied: Bool { if case .occupied = links.status { return true }; return false }
+    private var isOccupied: Bool { links.status.hasProblem && links.status.action == .install }
 
     private func actionTitle(_ action: CommandLinkAction) -> String {
         switch action {
@@ -83,8 +82,8 @@ struct CommandLineSettingsSection: View {
         }
     }
 
-    private func refresh() {
-        links.refresh()
-        skill.refresh(context: context)
+    private func refresh() async {
+        await links.refresh()
+        await skill.refresh(context: context)
     }
 }

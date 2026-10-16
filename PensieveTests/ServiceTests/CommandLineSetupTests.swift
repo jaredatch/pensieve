@@ -41,14 +41,19 @@ final class CommandLineSetupTests: XCTestCase {
         let healthy = try checks(await fixture.run(["doctor"], environment: ["PATH": bin]))
         XCTAssertEqual(Set(healthy.keys), Set(["socket", "app", "path", "git"] + agents.map { "agent:" + $0 }))
         for (name, row) in healthy { XCTAssertEqual(row["ok"], .bool(true), name) }
+        let noTools = try checks(await fixture.run(["doctor"], exit: 1,
+            environment: ["PATH": bin, "DEVELOPER_DIR": fixture.root + "/missing-tools"]))
+        XCTAssertEqual(noTools["git"]?["ok"], .bool(false), "The system git stub is not installed developer tools")
         try await checkOptionalAgent(fixture, bin: bin)
+        try await checkCursorApplication(fixture, bin: bin)
         try fixture.files.deleteFile(at: bin + "/git")
         try fixture.files.deleteDirectory(at: fixture.root + "/home/.codex/skills")
         try fixture.files.deleteFile(at: bin + "/pensieve")
         try fixture.files.createSymlink(at: bin + "/pensieve",
             pointingTo: fixture.root + "/PensieveGone.app/Contents/Helpers/pensieve")
         let broken = try checks(await fixture.run(["doctor"], exit: 1, environment: ["PATH": bin]))
-        for name in ["git", "agent:codex", "path"] { XCTAssertEqual(broken[name]?["ok"], .bool(false), name) }
+        for name in ["git", "path"] { XCTAssertEqual(broken[name]?["ok"], .bool(false), name) }
+        XCTAssertEqual(broken["agent:codex"]?["ok"], .bool(true), "The skills folder appears on the first sync")
         XCTAssertEqual(broken["app"]?["ok"], .bool(true))
         XCTAssertEqual(broken["socket"]?["ok"], .bool(true))
         guard case .string(let pathMessage) = broken["path"]?["message"] else { return XCTFail("Missing path diagnostic") }
@@ -77,8 +82,9 @@ final class CommandLineSetupTests: XCTestCase {
         XCTAssertEqual(uninstalled["agent:hermes"]?["ok"], .bool(true), "An uninstalled agent must not fail doctor")
         XCTAssertEqual(uninstalled["agent:hermes"]?["message"], .string("Not installed"))
         try fixture.files.createSymlink(at: bin + "/hermes", pointingTo: "/usr/bin/true")
-        let cliInstalled = try checks(await fixture.run(["doctor"], exit: 1, environment: ["PATH": bin]))
-        XCTAssertEqual(cliInstalled["agent:hermes"]?["ok"], .bool(false), "A detected CLI requires an accessible skills folder")
+        let cliInstalled = try checks(await fixture.run(["doctor"], environment: ["PATH": bin]))
+        XCTAssertEqual(cliInstalled["agent:hermes"]?["ok"], .bool(true),
+                       "A detected CLI may not have synced its skills folder yet")
         let skills = fixture.root + "/home/.hermes/skills"
         try fixture.files.createDirectory(at: skills)
         XCTAssertEqual(chmod(skills, 0), 0)
@@ -86,6 +92,17 @@ final class CommandLineSetupTests: XCTestCase {
         let unreadable = try checks(await fixture.run(["doctor"], exit: 1, environment: ["PATH": bin]))
         XCTAssertEqual(unreadable["agent:hermes"]?["ok"], .bool(false), "An unreadable installed agent folder must fail")
         XCTAssertEqual(chmod(skills, 0o755), 0)
+    }
+
+    private func checkCursorApplication(_ fixture: CLILibraryFixture, bin: String) async throws {
+        try fixture.files.deleteDirectory(at: fixture.root + "/home/.cursor")
+        let absent = try checks(await fixture.run(["doctor"], environment: ["PATH": bin]))
+        XCTAssertEqual(absent["agent:cursor"]?["message"], .string("Not installed"),
+                       "Host applications must not affect doctor fixtures")
+        try fixture.files.createDirectory(at: fixture.root + "/home/Applications/Cursor.app")
+        let installed = try checks(await fixture.run(["doctor"], environment: ["PATH": bin]))
+        XCTAssertEqual(installed["agent:cursor"]?["ok"], .bool(true))
+        XCTAssertEqual(installed["agent:cursor"]?["message"], .string("Installed; its skills folder appears on the first sync."))
     }
 
     private func checks(_ envelope: CLIEnvelope) throws -> [String: [String: CLIValue]] {

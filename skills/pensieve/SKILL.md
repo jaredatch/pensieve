@@ -1,4 +1,5 @@
 ---
+pensieve-bundled: caab5f804aca0efdc3afa6655fde32b70ccfce37f458b05c4d5c2751ad2b1cc5
 name: pensieve
 description: Use Pensieve when deploying, installing, updating or removing skills for Claude Code, Grok, Cursor, Codex, OpenClaw or Hermes, in projects or on another Mac.
 ---

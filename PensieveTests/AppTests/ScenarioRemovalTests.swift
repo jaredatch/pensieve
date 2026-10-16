@@ -98,7 +98,8 @@ final class ScenarioRemovalTests: XCTestCase {
             updatesModel: runtime.updates,
             machineDependencies: MachineObservabilityDependencies(
                 stateService: MachineStateService(
-                    agentDetection: AgentDetectionService(homeDirectory: TestPaths.homeDirectory),
+                    agentDetection: AgentDetectionService(homeDirectory: TestPaths.homeDirectory,
+                        applicationsDirectory: TestPaths.homeDirectory + "/Applications"),
                     deployState: { DeployState(schemaVersion: DeployStateStore.currentSchemaVersion, records: []) },
                     homeDirectory: TestPaths.homeDirectory
                 ), identity: MachineIdentity(appSupportDir: paths.appSupportDir),

@@ -12,14 +12,18 @@ final class CommandLineSettingsModel {
 
     init(installer: CommandLinkInstalling) { self.installer = installer }
 
-    func refresh() {
-        do { status = try installer.status() } catch { self.error = error.localizedDescription }
+    func refresh(clearError: Bool = true) async {
+        let installer = installer
+        do {
+            status = try await BlockingWork.run { try installer.status() }
+            if clearError { error = nil }
+        } catch { self.error = error.localizedDescription }
     }
 
     func perform(_ action: CommandLinkAction) async {
         guard !isWorking else { return }
         isWorking = true
-        defer { isWorking = false; refresh() }
+        defer { isWorking = false }
         do {
             let installer = installer
             try await BlockingWork.run { try installer.perform(action) }
@@ -27,6 +31,7 @@ final class CommandLineSettingsModel {
         } catch is AdminCommandLinkAuthorization.Cancelled {
             error = nil
         } catch { self.error = error.localizedDescription }
+        await refresh(clearError: false)
     }
 
     func repairAtLaunch() async {
@@ -34,7 +39,11 @@ final class CommandLineSettingsModel {
         didRepairAtLaunch = true
         let installer = installer
         // A failed unprivileged repair is reported by the broken status, with Repair offered.
-        _ = try? await BlockingWork.run { try installer.repairAtLaunch() }
-        refresh()
+        do { try await BlockingWork.run { try installer.repairAtLaunch() } } catch {
+            if error.localizedDescription == "Move Pensieve to your Applications folder first." {
+                self.error = error.localizedDescription
+            }
+        }
+        await refresh(clearError: false)
     }
 }

@@ -41,7 +41,9 @@ final class CommandLinkFixture {
 
 final class FixtureCommandAuthorization: AdministratorPromptRunning {
     var beforeRun: (() throws -> Void)?
+    var failureMessage: String?
     var cancelled = false
+    var cancellationMessage = "User canceled. (-128)"
     private(set) var calls = 0
 
     private(set) var commands: [String] = []
@@ -51,16 +53,16 @@ final class FixtureCommandAuthorization: AdministratorPromptRunning {
         try AdminCommandLinkAuthorization(prompt: self).run(request)
     }
 
-    func run(shellCommand: String) throws {
+    func run(shellCommand: String, action: CommandLinkAction) throws {
         calls += 1
         commands.append(shellCommand)
         promptThreads.append(Thread.isMainThread)
         if cancelled {
-            let result = try CommandLinkFixture.run("/usr/bin/osascript", arguments: ["-e", "error number -128"])
-            throw AppleScriptAdministratorPrompt.failure(status: result.0 ?? -1, message: result.1)
+            throw AppleScriptAdministratorPrompt.failure(status: 1, message: "0:1: execution error: " + cancellationMessage)
         }
+        if let failureMessage { throw AppleScriptAdministratorPrompt.failure(status: 1, message: failureMessage) }
         try beforeRun?()
         try AppleScriptAdministratorPrompt(requiresAdministratorPrivileges: false)
-            .run(shellCommand: "umask 077\n" + shellCommand)
+            .run(shellCommand: "umask 077\n" + shellCommand, action: action)
     }
 }

@@ -77,7 +77,9 @@ enum CLIEntry {
             return (CLIDoctor(files: files, app: app,
                 socket: CLIProtocol.socketPath(appSupport: appSupport, bundleID: bundleID, fileService: files),
                 home: paths.home,
-                searchPath: ProcessInfo.processInfo.environment["PATH"] ?? "").run(), nil)
+                searchPath: ProcessInfo.processInfo.environment["PATH"] ?? "",
+                applicationsDirectory: appSupport == defaultAppSupport ? "/Applications" : paths.home + "/Applications",
+                developerDirectory: ProcessInfo.processInfo.environment["DEVELOPER_DIR"]).run(), nil)
         }
         if command is VersionCommand {
             return (.success(.object(["version": .string(version)])), "pensieve \(version)\n")

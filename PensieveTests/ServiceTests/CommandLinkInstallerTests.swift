@@ -5,11 +5,15 @@ import XCTest
 @MainActor
 final class CommandLinkInstallerTests: XCTestCase {
     func testInstallCreatesFolderAndNewShellRunsBundledVersionThenUninstalls() async throws {
+        try assertPromptConfiguration()
         try await assertPromptRejectsInheritedEnvironment()
+        try await assertUnicodeArgumentsAndMissingParents()
+        try await assertRootRejectsInvalidArguments()
+        try await assertUnavailableBundleLocations()
         let fixture = try CommandLinkFixture()
         defer { fixture.clean() }
-        let model = CommandLineSettingsModel(installer: fixture.installer())
-        model.refresh()
+        let model = CommandLineSettingsModel(installer: SettingsCheckingInstaller(base: fixture.installer()))
+        await model.refresh()
         XCTAssertEqual(model.status, .absent)
         await model.perform(.install)
         XCTAssertTrue(fixture.authorization.commands.allSatisfy { $0.hasPrefix("'/bin/sh' ") },
@@ -60,9 +64,20 @@ final class CommandLinkInstallerTests: XCTestCase {
         XCTAssertEqual(model.status, .absent)
         XCTAssertNil(model.error)
         XCTAssertFalse(fixture.files.directoryExists(at: fixture.directory))
+        fixture.authorization.cancellationMessage = "Von Benutzer:in abgebrochen. (-128)"
+        await model.perform(.install)
+        XCTAssertNil(model.error, "Translated cancellation must leave Settings without an error")
         try await assertPromptPreservesOtherErrors()
         fixture.authorization.cancelled = false
-        let failure = CommandLineSettingsModel(installer: fixture.installer(executable: String(repeating: "a", count: 5000)))
+        for (message, shown) in [("0:2927: execution error: The link target changed. (1)", "The link target changed."),
+                                 ("", "The administrator command failed.")] {
+            fixture.authorization.failureMessage = message
+            await model.perform(.install)
+            XCTAssertEqual(model.error, shown, "Settings must show only the useful administrator error")
+        }
+        fixture.authorization.failureMessage = nil
+        let failure = CommandLineSettingsModel(installer: fixture.installer(
+            executable: "/" + String(repeating: "a", count: 5000) + ".app/Contents/Helpers/pensieve"))
         await failure.perform(.install)
         XCTAssertNotNil(failure.error)
         XCTAssertTrue(failure.error?.contains("link wasn't made") == true)
@@ -71,6 +86,7 @@ final class CommandLinkInstallerTests: XCTestCase {
     }
 
     func testForeignFilesAndLinksRefuseInstallAndUninstallWithoutAuthorization() async throws {
+        try await assertUnreadablePlistIsOccupied()
         let fixture = try CommandLinkFixture()
         defer { fixture.clean() }
         for target in [nil, Optional(fixture.root + "/foreign")] {
@@ -173,13 +189,25 @@ final class CommandLinkInstallerTests: XCTestCase {
         try fixture.files.createDirectory(at: brew + "/Caskroom/pensieve")
         try fixture.files.createSymlink(at: brew + "/bin/pensieve", pointingTo: fixture.executable)
         let model = CommandLineSettingsModel(installer: fixture.installer(homebrew: [brew + "/bin"]))
-        model.refresh()
+        await model.refresh()
         XCTAssertEqual(model.status, .homebrew(brew + "/bin/pensieve"))
         XCTAssertNil(model.status.action)
         await model.perform(.install)
         XCTAssertNil(model.error)
         XCTAssertEqual(fixture.authorization.calls, 0)
         XCTAssertFalse(try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path))
+        try fixture.link(to: fixture.executable)
+        await model.refresh()
+        XCTAssertTrue(model.status.message.contains(fixture.path))
+        XCTAssertTrue(model.status.message.contains(brew + "/bin/pensieve"))
+        XCTAssertEqual(model.status.action, .uninstall, "Homebrew must not hide our own link")
+        await model.perform(.uninstall)
+        XCTAssertNil(model.error)
+        XCTAssertFalse(try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path))
+        XCTAssertEqual(try fixture.files.symlinkTarget(at: brew + "/bin/pensieve"), fixture.executable)
+        model.error = "An old error"
+        await model.refresh()
+        XCTAssertNil(model.error, "A successful refresh clears stale errors")
     }
 
     func testRepairUsesAuthorizationAndRefusesAStillExistingApp() async throws {
@@ -187,7 +215,7 @@ final class CommandLinkInstallerTests: XCTestCase {
         defer { fixture.clean() }
         try fixture.link(to: fixture.removedExecutable)
         let model = CommandLineSettingsModel(installer: fixture.installer())
-        model.refresh()
+        await model.refresh()
         XCTAssertEqual(model.status, .broken)
         await model.perform(.repair)
         XCTAssertNil(model.error)

@@ -74,7 +74,7 @@ struct CLIClient {
                 hint: "Wait a moment, then run this command again.", exit: 3, retryable: true)
     }
 
-    private func validatedHandshake(_ bytes: Data, isWrite: Bool) throws -> CLIHandshake {
+    func validatedHandshake(_ bytes: Data, isWrite: Bool) throws -> CLIHandshake {
         let handshake = try JSONDecoder().decode(CLIHandshake.self, from: bytes)
         guard handshake.protocolVersion == CLIProtocol.version else {
             throw LaunchRefusal(reply: .failure("protocol_mismatch", "The app uses a different command protocol.",

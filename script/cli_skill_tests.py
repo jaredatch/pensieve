@@ -15,11 +15,19 @@ class CLISkillTests(unittest.TestCase):
 
     def test_public_docs_explain_command_and_installation(self):
         root = Path(__file__).resolve().parent.parent
-        for name in ["README.md", "CHANGELOG.md", "docs/SPEC.md"]:
+        claims = {
+            "README.md": ["Homebrew installs the command for you", "Settings › General › Command Line and click Install",
+                          "macOS asks for your password", "pensieve skill list --json", "pensieve doctor --json"],
+            "CHANGELOG.md": ["list, install, update, deploy and remove skills", "Homebrew installs it automatically",
+                             "Install… button in Settings › General › Command Line", "`pensieve doctor` checks the setup"],
+            "docs/SPEC.md": ["The Homebrew cask links that binary onto PATH", "Uninstall… removes only the inspected Pensieve link",
+                             "Cancelling the prompt leaves it alone", "exits 1 if a check fails", "It does not launch the app"],
+        }
+        for name, expected in claims.items():
             with self.subTest(document=name):
-                prose = (root / name).read_text().lower()
-                for term in ["pensieve", "doctor", "settings", "install", "homebrew"]:
-                    self.assertIn(term, prose, f"{name} must describe command setup ({term})")
+                prose = " ".join((root / name).read_text().split())
+                for claim in expected:
+                    self.assertIn(claim, prose, f"{name} must retain its specific command-setup claim")
 
     def test_eval_commands_and_flags_exist_in_built_cli(self):
         source = Path(__file__).resolve().parent.parent / "skills/pensieve-evals.json"

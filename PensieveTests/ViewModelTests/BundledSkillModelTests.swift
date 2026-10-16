@@ -1,3 +1,4 @@
+import CryptoKit
 import SwiftData
 import XCTest
 @testable import Pensieve
@@ -9,7 +10,9 @@ final class BundledSkillModelTests: XCTestCase {
         defer { fixture.stop() }
         try await fixture.start()
         let model = fixture.runtime.bundledSkill
-        model.refresh(context: fixture.context)
+        model.error = "Stale error"
+        await model.refresh(context: fixture.context)
+        XCTAssertNil(model.error, "A successful skill refresh clears stale errors")
         XCTAssertEqual(model.state, .absent)
         model.add(context: fixture.context)
         XCTAssertNil(model.error)
@@ -24,6 +27,8 @@ final class BundledSkillModelTests: XCTestCase {
                        fixture.paths.skillsDir + "/pensieve")
         model.add(context: fixture.context)
         XCTAssertEqual(try fixture.context.fetchCount(FetchDescriptor<Skill>()), 1)
+        try await assertUserNamedSkillIsPreserved()
+        try await assertManifestFailureStillRecordsTheAddedSkill()
     }
 
     func testBundledUpdatePreservesEditsUntilReplacementAndRefusesUnsavedDraft() async throws {
@@ -43,9 +48,11 @@ final class BundledSkillModelTests: XCTestCase {
         XCTAssertNil(model.error)
         let skill = try XCTUnwrap(fixture.context.fetch(FetchDescriptor<Skill>()).first)
         let path = fixture.paths.skillsDir + "/pensieve/SKILL.md"
-        let updated = original + "\nBundled update one.\n"
+        // A synced copy has its content but no receipt on this Mac.
+        try fixture.files.deleteFile(at: fixture.paths.appSupportDir + "/bundled-receipt.json")
+        let updated = Self.version(original, adding: "Bundled update one.")
         try fixture.files.writeFile(at: source + "/SKILL.md", content: updated)
-        model.refresh(context: fixture.context)
+        await model.refresh(context: fixture.context)
         XCTAssertEqual(model.state, .update)
         model.update(context: fixture.context)
         XCTAssertNil(model.error)
@@ -54,11 +61,11 @@ final class BundledSkillModelTests: XCTestCase {
         XCTAssertEqual(model.state, .installed)
         let edited = updated + "\nMy saved edits.\n"
         try fixture.files.writeFile(at: path, content: edited)
-        model.refresh(context: fixture.context)
+        await model.refresh(context: fixture.context)
         XCTAssertEqual(model.state, .installed, "Local edits alone must not advertise a newer bundled skill")
-        let next = original + "\nBundled update two.\n"
+        let next = Self.version(original, adding: "Bundled update two.")
         try fixture.files.writeFile(at: source + "/SKILL.md", content: next)
-        model.refresh(context: fixture.context)
+        await model.refresh(context: fixture.context)
         XCTAssertEqual(model.state, .edited)
         model.update(context: fixture.context)
         XCTAssertNotNil(model.error)
@@ -72,5 +79,32 @@ final class BundledSkillModelTests: XCTestCase {
         model.update(context: fixture.context, replaceEdits: true)
         XCTAssertTrue(model.error?.contains("draft") == true)
         XCTAssertEqual(try fixture.files.readFile(at: path), next)
+    }
+    private static func version(_ original: String, adding body: String) -> String {
+        let content = original.components(separatedBy: "\n").filter { !$0.hasPrefix("pensieve-bundled: ") }
+            .joined(separator: "\n") + "\n" + body + "\n"
+        let digest = SHA256.hash(data: Data(content.utf8)).map { String(format: "%02x", $0) }.joined()
+        return content.replacingOccurrences(of: "---\nname: pensieve", with: "---\npensieve-bundled: \(digest)\nname: pensieve")
+    }
+
+    private func assertUserNamedSkillIsPreserved() async throws {
+        let fixture = try CLILibraryFixture()
+        defer { fixture.stop() }
+        try await fixture.start()
+        let own = "---\nname: pensieve\ndescription: My own skill\n---\nMy private instructions.\n"
+        let directory = try fixture.runtime.library.skillStore.createSkill(name: "pensieve", content: own, avoiding: [])
+        fixture.context.insert(Skill(name: "pensieve", directoryName: directory))
+        try fixture.context.save()
+        let model = fixture.runtime.bundledSkill
+        await model.refresh(context: fixture.context)
+        XCTAssertEqual(model.state, .absent, "A user's same-named skill must offer Add, never Replace")
+        model.add(context: fixture.context)
+        XCTAssertNil(model.error, "An imported collision is still an added bundled skill")
+        XCTAssertEqual(model.state, .installed)
+        XCTAssertEqual(try fixture.files.readFile(at: fixture.paths.skillsDir + "/pensieve/SKILL.md"), own)
+        XCTAssertEqual(try fixture.context.fetchCount(FetchDescriptor<Skill>()), 2)
+        model.add(context: fixture.context)
+        XCTAssertEqual(try fixture.context.fetchCount(FetchDescriptor<Skill>()), 2, "Retry must not duplicate an imported skill")
+        XCTAssertTrue(fixture.files.fileExists(at: fixture.paths.appSupportDir + "/pensieve-skill-receipt.json"))
     }
 }

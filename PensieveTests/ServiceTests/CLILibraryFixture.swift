@@ -46,7 +46,7 @@ final class CLILibraryFixture {
                 skillStore: SkillStore(fileService: files, baseDir: paths.skillsDir, storeRoot: paths.storeRoot),
                 userRulesDirectory: deployPaths.cursorUserRulesDirectory),
             agentDetection: AgentDetectionService(probe: SystemEnvironmentProbe(fileService: files, pathEntries: []),
-                homeDirectory: root + "/home"),
+                homeDirectory: root + "/home", applicationsDirectory: root + "/home/Applications"),
             deployStateStore: DeployStateStore(fileService: files, appSupportDir: endpoint.path),
             skillsDirectory: paths.skillsDir)
         let defaults = try paths.makeDefaults()

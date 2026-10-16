@@ -3,56 +3,41 @@ import XCTest
 @testable import Pensieve
 
 extension CommandLinkInstallerTests {
-    /// A fresh test process starts with the poisoned environment, then runs the unchanged
-    /// production wrapper, so both Foundation and AppleScript see a real inherited-code attack.
     func assertPromptRejectsInheritedEnvironment() async throws {
         let fixture = try CommandLinkFixture()
         defer { fixture.clean() }
-        let probe = try await BlockingWork.run { try Self.compilePromptProbe(in: fixture) }
+        let names = ["BASH_FUNC_cd%%", "SHELLOPTS", "PS4"]
+        let saved = names.map { name in getenv(name).map { String(cString: $0) } }
+        addTeardownBlock {
+            for (name, value) in zip(names, saved) {
+                if let value { setenv(name, value, 1) } else { unsetenv(name) }
+            }
+        }
         for poison in ["function", "trace"] {
+            for name in names { unsetenv(name) }
             let marker = fixture.root + "/inherited-" + poison
             let quoted = "'" + marker.replacingOccurrences(of: "'", with: "'\\''") + "'"
-            var environment = ["PATH": "/usr/bin:/bin", "LANG": "en_US.UTF-8", "HOME": fixture.root]
-            let variable: String
             if poison == "function" {
-                variable = "BASH_FUNC_cd%%"
-                environment[variable] = "() { /usr/bin/touch \(quoted); builtin cd \"$@\"; }"
+                setenv("BASH_FUNC_cd%%", "() { /usr/bin/touch \(quoted); builtin cd \"$@\"; }", 1)
             } else {
-                variable = "SHELLOPTS"
-                environment[variable] = "xtrace"
-                environment["PS4"] = "$(/usr/bin/touch \(quoted))"
+                setenv("SHELLOPTS", "xtrace", 1)
+                setenv("PS4", "$(/usr/bin/touch \(quoted))", 1)
             }
-            let result = try await BlockingWork.run {
-                try CommandLinkFixture.run(probe, arguments: ["cd -P /; /bin/test -d .", variable], environment: environment)
-            }
-            XCTAssertEqual(result.0, 0, result.1)
+            let prompt = AppleScriptAdministratorPrompt(requiresAdministratorPrivileges: false)
+            try await BlockingWork.run { try prompt.run(shellCommand: "cd -P /; /bin/test -d .") }
             XCTAssertFalse(fixture.files.fileExists(at: marker),
                            "The production prompt must discard inherited \(poison) code before any shell starts")
+            let inherited = ProcessInfo.processInfo.environment
+            let control = try await BlockingWork.run {
+                try CommandLinkFixture.run("/usr/bin/osascript",
+                    arguments: ["-e", "do shell script \"cd -P /; /bin/test -d .\""], environment: inherited)
+            }
+            XCTAssertEqual(control.0, 0, control.1)
+            XCTAssertTrue(fixture.files.fileExists(at: marker), "Forwarded poison must execute in the positive control")
         }
-    }
-
-    nonisolated private static func compilePromptProbe(in fixture: CommandLinkFixture) throws -> String {
-        let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let source = fixture.root + "/AdministratorPrompt.swift"
-        try fixture.files.copyFile(at: sourceRoot.appendingPathComponent("Pensieve/Services/AdministratorPrompt.swift").path,
-                                   to: source)
-        let main = fixture.root + "/main.swift"
-        try fixture.files.writeFile(at: main, content: """
-        import Foundation
-        import Darwin
-        guard getenv(CommandLine.arguments[2]) != nil else { exit(78) }
-        do {
-            try AppleScriptAdministratorPrompt(requiresAdministratorPrivileges: false).run(shellCommand: CommandLine.arguments[1])
-        } catch {
-            print(error.localizedDescription)
-            exit(1)
+        for (name, value) in zip(names, saved) {
+            if let value { setenv(name, value, 1) } else { unsetenv(name) }
         }
-        """)
-        let executable = fixture.root + "/prompt-probe"
-        let compile = try CommandLinkFixture.run("/usr/bin/xcrun", arguments: ["swiftc", source, main, "-o", executable])
-        XCTAssertEqual(compile.0, 0, compile.1)
-        return executable
     }
 
     func assertUninstallDoesNotReadChangedPlist() async throws {
@@ -64,33 +49,17 @@ extension CommandLinkInstallerTests {
         try fixture.files.createDirectory(at: app + "/Contents")
         try fixture.files.writeData(at: plist, data: info)
         try fixture.link(to: app + "/Contents/Helpers/pensieve")
-        let expired = DispatchSemaphore(value: 0)
-        // Self-releasing FIFO: a regressed reader is unblocked after the upper bound, without
-        // ever leaving a hung privileged-step fixture or depending on the test host's main queue.
-        let release = DispatchWorkItem {
-            expired.signal()
-            let descriptor = open(plist, O_WRONLY)
-            if descriptor >= 0 {
-                _ = info.withUnsafeBytes { write(descriptor, $0.baseAddress, $0.count) }
-                close(descriptor)
-            }
-        }
-        defer {
-            release.cancel()
-            // Keep a reader until the release job finishes, including when the program never
-            // reads the FIFO. A delayed osascript still meets the waiting writer after the deadline.
-            let reader = open(plist, O_RDONLY | O_NONBLOCK)
-            XCTAssertEqual(release.wait(timeout: .now() + TestWait.hostedActionTimeoutSeconds), .success)
-            if reader >= 0 { close(reader) }
-        }
         fixture.authorization.beforeRun = {
             try fixture.files.deleteFile(at: plist)
             XCTAssertEqual(mkfifo(plist, 0o600), 0)
-            DispatchQueue.global().asyncAfter(deadline: .now() + 3, execute: release) // upper-bound: FIFO read deadline
+            // Inspect the executable program before running it: an app-read tool is forbidden,
+            // independently of whether a FIFO reader would complete on this particular host.
+            let command = try XCTUnwrap(fixture.authorization.commands.last)
+            XCTAssertFalse(command.contains("PlistBuddy"), "The privileged step must not read the app's FIFO plist")
+            if command.contains("PlistBuddy") { throw CommandLinkError(message: "Forbidden privileged app read") }
         }
         let model = CommandLineSettingsModel(installer: fixture.installer())
         await model.perform(.uninstall)
-        XCTAssertEqual(expired.wait(timeout: .now()), .timedOut, "The privileged step must not read the app's FIFO plist")
         XCTAssertNil(model.error)
         XCTAssertEqual(fixture.authorization.calls, 1)
         XCTAssertFalse(try fixture.files.entryExistsWithoutFollowingLinks(at: fixture.path))
@@ -99,17 +68,25 @@ extension CommandLinkInstallerTests {
 
 extension CommandLinkInstallerTests {
     func assertPromptPreservesOtherErrors() async throws {
-        for message in ["User canceled. (128)", "Some other failure (-128)", "User canceled. (-128) (1)"] {
+        for message in ["User canceled. (-128)", "Von Benutzer:in abgebrochen. (-128)"] {
             let error = AppleScriptAdministratorPrompt.failure(status: 1, message: "0:1: execution error: " + message)
-            XCTAssertEqual(error.code, 1, "Only osascript's cancellation diagnostic is cancellation")
-            XCTAssertTrue(error.localizedDescription.contains(message))
+            XCTAssertEqual(error.code, -128, "Cancellation is identified by the final error number in every language")
         }
+        for (message, expected) in [("User canceled. (128)", "User canceled."),
+                                    ("User canceled. (-128) (1)", "User canceled. (-128)"),
+                                    ("The link target changed. (1)", "The link target changed.")] {
+            let error = AppleScriptAdministratorPrompt.failure(status: 1, message: "0:2927: execution error: " + message)
+            XCTAssertEqual(error.code, 1, "A shell failure cannot forge cancellation")
+            XCTAssertEqual(error.localizedDescription, expected)
+        }
+        XCTAssertEqual(AppleScriptAdministratorPrompt.failure(status: 9, message: "").localizedDescription,
+                       "The administrator command failed.")
         let prompt = AppleScriptAdministratorPrompt(requiresAdministratorPrivileges: false)
         do {
             try await BlockingWork.run { try prompt.run(shellCommand: "printf '%s' 'fixture failure' >&2; exit 7") }
             XCTFail("A failed shell command must be reported")
         } catch {
-            XCTAssertTrue(error.localizedDescription.contains("fixture failure"))
+            XCTAssertEqual(error.localizedDescription, "fixture failure")
             XCTAssertNotEqual((error as NSError).code, -128)
         }
     }

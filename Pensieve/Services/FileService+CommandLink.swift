@@ -44,8 +44,8 @@ extension FileService {
                                 target: kind == .symlink ? try symlinkTarget(at: path) : nil)
     }
 
-    /// Rechecks after authorization. Parent descriptors prevent a replaced directory symlink from
-    /// redirecting privileged writes. Creation is exclusive; removal requires the inspected inode.
+    /// Launch repair is unprivileged. Parent descriptors prevent a replaced directory symlink from
+    /// redirecting writes. Creation is exclusive; removal requires the inspected inode.
     func changeCommandLink(_ request: CommandLinkRequest) throws {
         let directory = URL(fileURLWithPath: request.directory)
         let parent = directory.deletingLastPathComponent().path
@@ -132,10 +132,12 @@ enum CommandLinkOwnership {
     static func isPensieve(_ target: String, files: FileServiceProtocol) throws -> Bool {
         guard let app = appPath(target) else { return false }
         guard try files.entryExistsWithoutFollowingLinks(at: app) else { return true }
-        let bytes = try files.readRegularFileData(at: app + "/Contents/Info.plist", maximumBytes: 1_048_576)
-        let info = try PropertyListSerialization.propertyList(from: bytes, format: nil) as? [String: Any]
+        guard let bytes = try? files.readRegularFileData(at: app + "/Contents/Info.plist", maximumBytes: 1_048_576),
+              let info = try? PropertyListSerialization.propertyList(from: bytes, format: nil) as? [String: Any] else {
+            return false
+        }
         return ["com.jaredatch.Pensieve", "com.jaredatch.Pensieve.debug", "com.jaredatch.Pensieve.dogfood"]
-            .contains(info?["CFBundleIdentifier"] as? String ?? "")
+            .contains(info["CFBundleIdentifier"] as? String ?? "")
     }
 
     static func isMissingApp(_ target: String, files: FileServiceProtocol) throws -> Bool {

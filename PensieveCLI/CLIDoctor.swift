@@ -14,6 +14,8 @@ struct CLIDoctor {
     let socket: String
     let home: String
     let searchPath: String
+    let applicationsDirectory: String
+    let developerDirectory: String?
 
     func run() -> CLIReply {
         var checks: [CLIValue] = []
@@ -29,11 +31,10 @@ struct CLIDoctor {
             let descriptor = try SocketTransport.connect(to: socket, timeout: 1)
             defer { close(descriptor) }
             let data = try SocketTransport.readFrame(descriptor, limit: CLIProtocol.requestLimit, timeout: 1)
-            let handshake = try JSONDecoder().decode(CLIHandshake.self, from: data)
-            let matches = files.realPath(at: handshake.bundlePath) == files.realPath(at: app)
-                && handshake.protocolVersion == CLIProtocol.version
-            record("app", matches, handshake.bundlePath,
-                   matches ? "This app is reachable." : "Quit the other copy and open \(app).")
+            let client = CLIClient(appPath: files.realPath(at: app), socketPath: socket, fileService: files,
+                                   launcher: CLIAppLauncher(fileService: files), bundleID: "")
+            let handshake = try client.validatedHandshake(data, isWrite: false)
+            record("app", true, handshake.bundlePath, "This app is reachable.")
         } catch { record("app", false, error.localizedDescription, "Open \(app), then run doctor again.") }
         let directories = searchPath.components(separatedBy: ":").filter { PathSyntax.isAbsolute($0) }
         var found = false
@@ -52,8 +53,10 @@ struct CLIDoctor {
         }
         if !found { record("path", false, "pensieve is not on PATH.", "Install the command in Settings > General.") }
         let git = directories.map { $0 + "/git" }.first { files.isExecutableFile(at: $0) }
-        record("git", git != nil, git ?? "git is not on PATH.", "Install the Xcode Command Line Tools and add git to PATH.")
-        checkAgents(record: record)
+        let gitWorks = git.map { files.realPath(at: $0) != "/usr/bin/git" || developerToolsAvailable() } ?? false
+        record("git", gitWorks, gitWorks ? (git ?? "") : "git or its developer tools are missing.",
+               "Install the Xcode Command Line Tools and add git to PATH.")
+        checkAgents(directories: directories, record: record)
         let ok = checks.allSatisfy { if case .object(let row) = $0 { return row["ok"] == .bool(true) }; return false }
         let data = CLIValue.object(["checks": .array(checks)])
         if ok { return .success(data) }
@@ -61,24 +64,47 @@ struct CLIDoctor {
             error: CLIError(code: "doctor_failed", message: "Some setup checks failed.",
                             hint: "Follow the hint for each failed check.", retryable: false)), exitCode: 1)
     }
-    private func checkAgents(record: (String, Bool, String, String) -> Void) {
+    private func checkAgents(directories: [String], record: (String, Bool, String, String) -> Void) {
         let probe = SystemEnvironmentProbe(fileService: files,
-            pathEntries: searchPath.components(separatedBy: ":").filter { PathSyntax.isAbsolute($0) })
-        let detection = AgentDetectionService(probe: probe, homeDirectory: home)
+            pathEntries: directories)
+        let detection = AgentDetectionService(probe: probe, homeDirectory: home, applicationsDirectory: applicationsDirectory)
         for platform in PlatformTarget.allCases {
             let agent = platform.cliID
             guard detection.isInstalled(platform) else {
                 record("agent:" + agent, true, "Not installed", "Install \(platform.displayName) if you want to use it.")
                 continue
             }
-            let relative = "." + agent + (platform == .cursor ? "/rules" : "/skills")
-            let path = home + "/" + relative
+            let path = PathConstants.agentSkillsDirectory(platform, home: home)
             do {
+                guard try files.entryExistsWithoutFollowingLinks(at: path) else {
+                    record("agent:" + agent, true, "Installed; its skills folder appears on the first sync.",
+                           "Sync your skills to create \(path).")
+                    continue
+                }
                 let accessible = try files.directoryExistsFollowingLinks(at: path)
                 if accessible { _ = try files.listDirectory(at: path) }
-                record("agent:" + agent, accessible, path, "Install \(agent) and check access to its skills folder.")
+                record("agent:" + agent, accessible, path, "Check access to its skills folder.")
             } catch { record("agent:" + agent, false, error.localizedDescription, "Check access to \(path).") }
         }
+    }
+
+    private func developerToolsAvailable() -> Bool {
+        if let developerDirectory { return files.isExecutableFile(at: developerDirectory + "/usr/bin/git") }
+        // xcode-select reports the selected tools without invoking git's installer-launching stub.
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcode-select")
+        process.arguments = ["--print-path"]
+        process.standardInput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let output = Pipe()
+        process.standardOutput = output
+        do {
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0, let path = String(data: data, encoding: .utf8) else { return false }
+            return files.isExecutableFile(at: path.trimmingCharacters(in: .whitespacesAndNewlines) + "/usr/bin/git")
+        } catch { return false }
     }
 
 }

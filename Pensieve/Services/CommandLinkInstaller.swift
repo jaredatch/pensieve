@@ -12,9 +12,11 @@ protocol CommandLinkInstalling {
 
 enum CommandLinkStatus: Equatable {
     case absent, installed(String), homebrew(String), broken, occupied(String)
+    indirect case alongsideHomebrew(CommandLinkStatus, String)
 
     var message: String {
         switch self {
+        case .alongsideHomebrew(let local, let brew): return local.message + "; also installed by Homebrew at " + brew
         case .absent: return "Not installed"
         case .installed(let path): return "Installed at \(path)"
         case .homebrew(let path): return "Installed by Homebrew at \(path)"
@@ -23,8 +25,17 @@ enum CommandLinkStatus: Equatable {
         }
     }
 
+    var hasProblem: Bool {
+        switch self {
+        case .broken, .occupied: return true
+        case .alongsideHomebrew(let local, _): return local.hasProblem
+        default: return false
+        }
+    }
+
     var action: CommandLinkAction? {
         switch self {
+        case .alongsideHomebrew(let local, _): return local.action
         case .absent, .occupied: return .install
         case .installed: return .uninstall
         case .broken: return .repair
@@ -42,15 +53,21 @@ struct CommandLinkInstaller: CommandLinkInstalling {
     let authorization: CommandLinkAuthorizing
 
     func status() throws -> CommandLinkStatus {
+        let local = try localStatus()
         for bin in homebrewDirectories {
             let prefix = URL(fileURLWithPath: bin).deletingLastPathComponent().path
             if try files.entryExistsWithoutFollowingLinks(at: prefix + "/Caskroom/pensieve"),
                let entry = try files.commandLinkEntry(at: bin + "/pensieve"),
                let target = entry.target, try CommandLinkOwnership.isPensieve(target, files: files),
                files.isExecutableFile(at: bin + "/pensieve") {
-                return .homebrew(bin + "/pensieve")
+                if local == .absent || bin == directory { return .homebrew(bin + "/pensieve") }
+                return .alongsideHomebrew(local, bin + "/pensieve")
             }
         }
+        return local
+    }
+
+    private func localStatus() throws -> CommandLinkStatus {
         let path = directory + "/pensieve"
         guard let entry = try files.commandLinkEntry(at: path) else { return .absent }
         if let target = entry.target, try CommandLinkOwnership.isPensieve(target, files: files) {
@@ -62,7 +79,9 @@ struct CommandLinkInstaller: CommandLinkInstalling {
 
     func perform(_ action: CommandLinkAction) throws {
         try checkParents()
-        let state = try status()
+        if action != .uninstall { try checkAppLocation() }
+        var state = try status()
+        if case .alongsideHomebrew(let local, _) = state { state = local }
         if case .homebrew = state { return }
         switch (action, state) {
         case (.install, .absent), (.uninstall, .installed), (.uninstall, .broken), (.repair, .broken): break
@@ -81,12 +100,20 @@ struct CommandLinkInstaller: CommandLinkInstalling {
 
     /// Launch never asks for authorization. A permission failure leaves the broken link visible.
     func repairAtLaunch() throws {
-        guard try status() == .broken else { return }
+        try checkAppLocation()
+        guard try localStatus() == .broken else { return }
         try checkParents()
         let request = try makeRequest(.repair)
         guard let target = request.expected?.target,
               try CommandLinkOwnership.isMissingApp(target, files: files) else { return }
         try files.changeCommandLink(request)
+    }
+
+    private func checkAppLocation() throws {
+        let path = files.realPath(at: executable)
+        guard !PathSyntax.isWithin(path, root: "/Volumes"), !PathSyntax.components(path).contains("AppTranslocation") else {
+            throw CommandLinkError(message: "Move Pensieve to your Applications folder first.")
+        }
     }
 
     private func makeRequest(_ action: CommandLinkAction) throws -> CommandLinkRequest {
@@ -96,10 +123,15 @@ struct CommandLinkInstaller: CommandLinkInstalling {
 
     private func checkParents() throws {
         let parent = URL(fileURLWithPath: directory).deletingLastPathComponent().path
+        let ancestor = URL(fileURLWithPath: parent).deletingLastPathComponent().path
+        guard let root = try files.commandLinkEntry(at: ancestor), root.kind == .directory,
+              root.owner == 0 || (ancestor != "/usr" && root.owner == user) else {
+            throw CommandLinkError(message: "\(ancestor) must be an administrator-owned directory.")
+        }
         for path in [parent, directory] {
             guard let entry = try files.commandLinkEntry(at: path) else {
                 if path == directory { continue }
-                throw CommandLinkError(message: "\(path) is missing. Restore it before installing the command.")
+                continue
             }
             guard entry.kind == .directory, entry.owner == 0 || entry.owner == user else {
                 throw CommandLinkError(message: "\(path) must be a directory owned by root or your user, not a link.")
@@ -116,7 +148,7 @@ struct AdminCommandLinkAuthorization: CommandLinkAuthorizing {
     func run(_ request: CommandLinkRequest) throws {
         let shell = try PrivilegedCommandLink.command(for: request)
         do {
-            try prompt.run(shellCommand: shell)
+            try prompt.run(shellCommand: shell, action: request.action)
         } catch let error as NSError where error.domain == AppleScriptAdministratorPrompt.errorDomain && error.code == -128 {
             throw Cancelled()
         }

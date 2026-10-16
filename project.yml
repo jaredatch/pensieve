@@ -159,6 +159,7 @@ targets:
       - path: Pensieve/Services/FileService+TreeWalk.swift
       - path: Pensieve/Services/FileService+TreeComparison.swift
       - path: Pensieve/Services/RemoteURLPolicy.swift
+      - path: Pensieve/Models/PlatformTarget.swift
       - path: Pensieve/Utilities/PathConstants.swift
       - path: Pensieve/Utilities/PathSyntax.swift
       - path: Pensieve/Utilities/DisplayTextSanitizer.swift

@@ -40,16 +40,32 @@ final class BundledSkillModel {
         }
     }
 
-    func refresh(context: ModelContext) {
+    func refresh(context: ModelContext) async {
+        let container = context.container
+        let store = library.skillStore
+        let files = files
+        let directory = bundledDirectory
         do {
-            guard let skill = try findSkill(context) else { state = .absent; return }
-            let current = try library.skillStore.readData(directoryName: skill.directoryName)
-            let bundled = try files.readData(at: bundledDirectory + "/SKILL.md")
-            if current == bundled { state = .installed; return }
-            let receipt = try readReceipt()
-            if receipt?.skillID == skill.id && receipt?.digest == digest(bundled) { state = .installed; return }
-            state = receipt?.skillID == skill.id && receipt?.digest == digest(current) ? .update : .edited
+            state = try await BlockingWork.run {
+                try Self.readState(context: ModelContext(container), store: store, files: files, directory: directory)
+            }
+            error = nil
         } catch { self.error = error.localizedDescription }
+    }
+
+    private func refreshAfterAction(context: ModelContext) throws {
+        state = try Self.readState(context: context, store: library.skillStore, files: files, directory: bundledDirectory)
+    }
+
+    nonisolated private static func readState(context: ModelContext, store: SkillStoreProtocol,
+                                              files: FileServiceProtocol, directory: String) throws -> State {
+        guard let skill = try findSkill(context, store: store) else { return .absent }
+        let current = try store.readData(directoryName: skill.directoryName)
+        let bundled = try files.readData(at: directory + "/SKILL.md")
+        if current == bundled || BundledSkillContent.version(current) == BundledSkillContent.version(bundled) {
+            return .installed
+        }
+        return BundledSkillContent.isUnedited(current) ? .update : .edited
     }
 
     func add(context: ModelContext) {
@@ -57,16 +73,17 @@ final class BundledSkillModel {
             guard !library.addsFenced else {
                 throw CommandLinkError(message: library.addFenceReason ?? "The library is unavailable.")
             }
-            guard try findSkill(context) == nil else { refresh(context: context); return }
+            guard try findSkill(context) == nil else { try refreshAfterAction(context: context); return }
             guard case .found = importer.scanFolder(bundledDirectory) else {
                 throw CommandLinkError(message: "The bundled pensieve skill couldn't be read.")
             }
             _ = importer.importSelected(context: context)
-            if let failure = importer.error { throw CommandLinkError(message: failure) }
-            guard let skill = try findSkill(context) else { throw CommandLinkError(message: "The skill wasn't added.") }
+            guard importer.importedSkillCount > 0, let skill = try findSkill(context) else {
+                throw CommandLinkError(message: importer.error ?? "The skill wasn't added.")
+            }
             try saveReceipt(skill)
-            error = nil
-            refresh(context: context)
+            try refreshAfterAction(context: context)
+            error = importer.error
         } catch { self.error = error.localizedDescription }
     }
 
@@ -84,8 +101,7 @@ final class BundledSkillModel {
                 throw CommandLinkError(message: "Save or discard this skill's draft before updating it.")
             }
             let current = try library.skillStore.readData(directoryName: skill.directoryName)
-            let receipt = try readReceipt()
-            guard replaceEdits || (receipt?.skillID == skill.id && receipt?.digest == digest(current)) else {
+            guard replaceEdits || BundledSkillContent.isUnedited(current) else {
                 throw CommandLinkError(message: "Your copy has edits. Choose Replace to discard them.")
             }
             guard let original = String(data: current, encoding: .utf8) else {
@@ -100,17 +116,20 @@ final class BundledSkillModel {
             try saveReceipt(skill)
             library.notifySyncedStateMutation()
             error = nil
-            refresh(context: context)
+            try refreshAfterAction(context: context)
         } catch { self.error = error.localizedDescription }
     }
 
     private func findSkill(_ context: ModelContext) throws -> Skill? {
-        try context.fetch(FetchDescriptor<Skill>(predicate: #Predicate { $0.directoryName == "pensieve" })).first
+        try Self.findSkill(context, store: library.skillStore)
     }
 
-    private func readReceipt() throws -> Receipt? {
-        guard try files.entryExistsWithoutFollowingLinks(at: receiptPath) else { return nil }
-        return try JSONDecoder().decode(Receipt.self, from: files.readData(at: receiptPath))
+    nonisolated private static func findSkill(_ context: ModelContext, store: SkillStoreProtocol) throws -> Skill? {
+        for skill in try context.fetch(FetchDescriptor<Skill>()) {
+            guard let bytes = try? store.readData(directoryName: skill.directoryName) else { continue }
+            if BundledSkillContent.version(bytes) != nil { return skill }
+        }
+        return nil
     }
 
     private func saveReceipt(_ skill: Skill) throws {
