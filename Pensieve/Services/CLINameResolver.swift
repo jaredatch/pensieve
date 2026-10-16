@@ -10,6 +10,16 @@ struct CLINameResolver {
     let context: ModelContext
     let files: FileServiceProtocol
 
+    static func projectPath(_ argument: String, cwd: String) throws -> String {
+        let supplied = ProjectRegistration.submissionPath(argument)
+        guard !supplied.isEmpty else {
+            throw CLICommandRefusal(reply: .failure("usage", "A project needs a folder.",
+                hint: "Pass a project folder path.", exit: 64))
+        }
+        return PathSyntax.isAbsolute(supplied) ? supplied : URL(fileURLWithPath: supplied,
+            relativeTo: URL(fileURLWithPath: cwd)).path
+    }
+
     func skill(_ slug: String) throws -> Skill {
         let skills = try context.fetch(FetchDescriptor<Skill>())
         guard let skill = skills.first(where: { $0.directoryName == slug }) else {
@@ -29,11 +39,13 @@ struct CLINameResolver {
 
     func project(_ name: String, cwd: String) async throws -> Project {
         let pathLike = name == "." || PathSyntax.hasSeparator(name)
+        let lookupPath = try pathLike ? Self.projectPath(name, cwd: cwd)
+            : URL(fileURLWithPath: name, relativeTo: URL(fileURLWithPath: cwd)).path
         let projects = try context.fetch(FetchDescriptor<Project>())
         let snapshots = projects.map { (id: $0.id, name: $0.name, path: $0.path) }
         let files = files
         let (path, ids) = await BlockingWork.run {
-            let path = files.realPath(at: URL(fileURLWithPath: name, relativeTo: URL(fileURLWithPath: cwd)).path)
+            let path = files.realPath(at: lookupPath)
             let ids = snapshots.filter {
                 (!pathLike && $0.name.caseInsensitiveCompare(name) == .orderedSame) || files.realPath(at: $0.path) == path
             }.map { $0.id }

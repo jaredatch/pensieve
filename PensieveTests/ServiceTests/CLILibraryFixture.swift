@@ -109,14 +109,7 @@ final class CLILibraryFixture {
              beforeConfirmation: (() async throws -> Void)? = nil,
              afterProbe: @escaping () throws -> Void = {}) async throws -> CLIEnvelope {
         guard beforeConfirmation == nil || terminal else { throw POSIXError(.EINVAL) }
-        let process = Process()
-        process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/pensieve")
-        process.arguments = arguments + ["--json", "--app-support", paths.appSupportDir]
-        var environment = ProcessInfo.processInfo.environment
-        environment["HOME"] = root + "/home"
-        environment["CFFIXED_USER_HOME"] = root + "/home"
-        environment.merge(extra) { _, new in new }
-        process.environment = environment
+        let process = makeProcess(arguments, environment: extra)
         let output = Pipe(), errors = Pipe(), input = Pipe()
         process.standardOutput = output; process.standardError = errors
         var controllerFD: Int32 = -1, terminalFD: Int32 = -1
@@ -158,6 +151,19 @@ final class CLILibraryFixture {
             XCTAssertTrue((String(data: diagnostics, encoding: .utf8) ?? "").contains("Apply this plan?"))
         } else { XCTAssertFalse((String(data: diagnostics, encoding: .utf8) ?? "").contains("Apply this plan?")) }
         return try JSONDecoder().decode(CLIEnvelope.self, from: bytes)
+    }
+
+    private func makeProcess(_ arguments: [String], environment extra: [String: String]) -> Process {
+        let process = Process()
+        process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/pensieve")
+        process.arguments = arguments + ["--json", "--app-support", paths.appSupportDir]
+        process.currentDirectoryURL = URL(fileURLWithPath: root)
+        var environment = ProcessInfo.processInfo.environment
+        environment["HOME"] = root + "/home"
+        environment["CFFIXED_USER_HOME"] = root + "/home"
+        environment.merge(extra) { _, new in new }
+        process.environment = environment
+        return process
     }
 
     func skill(_ slug: String = "foo") throws -> Skill {

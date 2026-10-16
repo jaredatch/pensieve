@@ -38,11 +38,11 @@ final class AddProjectSheetHostTests: XCTestCase {
         try files.createDirectory(at: root + "/real")
         try files.createSymlink(at: root + "/link", pointingTo: root + "/real")
         let pathField = try XCTUnwrap(textFields(in: host).first { $0.stringValue == model.path })
-        pathField.stringValue = "  " + root + "/link  "
+        pathField.stringValue = "  " + root + "//link/  "
         pathField.delegate?.controlTextDidChange?(Notification(name: NSTextField.textDidChangeNotification, object: pathField))
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "Editing the sheet's path must update its binding") {
-            model.path == "  " + root + "/link  "
+            model.path == "  " + root + "//link/  "
         }
         await TestWait.until(timeout: .seconds(TestWait.hostedActionTimeoutSeconds),
                             failureMessage: "The same sheet must render its corrected status",

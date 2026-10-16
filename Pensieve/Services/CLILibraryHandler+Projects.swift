@@ -3,15 +3,13 @@ import SwiftData
 
 extension CLILibraryHandler {
     func addProject(_ suppliedPath: String, options: CLILibraryOptions) async throws -> CLIReply {
+        let path = try CLINameResolver.projectPath(suppliedPath, cwd: options.workingDirectory)
         try requireAddsAllowed()
         let files = files
         let snapshots = try context.fetch(FetchDescriptor<Project>()).map { (id: $0.id, path: $0.path) }
-        let (path, existingIDs) = await BlockingWork.run {
-            let supplied = ProjectRegistration.submissionPath(suppliedPath)
-            let path = PathSyntax.isAbsolute(supplied) ? supplied : URL(fileURLWithPath: supplied,
-                relativeTo: URL(fileURLWithPath: options.workingDirectory)).path
+        let existingIDs = await BlockingWork.run {
             let resolved = files.realPath(at: path)
-            return (path, Set(snapshots.filter { files.realPath(at: $0.path) == resolved }.map { $0.id }))
+            return Set(snapshots.filter { files.realPath(at: $0.path) == resolved }.map { $0.id })
         }
         try requireAddsAllowed()
         try requireUnchangedProjects(snapshots)
