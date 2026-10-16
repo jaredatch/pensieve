@@ -378,7 +378,9 @@ A bare noun shows help. Commands require their full names.
 `project add` and `project remove` use the app’s library and deployment services.
 Writes that change the library, deployments or projects support `--dry-run`.
 Install, update, delete and project removal ask for confirmation; off a terminal
-those commands require `--yes`.
+those commands require `--yes`. Without it they change nothing and exit 5 with
+`confirmation_required`, the plan, its `confirmationToken` and the exact rerun.
+With `--yes`, `--confirm-plan <token>` applies only that plan.
 
 `doctor` checks the reachable app and its identity, socket, command entries on PATH,
 git availability and the six agents’ folders. It reports each check with a hint,
@@ -395,7 +397,9 @@ readers and work without the app; absent or unreadable state exits 2.
 `changed`, or `error.code`, `error.message`, `error.hint` and `error.retryable`.
 Agent IDs are `claude`, `grok`, `cursor`, `codex`, `openclaw` and `hermes`.
 `commands --json` and `<command> --help --json` describe accepted input.
-Usage errors exit 64; a missing skill exits 4; the last failed sync exits 1.
+Usage errors exit 64; a missing skill, agent, project or machine exits 4; a choice that
+needs a person (a confirmation, a slug collision, an ambiguous name, an unsaved draft
+or a sync conflict) exits 5; an interrupted command exits 130; the last failed sync exits 1.
 Piped human output has no color, prompts or truncation. `NO_COLOR`, `--no-input`
 and `PENSIEVE_NO_INPUT=1` are accepted. `--app-support <directory>` selects alternate
 recorded state and an endpoint in that directory.
