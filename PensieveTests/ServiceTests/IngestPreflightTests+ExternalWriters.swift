@@ -15,6 +15,37 @@ extension IngestPreflightTests {
         for writer in [ExternalWriter.removal, .queuedSave] { try await assertExternalWriter(writer) }
     }
 
+    func testQueuedRenameClashAfterExternalFastForwardKeepsCompletedIngest() async throws {
+        let f = try NativeTestWork.run {
+            try IncompleteIngestFixture(base: self.tempDir + "/outside-rename-clash")
+        }
+        let context = try damageContext(f)
+        try NativeTestWork.run {
+            try f.changePeer()
+            guard case .fastForwarded = try f.git.fastForwardOnly(at: f.app, credential: nil) else {
+                return XCTFail("The outside git process must fast-forward the actual store")
+            }
+        }
+        let manifest = WriterIngestManifest()
+        let saves = ManifestSaveModel(manifest: manifest, root: f.app, lockPath: f.base + "/sync.lock")
+        let category = try XCTUnwrap(context.fetch(FetchDescriptor<Pensieve.Category>()).first { $0.name == "Kept" })
+        CategoryStore(manifestSaves: saves).rename(category, to: "Added", context: context)
+        await saves.waitUntilIdle()
+        let notice = try XCTUnwrap(saves.categoryNotice)
+        XCTAssertEqual(notice.title, "Category changes couldn't be saved")
+        XCTAssertEqual(notice.messages, [
+            "Couldn't save the change to “Kept”, so it was undone. A category named “Added” already exists."
+        ], "The rename must retain its own name-conflict refusal")
+        XCTAssertEqual(manifest.writes, 0, "A refused rename must not publish")
+        XCTAssertEqual(try context.fetch(FetchDescriptor<Pensieve.Category>()).map(\.name).sorted(), ["Added", "Kept"],
+                       "Completed ingestion must accept the pulled category despite the refused rename")
+        XCTAssertEqual(try f.manifest.read(fromRoot: f.app).categories.map(\.name).sorted(), ["Added", "Kept"])
+        let following = WriterIngestManifest()
+        try performImmediateWriter(.importSkill, fixture: f, context: context, manifest: following)
+        XCTAssertEqual(following.reads, 0, "A following writer must reuse the completed ingest at this HEAD")
+        XCTAssertEqual(following.writes, 1)
+    }
+
     func testUnreadableHeadRebuildsBeforeImportDeployRemovalAndQueuedSave() async throws {
         for writer in ExternalWriter.allCases { try await assertExternalWriter(writer, unreadableHead: true) }
     }

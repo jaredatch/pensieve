@@ -125,7 +125,7 @@ final class ManifestSaveModel {
             let ingest = StoreIngestState.shared(for: item.presentation.context.container)
             let head = await BlockingWork.run { [files, root] in GitHeadStamp(fileService: files).state(root: root) }
             if ingest.requiresRebuild(at: head) {
-                try await ingestBeforeSave(item, disk: disk)
+                guard try await ingestBeforeSave(item, disk: disk) else { return false }
             }
             let result = try await publish(item, disk: disk)
             await rebuild(item, durable: result.snapshot, published: result.published)
@@ -275,7 +275,7 @@ extension ManifestSaveModel {
     }
 
     @MainActor
-    private func refuseCategory(_ item: Item, durable: ManifestSnapshot?, error: Error) {
+    func refuseCategory(_ item: Item, durable: ManifestSnapshot?, error: Error) {
         guard let edit = item.categoryEdit, let start = items.firstIndex(where: { $0.id == item.id }) else { return }
         if categoryIsSaved(item, durable: durable) {
             categoryMessages.append(CategorySaveNotice.entry(edit: edit, error: error, outcome: .saved))
